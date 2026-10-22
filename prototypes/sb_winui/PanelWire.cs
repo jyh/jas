@@ -1646,4 +1646,17 @@ internal static class GradientSliderWire
     /// </summary>
     internal static (double Location, double Dy) Point(Layout l, double x, double y) =>
         ((x - l.R) / l.BarW * 100, y - (l.BarTop + l.BarH / 2));
+
+    /// <summary>
+    /// A key on the focused slider in GRADIENT.md's keyboard table's names, from
+    /// the `VirtualKey`'s name (`Left`, `Back`, ...); null for a key the table
+    /// does not name, which the slider leaves to the window. Mirrors the web's
+    /// `slider_key`: Back is Backspace.
+    /// </summary>
+    internal static string? KeyName(string virtualKey) => virtualKey switch
+    {
+        "Left" or "Right" or "Home" or "End" or "Delete" => virtualKey,
+        "Back" => "Backspace",
+        _ => null,
+    };
 }
