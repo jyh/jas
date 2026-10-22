@@ -245,11 +245,16 @@ pub const STOPS_KEY: &str = "gradient_stops";
 /// The engine's whole-list write: the selection's gradient (the same base as
 /// [`apply_stop_edit`]) takes `stops`. `false`, and nothing written, when
 /// nothing is selected, `stops` does not parse, or it has fewer than two stops.
+/// Also `false` when the selection already holds exactly those stops (a plain
+/// click on a stop, or a two-stop drag off the bar that clamps onto itself):
+/// a write of equal stops would move the model's generation, and the door
+/// would report a document change that did not happen (flask §518).
 pub fn apply_stops(model: &mut Model, fill_on_top: bool, stops: &Value,
                    mixed_base: impl FnOnce() -> Gradient) -> bool {
     let Some(stops) = stops_from_json(stops).filter(|s| s.len() >= 2) else { return false };
     let mut g = match selection_gradient(model.document(), fill_on_top) {
         SelectionGradient::Empty => return false,
+        SelectionGradient::Uniform(g) if g.stops == stops => return false,
         SelectionGradient::Uniform(g) => g,
         SelectionGradient::Solid(c) => seed_gradient(c),
         SelectionGradient::Mixed => mixed_base(),
