@@ -37,6 +37,19 @@ enum DialogWidgetActions {
                        platformEffects: buildYamlToolEffects(model: m), model: m)
             return m.stateStore.getDialogId() == nil
         }
+        // The paragraph dialogs' OK (PARAGRAPH.md §Justification Dialog,
+        // §Hyphenation Dialog) writes the fields to the selection's paragraph
+        // wrappers HERE, before the action's YAML clears the preview snapshot
+        // and closes the dialog: an intercept, as the engine's
+        // `panel_behavior` does. Until 2026-10-24 nothing called these two
+        // apply functions, so OK on the Mac closed and wrote nothing.
+        if actionName == "paragraph_justification_confirm" {
+            applyJustificationDialogToSelection(justificationValues(m.stateStore),
+                                                controller: Controller(model: m))
+        } else if actionName == "paragraph_hyphenation_confirm" {
+            applyHyphenationDialogToSelection(hyphenationValues(m.stateStore),
+                                              controller: Controller(model: m), store: m.stateStore)
+        }
         let abSel = (m.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
             .compactMap { $0 as? String } ?? []
         LayersPanel.dispatchYamlAction(
@@ -45,6 +58,49 @@ enum DialogWidgetActions {
             params: params
         )
         return m.stateStore.getDialogId() == nil
+    }
+
+    /// The open dialog's fields by their dialog keys; a null or absent field
+    /// is blank (the paragraphs differ) and writes nothing. Rust
+    /// `paragraph_host::JustificationDialogValues::from_dialog`.
+    static func justificationValues(_ store: StateStore) -> JustificationDialogValues {
+        let f = { (k: String) in dialogNumber(store.getDialog(k)) }
+        return JustificationDialogValues(
+            wordSpacingMin: f("word_spacing_min"), wordSpacingDesired: f("word_spacing_desired"),
+            wordSpacingMax: f("word_spacing_max"),
+            letterSpacingMin: f("letter_spacing_min"), letterSpacingDesired: f("letter_spacing_desired"),
+            letterSpacingMax: f("letter_spacing_max"),
+            glyphScalingMin: f("glyph_scaling_min"), glyphScalingDesired: f("glyph_scaling_desired"),
+            glyphScalingMax: f("glyph_scaling_max"),
+            autoLeading: f("auto_leading"),
+            singleWordJustify: store.getDialog("single_word_justify") as? String)
+    }
+
+    /// Rust `paragraph_host::HyphenationDialogValues::from_dialog`.
+    static func hyphenationValues(_ store: StateStore) -> HyphenationDialogValues {
+        let f = { (k: String) in dialogNumber(store.getDialog(k)) }
+        let b = { (k: String) in dialogBool(store.getDialog(k)) }
+        return HyphenationDialogValues(
+            hyphenate: b("hyphenate"),
+            minWord: f("hyphenate_min_word"), minBefore: f("hyphenate_min_before"),
+            minAfter: f("hyphenate_min_after"), limit: f("hyphenate_limit"),
+            zone: f("hyphenate_zone"), bias: f("hyphenate_bias"),
+            capitalized: b("hyphenate_capitalized"))
+    }
+
+    /// A number, never a bool (an NSNumber can be either; JSON's are distinct).
+    private static func dialogNumber(_ v: Any?) -> Double? {
+        guard let n = v as? NSNumber, !isBoolNumber(n) else { return nil }
+        return n.doubleValue
+    }
+
+    private static func dialogBool(_ v: Any?) -> Bool? {
+        guard let n = v as? NSNumber, isBoolNumber(n) else { return nil }
+        return n.boolValue
+    }
+
+    private static func isBoolNumber(_ n: NSNumber) -> Bool {
+        CFGetTypeID(n) == CFBooleanGetTypeID()
     }
 
     /// Write a dialog-body widget's bound `dialog.<key>`: through the store's

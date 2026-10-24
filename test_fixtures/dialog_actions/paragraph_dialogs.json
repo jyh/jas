@@ -1,0 +1,168 @@
+[
+  {
+    "name": "paragraph_justification_ok_writes_the_edited_fields",
+    "setup_svg": "text_area_two_para.svg",
+    "note": "PARAGRAPH.md Justification Dialog: OK writes the fields to every paragraph wrapper in the selection; a field at its spec default is omitted (identity-value rule).",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "open_paragraph_justification"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pj_word_spacing_min"
+          },
+          "event": "commit",
+          "value": "70"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pj_auto_leading"
+          },
+          "event": "commit",
+          "value": "130"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "paragraph_justification_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "changed",
+    "expected_json": "paragraph_justification_ok_writes_the_edited_fields_expected.json"
+  },
+  {
+    "name": "paragraph_justification_cancel_writes_nothing",
+    "setup_svg": "text_area_two_para.svg",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "open_paragraph_justification"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pj_word_spacing_min"
+          },
+          "event": "commit",
+          "value": "70"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pj_auto_leading"
+          },
+          "event": "commit",
+          "value": "130"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "dismiss_dialog",
+            "label": "Cancel"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "paragraph_hyphenation_ok_writes_the_edited_fields",
+    "setup_svg": "text_area_two_para.svg",
+    "note": "PARAGRAPH.md Hyphenation Dialog: the master toggle on and Words Longer Than 5 are written; the other fields stay at their defaults and are omitted.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "open_paragraph_hyphenation"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ph_master"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ph_min_word"
+          },
+          "event": "commit",
+          "value": "5"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "paragraph_hyphenation_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "changed",
+    "expected_json": "paragraph_hyphenation_ok_writes_the_edited_fields_expected.json"
+  },
+  {
+    "name": "paragraph_hyphenation_cancel_writes_nothing",
+    "setup_svg": "text_area_two_para.svg",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "open_paragraph_hyphenation"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ph_master"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ph_min_word"
+          },
+          "event": "commit",
+          "value": "5"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "dismiss_dialog",
+            "label": "Cancel"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged"
+  }
+]
