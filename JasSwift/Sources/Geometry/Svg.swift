@@ -770,7 +770,13 @@ private func stdGradientToJas(_ def: StdGradientDef, _ bbox: GradientBBox) -> Gr
         let angle = atan2(-(y1 - y0), x1 - x0) * (180 / Double.pi) + 0.0  // -0.0 -> 0.0, as Rust
         let side = d / 2.0.squareRoot()
         let parent: GradientBBox = ((x0 + x1) / 2 - side / 2, (y0 + y1) / 2 - side / 2, side, side)
-        let stops = remapLinearStops(def.stops, angleDeg: angle, parent: parent, fragment: bbox)
+        // Snapped to 1e-9 percent: the remap's arithmetic depends on where the
+        // shape sits, and one gradient on same-sized shapes otherwise came back
+        // differing in the last bits (flask STATUS §530). As Rust.
+        let stops = remapLinearStops(def.stops, angleDeg: angle, parent: parent, fragment: bbox).map {
+            GradientStop(color: $0.color, opacity: $0.opacity, location: ($0.location * 1e9).rounded() / 1e9,
+                         midpointToNext: $0.midpointToNext)
+        }
         return Gradient(type: .linear, angle: angle, aspectRatio: 100, method: .classic, dither: false,
                         strokeSubMode: .within, stops: stops, nodes: [])
     }
