@@ -91,13 +91,26 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                 let r = route.commit(node, text: ev["value"] as? String)
                 if r.outcome == "refused" { return ["\(name): the commit was refused (\(r.reason ?? "-"))"] }
             case "click":
-                if WidgetEvent.clickRunsNodeAction(node), let action = node["action"] as? String {
-                    DialogWidgetActions.run(
-                        action,
-                        params: DialogWidgetActions.resolveParams(node["params"] as? [String: Any] ?? [:], context: ctx),
-                        model: m)
+                // By the widget's KIND, as the view routes it: a boolean kind is
+                // pressed, a click kind with a node action runs the overlay's
+                // act, any other click kind is the contract's click. A refusal
+                // is a failure, never swallowed (the engine reports its own).
+                let kind = node["type"] as? String ?? ""
+                if WidgetEvent.booleanKinds.contains(kind) {
+                    let r = route.press(node)
+                    if r.outcome == "refused" { return ["\(name): the press was refused (\(r.reason ?? "-"))"] }
+                } else if WidgetEvent.clickKinds.contains(kind) {
+                    if WidgetEvent.clickRunsNodeAction(node), let action = node["action"] as? String {
+                        DialogWidgetActions.run(
+                            action,
+                            params: DialogWidgetActions.resolveParams(node["params"] as? [String: Any] ?? [:], context: ctx),
+                            model: m)
+                    } else {
+                        let r = route.click(node)
+                        if r.outcome == "refused" { return ["\(name): the click was refused (\(r.reason ?? "-"))"] }
+                    }
                 } else {
-                    route.click(node)
+                    return ["\(name): a click on a \(kind), which this runner does not route"]
                 }
             default:
                 return ["\(name): unknown dialog event \(ev["event"] ?? "nil")"]
@@ -160,6 +173,7 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
 /// this list as the claim; Rust's `DIALOG_ACTION_FIXTURES` is its twin).
 private let dialogActionFixtures = [
     "dialog_actions/transform_options.json",
+    "dialog_actions/tool_options.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {
@@ -197,5 +211,10 @@ private let swiftDialogGaps: [String: String] = [
     // null, so `so_uniform_pct` (`disabled: not dialog.uniform`) refuses the
     // commit. Measured 2026-10-24.
     "scale_reset_restores_the_dialog_defaults":
+        "the store is not seeded with the bundle's state defaults",
+    // The same cause: Eyedropper's init reads `state.eyedropper_fill` and
+    // `state.eyedropper_stroke` (both true in state.yaml) as null, so the press
+    // on Fill writes true instead of unticking it, and OK carries no Stroke.
+    "eyedropper_ok_unticks_fill_and_keeps_the_rest":
         "the store is not seeded with the bundle's state defaults",
 ]
