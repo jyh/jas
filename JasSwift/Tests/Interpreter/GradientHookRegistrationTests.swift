@@ -83,6 +83,66 @@ struct GradientHookRegistrationTests {
         #expect(g?.aspectRatio == 150)
     }
 
+    private func graded(_ from: String, _ to: String, fill: Fill? = nil) -> Element {
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: fill, fillGradient: Gradient(stops: [
+            GradientStop(color: from, location: 0), GradientStop(color: to, location: 100)])))
+    }
+
+    private func readSelected(_ e: Element, fillOnTop: Bool = true) -> SelectionGradient {
+        selectionGradient(Document(layers: [Layer(name: "L", children: [e])],
+                                   selection: [ElementSelection.all([0, 0])]), fillOnTop: fillOnTop)
+    }
+
+    private func colours(_ s: SelectionGradient) -> [String]? {
+        if case .uniform(let g) = s { return g.stops.map(\.color) }
+        return nil
+    }
+
+    /// The read twin of the write above: a selected group speaks for its
+    /// paintable members at any depth. Mirrors gradient_host.rs
+    /// `a_selected_group_reads_its_members_gradient`.
+    @Test func aSelectedGroupReadsItsMembersGradient() {
+        let rb = { self.graded("#ff0000", "#0000ff") }
+        let red = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: Fill(color: .rgb(r: 1, g: 0, b: 0, a: 1))))
+        let blue = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: Fill(color: .rgb(r: 0, g: 0, b: 1, a: 1))))
+        #expect(colours(readSelected(.group(Group(children: [rb()])))) == ["#ff0000", "#0000ff"])
+        #expect(colours(readSelected(.group(Group(children: [rb(), .group(Group(children: [rb()]))])))) == ["#ff0000", "#0000ff"], "nested")
+        #expect(readSelected(.group(Group(children: [rb(), graded("#0000ff", "#ff0000")]))) == .mixed)
+        #expect(readSelected(.group(Group(children: [rb(), red]))) == .mixed, "a gradient member beside a solid one")
+        #expect(readSelected(.group(Group(children: [red, blue]))) == .solid(.rgb(r: 1, g: 0, b: 0, a: 1)),
+                "all solid: the first member's colour seeds")
+        #expect(readSelected(.group(Group(children: []))) == .empty, "an empty group contributes nothing")
+    }
+
+    @Test func aSelectedGroupsStrokeReadsItsMembersStrokeGradient() {
+        let leaf = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                     stroke: Stroke(color: .rgb(r: 0, g: 0, b: 1, a: 1), width: 1),
+                                     strokeGradient: Gradient(stops: [
+                                        GradientStop(color: "#ff0000", location: 0), GradientStop(color: "#0000ff", location: 100)])))
+        #expect(colours(readSelected(.group(Group(children: [leaf])), fillOnTop: false)) == ["#ff0000", "#0000ff"])
+    }
+
+    /// End to end through the hook: an angle edit on a selected group keeps
+    /// its members' stops. Mirrors `an_edit_on_a_selected_group_keeps_its_members_stops`.
+    @Test func anEditOnASelectedGroupKeepsItsMembersStops() {
+        let g = Element.group(Group(children: [graded("#ff0000", "#0000ff"), graded("#ff0000", "#0000ff")]))
+        let model = Model(document: Document(layers: [Layer(name: "L", children: [g])],
+                                             selection: [ElementSelection.all([0, 0])]))
+        let store = StateStore()
+        store.set("gradient_angle", 45)
+        guard let hook = alignPlatformEffects(model: model)["apply_gradient_panel"] else {
+            Issue.record("hook not registered"); return
+        }
+        _ = hook("gradient_angle", [:], store)
+        guard case .group(let out) = model.document.getElement([0, 0]) else {
+            Issue.record("[0,0] should still be a Group"); return
+        }
+        for child in out.children {
+            #expect(child.fillGradient?.angle == 45)
+            #expect(child.fillGradient?.stops.map(\.color) == ["#ff0000", "#0000ff"])
+        }
+    }
+
     /// A field edit keeps every field it does not name, from the SELECTION'S
     /// gradient, never from the store's last values: the store here holds a
     /// previous edit's stops and dither, as it would after editing another

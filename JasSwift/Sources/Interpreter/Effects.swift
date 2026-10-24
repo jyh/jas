@@ -1336,20 +1336,27 @@ public enum SelectionGradient: Equatable {
 }
 
 /// Read the active attribute (`fillOnTop` ⇒ fill, else stroke) of every
-/// selected element. Mirrors `gradient_host::selection_gradient`.
+/// selected element. A selected container speaks for its paintable members at
+/// any depth (the read twin of the write, which recurses into members), and an
+/// empty one contributes nothing. Mirrors `gradient_host::selection_gradient`.
 public func selectionGradient(_ doc: Document, fillOnTop: Bool) -> SelectionGradient {
     var first: Gradient?? = nil
     var firstSolid: Color? = nil
+    var mixed = false
     for es in doc.selection {
         guard let elem = doc.tryGetElement(es.path) else { continue }
-        let g = fillOnTop ? elem.fillGradient : elem.strokeGradient
-        if firstSolid == nil && g == nil {
-            firstSolid = fillOnTop ? elem.fill?.color : elem.stroke?.color
+        elem.forEachPaintable { leaf in
+            if mixed { return }
+            let g = fillOnTop ? leaf.fillGradient : leaf.strokeGradient
+            if firstSolid == nil && g == nil {
+                firstSolid = fillOnTop ? leaf.fill?.color : leaf.stroke?.color
+            }
+            switch first {
+            case .none: first = .some(g)
+            case .some(let prev): if prev != g { mixed = true }
+            }
         }
-        switch first {
-        case .none: first = .some(g)
-        case .some(let prev): if prev != g { return .mixed }
-        }
+        if mixed { return .mixed }
     }
     switch first {
     case .none: return .empty
