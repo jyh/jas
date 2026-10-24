@@ -52,6 +52,13 @@ private func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
         if CFGetTypeID(x) == CFBooleanGetTypeID() || CFGetTypeID(y) == CFBooleanGetTypeID() { return false }
         return x.doubleValue == y.doubleValue
     case (let x as String, let y as String): return x == y
+    // Compound values compare structurally, as the engine's `json_value_eq`
+    // does (`expected_data` pins a whole brush). Until then two equal objects
+    // compared false.
+    case (let x as [String: Any], let y as [String: Any]):
+        return x.count == y.count && x.allSatisfy { k, v in y.keys.contains(k) && sameJSON(v, y[k]) }
+    case (let x as [Any], let y as [Any]):
+        return x.count == y.count && zip(x, y).allSatisfy { sameJSON($0, $1) }
     case (nil, nil), (is NSNull, is NSNull), (nil, is NSNull), (is NSNull, nil): return true
     default: return false
     }
@@ -154,6 +161,26 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             failures.append("\(name): state.\(key) is \(String(describing: store.get(key))), the corpus pins \(value)")
         }
     }
+    // `expected_data`: a dotted path into the store's `data` namespace, where
+    // an integer segment indexes an array and -1 is its last item; a path that
+    // does not resolve is a failure. The engine runner reads it the same way.
+    for (path, value) in tc["expected_data"] as? [String: Any] ?? [:] {
+        var cur: Any? = store.getDataPath("")
+        for seg in path.split(separator: ".").map(String.init) {
+            if let a = cur as? [Any], let i = Int(seg) {
+                let j = i < 0 ? a.count + i : i
+                cur = (0..<a.count).contains(j) ? a[j] : nil
+            } else {
+                cur = (cur as? [String: Any])?[seg]
+            }
+            if cur == nil { break }
+        }
+        if cur == nil {
+            failures.append("\(name): data.\(path) does not resolve")
+        } else if !sameJSON(cur, value) {
+            failures.append("\(name): data.\(path) is \(String(describing: cur)), the corpus pins \(value)")
+        }
+    }
     let after = documentToTestJson(m.document)
     if let want = tc["expected_document"] as? String {
         switch (want, atOpen) {
@@ -182,6 +209,7 @@ private let dialogActionFixtures = [
     "dialog_actions/tool_options.json",
     "dialog_actions/boolean_options.json",
     "dialog_actions/paragraph_dialogs.json",
+    "dialog_actions/brush_options.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {

@@ -3874,6 +3874,7 @@ mod tests {
         "dialog_actions/tool_options.json",
         "dialog_actions/boolean_options.json",
         "dialog_actions/paragraph_dialogs.json",
+        "dialog_actions/brush_options.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
@@ -3997,6 +3998,29 @@ mod tests {
                 let have = store.get(key);
                 if !crate::cross_language_test::tests::json_value_eq(have, value) {
                     failures.push(format!("{name}: state.{key} is {have}, the corpus pins {value}"));
+                }
+            }
+            // `expected_data`: a dotted path into the store's `data` namespace
+            // (Brush Options writes `brush_libraries`), where an integer segment
+            // indexes an array and -1 is its last item. A path that does not
+            // resolve is a failure, never a match against null.
+            for (path, value) in tc.get("expected_data").and_then(|s| s.as_object()).into_iter().flatten() {
+                let mut cur = store.get_data_path("");
+                let mut ok = true;
+                for seg in path.split('.') {
+                    let next = match (&cur, seg.parse::<i64>()) {
+                        (serde_json::Value::Array(a), Ok(i)) => {
+                            let i = if i < 0 { a.len() as i64 + i } else { i };
+                            usize::try_from(i).ok().and_then(|i| a.get(i)).cloned()
+                        }
+                        _ => cur.get(seg).cloned(),
+                    };
+                    match next { Some(v) => cur = v, None => { ok = false; break; } }
+                }
+                if !ok {
+                    failures.push(format!("{name}: data.{path} does not resolve"));
+                } else if !crate::cross_language_test::tests::json_value_eq(&cur, value) {
+                    failures.push(format!("{name}: data.{path} is {cur}, the corpus pins {value}"));
                 }
             }
             drop(store);

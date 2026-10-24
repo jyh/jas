@@ -488,7 +488,17 @@ public class Model: ObservableObject {
     /// re-renders the bound views. It starts from the bundle's `state`
     /// defaults, as the reference's and the engine's stores do, so an
     /// `init:` reading `state.<key>` sees the declared default, not null.
-    public let stateStore: StateStore = StateStore(defaults: WorkspaceData.load()?.stateDefaults())
+    public let stateStore: StateStore = {
+        let store = StateStore(defaults: WorkspaceData.load()?.stateDefaults())
+        // The bundle's brush libraries, as the engine's
+        // `panel_scope::seed_library_data` seeds them: the library effects
+        // (Brush Options, Duplicate, Delete) write here and the canvas brush
+        // registry reads here. Swatches live in `swatchLibraries` instead.
+        if let libs = WorkspaceData.load()?.brushLibraries() {
+            store.setDataPath("brush_libraries", libs)
+        }
+        return store
+    }()
     /// Mirror hook for ``state.active_tool`` writes that originate in
     /// YAML effects (the tool-alternates flyout's ``set: { active_tool }``).
     /// ContentView installs this so a flyout pick switches the live
