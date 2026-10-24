@@ -1,0 +1,92 @@
+[
+  {
+    "name": "artboard_options_a4_preset_sets_the_size",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "apply_artboard_preset: A4 is 595.28 x 841.89, the size its dropdown label states.",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_preset"
+          },
+          "event": "commit",
+          "value": "a4"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "width": 595.28,
+        "height": 841.89
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_landscape_swaps_the_sides",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "The dialog starts portrait at 612 x 792; toggle_artboard_orientation swaps width and height. Opened through the action door, whose scope carries no active_document.artboards (the Artboard tool's and the panel's doors do), so the init reads nothing and the dialog starts at its declared 612 x 792; the case pins the orientation law, not the init.",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_orientation"
+          },
+          "event": "commit",
+          "value": "landscape"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "width": 792,
+        "height": 612
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_the_shown_orientation_changes_nothing",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "The behavior's condition: pressing the orientation already shown (portrait) does not run the swap. Opened through the action door, whose scope carries no active_document.artboards (the Artboard tool's and the panel's doors do), so the init reads nothing and the dialog starts at its declared 612 x 792; the case pins the orientation law, not the init.",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_orientation"
+          },
+          "event": "commit",
+          "value": "portrait"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "width": 612,
+        "height": 792
+      }
+    },
+    "expected_document": "unchanged"
+  }
+]
