@@ -1,0 +1,132 @@
+[
+  {
+    "name": "brush_options_create_ok_appends_a_calligraphic_brush",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "actions.yaml brush_options_confirm, create mode: append a brush to the library with a slug made from the name (lowercased, non-alphanumerics to '_'). The bundle's default_brushes has 9 brushes, so the new one is index 9.",
+    "actions": [
+      {
+        "action": "open_brush_options",
+        "params": {
+          "mode": "create",
+          "library": "default_brushes"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_name_input"
+          },
+          "event": "commit",
+          "value": "Wide Nib"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "brush_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged",
+    "expected_data": {
+      "brush_libraries.default_brushes.brushes.9.slug": "wide_nib",
+      "brush_libraries.default_brushes.brushes.-1": {
+        "name": "Wide Nib",
+        "slug": "wide_nib",
+        "type": "calligraphic",
+        "angle": 0,
+        "roundness": 100,
+        "size": 5,
+        "angle_variation": {
+          "mode": "fixed"
+        },
+        "roundness_variation": {
+          "mode": "fixed"
+        },
+        "size_variation": {
+          "mode": "fixed"
+        }
+      }
+    }
+  },
+  {
+    "name": "brush_options_library_edit_ok_renames_in_place",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "library_edit mode updates the master brush where it stands: index and slug are unchanged.",
+    "actions": [
+      {
+        "action": "open_brush_options",
+        "params": {
+          "mode": "library_edit",
+          "library": "default_brushes",
+          "brush_slug": "round_3pt"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_name_input"
+          },
+          "event": "commit",
+          "value": "Round Three"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "brush_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged",
+    "expected_data": {
+      "brush_libraries.default_brushes.brushes.1.name": "Round Three",
+      "brush_libraries.default_brushes.brushes.1.slug": "round_3pt",
+      "brush_libraries.default_brushes.brushes.-1.slug": "bristle_round"
+    }
+  },
+  {
+    "name": "brush_options_cancel_appends_nothing",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_brush_options",
+        "params": {
+          "mode": "create",
+          "library": "default_brushes"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_name_input"
+          },
+          "event": "commit",
+          "value": "Wide Nib"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "dismiss_dialog",
+            "label": "Cancel"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged",
+    "expected_data": {
+      "brush_libraries.default_brushes.brushes.-1.slug": "bristle_round"
+    }
+  }
+]

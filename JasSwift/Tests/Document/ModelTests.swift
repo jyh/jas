@@ -489,3 +489,23 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
     a.stateStore.set("scale_uniform", false)
     #expect(b.stateStore.get("scale_uniform") as? Bool == true)
 }
+
+@Test func aFreshModelsStoreCarriesTheBundlesLibraries() throws {
+    // The engine seeds `data` with the bundle's brush libraries
+    // (`panel_scope::seed_library_data`), because the library effects write
+    // there: Brush Options' create appends to `data.brush_libraries`, and the
+    // canvas brush registry reads it. A store that starts empty appends to a
+    // library holding only the new brush, and the canvas has no brushes.
+    let ws = try #require(WorkspaceData.load())
+    let store = Model().stateStore
+    // Swatches are not seeded here: the Mac keeps them in `Model.swatchLibraries`,
+    // and a second copy in the store would be two truths.
+    for key in ["brush_libraries"] {
+        let want = try #require(ws.data[key] as? [String: Any])
+        #expect(!want.isEmpty, "the bundle has \(key)")
+        let have = store.getDataPath(key) as? [String: Any]
+        #expect(have?.keys.sorted() == want.keys.sorted(), "\(key): \(String(describing: have?.keys.sorted()))")
+    }
+    let brushes = (store.getDataPath("brush_libraries.default_brushes.brushes") as? [Any])?.count
+    #expect(brushes == 9, "default_brushes holds \(String(describing: brushes))")
+}
