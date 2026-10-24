@@ -911,6 +911,15 @@ public sealed partial class MainWindow
             return slider;
         }
 
+        /// <summary>A press on the bar: the slider's `add` at the pointer's location.</summary>
+        private void AddAt(GradientSliderSurface slider, GradientSliderWire.Layout g, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            e.Handled = true;
+            slider.Focus(FocusState.Pointer);
+            var at = e.GetCurrentPoint(slider).Position;
+            SendGesture(slider, "add", new Dictionary<string, object> { ["location"] = GradientSliderWire.Point(g, at.X, at.Y).Location });
+        }
+
         /// <summary>
         /// A press on one of the slider's markers: select it, hold it, capture
         /// the pointer. It carries the pointer's `location` too, so the engine
@@ -963,13 +972,7 @@ public sealed partial class MainWindow
             if (stops is null || stops.Count < 2) { bar.Fill = _paneMutedBrush; return; }
             if (live)
             {
-                bar.PointerPressed += (_, e) =>
-                {
-                    e.Handled = true;
-                    slider.Focus(FocusState.Pointer);
-                    var at = e.GetCurrentPoint(slider).Position;
-                    SendGesture(slider, "add", new Dictionary<string, object> { ["location"] = GradientSliderWire.Point(g, at.X, at.Y).Location });
-                };
+                bar.PointerPressed += (_, e) => AddAt(slider, g, e);
             }
             var preview = new Microsoft.UI.Xaml.Media.LinearGradientBrush
             {
@@ -1004,20 +1007,26 @@ public sealed partial class MainWindow
             if (live)
             {
                 // The diamonds' one target (desk AED): the band above the bar,
-                // each diamond a thumb wide, the nearer one on an overlap. A
-                // press that reaches no diamond is left unhandled.
+                // from the drawn corner's top (it overhangs the rect, flask
+                // §533: WinUI delivers a press there) down to the bar, each
+                // diamond a thumb wide, the nearer one on an overlap. Layout
+                // rounding can lay the band's bottom pixel row over the bar's
+                // top one, so a press there that no diamond takes is the
+                // bar's `add`, as if the band were not there (§533).
+                var overhang = GradientSliderWire.DiamondOverhang(g);
                 var band = new Microsoft.UI.Xaml.Shapes.Rectangle
                 {
-                    Width = leaf.W, Height = barTop,
+                    Width = leaf.W, Height = barTop + overhang,
                     Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00)),
                 };
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(band, 0);
-                Microsoft.UI.Xaml.Controls.Canvas.SetTop(band, 0);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(band, -overhang);
                 slider.Surface.Children.Add(band);
                 band.PointerPressed += (_, e) =>
                 {
                     var at = e.GetCurrentPoint(slider).Position;
                     if (GradientSliderWire.MidpointAt(g, stops, at.X, at.Y) is { } pair) { PressMarker(slider, e, "midpoint", "press_midpoint", "pair", pair); }
+                    else if (at.Y >= barTop) { AddAt(slider, g, e); }
                 };
             }
             for (var i = 0; i < stops.Count; i++)
