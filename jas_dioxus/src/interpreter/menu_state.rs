@@ -230,6 +230,34 @@ fn walk(items: &[Value], prefix: &[i64], ctx: &Value, out: &mut Vec<Value>) {
     }
 }
 
+/// The default layout's name. Every session falls back to it, so the
+/// Workspace submenu never lists it (Reset to Default reaches it).
+pub use crate::workspace::workspace::WORKSPACE_LAYOUT_NAME as DEFAULT_LAYOUT_NAME;
+
+/// The appearance in force when none is stored.
+pub const DEFAULT_APPEARANCE_NAME: &str = "dark_gray";
+
+/// The Workspace submenu's layout entries (menubar.yaml `menu_workspace`):
+/// every saved layout but the default one, in saved order, labelled by its
+/// name, the active one checked, as `[{name, label, checked}]`. Mirrors the
+/// reference's `workspace_entries`; pinned by `submenu_entries.json`.
+pub fn workspace_entries(saved: &[String], active: &str) -> Value {
+    Value::Array(saved.iter().filter(|n| n.as_str() != DEFAULT_LAYOUT_NAME)
+        .map(|n| json!({"name": n, "label": n, "checked": n == active}))
+        .collect())
+}
+
+/// The Appearance submenu's entries (menubar.yaml `menu_appearance`): every
+/// available `(name, label)` in order, the active one checked, and no stored
+/// appearance means the default one is active. Mirrors the reference's
+/// `appearance_entries`; pinned by `submenu_entries.json`.
+pub fn appearance_entries(appearances: &[(String, String)], active: Option<&str>) -> Value {
+    let current = active.unwrap_or(DEFAULT_APPEARANCE_NAME);
+    Value::Array(appearances.iter()
+        .map(|(name, label)| json!({"name": name, "label": label, "checked": name == current}))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

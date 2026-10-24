@@ -180,6 +180,12 @@ def gather_evidence(root):
         for case in _load(mst):
             for r in case.get("expected", []):
                 ev["menu_paths"].add(tuple(r.get("path", [])))
+    # A DYNAMIC submenu's own observable is the entry list it generates (saved
+    # layouts, appearances), not a row: algorithms/submenu_entries.json, which
+    # the reference generates and Rust AND Swift replay, names each by `submenu`.
+    sme = os.path.join(root, "test_fixtures", "algorithms", "submenu_entries.json")
+    ev["dynamic_submenus"] = ({c.get("submenu") for c in _load(sme)}
+                              if os.path.exists(sme) else set())
     # The map each app STARTS from, which Rust (web app and engine) and Swift
     # compare with the reference's spec defaults over every state variable.
     ism = os.path.join(root, "test_fixtures", "algorithms", "initial_state_map.json")
@@ -268,6 +274,10 @@ def census(spec, ev):
         if tuple(path) in ev["menu_paths"]:
             rows.append(_row("menu_items", it["id"], TREE, COVERED,
                              "test_fixtures/algorithms/menu_state.json (Rust + Swift)"))
+        elif "items" in it and it["id"] in ev["dynamic_submenus"]:
+            rows.append(_row("menu_items", it["id"], TREE, COVERED,
+                             "test_fixtures/algorithms/submenu_entries.json (its "
+                             "generated entries: reference + Rust + Swift)"))
         elif "items" in it:
             rows.append(_row("menu_items", it["id"], TREE, NOT_YET_BUILT,
                              "a submenu parent has no state row; only a bundle "
@@ -523,6 +533,8 @@ def self_test():
             [{"name": "x", "function": "menu_state", "args": {}, "expected": [
                 {"path": [0, 0], "action": "new_document", "enabled": True, "checked": None},
                 {"path": [0, 4, 0], "action": "in_sub", "enabled": True, "checked": None}]}])
+        put("test_fixtures/algorithms/submenu_entries.json",
+            [{"name": "x", "submenu": "sub", "function": "workspace_entries", "args": {}, "expected": []}])
         put("test_fixtures/algorithms/panel_widget_tree.json", [{"name": "p1"}])
         put("test_fixtures/algorithms/initial_state_map.json",
             [{"name": "no_document", "function": "initial_state_map", "args": {},
@@ -585,6 +597,7 @@ def self_test():
         expect(("menu_items", "m_deep"), NOT_YET_BUILT)  # a submenu item is censused
         expect(("menu_items", "m_relabel"), NOT_YET_BUILT)  # no row at its path
         expect(("menu_items", "sub2"), NOT_YET_BUILT)  # a submenu parent has no state row
+        expect(("menu_items", "sub"), COVERED)  # a dynamic submenu's entries are in the corpus
         expect(("menu_items", "m_in_sub"), COVERED)  # [0,4,0]: the separator counts
         expect(("menu_items", "m_golden_only"), NOT_YET_BUILT)  # a script-only golden
         expect(("menu_items", "file"), None)  # a top-level menu is not an item
