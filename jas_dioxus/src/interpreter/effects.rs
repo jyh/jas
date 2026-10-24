@@ -6978,9 +6978,12 @@ fn drag_to_scale_factors(
 fn drag_to_rotate_angle(
     px: f64, py: f64, cx: f64, cy: f64, rx: f64, ry: f64, shift: bool,
 ) -> f64 {
+    // `atan2` in the y-down document grows CLOCKWISE on screen, and the angle
+    // is counter-clockwise ([`transform_apply::rotate_matrix`]), so the swept
+    // angle is press minus cursor: the selection still follows the cursor.
     let theta_press = (py - ry).atan2(px - rx);
     let theta_cursor = (cy - ry).atan2(cx - rx);
-    let mut theta_deg = (theta_cursor - theta_press).to_degrees();
+    let mut theta_deg = (theta_press - theta_cursor).to_degrees();
     if shift {
         theta_deg = (theta_deg / 45.0).round() * 45.0;
     }

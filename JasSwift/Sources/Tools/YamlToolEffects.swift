@@ -3367,9 +3367,13 @@ private func dragToRotateAngle(
     px: Double, py: Double, cx: Double, cy: Double,
     rx: Double, ry: Double, shift: Bool
 ) -> Double {
+    // `atan2` in the y-down document grows CLOCKWISE on screen, and the angle
+    // is counter-clockwise (``TransformApply/rotateMatrix(thetaDeg:rx:ry:)``),
+    // so the swept angle is press minus cursor: the selection still follows
+    // the cursor.
     let thetaPress  = atan2(py - ry, px - rx)
     let thetaCursor = atan2(cy - ry, cx - rx)
-    var thetaDeg = (thetaCursor - thetaPress) * (180 / Double.pi)
+    var thetaDeg = (thetaPress - thetaCursor) * (180 / Double.pi)
     if shift { thetaDeg = (thetaDeg / 45.0).rounded() * 45.0 }
     return thetaDeg
 }

@@ -32,8 +32,12 @@ def scale_matrix(sx: float, sy: float, rx: float, ry: float) -> Transform:
 
 
 def rotate_matrix(theta_deg: float, rx: float, ry: float) -> Transform:
-    """Rotation matrix: theta_deg degrees CCW around (rx, ry)."""
-    return Transform.rotate(theta_deg).around_point(rx, ry)
+    """Rotation matrix: theta_deg degrees counter-clockwise ON SCREEN around
+    (rx, ry) (ROTATE_TOOL.md, ROT-062). The document is y-down, where
+    `Transform.rotate` (SVG's rotate()) turns a positive angle clockwise, so
+    the angle is negated: a point at 3 o'clock moves toward 12 o'clock. Until
+    2026-10-24 this passed the angle through, as both active ports did."""
+    return Transform.rotate(-theta_deg).around_point(rx, ry)
 
 
 def shear_matrix(angle_deg: float, axis: str, axis_angle_deg: float,
