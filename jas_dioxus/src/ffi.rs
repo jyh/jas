@@ -3871,6 +3871,7 @@ mod tests {
     /// reads this list as the claim; Swift's `dialogActionFixtures` is its twin).
     const DIALOG_ACTION_FIXTURES: &[&str] = &[
         "dialog_actions/transform_options.json",
+        "dialog_actions/tool_options.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design

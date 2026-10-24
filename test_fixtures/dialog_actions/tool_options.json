@@ -1,0 +1,75 @@
+[
+ {
+  "name": "paintbrush_reset_restores_the_dialog_defaults",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"open_dialog": {"id": "paintbrush_tool_options"}},
+   {"dialog_event": {"address": {"id": "pto_fidelity"}, "event": "commit", "value": "5"}},
+   {"dialog_event": {"address": {"id": "pto_fill_new_strokes"}, "event": "click"}},
+   {"dialog_event": {"address": {"action": "paintbrush_tool_options_reset"}, "event": "click"}}
+  ],
+  "expected_dialog": {"id": "paintbrush_tool_options", "state": {"fidelity": 3, "fill_new_strokes": false, "keep_selected": true, "edit_selected_paths": true, "edit_within": 12}},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "paintbrush_ok_stores_what_was_edited",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"open_dialog": {"id": "paintbrush_tool_options"}},
+   {"dialog_event": {"address": {"id": "pto_fidelity"}, "event": "commit", "value": "5"}},
+   {"dialog_event": {"address": {"id": "pto_fill_new_strokes"}, "event": "click"}},
+   {"dialog_event": {"address": {"action": "paintbrush_tool_options_confirm", "label": "OK"}, "event": "click"}}
+  ],
+  "expected_dialog": null,
+  "expected_state": {"paintbrush_fidelity": 5, "paintbrush_fill_new_strokes": true},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "blob_brush_reset_restores_the_dialog_defaults",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"open_dialog": {"id": "blob_brush_tool_options"}},
+   {"dialog_event": {"address": {"id": "bbo_fidelity"}, "event": "commit", "value": "1"}},
+   {"dialog_event": {"address": {"action": "blob_brush_tool_options_reset"}, "event": "click"}}
+  ],
+  "expected_dialog": {"id": "blob_brush_tool_options", "state": {"fidelity": 3, "keep_selected": false, "merge_only_with_selection": false, "size": 10, "angle": 0, "roundness": 100}},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "blob_brush_ok_stores_what_was_edited",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"open_dialog": {"id": "blob_brush_tool_options"}},
+   {"dialog_event": {"address": {"id": "bbo_fidelity"}, "event": "commit", "value": "1"}},
+   {"dialog_event": {"address": {"id": "bbo_keep_selected"}, "event": "click"}},
+   {"dialog_event": {"address": {"action": "blob_brush_tool_options_confirm", "label": "OK"}, "event": "click"}}
+  ],
+  "expected_dialog": null,
+  "expected_state": {"blob_brush_fidelity": 1, "blob_brush_keep_selected": true},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "eyedropper_reset_ticks_every_attribute",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"open_dialog": {"id": "eyedropper_tool_options"}},
+   {"dialog_event": {"address": {"id": "eto_fill"}, "event": "click"}},
+   {"dialog_event": {"address": {"action": "eyedropper_tool_options_reset"}, "event": "click"}}
+  ],
+  "expected_dialog": {"id": "eyedropper_tool_options", "state": {"fill": true, "stroke": true, "opacity": true, "character": true}},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "eyedropper_ok_unticks_fill_and_keeps_the_rest",
+  "setup_svg": "rect_with_stroke.svg",
+  "note": "fill and stroke both start true (state.yaml); the press unticks fill, and OK must carry the untouched stroke through as true.",
+  "actions": [
+   {"open_dialog": {"id": "eyedropper_tool_options"}},
+   {"dialog_event": {"address": {"id": "eto_fill"}, "event": "click"}},
+   {"dialog_event": {"address": {"action": "eyedropper_tool_options_confirm", "label": "OK"}, "event": "click"}}
+  ],
+  "expected_dialog": null,
+  "expected_state": {"eyedropper_fill": false, "eyedropper_stroke": true},
+  "expected_document": "unchanged"
+ }
+]
