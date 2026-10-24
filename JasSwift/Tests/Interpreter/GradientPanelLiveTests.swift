@@ -48,8 +48,13 @@ private func filled(_ g: Gradient?, _ c: Color = Color(r: 0, g: 0, b: 1)) -> Ele
     #expect(((o["stops"] as? [[String: Any]])?.first?["color"] as? String) == "#ff0000")
 }
 
-@Test func gradientPanelAddsNothingWithNoSelectionOrAMixedOne() {
+@Test func gradientPanelAddsNothingWithNoSelectionAndOnlyTheFirstStopsWhenMixed() {
     #expect(gradientPanelLiveOverrides(model: gradientModel([filled(blueRadial)], selected: [])).isEmpty)
+    // GRADIENT.md §Multi-selection: the slider shows the first element's
+    // stops; every other field stands as the store holds it. Mirrors
+    // gradient_host.rs `live_values_are_empty_with_no_selection_and_only_the_first_stops_when_mixed`.
     let mixed = gradientModel([filled(blueRadial), filled(nil)], selected: [[0, 0], [0, 1]])
-    #expect(gradientPanelLiveOverrides(model: mixed).isEmpty)
+    let o = gradientPanelLiveOverrides(model: mixed)
+    #expect(Array(o.keys) == ["stops"])
+    #expect((o["stops"] as? [[String: Any]])?.map { $0["color"] as? String } == blueRadial.stops.map { $0.color })
 }

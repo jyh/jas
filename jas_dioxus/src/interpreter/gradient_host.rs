@@ -147,17 +147,22 @@ pub fn set_render_field(g: &mut Gradient, key: &str, value: &Value) -> bool {
 /// The engine's write: a `gradient_*` global was just written with `value`.
 /// The base is what the selection holds — its shared gradient, or the seed
 /// when it is solid/none (the promotion) — and the one key is applied on top.
-/// A MIXED selection takes `mixed_base`, the panel as the store holds it,
-/// because there is no single gradient to start from (the web app applies its
-/// panel there too). Nothing selected writes nothing. Returns whether a
-/// gradient was written.
-pub fn apply_render_key(model: &mut Model, fill_on_top: bool, key: &str, value: &Value,
-                        mixed_base: impl FnOnce() -> Gradient) -> bool {
+/// A MIXED selection sets the field on each member's OWN gradient (a member
+/// with none is promoted from its own seed): GRADIENT.md §Multi-selection,
+/// "each control is evaluated independently". Nothing selected writes
+/// nothing. Returns whether a gradient was written.
+pub fn apply_render_key(model: &mut Model, fill_on_top: bool, key: &str, value: &Value) -> bool {
     let mut g = match selection_gradient(model.document(), fill_on_top) {
         SelectionGradient::Empty => return false,
         SelectionGradient::Uniform(g) => g,
         SelectionGradient::Solid(c) => seed_gradient(c),
-        SelectionGradient::Mixed => mixed_base(),
+        SelectionGradient::Mixed => {
+            if !set_render_field(&mut seed_gradient(None), key, value) {
+                return false;
+            }
+            map_member_gradients(model, fill_on_top, &|mut g| { set_render_field(&mut g, key, value); g });
+            return true;
+        }
     };
     if !set_render_field(&mut g, key, value) {
         return false;
@@ -166,32 +171,68 @@ pub fn apply_render_key(model: &mut Model, fill_on_top: bool, key: &str, value: 
     true
 }
 
-/// The panel as an engine's store holds it, for a mixed selection: the six
-/// render globals over the default gradient, with the panel scope's `stops`
-/// (`{ color: "#rrggbb", opacity, location, midpoint_to_next }`, the YAML's
-/// shape) when they parse, else the seed's.
-pub fn gradient_from_store(store: &crate::interpreter::state_store::StateStore, panel_id: &str) -> Gradient {
-    let mut g = seed_gradient(None);
-    for key in GRADIENT_RENDER_KEYS {
-        set_render_field(&mut g, key, store.get(key));
+/// A member's active-attribute gradient: its own, or the seed its solid
+/// colour (or none) promotes to.
+fn member_gradient(leaf: &crate::geometry::element::Element, fill_on_top: bool) -> Gradient {
+    let own = if fill_on_top { leaf.fill_gradient() } else { leaf.stroke_gradient() };
+    own.cloned().unwrap_or_else(|| seed_gradient(
+        if fill_on_top { leaf.fill().map(|f| f.color) } else { leaf.stroke().map(|s| s.color) }))
+}
+
+/// The first selected member's gradient (selection order, then paint order
+/// within a container): the base the slider and the stop combos show and edit
+/// on a MIXED selection (GRADIENT.md §Multi-selection).
+fn first_member_gradient(doc: &Document, fill_on_top: bool) -> Option<Gradient> {
+    let mut first = None;
+    for es in &doc.selection {
+        let Some(elem) = doc.get_element(&es.path) else { continue };
+        crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+            if first.is_none() {
+                first = Some(member_gradient(leaf, fill_on_top));
+            }
+        });
+        if first.is_some() {
+            break;
+        }
     }
-    if let Some(stops) = stops_from_json(store.get_panel(panel_id, "stops")).filter(|s| !s.is_empty()) {
-        g.stops = stops;
+    first
+}
+
+/// Each selected member's active-attribute gradient replaced by `f` of its
+/// own ([`member_gradient`]), in one document edit.
+fn map_member_gradients(model: &mut Model, fill_on_top: bool, f: &dyn Fn(Gradient) -> Gradient) {
+    use crate::geometry::element::{map_paintable, with_fill_gradient, with_stroke_gradient};
+    let doc = model.document().clone();
+    let mut new_doc = doc.clone();
+    for es in &doc.selection {
+        if let Some(elem) = doc.get_element(&es.path) {
+            new_doc = new_doc.replace_element(&es.path, map_paintable(elem, &|leaf| {
+                let g = Some(Box::new(f(member_gradient(leaf, fill_on_top))));
+                if fill_on_top { with_fill_gradient(leaf, g) } else { with_stroke_gradient(leaf, g) }
+            }));
+        }
     }
-    g
+    model.edit_document(new_doc);
 }
 
 /// The Gradient panel's fields as the SELECTION holds them, for the engine's
 /// panel scope (the role `stroke_host::live_values` plays for Stroke). A
 /// uniform gradient reads as itself; a solid/none selection reads as the seed
-/// its first edit will promote from. Nothing selected, or a mixed selection,
-/// returns nothing, so the store's panel stands, as the web's
-/// `sync_gradient_panel_from_selection` leaves it. `stops` is the YAML's shape,
-/// the one [`gradient_from_store`] parses back.
+/// its first edit will promote from. Nothing selected returns nothing, so the
+/// store's panel stands. A mixed selection returns only `stops`, the first
+/// member's (GRADIENT.md §Multi-selection: the slider shows them and the stop
+/// combos edit them); its other fields stand as the store holds them. `stops`
+/// is the YAML's shape, the one [`stops_from_json`] parses back.
 pub fn live_values(doc: &Document, fill_on_top: bool) -> serde_json::Map<String, Value> {
     let mut m = serde_json::Map::new();
     let g = match selection_gradient(doc, fill_on_top) {
-        SelectionGradient::Empty | SelectionGradient::Mixed => return m,
+        SelectionGradient::Empty => return m,
+        SelectionGradient::Mixed => {
+            if let Some(first) = first_member_gradient(doc, fill_on_top) {
+                m.insert("stops".into(), stops_to_json(&first.stops));
+            }
+            return m;
+        }
         SelectionGradient::Uniform(g) => g,
         SelectionGradient::Solid(c) => seed_gradient(c),
     };
@@ -243,16 +284,22 @@ pub fn stop_field(key: &str) -> Option<&'static str> {
 
 /// The engine's stop write: stop `index` of the selection's gradient (the
 /// same base as [`apply_render_key`]: its own gradient, the seed when it is
-/// solid/none, `mixed_base` when mixed) gets `field` by [`edit_stop`].
+/// solid/none; when mixed, the first member's stops, which then overwrite every
+/// member's stops) gets `field` by [`edit_stop`].
 /// Returns the index the stop now sits at, or `None` when nothing is
 /// selected or the law refuses; nothing is written then.
 pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value: &Value,
-                       index: i64, mixed_base: impl FnOnce() -> Gradient) -> Option<usize> {
+                       index: i64) -> Option<usize> {
     let mut g = match selection_gradient(model.document(), fill_on_top) {
         SelectionGradient::Empty => return None,
         SelectionGradient::Uniform(g) => g,
         SelectionGradient::Solid(c) => seed_gradient(c),
-        SelectionGradient::Mixed => mixed_base(),
+        SelectionGradient::Mixed => {
+            let first = first_member_gradient(model.document(), fill_on_top)?;
+            let (stops, moved) = edit_stop(&first.stops, index, field, value)?;
+            map_member_gradients(model, fill_on_top, &|mut g| { g.stops = stops.clone(); g });
+            return Some(moved);
+        }
     };
     let (stops, moved) = edit_stop(&g.stops, index, field, value)?;
     g.stops = stops;
@@ -269,14 +316,17 @@ pub const STOPS_KEY: &str = "gradient_stops";
 /// nothing is selected, `stops` does not parse, or it has fewer than two stops.
 /// A list equal to the selection's own writes nothing
 /// ([`apply_gradient_to_selection`]).
-pub fn apply_stops(model: &mut Model, fill_on_top: bool, stops: &Value,
-                   mixed_base: impl FnOnce() -> Gradient) -> bool {
+pub fn apply_stops(model: &mut Model, fill_on_top: bool, stops: &Value) -> bool {
     let Some(stops) = stops_from_json(stops).filter(|s| s.len() >= 2) else { return false };
     let mut g = match selection_gradient(model.document(), fill_on_top) {
         SelectionGradient::Empty => return false,
         SelectionGradient::Uniform(g) => g,
         SelectionGradient::Solid(c) => seed_gradient(c),
-        SelectionGradient::Mixed => mixed_base(),
+        // A mixed slider commit overwrites every member's stops, and only them.
+        SelectionGradient::Mixed => {
+            map_member_gradients(model, fill_on_top, &|mut g| { g.stops = stops.clone(); g });
+            return true;
+        }
     };
     g.stops = stops;
     apply_gradient_to_selection(model, fill_on_top, g);
@@ -641,7 +691,7 @@ mod tests {
     #[test]
     fn an_edit_on_a_selected_group_keeps_its_members_stops() {
         let mut m = model_with(vec![group(vec![graded(Some(BLUE), RED, BLUE), graded(None, RED, BLUE)])], &[0]);
-        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(45), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(45)));
         let Element::Group(g) = m.document().get_element(&vec![0, 0]).unwrap() else { panic!("still a group") };
         for c in &g.children {
             let fg = c.fill_gradient().expect("each member carries the gradient");
@@ -685,7 +735,7 @@ mod tests {
     #[test]
     fn a_first_edit_on_a_solid_selection_promotes_from_the_seed_with_the_edit_applied() {
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
-        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial")));
         let mut want = seed_gradient(Some(BLUE));
         want.gtype = GradientType::Radial;
         assert_eq!(fill_gradient(&m, 0), Some(want));
@@ -703,13 +753,13 @@ mod tests {
         held.angle = 30.0;
         apply_gradient_to_selection(&mut m, true, held.clone());
         let g0 = m.generation();
-        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0)));
         assert_eq!(m.generation(), g0, "a render key set to its own value");
-        apply_stop_edit(&mut m, true, "opacity", &json!(100.0), 0, || panic!("not mixed")).unwrap();
+        apply_stop_edit(&mut m, true, "opacity", &json!(100.0), 0).unwrap();
         assert_eq!(m.generation(), g0, "a stop combo set to its own value");
-        apply_stops(&mut m, true, &stops_to_json(&held.stops), || panic!("not mixed"));
+        apply_stops(&mut m, true, &stops_to_json(&held.stops));
         assert_eq!(m.generation(), g0, "the slider's list unchanged");
-        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(45.0), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(45.0)));
         assert_ne!(m.generation(), g0, "the control: a real change writes");
     }
 
@@ -719,33 +769,61 @@ mod tests {
         let mut held = seed_gradient(Some(RED));
         held.angle = 30.0;
         apply_gradient_to_selection(&mut m, true, held.clone());
-        assert!(apply_render_key(&mut m, true, "gradient_aspect_ratio", &json!(150.0), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_aspect_ratio", &json!(150.0)));
         held.aspect_ratio = 150.0;
         assert_eq!(fill_gradient(&m, 0), Some(held));
     }
 
+    /// GRADIENT.md §Multi-selection: "Each control is evaluated independently"
+    /// and "any edit applies to every element": on a MIXED selection a field
+    /// commit sets THAT FIELD on each member's own gradient, and a member with
+    /// no gradient is promoted from its own seed (§Fill-type coupling).
     #[test]
-    fn a_mixed_selection_takes_the_panel_and_nothing_selected_writes_nothing() {
-        // Element 0 holds a gradient, element 1 is solid: both selected is mixed.
-        let mut m2 = model_with(vec![rect(Some(BLUE)), rect(Some(RED))], &[0]);
-        apply_gradient_to_selection(&mut m2, true, seed_gradient(Some(RED)));
-        select(&mut m2, &[0, 1]);
-        assert_eq!(selection_gradient(m2.document(), true), SelectionGradient::Mixed);
-        let panel = seed_gradient(Some(Color::rgb(0.0, 1.0, 0.0)));
-        assert!(apply_render_key(&mut m2, true, "gradient_dither", &json!(true), || panel.clone()));
-        let mut want = panel;
-        want.dither = true;
-        assert_eq!((fill_gradient(&m2, 0), fill_gradient(&m2, 1)), (Some(want.clone()), Some(want)));
+    fn a_mixed_field_edit_sets_that_field_on_each_members_own_gradient() {
+        let mut m = model_with(vec![graded(Some(BLUE), RED, BLUE), graded(None, BLUE, RED), rect(Some(RED))], &[0, 1, 2]);
+        assert_eq!(selection_gradient(m.document(), true), SelectionGradient::Mixed);
+        assert!(apply_render_key(&mut m, true, "gradient_dither", &json!(true)));
+        let got = |m: &Model, i| { let g = fill_gradient(m, i).expect("a gradient"); (g.dither, g.stops.iter().map(|s| s.color).collect::<Vec<_>>()) };
+        assert_eq!(got(&m, 0), (true, vec![RED, BLUE]), "the first member keeps its stops");
+        assert_eq!(got(&m, 1), (true, vec![BLUE, RED]), "the second keeps its own, not the first's");
+        assert_eq!(got(&m, 2), (true, vec![RED, Color::WHITE]), "a solid member is promoted from its own seed");
+        assert!(!apply_render_key(&mut m, true, "gradient_angle", &json!("45")), "a refused value writes nothing");
+    }
 
+    /// The slider and the stop combos on a MIXED selection start from the FIRST
+    /// member's stops, and a commit overwrites the others' stops (and only
+    /// their stops: their angle and the rest stay theirs).
+    #[test]
+    fn a_mixed_stop_edit_starts_from_the_first_members_stops() {
+        let mut m = model_with(vec![graded(Some(BLUE), RED, BLUE), graded(None, BLUE, RED)], &[0]);
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0)));
+        select(&mut m, &[0, 1]);
+        assert_eq!(live_values(m.document(), true).get("stops"), Some(&stops_to_json(&fill_gradient(&m, 0).unwrap().stops)),
+                   "a mixed panel shows the first member's stops");
+        assert_eq!(apply_stop_edit(&mut m, true, "opacity", &json!(25.0), 0), Some(0));
+        for i in 0..2 {
+            let g = fill_gradient(&m, i).unwrap();
+            assert_eq!((g.stops.iter().map(|s| (s.color, s.opacity)).collect::<Vec<_>>()),
+                       vec![(RED, 25.0), (BLUE, 100.0)], "member {i}");
+        }
+        assert_eq!((fill_gradient(&m, 0).unwrap().angle, fill_gradient(&m, 1).unwrap().angle), (30.0, 0.0),
+                   "each keeps its own angle");
+        assert!(apply_stops(&mut m, true, &json!([
+            {"color": "#00ff00", "opacity": 100, "location": 0}, {"color": "#ffffff", "opacity": 100, "location": 100}])));
+        assert_eq!(fill_gradient(&m, 1).unwrap().stops[0].color, Color::rgb(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn nothing_selected_writes_nothing() {
         let mut empty = model_with(vec![rect(Some(BLUE))], &[]);
-        assert!(!apply_render_key(&mut empty, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        assert!(!apply_render_key(&mut empty, true, "gradient_type", &json!("radial")));
         assert_eq!(fill_gradient(&empty, 0), None);
     }
 
     #[test]
     fn the_stroke_side_is_written_when_fill_is_not_on_top() {
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
-        assert!(apply_render_key(&mut m, false, "gradient_type", &json!("linear"), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, false, "gradient_type", &json!("linear")));
         let e = m.document().get_element(&vec![0, 0]).unwrap().clone();
         assert_eq!((e.fill_gradient().is_some(), e.stroke_gradient().is_some()), (false, true));
     }
@@ -753,8 +831,8 @@ mod tests {
     #[test]
     fn a_value_outside_its_set_is_refused_and_writes_nothing() {
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
-        assert!(!apply_render_key(&mut m, true, "gradient_type", &json!("conic"), || panic!("not mixed")));
-        assert!(!apply_render_key(&mut m, true, "gradient_angle", &json!("45"), || panic!("not mixed")));
+        assert!(!apply_render_key(&mut m, true, "gradient_type", &json!("conic")));
+        assert!(!apply_render_key(&mut m, true, "gradient_angle", &json!("45")));
         assert_eq!(fill_gradient(&m, 0), None);
     }
 
@@ -781,7 +859,7 @@ mod tests {
     #[test]
     fn live_values_read_the_selected_gradient() {
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
-        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial")));
         let v = live_values(m.document(), true);
         assert_eq!(v["type"], json!("radial"), "{v:?}");
         assert_eq!(v["angle"], json!(0.0));
@@ -800,7 +878,7 @@ mod tests {
     #[test]
     fn live_values_follow_fill_on_top_and_seed_a_solid_selection() {
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
-        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial")));
         let stroke = live_values(m.document(), false);
         assert_eq!(stroke["type"], json!("linear"), "no stroke ⇒ the black seed: {stroke:?}");
         assert_eq!(stroke["stops"][0]["color"], json!("#000000"));
@@ -812,31 +890,33 @@ mod tests {
     /// Nothing selected, or a mixed selection, contributes NOTHING, so the
     /// panel keeps the store's values exactly as the web sync leaves them.
     #[test]
-    fn live_values_are_empty_with_no_selection_or_a_mixed_one() {
+    fn live_values_are_empty_with_no_selection_and_only_the_first_stops_when_mixed() {
         assert!(live_values(model_with(vec![rect(Some(BLUE))], &[]).document(), true).is_empty());
         let mut m = model_with(vec![rect(Some(BLUE)), rect(Some(RED))], &[0]);
-        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial")));
         select(&mut m, &[0, 1]);
         assert!(matches!(selection_gradient(m.document(), true), SelectionGradient::Mixed));
-        assert!(live_values(m.document(), true).is_empty());
+        // GRADIENT.md §Multi-selection: the slider shows the first element's
+        // stops; every other field stands as the store holds it.
+        let v = live_values(m.document(), true);
+        assert_eq!(v.keys().collect::<Vec<_>>(), vec!["stops"]);
+        assert_eq!(stops_from_json(&v["stops"]), Some(fill_gradient(&m, 0).unwrap().stops.clone()));
     }
 
     /// Every key is a declared Gradient panel state field, and the stops are
-    /// the shape the write side's reader (`gradient_from_store`) parses back.
+    /// the shape the write side's reader (`stops_from_json`) parses back.
     #[test]
     fn live_values_name_declared_fields_and_round_trip_through_the_store_reader() {
         let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
         let spec = ws.panel(GRADIENT_PANEL).expect("gradient panel");
         let declared = spec["state"].as_object().expect("declared state");
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
-        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0), || panic!("not mixed")));
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0)));
         let v = live_values(m.document(), true);
         assert_eq!(v.len(), 7, "{v:?}");
         for k in v.keys() {
             assert!(declared.contains_key(k), "{k} is not a declared Gradient panel field");
         }
-        let mut store = crate::interpreter::state_store::StateStore::new();
-        store.init_panel(GRADIENT_PANEL, v.clone().into_iter().collect());
-        assert_eq!(gradient_from_store(&store, GRADIENT_PANEL).stops, fill_gradient(&m, 0).unwrap().stops);
+        assert_eq!(stops_from_json(&v["stops"]), Some(fill_gradient(&m, 0).unwrap().stops.clone()));
     }
 }

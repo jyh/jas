@@ -849,15 +849,15 @@ fn apply_set_effects(
     if pending.iter().any(|(key, _)| key.starts_with("gradient_")) {
         st.sync_gradient_panel_from_selection();
     }
-    let mut any_gradient_key = false;
+    let gradient_keys: Vec<String> = pending.iter()
+        .filter(|(key, _)| key.starts_with("gradient_")).map(|(key, _)| key.clone()).collect();
     for (key, val) in pending {
-        if key.starts_with("gradient_") { any_gradient_key = true; }
         set_app_state_field(key.as_str(), &val, st);
     }
-    // Phase 5 follow-up: after any gradient_* write, apply the
-    // updated panel state to the selected element(s).
-    if any_gradient_key {
-        st.apply_gradient_panel_to_selection();
+    // Each gradient_* key written reaches the selection by its own law
+    // (`AppState::apply_gradient_panel_keys`).
+    if !gradient_keys.is_empty() {
+        st.apply_gradient_panel_keys(&gradient_keys.iter().map(String::as_str).collect::<Vec<_>>());
     }
 }
 
@@ -1086,7 +1086,7 @@ fn set_app_state_field(
         "stroke_profile" => { if let Some(s) = val.as_str() { st.stroke_panel.profile = s.into(); } }
         "stroke_profile_flipped" => { if let Some(b) = val.as_bool() { st.stroke_panel.profile_flipped = b; } }
         // Gradient panel fields (Phase 5 follow-up). Each write
-        // also triggers apply_gradient_panel_to_selection below.
+        // also triggers apply_gradient_panel_keys below.
         "gradient_type" => { if let Some(s) = val.as_str() { st.gradient_panel.gtype = s.into(); } }
         "gradient_angle" => { if let Some(n) = val.as_f64() { st.gradient_panel.angle = n; } }
         "gradient_aspect_ratio" => { if let Some(n) = val.as_f64() { st.gradient_panel.aspect_ratio = n; } }
@@ -13069,6 +13069,43 @@ mod tests {
         assert_eq!((shown(&st, "selected_stop_index"), shown(&st, "selected_midpoint_index")), (json!(-1), json!(0)));
     }
 
+    /// GRADIENT.md §Multi-selection on the web: a field edit on a MIXED
+    /// selection sets that field on each member's own gradient, and a stop
+    /// combo starts from the first member's stops and overwrites only stops.
+    #[test]
+    fn a_web_edit_on_a_mixed_selection_keeps_each_members_own_fields() {
+        use crate::geometry::element::{Color, Element, Gradient, GradientStop};
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 50.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient { stops: vec![stop(red, 0.0), stop(blue, 100.0)], angle: 30.0, ..Gradient::default() }));
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        let mut second = (*doc.get_element(&vec![0, 0]).unwrap()).clone();
+        if let Element::Rect(ref mut r) = second {
+            r.fill_gradient = Some(Box::new(Gradient { stops: vec![stop(blue, 0.0), stop(red, 100.0)], ..Gradient::default() }));
+        }
+        if let Some(Element::Layer(layer)) = doc.layers.get_mut(0) {
+            layer.children.push(std::rc::Rc::new(second));
+        }
+        doc.selection = vec![ElementSelection::all(vec![0, 0]), ElementSelection::all(vec![0, 1])];
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        let gradient = |st: &AppState, i: usize| st.tabs[st.active_tab].model.document()
+            .get_element(&vec![0usize, i]).unwrap().fill_gradient().cloned().unwrap();
+        let set = |k: &str, v: serde_json::Value| { let mut m = serde_json::Map::new(); m.insert(k.into(), v); m };
+        apply_set_effects(&set("gradient_dither", serde_json::json!(true)), &mut st);
+        assert_eq!((gradient(&st, 0).dither, gradient(&st, 0).stops[0].color, gradient(&st, 0).angle), (true, red, 30.0));
+        assert_eq!((gradient(&st, 1).dither, gradient(&st, 1).stops[0].color, gradient(&st, 1).angle), (true, blue, 0.0));
+        st.gradient_panel.selected_stop_index = 0;
+        apply_set_effects(&set("gradient_stop_opacity", serde_json::json!(25)), &mut st);
+        for i in 0..2 {
+            assert_eq!(gradient(&st, i).stops.iter().map(|s| (s.color, s.opacity)).collect::<Vec<_>>(),
+                       vec![(red, 25.0), (blue, 100.0)], "member {i} takes the first member's stops");
+        }
+        assert_eq!((gradient(&st, 0).angle, gradient(&st, 1).angle), (30.0, 0.0), "only the stops are overwritten");
+    }
+
     #[test]
     fn a_web_gradient_field_edit_keeps_the_selections_stops() {
         use crate::geometry::element::{Color, Gradient, GradientStop};
@@ -13113,7 +13150,9 @@ mod tests {
             GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
         ];
         st.gradient_panel.preview_state = true; // pretend we're promoting
-        st.apply_gradient_panel_to_selection();
+        st.apply_gradient_panel_keys(&["gradient_type", "gradient_angle", "gradient_aspect_ratio",
+                                       "gradient_method", "gradient_dither", "gradient_stroke_sub_mode",
+                                       "gradient_stops"]);
         // Preview-state cleared after first edit.
         assert!(!st.gradient_panel.preview_state);
         // Element gained a fill_gradient with the panel values.

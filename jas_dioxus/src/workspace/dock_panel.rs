@@ -2210,7 +2210,7 @@ mod gradient_scope_tests {
         doc.selection = vec![ElementSelection::all(vec![0, 0])];
         st.tabs[0].model.set_document_for_test(doc);
         assert!(gradient_host::apply_render_key(&mut st.tabs[0].model, true, "gradient_type",
-                                                &json!("radial"), || panic!("not mixed")));
+                                                &json!("radial")));
         if !selected {
             let mut doc = st.tabs[0].model.document().clone();
             doc.selection.clear();
