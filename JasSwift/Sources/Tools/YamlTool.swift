@@ -114,6 +114,13 @@ private func parseOverlay(_ val: Any?) -> [OverlaySpec] {
 
 // MARK: - YamlTool
 
+/// App-level `state.*` keys a tool's own handlers WRITE (the complement of
+/// ``bridgedStateKeys``): copied UP to the model's store after every event by
+/// ``handOffToolEvent(_:model:)``, so a dialog applying there (Rotate Options'
+/// OK) reads the point an Alt+click set (flask STATUS §537). Only a key the
+/// tool has set is copied. Mirrors the Rust `TOOL_OWNED_STATE_KEYS`.
+let toolOwnedStateKeys: [String] = ["transform_reference_point"]
+
 /// App-level `state.*` keys bridged into a tool's self-contained store
 /// before each event dispatch (via `syncAppState`) so commit-effects read
 /// live document values instead of the tool store's empty defaults. This
@@ -401,6 +408,14 @@ final class YamlTool: CanvasTool {
                                          dragging: dragging),
                  model: ctx.model)
         ctx.requestUpdate()
+    }
+
+    func ownedGlobals() -> [String: Any] {
+        var out: [String: Any] = [:]
+        for k in toolOwnedStateKeys {
+            if let v = store.get(k), !(v is NSNull) { out[k] = v }
+        }
+        return out
     }
 
     func takeOpenedDialog() -> (id: String, params: [String: Any])? {
