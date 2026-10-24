@@ -1,0 +1,111 @@
+[
+ {
+  "name": "select_tool_sets_the_active_tool",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {
+    "action": "select_tool",
+    "params": {
+     "tool": "pen"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_panel_state": {
+   "active_tool": "pen"
+  }
+ },
+ {
+  "name": "reset_fill_stroke_puts_fill_back_on_top",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {
+    "action": "toggle_fill_on_top",
+    "params": {}
+   },
+   {
+    "action": "reset_fill_stroke",
+    "params": {}
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_panel_state": {
+   "fill_on_top": true,
+   "fill_color": "#ffffff",
+   "stroke_color": "#000000"
+  }
+ },
+ {
+  "name": "set_align_to_artboard",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {
+    "action": "set_align_to",
+    "params": {
+     "target": "artboard"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_panel_state": {
+   "align_to": "artboard"
+  }
+ },
+ {
+  "name": "toggle_use_preview_bounds_turns_it_on",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {
+    "action": "toggle_use_preview_bounds",
+    "params": {}
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_panel_state": {
+   "align_use_preview_bounds": true
+  }
+ },
+ {
+  "name": "toggle_use_preview_bounds_twice_turns_it_off_again",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {
+    "action": "toggle_use_preview_bounds",
+    "params": {}
+   },
+   {
+    "action": "toggle_use_preview_bounds",
+    "params": {}
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_panel_state": {
+   "align_use_preview_bounds": false
+  }
+ },
+ {
+  "name": "reset_align_panel_after_two_changes",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {
+    "action": "set_align_to",
+    "params": {
+     "target": "artboard"
+    }
+   },
+   {
+    "action": "toggle_use_preview_bounds",
+    "params": {}
+   },
+   {
+    "action": "reset_align_panel",
+    "params": {}
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_panel_state": {
+   "align_to": "selection",
+   "align_use_preview_bounds": false
+  }
+ }
+]
