@@ -1092,6 +1092,11 @@ impl AppState {
     pub(crate) fn gradient_slider_gesture(&mut self, gesture: &str, params: &serde_json::Value)
                                           -> Result<bool, &'static str> {
         use crate::interpreter::gradient_host::{stops_from_json, stops_step, stops_to_json};
+        // A gesture starts from the stops the panel shows, the selection's;
+        // while one stands, the struct is its preview and is not re-read.
+        if self.gradient_panel.press.is_null() {
+            self.sync_gradient_panel_from_selection();
+        }
         let gp = &self.gradient_panel;
         let Some(step) = stops_step(gesture, params, &stops_to_json(&gp.stops),
                                     gp.selected_stop_index, gp.selected_midpoint_index, &gp.press)? else {

@@ -83,6 +83,35 @@ struct GradientHookRegistrationTests {
         #expect(g?.aspectRatio == 150)
     }
 
+    /// A field edit keeps every field it does not name, from the SELECTION'S
+    /// gradient, never from the store's last values: the store here holds a
+    /// previous edit's stops and dither, as it would after editing another
+    /// gradient. Mirrors renderer.rs `a_web_gradient_field_edit_keeps_the_selections_stops`,
+    /// the port that once rebuilt the gradient from its panel struct.
+    @Test func aFieldEditKeepsTheSelectionsOtherFields() {
+        let model = Model(document: Document(
+            layers: [Layer(name: "L", children: [rect(0)])],
+            selection: [ElementSelection.all([0, 0])]))
+        let controller = Controller(model: model)
+        controller.setSelectionFillGradient(Gradient(dither: true, stops: [
+            GradientStop(color: "#ff0000", location: 0, midpointToNext: 40),
+            GradientStop(color: "#0000ff", location: 100, midpointToNext: 40)]))
+        let store = StateStore()
+        store.set("gradient_stops", [
+            ["color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50],
+            ["color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50]])
+        store.set("gradient_dither", false)
+        store.set("gradient_angle", 45)
+        guard let hook = alignPlatformEffects(model: model)["apply_gradient_panel"] else {
+            Issue.record("hook not registered"); return
+        }
+        _ = hook("gradient_angle", [:], store)
+        let g = model.document.getElement([0, 0]).fillGradient
+        #expect(g?.angle == 45)
+        #expect(g?.dither == true, "an angle edit leaves the other fields")
+        #expect(g?.stops.map { "\($0.color)@\($0.location)" } == ["#ff0000@0.0", "#0000ff@100.0"])
+    }
+
     /// A stop combo through the hook: a location crossing the right
     /// neighbour re-sorts the selected rect's stops (the law is the corpus's;
     /// GradientStopCorpusTests) and the panel's selected index follows the
