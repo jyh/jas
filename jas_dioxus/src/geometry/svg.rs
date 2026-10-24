@@ -750,7 +750,14 @@ fn std_gradient_to_jas(def: &StdGradientDef, bbox: (f64, f64, f64, f64)) -> Opti
         let angle = (-(y1 - y0)).atan2(x1 - x0).to_degrees() + 0.0;
         let side = d / std::f64::consts::SQRT_2;
         let parent = ((x0 + x1) / 2.0 - side / 2.0, (y0 + y1) / 2.0 - side / 2.0, side, side);
-        let stops = crate::algorithms::gradient_remap::remap_linear_stops(&def.stops, angle, parent, bbox);
+        // The remap's arithmetic depends on where the shape sits, so one
+        // gradient on same-sized shapes came back with locations differing in
+        // the last bits (flask STATUS §530) and read as a mixed selection.
+        // Snapped to 1e-9 percent, far below anything a painter resolves.
+        let stops = crate::algorithms::gradient_remap::remap_linear_stops(&def.stops, angle, parent, bbox)
+            .into_iter()
+            .map(|s| GradientStop { location: (s.location * 1e9).round() / 1e9, ..s })
+            .collect();
         return Some(Gradient { gtype: GradientType::Linear, angle, stops, ..Gradient::default() });
     }
     let half = bw.max(bh) / 2.0;
@@ -4131,6 +4138,32 @@ mod tests {
     /// jas ramp (the bbox diagonal), so a naive copy of the offsets would be
     /// visibly wrong. And the fallback colour after `url(#g)` is the element's
     /// own fill.
+    /// One `<linearGradient>` filling shapes of the same size at different
+    /// places imports as ONE gradient (flask STATUS §530): the remap's float
+    /// noise (10.000000000000004 against 9.999999999999998) made two such
+    /// shapes read as a mixed selection, whose edits then wrote the store's
+    /// gradient over both. Imported stop locations are snapped.
+    #[test]
+    fn one_standard_gradient_on_same_sized_shapes_imports_as_one_gradient() {
+        let rects: String = [(0.0, 0.0), (37.3, 11.1), (61.7, 52.9), (13.13, 70.07), (88.8, 3.3)].iter()
+            .map(|(x, y)| format!(r#"<rect x="{x}" y="{y}" width="23.7" height="11.9" fill="url(#rb)"/>"#)).collect();
+        let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 90" width="120" height="90">
+          <defs><linearGradient id="rb" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="rgb(255,0,0)"/><stop offset="1" stop-color="rgb(0,0,255)"/>
+          </linearGradient></defs><g>{rects}</g></svg>"##);
+        let doc = svg_to_document(&svg);
+        let mut gradients = Vec::new();
+        for layer in &doc.layers {
+            crate::geometry::element::for_each_paintable(layer, &mut |leaf| gradients.push(leaf.fill_gradient().cloned()));
+        }
+        assert_eq!(gradients.len(), 5);
+        let first = gradients[0].clone().expect("a gradient");
+        assert!(first.stops.len() >= 2);
+        for (i, g) in gradients.iter().enumerate() {
+            assert_eq!(g.as_ref(), Some(&first), "shape {i}'s gradient differs from shape 0's");
+        }
+    }
+
     #[test]
     fn a_standard_linear_gradient_imports_as_the_same_painted_ramp() {
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
