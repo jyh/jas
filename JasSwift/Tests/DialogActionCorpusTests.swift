@@ -204,17 +204,4 @@ private let dialogActionFixtures = [
 
 /// The cases this port fails for a reason measured and named, not yet repaired.
 /// The list can only shrink (the test above reds on a gap that passes).
-private let swiftDialogGaps: [String: String] = [
-    // The Model's StateStore is created empty (Model.swift, `StateStore()`),
-    // where the reference's and the engine's carry the bundle's `state`
-    // defaults. Scale Options' init `uniform: state.scale_uniform` then reads
-    // null, so `so_uniform_pct` (`disabled: not dialog.uniform`) refuses the
-    // commit. Measured 2026-10-24.
-    "scale_reset_restores_the_dialog_defaults":
-        "the store is not seeded with the bundle's state defaults",
-    // The same cause: Eyedropper's init reads `state.eyedropper_fill` and
-    // `state.eyedropper_stroke` (both true in state.yaml) as null, so the press
-    // on Fill writes true instead of unticking it, and OK carries no Stroke.
-    "eyedropper_ok_unticks_fill_and_keeps_the_rest":
-        "the store is not seeded with the bundle's state defaults",
-]
+private let swiftDialogGaps: [String: String] = [:]

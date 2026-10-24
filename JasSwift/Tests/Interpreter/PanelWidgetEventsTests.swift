@@ -72,10 +72,10 @@ private let gradient = "gradient_panel_content"
 }
 
 @Test func aMagicWandTogglePressFlipsItsFieldAndItsGlobalTogether() {
-    // The app store starts with NO magic_wand_* globals: Swift never seeds
-    // the bundle's `state` defaults nor runs the panel's `init:`. The flip
-    // `not state.magic_wand_X` would read a null there, so the route seeds
-    // each absent bound global from its field before the event.
+    // The flip `not state.magic_wand_X` reads null when the bound global is
+    // absent, so the route seeds each absent bound global from its field
+    // before the event. The app store now starts from the bundle's defaults,
+    // so the arm removes the global itself to keep the seed exercised.
     let ids = ["mwp_fill_color", "mwp_stroke_color", "mwp_stroke_weight",
                "mwp_opacity", "mwp_blending_mode"]
     for id in ids {
@@ -83,8 +83,9 @@ private let gradient = "gradient_panel_content"
         let widget = shipped(magicWand, id)
         let key = String(((widget["bind"] as? [String: Any])?["checked"] as? String ?? "")
             .dropFirst("panel.".count))
+        model.stateStore.set("magic_wand_" + key, nil)
         #expect(model.stateStore.get("magic_wand_" + key) == nil,
-                "\(id): the arm needs the app's unseeded store")
+                "\(id): the arm needs an absent global")
         let start = model.stateStore.getPanel(magicWand, key) as? Bool
             ?? (WorkspaceData.load()?.panelStateDefaults(magicWand)[key] as? Bool)
         for expected in [!(start ?? false), start ?? false] {
