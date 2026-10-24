@@ -244,6 +244,8 @@ radial gradients. (It is disabled when `type == freeform`.)
   platform's pointer; the press still carries the pointer's own location.
   The Windows shell's diamond target is the band above the bar, a slider
   thumb wide (18 DIP), the nearer diamond taking a press where two overlap.
+  The web and Swift diamonds take theirs in the same band, a stop marker
+  wide (14 px), by the same rule.
 
 ### Selection model
 

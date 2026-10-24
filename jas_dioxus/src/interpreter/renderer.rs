@@ -6902,6 +6902,34 @@ fn slider_point(x: f64, y: f64, left: f64, top: f64, width: f64) -> (f64, f64) {
     (location, y - (top + SLIDER_BAR_CENTRE_PX))
 }
 
+/// The slider bar's top edge, in pixels from the widget's top: the band
+/// above it is where the midpoint diamonds sit and take a press.
+const SLIDER_BAR_TOP_PX: f64 = 14.0;
+
+/// A midpoint diamond's press target, in pixels across: a stop marker's
+/// width. The diamond is drawn 10 px rotated, and GRADIENT.md lets its target
+/// be larger than its drawing.
+const SLIDER_MIDPOINT_TARGET_PX: f64 = 14.0;
+
+/// The midpoint diamond a press at widget-local `(x, y)` takes, given each
+/// diamond's location in percent along a `width`-px bar: the nearest one
+/// within half the target, in the band above the bar; `None` elsewhere, and
+/// the first on an exact tie. Mirrors the Windows shell's `MidpointAt`.
+fn slider_midpoint_at(x: f64, y: f64, width: f64, midpoints: &[f64]) -> Option<usize> {
+    if width <= 0.0 || !(0.0..SLIDER_BAR_TOP_PX).contains(&y) {
+        return None;
+    }
+    let mut best = None;
+    let mut best_distance = SLIDER_MIDPOINT_TARGET_PX / 2.0;
+    for (i, m) in midpoints.iter().enumerate() {
+        let distance = (x - m / 100.0 * width).abs();
+        if distance < best_distance || (best.is_none() && distance == best_distance) {
+            (best, best_distance) = (Some(i), distance);
+        }
+    }
+    best
+}
+
 /// A key on a focused slider, in GRADIENT.md's keyboard table's names; `None`
 /// for a key the table does not name.
 fn slider_key(key: &str) -> Option<&'static str> {
@@ -7052,31 +7080,36 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
 
     // Build midpoint and stop markers as Element lists so the rsx! macro can
     // splice them in.
-    let mut midpoint_markers: Vec<Element> = Vec::new();
-    for i in 0..stops_arr.len().saturating_sub(1) {
+    // The diamonds are drawn only; the band above the bar takes their press
+    // (`slider_midpoint_at`), so a press near a diamond need not land on it.
+    let midpoints: Vec<f64> = (0..stops_arr.len().saturating_sub(1)).map(|i| {
         let left = stops_arr[i].get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let right = stops_arr[i + 1].get("location").and_then(|v| v.as_f64()).unwrap_or(100.0);
         let pct = stops_arr[i].get("midpoint_to_next").and_then(|v| v.as_f64()).unwrap_or(50.0);
-        let mid_loc = left + (right - left) * (pct / 100.0);
+        left + (right - left) * (pct / 100.0)
+    }).collect();
+    let mut midpoint_markers: Vec<Element> = Vec::new();
+    for (i, mid_loc) in midpoints.iter().enumerate() {
         let sel_class = if sel_mid == i as i64 { " jas-gradient-midpoint-selected" } else { "" };
-        let (app_m, dom_m) = (app.clone(), id.clone());
         midpoint_markers.push(rsx! {
             div {
                 class: "jas-gradient-midpoint{sel_class}",
                 "data-role": "midpoint",
                 "data-midpoint-index": "{i}",
-                onpointerdown: move |evt: Event<PointerData>| {
-                    evt.stop_propagation();
-                    slider_capture(&dom_m, evt.data().pointer_id());
-                    let c = evt.data().client_coordinates();
-                    let (left, top, width) = slider_box(&dom_m);
-                    let (location, _) = slider_point(c.x, c.y, left, top, width);
-                    slider_send(&app_m, revision, "press_midpoint", serde_json::json!({"pair": i, "location": location}));
-                },
-                style: "position:absolute;left:calc({mid_loc}% - 5px);top:2px;width:10px;height:10px;transform:rotate(45deg);background:#888;border:1px solid #333;box-sizing:border-box;cursor:grab;",
+                style: "position:absolute;left:calc({mid_loc}% - 5px);top:2px;width:10px;height:10px;transform:rotate(45deg);background:#888;border:1px solid #333;box-sizing:border-box;pointer-events:none;",
             }
         });
     }
+    let (app_band, dom_band) = (app.clone(), id.clone());
+    let on_band_down = move |evt: Event<PointerData>| {
+        let c = evt.data().client_coordinates();
+        let (left, top, width) = slider_box(&dom_band);
+        let Some(pair) = slider_midpoint_at(c.x - left, c.y - top, width, &midpoints) else { return };
+        evt.stop_propagation();
+        slider_capture(&dom_band, evt.data().pointer_id());
+        let (location, _) = slider_point(c.x, c.y, left, top, width);
+        slider_send(&app_band, revision, "press_midpoint", serde_json::json!({"pair": pair, "location": location}));
+    };
 
     let mut stop_markers: Vec<Element> = Vec::new();
     for (i, s) in stops_arr.iter().enumerate() {
@@ -7121,6 +7154,12 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
                 "data-role": "bar",
                 onpointerdown: on_bar_down,
                 style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
+            }
+            div {
+                class: "jas-gradient-midpoint-band",
+                "data-role": "midpoint-band",
+                onpointerdown: on_band_down,
+                style: "position:absolute;left:0;right:0;top:0;height:14px;",
             }
             {midpoint_markers.into_iter()}
             {stop_markers.into_iter()}
@@ -12873,6 +12912,33 @@ mod tests {
         assert_eq!(slider_point(340.0, 50.0, 100.0, 50.0, 200.0), (120.0, -22.0));
         // An unmeasured box reports 0, never a division by zero.
         assert_eq!(slider_point(5.0, 22.0, 0.0, 0.0, 0.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_midpoint_diamond_takes_a_press_in_the_band_above_the_bar() {
+        // A 200 px slider, one diamond at 50 % (x = 100). The drawn diamond is
+        // 10 px rotated; its target is the band above the bar, 14 px wide.
+        let one = [50.0];
+        let at = |x: f64, y: f64| slider_midpoint_at(x, y, 200.0, &one);
+        // Off its middle row and off its centre: the drawn square misses these.
+        assert_eq!((at(100.0, 7.0), at(103.0, 10.0), at(105.0, 1.0)), (Some(0), Some(0), Some(0)));
+        // Half the target either side, and no further.
+        assert_eq!((at(93.0, 7.0), at(107.0, 7.0)), (Some(0), Some(0)));
+        assert_eq!((at(92.5, 7.0), at(107.5, 7.0)), (None, None));
+        // The bar's rows are the bar's (an add), and above the widget is nothing.
+        assert_eq!((at(100.0, 14.0), at(100.0, 22.0), at(100.0, -0.5)), (None, None, None));
+        // An unmeasured box takes no press.
+        assert_eq!(slider_midpoint_at(0.0, 7.0, 0.0, &one), None);
+    }
+
+    #[test]
+    fn overlapping_diamond_targets_go_to_the_nearer_diamond_both_ways() {
+        // Diamonds at 2.5 % and 7.5 % of 200 px: x = 5 and 15, 10 px apart.
+        let two = [2.5, 7.5];
+        let at = |x: f64| slider_midpoint_at(x, 7.0, 200.0, &two);
+        assert_eq!((at(5.0), at(9.9), at(10.1), at(15.0)), (Some(0), Some(0), Some(1), Some(1)));
+        // Equidistant: the first diamond, as on Windows (`MidpointAt`).
+        assert_eq!(at(10.0), Some(0));
     }
 
     #[test]

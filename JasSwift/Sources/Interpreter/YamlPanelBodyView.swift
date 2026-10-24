@@ -2299,8 +2299,18 @@ struct YamlElementView: View {
                                 .rotationEffect(.degrees(45))
                                 .offset(x: x, y: 2)
                         )
-                        .gesture(sliderDrag(index: i, midpoint: true, width: geo.size.width))
+                        .allowsHitTesting(false)
                 }
+
+                // The band above the bar takes the diamonds' press
+                // (``gradientSliderMidpointAt``), so a press near a diamond
+                // need not land on its drawn square.
+                Rectangle().fill(SwiftUI.Color.clear)
+                    .contentShape(Rectangle())
+                    .frame(width: geo.size.width, height: 14)
+                    .gesture(sliderDrag(midpoint: true, width: geo.size.width) { [midpoints = sliderMidpoints(stopsRaw), width = geo.size.width] p in
+                        gradientSliderMidpointAt(p, width: width, midpoints: midpoints)
+                    })
 
                 // Stop markers (circles, below bar)
                 ForEach(0..<stopsRaw.count, id: \.self) { i in
@@ -2323,9 +2333,13 @@ struct YamlElementView: View {
 
     /// A marker's drag as slider gestures: its first change is the press (no
     /// snapshot stands yet), later changes are drags, and its end the release.
-    private func sliderDrag(index: Int, midpoint: Bool, width: CGFloat) -> some Gesture {
+    /// `index` names the marker a press at the drag's start takes; a press it
+    /// names none for reports nothing.
+    private func sliderDrag(midpoint: Bool, width: CGFloat,
+                            index: @escaping (CGPoint) -> Int?) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(gradientSliderSpace))
             .onChanged { value in
+                guard let index = index(value.startLocation) else { return }
                 let (location, dy) = gradientSliderPoint(value.location, width: width)
                 let held = model?.stateStore.getPanel(panelId ?? "", "stops__press")
                 if held == nil || held is NSNull {
@@ -2342,11 +2356,22 @@ struct YamlElementView: View {
                 }
             }
             .onEnded { value in
+                guard index(value.startLocation) != nil else { return }
                 let (location, dy) = gradientSliderPoint(value.location, width: width)
                 widgetEvents?.gesture(element, name: midpoint ? "release_midpoint" : "release",
                                       params: midpoint ? ["location": location]
                                                        : ["location": location, "dy": dy])
             }
+    }
+
+    /// Each diamond's location in percent along the bar.
+    private func sliderMidpoints(_ stopsRaw: [[String: Any]]) -> [Double] {
+        (0..<max(stopsRaw.count - 1, 0)).map { i in
+            let left = (stopsRaw[i]["location"] as? Double) ?? 0.0
+            let right = (stopsRaw[i + 1]["location"] as? Double) ?? 100.0
+            let pct = (stopsRaw[i]["midpoint_to_next"] as? Double) ?? 50.0
+            return left + (right - left) * (pct / 100.0)
+        }
     }
 
     @ViewBuilder
@@ -2373,7 +2398,7 @@ struct YamlElementView: View {
             .simultaneousGesture(TapGesture(count: 2).onEnded {
                 onWidgetAction?("gradient_slider_stop_dblclick", ["stop_index": index])
             })
-            .gesture(sliderDrag(index: index, midpoint: false, width: width))
+            .gesture(sliderDrag(midpoint: false, width: width) { _ in index })
     }
 
     // MARK: - Separator
@@ -5138,6 +5163,24 @@ let gradientSliderSpace = "gradient_slider"
 func gradientSliderPoint(_ p: CGPoint, width: CGFloat) -> (Double, Double) {
     let location = width > 0 ? Double(p.x / width) * 100 : 0
     return (location, Double(p.y) - 22)
+}
+
+/// The midpoint diamond a press at `p` in ``gradientSliderSpace`` takes, given
+/// each diamond's location in percent along a `width`-pt bar: the nearest one
+/// within half the target (14 pt, a stop marker's width; the diamond is drawn
+/// 10 pt rotated) in the band above the bar (y 0..<14); nil elsewhere, and the
+/// first on an exact tie. Mirrors `renderer.rs` `slider_midpoint_at`.
+func gradientSliderMidpointAt(_ p: CGPoint, width: CGFloat, midpoints: [Double]) -> Int? {
+    guard width > 0, p.y >= 0, p.y < 14 else { return nil }
+    var best: Int? = nil
+    var bestDistance = 7.0
+    for (i, m) in midpoints.enumerated() {
+        let distance = abs(Double(p.x) - m / 100 * Double(width))
+        if distance < bestDistance || (best == nil && distance == bestDistance) {
+            (best, bestDistance) = (i, distance)
+        }
+    }
+    return best
 }
 
 /// A key on the focused slider in GRADIENT.md's keyboard table's names; nil
