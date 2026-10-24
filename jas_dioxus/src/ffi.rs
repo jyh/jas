@@ -3872,6 +3872,7 @@ mod tests {
     const DIALOG_ACTION_FIXTURES: &[&str] = &[
         "dialog_actions/transform_options.json",
         "dialog_actions/tool_options.json",
+        "dialog_actions/boolean_options.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
@@ -3923,6 +3924,22 @@ mod tests {
                     crate::interpreter::effects::open_dialog_in(
                         id, spec, params, None, &ctx,
                         &mut en.store.borrow_mut(), Some(&mut *en.model.borrow_mut()));
+                } else if let Some(action) = step.get("action").and_then(|a| a.as_str()) {
+                    // An action through the shell's own door, so a dialog it opens
+                    // (`open_boolean_options`) resolves its params in the app's
+                    // scope, as the app does. The document is taken as it opens.
+                    let before = document_to_test_json(engine_of(e).model.borrow().document());
+                    let msg = serde_json::json!({"action": action,
+                        "params": step.get("params").cloned().unwrap_or(serde_json::json!({}))}).to_string();
+                    let (reply, err) = dispatch(e, &msg);
+                    if reply.is_empty() {
+                        failures.push(format!("{name}: the action {action} was refused: {err}"));
+                        step_failed = true;
+                        break;
+                    }
+                    if engine_of(e).store.borrow().dialog_id().is_some() {
+                        at_open.get_or_insert(before);
+                    }
                 } else if let Some(ev) = step.get("dialog_event") {
                     let open = engine_of(e).store.borrow().dialog_id().map(str::to_string);
                     let Some(spec) = open.as_deref().and_then(|id| ws.dialog(id)) else {
@@ -3948,7 +3965,9 @@ mod tests {
                         }
                     }
                 } else {
-                    let _ = dispatch(e, &step.to_string());
+                    failures.push(format!("{name}: a step this runner does not know: {step}"));
+                    step_failed = true;
+                    break;
                 }
             }
             if step_failed { unsafe { jas_engine_free(e) }; continue; }

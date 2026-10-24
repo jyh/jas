@@ -1,0 +1,129 @@
+[
+  {
+    "name": "boolean_options_opens_with_the_document_preferences",
+    "note": "Opened by its own action, open_boolean_options, which passes the five state.boolean_* values as params.",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_boolean_options"
+      }
+    ],
+    "expected_dialog": {
+      "id": "boolean_options",
+      "state": {
+        "precision": 0.0283,
+        "remove_redundant_points": false,
+        "divide_remove_unpainted": false,
+        "apply_simplify_after_op": false,
+        "simplify_precision": 0.5
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "boolean_options_ok_stores_what_was_edited",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_boolean_options"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_precision_input"
+          },
+          "event": "commit",
+          "value": "0.05"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_remove_redundant_points"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_simplify_precision_input"
+          },
+          "event": "commit",
+          "value": "1.5"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "boolean_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_state": {
+      "boolean_precision": 0.05,
+      "boolean_remove_redundant_points": true,
+      "boolean_divide_remove_unpainted": false,
+      "boolean_apply_simplify_after_op": false,
+      "boolean_simplify_precision": 1.5
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "boolean_options_cancel_stores_nothing",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_boolean_options"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_precision_input"
+          },
+          "event": "commit",
+          "value": "0.05"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_remove_redundant_points"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "bo_simplify_precision_input"
+          },
+          "event": "commit",
+          "value": "1.5"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "dismiss_dialog",
+            "label": "Cancel"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_state": {
+      "boolean_precision": 0.0283,
+      "boolean_remove_redundant_points": false,
+      "boolean_divide_remove_unpainted": false,
+      "boolean_apply_simplify_after_op": false,
+      "boolean_simplify_precision": 0.5
+    },
+    "expected_document": "unchanged"
+  }
+]
