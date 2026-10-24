@@ -1650,23 +1650,31 @@ internal static class GradientSliderWire
     /// <summary>
     /// A diamond's press target's width, in DIPs: a slider thumb's, not the
     /// diamond's drawn 6 (desk AED, flask §520: a press 3 DIP right of a
-    /// diamond's centre missed it). 18 is taken as WinUI's horizontal slider
-    /// thumb width; that figure is not measured from this tree (flask reads it
-    /// on the box).
+    /// diamond's centre missed it). 18 is WinUI's horizontal slider thumb
+    /// width, measured on the box (flask §527: `SliderHorizontalThumbWidth`).
     /// </summary>
     internal const double MidpointTarget = 18;
 
     /// <summary>
+    /// How far the drawn diamond's top corner reaches above the slider's rect:
+    /// a <see cref="Layout.D"/>-wide square rotated 45° about its centre at
+    /// y = D/2 spans D·√2, so its corner sits D(√2 − 1)/2 above y 0 (flask
+    /// §527). The target reaches up with it, so every drawn pixel takes a press.
+    /// </summary>
+    internal static double DiamondOverhang(Layout l) => l.D * (Math.Sqrt(2) - 1) / 2;
+
+    /// <summary>
     /// The pair whose diamond a press at (x, y) takes, or null. The target is
-    /// the band above the bar (y in 0..BarTop, so the bar's own rows stay the
-    /// bar's `add`), <see cref="MidpointTarget"/> wide and centred on the
+    /// the band above the bar (y in −<see cref="DiamondOverhang"/>..BarTop, from
+    /// the drawn corner down to the bar, so the bar's own rows stay the bar's
+    /// `add`), <see cref="MidpointTarget"/> wide and centred on the
     /// diamond; where two targets overlap the nearer diamond takes it, the
     /// lower pair on a tie. Only the shell's hit test: the press it starts
     /// carries the pointer's own location, as a press on the drawn diamond did.
     /// </summary>
     internal static int? MidpointAt(Layout l, IReadOnlyList<Stop> stops, double x, double y)
     {
-        if (y < 0 || y >= l.BarTop) { return null; }
+        if (y < -DiamondOverhang(l) || y >= l.BarTop) { return null; }
         int? best = null;
         var bestDistance = MidpointTarget / 2;
         for (var i = 0; i + 1 < stops.Count; i++)

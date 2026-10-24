@@ -808,6 +808,13 @@ static class Program
         var gStops = GradientSliderWire.Stops("""[{"color":"#000000","location":0},{"color":"#ffffff","location":100}]""")!;
         string MidAt(IReadOnlyList<GradientSliderWire.Stop> st, double x, double y) =>
             slider is { } sl4 ? GradientSliderWire.MidpointAt(sl4, st, x, y)?.ToString() ?? "(null)" : "(no layout)";
+        // flask §527/§533: the drawn diamond is 6 DIP rotated 45°, so its top
+        // corner reaches DiamondOverhang = 6 (√2 − 1) / 2 ≈ 1.242641 DIP above
+        // the rect; the target reaches up with it, and no further.
+        Eq("gradient target: the diamond's corner overhang above the rect",
+            "1.242641", slider is { } sl5 ? GradientSliderWire.DiamondOverhang(sl5).ToString("0.######", System.Globalization.CultureInfo.InvariantCulture) : "(no layout)");
+        Eq("gradient target: the rows above the rect where the corner is drawn hit, and above the corner nothing does",
+            "0|0|(null)|(null)", $"{MidAt(gStops, 100, -1.2)}|{MidAt(gStops, 100, -1.24)}|{MidAt(gStops, 100, -1.25)}|{MidAt(gStops, 100, -2)}");
         Eq("gradient target: §520's misses now hit (+3,+3 middle row; +2,+0 top row) and the centre still does",
             "0|0|0", $"{MidAt(gStops, 103, 3)}|{MidAt(gStops, 102, 0)}|{MidAt(gStops, 100, 3)}");
         Eq("gradient target: half the target either side, and no further", "0|0|(null)|(null)",
