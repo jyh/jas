@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JasLib
 
@@ -463,4 +464,28 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
     model.redo()
     #expect(model.idIndex["r2"] != nil, "redo restores r2")
     #expect(model.idIndex == rebuildIdIndex(model.document))
+}
+
+// MARK: - The store starts from the bundle's state defaults
+
+@Test func aFreshModelsStoreCarriesTheBundlesStateDefaults() throws {
+    // The reference's and the engine's stores start from the bundle's `state`
+    // defaults, so an `init:` reading `state.scale_uniform` sees true, not null.
+    let defaults = try #require(WorkspaceData.load()?.stateDefaults())
+    #expect(defaults.count > 50, "the bundle declares \(defaults.count) state key(s)")
+    let store = Model().stateStore
+    var missing: [String] = []
+    for (key, value) in defaults where !(value is NSNull) {
+        if store.get(key) == nil { missing.append(key) }
+    }
+    #expect(missing.isEmpty, "\(missing.count) of \(defaults.count) default(s) absent: \(missing.sorted().prefix(8))")
+    #expect(store.get("scale_uniform") as? Bool == true)
+    #expect(store.get("eyedropper_fill") as? Bool == true)
+}
+
+@Test func aFreshModelsStoreIsItsOwn() {
+    // Seeding copies the defaults; one document's write never reaches another's.
+    let a = Model(), b = Model()
+    a.stateStore.set("scale_uniform", false)
+    #expect(b.stateStore.get("scale_uniform") as? Bool == true)
 }

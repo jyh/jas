@@ -485,8 +485,10 @@ public class Model: ObservableObject {
     /// `initPanel` on first render and `setPanel` on every widget
     /// write; the store survives across re-renders so edits persist.
     /// A panel-state mutation bumps `panelStateVersion` so SwiftUI
-    /// re-renders the bound views.
-    public let stateStore: StateStore = StateStore()
+    /// re-renders the bound views. It starts from the bundle's `state`
+    /// defaults, as the reference's and the engine's stores do, so an
+    /// `init:` reading `state.<key>` sees the declared default, not null.
+    public let stateStore: StateStore = StateStore(defaults: WorkspaceData.load()?.stateDefaults())
     /// Mirror hook for ``state.active_tool`` writes that originate in
     /// YAML effects (the tool-alternates flyout's ``set: { active_tool }``).
     /// ContentView installs this so a flyout pick switches the live
