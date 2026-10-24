@@ -132,16 +132,54 @@ def _effects_flat(effects):
 # evidence: what the committed corpora and goldens name
 # ---------------------------------------------------------------------------
 
-def gather_evidence(root):
+def _widgets_by_id(spec):
+    """Every dialog widget with an `id`, keyed by that id, as a list of the
+    nodes that carry it (an id in two dialogs is ambiguous and resolves to
+    nothing)."""
+    found = {}
+
+    def walk(v):
+        if isinstance(v, dict):
+            if isinstance(v.get("id"), str):
+                found.setdefault(v["id"], []).append(v)
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    for d in ((spec or {}).get("dialogs") or {}).values():
+        walk((d or {}).get("content"))
+    return found
+
+
+# The behavior events a dialog_event's event fires on its widget: a commit is a
+# value change, a click is a click. The widget's own `action` runs on a click.
+_EVENT_BEHAVIORS = {"commit": ("change", "commit"), "click": ("click",)}
+
+
+def _id_addressed_actions(node, event):
+    acts = set()
+    if event == "click" and isinstance(node.get("action"), str):
+        acts.add(node["action"])
+    for b in node.get("behavior") or []:
+        if isinstance(b, dict) and b.get("event") in _EVENT_BEHAVIORS.get(event, ()) \
+                and isinstance(b.get("action"), str):
+            acts.add(b["action"])
+    return acts
+
+
+def gather_evidence(root, spec=None):
     ev = {}
+    widgets = _widgets_by_id(spec)
     ev["actions_dispatched"] = {
         a["action"] for case in _fixture_cases(root, "actions")
         for a in case.get("actions", []) if isinstance(a, dict) and "action" in a}
     # The dialog-action corpus (test_fixtures/dialog_actions/), which Rust (the
     # engine's jas_dialog_event) and Swift (the overlay's store route) replay:
-    # its plain action steps, and the action a CLICKED widget names by its
-    # address. A widget addressed only by id or label is not resolved here, so
-    # its action is not counted (a known under-count, never an over-count).
+    # its plain action steps, the action a CLICKED widget names by its address,
+    # and (given the spec) the action a widget addressed by id runs for that
+    # event. A widget addressed only by label is not resolved, and an id that
+    # names no widget or two is not either (an under-count, never an over-count).
     for case in _fixture_cases(root, "dialog_actions"):
         for a in case.get("actions", []):
             if not isinstance(a, dict):
@@ -153,6 +191,15 @@ def gather_evidence(root):
                 pressed = (de.get("address") or {}).get("action")
                 if isinstance(pressed, str):
                     ev["actions_dispatched"].add(pressed)
+            # A widget addressed by ID resolves, through the bundle, to the
+            # action its event runs (Artboard Options' preset select runs
+            # apply_artboard_preset on change). Only an id that names exactly
+            # one dialog widget resolves, so this can still only under-count.
+            if isinstance(de, dict):
+                wid = (de.get("address") or {}).get("id")
+                nodes = widgets.get(wid) if isinstance(wid, str) else None
+                if nodes and len(nodes) == 1:
+                    ev["actions_dispatched"] |= _id_addressed_actions(nodes[0], de.get("event"))
     # Ops tested at the op layer whose NAME is also an action's. They exercise
     # the layer beneath the action, not the action's spec effects, so they do
     # not cover it; the report counts them so the gap is visible, not silent.
@@ -534,7 +581,12 @@ def self_test():
                 {"action": "dlg_setup"},
                 {"open_dialog": {"id": "d0"}},
                 {"dialog_event": {"address": {"action": "dlg_committed"}, "event": "commit", "value": "1"}},
-                {"dialog_event": {"address": {"action": "dlg_pressed", "label": "OK"}, "event": "click"}}]}])
+                {"dialog_event": {"address": {"action": "dlg_pressed", "label": "OK"}, "event": "click"}},
+                {"dialog_event": {"address": {"id": "w_sel"}, "event": "commit", "value": "a4"}},
+                {"dialog_event": {"address": {"id": "w_btn"}, "event": "click"}},
+                {"dialog_event": {"address": {"id": "w_twice"}, "event": "click"}},
+                {"dialog_event": {"address": {"id": "w_nowhere"}, "event": "click"}},
+                {"dialog_event": {"address": {"id": "w_clickonly"}, "event": "commit", "value": "1"}}]}])
         put("test_fixtures/dialog_actions/b_expected.json",
             {"actions": [{"dialog_event": {"address": {"action": "dlg_decoy"}, "event": "click"}}]})
         put("test_fixtures/gestures/g.json", [{"name": "g", "tool": "rect"}])
@@ -576,6 +628,8 @@ def self_test():
                 "dlg_pressed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_committed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_decoy": {"effects": [{"set": {"a": 1}}]},
+                **{a: {"effects": [{"set": {"a": 1}}]} for a in (
+                    "beh_on_change", "beh_not_change", "btn_act", "twice_act", "clickonly_act")},
             },
             "tools": {"rect": {"handlers": {"a": 1}}, "type": {"handlers": {}},
                       "pen": {"handlers": {"a": 1}}},
@@ -592,11 +646,18 @@ def self_test():
                     {"id": "m_in_sub", "action": "in_sub", "label": "In"}]},
                 {"id": "m_golden_only", "action": "golden_only", "label": "G"}]}],
             "panels": {"p1": {}, "p2": {}},
-            "dialogs": {"d0": {"content": {"type": "col"}}, "d1": {"content": {"type": "col"}}, "d2": {}},
+            "dialogs": {"d0": {"content": {"type": "col", "children": [
+                {"id": "w_sel", "type": "select", "behavior": [
+                    {"event": "change", "action": "beh_on_change"}, {"event": "click", "action": "beh_not_change"}]},
+                {"id": "w_btn", "type": "button", "action": "btn_act"},
+                {"id": "w_twice", "type": "button", "action": "twice_act"},
+                {"id": "w_clickonly", "type": "button", "action": "clickonly_act"}]}},
+                        "d1": {"content": {"type": "col", "children": [
+                {"id": "w_twice", "type": "button", "action": "twice_act"}]}}, "d2": {}},
             "icons": {"i1": {}},
             "elements": {"e": 1},
         }
-        rows = census(spec, gather_evidence(d))
+        rows = census(spec, gather_evidence(d, spec))
         st = {(r["class"], r["id"]): r["status"] for r in rows}
 
         def expect(key, want):
@@ -615,6 +676,12 @@ def self_test():
         expect(("actions", "dlg_pressed"), COVERED)  # the action a clicked widget names
         expect(("actions", "dlg_committed"), NOT_YET_BUILT)  # a commit is not a press
         expect(("actions", "dlg_decoy"), NOT_YET_BUILT)  # an _expected file is not a case
+        # An id-addressed widget resolves through the spec to what its event runs.
+        expect(("actions", "beh_on_change"), COVERED)  # a commit fires the change behavior
+        expect(("actions", "beh_not_change"), NOT_YET_BUILT)  # not its click behavior
+        expect(("actions", "btn_act"), COVERED)  # a click runs the button's action
+        expect(("actions", "twice_act"), NOT_YET_BUILT)  # an id in two dialogs is ambiguous
+        expect(("actions", "clickonly_act"), NOT_YET_BUILT)  # a commit is not a click
         expect(("tools", "rect"), COVERED)
         expect(("tools", "type"), UNDERSPECIFIED)
         expect(("tools", "pen"), NOT_YET_BUILT)
@@ -758,7 +825,7 @@ def main(argv=None):
         print(f"yaml_coverage_census: REFUSED: undeclared spec class(es) {bad}; "
               "add each to CENSUSED or NOT_CENSUSED")
         return 2
-    ev = gather_evidence(args.root)
+    ev = gather_evidence(args.root, spec)
     rows = census(spec, ev)
     prov = provenance_of(args.root, spec_path)
     l2 = read_l2_certs(args.root, spec, rows)
