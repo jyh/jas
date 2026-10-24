@@ -18,8 +18,9 @@ tell from the spec which of them do anything.
 
 A convention exists and it is WRONG. Nine of the 64 carry the literal string
 `(native)` inside their log message. At least two of those nine --
-`toggle_artboard_orientation` and `toggle_artboard_chain_link` -- are implemented
-in neither port. A marker that is false on 22% of its own uses is worse than no
+`toggle_artboard_orientation` and `toggle_artboard_chain_link` -- were implemented
+in neither port when this was written (both are effects in actions.yaml now, since
+2026-10-15 and 2026-10-24). A marker that is false on 22% of its own uses is worse than no
 marker, and it is the house's recurring shape: a human-readable claim in a
 machine-read file that nobody rechecks.
 
@@ -151,7 +152,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 61
+MIN_LOG_ONLY = 59
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -437,11 +438,13 @@ def self_test() -> int:
     anchors = {
         # verified by hand: menu_bar.rs:67 real body / JasCommands "undo"
         "undo": "native_both",
-        # verified: neither port contains the string at all. Until 2026-10-15
-        # this anchor was `toggle_artboard_orientation`, which then became
-        # effects in actions.yaml and left the log-only set; its sibling stub
-        # from the same dialog holds the class.
-        "toggle_artboard_chain_link": "dead_both",
+        # verified: neither port contains the string at all (0 files in
+        # jas_dioxus/src and JasSwift/Sources, 2026-10-24). This anchor was
+        # `toggle_artboard_orientation` until 2026-10-15 and then
+        # `toggle_artboard_chain_link` until 2026-10-24; each became effects
+        # in actions.yaml and left the log-only set, and the same dialog's
+        # remaining stub holds the class.
+        "set_artboard_fill_preset": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any
@@ -530,6 +533,16 @@ def self_test() -> int:
     # is the ENGINE host, which this gate does not read. `quit` and
     # `close_without_saving` dispatch it and did not join (each has a
     # non-log effect). A delta of 1.
+    #
+    # 60 when `toggle_artboard_chain_link` left (2026-10-24, jas STATUS item
+    # 7): ARTBOARDS.md's chain link, written as effects in actions.yaml (a
+    # toggle plus the ratio captured on engage) and as Width's and Height's
+    # commit behaviours, driven on both corpus runners. One stub, a delta of 1.
+    #
+    # 59 when `document_setup_toggle_bleed_uniform` left the same day: the
+    # Document Setup bleed link, a toggle plus each side's commit behaviour
+    # mirroring to all four while engaged. Its description had cited the
+    # chain link as precedent for "not yet wired". One stub, a delta of 1.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")
