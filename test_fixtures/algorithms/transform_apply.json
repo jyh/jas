@@ -62,23 +62,23 @@
     {
       "name": "rotate_ninety_about_the_origin",
       "function": "rotate_matrix",
-      "derivation": "cos 90 = 0, sin 90 = 1, so m = [0,1,-1,0,0,0]. The application rule is (a*x + c*y + e, b*x + d*y + f), so (100,40) maps to (0*100 - 1*40, 1*100 + 0*40) = (-40, 100) -- the quarter turn the SIGN of `c` decides, which is the half of the convention a symmetric angle could not pin.",
+      "derivation": "A positive angle turns COUNTER-clockwise on screen (ROT-062), and the document is y-down, so the matrix is SVG's rotate(-theta): cos 90 = 0, sin 90 = 1, m = [0,-1,1,0,0,0]. The application rule is (a*x + c*y + e, b*x + d*y + f), so (100,40) maps to (0*100 + 1*40, -1*100 + 0*40) = (40, -100): a point at 3 o'clock goes to 12 o'clock -- the quarter turn the SIGNS of `b` and `c` decide, which is the half of the convention a symmetric angle could not pin. (Until 2026-10-24 this vector pinned [0,1,-1,0], a clockwise turn on screen.)",
       "theta_deg": 90.0, "rx": 0.0, "ry": 0.0,
       "expected": {
-        "m": [0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
+        "m": [0.0, -1.0, 1.0, 0.0, 0.0, 0.0],
         "origin_image": [0.0, 0.0],
-        "probe_image": [-40.0, 100.0]
+        "probe_image": [40.0, -100.0]
       }
     },
     {
       "name": "rotate_ninety_about_a_reference_point",
       "function": "rotate_matrix",
-      "derivation": "Same a..d as above. e = 50 - 0*50 - (-1)*50 = 100; f = 50 - 1*50 - 0*50 = 0. (0,0) maps to (100,0); (100,40) maps to (-40 + 100, 100 + 0) = (60,100). The reference point is fixed: -50 + 100 = 50, 50 + 0 = 50.",
+      "derivation": "Same a..d as above, [0,-1,1,0]. e = 50 - 0*50 - 1*50 = 0; f = 50 - (-1)*50 - 0*50 = 100. (0,0) maps to (0,100); (100,40) maps to (40 + 0, -100 + 100) = (40,0). The reference point is fixed: 0*50 + 1*50 + 0 = 50, -1*50 + 0*50 + 100 = 50.",
       "theta_deg": 90.0, "rx": 50.0, "ry": 50.0,
       "expected": {
-        "m": [0.0, 1.0, -1.0, 0.0, 100.0, 0.0],
-        "origin_image": [100.0, 0.0],
-        "probe_image": [60.0, 100.0]
+        "m": [0.0, -1.0, 1.0, 0.0, 0.0, 100.0],
+        "origin_image": [0.0, 100.0],
+        "probe_image": [40.0, 0.0]
       }
     },
     {
@@ -95,23 +95,23 @@
     {
       "name": "rotate_forty_five_about_the_origin",
       "function": "rotate_matrix",
-      "derivation": "cos 45 = sin 45 = sqrt(2)/2 = 0.7071067811865476. (100,40) maps to (100c - 40s, 100s + 40c) = (60c, 140c) = (42.42640687119285, 98.99494936611666).",
+      "derivation": "cos 45 = sin 45 = sqrt(2)/2 = 0.7071067811865476, and the matrix is rotate(-45): m = [c, -c, c, c, 0, 0]. (100,40) maps to (100c + 40c, -100c + 40c) = (140c, -60c) = (98.99494936611666, -42.42640687119285).",
       "theta_deg": 45.0, "rx": 0.0, "ry": 0.0,
       "expected": {
-        "m": [0.7071067811865476, 0.7071067811865476, -0.7071067811865476, 0.7071067811865476, 0.0, 0.0],
+        "m": [0.7071067811865476, -0.7071067811865476, 0.7071067811865476, 0.7071067811865476, 0.0, 0.0],
         "origin_image": [0.0, 0.0],
-        "probe_image": [42.42640687119285, 98.99494936611666]
+        "probe_image": [98.99494936611666, -42.42640687119285]
       }
     },
     {
       "name": "rotate_negative_thirty_about_the_origin",
       "function": "rotate_matrix",
-      "derivation": "A NEGATIVE angle, which no other vector here carries and which the sign of `b` decides. cos(-30) = sqrt(3)/2 = 0.8660254037844386, sin(-30) = -1/2 exactly. m = [sqrt(3)/2, -0.5, 0.5, sqrt(3)/2, 0, 0]. (100,40) maps to (100*sqrt(3)/2 + 40*0.5, -100*0.5 + 40*sqrt(3)/2) = (106.60254037844386, -15.358983848622458).",
+      "derivation": "A NEGATIVE angle, which no other vector here carries and which the sign of `b` decides: it turns CLOCKWISE on screen, so the matrix is rotate(+30). cos 30 = sqrt(3)/2 = 0.8660254037844386, sin 30 = 1/2 exactly. m = [sqrt(3)/2, 0.5, -0.5, sqrt(3)/2, 0, 0]. (100,40) maps to (100*sqrt(3)/2 - 40*0.5, 100*0.5 + 40*sqrt(3)/2) = (66.60254037844386, 84.64101615137754).",
       "theta_deg": -30.0, "rx": 0.0, "ry": 0.0,
       "expected": {
-        "m": [0.8660254037844386, -0.5, 0.5, 0.8660254037844386, 0.0, 0.0],
+        "m": [0.8660254037844386, 0.5, -0.5, 0.8660254037844386, 0.0, 0.0],
         "origin_image": [0.0, 0.0],
-        "probe_image": [106.60254037844386, -15.358983848622458]
+        "probe_image": [66.60254037844386, 84.64101615137754]
       }
     },
     {

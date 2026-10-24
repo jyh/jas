@@ -2061,9 +2061,10 @@ fn draw_bbox_ghost(
             transform_apply::scale_matrix(sx, sy, rx, ry)
         }
         "rotate" => {
+            // Counter-clockwise on screen, as `drag_to_rotate_angle` has it.
             let theta_press = (py - ry).atan2(px - rx);
             let theta_cursor = (cy - ry).atan2(cx - rx);
-            let mut theta_deg = (theta_cursor - theta_press).to_degrees();
+            let mut theta_deg = (theta_press - theta_cursor).to_degrees();
             if shift { theta_deg = (theta_deg / 45.0).round() * 45.0; }
             transform_apply::rotate_matrix(theta_deg, rx, ry)
         }

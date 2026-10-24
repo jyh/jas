@@ -25,11 +25,15 @@ public enum TransformApply {
         Transform.scale(sx, sy).aroundPoint(rx, ry)
     }
 
-    /// Rotation matrix: thetaDeg degrees CCW around (rx, ry).
-    /// thetaDeg = 0.0 is the identity transform.
+    /// Rotation matrix: thetaDeg degrees counter-clockwise ON SCREEN around
+    /// (rx, ry) (ROTATE_TOOL.md, ROT-062). thetaDeg = 0.0 is the identity.
+    /// The document is y-down, where `Transform.rotate` (SVG's `rotate()`)
+    /// turns a positive angle clockwise, so the angle is negated: a point at
+    /// 3 o'clock moves toward 12 o'clock. Until 2026-10-24 this passed the
+    /// angle through and every port turned a positive angle clockwise.
     public static func rotateMatrix(thetaDeg: Double,
                                     rx: Double, ry: Double) -> Transform {
-        Transform.rotate(thetaDeg).aroundPoint(rx, ry)
+        Transform.rotate(-thetaDeg).aroundPoint(rx, ry)
     }
 
     /// Shear matrix: angleDeg degrees of slant along axis around

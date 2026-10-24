@@ -51,7 +51,19 @@ private func pointApprox(_ p: (Double, Double),
 
 @Test func rotateNinetyAroundOrigin() {
     let m = TransformApply.rotateMatrix(thetaDeg: 90, rx: 0, ry: 0)
-    pointApprox(m.applyPoint(1, 0), (0, 1))
+    // 3 o'clock to 12 o'clock, counter-clockwise on a y-down screen.
+    pointApprox(m.applyPoint(1, 0), (0, -1))
+}
+
+/// ROTATE_TOOL.md and ROT-062 (P0): a positive angle turns the selection
+/// COUNTER-clockwise as the artist sees it. The document is y-down, so a point
+/// at 3 o'clock moves toward 12 o'clock, which is toward SMALLER y. Until
+/// 2026-10-24 every port turned a positive angle clockwise on screen.
+@Test func aPositiveAngleTurnsAThreeOclockPointTowardTwelve() {
+    let p = TransformApply.rotateMatrix(thetaDeg: 30, rx: 0, ry: 0).applyPoint(1, 0)
+    #expect(abs(p.0 - cos(30.0 * (Double.pi / 180))) < 1e-12, "x \(p.0)")
+    #expect(p.1 < 0, "a 3 o'clock point moves UP the screen (smaller y), got y \(p.1)")
+    #expect(abs(p.1 + 0.5) < 1e-12, "y \(p.1)")
 }
 
 @Test func rotate180AroundRefPoint() {

@@ -23,12 +23,16 @@ pub fn scale_matrix(sx: f64, sy: f64, rx: f64, ry: f64) -> Transform {
     Transform::scale(sx, sy).around_point(rx, ry)
 }
 
-/// Rotation matrix: `theta_deg` degrees CCW around `(rx, ry)`.
+/// Rotation matrix: `theta_deg` degrees counter-clockwise ON SCREEN around
+/// `(rx, ry)` (ROTATE_TOOL.md, ROT-062).
 ///
-/// `theta_deg = 0.0` is the identity transform. Positive values
-/// rotate counter-clockwise.
+/// `theta_deg = 0.0` is the identity transform. The document is y-down, where
+/// [`Transform::rotate`] (SVG's `rotate()`) turns a positive angle clockwise, so
+/// the angle is negated: a point at 3 o'clock moves toward 12 o'clock. Until
+/// 2026-10-24 this passed the angle through and every port turned a positive
+/// angle clockwise on screen.
 pub fn rotate_matrix(theta_deg: f64, rx: f64, ry: f64) -> Transform {
-    Transform::rotate(theta_deg).around_point(rx, ry)
+    Transform::rotate(-theta_deg).around_point(rx, ry)
 }
 
 /// Shear matrix: `angle_deg` degrees of slant along `axis` around
@@ -144,9 +148,22 @@ mod tests {
 
     #[test]
     fn rotate_90_around_origin() {
-        // (1, 0) → (0, 1) under a 90° CCW rotation in image-space.
+        // (1, 0) → (0, -1): 3 o'clock to 12 o'clock, counter-clockwise on a
+        // y-down screen.
         let m = rotate_matrix(90.0, 0.0, 0.0);
-        point_approx(m.apply_point(1.0, 0.0), (0.0, 1.0));
+        point_approx(m.apply_point(1.0, 0.0), (0.0, -1.0));
+    }
+
+    /// ROTATE_TOOL.md and ROT-062 (P0): a positive angle turns the selection
+    /// COUNTER-clockwise as the artist sees it. The document is y-down, so a
+    /// point at 3 o'clock moves toward 12 o'clock, which is toward SMALLER y.
+    /// Until 2026-10-24 every port turned a positive angle clockwise on screen.
+    #[test]
+    fn a_positive_angle_turns_a_three_oclock_point_toward_twelve() {
+        let (x, y) = rotate_matrix(30.0, 0.0, 0.0).apply_point(1.0, 0.0);
+        assert!((x - 30f64.to_radians().cos()).abs() < 1e-12, "x {x}");
+        assert!(y < 0.0, "a 3 o'clock point moves UP the screen (smaller y), got y {y}");
+        assert!((y + 0.5).abs() < 1e-12, "y {y}");
     }
 
     #[test]

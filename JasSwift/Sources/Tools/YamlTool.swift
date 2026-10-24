@@ -1523,9 +1523,10 @@ private func drawBBoxGhost(
             }
             return TransformApply.scaleMatrix(sx: sx, sy: sy, rx: rx, ry: ry)
         case "rotate":
+            // Counter-clockwise on screen, as `dragToRotateAngle` has it.
             let tp = atan2(py - ry, px - rx)
             let tc = atan2(cy - ry, cx - rx)
-            var theta = (tc - tp) * (180 / Double.pi)
+            var theta = (tp - tc) * (180 / Double.pi)
             if shift { theta = (theta / 45.0).rounded() * 45.0 }
             return TransformApply.rotateMatrix(thetaDeg: theta, rx: rx, ry: ry)
         case "shear":
