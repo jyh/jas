@@ -333,8 +333,12 @@ pub unsafe extern "C" fn jas_pointer_event(
     // queued (the Artboard tool's click selection) go there too.
     let opened = tool.take_opened_dialog();
     let writes = tool.drain_pending_panel_writes();
+    let owned = tool.owned_globals();
     drop(slot);
     crate::ffi::apply_tool_panel_writes(engine, writes);
+    // The globals the tool's handlers own (the transform tools' reference
+    // point) go to the engine's store, where a dialog applies (flask §537).
+    engine.with_store_mut(|store| for (k, v) in owned { store.set(&k, v) });
     // A key that the tool's event deselected is cleared, as the web canvas
     // clears it after every press and release (ALIGN.md §Panel state).
     if kind != KIND_MOVE {
@@ -434,7 +438,9 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
             // falling through to an orphaning `delete_selection`) moves to the
             // engine's store, as a pointer event's does.
             let opened = tool.take_opened_dialog();
+            let owned = tool.owned_globals();
             drop(slot);
+            engine.with_store_mut(|store| for (k, v) in owned { store.set(&k, v) });
             if let Some((id, params)) = opened {
                 crate::ffi::open_tool_dialog(engine, &id, &params);
             }
@@ -1601,6 +1607,76 @@ mod tests {
             let alt = open(tool, MOD_ALT);
             let id = format!(r#""id":"{tool}_options""#);
             assert!(alt.contains(&id) && alt.contains(r#""open":true"#), "{tool}: {alt}");
+        }
+    }
+
+    /// The reference point a transform tool's click sets is APP state
+    /// (`state.transform_reference_point`, shared by Scale, Rotate and Shear),
+    /// so it must reach the engine's store, where the tool's options dialog
+    /// applies (flask STATUS §537). The tool's handlers write it on their own
+    /// private store; before this only the opened dialog moved to the engine,
+    /// so Rotate Options turned about the selection's centre (70, 70), not the
+    /// Alt+click. Driven: Alt+click with Rotate at (300, 200), OK at +90, and
+    /// the transform's fixed point is the click. The control: a plain click
+    /// stores the point too, so a dialog opened later from the toolbar sees it.
+    #[test]
+    fn a_transform_tools_click_point_reaches_the_engines_store() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let point = |e: *mut JasEngine| -> serde_json::Value {
+            unsafe { &*e }.with_store_mut(|s| s.get("transform_reference_point").clone())
+        };
+        for tool in ["scale", "rotate", "shear"] {
+            let e = jas_engine_new();
+            seed(e);
+            unsafe {
+                jas_set_tool(e, 0);
+                jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+                jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+                assert_eq!(jas_set_tool(e, selectable_index(tool).expect(tool)), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_PRESS, 300.0, 200.0, 0), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_RELEASE, 300.0, 200.0, 0), JasStatus::Ok);
+                assert_eq!(point(e), serde_json::json!([300.0, 200.0]), "{tool}: a plain click stores the point");
+                jas_engine_free(e);
+            }
+        }
+        // End to end: the Rotate Options apply turns about the Alt+click.
+        let e = jas_engine_new();
+        seed(e);
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+            assert_eq!(jas_set_tool(e, selectable_index("rotate").unwrap()), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 300.0, 200.0, MOD_ALT);
+            jas_pointer_event(e, KIND_RELEASE, 300.0, 200.0, MOD_ALT);
+            let ev = |json: &str| {
+                let b = crate::ffi::jas_dialog_event(e, json.as_ptr(), json.len());
+                let r = String::from_utf8_lossy(std::slice::from_raw_parts(b.ptr, b.len)).into_owned();
+                crate::ffi::jas_free(b);
+                r
+            };
+            let r = ev(r#"{"widget":"ro_angle","event":"commit","value":"90"}"#);
+            assert!(!r.is_empty(), "the angle commit ran: {r}");
+            let b = crate::ffi::jas_dialog_plan(e, 380, 640);
+            let plan: serde_json::Value = serde_json::from_slice(std::slice::from_raw_parts(b.ptr, b.len)).unwrap();
+            crate::ffi::jas_free(b);
+            let leaves = plan["plan"]["leaves"].as_array().expect("Rotate Options is open").clone();
+            let ok = leaves.iter().find(|l| l["type"] == "button" && l.to_string().contains("\"OK\""))
+                .expect("an OK button")["path"].clone();
+            let r = ev(&serde_json::json!({"path": ok, "event": "click"}).to_string());
+            assert!(r.contains(r#""dialog":null"#), "OK closed the dialog: {r}");
+            let t = (&*e).with_model(|m| {
+                let el = m.document().get_element(&vec![0, 0]).expect("the rect");
+                el.common().transform.expect("OK applied a transform")
+            });
+            // The fixed point p of x -> M x + t: (I - M) p = t.
+            let (a, b, c, d) = (1.0 - t.a, -t.b, -t.c, 1.0 - t.d);
+            let det = a * d - b * c;
+            let px = (d * t.e - c * t.f) / det;
+            let py = (a * t.f - b * t.e) / det;
+            assert!((px - 300.0).abs() < 1e-6 && (py - 200.0).abs() < 1e-6,
+                "Rotate Options turned about ({px}, {py}), not the Alt+click (300, 200): {t:?}");
+            jas_engine_free(e);
         }
     }
 

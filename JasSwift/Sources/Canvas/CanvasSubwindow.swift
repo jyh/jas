@@ -4216,9 +4216,7 @@ class CanvasNSView: NSView {
         syncAlignKeyObjectFromSelection(model: ctx.model, store: ctx.model.stateStore)
         // A dialog the tool opened (Scale's Alt-click) moves to the model's
         // store, where the app's dialog view reads it (flask STATUS §285).
-        if let opened = activeTool.takeOpenedDialog() {
-            openToolDialog(opened, model: ctx.model)
-        }
+        handOffToolEvent(activeTool, model: ctx.model)
     }
 
     // MARK: - Test helper

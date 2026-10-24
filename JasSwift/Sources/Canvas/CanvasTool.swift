@@ -77,6 +77,12 @@ protocol CanvasTool: AnyObject {
     /// Hand the tool document facts its host knows and its own store does not
     /// (the Artboards panel's `artboards_panel_selection_ids`).
     func setDocumentFacts(_ facts: [String: Any])
+    /// ⛔ REQUIREMENTS, not only extension defaults: the host holds the tool
+    /// as `CanvasTool`, and a method declared only in the extension dispatches
+    /// statically to the default there, so a YamlTool's override never ran and
+    /// a canvas Alt+click's dialog was dropped (found 2026-10-24).
+    func takeOpenedDialog() -> (id: String, params: [String: Any])?
+    func ownedGlobals() -> [String: Any]
 }
 
 /// Default implementations for optional protocol methods.
@@ -92,6 +98,10 @@ extension CanvasTool {
     /// The host opens it in the model's store. Nil when the event opened none
     /// (Rust `CanvasTool::take_opened_dialog`).
     func takeOpenedDialog() -> (id: String, params: [String: Any])? { nil }
+    /// The app-level globals this tool's handlers own and have set
+    /// (``toolOwnedStateKeys``), read from its private store. Rust
+    /// `CanvasTool::owned_globals`. Native tools own none.
+    func ownedGlobals() -> [String: Any] { [:] }
     func isEditing() -> Bool { false }
     func cursorOverride() -> String? { nil }
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool { false }
@@ -210,6 +220,19 @@ func createTools() -> [Tool: CanvasTool] {
     return registry
 }
 
+
+/// After a tool event, hand the model what the tool produced on its private
+/// store: the globals its handlers own (the transform tools' reference point,
+/// which a dialog applying in the model's store must see, flask STATUS §537),
+/// then the dialog it opened. Rust `ffi_pointer::jas_pointer_event`'s tail.
+func handOffToolEvent(_ tool: CanvasTool, model: Model) {
+    for (k, v) in tool.ownedGlobals() {
+        model.stateStore.set(k, v)
+    }
+    if let opened = tool.takeOpenedDialog() {
+        openToolDialog(opened, model: model)
+    }
+}
 
 /// Open in the MODEL's store a dialog a tool opened: the same `open_dialog`
 /// effect an action runs, so the dialog's `init` evaluates in the app's scope.
