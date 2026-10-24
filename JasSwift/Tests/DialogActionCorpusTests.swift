@@ -181,6 +181,7 @@ private let dialogActionFixtures = [
     "dialog_actions/transform_options.json",
     "dialog_actions/tool_options.json",
     "dialog_actions/boolean_options.json",
+    "dialog_actions/paragraph_dialogs.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {
