@@ -1478,7 +1478,7 @@ impl Controller {
     }
 
     /// Set the `fill_gradient` field of every selected element to the
-    /// given value. Phase 5 — used by `apply_gradient_panel_to_selection`.
+    /// given value (`gradient_host::apply_gradient_to_selection` writes through it).
     /// Pass `None` to clear (demote to solid; the existing `fill` value
     /// remains as the demote-target color per GRADIENT.md §Fill-type
     /// coupling).
