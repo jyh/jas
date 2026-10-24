@@ -651,6 +651,22 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // Override with live values from AppState
     m.insert("fill_on_top".into(), J::Bool(st.fill_on_top));
     m.insert("active_tool".into(), J::String(tool_kind_name(st.active_tool).into()));
+    // The Align panel's four globals, which its actions read back as
+    // `state.align_*` (`toggle_use_preview_bounds` sets the negation of what it
+    // reads, so a stale default here meant it could never turn off) and its
+    // panel `init:` reads on open.
+    let ap = &st.align_panel;
+    m.insert("align_to".into(), J::String(ap.align_to.as_str().into()));
+    m.insert("align_key_object_path".into(), match &ap.key_object_path {
+        Some(p) => serde_json::json!({"__path__": p}),
+        None => J::Null,
+    });
+    // A whole spacing is written as the spec writes it (`0`, not `0.0`), so the
+    // starting map equals the reference's (`initial_state_map.json`).
+    let d = ap.distribute_spacing;
+    m.insert("align_distribute_spacing".into(),
+             if d.fract() == 0.0 && d.abs() < 1e15 { serde_json::json!(d as i64) } else { serde_json::json!(d) });
+    m.insert("align_use_preview_bounds".into(), J::Bool(ap.use_preview_bounds));
 
     // Override fill/stroke colors from the active selection's fill /
     // stroke summary (so the Color panel's swatch reflects whatever
