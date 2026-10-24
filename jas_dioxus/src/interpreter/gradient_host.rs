@@ -61,18 +61,31 @@ pub enum SelectionGradient {
 /// Read the active attribute (`fill_on_top` ⇒ fill, else stroke) of every
 /// selected element.
 pub fn selection_gradient(doc: &Document, fill_on_top: bool) -> SelectionGradient {
+    // A selected CONTAINER speaks for its paintable members at any depth, the
+    // read twin of the write (which recurses into members), as
+    // `selection_fill_summary` does for a fill. An empty container visits
+    // nothing, so it contributes no value.
     let mut first: Option<Option<Gradient>> = None;
     let mut first_solid: Option<Color> = None;
+    let mut mixed = false;
     for es in &doc.selection {
         let Some(elem) = doc.get_element(&es.path) else { continue };
-        let g = if fill_on_top { elem.fill_gradient().cloned() } else { elem.stroke_gradient().cloned() };
-        if first_solid.is_none() && g.is_none() {
-            first_solid = if fill_on_top { elem.fill().map(|f| f.color) } else { elem.stroke().map(|s| s.color) };
-        }
-        match &first {
-            None => first = Some(g),
-            Some(prev) if *prev != g => return SelectionGradient::Mixed,
-            Some(_) => {}
+        crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+            if mixed {
+                return;
+            }
+            let g = if fill_on_top { leaf.fill_gradient().cloned() } else { leaf.stroke_gradient().cloned() };
+            if first_solid.is_none() && g.is_none() {
+                first_solid = if fill_on_top { leaf.fill().map(|f| f.color) } else { leaf.stroke().map(|s| s.color) };
+            }
+            match &first {
+                None => first = Some(g),
+                Some(prev) if *prev != g => mixed = true,
+                Some(_) => {}
+            }
+        });
+        if mixed {
+            return SelectionGradient::Mixed;
         }
     }
     match first {
@@ -583,6 +596,71 @@ mod tests {
         let mut model = Model::default();
         model.set_document_for_test(doc);
         model
+    }
+
+    /// `rect(fill)` with a fill gradient of `stops` colours at 0 and 100.
+    fn graded(fill: Option<Color>, from: Color, to: Color) -> Element {
+        let mut e = rect(fill);
+        if let Element::Rect(ref mut r) = e {
+            r.fill_gradient = Some(Box::new(Gradient { stops: vec![
+                GradientStop { color: from, opacity: 100.0, location: 0.0, midpoint_to_next: 50.0 },
+                GradientStop { color: to, opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ], ..Gradient::default() }));
+        }
+        e
+    }
+
+    fn group(children: Vec<Element>) -> Element {
+        Element::Group(crate::geometry::element::GroupElem {
+            children: children.into_iter().map(std::rc::Rc::new).collect(),
+            ..Default::default()
+        })
+    }
+
+    fn colours(s: SelectionGradient) -> Option<Vec<Color>> {
+        match s { SelectionGradient::Uniform(g) => Some(g.stops.iter().map(|s| s.color).collect()), _ => None }
+    }
+
+    #[test]
+    fn a_selected_group_reads_its_members_gradient() {
+        // The read twin of the write, which recurses into members: a group
+        // speaks for its paintable leaves at any depth, as
+        // `selection_fill_summary` does for a fill.
+        let rb = || graded(Some(BLUE), RED, BLUE);
+        let read = |e: Element| selection_gradient(model_with(vec![e], &[0]).document(), true);
+        assert_eq!(colours(read(group(vec![rb()]))), Some(vec![RED, BLUE]));
+        assert_eq!(colours(read(group(vec![rb(), group(vec![rb()])]))), Some(vec![RED, BLUE]), "nested");
+        assert!(matches!(read(group(vec![rb(), graded(None, BLUE, RED)])), SelectionGradient::Mixed));
+        assert!(matches!(read(group(vec![rb(), rect(Some(RED))])), SelectionGradient::Mixed),
+                "a gradient member beside a solid one");
+        assert!(matches!(read(group(vec![rect(Some(RED)), rect(Some(BLUE))])), SelectionGradient::Solid(Some(RED))),
+                "all solid: the first member's colour seeds");
+        assert!(matches!(read(group(vec![])), SelectionGradient::Empty), "an empty group contributes nothing");
+    }
+
+    #[test]
+    fn an_edit_on_a_selected_group_keeps_its_members_stops() {
+        let mut m = model_with(vec![group(vec![graded(Some(BLUE), RED, BLUE), graded(None, RED, BLUE)])], &[0]);
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(45), || panic!("not mixed")));
+        let Element::Group(g) = m.document().get_element(&vec![0, 0]).unwrap() else { panic!("still a group") };
+        for c in &g.children {
+            let fg = c.fill_gradient().expect("each member carries the gradient");
+            assert_eq!((fg.angle, fg.stops.iter().map(|s| s.color).collect::<Vec<_>>()), (45.0, vec![RED, BLUE]));
+        }
+    }
+
+    #[test]
+    fn a_selected_groups_stroke_reads_its_members_stroke_gradient() {
+        let mut leaf = rect(Some(BLUE));
+        if let Element::Rect(ref mut r) = leaf {
+            r.stroke = Some(crate::geometry::element::Stroke::new(BLUE, 1.0));
+            r.stroke_gradient = Some(Box::new(Gradient { stops: vec![
+                GradientStop { color: RED, opacity: 100.0, location: 0.0, midpoint_to_next: 50.0 },
+                GradientStop { color: BLUE, opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ], ..Gradient::default() }));
+        }
+        let m = model_with(vec![group(vec![leaf])], &[0]);
+        assert_eq!(colours(selection_gradient(m.document(), false)), Some(vec![RED, BLUE]));
     }
 
     fn select(m: &mut Model, selected: &[usize]) {
