@@ -63,3 +63,35 @@ private func makeCtx(model: Model) -> ToolContext {
     #expect(toolParamLiteral(true as NSNumber) == "true")
     #expect(toolParamLiteral([1]) == nil)
 }
+
+// The reference point a transform tool's click sets is APP state
+// (`state.transform_reference_point`, shared by Scale, Rotate and Shear), so
+// the host copies it to the model's store beside the opened dialog (flask
+// STATUS §537; Rust `a_transform_tools_click_point_reaches_the_engines_store`).
+// Before this only the dialog moved, so Rotate Options' OK turned about the
+// selection's centre. The control: a plain click stores the point too, so a
+// dialog opened later from the toolbar sees it.
+@Test func aTransformToolsClickPointReachesTheModelsStore() throws {
+    guard let ws = WorkspaceData.load(),
+          let tools = ws.data["tools"] as? [String: Any] else { Issue.record("no bundle"); return }
+    for id in ["scale", "rotate", "shear"] {
+        for alt in [false, true] {
+            let spec = try #require(tools[id] as? [String: Any])
+            let tool = try #require(YamlTool.fromWorkspaceTool(spec))
+            let model = Model(document: Document(layers: [Layer(name: "L", children: [])],
+                                                 selectedLayer: 0, selection: []))
+            let ctx = makeCtx(model: model)
+            tool.activate(ctx)
+            tool.onPress(ctx, x: 300, y: 200, shift: false, alt: alt)
+            tool.onRelease(ctx, x: 300, y: 200, shift: false, alt: alt)
+            #expect(model.stateStore.get("transform_reference_point") is NSNull,
+                    "\(id): the control, the seeded default stands until the hand-off")
+            handOffToolEvent(tool, model: model)
+            let p = model.stateStore.get("transform_reference_point") as? [Any]
+            #expect((p?.compactMap { ($0 as? NSNumber)?.doubleValue }) == [300, 200],
+                    "\(id) alt=\(alt): \(String(describing: p))")
+            #expect((model.stateStore.getDialogId() == "\(id)_options") == alt,
+                    "\(id) alt=\(alt): dialog \(String(describing: model.stateStore.getDialogId()))")
+        }
+    }
+}
