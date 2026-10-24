@@ -1032,6 +1032,18 @@ pub(crate) fn live_panel_state_table(st: &AppState)
             table.entry(GRADIENT_PANEL.to_string()).or_default().extend(live);
         }
     }
+    // The panel struct is the web's slider store (`gradient_slider_gesture`):
+    // its selected stop and midpoint are what the keys act on, so they stand
+    // always, and while a gesture stands its stops are the preview and stand
+    // over the selection's until the release commits them, as the engine
+    // scope lets the store's stand (`panel_scope::engine_scope`).
+    let gp = &st.gradient_panel;
+    let entry = table.entry(GRADIENT_PANEL.to_string()).or_default();
+    entry.insert("selected_stop_index".into(), gp.selected_stop_index.into());
+    entry.insert("selected_midpoint_index".into(), gp.selected_midpoint_index.into());
+    if !gp.press.is_null() {
+        entry.insert("stops".into(), gradient_host::stops_to_json(&gp.stops));
+    }
     table
 }
 
