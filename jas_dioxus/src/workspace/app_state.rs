@@ -1110,47 +1110,53 @@ impl AppState {
             gp.press = snap;
         }
         if step.commit {
-            self.apply_gradient_panel_to_selection();
+            self.apply_gradient_panel_keys(&[crate::interpreter::gradient_host::STOPS_KEY]);
         }
         Ok(true)
     }
 
-    pub(crate) fn apply_gradient_panel_to_selection(&mut self) {
-        use crate::geometry::element::{
-            Gradient, GradientType, GradientMethod, StrokeSubMode,
-        };
+    /// Apply the Gradient panel keys just written to the selection, each by
+    /// the engine's own law (`gradient_host`), with the value the panel struct
+    /// now holds: a render key sets that one field, and `gradient_stops` or a
+    /// stop combo sets the stops. So a MIXED selection keeps each member's
+    /// other fields (GRADIENT.md §Multi-selection, "each control is evaluated
+    /// independently"), where applying the whole struct overwrote them. The
+    /// inverse of [`Self::sync_gradient_panel_from_selection`].
+    pub(crate) fn apply_gradient_panel_keys(&mut self, keys: &[&str]) {
+        use crate::interpreter::gradient_host::{self as gh};
+        use serde_json::json;
         let gp = &self.gradient_panel;
-        let gtype = match gp.gtype.as_str() {
-            "radial" => GradientType::Radial,
-            "freeform" => GradientType::Freeform,
-            _ => GradientType::Linear,
+        let value = |k: &str| -> Option<serde_json::Value> {
+            Some(match k {
+                "gradient_type" => json!(gp.gtype),
+                "gradient_angle" => json!(gp.angle),
+                "gradient_aspect_ratio" => json!(gp.aspect_ratio),
+                "gradient_method" => json!(gp.method),
+                "gradient_dither" => json!(gp.dither),
+                "gradient_stroke_sub_mode" => json!(gp.stroke_sub_mode),
+                _ => return None,
+            })
         };
-        let gmethod = match gp.method.as_str() {
-            "smooth" => GradientMethod::Smooth,
-            "points" => GradientMethod::Points,
-            "lines" => GradientMethod::Lines,
-            _ => GradientMethod::Classic,
-        };
-        let gsub = match gp.stroke_sub_mode.as_str() {
-            "along" => StrokeSubMode::Along,
-            "across" => StrokeSubMode::Across,
-            _ => StrokeSubMode::Within,
-        };
-        let g = Gradient {
-            gtype,
-            angle: gp.angle,
-            aspect_ratio: gp.aspect_ratio,
-            method: gmethod,
-            dither: gp.dither,
-            stroke_sub_mode: gsub,
-            stops: gp.stops.clone(),
-            nodes: Vec::new(),
-        };
+        let writes: Vec<(String, serde_json::Value)> = keys.iter().filter_map(|k| {
+            if gh::is_render_key(k) {
+                value(k).map(|v| (k.to_string(), v))
+            } else if *k == gh::STOPS_KEY || gh::stop_field(k).is_some() {
+                Some((gh::STOPS_KEY.to_string(), gh::stops_to_json(&gp.stops)))
+            } else {
+                None
+            }
+        }).collect();
         let fill_on_top = self.fill_on_top;
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-            if !tab.model.document().selection.is_empty() {
+            if !tab.model.document().selection.is_empty() && !writes.is_empty() {
                 tab.model.with_txn(|m| {
-                    crate::interpreter::gradient_host::apply_gradient_to_selection(m, fill_on_top, g);
+                    for (k, v) in &writes {
+                        if k == gh::STOPS_KEY {
+                            gh::apply_stops(m, fill_on_top, v);
+                        } else {
+                            gh::apply_render_key(m, fill_on_top, k, v);
+                        }
+                    }
                 });
             }
         }
@@ -1192,7 +1198,7 @@ impl AppState {
     /// fill-type coupling rule (Phase 5).
     ///
     /// The read direction only; the write is
-    /// [`Self::apply_gradient_panel_to_selection`].
+    /// [`Self::apply_gradient_panel_keys`].
     pub(crate) fn sync_gradient_panel_from_selection(&mut self) {
         use crate::geometry::element::{GradientMethod, GradientType, StrokeSubMode};
         use crate::interpreter::gradient_host::{self, SelectionGradient};
@@ -1204,10 +1210,14 @@ impl AppState {
             // No selection: panel keeps current defaults (acts as
             // "session defaults" mode, mirroring STROKE.md behavior).
             SelectionGradient::Empty => return,
-            // Mixed selection: leave panel fields at their current values;
-            // the panel renderer reads selection_summary to decide
-            // blank-vs-uniform display per Multi-selection table.
+            // Mixed selection: the slider and the stop combos show and edit
+            // the FIRST member's stops (GRADIENT.md §Multi-selection); the
+            // other fields stay at their current values.
             SelectionGradient::Mixed => {
+                if let Some(stops) = gradient_host::live_values(tab.model.document(), self.fill_on_top)
+                    .get("stops").and_then(gradient_host::stops_from_json) {
+                    self.gradient_panel.stops = stops;
+                }
                 self.gradient_panel.preview_state = false;
                 return;
             }

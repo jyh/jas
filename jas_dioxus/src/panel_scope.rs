@@ -843,8 +843,7 @@ mod tests {
         ]));
         let mut m = crate::document::test_fixture::model_with(
             vec![crate::document::test_fixture::rect(0.0, 0.0, 10.0, 10.0)], &[0]);
-        assert!(gradient_host::apply_render_key(&mut m, true, "gradient_type", &json!("radial"),
-                                                || panic!("not mixed")));
+        assert!(gradient_host::apply_render_key(&mut m, true, "gradient_type", &json!("radial")));
         let panel = |m: &Model, fill_on_top: bool| {
             let slice = PanelState { fill_on_top, ..PanelState::default() };
             engine_scope(&slice, &store, m, GRADIENT_PANEL)["panel"].clone()

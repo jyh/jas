@@ -403,8 +403,7 @@ impl EffectHost for EngineHost {
             if !model.in_txn() {
                 model.begin_txn();
             }
-            gradient_host::apply_render_key(model, fill_on_top, key, &value,
-                || gradient_host::gradient_from_store(store, GRADIENT_PANEL));
+            gradient_host::apply_render_key(model, fill_on_top, key, &value);
             return;
         }
         // The slider's finished gesture (WIDGET_EVENTS.md §The stops kind): the
@@ -415,8 +414,7 @@ impl EffectHost for EngineHost {
             if !model.in_txn() {
                 model.begin_txn();
             }
-            gradient_host::apply_stops(model, fill_on_top, &stops,
-                || gradient_host::gradient_from_store(store, GRADIENT_PANEL));
+            gradient_host::apply_stops(model, fill_on_top, &stops);
             return;
         }
         // A stop combo (GRADIENT.md STOP_OPACITY_COMBO, STOP_LOCATION_COMBO):
@@ -429,8 +427,7 @@ impl EffectHost for EngineHost {
             if !model.in_txn() {
                 model.begin_txn();
             }
-            if let Some(moved) = gradient_host::apply_stop_edit(model, fill_on_top, field, &value, index,
-                || gradient_host::gradient_from_store(store, GRADIENT_PANEL)) {
+            if let Some(moved) = gradient_host::apply_stop_edit(model, fill_on_top, field, &value, index) {
                 store.set_panel(GRADIENT_PANEL, "selected_stop_index", serde_json::json!(moved));
             }
             return;

@@ -1407,41 +1407,24 @@ func settingGradientField(_ g: Gradient, _ key: String, _ value: Any?) -> Gradie
                     strokeSubMode: sub, stops: g.stops, nodes: g.nodes)
 }
 
-/// The panel as the store holds it, for a mixed selection: the six render
-/// globals over the default gradient, with the Gradient panel scope's `stops`
-/// when they parse, else the seed's. Mirrors `gradient_host::gradient_from_store`.
-func gradientFromStore(_ store: StateStore) -> Gradient {
-    var g = seedGradient(nil)
-    for key in gradientRenderKeys.sorted() {
-        if let next = settingGradientField(g, key, store.get(key)) { g = next }
-    }
-    if let raw = store.getPanel("gradient_panel_content", "stops") as? [[String: Any]], !raw.isEmpty {
-        let stops: [GradientStop] = raw.compactMap { s in
-            guard let c = s["color"] as? String, Color.fromHex(c) != nil,
-                  let o = (s["opacity"] as? NSNumber)?.doubleValue,
-                  let l = (s["location"] as? NSNumber)?.doubleValue else { return nil }
-            return GradientStop(color: c, opacity: o, location: l,
-                                midpointToNext: (s["midpoint_to_next"] as? NSNumber)?.doubleValue ?? 50)
-        }
-        if stops.count == raw.count {
-            g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
-                         dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops)
-        }
-    }
-    return g
-}
-
 /// The Gradient panel's fields as the SELECTION holds them, for the dock's
 /// panel scope (the role `strokePanelLiveOverrides` plays for Stroke). A
 /// uniform gradient reads as itself; a solid/none selection reads as the seed
-/// its first edit will promote from; nothing selected, or a mixed selection,
-/// contributes nothing, so the stored panel stands. Mirrors
+/// its first edit will promote from; nothing selected contributes nothing, so
+/// the stored panel stands; a mixed selection contributes only `stops`, the
+/// first member's (GRADIENT.md §Multi-selection). Mirrors
 /// `gradient_host::live_values`.
 public func gradientPanelLiveOverrides(model: Model) -> [String: Any] {
     let fillOnTop = (model.stateStore.get("fill_on_top") as? Bool) ?? true
     let g: Gradient
     switch selectionGradient(model.document, fillOnTop: fillOnTop) {
-    case .empty, .mixed: return [:]
+    case .empty: return [:]
+    case .mixed:
+        guard let first = firstMemberGradient(model.document, fillOnTop: fillOnTop) else { return [:] }
+        return ["stops": first.stops.map { s -> [String: Any] in
+            ["color": s.color, "opacity": s.opacity, "location": s.location,
+             "midpoint_to_next": s.midpointToNext]
+        }]
     case .uniform(let u): g = u
     case .solid(let c): g = seedGradient(c)
     }
@@ -1462,8 +1445,11 @@ public func gradientPanelLiveOverrides(model: Model) -> [String: Any] {
 /// Apply a Gradient panel write to the selected element(s), per GRADIENT.md
 /// §Fill-type coupling. The base is what the selection holds — its shared
 /// gradient, or the seed when it is solid/none (the promotion) — and the
-/// written key is applied on top; a MIXED selection takes the panel as the
-/// store holds it; nothing selected writes nothing. `key` names the render
+/// written key is applied on top. On a MIXED selection (GRADIENT.md
+/// §Multi-selection, "each control is evaluated independently") a render key
+/// sets that field on each member's own gradient, and the slider and the stop
+/// combos start from the first member's stops and overwrite only the members'
+/// stops. Nothing selected writes nothing. `key` names the render
 /// key just written; nil applies every render key the store holds (a caller
 /// with no single key). Mirrors `gradient_host::apply_render_key`, which the
 /// Rust engine and web app both call.
@@ -1478,7 +1464,9 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     case .empty: return
     case .uniform(let held): g = held
     case .solid(let c): g = seedGradient(c)
-    case .mixed: g = gradientFromStore(store)
+    case .mixed:
+        applyGradientPanelToMixed(store: store, controller: controller, fillOnTop: fillOnTop, key: key)
+        return
     }
     if key == gradientStopsKey {
         // The slider's finished gesture: the whole list (WIDGET_EVENTS.md
@@ -1506,6 +1494,64 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     } else {
         controller.setSelectionStrokeGradient(g)
     }
+    store.set("gradient_preview_state", false)
+}
+
+/// A member's active-attribute gradient: its own, or the seed its solid
+/// colour (or none) promotes to. Mirrors `gradient_host::member_gradient`.
+func memberGradient(_ leaf: Element, fillOnTop: Bool) -> Gradient {
+    (fillOnTop ? leaf.fillGradient : leaf.strokeGradient)
+        ?? seedGradient(fillOnTop ? leaf.fill?.color : leaf.stroke?.color)
+}
+
+/// The first selected member's gradient (selection order, then paint order in
+/// a container). Mirrors `gradient_host::first_member_gradient`.
+func firstMemberGradient(_ doc: Document, fillOnTop: Bool) -> Gradient? {
+    var first: Gradient? = nil
+    for es in doc.selection {
+        guard let elem = doc.tryGetElement(es.path) else { continue }
+        elem.forEachPaintable { leaf in
+            if first == nil { first = memberGradient(leaf, fillOnTop: fillOnTop) }
+        }
+        if first != nil { break }
+    }
+    return first
+}
+
+/// The MIXED arm of ``applyGradientPanelToSelection(store:controller:key:)``:
+/// each member's own gradient takes the written field, or the stops the first
+/// member's take. Mirrors the Mixed arms of `gradient_host`'s three writes.
+private func applyGradientPanelToMixed(store: StateStore, controller: Controller, fillOnTop: Bool, key: String?) {
+    let edit: (Gradient) -> Gradient
+    if key == gradientStopsKey {
+        guard let stops = gradientStopsFromJSON(store.get(gradientStopsKey)), stops.count >= 2 else { return }
+        edit = { g in Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                               dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes) }
+    } else if let key = key, let field = gradientStopKeys[key] {
+        guard let first = firstMemberGradient(controller.model.document, fillOnTop: fillOnTop) else { return }
+        let index = (store.getPanel("gradient_panel_content", "selected_stop_index") as? NSNumber)?.intValue ?? -1
+        guard let (stops, moved) = editStop(first.stops, index: index, field: field, value: store.get(key)) else { return }
+        store.setPanel("gradient_panel_content", "selected_stop_index", moved)
+        edit = { g in Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                               dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes) }
+    } else {
+        let keys = key.map { [$0] } ?? gradientRenderKeys.sorted().filter { store.get($0) != nil }
+        guard keys.contains(where: { settingGradientField(seedGradient(nil), $0, store.get($0)) != nil }) else { return }
+        edit = { g in
+            var out = g
+            for k in keys { if let next = settingGradientField(out, k, store.get(k)) { out = next } }
+            return out
+        }
+    }
+    var doc = controller.model.document
+    for es in doc.selection {
+        guard let elem = doc.tryGetElement(es.path) else { continue }
+        doc = doc.replaceElement(es.path, with: elem.mapPaintable { leaf in
+            let g = edit(memberGradient(leaf, fillOnTop: fillOnTop))
+            return fillOnTop ? withFillGradient(leaf, fillGradient: g) : withStrokeGradient(leaf, strokeGradient: g)
+        })
+    }
+    controller.model.editDocument(doc)
     store.set("gradient_preview_state", false)
 }
 

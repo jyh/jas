@@ -143,6 +143,51 @@ struct GradientHookRegistrationTests {
         }
     }
 
+    private func mixedModel() -> Model {
+        let a = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fillGradient: Gradient(angle: 30, stops: [
+            GradientStop(color: "#ff0000", location: 0), GradientStop(color: "#0000ff", location: 100)])))
+        let b = graded("#0000ff", "#ff0000")
+        let c = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: Fill(color: .rgb(r: 1, g: 0, b: 0, a: 1))))
+        return Model(document: Document(layers: [Layer(name: "L", children: [a, b, c])],
+                                        selection: [ElementSelection.all([0, 0]), ElementSelection.all([0, 1]),
+                                                    ElementSelection.all([0, 2])]))
+    }
+
+    /// GRADIENT.md §Multi-selection: "each control is evaluated independently".
+    /// A field commit on a MIXED selection sets that field on each member's own
+    /// gradient; a solid member is promoted from its own seed. Mirrors
+    /// gradient_host.rs `a_mixed_field_edit_sets_that_field_on_each_members_own_gradient`.
+    @Test func aMixedFieldEditSetsThatFieldOnEachMembersOwnGradient() {
+        let model = mixedModel()
+        #expect(selectionGradient(model.document, fillOnTop: true) == .mixed)
+        let store = StateStore()
+        store.set("gradient_stops", [["color": "#000000", "opacity": 100, "location": 0],
+                                     ["color": "#ffffff", "opacity": 100, "location": 100]])
+        store.set("gradient_dither", true)
+        _ = alignPlatformEffects(model: model)["apply_gradient_panel"]?("gradient_dither", [:], store)
+        let g = { (i: Int) in model.document.getElement([0, i]).fillGradient }
+        #expect(g(0)?.dither == true && g(0)?.stops.map(\.color) == ["#ff0000", "#0000ff"] && g(0)?.angle == 30)
+        #expect(g(1)?.dither == true && g(1)?.stops.map(\.color) == ["#0000ff", "#ff0000"])
+        #expect(g(2)?.dither == true && g(2)?.stops.map(\.color) == ["#ff0000", "#ffffff"], "promoted from its own seed")
+    }
+
+    /// The stop combos on a MIXED selection start from the FIRST member's
+    /// stops, and a commit overwrites only the others' stops. Mirrors
+    /// `a_mixed_stop_edit_starts_from_the_first_members_stops`.
+    @Test func aMixedStopEditStartsFromTheFirstMembersStops() {
+        let model = mixedModel()
+        let store = StateStore()
+        store.initPanel("gradient_panel_content", defaults: ["selected_stop_index": 0])
+        store.set("gradient_stop_opacity", 25)
+        _ = alignPlatformEffects(model: model)["apply_gradient_panel"]?("gradient_stop_opacity", [:], store)
+        for i in 0..<3 {
+            let g = model.document.getElement([0, i]).fillGradient
+            #expect(g?.stops.map { "\($0.color)@\($0.opacity)" } == ["#ff0000@25.0", "#0000ff@100.0"], "member \(i)")
+        }
+        #expect(model.document.getElement([0, 0]).fillGradient?.angle == 30)
+        #expect(model.document.getElement([0, 1]).fillGradient?.angle == 0, "only the stops are overwritten")
+    }
+
     /// A field edit keeps every field it does not name, from the SELECTION'S
     /// gradient, never from the store's last values: the store here holds a
     /// previous edit's stops and dither, as it would after editing another
