@@ -158,6 +158,14 @@ public func liveAppStateOverrides(model: Model?) -> [String: Any] {
 /// dock render path, the corpus's `@testable` arm) is in-module.
 func buildLiveStateMap(ws: WorkspaceData, model: Model?) -> [String: Any] {
     var m = ws.stateDefaults()
+    // Every declared global as the store holds it, which is where a `set:`
+    // effect writes. Without this an action that reads back its own global
+    // (`toggle_use_preview_bounds` sets `not state.align_use_preview_bounds`)
+    // read the default forever, and `select_tool`'s tool never showed: the
+    // Stroke panel's overlay below fixed one family of this on 2026-10-11.
+    if let model = model {
+        for (k, v) in model.stateStore.getAll() where m[k] != nil { m[k] = v }
+    }
     for (k, v) in liveAppStateOverrides(model: model) { m[k] = v }
     // The Stroke panel's live fields, as Rust's map overlays them. The dock's
     // panel ctx already did this (DASHFIX); the ACTION route reads this map,

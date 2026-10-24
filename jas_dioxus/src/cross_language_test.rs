@@ -3026,6 +3026,7 @@ pub(crate) mod tests {
         // state reader never republished, so the Color panel's guards kept
         // reading the old colour). See `assert_action_panel_state`.
         "fill_stroke_none.json",
+        "state_actions.json",
         // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
         // `set_fill_type_solid` on a stroke-only SELECTION must read that
         // selection's None and paint it; Rust's `build_appstate_ctx` used to
