@@ -490,6 +490,24 @@ private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [
     #expect(gradientSliderPoint(CGPoint(x: 5, y: 22), width: 0) == (0, 0))
 }
 
+@Test func aMidpointDiamondTakesAPressInTheBandAboveTheBar() {
+    // Mirrors renderer.rs's arm: a 200 pt slider, one diamond at x = 100,
+    // drawn 10 pt rotated, its target the band above the bar, 14 pt wide.
+    let at = { (x: CGFloat, y: CGFloat) in gradientSliderMidpointAt(CGPoint(x: x, y: y), width: 200, midpoints: [50]) }
+    #expect(at(100, 7) == 0 && at(103, 10) == 0 && at(105, 1) == 0)
+    #expect(at(93, 7) == 0 && at(107, 7) == 0)
+    #expect(at(92.5, 7) == nil && at(107.5, 7) == nil)
+    #expect(at(100, 14) == nil && at(100, 22) == nil && at(100, -0.5) == nil)
+    #expect(gradientSliderMidpointAt(CGPoint(x: 0, y: 7), width: 0, midpoints: [50]) == nil)
+}
+
+@Test func overlappingDiamondTargetsGoToTheNearerDiamondBothWays() {
+    // Diamonds at 2.5 % and 7.5 % of 200 pt: x = 5 and 15, 10 pt apart.
+    let at = { (x: CGFloat) in gradientSliderMidpointAt(CGPoint(x: x, y: 7), width: 200, midpoints: [2.5, 7.5]) }
+    #expect(at(5) == 0 && at(9.9) == 0 && at(10.1) == 1 && at(15) == 1)
+    #expect(at(10) == 0, "equidistant: the first, as renderer.rs and Windows")
+}
+
 @Test func theSliderKeysAreTheKeyboardTablesNames() {
     // Mirrors renderer.rs's `slider_key`: the arrows, Home and End, and both
     // deletes (the Mac's delete key is Backspace, its forward delete is
