@@ -7511,6 +7511,37 @@ pub(crate) mod tests {
         }
     }
 
+    /// The two DYNAMIC submenus (`menu_workspace`, `menu_appearance`): the
+    /// entries each lists, which `menu_state.json` cannot see. Generated from
+    /// the reference by scripts/gen_submenu_entries_corpus.py.
+    #[test]
+    fn algorithm_submenu_entries_vectors() {
+        use crate::interpreter::menu_state::{appearance_entries, workspace_entries};
+
+        let tests: serde_json::Value =
+            serde_json::from_str(&read_fixture("algorithms/submenu_entries.json")).unwrap();
+        let cases = tests.as_array().unwrap();
+        assert!(cases.len() >= 9, "the corpus has {} cases", cases.len());
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            let args = &tc["args"];
+            let strings = |v: &serde_json::Value| -> Vec<String> {
+                v.as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect()
+            };
+            let actual = match tc["function"].as_str().unwrap() {
+                "workspace_entries" => workspace_entries(&strings(&args["saved"]), args["active"].as_str().unwrap()),
+                "appearance_entries" => {
+                    let apps: Vec<(String, String)> = args["appearances"].as_array().unwrap().iter()
+                        .map(|a| (a["name"].as_str().unwrap().to_string(), a["label"].as_str().unwrap().to_string()))
+                        .collect();
+                    appearance_entries(&apps, args["active"].as_str())
+                }
+                other => panic!("Unknown function: {other}"),
+            };
+            assert_eq!(&actual, &tc["expected"], "submenu entries '{name}' mismatch");
+        }
+    }
+
     /// The PANEL-menu arm of the same chrome seam.
     ///
     /// `menu_state.json` pins the MENUBAR; nothing pinned a panel hamburger

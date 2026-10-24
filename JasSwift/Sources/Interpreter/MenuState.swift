@@ -77,4 +77,30 @@ public enum MenuState {
             ])
         }
     }
+
+    /// One entry of a DYNAMIC submenu (menubar.yaml `menu_workspace`,
+    /// `menu_appearance`), pinned by `submenu_entries.json`.
+    public struct SubmenuEntry: Equatable {
+        public let name: String
+        public let label: String
+        public let checked: Bool
+    }
+
+    /// The Workspace submenu's layout entries: every saved layout but the
+    /// default one (``workspaceLayoutName``, reached by Reset to Default), in
+    /// saved order, labelled by its name, the active one checked. Mirrors the
+    /// reference's `workspace_entries` and jas_dioxus `menu_state::workspace_entries`.
+    public static func workspaceEntries(saved: [String], active: String) -> [SubmenuEntry] {
+        saved.filter { $0 != workspaceLayoutName }
+            .map { SubmenuEntry(name: $0, label: $0, checked: $0 == active) }
+    }
+
+    /// The Appearance submenu's entries: every available `(name, label)` in
+    /// order, the active one checked; no stored appearance means
+    /// ``defaultAppearanceName`` is active. Mirrors the reference's
+    /// `appearance_entries` and jas_dioxus `menu_state::appearance_entries`.
+    public static func appearanceEntries(_ appearances: [(String, String)], active: String?) -> [SubmenuEntry] {
+        let current = active ?? defaultAppearanceName
+        return appearances.map { SubmenuEntry(name: $0.0, label: $0.1, checked: $0.0 == current) }
+    }
 }

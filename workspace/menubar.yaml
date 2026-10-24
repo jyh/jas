@@ -101,6 +101,9 @@ menubar:
         dynamic: true
         description: >
           Lists saved workspace layouts with a checkmark on the active one.
+          The layouts are listed in saved order, each labelled by its name;
+          the default layout ("Workspace", reached by Reset to Default) is
+          never listed, and an active name that is not saved checks nothing.
           Includes Save As, Reset to Default, and Revert to Saved commands.
         items:
           - { id: menu_ws_save_as,  label: "Save As...",       action: save_workspace_as }
@@ -114,7 +117,9 @@ menubar:
         dynamic: true
         description: >
           Lists available UI appearances (color themes) with a checkmark
-          on the active one. Predefined appearances are loaded from
+          on the active one, each labelled by its label, in order. When no
+          appearance is stored, the default one ("dark_gray") is active.
+          Predefined appearances are loaded from
           workspace/appearances/*.json. Users can save custom appearances
           via Save As.
         items:

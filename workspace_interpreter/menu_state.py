@@ -80,3 +80,33 @@ def menu_state(menubar: list, ctx: dict) -> list[dict]:
     for m, menu in enumerate(menubar):
         _walk(menu.get("items", []), [m])
     return out
+
+
+# The two DYNAMIC submenus (menubar.yaml `menu_workspace`, `menu_appearance`):
+# the entries each lists above its static items, as `{name, label, checked}`.
+# The live renderers build their buttons from these; the corpus
+# (test_fixtures/algorithms/submenu_entries.json) pins them across ports.
+
+#: The default layout's name. It is the layout every session falls back to,
+#: so the Workspace submenu never lists it (it is reached by Reset to Default).
+DEFAULT_LAYOUT_NAME = "Workspace"
+
+#: The appearance in force when none is stored.
+DEFAULT_APPEARANCE_NAME = "dark_gray"
+
+
+def workspace_entries(saved: list[str], active: str) -> list[dict]:
+    """The Workspace submenu's layout entries: every saved layout but the
+    default one, in saved order, labelled by its name, the active one
+    checked."""
+    return [{"name": n, "label": n, "checked": n == active}
+            for n in saved if n != DEFAULT_LAYOUT_NAME]
+
+
+def appearance_entries(appearances: list[dict], active: str | None) -> list[dict]:
+    """The Appearance submenu's entries: every available appearance in order,
+    labelled by its label, the active one checked; no stored appearance
+    means the default one is active."""
+    current = active if active is not None else DEFAULT_APPEARANCE_NAME
+    return [{"name": a["name"], "label": a["label"], "checked": a["name"] == current}
+            for a in appearances]
