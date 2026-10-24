@@ -116,11 +116,17 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                 return ["\(name): unknown dialog event \(ev["event"] ?? "nil")"]
             }
         } else if let action = step["action"] as? String {
+            // A dialog an action opens (`open_boolean_options`) is compared
+            // from the document as it opened, as the engine runner does.
+            let before = documentToTestJson(m.document)
             if action == "select_all" {
                 MenuActions.selectAll(m)
             } else {
                 LayersPanel.dispatchYamlAction(action, model: m, params: step["params"] as? [String: Any] ?? [:])
             }
+            if atOpen == nil, store.getDialogId() != nil { atOpen = before }
+        } else {
+            return ["\(name): a step this runner does not know: \(step)"]
         }
     }
     var failures: [String] = []
@@ -174,6 +180,7 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
 private let dialogActionFixtures = [
     "dialog_actions/transform_options.json",
     "dialog_actions/tool_options.json",
+    "dialog_actions/boolean_options.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {
