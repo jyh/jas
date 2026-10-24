@@ -1124,18 +1124,8 @@ struct YamlElementView: View {
         if WidgetEvent.clickRunsNodeAction(element),
            let actionName = element["action"] as? String {
             let rawParams = (element["params"] as? [String: Any]) ?? [:]
-            var resolved: [String: Any] = [:]
-            for (k, v) in rawParams {
-                if let exprStr = v as? String {
-                    let result = evaluate(exprStr, context: context)
-                    if let any = result.toAny() {
-                        resolved[k] = any
-                    }
-                } else {
-                    resolved[k] = v
-                }
-            }
-            onWidgetAction?(actionName, resolved)
+            onWidgetAction?(actionName,
+                            DialogWidgetActions.resolveParams(rawParams, context: context))
             return
         }
         handleClickBehavior()

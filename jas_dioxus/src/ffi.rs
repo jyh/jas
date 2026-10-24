@@ -3822,6 +3822,188 @@ mod tests {
     /// new gap has to be declared here to pass.
     const ENGINE_DIALOG_VALUE_GAPS: [&str; 0] = [];
 
+    /// The path (child indices from `content`, the plan's scheme) of the ONE
+    /// static node whose every `address` key equals the node's own. A dialog's
+    /// buttons carry no id, and two buttons can share an action (Copy and OK),
+    /// so an address is a key subset; zero or two matches refuse by name.
+    /// A `foreach` row is not addressable statically and is not searched.
+    fn dialog_address_path(content: &serde_json::Value, address: &serde_json::Map<String, serde_json::Value>)
+        -> Result<Vec<usize>, String> {
+        fn walk(node: &serde_json::Value, path: &mut Vec<usize>,
+                address: &serde_json::Map<String, serde_json::Value>, out: &mut Vec<Vec<usize>>) {
+            if address.iter().all(|(k, v)| node.get(k) == Some(v)) {
+                out.push(path.clone());
+            }
+            if let Some(children) = node.get("children").and_then(|c| c.as_array()) {
+                for (i, child) in children.iter().enumerate() {
+                    path.push(i);
+                    walk(child, path, address, out);
+                    path.pop();
+                }
+            }
+        }
+        let mut found = Vec::new();
+        walk(content, &mut Vec::new(), address, &mut found);
+        match found.len() {
+            1 => Ok(found.remove(0)),
+            n => Err(format!("the address {address:?} matches {n} widget(s) of the dialog, want exactly 1: {found:?}")),
+        }
+    }
+
+    /// The resolver refuses an address two buttons share (Rotate's Copy and OK
+    /// both run `rotate_options_confirm`) and one nothing has, and a label
+    /// separates the two.
+    #[test]
+    fn a_dialog_address_names_exactly_one_widget() {
+        let ws = Workspace::load().expect("workspace");
+        let content = &ws.dialog("rotate_options").expect("rotate_options")["content"];
+        let addr = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let shared = dialog_address_path(content, &addr(serde_json::json!({"action": "rotate_options_confirm"})));
+        assert!(shared.as_ref().is_err_and(|e| e.contains("matches 2")), "{shared:?}");
+        let none = dialog_address_path(content, &addr(serde_json::json!({"action": "no_such_action"})));
+        assert!(none.as_ref().is_err_and(|e| e.contains("matches 0")), "{none:?}");
+        let ok = dialog_address_path(content, &addr(serde_json::json!({"action": "rotate_options_confirm", "label": "OK"}))).unwrap();
+        let copy = dialog_address_path(content, &addr(serde_json::json!({"action": "rotate_options_confirm", "label": "Copy"}))).unwrap();
+        assert_ne!(ok, copy, "the label separates OK from Copy");
+    }
+
+    /// The dialog-action corpus's files, by name (the corpus-completeness gate
+    /// reads this list as the claim; Swift's `dialogActionFixtures` is its twin).
+    const DIALOG_ACTION_FIXTURES: &[&str] = &[
+        "dialog_actions/transform_options.json",
+    ];
+
+    /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
+    /// `2026-10-24-jas-DESIGN-dialog-action-corpus`), on the engine's route,
+    /// which is the Windows shell's: `test_fixtures/dialog_actions/*.json`. A
+    /// step is an action (`jas_dispatch_action`), an `open_dialog` (what a
+    /// tool's double-click or an opener action performs), or a `dialog_event`
+    /// (`jas_dialog_event`, addressed by [`dialog_address_path`]). Then:
+    /// `expected_dialog` is the dialog open AFTER the last step (`null` for
+    /// none; `state` is a subset), `expected_state` a subset of the globals,
+    /// `expected_document` `"unchanged"` / `"changed"` against the document
+    /// as the dialog opened, and `expected_json` the pinned golden, which Swift must match.
+    #[test]
+    fn dialog_action_corpus_runs_on_the_engine_route() {
+        use crate::geometry::test_json::document_to_test_json;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures");
+        let root = format!("{fixtures}/dialog_actions");
+        let ws = Workspace::load().expect("workspace");
+        let mut cases = Vec::new();
+        for file in DIALOG_ACTION_FIXTURES {
+            let doc: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(format!("{fixtures}/{file}")).unwrap()).unwrap();
+            cases.extend(doc.as_array().cloned().unwrap_or_default());
+        }
+        // The floor: the count on the day the file was cut. A floor is a minimum.
+        assert!(cases.len() >= 6, "the dialog-action corpus holds {} case(s)", cases.len());
+        let mut failures = Vec::new();
+        for tc in &cases {
+            let name = tc["name"].as_str().unwrap();
+            let e = engine_on(tc["setup_svg"].as_str().unwrap());
+            // `expected_document` compares against the document as the dialog
+            // OPENED (after the setup steps), never the setup file itself.
+            let mut at_open: Option<String> = None;
+            let mut step_failed = false;
+            for step in tc["actions"].as_array().unwrap() {
+                if let Some(od) = step.get("open_dialog") {
+                    let id = od["id"].as_str().unwrap();
+                    let Some(spec) = ws.dialog(id) else {
+                        failures.push(format!("{name}: no dialog {id:?} in the bundle"));
+                        step_failed = true;
+                        break;
+                    };
+                    let params = od.get("params").and_then(|p| p.as_object()).map(|m|
+                        m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                    let en = engine_of(e);
+                    at_open.get_or_insert_with(|| document_to_test_json(en.model.borrow().document()));
+                    let ctx = en.store.borrow().eval_context();
+                    crate::interpreter::effects::open_dialog_in(
+                        id, spec, params, None, &ctx,
+                        &mut en.store.borrow_mut(), Some(&mut *en.model.borrow_mut()));
+                } else if let Some(ev) = step.get("dialog_event") {
+                    let open = engine_of(e).store.borrow().dialog_id().map(str::to_string);
+                    let Some(spec) = open.as_deref().and_then(|id| ws.dialog(id)) else {
+                        failures.push(format!("{name}: a dialog_event with no dialog open ({open:?})"));
+                        step_failed = true;
+                        break;
+                    };
+                    let path = match dialog_address_path(&spec["content"], ev["address"].as_object().unwrap()) {
+                        Ok(p) => p,
+                        Err(why) => { failures.push(format!("{name}: {why}")); step_failed = true; break; }
+                    };
+                    let mut msg = serde_json::json!({"path": path, "event": ev["event"]});
+                    if let Some(v) = ev.get("value") { msg["value"] = v.clone(); }
+                    let msg = msg.to_string();
+                    let reply = take(unsafe { jas_dialog_event(e, msg.as_ptr(), msg.len()) });
+                    if reply.is_empty() {
+                        let err = take(unsafe { jas_last_error_json(e) });
+                        // `Unchanged` is a run that moved nothing, not a refusal of the act.
+                        if !err.contains("Unchanged") {
+                            failures.push(format!("{name}: the dialog refused {msg}: {err}"));
+                            step_failed = true;
+                            break;
+                        }
+                    }
+                } else {
+                    let _ = dispatch(e, &step.to_string());
+                }
+            }
+            if step_failed { unsafe { jas_engine_free(e) }; continue; }
+            let en = engine_of(e);
+            let store = en.store.borrow();
+            match tc.get("expected_dialog") {
+                Some(serde_json::Value::Null) => if let Some(id) = store.dialog_id() {
+                    failures.push(format!("{name}: dialog {id:?} is still open, want none"));
+                },
+                Some(want) => {
+                    if store.dialog_id() != want["id"].as_str() {
+                        failures.push(format!("{name}: the open dialog is {:?}, want {}", store.dialog_id(), want["id"]));
+                    } else {
+                        let ctx = store.eval_context();
+                        for (key, value) in want.get("state").and_then(|s| s.as_object()).into_iter().flatten() {
+                            match ctx.get("dialog").and_then(|d| d.get(key)) {
+                                Some(have) if crate::cross_language_test::tests::json_value_eq(have, value) => {}
+                                have => failures.push(format!("{name}: dialog.{key} is {have:?}, the corpus pins {value}")),
+                            }
+                        }
+                    }
+                }
+                None => {}
+            }
+            for (key, value) in tc.get("expected_state").and_then(|s| s.as_object()).into_iter().flatten() {
+                let have = store.get(key);
+                if !crate::cross_language_test::tests::json_value_eq(have, value) {
+                    failures.push(format!("{name}: state.{key} is {have}, the corpus pins {value}"));
+                }
+            }
+            drop(store);
+            let after = document_to_test_json(en.model.borrow().document());
+            let before = at_open.unwrap_or_default();
+            match tc.get("expected_document").and_then(|v| v.as_str()) {
+                Some(_) if before.is_empty() =>
+                    failures.push(format!("{name}: expected_document needs an open_dialog step to compare from")),
+                Some("unchanged") if after != before =>
+                    failures.push(format!("{name}: the document changed, want unchanged:\n{after}")),
+                Some("changed") if after == before =>
+                    failures.push(format!("{name}: the document is unchanged, want changed")),
+                Some("unchanged") | Some("changed") | None => {}
+                Some(other) => failures.push(format!("{name}: expected_document {other:?} is neither unchanged nor changed")),
+            }
+            if let Some(file) = tc.get("expected_json").and_then(|v| v.as_str()) {
+                match std::fs::read_to_string(format!("{root}/{file}")) {
+                    Ok(want) if want.trim() == after => {}
+                    Ok(_) => failures.push(format!("{name}: canonical JSON mismatch against {file}; ACTUAL:\n{after}")),
+                    Err(_) => failures.push(format!("{name}: no golden {file}; ACTUAL:\n{after}")),
+                }
+            }
+            unsafe { jas_engine_free(e) };
+        }
+        assert!(failures.is_empty(), "{} failure(s) over {} case(s):\n{}",
+            failures.len(), cases.len(), failures.join("\n"));
+    }
+
     /// THE DIALOG DOOR, the shell's one non-YAML act: Escape or the window's
     /// close box. `jas_dialog_dismiss` closes the open dialog as `close_dialog`
     /// does (a preview snapshot no OK action cleared is restored), and says

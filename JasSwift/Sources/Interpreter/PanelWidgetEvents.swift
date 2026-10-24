@@ -34,7 +34,7 @@ struct PanelWidgetEvents {
             WidgetEvent.commit(widget: widget, text: text, store: model.stateStore,
                                panel: panel, actions: ws?.actions(),
                                dialogs: ws?.dialogs(),
-                               platformEffects: alignPlatformEffects(model: model),
+                               platformEffects: platformEffects,
                                host: host)
         }
     }
@@ -45,7 +45,7 @@ struct PanelWidgetEvents {
         run { host, panel, ws in
             WidgetEvent.press(widget: widget, store: model.stateStore, panel: panel,
                               actions: ws?.actions(), dialogs: ws?.dialogs(),
-                              platformEffects: alignPlatformEffects(model: model),
+                              platformEffects: platformEffects,
                               host: host)
         }
     }
@@ -57,7 +57,7 @@ struct PanelWidgetEvents {
         run { host, panel, ws in
             WidgetEvent.gesture(widget: widget, name: name, params: params, store: model.stateStore,
                                 panel: panel, actions: ws?.actions(), dialogs: ws?.dialogs(),
-                                platformEffects: alignPlatformEffects(model: model), model: model,
+                                platformEffects: platformEffects, model: model,
                                 host: host)
         }
     }
@@ -70,7 +70,7 @@ struct PanelWidgetEvents {
             WidgetEvent.click(widget: widget, event: "click", store: model.stateStore,
                               panel: panel, modifiers: modifiers,
                               actions: ws?.actions(), dialogs: ws?.dialogs(),
-                              platformEffects: alignPlatformEffects(model: model),
+                              platformEffects: platformEffects,
                               host: host)
         }
     }
@@ -84,9 +84,25 @@ struct PanelWidgetEvents {
                              event: alt ? "alt_toggle" : "toggle",
                              store: model.stateStore, panel: panel,
                              actions: ws?.actions(), dialogs: ws?.dialogs(),
-                             platformEffects: alignPlatformEffects(model: model),
+                             platformEffects: platformEffects,
                              host: host)
         }
+    }
+
+    /// The platform effects an event runs with. A panel's are Align's. A
+    /// dialog's are also the tool table's, which carries
+    /// `doc.{scale,rotate,shear}.apply` and `doc.preview.{restore,clear}`:
+    /// the dialog's `on_change` (`rotate_options_preview`) runs inside the
+    /// event, and without them it changed nothing on the canvas. A dialog's
+    /// OK already runs with that table (``LayersPanel/dispatchYamlAction``).
+    private var platformEffects: [String: PlatformEffect] {
+        var table = alignPlatformEffects(model: model)
+        if panelId == nil {
+            for (key, handler) in buildYamlToolEffects(model: model) where table[key] == nil {
+                table[key] = handler
+            }
+        }
+        return table
     }
 
     private func run(

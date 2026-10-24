@@ -409,6 +409,14 @@ expression that reads another root, or that does not parse.
   layer**, where `<ident>` is ASCII letters, digits and `_`. A `panel.` path
   writes the widget's own panel, which the reference models as the
   active panel. A `dialog.` path writes the open dialog.
+- **A write to the open dialog runs its `on_change`, once, at the end of
+  the event.** The event is one batch: the bind write, then the declared
+  behaviors, then the dialog's `on_change` action if anything in the batch
+  wrote a dialog field. This is how the transform dialogs preview live
+  (`rotate_options_preview`, "the canvas re-renders live"). *(Until
+  2026-10-24 the reference wrote the bind outside any batch, so a typed
+  angle previewed only at the next button press, while the engine already
+  ran it in the batch.)*
 - **The two-way bind.** A panel's `init:` hydrates each field from an
   expression when the panel opens. When that expression is a bare
   `state.<ident>` (`weight: "state.stroke_width"`), the field and that

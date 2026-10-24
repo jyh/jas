@@ -137,6 +137,22 @@ def gather_evidence(root):
     ev["actions_dispatched"] = {
         a["action"] for case in _fixture_cases(root, "actions")
         for a in case.get("actions", []) if isinstance(a, dict) and "action" in a}
+    # The dialog-action corpus (test_fixtures/dialog_actions/), which Rust (the
+    # engine's jas_dialog_event) and Swift (the overlay's store route) replay:
+    # its plain action steps, and the action a CLICKED widget names by its
+    # address. A widget addressed only by id or label is not resolved here, so
+    # its action is not counted (a known under-count, never an over-count).
+    for case in _fixture_cases(root, "dialog_actions"):
+        for a in case.get("actions", []):
+            if not isinstance(a, dict):
+                continue
+            if "action" in a:
+                ev["actions_dispatched"].add(a["action"])
+            de = a.get("dialog_event")
+            if isinstance(de, dict) and de.get("event") == "click":
+                pressed = (de.get("address") or {}).get("action")
+                if isinstance(pressed, str):
+                    ev["actions_dispatched"].add(pressed)
     # Ops tested at the op layer whose NAME is also an action's. They exercise
     # the layer beneath the action, not the action's spec effects, so they do
     # not cover it; the report counts them so the gap is visible, not silent.
@@ -513,6 +529,14 @@ def self_test():
         put("test_fixtures/actions/a.json",
             [{"name": "x", "actions": [{"action": "covered_act"}]}])
         put("test_fixtures/actions/a_expected.json", {"actions": [{"action": "decoy"}]})
+        put("test_fixtures/dialog_actions/b.json",
+            [{"name": "y", "actions": [
+                {"action": "dlg_setup"},
+                {"open_dialog": {"id": "d0"}},
+                {"dialog_event": {"address": {"action": "dlg_committed"}, "event": "commit", "value": "1"}},
+                {"dialog_event": {"address": {"action": "dlg_pressed", "label": "OK"}, "event": "click"}}]}])
+        put("test_fixtures/dialog_actions/b_expected.json",
+            {"actions": [{"dialog_event": {"address": {"action": "dlg_decoy"}, "event": "click"}}]})
         put("test_fixtures/gestures/g.json", [{"name": "g", "tool": "rect"}])
         put("test_fixtures/keys/k.json",
             [{"name": "k", "expected_json": "k_expected.json",
@@ -548,6 +572,10 @@ def self_test():
                 "later": {"effects": [{"log": "later (deferred)"}]},
                 "undo": {"effects": [{"log": "undo"}]},
                 "empty": {"effects": []},
+                "dlg_setup": {"effects": [{"set": {"a": 1}}]},
+                "dlg_pressed": {"effects": [{"set": {"a": 1}}]},
+                "dlg_committed": {"effects": [{"set": {"a": 1}}]},
+                "dlg_decoy": {"effects": [{"set": {"a": 1}}]},
             },
             "tools": {"rect": {"handlers": {"a": 1}}, "type": {"handlers": {}},
                       "pen": {"handlers": {"a": 1}}},
@@ -583,6 +611,10 @@ def self_test():
         expect(("actions", "later"), NOT_YET_BUILT)
         expect(("actions", "undo"), UNDERSPECIFIED)
         expect(("actions", "empty"), UNDERSPECIFIED)
+        expect(("actions", "dlg_setup"), COVERED)  # a dialog case's plain action step
+        expect(("actions", "dlg_pressed"), COVERED)  # the action a clicked widget names
+        expect(("actions", "dlg_committed"), NOT_YET_BUILT)  # a commit is not a press
+        expect(("actions", "dlg_decoy"), NOT_YET_BUILT)  # an _expected file is not a case
         expect(("tools", "rect"), COVERED)
         expect(("tools", "type"), UNDERSPECIFIED)
         expect(("tools", "pen"), NOT_YET_BUILT)

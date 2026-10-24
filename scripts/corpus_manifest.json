@@ -36,6 +36,21 @@
       },
       "notes": "The ACTION-seam corpus (dispatch_action / dispatchYamlAction). Goldens (*_expected.json) and setup SVGs are claimed transitively via expected_json/setup_svg data references. Second branches of the toggle_all_layers_* actions (all-invisible->preview, all-outline->preview, all-locked->unlock) were reference-only pins (workspace/tests/phase3/) until S4 added the *_all_* port-side fixtures; the remaining phase3 panel-state-driven scenarios stay reference-only pending a port-side panel-seeding mechanism (a named future decision)."
     },
+    "test_fixtures/dialog_actions": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "a dialog action produces a whole document and a dialog state; as for test_fixtures/actions, the law available is the Preservation Law, which needs a document differ (PHASE 2)",
+      "claim_style": {
+        "rust": "path list (DIALOG_ACTION_FIXTURES in src/ffi.rs) + data references",
+        "swift": "path list (dialogActionFixtures in Tests/DialogActionCorpusTests.swift) + data references"
+      },
+      "notes": "The action corpus INSIDE AN OPEN DIALOG (2026-10-24): steps are actions, an open_dialog, or a dialog_event (a commit or a click, addressed by the one widget whose keys match). Rust replays it on the engine's route (jas_dialog_event, the Windows shell's), Swift on the Mac overlay's store route (PanelWidgetEvents + DialogWidgetActions). Swift declares its measured gaps in swiftDialogGaps, a two-sided list. Goldens are claimed transitively via expected_json."
+    },
     "test_fixtures/algorithms": {
       "kind": "fixtures",
       "required_consumers": [

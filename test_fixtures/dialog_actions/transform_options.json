@@ -1,0 +1,75 @@
+[
+ {
+  "name": "rotate_reset_restores_the_dialog_defaults",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "rotate_options"}},
+   {"dialog_event": {"address": {"id": "ro_angle"}, "event": "commit", "value": "30"}},
+   {"dialog_event": {"address": {"action": "rotate_options_reset"}, "event": "click"}}
+  ],
+  "expected_dialog": {"id": "rotate_options", "state": {"angle": 0.0, "preview": true}},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "rotate_commit_previews_the_angle_live",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "rotate_options"}},
+   {"dialog_event": {"address": {"id": "ro_angle"}, "event": "commit", "value": "30"}}
+  ],
+  "expected_dialog": {"id": "rotate_options", "state": {"angle": 30.0}},
+  "expected_document": "changed"
+ },
+ {
+  "name": "rotate_cancel_puts_the_previewed_document_back",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "rotate_options"}},
+   {"dialog_event": {"address": {"id": "ro_angle"}, "event": "commit", "value": "30"}},
+   {"dialog_event": {"address": {"action": "dismiss_dialog", "label": "Cancel"}, "event": "click"}}
+  ],
+  "expected_dialog": null,
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "rotate_ok_rotates_the_selection_and_stores_the_angle",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "rotate_options"}},
+   {"dialog_event": {"address": {"id": "ro_angle"}, "event": "commit", "value": "180"}},
+   {"dialog_event": {"address": {"action": "rotate_options_confirm", "label": "OK"}, "event": "click"}}
+  ],
+  "note": "180 degrees reads the same clockwise and counter-clockwise. The SIGN of a rotation is not pinned here: the dialog says positive is counter-clockwise (ROT-062) and both ports turn a positive angle clockwise on screen, which is open for a ruling.",
+  "expected_dialog": null,
+  "expected_state": {"rotate_angle": 180.0},
+  "expected_json": "rotate_ok_rotates_the_selection_and_stores_the_angle_expected.json"
+ },
+ {
+  "name": "scale_reset_restores_the_dialog_defaults",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "scale_options"}},
+   {"dialog_event": {"address": {"id": "so_uniform_pct"}, "event": "commit", "value": "200"}},
+   {"dialog_event": {"address": {"action": "scale_options_reset"}, "event": "click"}}
+  ],
+  "expected_dialog": {"id": "scale_options", "state": {"uniform": true, "uniform_pct": 100.0, "horizontal_pct": 100.0, "vertical_pct": 100.0, "scale_strokes": true, "scale_corners": false, "preview": true}},
+  "expected_document": "unchanged"
+ },
+ {
+  "name": "shear_reset_restores_the_dialog_defaults",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "shear_options"}},
+   {"dialog_event": {"address": {"id": "sho_angle"}, "event": "commit", "value": "20"}},
+   {"dialog_event": {"address": {"action": "shear_options_reset"}, "event": "click"}}
+  ],
+  "expected_dialog": {"id": "shear_options", "state": {"angle": 0.0, "axis": "horizontal", "axis_angle": 0.0, "preview": true}},
+  "expected_document": "unchanged"
+ }
+]
