@@ -449,32 +449,7 @@ struct YamlDialogOverlay: View {
             dialogState = ds
             return
         }
-        store.setDialog(key, value)
-        // Color picker "Only Web Colors": when toggled on, snap each
-        // RGB channel to multiples of 51 (0/51/102/153/204/255). The
-        // r/g/bl setters route through the YAML lambdas which rebuild
-        // dialog.color, so subsequent reads of h/s/b/r/g/bl/c/m/y/k/hex
-        // see the snapped value.
-        if key == "web_only", let on = value as? Bool, on {
-            // Rust clamps BEFORE its cast here (`v.clamp(0.0, 255.0) as i64`,
-            // renderer.rs) and this port clamped after; the inputs are the
-            // 0...255 r/g/bl getters so the two agree today, but the shape is
-            // risk R9's and saturatingInt removes it either way.
-            func snap(_ v: Int) -> Int {
-                let n = (Double(v) / 51.0).rounded() * 51.0
-                return min(max(saturatingInt(n), 0), 255)
-            }
-            func ival(_ k: String) -> Int {
-                if let any = store.getDialog(k) {
-                    if let i = any as? Int { return i }
-                    if let d = any as? Double { return saturatingInt(d.rounded()) }
-                }
-                return 0
-            }
-            store.setDialog("r", snap(ival("r")))
-            store.setDialog("g", snap(ival("g")))
-            store.setDialog("bl", snap(ival("bl")))
-        }
+        DialogWidgetActions.write(key, value, store: store)
         if var ds = dialogState {
             ds.state = store.getDialogState()
             dialogState = ds
@@ -484,32 +459,15 @@ struct YamlDialogOverlay: View {
     /// Dispatch a dialog-body widget-level ``action:`` click. Params
     /// are already resolved against the dialog ctx by YamlElementView.
     ///
-    /// Two action shapes:
-    /// - ``dismiss_dialog`` — close the store and zero the binding.
-    ///   Matches the Python YamlDialogView._dispatch_dialog_action
-    ///   special case (Cancel button idiom).
-    /// - any other action name — route through
-    ///   ``LayersPanel.dispatchYamlAction`` with the resolved params.
-    ///   If the action's effects include ``close_dialog``, the store's
-    ///   dialog id becomes nil; we mirror that by zeroing the binding.
+    /// The act is ``DialogWidgetActions/run(_:params:model:)``, which the
+    /// dialog action corpus drives; this method only zeroes the binding when
+    /// the act left no dialog open.
     private func handleDialogWidgetAction(_ actionName: String,
                                            _ params: [String: Any]) {
-        if actionName == "dismiss_dialog" {
-            model?.stateStore.closeDialog()
-            dialogState = nil
-            return
-        }
         guard let m = model else { return }
-        let abSel = (m.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
-            .compactMap { $0 as? String } ?? []
-        LayersPanel.dispatchYamlAction(
-            actionName, model: m,
-            artboardsPanelSelection: abSel,
-            params: params
-        )
         // The action's effects may have run close_dialog — sync the
         // SwiftUI binding so the overlay dismisses.
-        if m.stateStore.getDialogId() == nil {
+        if DialogWidgetActions.run(actionName, params: params, model: m) {
             dialogState = nil
         }
     }

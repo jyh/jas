@@ -136,6 +136,8 @@ enum WidgetEvent {
         let ran = runBehaviors(declared(widget, events: commitEvents), value: parsed.value,
                                store: store, actions: actions, dialogs: dialogs,
                                platformEffects: platformEffects, model: model, host: host)
+        settle(store: store, actions: actions, dialogs: dialogs,
+               platformEffects: platformEffects, model: model)
         return Result(outcome: target != nil || ran > 0 ? "committed" : "inert",
                       value: parsed.value, bindWritten: target != nil, behaviorsRun: ran)
     }
@@ -222,6 +224,8 @@ enum WidgetEvent {
             return Result(outcome: "inert", value: value)
         }
         writeBind(target, value: value, store: store, panel: panel, host: host)
+        settle(store: store, actions: actions, dialogs: dialogs,
+               platformEffects: platformEffects, model: model)
         return Result(outcome: "committed", value: value, bindWritten: true)
     }
 
@@ -262,6 +266,8 @@ enum WidgetEvent {
         ran += runBehaviors(declared(widget, events: pressEvents), value: true, store: store,
                             actions: actions, dialogs: dialogs,
                             platformEffects: platformEffects, model: model, host: host)
+        settle(store: store, actions: actions, dialogs: dialogs,
+               platformEffects: platformEffects, model: model)
         return Result(outcome: ran > 0 || written ? "committed" : "inert", value: true,
                       bindWritten: written, behaviorsRun: ran)
     }
@@ -306,6 +312,8 @@ enum WidgetEvent {
         let ran = runBehaviors(declared(widget, events: chooseEvents), value: optionId,
                                store: store, actions: actions, dialogs: dialogs,
                                platformEffects: platformEffects, model: model, host: host)
+        settle(store: store, actions: actions, dialogs: dialogs,
+               platformEffects: platformEffects, model: model)
         return Result(outcome: target != nil || ran > 0 ? "committed" : "inert",
                       value: optionId, bindWritten: target != nil, behaviorsRun: ran)
     }
@@ -635,6 +643,19 @@ enum WidgetEvent {
 
     /// Run `behaviors` in order. Within one, its effects run first, then its
     /// action. The count excludes a behavior whose `condition` is false.
+    /// End the event as one batch ends: a write to a field of the open dialog
+    /// runs the dialog's `on_change` action, once (WIDGET_EVENTS.md, "The bound
+    /// target"; the reference's `_settle`). An empty batch runs `runEffects`'
+    /// post-batch hook, which fires only while the dialog is dirty, so after a
+    /// behavior batch that already fired it this is a no-op.
+    private static func settle(
+        store: StateStore, actions: [String: Any]?, dialogs: [String: Any]?,
+        platformEffects: [String: PlatformEffect], model: Model?
+    ) {
+        runEffects([], ctx: [:], store: store, actions: actions, dialogs: dialogs,
+                   platformEffects: platformEffects, model: model)
+    }
+
     private static func runBehaviors(
         _ behaviors: [[String: Any]], value: Any?, store: StateStore,
         actions: [String: Any]?, dialogs: [String: Any]?,

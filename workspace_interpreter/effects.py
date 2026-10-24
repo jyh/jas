@@ -53,6 +53,31 @@ def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
         store.set(target, value)
 
 
+def run_dialog_on_change(ctx: dict, store: StateStore,
+                         actions: dict | None = None,
+                         platform_effects: dict | None = None,
+                         dialogs: dict | None = None,
+                         schema=None,
+                         diagnostics: list | None = None,
+                         **_ignored) -> None:
+    """Dialog on_change post-batch hook. Fires the action declared on
+    the open dialog's on_change field whenever the batch mutated
+    dialog state. Per-batch debounced (one fire per UI tick batch).
+    Re-entrancy guarded so the action's effects do not re-fire.
+    See SCALE_TOOL.md §Preview. ``run_effects`` runs it after every
+    batch, and a widget event after its bind write (``widget_event``),
+    which is a batch of its own that may run no effects at all."""
+    if not store.is_firing_on_change() and store.take_dialog_dirty():
+        on_change_action = store.get_dialog_on_change()
+        if on_change_action:
+            store.set_firing_on_change(True)
+            try:
+                _run_one({"dispatch": on_change_action}, ctx, store, actions,
+                         platform_effects, dialogs, schema, diagnostics)
+            finally:
+                store.set_firing_on_change(False)
+
+
 def run_effects(effects: list, ctx: dict, store: StateStore,
                 actions: dict | None = None,
                 platform_effects: dict | None = None,
@@ -128,20 +153,8 @@ def run_effects(effects: list, ctx: dict, store: StateStore,
             if as_name is not None and return_value is not None:
                 ctx = {**ctx, as_name: return_value}
 
-    # Dialog on_change post-batch hook. Fires the action declared on
-    # the open dialog's on_change field whenever this batch mutated
-    # dialog state. Per-batch debounced (one fire per UI tick batch).
-    # Re-entrancy guarded so the action's effects do not re-fire.
-    # See SCALE_TOOL.md §Preview.
-    if not store.is_firing_on_change() and store.take_dialog_dirty():
-        on_change_action = store.get_dialog_on_change()
-        if on_change_action:
-            store.set_firing_on_change(True)
-            try:
-                _run_one({"dispatch": on_change_action}, ctx, store, actions,
-                         platform_effects, dialogs, schema, diagnostics)
-            finally:
-                store.set_firing_on_change(False)
+    run_dialog_on_change(ctx, store, actions, platform_effects, dialogs,
+                         schema, diagnostics)
 
     # OP_LOG.md §9, Increment 3b-B: commit the transaction this batch opened (if
     # any), making the whole action one undo step. Name it with the action/event

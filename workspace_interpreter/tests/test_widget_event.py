@@ -1132,6 +1132,53 @@ class TestShippedRotateButtons:
         assert self._run("Copy") == (we.EventResult("committed", behaviors_run=1), 30, True)
 
 
+class TestDialogOnChange:
+    """A write to a field of the open dialog runs the dialog's `on_change`
+    action, once, in the same event. The transform dialogs' "Preview: the
+    canvas re-renders live" is that action (`rotate_options_preview`); until
+    2026-10-24 the reference wrote the bind outside any batch, so a typed
+    angle previewed only at the NEXT button press, while the engine ran it."""
+
+    ACTIONS = {"seen": {"effects": [{"set": {"fired": "state.fired + 1",
+                                              "fired_angle": "dialog.angle"}}]}}
+
+    def _store(self):
+        store = StateStore({"fired": 0})
+        store.init_dialog("d", {"angle": 0, "on": False})
+        store.set_dialog_on_change("seen")
+        store.take_dialog_dirty()
+        return store
+
+    def test_a_commit_runs_on_change_with_the_new_value(self):
+        store = self._store()
+        w = {"type": "number_input", "bind": {"value": "dialog.angle"}}
+        r = we.commit(w, "30", store, panel=None, actions=self.ACTIONS)
+        assert r.outcome == "committed"
+        assert (store.get("fired"), store.get("fired_angle")) == (1, 30.0)
+
+    def test_a_press_runs_on_change(self):
+        store = self._store()
+        w = {"type": "toggle", "bind": {"checked": "dialog.on"}}
+        we.press(w, store, panel=None, actions=self.ACTIONS)
+        assert store.get_dialog("on") is True
+        assert store.get("fired") == 1
+
+    def test_a_behavior_batch_runs_it_once_not_twice(self):
+        store = self._store()
+        w = {"type": "number_input", "bind": {"value": "dialog.angle"},
+             "behavior": [{"event": "commit", "effects": [{"set": {"x": "1"}}]}]}
+        we.commit(w, "5", store, panel=None, actions=self.ACTIONS)
+        assert store.get("fired") == 1
+
+    def test_a_panel_write_runs_no_dialog_action(self):
+        store = self._store()
+        store.init_panel("p", {"n": 0})
+        store.set_active_panel("p")
+        w = {"type": "number_input", "bind": {"value": "panel.n"}}
+        we.commit(w, "4", store, panel=None, actions=self.ACTIONS)
+        assert store.get("fired") == 0
+
+
 class TestPickSynthetic:
     def test_a_toggle_item_runs_the_events_behaviors_with_item_bound(self):
         store = StateStore()

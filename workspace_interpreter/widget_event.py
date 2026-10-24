@@ -54,7 +54,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from workspace_interpreter.effects import _set_by_scoped_target, run_effects
+from workspace_interpreter.effects import (
+    _set_by_scoped_target,
+    run_dialog_on_change,
+    run_effects,
+)
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.length import parse_length
 from workspace_interpreter.state_store import StateStore
@@ -357,6 +361,14 @@ def _write_bind(target: tuple[str, str], value, store: StateStore, panel) -> Non
             store.set(global_key, value)
 
 
+def _settle(store: StateStore, run_kwargs: dict) -> None:
+    """End the event as one batch ends: a write to a field of the open dialog
+    runs the dialog's ``on_change`` action, once (WIDGET_EVENTS.md, "The bound
+    target"). The hook fires only while the dialog is dirty, so after a
+    behavior batch that already fired it this is a no-op."""
+    run_dialog_on_change({}, store, **run_kwargs)
+
+
 def evaluate_in(store: StateStore, expr: str, ctx: dict | None = None):
     """Evaluate ``expr`` against the store, as a behavior would see it."""
     return evaluate(expr, store.eval_context(ctx or {})).value
@@ -426,6 +438,7 @@ def commit(widget: dict, text: str | None, store: StateStore, *,
         _write_bind(target, value, store, panel)
     ran = _run_behaviors(_declared(widget, COMMIT_EVENTS), value, store,
                          run_kwargs)
+    _settle(store, run_kwargs)
     outcome = "committed" if target is not None or ran else "inert"
     return EventResult(outcome, value=value,
                        bind_written=target is not None, behaviors_run=ran)
@@ -455,6 +468,7 @@ def press(widget: dict, store: StateStore, *, panel: dict | None,
     if target is None:
         return EventResult("inert", value=value)
     _write_bind(target, value, store, panel)
+    _settle(store, run_kwargs)
     return EventResult("committed", value=value, bind_written=True)
 
 
@@ -487,6 +501,7 @@ def check(widget: dict, store: StateStore, *, panel: dict | None,
             _write_bind(target, True, store, panel)
             written = True
     ran += _run_behaviors(_declared(widget, PRESS_EVENTS), True, store, run_kwargs)
+    _settle(store, run_kwargs)
     return EventResult("committed" if ran or written else "inert", value=True,
                        bind_written=written, behaviors_run=ran)
 
@@ -520,6 +535,7 @@ def choose(widget: dict, option_id, event: str, store: StateStore, *,
     if target is not None:
         _write_bind(target, option_id, store, panel)
     ran = _run_behaviors(_declared(widget, (event,)), option_id, store, run_kwargs)
+    _settle(store, run_kwargs)
     return EventResult("committed" if target is not None or ran else "inert",
                        value=option_id, bind_written=target is not None,
                        behaviors_run=ran)
