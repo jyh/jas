@@ -374,6 +374,13 @@ impl EffectHost for ToolHost {
 /// namespace (e.g. `transform_reference_point`) are deliberately absent so
 /// the bridge can never clobber a mid-gesture handler write. The set must
 /// stay identical across all four apps for cross-language equivalence.
+/// App-level `state.*` keys a tool's own handlers WRITE (the complement of
+/// [`BRIDGED_STATE_KEYS`]): copied UP from the tool's store to the app's after
+/// every event, so a dialog applying in the app's store (Rotate Options' OK)
+/// reads the point an Alt+click set (flask STATUS §537). Only a key the tool
+/// has set is copied, so a tool that never set it clobbers nothing.
+pub(crate) const TOOL_OWNED_STATE_KEYS: &[&str] = &["transform_reference_point"];
+
 pub(crate) const BRIDGED_STATE_KEYS: &[&str] = &[
     "fill_color",
     "stroke_color",
@@ -598,6 +605,13 @@ impl CanvasTool for YamlTool {
         // way when Escape-to-commit-pen-path stopped working in
         // dx serve. Dispatch here too, with empty modifiers.
         self.on_key_event(model, key, KeyMods::default())
+    }
+
+    fn owned_globals(&self) -> Vec<(String, serde_json::Value)> {
+        TOOL_OWNED_STATE_KEYS.iter()
+            .map(|k| (k.to_string(), self.store.get(k).clone()))
+            .filter(|(_, v)| !v.is_null())
+            .collect()
     }
 
     fn take_opened_dialog(&mut self) -> Option<(String, serde_json::Map<String, serde_json::Value>)> {

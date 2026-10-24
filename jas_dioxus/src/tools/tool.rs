@@ -265,6 +265,13 @@ pub trait CanvasTool {
     /// host opens it in the app's store, where every dialog lives. `None`
     /// when the event opened none.
     fn take_opened_dialog(&mut self) -> Option<(String, serde_json::Map<String, serde_json::Value>)> { None }
+    /// The app-level globals this tool's handlers OWN and have set
+    /// (`yaml_tool::TOOL_OWNED_STATE_KEYS`, e.g. the transform tools'
+    /// `transform_reference_point`), read from the tool's private store. The
+    /// host copies them to the app's store after every event, beside the
+    /// opened dialog, so a dialog that applies there sees the tool's point.
+    /// Default: none (native tools run no state store).
+    fn owned_globals(&self) -> Vec<(String, serde_json::Value)> { Vec::new() }
     /// Optional cursor CSS override. When `Some`, the canvas displays this
     /// cursor instead of the static [`ToolKind::cursor_css`] value.
     fn cursor_css_override(&self) -> Option<String> { None }
