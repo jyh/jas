@@ -509,12 +509,14 @@ pub(crate) fn MenuBarView(
                     let open_menu_ws = open_menu_sig;
                     let active_name = active_layout_name.clone();
                     let has_saved_layout = active_name != super::workspace::WORKSPACE_LAYOUT_NAME;
-                    // Filter out "Workspace" from the layout list
-                    let visible_layouts: Vec<String> = saved_layout_names
-                        .iter()
-                        .filter(|n| n.as_str() != super::workspace::WORKSPACE_LAYOUT_NAME)
-                        .cloned()
-                        .collect();
+                    // The listed layouts and their checks: one rule, pinned by
+                    // submenu_entries.json (`menu_state::workspace_entries`).
+                    let visible_layouts: Vec<(String, bool)> =
+                        crate::interpreter::menu_state::workspace_entries(&saved_layout_names, &active_name)
+                            .as_array().into_iter().flatten()
+                            .map(|e| (e["name"].as_str().unwrap_or_default().to_string(),
+                                      e["checked"].as_bool().unwrap_or(false)))
+                            .collect();
 
                     let mut items: Vec<Result<VNode, RenderError>> = Vec::new();
 
@@ -539,10 +541,9 @@ pub(crate) fn MenuBarView(
                                         onmouseenter: move |_| { workspace_submenu_open.set(true); },
 
                                         // List saved layouts with check mark
-                                        for name in visible_layouts.clone() {
+                                        for (name, is_active) in visible_layouts.clone() {
                                             {
                                                 let act = act_ws.clone();
-                                                let is_active = name == active_name;
                                                 let check = if is_active { "\u{2713} " } else { "    " };
                                                 let display = format!("{check}{name}");
                                                 let name_clone = name.clone();
@@ -674,8 +675,16 @@ pub(crate) fn MenuBarView(
                     };
                     let active_appearance = js_sys::eval("getActiveAppearance()")
                         .ok()
-                        .and_then(|v| v.as_string())
-                        .unwrap_or_else(|| "dark_gray".to_string());
+                        .and_then(|v| v.as_string());
+                    // The rows and their checks: one rule, pinned by
+                    // submenu_entries.json (`menu_state::appearance_entries`).
+                    let appearance_rows: Vec<(String, String, bool)> =
+                        crate::interpreter::menu_state::appearance_entries(&appearances, active_appearance.as_deref())
+                            .as_array().into_iter().flatten()
+                            .map(|e| (e["name"].as_str().unwrap_or_default().to_string(),
+                                      e["label"].as_str().unwrap_or_default().to_string(),
+                                      e["checked"].as_bool().unwrap_or(false)))
+                            .collect();
 
                     let mut items: Vec<Result<VNode, RenderError>> = Vec::new();
                     items.push({
@@ -697,9 +706,8 @@ pub(crate) fn MenuBarView(
                                         style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
                                         onmouseenter: move |_| { appearance_submenu_open.set(true); },
 
-                                        for (name, app_label) in appearances.clone() {
+                                        for (name, app_label, is_active) in appearance_rows.clone() {
                                             {
-                                                let is_active = name == active_appearance;
                                                 let check = if is_active { "\u{2713} " } else { "    " };
                                                 let display = format!("{check}{app_label}");
                                                 let name_clone = name.clone();

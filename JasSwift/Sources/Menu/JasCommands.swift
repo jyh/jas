@@ -410,12 +410,12 @@ public struct JasCommands: Commands {
         SwiftUI.Group {
             if let ws = workspace {
                 Menu("Workspace \u{25B6}") {
-                    let visibleLayouts = ws.appConfig.savedLayouts.filter { $0 != workspaceLayoutName }
-                    ForEach(visibleLayouts, id: \.self) { name in
-                        let isActive = name == ws.appConfig.activeLayout
-                        let prefix = isActive ? "\u{2713} " : "    "
-                        Button(prefix + name) {
-                            ws.switchLayout(name)
+                    // One rule, pinned by submenu_entries.json.
+                    ForEach(MenuState.workspaceEntries(saved: ws.appConfig.savedLayouts,
+                                                       active: ws.appConfig.activeLayout), id: \.name) { entry in
+                        let prefix = entry.checked ? "\u{2713} " : "    "
+                        Button(prefix + entry.label) {
+                            ws.switchLayout(entry.name)
                         }
                     }
 
@@ -481,9 +481,10 @@ public struct JasCommands: Commands {
     private func appearanceSubmenu() -> some View {
         if let ws = workspace {
             Menu("Appearance \u{25B6}") {
-                ForEach(predefinedAppearances, id: \.name) { entry in
-                    let isActive = entry.name == (activeAppearanceName ?? "dark_gray")
-                    let prefix = isActive ? "\u{2713} " : "    "
+                // One rule, pinned by submenu_entries.json.
+                ForEach(MenuState.appearanceEntries(predefinedAppearances.map { ($0.name, $0.label) },
+                                                    active: activeAppearanceName), id: \.name) { entry in
+                    let prefix = entry.checked ? "\u{2713} " : "    "
                     Button(prefix + entry.label) {
                         ws.switchAppearance(entry.name)
                     }

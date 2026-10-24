@@ -3369,6 +3369,35 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - The two dynamic submenus (menu_workspace, menu_appearance)
+
+/// The entries each dynamic submenu lists, which menu_state.json cannot see.
+/// Generated from the reference by scripts/gen_submenu_entries_corpus.py.
+@Test func testAlgorithmSubmenuEntries() throws {
+    let data = readFixture("algorithms/submenu_entries.json").data(using: .utf8)!
+    let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+    #expect(cases.count >= 9, "the corpus has \(cases.count) cases")
+    for tc in cases {
+        let name = tc["name"] as! String
+        let args = tc["args"] as! [String: Any]
+        let actual: [MenuState.SubmenuEntry]
+        switch tc["function"] as! String {
+        case "workspace_entries":
+            actual = MenuState.workspaceEntries(saved: args["saved"] as! [String], active: args["active"] as! String)
+        case "appearance_entries":
+            let apps = (args["appearances"] as! [[String: Any]]).map { ($0["name"] as! String, $0["label"] as! String) }
+            actual = MenuState.appearanceEntries(apps, active: args["active"] as? String)
+        case let other:
+            Issue.record("Unknown function: \(other)"); continue
+        }
+        let expected = (tc["expected"] as! [[String: Any]]).map {
+            MenuState.SubmenuEntry(name: $0["name"] as! String, label: $0["label"] as! String,
+                                   checked: $0["checked"] as! Bool)
+        }
+        #expect(actual == expected, "submenu entries '\(name)' mismatch")
+    }
+}
+
 // MARK: - Menu enabled/checked state (chrome seam) algorithm vectors
 
 @Test func testAlgorithmMenuState() throws {

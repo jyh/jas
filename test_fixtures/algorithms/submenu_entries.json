@@ -1,0 +1,249 @@
+[
+ {
+  "name": "no_saved_layouts",
+  "submenu": "menu_workspace",
+  "function": "workspace_entries",
+  "args": {
+   "saved": [],
+   "active": "Workspace"
+  },
+  "expected": []
+ },
+ {
+  "name": "the_default_layout_is_never_listed",
+  "submenu": "menu_workspace",
+  "function": "workspace_entries",
+  "args": {
+   "saved": [
+    "Workspace",
+    "Painting",
+    "Type"
+   ],
+   "active": "Workspace"
+  },
+  "expected": [
+   {
+    "name": "Painting",
+    "label": "Painting",
+    "checked": false
+   },
+   {
+    "name": "Type",
+    "label": "Type",
+    "checked": false
+   }
+  ]
+ },
+ {
+  "name": "the_active_layout_is_checked",
+  "submenu": "menu_workspace",
+  "function": "workspace_entries",
+  "args": {
+   "saved": [
+    "Workspace",
+    "Painting",
+    "Type"
+   ],
+   "active": "Type"
+  },
+  "expected": [
+   {
+    "name": "Painting",
+    "label": "Painting",
+    "checked": false
+   },
+   {
+    "name": "Type",
+    "label": "Type",
+    "checked": true
+   }
+  ]
+ },
+ {
+  "name": "saved_order_is_kept",
+  "submenu": "menu_workspace",
+  "function": "workspace_entries",
+  "args": {
+   "saved": [
+    "Zeta",
+    "Alpha",
+    "Workspace",
+    "Mid"
+   ],
+   "active": "Alpha"
+  },
+  "expected": [
+   {
+    "name": "Zeta",
+    "label": "Zeta",
+    "checked": false
+   },
+   {
+    "name": "Alpha",
+    "label": "Alpha",
+    "checked": true
+   },
+   {
+    "name": "Mid",
+    "label": "Mid",
+    "checked": false
+   }
+  ]
+ },
+ {
+  "name": "an_active_name_not_saved_checks_nothing",
+  "submenu": "menu_workspace",
+  "function": "workspace_entries",
+  "args": {
+   "saved": [
+    "Painting"
+   ],
+   "active": "Gone"
+  },
+  "expected": [
+   {
+    "name": "Painting",
+    "label": "Painting",
+    "checked": false
+   }
+  ]
+ },
+ {
+  "name": "no_stored_appearance_means_the_default",
+  "submenu": "menu_appearance",
+  "function": "appearance_entries",
+  "args": {
+   "appearances": [
+    {
+     "name": "dark_gray",
+     "label": "Dark Gray"
+    },
+    {
+     "name": "medium_gray",
+     "label": "Medium Gray"
+    },
+    {
+     "name": "light_gray",
+     "label": "Light Gray"
+    }
+   ],
+   "active": null
+  },
+  "expected": [
+   {
+    "name": "dark_gray",
+    "label": "Dark Gray",
+    "checked": true
+   },
+   {
+    "name": "medium_gray",
+    "label": "Medium Gray",
+    "checked": false
+   },
+   {
+    "name": "light_gray",
+    "label": "Light Gray",
+    "checked": false
+   }
+  ]
+ },
+ {
+  "name": "the_active_appearance_is_checked",
+  "submenu": "menu_appearance",
+  "function": "appearance_entries",
+  "args": {
+   "appearances": [
+    {
+     "name": "dark_gray",
+     "label": "Dark Gray"
+    },
+    {
+     "name": "medium_gray",
+     "label": "Medium Gray"
+    },
+    {
+     "name": "light_gray",
+     "label": "Light Gray"
+    }
+   ],
+   "active": "light_gray"
+  },
+  "expected": [
+   {
+    "name": "dark_gray",
+    "label": "Dark Gray",
+    "checked": false
+   },
+   {
+    "name": "medium_gray",
+    "label": "Medium Gray",
+    "checked": false
+   },
+   {
+    "name": "light_gray",
+    "label": "Light Gray",
+    "checked": true
+   }
+  ]
+ },
+ {
+  "name": "an_unknown_appearance_checks_nothing",
+  "submenu": "menu_appearance",
+  "function": "appearance_entries",
+  "args": {
+   "appearances": [
+    {
+     "name": "dark_gray",
+     "label": "Dark Gray"
+    },
+    {
+     "name": "medium_gray",
+     "label": "Medium Gray"
+    },
+    {
+     "name": "light_gray",
+     "label": "Light Gray"
+    }
+   ],
+   "active": "neon"
+  },
+  "expected": [
+   {
+    "name": "dark_gray",
+    "label": "Dark Gray",
+    "checked": false
+   },
+   {
+    "name": "medium_gray",
+    "label": "Medium Gray",
+    "checked": false
+   },
+   {
+    "name": "light_gray",
+    "label": "Light Gray",
+    "checked": false
+   }
+  ]
+ },
+ {
+  "name": "labels_come_from_the_entry",
+  "submenu": "menu_appearance",
+  "function": "appearance_entries",
+  "args": {
+   "appearances": [
+    {
+     "name": "custom_1",
+     "label": "My Theme"
+    }
+   ],
+   "active": "custom_1"
+  },
+  "expected": [
+   {
+    "name": "custom_1",
+    "label": "My Theme",
+    "checked": true
+   }
+  ]
+ }
+]
