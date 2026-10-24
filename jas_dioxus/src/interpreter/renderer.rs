@@ -841,7 +841,14 @@ fn apply_set_effects(
         }
     }
 
-    // Apply all successful writes as a batch
+    // Apply all successful writes as a batch. A gradient key edits the
+    // gradient the panel shows, which is the selection's (the dock lays
+    // `gradient_host::live_values` over the panel), so the panel struct is
+    // read from the selection first; otherwise the apply below writes the
+    // struct's last values over every field the key did not name.
+    if pending.iter().any(|(key, _)| key.starts_with("gradient_")) {
+        st.sync_gradient_panel_from_selection();
+    }
     let mut any_gradient_key = false;
     for (key, val) in pending {
         if key.starts_with("gradient_") { any_gradient_key = true; }
@@ -12909,6 +12916,76 @@ mod tests {
         assert_eq!(st.gradient_slider_gesture("key", &json!({"key": "Right", "shift": true})), Ok(true));
         assert_eq!(doc(&st), vec![45.0, 100.0]);
         assert_eq!(st.gradient_slider_gesture("key", &json!({"key": "q"})), Ok(false));
+    }
+
+    #[test]
+    fn a_web_slider_drag_edits_the_selections_stops_not_the_panels_last_ones() {
+        // The web panel shows the selection's gradient (`live_panel_state_table`),
+        // so a drag on it must edit THOSE stops. Nothing here syncs the panel
+        // struct first, as nothing does in the app.
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        use serde_json::json;
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(red, 0.0), stop(blue, 100.0)],
+            ..Gradient::default()
+        }));
+        assert_eq!(st.gradient_slider_gesture("press", &json!({"index": 0, "location": 0})), Ok(true));
+        assert_eq!(st.gradient_slider_gesture("release", &json!({"location": 30, "dy": 0})), Ok(true));
+        let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().cloned().unwrap();
+        assert_eq!(g.stops.iter().map(|s| (s.color, s.location, s.midpoint_to_next)).collect::<Vec<_>>(),
+                   vec![(red, 30.0, 40.0), (blue, 100.0, 40.0)]);
+    }
+
+    #[test]
+    fn a_web_stop_combo_edits_the_selections_stops_not_the_panels_last_ones() {
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(red, 0.0), stop(blue, 100.0)],
+            ..Gradient::default()
+        }));
+        st.gradient_panel.selected_stop_index = 0;
+        let mut m = serde_json::Map::new();
+        m.insert("gradient_stop_opacity".into(), serde_json::json!(25));
+        apply_set_effects(&m, &mut st);
+        let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().cloned().unwrap();
+        assert_eq!(g.stops.iter().map(|s| (s.color, s.opacity)).collect::<Vec<_>>(),
+                   vec![(red, 25.0), (blue, 100.0)]);
+    }
+
+    #[test]
+    fn a_web_gradient_field_edit_keeps_the_selections_stops() {
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(red, 0.0), stop(blue, 100.0)],
+            dither: true,
+            ..Gradient::default()
+        }));
+        let mut m = serde_json::Map::new();
+        m.insert("gradient_angle".into(), serde_json::json!(45));
+        apply_set_effects(&m, &mut st);
+        let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().cloned().unwrap();
+        assert_eq!(g.angle, 45.0);
+        assert!(g.dither, "an angle edit leaves the other fields");
+        assert_eq!(g.stops.iter().map(|s| (s.color, s.location)).collect::<Vec<_>>(),
+                   vec![(red, 0.0), (blue, 100.0)]);
     }
 
     #[test]
