@@ -13031,6 +13031,45 @@ mod tests {
     }
 
     #[test]
+    fn the_web_slider_shows_its_drag_preview_and_its_selected_stop() {
+        // The web slider draws `panel.*` from `live_panel_state_table`, which
+        // lays the selection's gradient over the panel. While a gesture
+        // stands, the panel struct is its preview (as the engine scope lets
+        // the store's stops stand over the document's), and the selected
+        // stop and midpoint are the struct's at all times: the keys act on
+        // them, so the slider must show them.
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        use crate::interpreter::gradient_host::GRADIENT_PANEL;
+        use crate::workspace::dock_panel::live_panel_state_table;
+        use serde_json::json;
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(Color::rgb(1.0, 0.0, 0.0), 0.0), stop(Color::rgb(0.0, 0.0, 1.0), 100.0)],
+            ..Gradient::default()
+        }));
+        let shown = |st: &AppState, k: &str| live_panel_state_table(st)[GRADIENT_PANEL][k].clone();
+        let first_location = |st: &AppState| shown(st, "stops")[0]["location"].as_f64();
+        assert_eq!(st.gradient_slider_gesture("press", &json!({"index": 0, "location": 0})), Ok(true));
+        assert_eq!(st.gradient_slider_gesture("drag", &json!({"location": 30, "dy": 0})), Ok(true));
+        assert_eq!(first_location(&st), Some(30.0), "mid-drag the slider shows the preview");
+        assert_eq!(shown(&st, "selected_stop_index"), json!(0));
+        assert_eq!(st.gradient_slider_gesture("release", &json!({"location": 35, "dy": 0})), Ok(true));
+        assert_eq!(first_location(&st), Some(35.0), "after the release, the document's");
+        assert_eq!(shown(&st, "selected_stop_index"), json!(0), "the pressed stop stays selected");
+        // With no gesture standing the stops are the selection's, never the
+        // struct's last ones: a gradient set by another route shows at once.
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(Color::BLACK, 10.0), stop(Color::WHITE, 90.0)],
+            ..Gradient::default()
+        }));
+        assert_eq!(first_location(&st), Some(10.0));
+        assert_eq!(st.gradient_slider_gesture("press_midpoint", &json!({"pair": 0, "location": 50})), Ok(true));
+        assert_eq!((shown(&st, "selected_stop_index"), shown(&st, "selected_midpoint_index")), (json!(-1), json!(0)));
+    }
+
+    #[test]
     fn a_web_gradient_field_edit_keeps_the_selections_stops() {
         use crate::geometry::element::{Color, Gradient, GradientStop};
         let red = Color::rgb(1.0, 0.0, 0.0);
