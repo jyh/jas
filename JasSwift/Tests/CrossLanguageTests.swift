@@ -166,6 +166,28 @@ private func withoutJasGradients(_ svg: String) -> String {
     let g = svgToDocument(svg).layers.first?.children.first?.fillGradient
     #expect(g?.angle == 90, "the jas attribute's angle, not the url's: \(String(describing: g?.angle))")
 }
+/// The twin of Rust's `one_standard_gradient_on_same_sized_shapes_imports_as_one_gradient`
+/// (flask STATUS §530): one `<linearGradient>` on same-sized shapes at
+/// different places imports as ONE gradient; the remap's float noise is snapped.
+@Test func svgOneStandardGradientOnSameSizedShapesImportsAsOneGradient() {
+    let places: [(String, String)] = [("0", "0"), ("37.3", "11.1"), ("61.7", "52.9"), ("13.13", "70.07"), ("88.8", "3.3")]
+    let rects = places.map { "<rect x=\"\($0.0)\" y=\"\($0.1)\" width=\"23.7\" height=\"11.9\" fill=\"url(#rb)\"/>" }.joined()
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 90" width="120" height="90">
+      <defs><linearGradient id="rb" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="rgb(255,0,0)"/><stop offset="1" stop-color="rgb(0,0,255)"/>
+      </linearGradient></defs><g>\(rects)</g></svg>
+    """
+    var gradients: [Gradient?] = []
+    for layer in svgToDocument(svg).layers {
+        Element.layer(layer).forEachPaintable { gradients.append($0.fillGradient) }
+    }
+    #expect(gradients.count == 5)
+    guard let first = gradients.first ?? nil else { Issue.record("no gradient"); return }
+    for (i, g) in gradients.enumerated() {
+        #expect(g == first, "shape \(i)'s gradient differs from shape 0's")
+    }
+}
 /// I1b-3, the twin of Rust's `an_href_gradient_imports_as_its_inline_equivalent`:
 /// an `href`'d standard gradient (Inkscape's shape) imports EXACTLY as the same
 /// gradient written inline; the oracle is the inline form. And a cycle or a
