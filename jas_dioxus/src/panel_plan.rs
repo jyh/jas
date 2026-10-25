@@ -532,6 +532,8 @@ pub fn panel_plan(
 ) -> (Value, Value) {
     let panel_id = panel_node.get("id").and_then(Value::as_str).unwrap_or("");
     let acts = PanelActions { panel_id, actions };
+    let canonical = canonical_tabs(panel_node, ctx);
+    let panel_node = &canonical;
     let rows = bind_values(panel_node, ctx);
     // A node whose DYNAMIC visibility resolved false is laid out as the static
     // `visible: false` the layout pass already drops, so a hidden group takes
@@ -610,6 +612,86 @@ pub fn panel_plan(
         "icons_missing": icons_missing,
     });
     (out, rows)
+}
+
+/// `spec` with every `tabs` node in the form the plan and the behavior door
+/// can walk (flask §539: the Windows Print dialog showed no fields, because
+/// both walk only `children` and a `tabs` node keeps its pages under `tabs`).
+///
+/// A `tabs` node becomes a column container whose `children` are
+/// `[<strip>, <the ACTIVE page's content>]`. The strip is a `select` with the
+/// tabs node's `id` and `bind`, and one option per tab (`value` its id, `label`
+/// its label), so a shell materialises it as it does any select and a change
+/// on it writes the tab id through `bind.value` as a select writes. The active
+/// page follows the web and Mac law: `bind.value` evaluated in `scope` when it
+/// is a non-empty string, else the first tab. Only the active page is
+/// present, as only it renders on the web and the Mac.
+///
+/// ⚠️ A widget's path therefore depends on the active tab: two pages put their
+/// content at the same index. A path is consistent within one plan, the only
+/// scope it is used in, because a shell re-reads the plan after every act and
+/// the behavior door canonicalises with the same scope the plan did.
+///
+/// ⚠️ A `tabs` node inside a `foreach` template is canonicalised in `scope`,
+/// not a row's scope. No dialog or panel has one.
+pub(crate) fn canonical_tabs(spec: &Value, scope: &Value) -> Value {
+    fn walk(node: &mut Value, scope: &Value) {
+        if node.get("type").and_then(Value::as_str) == Some("tabs") {
+            *node = canonical_tabs_node(node, scope);
+        }
+        for k in ["children", "do"] {
+            match node.get_mut(k) {
+                Some(Value::Array(items)) => items.iter_mut().for_each(|c| walk(c, scope)),
+                Some(c @ Value::Object(_)) => walk(c, scope),
+                _ => {}
+            }
+        }
+    }
+    let mut out = spec.clone();
+    if let Some(content) = out.get_mut("content") {
+        walk(content, scope);
+    }
+    out
+}
+
+/// One `tabs` node as [`canonical_tabs`] plans it.
+fn canonical_tabs_node(node: &Value, scope: &Value) -> Value {
+    use crate::interpreter::expr_types::Value as EVal;
+    let pages: Vec<Value> = node.get("tabs").and_then(Value::as_array).cloned().unwrap_or_default();
+    let id_of = |p: &Value| p.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+    let first = pages.first().map(id_of).unwrap_or_default();
+    let active = match node.get("bind").and_then(|b| b.get("value")).and_then(Value::as_str) {
+        Some(expr) if !expr.is_empty() => match crate::interpreter::expr::eval(expr, scope) {
+            EVal::Str(s) if !s.is_empty() => s,
+            _ => first,
+        },
+        _ => first,
+    };
+    let mut strip = json!({
+        "type": "select",
+        "options": pages.iter().map(|p| json!({
+            "value": id_of(p),
+            "label": p.get("label").cloned().unwrap_or_else(|| json!("")),
+        })).collect::<Vec<_>>(),
+    });
+    for k in ["id", "bind"] {
+        if let Some(v) = node.get(k) {
+            strip[k] = v.clone();
+        }
+    }
+    let page = pages.iter().find(|p| id_of(p) == active)
+        .and_then(|p| p.get("content")).cloned()
+        .unwrap_or_else(|| json!({"type": "container", "layout": "column", "children": []}));
+    // The container keeps the node's own layout keys (style, visibility) and
+    // drops what moved to the strip.
+    let mut container = node.as_object().cloned().unwrap_or_default();
+    for k in ["id", "bind", "tabs"] {
+        container.remove(k);
+    }
+    container.insert("type".to_string(), json!("container"));
+    container.insert("layout".to_string(), json!("column"));
+    container.insert("children".to_string(), json!([strip, page]));
+    Value::Object(container)
 }
 
 /// `panel_node` as the layout pass should see it in this scope: a clone in which
