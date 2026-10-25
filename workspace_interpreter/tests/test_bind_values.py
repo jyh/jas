@@ -35,6 +35,15 @@ def _bundle_panels() -> dict:
         return json.load(f)["panels"]
 
 
+def _subject(args: dict) -> dict:
+    """A case names a compiled panel (`panel`) or a dialog (`dialog`)."""
+    with open(BUNDLE, encoding="utf-8") as f:
+        bundle = json.load(f)
+    if "dialog" in args:
+        return bundle["dialogs"][args["dialog"]]
+    return bundle["panels"][args["panel"]]
+
+
 # --------------------------------------------------------------------------
 # 1. The canonical value form, per expression-language type
 # --------------------------------------------------------------------------
@@ -174,12 +183,11 @@ def test_canon_foreach_resolves_the_per_item_scope():
 def test_fixture_is_fresh():
     with open(FIXTURE, encoding="utf-8") as f:
         cases = json.load(f)
-    panels = _bundle_panels()
     assert cases, "the corpus must not be empty"
     for tc in cases:
         assert tc["function"] == "bind_values", tc["name"]
         args = tc["args"]
-        actual = bind_values(panels[args["panel"]], args.get("ctx") or {})
+        actual = bind_values(_subject(args), args.get("ctx") or {})
         assert actual == tc["expected"], (
             f"{tc['name']}: golden is stale relative to the reference "
             "(re-run scripts/gen_panel_layout_fixture.py)")
@@ -191,9 +199,8 @@ def test_fixture_covers_the_four_expression_shapes():
     to a shape it no longer covers reddens here rather than passing quietly."""
     with open(FIXTURE, encoding="utf-8") as f:
         cases = json.load(f)
-    panels = _bundle_panels()
     rows = [r for tc in cases
-            for r in bind_values(panels[tc["args"]["panel"]],
+            for r in bind_values(_subject(tc["args"]),
                                  tc["args"].get("ctx") or {})]
     kinds = {(r["key"], r["type"]) for r in rows}
     assert ("bind.color", "color") in kinds       # a colour swatch
@@ -236,3 +243,20 @@ def test_equal_length_hex_is_visible_to_bind_values():
     x, y = diff[0]
     assert x["id"] == "cp_hex" and x["key"] == "bind.value"
     assert (x["value"], y["value"]) == ("664040", "664141")
+
+
+def test_artboard_fill_dropdown_displays_its_preset():
+    """The Artboard Options fill dropdown shows the preset its fill names
+    (ARTBOARDS.md FILL_DROPDOWN). `dialog.fill` is `color_or_transparent`, so
+    a hex fill resolves to a COLOR and the bind must compare it with a colour
+    literal: against a quoted '#000000' (a STRING) typed equality is false and
+    White and Black both displayed "custom" (Windows, flask §543 finding D)."""
+    dialog = _subject({"dialog": "artboard_options"})
+    shown = {}
+    for fill in ("transparent", "#ffffff", "#000000", "#FFF", "#123456"):
+        rows = [r for r in bind_values(dialog, {"dialog": {"fill": fill}})
+                if r["id"] == "ao_fill_dropdown" and r["key"] == "bind.value"]
+        assert len(rows) == 1, (fill, rows)
+        shown[fill] = rows[0]["value"]
+    assert shown == {"transparent": "transparent", "#ffffff": "white",
+                     "#000000": "black", "#FFF": "white", "#123456": "custom"}

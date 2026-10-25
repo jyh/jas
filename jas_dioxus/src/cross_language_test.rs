@@ -7397,7 +7397,12 @@ pub(crate) mod tests {
             let name = tc["name"].as_str().unwrap();
             let func = tc["function"].as_str().unwrap();
             assert_eq!(func, "bind_values", "Unknown function: {}", func);
-            let panel_id = tc["args"]["panel"].as_str().unwrap();
+            // A case names a compiled panel (`panel`) or a dialog (`dialog`).
+            let subject = match tc["args"]["dialog"].as_str() {
+                Some(dialog_id) => &bundle["dialogs"][dialog_id],
+                None => &panels[tc["args"]["panel"].as_str().unwrap()],
+            };
+            assert!(subject.is_object(), "Panel bind values '{}': no such subject", name);
             // ctx is a JSON object data scope (state / panel / data namespaces);
             // it passes straight to the expr evaluator, as in the two sibling
             // panel passes. Default to empty (everything resolves to null).
@@ -7405,7 +7410,7 @@ pub(crate) mod tests {
             let ctx = tc["args"].get("ctx").unwrap_or(&empty);
             let expected = &tc["expected"];
 
-            let actual = bind_values(&panels[panel_id], ctx);
+            let actual = bind_values(subject, ctx);
             assert_eq!(&actual, expected, "Panel bind values '{}' mismatch", name);
         }
     }

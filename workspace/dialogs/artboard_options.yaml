@@ -331,7 +331,7 @@ artboard_options:
                   - { label: "Black",       value: black }
                   - { label: "Custom…",     value: custom }
                 bind:
-                  value: "if dialog.fill == 'transparent' then 'transparent' else if dialog.fill == '#ffffff' then 'white' else if dialog.fill == '#000000' then 'black' else 'custom'"
+                  value: "if dialog.fill == 'transparent' then 'transparent' else if dialog.fill == #ffffff then 'white' else if dialog.fill == #000000 then 'black' else 'custom'"
                 behavior:
                   - event: change
                     action: set_artboard_fill_preset
