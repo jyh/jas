@@ -6212,7 +6212,9 @@ private func assertActionDialog(_ tc: [String: Any], _ model: Model) {
             "Action test '\(name)': the dialog opened is '\(id)'")
     let sections: [(String, [String: Any])] = [
         ("params", store.getDialogParams() ?? [:]),
-        ("state", store.getDialogState()),
+        // The dialog namespace a widget reads: stored values plus every
+        // derived (`get`) key, as the reference's `eval_context` builds it.
+        ("state", store.evalContext()["dialog"] as? [String: Any] ?? [:]),
     ]
     for (section, got) in sections {
         guard let want = expected[section] as? [String: Any] else { continue }
