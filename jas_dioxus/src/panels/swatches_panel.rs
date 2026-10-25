@@ -2,10 +2,10 @@
 //!
 //! Menu items mirror the `menu:` block in
 //! `workspace/panels/swatches.yaml`. The dynamic submenu
-//! ("Open Swatch Library") and a couple of data-mutating actions
-//! (open_swatch_library, save_swatch_library) are placeholders that
-//! log and no-op until the library-load / library-save plumbing lands.
-//! New Swatch and Swatch Options run their YAML, which opens a dialog.
+//! ("Open Swatch Library", open_swatch_library) is a placeholder that
+//! logs and no-ops until the library-load plumbing lands. New Swatch,
+//! Swatch Options and Save Swatch Library run their YAML, which opens a
+//! dialog.
 //!
 //! Wired: thumbnail size (st.swatches_panel.thumbnail_size). The five
 //! library verbs (duplicate_swatch, delete_swatch, sort_swatches_by_name,
@@ -80,7 +80,7 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_j
         // their YAML; the action evaluates with this panel's scope (Swatch
         // Options reads the panel's selected swatch), and its deferred
         // `open_dialog` goes back to the menu view, which opens it.
-        "new_swatch" | "open_swatch_options" => {
+        "new_swatch" | "open_swatch_options" | "save_swatch_library" => {
             return super::panel_menu::dispatch_yaml_menu("swatches_panel_content", cmd, addr, state);
         }
         // A placeholder — see module doc. Logging helps surface unwired
