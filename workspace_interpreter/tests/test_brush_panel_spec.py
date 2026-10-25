@@ -446,3 +446,45 @@ class TestLibraryEditsAreNotUndoable:
             assert f"**{label}**" not in undoable, label
             assert f"**{label}**" in not_undoable, label
         assert "library_edit" not in undoable
+
+
+# ══════════════════════════════════════════════════════════════════
+# Show <Type> Brushes: toggle_brush_category
+# ══════════════════════════════════════════════════════════════════
+#
+# The panel menu's five "Show X Brushes" checkboxes ran a `log:` stub in every
+# port, so unchecking one changed nothing. The action toggles the type's
+# membership in panel.category_filter, through `list_toggle`.
+
+
+def _category_store(categories: list[str]) -> StateStore:
+    store = _store([], [])
+    store.init_panel("brushes", {"category_filter": list(categories)})
+    store.set_active_panel("brushes")
+    return store
+
+
+class TestToggleBrushCategory:
+    def test_the_action_toggles_its_type_in_the_filter(self):
+        assert ACTIONS["toggle_brush_category"]["effects"] == [
+            {"list_toggle": {"target": "panel.category_filter", "value": "param.type"}}]
+
+    def test_unchecking_removes_the_type_and_checking_restores_it(self):
+        store = _category_store(["calligraphic", "scatter", "art"])
+        run_effects(ACTIONS["toggle_brush_category"]["effects"], {"param": {"type": "scatter"}},
+                    store, actions=ACTIONS)
+        assert store.get_panel("brushes", "category_filter") == ["calligraphic", "art"]
+        run_effects(ACTIONS["toggle_brush_category"]["effects"], {"param": {"type": "scatter"}},
+                    store, actions=ACTIONS)
+        assert sorted(store.get_panel("brushes", "category_filter")) == ["art", "calligraphic", "scatter"]
+
+    def test_unchecking_all_leaves_an_empty_filter(self):
+        store = _category_store(["art"])
+        run_effects(ACTIONS["toggle_brush_category"]["effects"], {"param": {"type": "art"}},
+                    store, actions=ACTIONS)
+        assert store.get_panel("brushes", "category_filter") == []
+
+    def test_every_menu_row_passes_its_own_type(self):
+        rows = [m for m in BRUSHES["menu"] if isinstance(m, dict) and m.get("action") == "toggle_brush_category"]
+        types = [r["params"]["type"] for r in rows]
+        assert sorted(types) == sorted(BRUSHES["state"]["category_filter"]["default"])
