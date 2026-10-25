@@ -1,0 +1,116 @@
+[
+  {
+    "name": "document_setup_an_engaged_bleed_link_mirrors_one_side",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "document_setup_toggle_bleed_uniform: while dialog.bleed_uniform is on, an edit to one side writes all four. Opened through the action door at the dialog's declared defaults: every bleed 0, the link engaged.",
+    "actions": [
+      {
+        "action": "open_document_setup"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ds_bleed_top"
+          },
+          "event": "commit",
+          "value": "9"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "document_setup",
+      "state": {
+        "bleed_uniform": true,
+        "bleed_top": 9,
+        "bleed_bottom": 9,
+        "bleed_left": 9,
+        "bleed_right": 9
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "document_setup_an_open_bleed_link_edits_one_side",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "One click disengages the link; then each side is typed individually. Opened through the action door at the dialog's declared defaults: every bleed 0, the link engaged.",
+    "actions": [
+      {
+        "action": "open_document_setup"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ds_bleed_chain"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ds_bleed_top"
+          },
+          "event": "commit",
+          "value": "9"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "document_setup",
+      "state": {
+        "bleed_uniform": false,
+        "bleed_top": 9,
+        "bleed_bottom": 0,
+        "bleed_left": 0,
+        "bleed_right": 0
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "document_setup_a_second_click_engages_the_bleed_link",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "The button toggles: two clicks engage it again, and a left edit writes all four. Opened through the action door at the dialog's declared defaults: every bleed 0, the link engaged.",
+    "actions": [
+      {
+        "action": "open_document_setup"
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ds_bleed_chain"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ds_bleed_chain"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ds_bleed_left"
+          },
+          "event": "commit",
+          "value": "4"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "document_setup",
+      "state": {
+        "bleed_uniform": true,
+        "bleed_top": 4,
+        "bleed_bottom": 4,
+        "bleed_left": 4,
+        "bleed_right": 4
+      }
+    },
+    "expected_document": "unchanged"
+  }
+]

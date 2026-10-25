@@ -3070,10 +3070,20 @@ actions:
             - set: { dialog.width: "1000", dialog.height: "1000" }
 
   toggle_artboard_chain_link:
-    description: "Toggle dialog.chain_link_engaged; capture dialog.chain_link_ratio on engage."
+    description: >
+      Toggle the Artboard Options dialog's chain link (ARTBOARDS.md,
+      CHAIN_LINK_BUTTON). Engaging it captures dialog.chain_link_ratio as the
+      current width divided by height; while it stays engaged, an edit to
+      Width or Height rescales the other side against that ratio (the inputs'
+      own commit behaviors). Disengaging leaves both sizes as they are. The
+      link is dialog-session state: off on every open, never stored.
     category: artboards
     effects:
-      - log: "toggle_artboard_chain_link (native)"
+      - set: { dialog.chain_link_engaged: "not dialog.chain_link_engaged" }
+      - if:
+          condition: "dialog.chain_link_engaged"
+          then:
+            - set: { dialog.chain_link_ratio: "dialog.width / dialog.height" }
 
   toggle_artboard_orientation:
     description: >
@@ -3179,14 +3189,15 @@ actions:
 
   document_setup_toggle_bleed_uniform:
     description: >
-      Toggle dialog.bleed_uniform. Phase-1A deferral: dialog state
-      mutation from action effects is not yet wired (matches
-      toggle_artboard_chain_link precedent). The chain-link icon
-      ships visually but the click is a no-op until the dialog-state
-      effect framework lands.
+      Toggle the Document Setup dialog's bleed chain link
+      (dialog.bleed_uniform). While it is engaged, an edit to any one
+      bleed side writes the same value to all four (the side inputs' own
+      commit behaviors); disengaging leaves the four as they are. The
+      state persists with the document through the dialog's OK, so the
+      user's preferred mode survives across sessions.
     category: document
     effects:
-      - log: "document_setup_toggle_bleed_uniform (native, deferred)"
+      - set: { dialog.bleed_uniform: "not dialog.bleed_uniform" }
 
   # ─── Print dialog (PRINT.md §1B) ─────────────────────────
 
