@@ -534,13 +534,8 @@ public struct ContentView: View {
             // same targets the menu's View commands dispatch.
             dispatchToolOptionsAction(actionName)
         case .dialog(let dialogId):
-            // Open the tool's options dialog via the same path the prior
-            // native toolbar used: plain state defaults, no params.
-            yamlDialogState = openYamlDialog(
-                dialogId: dialogId,
-                rawParams: [:],
-                liveState: ws.stateDefaults()
-            )
+            yamlDialogState = DialogWidgetActions.openToolOptions(
+                dialogId, model: workspace.activeModel)
         case .none:
             // Active tool declares no options field — no-op, matching the
             // prior native early-return.
