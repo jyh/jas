@@ -16,7 +16,8 @@ workspace_save_as:
       - id: ws_name_input
         type: text_input
         placeholder: "My Layout"
-        bind: "dialog.name"
+        bind:
+          value: "dialog.name"
       - id: ws_name_warning
         type: text
         content: "\u201cWorkspace\u201d is reserved and cannot be used."

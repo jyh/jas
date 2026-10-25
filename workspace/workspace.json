@@ -27053,7 +27053,9 @@
             "id": "appearance_name_input",
             "type": "text_input",
             "placeholder": "My Theme",
-            "bind": "dialog.name"
+            "bind": {
+              "value": "dialog.name"
+            }
           },
           {
             "type": "row",
@@ -29624,7 +29626,9 @@
                     "label": "Only Web Colors",
                     "summary": "Web-safe color snap",
                     "description": "Snap all color values to the web-safe palette (0, 51, 102, 153, 204, 255)",
-                    "bind": "dialog.web_only"
+                    "bind": {
+                      "checked": "dialog.web_only"
+                    }
                   }
                 ]
               },
@@ -29692,7 +29696,9 @@
                                 },
                                 "min": 0,
                                 "max": 359,
-                                "bind": "dialog.h"
+                                "bind": {
+                                  "value": "dialog.h"
+                                }
                               },
                               {
                                 "type": "text",
@@ -29732,7 +29738,9 @@
                                 },
                                 "min": 0,
                                 "max": 100,
-                                "bind": "dialog.s"
+                                "bind": {
+                                  "value": "dialog.s"
+                                }
                               },
                               {
                                 "type": "text",
@@ -29772,7 +29780,9 @@
                                 },
                                 "min": 0,
                                 "max": 100,
-                                "bind": "dialog.b"
+                                "bind": {
+                                  "value": "dialog.b"
+                                }
                               },
                               {
                                 "type": "text",
@@ -29902,7 +29912,9 @@
                                 },
                                 "min": 0,
                                 "max": 255,
-                                "bind": "dialog.r"
+                                "bind": {
+                                  "value": "dialog.r"
+                                }
                               },
                               {
                                 "type": "text",
@@ -29942,7 +29954,9 @@
                                 },
                                 "min": 0,
                                 "max": 255,
-                                "bind": "dialog.g"
+                                "bind": {
+                                  "value": "dialog.g"
+                                }
                               },
                               {
                                 "type": "text",
@@ -29982,7 +29996,9 @@
                                 },
                                 "min": 0,
                                 "max": 255,
-                                "bind": "dialog.bl"
+                                "bind": {
+                                  "value": "dialog.bl"
+                                }
                               },
                               {
                                 "type": "text",
@@ -30011,7 +30027,9 @@
                                 "style": {
                                   "width": 60
                                 },
-                                "bind": "dialog.hex"
+                                "bind": {
+                                  "value": "dialog.hex"
+                                }
                               }
                             ]
                           }
@@ -30044,7 +30062,9 @@
                                 },
                                 "min": 0,
                                 "max": 100,
-                                "bind": "dialog.c"
+                                "bind": {
+                                  "value": "dialog.c"
+                                }
                               },
                               {
                                 "type": "text",
@@ -30073,7 +30093,9 @@
                                 },
                                 "min": 0,
                                 "max": 100,
-                                "bind": "dialog.m"
+                                "bind": {
+                                  "value": "dialog.m"
+                                }
                               },
                               {
                                 "type": "text",
@@ -30102,7 +30124,9 @@
                                 },
                                 "min": 0,
                                 "max": 100,
-                                "bind": "dialog.y"
+                                "bind": {
+                                  "value": "dialog.y"
+                                }
                               },
                               {
                                 "type": "text",
@@ -30131,7 +30155,9 @@
                                 },
                                 "min": 0,
                                 "max": 100,
-                                "bind": "dialog.k"
+                                "bind": {
+                                  "value": "dialog.k"
+                                }
                               },
                               {
                                 "type": "text",
@@ -36941,7 +36967,9 @@
             "id": "swatch_lib_name_input",
             "type": "text_input",
             "placeholder": "My Swatches",
-            "bind": "dialog.name"
+            "bind": {
+              "value": "dialog.name"
+            }
           },
           {
             "type": "row",
@@ -38951,7 +38979,9 @@
             "id": "ws_name_input",
             "type": "text_input",
             "placeholder": "My Layout",
-            "bind": "dialog.name"
+            "bind": {
+              "value": "dialog.name"
+            }
           },
           {
             "id": "ws_name_warning",
@@ -39054,7 +39084,9 @@
             },
             "min": "${min}",
             "max": "${max}",
-            "bind": "${bind}"
+            "bind": {
+              "value": "${bind}"
+            }
           },
           {
             "type": "text",
@@ -39104,7 +39136,9 @@
             },
             "min": "${min}",
             "max": "${max}",
-            "bind": "${bind}"
+            "bind": {
+              "value": "${bind}"
+            }
           },
           {
             "type": "text",
