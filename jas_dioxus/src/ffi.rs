@@ -3876,18 +3876,26 @@ mod tests {
         "dialog_actions/paragraph_dialogs.json",
         "dialog_actions/brush_options.json",
         "dialog_actions/artboard_options.json",
+        "dialog_actions/document_setup.json",
+        "dialog_actions/print.json",
+        "dialog_actions/panel_menu_actions.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
     /// `2026-10-24-jas-DESIGN-dialog-action-corpus`), on the engine's route,
     /// which is the Windows shell's: `test_fixtures/dialog_actions/*.json`. A
     /// step is an action (`jas_dispatch_action`), an `open_dialog` (what a
-    /// tool's double-click or an opener action performs), or a `dialog_event`
-    /// (`jas_dialog_event`, addressed by [`dialog_address_path`]). Then:
+    /// tool's double-click or an opener action performs), a `dialog_event`
+    /// (`jas_dialog_event`, addressed by [`dialog_address_path`]), or a
+    /// `panel_menu` click (`{"panel", "address"}`: the one row of that panel's
+    /// menu the address names, sent as `{"panel", "menu_index"}`), after any
+    /// `panel_state` seed (a panel's own state, as a tile click leaves it). Then:
     /// `expected_dialog` is the dialog open AFTER the last step (`null` for
     /// none; `state` is a subset), `expected_state` a subset of the globals,
     /// `expected_document` `"unchanged"` / `"changed"` against the document
-    /// as the dialog opened, and `expected_json` the pinned golden, which Swift must match.
+    /// as the dialog opened, `expected_data` dotted paths into `data`,
+    /// `expected_panel` a subset of a panel's own state, and `expected_json` the
+    /// pinned golden, which Swift must match.
     #[test]
     fn dialog_action_corpus_runs_on_the_engine_route() {
         use crate::geometry::test_json::document_to_test_json;
@@ -3907,6 +3915,15 @@ mod tests {
         for tc in &cases {
             let name = tc["name"].as_str().unwrap();
             let e = engine_on(tc["setup_svg"].as_str().unwrap());
+            // `panel_state`: a panel's own state as the artist left it (a
+            // selection made by clicking tiles, which no verb sets), written
+            // over the panel's declared defaults. Swift seeds it the same way.
+            for (pid, keys) in tc.get("panel_state").and_then(|v| v.as_object()).into_iter().flatten() {
+                seed_panel(engine_of(e), &ws, pid);
+                for (k, v) in keys.as_object().into_iter().flatten() {
+                    engine_of(e).store.borrow_mut().set_panel(pid, k, v.clone());
+                }
+            }
             // `expected_document` compares against the document as the dialog
             // OPENED (after the setup steps), never the setup file itself.
             let mut at_open: Option<String> = None;
@@ -3927,6 +3944,27 @@ mod tests {
                     crate::interpreter::effects::open_dialog_in(
                         id, spec, params, None, &ctx,
                         &mut en.store.borrow_mut(), Some(&mut *en.model.borrow_mut()));
+                } else if let Some(pm) = step.get("panel_menu") {
+                    // A panel-menu click, through the shell's own door: the ONE row
+                    // of the panel's menu whose every `address` key equals its own
+                    // (zero or two refuse by name), sent back by index.
+                    let pid = pm["panel"].as_str().unwrap_or_default();
+                    let address = pm["address"].as_object().cloned().unwrap_or_default();
+                    let hits: Vec<usize> = ws.panel_menu(pid).iter().enumerate()
+                        .filter(|(_, n)| n.is_object() && address.iter().all(|(k, v)| n.get(k) == Some(v)))
+                        .map(|(i, _)| i).collect();
+                    if hits.len() != 1 {
+                        failures.push(format!("{name}: the address {address:?} matches {} row(s) of {pid}'s menu, want exactly 1", hits.len()));
+                        step_failed = true;
+                        break;
+                    }
+                    let msg = serde_json::json!({"panel": pid, "menu_index": hits[0]}).to_string();
+                    let (reply, err) = dispatch(e, &msg);
+                    if reply.is_empty() {
+                        failures.push(format!("{name}: the panel menu refused {msg}: {err}"));
+                        step_failed = true;
+                        break;
+                    }
                 } else if let Some(action) = step.get("action").and_then(|a| a.as_str()) {
                     // An action through the shell's own door, so a dialog it opens
                     // (`open_boolean_options`) resolves its params in the app's
@@ -3950,6 +3988,10 @@ mod tests {
                         step_failed = true;
                         break;
                     };
+                    // Addressed in the form the door walks: a `tabs` node is its strip
+                    // and its active page, in the dialog's own scope.
+                    let scope = dialog_ctx(engine_of(e), &engine_of(e).store.borrow().eval_context());
+                    let spec = crate::panel_plan::canonical_tabs(spec, &scope);
                     let path = match dialog_address_path(&spec["content"], ev["address"].as_object().unwrap()) {
                         Ok(p) => p,
                         Err(why) => { failures.push(format!("{name}: {why}")); step_failed = true; break; }
@@ -4022,6 +4064,16 @@ mod tests {
                     failures.push(format!("{name}: data.{path} does not resolve"));
                 } else if !crate::cross_language_test::tests::json_value_eq(&cur, value) {
                     failures.push(format!("{name}: data.{path} is {cur}, the corpus pins {value}"));
+                }
+            }
+            // `expected_panel`: a subset of a panel's own state after the last
+            // step. A key the panel does not hold is a failure, never a null.
+            for (pid, keys) in tc.get("expected_panel").and_then(|v| v.as_object()).into_iter().flatten() {
+                for (key, value) in keys.as_object().into_iter().flatten() {
+                    let have = store.get_panel(pid, key);
+                    if have.is_null() || !crate::cross_language_test::tests::json_value_eq(have, value) {
+                        failures.push(format!("{name}: panel {pid}.{key} is {have}, the corpus pins {value}"));
+                    }
                 }
             }
             drop(store);
@@ -4142,6 +4194,83 @@ mod tests {
         assert_eq!(unsafe { jas_dialog_dismiss(e) }, 1);
         let v = plan(e);
         assert_eq!((v["id"].clone(), v["depth"].clone()), (serde_json::json!("layer_options"), serde_json::json!(1)));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A TABBED dialog plans its tab strip and its ACTIVE page (flask §539
+    /// measured Print showing no fields on Windows: the plan walked only
+    /// `children`, so no page reached it). The strip is a `select` leaf whose
+    /// options are the bundle's tab ids and labels, read from the bundle here
+    /// and never typed, with the active tab selected. A change on the strip
+    /// re-plans with that page's widgets and none of the other's, in BOTH
+    /// directions (a radio-like control is driven both ways).
+    #[test]
+    fn dialog_plan_plans_a_tab_strip_and_the_active_page() {
+        use std::collections::BTreeSet;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().expect("workspace");
+        fn find_tabs(n: &serde_json::Value) -> Option<&serde_json::Value> {
+            if n["type"] == "tabs" {
+                return Some(n);
+            }
+            n["children"].as_array().into_iter().flatten().find_map(find_tabs)
+        }
+        fn ids(n: &serde_json::Value, out: &mut BTreeSet<String>) {
+            if let Some(id) = n["id"].as_str() {
+                out.insert(id.to_string());
+            }
+            for c in n["children"].as_array().into_iter().flatten() {
+                ids(c, out);
+            }
+        }
+        let tabs = find_tabs(&ws.dialog("print").expect("print")["content"]).expect("Print has a tabs node").clone();
+        let pages = tabs["tabs"].as_array().expect("tabs.tabs").clone();
+        assert!(pages.len() >= 2, "two pages to switch between: {pages:?}");
+        let page_ids: Vec<BTreeSet<String>> = pages.iter().map(|p| {
+            let mut s = BTreeSet::new();
+            ids(&p["content"], &mut s);
+            s
+        }).collect();
+        // The page to switch to is the first other page with a widget of its own.
+        let (other, _) = page_ids.iter().enumerate().skip(1).find(|(_, s)| !s.is_empty())
+            .expect("a second page with an addressable widget");
+        assert!(page_ids[0].is_disjoint(&page_ids[other]), "the two pages share no id");
+
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"open_print_dialog","params":{}}"#);
+        assert!(reply.contains(r#""dialog":"print""#), "{reply} {err}");
+        let plan = |e| -> Vec<serde_json::Value> {
+            let v: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 720, 640) })).unwrap();
+            v["plan"]["leaves"].as_array().expect("an open dialog's plan").clone()
+        };
+        let planned = |leaves: &[serde_json::Value]| -> BTreeSet<String> {
+            leaves.iter().filter_map(|l| l["id"].as_str()).filter(|s| !s.is_empty()).map(str::to_string).collect()
+        };
+        let tab_id = tabs["id"].as_str().expect("the tabs node's id");
+        let strip_of = |leaves: &[serde_json::Value]| -> serde_json::Value {
+            leaves.iter().find(|l| l["id"] == tab_id).unwrap_or_else(|| panic!("no strip leaf {tab_id}: {leaves:?}")).clone()
+        };
+        let want = |active: usize| -> serde_json::Value {
+            serde_json::Value::Array(pages.iter().enumerate().map(|(i, p)| serde_json::json!({
+                "kind": "option", "value": p["id"], "label": p["label"], "selected": i == active})).collect())
+        };
+        let mut seen = vec![];
+        for (to, from) in [(other, 0), (0, other)] {
+            let leaves = plan(e);
+            let strip = strip_of(&leaves);
+            assert_eq!(strip["type"], "select", "{strip}");
+            assert_eq!(strip["options"], want(from), "the strip's options and its selection");
+            let ids = planned(&leaves);
+            assert!(page_ids[from].is_subset(&ids), "page {from} is planned: missing {:?}",
+                    page_ids[from].difference(&ids).collect::<Vec<_>>());
+            assert!(ids.is_disjoint(&page_ids[to]), "page {to} is not: {:?}",
+                    ids.intersection(&page_ids[to]).collect::<Vec<_>>());
+            let ev = serde_json::json!({"widget": tab_id, "event": "change", "value": pages[to]["id"]}).to_string();
+            let (reply, err) = dialog_event(e, &ev);
+            assert!(!reply.is_empty(), "the switch to {to} ran: {err}");
+            seen.push(engine_of(e).store.borrow().eval_context()["dialog"]["active_tab"].clone());
+        }
+        assert_eq!(seen, vec![pages[other]["id"].clone(), pages[0]["id"].clone()], "the bind wrote each tab id");
         unsafe { jas_engine_free(e) };
     }
 
@@ -4400,6 +4529,41 @@ mod tests {
         assert_eq!((store.get("fill_color").clone(), store.get("stroke_color").clone()), app,
                    "a dialog-field target writes no app colour");
         drop(store);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The nested Color Picker's derived fields read their values in the plan
+    /// the shell draws (flask §545 finding E: over Artboard Options its setter
+    /// ran and every channel field read empty).
+    #[test]
+    fn the_nested_pickers_derived_fields_read_in_its_plan() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e, r#"{"action":"open_layer_options","params":{"mode":"create"}}"#);
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_color_swatch","event":"click"}"#);
+        assert!(reply.contains(r#""dialog":"color_picker""#), "the swatch opened the picker: {reply} {err}");
+        engine_of(e).store.borrow_mut().set_dialog("color", serde_json::json!("#12ab34"));
+        assert_eq!(engine_of(e).store.borrow().eval_context()["dialog"]["hex"], serde_json::json!("12ab34"),
+                   "the store's dialog scope carries the getter");
+        let plan = take(unsafe { jas_dialog_plan(e, 420, 640) });
+        let v: serde_json::Value = serde_json::from_str(&plan).unwrap();
+        let mut leaves = Vec::new();
+        fn walk(n: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+            match n {
+                serde_json::Value::Object(m) => {
+                    if m.get("id").and_then(|i| i.as_str()).is_some_and(|i| i == "cp_hex" || i == "cp_r") {
+                        out.push(n.clone());
+                    }
+                    m.values().for_each(|c| walk(c, out));
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|c| walk(c, out)),
+                _ => {}
+            }
+        }
+        walk(&v["plan"], &mut leaves);
+        assert_eq!(leaves.len(), 2, "the plan has cp_hex and cp_r: {leaves:?}");
+        let shown: Vec<String> = leaves.iter().map(|l| l["values"]["bind.value"].to_string()).collect();
+        assert_eq!(shown, [r#""18""#, r#""12ab34""#], "cp_r and cp_hex show the colour: {leaves:?}");
         unsafe { jas_engine_free(e) };
     }
 

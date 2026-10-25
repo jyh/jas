@@ -200,6 +200,15 @@ artboard_options:
                 style: { width: 80 }
                 bind:
                   value: "dialog.width"
+                behavior:
+                  # The chain link (ARTBOARDS.md WIDTH_INPUT): while engaged, a
+                  # new width rescales the height against the captured ratio.
+                  - event: commit
+                    effects:
+                      - if:
+                          condition: "dialog.chain_link_engaged"
+                          then:
+                            - set: { dialog.height: "dialog.width / dialog.chain_link_ratio" }
           - type: col
             col: 1
             children:
@@ -256,6 +265,14 @@ artboard_options:
                 style: { width: 80 }
                 bind:
                   value: "dialog.height"
+                behavior:
+                  # The chain link: while engaged, a new height rescales the width.
+                  - event: commit
+                    effects:
+                      - if:
+                          condition: "dialog.chain_link_engaged"
+                          then:
+                            - set: { dialog.width: "dialog.height * dialog.chain_link_ratio" }
           - type: col
             col: 2
             children: []
@@ -314,7 +331,7 @@ artboard_options:
                   - { label: "Black",       value: black }
                   - { label: "Custom…",     value: custom }
                 bind:
-                  value: "if dialog.fill == 'transparent' then 'transparent' else if dialog.fill == '#ffffff' then 'white' else if dialog.fill == '#000000' then 'black' else 'custom'"
+                  value: "if dialog.fill == 'transparent' then 'transparent' else if dialog.fill == #ffffff then 'white' else if dialog.fill == #000000 then 'black' else 'custom'"
                 behavior:
                   - event: change
                     action: set_artboard_fill_preset

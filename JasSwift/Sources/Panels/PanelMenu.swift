@@ -161,7 +161,21 @@ public func panelDynamicLabel(_ kind: PanelKind, cmd: String,
 }
 
 /// Dispatch a menu command for a panel kind.
+///
+/// The panel whose menu it is becomes the ACTIVE panel first, so an action
+/// reading `panel.*` reads THIS panel's state. The active panel is otherwise
+/// whichever panel rendered last (``DockPanelView`` sets it on every render),
+/// and the Brushes menu's Delete read the Layers panel's
+/// `panel.selected_library` and did nothing. The engine's panel door makes the
+/// event's panel active the same way.
 public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
+    if let store = model?.stateStore {
+        let pid = panelKindToContentId(kind)
+        if !store.hasPanel(pid) {
+            store.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+        }
+        store.setActivePanel(pid)
+    }
     switch kind {
     case .layers: LayersPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .color: ColorPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)

@@ -67,28 +67,30 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
     }
 }
 
-/// Dispatch a menu command for a panel kind.
+/// Dispatch a menu command for a panel kind. Returns the dialog effects the
+/// action deferred (`open_dialog`, `close_dialog`), which the caller applies
+/// once the `AppState` borrow is released (`apply_deferred_dialog_effects`).
 pub(crate) fn panel_dispatch(
     kind: PanelKind,
     cmd: &str,
     addr: PanelAddr,
     state: &mut AppState,
-) {
+) -> Vec<serde_json::Value> {
     match kind {
         PanelKind::Layers => layers_panel::dispatch(cmd, addr, state),
-        PanelKind::Color => color_panel::dispatch(cmd, addr, state),
+        PanelKind::Color => { color_panel::dispatch(cmd, addr, state); Vec::new() }
         PanelKind::Swatches => swatches_panel::dispatch(cmd, addr, state),
         PanelKind::Brushes => brushes_panel::dispatch(cmd, addr, state),
-        PanelKind::Stroke => stroke_panel::dispatch(cmd, addr, state),
-        PanelKind::Properties => properties_panel::dispatch(cmd, addr, state),
-        PanelKind::Character => character_panel::dispatch(cmd, addr, state),
+        PanelKind::Stroke => { stroke_panel::dispatch(cmd, addr, state); Vec::new() }
+        PanelKind::Properties => { properties_panel::dispatch(cmd, addr, state); Vec::new() }
+        PanelKind::Character => { character_panel::dispatch(cmd, addr, state); Vec::new() }
         PanelKind::Paragraph => paragraph_panel::dispatch(cmd, addr, state),
         PanelKind::Artboards => artboards_panel::dispatch(cmd, addr, state),
-        PanelKind::Align => align_panel::dispatch(cmd, addr, state),
+        PanelKind::Align => { align_panel::dispatch(cmd, addr, state); Vec::new() }
         PanelKind::Boolean => boolean_panel::dispatch(cmd, addr, state),
-        PanelKind::Opacity => opacity_panel::dispatch(cmd, addr, state),
-        PanelKind::MagicWand => magic_wand_panel::dispatch(cmd, addr, state),
-        PanelKind::Symbols => symbols_panel::dispatch(cmd, addr, state),
+        PanelKind::Opacity => { opacity_panel::dispatch(cmd, addr, state); Vec::new() }
+        PanelKind::MagicWand => { magic_wand_panel::dispatch(cmd, addr, state); Vec::new() }
+        PanelKind::Symbols => { symbols_panel::dispatch(cmd, addr, state); Vec::new() }
         // No native module (YAML-rendered): no bespoke menu commands, so the
         // generic route runs each item's YAML action in the panel's scope.
         PanelKind::Gradient | PanelKind::Concepts => panel_menu::dispatch_yaml_menu(
@@ -423,6 +425,118 @@ mod tests {
         assert!(panel_is_checked(PanelKind::Brushes, "set_brush_view_mode:list", &state));
     }
 
+    /// Swatch Options' OK on the web is the YAML's `swatch.store` (its native
+    /// arm in `apply_dialog_confirm` is gone; with both, create mode appended
+    /// twice). Edit replaces the named swatch; create appends.
+    #[test]
+    fn swatch_options_confirm_stores_through_the_yaml() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let sw = |n: &str, c: &str| serde_json::json!({"name": n, "color": c, "color_mode": "rgb",
+                                                        "color_type": "process", "global": false});
+        state.swatch_libraries = serde_json::json!({"lib_a": {"name": "A", "swatches": [sw("A", "#ff0000"), sw("B", "#00ff00")]}});
+        let params = |mode: &str, name: &str, index: serde_json::Value| -> serde_json::Map<String, serde_json::Value> {
+            serde_json::json!({"mode": mode, "swatch_name": name, "color": "#00ff00", "color_mode": "rgb",
+                               "library": "lib_a", "index": index}).as_object().unwrap().clone()
+        };
+        crate::interpreter::renderer::dispatch_action("swatch_options_confirm", &params("edit", "Bee", serde_json::json!(1)), &mut state);
+        assert_eq!(state.swatch_libraries["lib_a"]["swatches"][1], sw("Bee", "#00ff00"));
+        crate::interpreter::renderer::dispatch_action("swatch_options_confirm", &params("create", "New", serde_json::Value::Null), &mut state);
+        let names: Vec<_> = state.swatch_libraries["lib_a"]["swatches"].as_array().unwrap().iter()
+            .map(|s| s["name"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names, ["A", "Bee", "New"], "create appends exactly once");
+    }
+
+    /// The five "Show <Type> Brushes" checkboxes toggle their type in
+    /// `panel.category_filter` (`list_toggle`). They ran a `log:` stub in every
+    /// port, so unchecking one changed nothing and its check mark never moved.
+    /// The command is the one the menu builder produced for the row.
+    #[test]
+    fn a_show_brushes_checkbox_toggles_its_type() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        use super::panel_menu::PanelMenuItem;
+        let cmd: String = brushes_panel::menu_items().into_iter()
+            .find_map(|i| match i {
+                PanelMenuItem::Action { label, command, .. }
+                | PanelMenuItem::Toggle { label, command, .. }
+                | PanelMenuItem::Radio { label, command, .. } if label.contains("Scatter") => Some(command.to_string()),
+                _ => None,
+            })
+            .expect("a Show Scatter Brushes row");
+        assert!(panel_is_checked(PanelKind::Brushes, &cmd, &state), "checked by default");
+        brushes_panel::dispatch(&cmd, addr, &mut state);
+        assert!(!panel_is_checked(PanelKind::Brushes, &cmd, &state), "unchecked after one click ({cmd})");
+        brushes_panel::dispatch(&cmd, addr, &mut state);
+        assert!(panel_is_checked(PanelKind::Brushes, &cmd, &state), "checked again after a second");
+    }
+
+    /// A panel-menu row whose YAML opens a dialog hands its `open_dialog` back
+    /// to the caller (the menu view applies it with the dialog signal). Until
+    /// 2026-10-25 `panel_dispatch` returned nothing, so on the web New Swatch,
+    /// Swatch Options, Artboard Options and Brush Options from a panel menu ran
+    /// their action and dropped the dialog it deferred.
+    #[test]
+    fn a_menu_row_that_opens_a_dialog_hands_it_back() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        let opened = |effects: &[serde_json::Value]| -> Vec<String> {
+            effects.iter()
+                .filter_map(|e| e.get("open_dialog")?.get("id")?.as_str().map(str::to_string))
+                .collect()
+        };
+        let fx = panel_dispatch(PanelKind::Swatches, "new_swatch", addr, &mut state);
+        assert_eq!(opened(&fx), ["swatch_options"], "New Swatch: {fx:?}");
+        let mode = fx[0]["open_dialog"]["params"]["mode"].clone();
+        assert_eq!(mode, serde_json::json!("create"), "the params arrive resolved");
+        state.artboards_panel_selection.push("ab-1".into());
+        let fx = panel_dispatch(PanelKind::Artboards, "open_artboard_options", addr, &mut state);
+        assert_eq!(opened(&fx), ["artboard_options"], "Artboard Options: {fx:?}");
+        let fx = panel_dispatch(PanelKind::Swatches, "set_swatch_thumbnail_size:medium", addr, &mut state);
+        assert!(fx.is_empty(), "a row that opens nothing hands back nothing: {fx:?}");
+    }
+
+    /// The four dialogs the web menu view used to open from its own table
+    /// (Justification, Hyphenation, Save Swatch Library, Boolean Options)
+    /// come back from their YAML like every other row, so the table can go.
+    /// Boolean Options' params are the panel's options, read from
+    /// `state.boolean_*` as the table seeded them from `boolean_panel`.
+    #[test]
+    fn the_menu_tables_four_dialogs_come_back_from_their_yaml() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        let opened = |fx: &[serde_json::Value]| -> Vec<String> {
+            fx.iter().filter_map(|e| e.get("open_dialog")?.get("id")?.as_str().map(str::to_string)).collect()
+        };
+        for (kind, cmd, id) in [
+            (PanelKind::Paragraph, "open_paragraph_justification", "paragraph_justification"),
+            (PanelKind::Paragraph, "open_paragraph_hyphenation", "paragraph_hyphenation"),
+            (PanelKind::Swatches, "save_swatch_library", "swatch_library_save"),
+            (PanelKind::Boolean, "open_boolean_options", "boolean_options"),
+        ] {
+            let fx = panel_dispatch(kind, cmd, addr, &mut state);
+            assert_eq!(opened(&fx), [id], "{cmd}: {fx:?}");
+        }
+        state.boolean_panel.precision = 0.125;
+        state.boolean_panel.remove_redundant_points = false;
+        let fx = panel_dispatch(PanelKind::Boolean, "open_boolean_options", addr, &mut state);
+        let p = &fx[0]["open_dialog"]["params"];
+        assert_eq!((p["precision"].as_f64(), p["remove_redundant_points"].as_bool()), (Some(0.125), Some(false)),
+                   "the params are the panel's options: {p}");
+    }
+
     /// Two panels declare a `thumbnail_size` and both write it through the SAME
     /// generic `set_panel_state` effect. A handler that dispatches on the
     /// effect's `key` alone — which is what this app did — cannot tell them
@@ -556,6 +670,7 @@ mod tests {
             properties_constrain: false,
             concepts_selected: None,
             panel_state: std::collections::HashMap::new(),
+            menu_panel: None,
         }
     }
 

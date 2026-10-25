@@ -449,20 +449,30 @@ pub fn open_dialog_in(
     if let Some(key) = push_over {
         store.push_dialog(Some(key));
     }
-    // Extract state defaults
+    // Extract state defaults and the derived properties: a key with a `get`
+    // is computed on read and stores no default; one with a `set` runs its
+    // lambda on write (the reference's `open_dialog`).
     let mut defaults = std::collections::HashMap::new();
+    let mut props = std::collections::HashMap::new();
     if let Some(serde_json::Value::Object(state_defs)) = dlg_def.get("state") {
         for (key, defn) in state_defs {
-            let default_val = if let serde_json::Value::Object(d) = defn {
-                d.get("default").cloned().unwrap_or(serde_json::Value::Null)
+            if let serde_json::Value::Object(d) = defn {
+                let prop: serde_json::Map<String, serde_json::Value> = ["get", "set"].iter()
+                    .filter_map(|k| d.get(*k).map(|v| (k.to_string(), v.clone())))
+                    .collect();
+                if !prop.is_empty() {
+                    props.insert(key.clone(), serde_json::Value::Object(prop));
+                }
+                if !d.contains_key("get") {
+                    defaults.insert(key.clone(), d.get("default").cloned().unwrap_or(serde_json::Value::Null));
+                }
             } else {
-                defn.clone()
-            };
-            defaults.insert(key.clone(), default_val);
+                defaults.insert(key.clone(), defn.clone());
+            }
         }
     }
     // Init dialog
-    store.init_dialog(dlg_id, defaults, resolved_params);
+    store.init_dialog_with_props(dlg_id, defaults, resolved_params, props);
     // Evaluate init expressions (in order: a later init may read an earlier
     // one). The DIALOG's params must win over the opening action's: an init
     // reads `param.*` meaning its own dialog's. The reference drops the outer
@@ -574,9 +584,11 @@ fn run_one<'h>(
         }
     }
 
-    // ── Brush library edits (brush.*) — their own function, because only
-    // `options_confirm` needs the document (W2b-18).
-    if let Some((name, spec)) = effect.iter().find(|(k, _)| k.starts_with("brush.")) {
+    // ── Brush and swatch library edits (brush.*, swatch.*) — their own
+    // function, because only a few arms need the document (W2b-18).
+    if let Some((name, spec)) = effect.iter()
+        .find(|(k, _)| k.starts_with("brush.") || k.starts_with("swatch."))
+    {
         run_brush_effect(name, spec, ctx, store, model.as_deref_mut(), report);
         return;
     }
@@ -1204,6 +1216,79 @@ fn run_brush_effect(
             match model {
                 Some(m) => brush_options_confirm_dispatch(store, m),
                 None => report.unhandled.push(Unhandled::NoModel(name.to_string())),
+            }
+        }
+        "swatch.duplicate_selected" | "swatch.delete_selected" | "swatch.sort_by_name" => {
+            // The Swatches panel's library verbs (actions.yaml; the reference
+            // is `workspace_interpreter/effects.py`). `library` is an
+            // expression; `indices` (duplicate, delete) evaluates to the
+            // panel's selected INDICES. A missing library is a no-op.
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let indices = eval_index_list(args.get("indices"), store, ctx);
+                if !lib_id.is_empty() {
+                    swatch_library_verb(store, name, &lib_id, &indices);
+                }
+            }
+        }
+        "swatch.store" => {
+            // Swatch Options' OK (actions.yaml `swatch_options_confirm`; the
+            // reference is workspace_interpreter/effects.py). Edit replaces
+            // the swatch at `index`, create appends; every operand is an
+            // expression. A missing library or a bad edit index is a no-op.
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let path = format!("swatch_libraries.{lib_id}.swatches");
+                if let (false, serde_json::Value::Array(mut swatches)) =
+                    (lib_id.is_empty(), store.get_data_path(&path))
+                {
+                    let eval_json = |k: &str| match args.get(k) {
+                        Some(serde_json::Value::String(e)) => value_to_json(&eval_expr(e, store, ctx)),
+                        Some(other) => other.clone(),
+                        None => serde_json::Value::Null,
+                    };
+                    let hex = match eval_json("color") {
+                        serde_json::Value::String(c) => c.trim_start_matches('#').to_lowercase(),
+                        _ => "000000".to_string(),
+                    };
+                    let mode = eval_json("color_mode").as_str().filter(|m| !m.is_empty()).unwrap_or("rgb").to_string();
+                    let swatch = serde_json::json!({
+                        "name": eval_json("name").as_str().unwrap_or(""),
+                        "color": format!("#{hex}"),
+                        "color_mode": mode,
+                        "color_type": "process",
+                        "global": false,
+                    });
+                    let ok = if eval_json("mode") == serde_json::json!("edit") {
+                        match eval_json("index").as_f64() {
+                            Some(i) if i >= 0.0 && i.fract() == 0.0 && (i as usize) < swatches.len() => {
+                                swatches[i as usize] = swatch;
+                                true
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        swatches.push(swatch);
+                        true
+                    };
+                    if ok {
+                        store.set_data_path(&path, serde_json::Value::Array(swatches));
+                    }
+                }
+            }
+        }
+        "swatch.select_unused" | "swatch.add_used_colors" => {
+            // Both read the document's fill and stroke colours.
+            let Some(m) = model else {
+                report.unhandled.push(Unhandled::NoModel(name.to_string()));
+                return;
+            };
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                if !lib_id.is_empty() {
+                    let used = document_colours(m.document());
+                    swatch_colour_verb(store, name, &lib_id, &used);
+                }
             }
         }
         "brush.delete_selected" => {
@@ -2785,6 +2870,132 @@ fn eval_string(
         },
         _ => String::new(),
     }
+}
+
+/// Evaluate an arg as a list of swatch INDICES: a JSON array literal or an
+/// expression yielding a list. Non-numbers and negatives are dropped; a
+/// fractional index truncates, as the reference's `int()` does.
+fn eval_index_list(
+    arg: Option<&serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> Vec<usize> {
+    let items: Vec<serde_json::Value> = match arg {
+        Some(serde_json::Value::Array(items)) => items.clone(),
+        Some(serde_json::Value::String(s)) => match eval_expr(s, store, ctx) {
+            Value::List(items) => items,
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    items.iter().filter_map(|v| v.as_f64()).filter(|f| *f >= 0.0).map(|f| f as usize).collect()
+}
+
+/// `swatch.duplicate_selected`, `swatch.delete_selected` and
+/// `swatch.sort_by_name` on `swatch_libraries.<lib_id>.swatches` (the law is
+/// actions.yaml's; the reference is `workspace_interpreter/effects.py`).
+/// Duplicate takes the indices ascending with a running offset and selects
+/// the copies; delete takes them descending and clears the selection; sort is
+/// stable, by code point (`str`'s `Ord` compares UTF-8 bytes), a missing name
+/// sorting as "", and clears the selection. An out-of-range index is skipped.
+fn swatch_library_verb(store: &mut StateStore, verb: &str, lib_id: &str, indices: &[usize]) {
+    let path = format!("swatch_libraries.{lib_id}.swatches");
+    let serde_json::Value::Array(mut swatches) = store.get_data_path(&path) else { return };
+    let selection = match verb {
+        "swatch.delete_selected" => {
+            let mut order = indices.to_vec();
+            order.sort_unstable_by(|a, b| b.cmp(a));
+            for i in order {
+                if i < swatches.len() {
+                    swatches.remove(i);
+                }
+            }
+            vec![]
+        }
+        "swatch.duplicate_selected" => {
+            let mut order = indices.to_vec();
+            order.sort_unstable();
+            let (mut offset, mut picked) = (0usize, vec![]);
+            for i in order {
+                let pos = i + offset;
+                if pos >= swatches.len() {
+                    continue;
+                }
+                let mut copy = swatches[pos].clone();
+                if !copy.is_object() {
+                    copy = serde_json::json!({});
+                }
+                let name = copy.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                copy["name"] = serde_json::Value::String(format!("{name} copy"));
+                swatches.insert(pos + 1, copy);
+                picked.push(serde_json::json!(pos + 1));
+                offset += 1;
+            }
+            picked
+        }
+        _ => {
+            let key = |s: &serde_json::Value| s.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            swatches.sort_by_key(key);
+            vec![]
+        }
+    };
+    store.set_data_path(&path, serde_json::Value::Array(swatches));
+    store.set_panel("swatches", "selected_swatches", serde_json::Value::Array(selection));
+}
+
+/// `swatch.select_unused` and `swatch.add_used_colors`, given the document's
+/// colours as lower-case hex without the `#` ([`document_colours`]).
+fn swatch_colour_verb(store: &mut StateStore, verb: &str, lib_id: &str,
+                      used: &std::collections::BTreeSet<String>) {
+    let path = format!("swatch_libraries.{lib_id}.swatches");
+    let serde_json::Value::Array(mut swatches) = store.get_data_path(&path) else { return };
+    let hex_of = |s: &serde_json::Value| s.get("color").and_then(|c| c.as_str())
+        .map(|c| c.trim_start_matches('#').to_lowercase()).unwrap_or_default();
+    if verb == "swatch.select_unused" {
+        let unused: Vec<serde_json::Value> = swatches.iter().enumerate()
+            .filter(|(_, s)| !used.contains(&hex_of(s)))
+            .map(|(i, _)| serde_json::json!(i))
+            .collect();
+        store.set_panel("swatches", "selected_swatches", serde_json::Value::Array(unused));
+        return;
+    }
+    let have: std::collections::HashSet<String> = swatches.iter().map(hex_of).collect();
+    for h in used {
+        if have.contains(h) || h.len() != 6 {
+            continue;
+        }
+        let c = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).unwrap_or(0);
+        swatches.push(serde_json::json!({
+            "name": format!("R={} G={} B={}", c(0), c(2), c(4)),
+            "color": format!("#{h}"),
+            "color_mode": "rgb",
+            "color_type": "process",
+            "global": false,
+        }));
+    }
+    store.set_data_path(&path, serde_json::Value::Array(swatches));
+}
+
+/// Every fill and stroke colour of every element of `doc`, at any depth, as
+/// lower-case hex without the `#` (`Color::to_hex`). Sorted, so
+/// `swatch.add_used_colors` appends in ascending hex order.
+fn document_colours(doc: &crate::document::document::Document) -> std::collections::BTreeSet<String> {
+    fn walk(e: &Element, out: &mut std::collections::BTreeSet<String>) {
+        if let Some(f) = e.fill() {
+            out.insert(f.color.to_hex());
+        }
+        if let Some(s) = e.stroke() {
+            out.insert(s.color.to_hex());
+        }
+        for child in e.children().unwrap_or(&[]) {
+            walk(child, out);
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    for layer in &doc.layers {
+        walk(layer, &mut out);
+    }
+    out
 }
 
 /// Evaluate an arg as a list of strings. Accepts a JSON array
@@ -14521,6 +14732,228 @@ mod tests {
         assert_eq!(run_real_brush_action(&mut store, "select_all_unused_brushes"),
                    vec![Unhandled::NoModel("brush.select_unused".into())]);
         assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!(["b"]));
+    }
+
+    /// The Brushes menu's Show <Type> Brushes, through the real action:
+    /// `list_toggle` on the ACTIVE panel's `category_filter`, both ways.
+    #[test]
+    fn the_real_toggle_brush_category_action_toggles_its_type() {
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("category_filter".to_string(), serde_json::json!(["calligraphic", "scatter", "art"]));
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let run = |store: &mut StateStore| run_effects(
+            &[serde_json::json!({"dispatch": {"action": "toggle_brush_category", "params": {"type": "scatter"}}})],
+            &serde_json::json!({}), store, None, Some(ws.actions()), Some(ws.dialogs()), None).unhandled;
+        assert_eq!(run(&mut store), vec![]);
+        assert_eq!(store.get_panel("brushes", "category_filter"), &serde_json::json!(["calligraphic", "art"]));
+        run(&mut store);
+        assert_eq!(store.get_panel("brushes", "category_filter"), &serde_json::json!(["calligraphic", "art", "scatter"]));
+    }
+
+    // ── The five swatch verbs, row for row with the reference's
+    //    `workspace_interpreter/tests/test_swatch_verbs.py` ──────────────
+
+    fn sw(name: &str, color: &str) -> serde_json::Value {
+        serde_json::json!({"name": name, "color": color, "color_mode": "rgb",
+                           "color_type": "process", "global": false})
+    }
+
+    fn abc() -> Vec<serde_json::Value> {
+        vec![sw("A", "#ff0000"), sw("B", "#00ff00"), sw("C", "#0000ff")]
+    }
+
+    fn swatch_store(swatches: Vec<serde_json::Value>, selected: serde_json::Value, library: &str) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"swatch_libraries": {
+            "lib_a": {"name": "A", "swatches": swatches},
+            "lib_b": {"name": "B", "swatches": [sw("Other", "#123456")]}}}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("selected_library".to_string(), serde_json::json!(library));
+        defaults.insert("selected_swatches".to_string(), selected);
+        store.init_panel("swatches", defaults);
+        store.set_active_panel(Some("swatches"));
+        store
+    }
+
+    fn run_swatch_action(store: &mut StateStore, name: &str, children: Option<Vec<Element>>) -> Vec<Unhandled> {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let mut model = children.map(|c| crate::document::test_fixture::model_with(c, &[]));
+        run_effects(&[serde_json::json!({"dispatch": name})], &serde_json::json!({}), store,
+                    model.as_mut(), Some(ws.actions()), Some(ws.dialogs()), None).unhandled
+    }
+
+    fn swatch_names(store: &StateStore, lib: &str) -> Vec<String> {
+        store.get_data_path(&format!("swatch_libraries.{lib}.swatches")).as_array().unwrap().iter()
+            .map(|s| s["name"].as_str().unwrap_or("").to_string()).collect()
+    }
+
+    fn swatch_sel(store: &StateStore) -> serde_json::Value {
+        store.get_panel("swatches", "selected_swatches").clone()
+    }
+
+    /// A rect with `fill` and/or `stroke` (hex), for the colour verbs.
+    fn painted(fill: Option<&str>, stroke: Option<&str>) -> Element {
+        use crate::geometry::element::{Fill, Stroke};
+        let base = crate::document::test_fixture::rect(0.0, 0.0, 10.0, 10.0);
+        let base = crate::geometry::element::with_fill(&base, fill.map(|h| Fill::new(Color::from_hex(h).unwrap())));
+        match (base, stroke) {
+            (Element::Rect(mut r), Some(h)) => { r.stroke = Some(Stroke::new(Color::from_hex(h).unwrap(), 1.0)); Element::Rect(r) }
+            (e, _) => e,
+        }
+    }
+
+    #[test]
+    fn duplicate_swatch_follows_the_originals_and_selects_the_copies() {
+        let mut store = swatch_store(abc(), serde_json::json!([2, 0]), "lib_a");
+        assert_eq!(run_swatch_action(&mut store, "duplicate_swatch", None), vec![]);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "A copy", "B", "C", "C copy"]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([1, 4]));
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches")[1]["color"], "#ff0000");
+        assert_eq!(swatch_names(&store, "lib_b"), ["Other"]);
+
+        let mut store = swatch_store(abc(), serde_json::json!([-1, 1, 7]), "lib_a");
+        run_swatch_action(&mut store, "duplicate_swatch", None);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "B copy", "C"]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([2]));
+    }
+
+    #[test]
+    fn delete_swatch_removes_the_selected_and_clears_the_selection() {
+        let mut store = swatch_store(abc(), serde_json::json!([0, 2]), "lib_a");
+        assert_eq!(run_swatch_action(&mut store, "delete_swatch", None), vec![]);
+        assert_eq!(swatch_names(&store, "lib_a"), ["B"]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([]));
+
+        let mut store = swatch_store(abc(), serde_json::json!([-1, 1, 3]), "lib_a");
+        run_swatch_action(&mut store, "delete_swatch", None);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "C"]);
+
+        let mut store = swatch_store(abc(), serde_json::json!([0]), "nope");
+        run_swatch_action(&mut store, "delete_swatch", None);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "C"]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([0]), "an unknown library is a no-op");
+    }
+
+    #[test]
+    fn sort_swatches_by_name_is_code_point_stable_and_clears_the_selection() {
+        let mut store = swatch_store(vec![sw("b", "#000000"), sw("B", "#000000"), sw("a", "#000000"), sw("A", "#000000")],
+                                     serde_json::json!([1]), "lib_a");
+        run_swatch_action(&mut store, "sort_swatches_by_name", None);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "a", "b"]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([]));
+
+        let (pre, dec) = ("\u{e9}".to_string(), "e\u{301}".to_string());
+        let mut store = swatch_store(vec![sw(&pre, "#0"), sw("z", "#0"), sw(&dec, "#0"), sw("f", "#0")],
+                                     serde_json::json!([]), "lib_a");
+        run_swatch_action(&mut store, "sort_swatches_by_name", None);
+        assert_eq!(swatch_names(&store, "lib_a"), [dec.as_str(), "f", "z", pre.as_str()]);
+
+        let mut store = swatch_store(vec![sw("X", "#000001"), sw("A", "#0"), sw("X", "#000002"), sw("X", "#000003")],
+                                     serde_json::json!([]), "lib_a");
+        run_swatch_action(&mut store, "sort_swatches_by_name", None);
+        let colours: Vec<_> = store.get_data_path("swatch_libraries.lib_a.swatches").as_array().unwrap()
+            .iter().map(|s| s["color"].clone()).collect();
+        assert_eq!(colours[1..], [serde_json::json!("#000001"), serde_json::json!("#000002"), serde_json::json!("#000003")]);
+
+        // Stability at a size where an unstable sort is not insertion sort
+        // (Rust's `sort_unstable` is stable in practice below ~20 items, so
+        // the four-swatch row above cannot tell the two apart; measured by
+        // mutant). 64 swatches over three names, each colour its position.
+        let many: Vec<_> = (0..64).map(|i| sw(["Y", "X", "Z"][(i * 7) % 3], &format!("#{i:06x}"))).collect();
+        let mut store = swatch_store(many, serde_json::json!([]), "lib_a");
+        run_swatch_action(&mut store, "sort_swatches_by_name", None);
+        let lib = store.get_data_path("swatch_libraries.lib_a.swatches");
+        for name in ["X", "Y", "Z"] {
+            let order: Vec<String> = lib.as_array().unwrap().iter().filter(|s| s["name"] == name)
+                .map(|s| s["color"].as_str().unwrap().to_string()).collect();
+            let mut sorted = order.clone();
+            sorted.sort();
+            assert_eq!(order, sorted, "equal names keep their relative order ({name})");
+        }
+
+        let nameless = serde_json::json!({"color": "#abcdef"});
+        let mut store = swatch_store(vec![sw("A", "#0"), nameless.clone()], serde_json::json!([]), "lib_a");
+        run_swatch_action(&mut store, "sort_swatches_by_name", None);
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches")[0], nameless);
+    }
+
+    #[test]
+    fn select_all_unused_swatches_leaves_out_every_used_colour() {
+        let mut store = swatch_store(vec![sw("R", "#FF0000"), sw("G", "#00ff00"), sw("B", "#0000ff")],
+                                     serde_json::json!([]), "lib_a");
+        let unhandled = run_swatch_action(&mut store, "select_all_unused_swatches",
+            Some(vec![painted(Some("#ff0000"), None), painted(None, Some("#0000FF"))]));
+        assert_eq!(unhandled, vec![]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([1]));
+
+        let group = crate::document::test_fixture::group(vec![painted(Some("#00ff00"), None)]);
+        let mut store = swatch_store(abc(), serde_json::json!([]), "lib_a");
+        run_swatch_action(&mut store, "select_all_unused_swatches", Some(vec![group]));
+        assert_eq!(swatch_sel(&store), serde_json::json!([0, 2]), "use inside a group counts");
+
+        let mut store = swatch_store(abc(), serde_json::json!([1]), "lib_a");
+        assert_eq!(run_swatch_action(&mut store, "select_all_unused_swatches", None),
+                   vec![Unhandled::NoModel("swatch.select_unused".into())]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([1]), "no model writes nothing");
+    }
+
+    #[test]
+    fn add_used_colors_appends_the_missing_colours_sorted_by_hex() {
+        let mut store = swatch_store(vec![sw("Red", "#FF0000")], serde_json::json!([]), "lib_a");
+        run_swatch_action(&mut store, "add_used_colors",
+            Some(vec![painted(Some("#ff0000"), Some("#0a0b0c")), painted(Some("#00ff00"), None)]));
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches"), serde_json::json!([
+            sw("Red", "#FF0000"), sw("R=0 G=255 B=0", "#00ff00"), sw("R=10 G=11 B=12", "#0a0b0c")]));
+
+        let mut store = swatch_store(abc(), serde_json::json!([2]), "lib_a");
+        run_swatch_action(&mut store, "add_used_colors", Some(vec![painted(Some("#FF0000"), None)]));
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "C"]);
+        assert_eq!(swatch_sel(&store), serde_json::json!([2]), "the selection is not touched");
+    }
+
+    /// Swatch Options from the panel menu (`{mode: edit}` only): the dialog
+    /// opens on the first selected swatch, and OK, with the params its button
+    /// passes, replaces that swatch. Create mode appends. Row for row with the
+    /// reference's `TestSwatchOptions`.
+    #[test]
+    fn swatch_options_edits_the_first_selected_swatch_and_create_appends() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let act = |store: &mut StateStore, action: &str, params: serde_json::Value| run_effects(
+            &[serde_json::json!({"dispatch": {"action": action, "params": params}})],
+            &serde_json::json!({}), store, None, Some(ws.actions()), Some(ws.dialogs()), None).unhandled;
+        // The OK button's params, resolved in the open dialog's scope.
+        let ok_params = |store: &StateStore| {
+            let ctx = store.eval_context();
+            serde_json::json!({
+                "mode": value_to_json(&crate::interpreter::expr::eval("param.mode", &ctx)),
+                "swatch_name": value_to_json(&crate::interpreter::expr::eval("dialog.swatch_name", &ctx)),
+                "color": value_to_json(&crate::interpreter::expr::eval("dialog.color", &ctx)),
+                "color_mode": value_to_json(&crate::interpreter::expr::eval("dialog.color_mode", &ctx)),
+                "library": value_to_json(&crate::interpreter::expr::eval("param.library", &ctx)),
+                "index": value_to_json(&crate::interpreter::expr::eval("param.index", &ctx)),
+            })
+        };
+
+        let mut store = swatch_store(abc(), serde_json::json!([1, 2]), "lib_a");
+        assert_eq!(act(&mut store, "open_swatch_options", serde_json::json!({"mode": "edit"})), vec![]);
+        assert_eq!(store.dialog_id(), Some("swatch_options"));
+        assert_eq!(store.get_dialog("swatch_name"), &serde_json::json!("B"));
+        store.set_dialog("swatch_name", serde_json::json!("Bee"));
+        let params = ok_params(&store);
+        act(&mut store, "swatch_options_confirm", params);
+        assert_eq!(store.dialog_id(), None, "OK closes the dialog");
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches")[1], sw("Bee", "#00ff00"));
+
+        let mut store = swatch_store(abc(), serde_json::json!([]), "lib_a");
+        act(&mut store, "open_swatch_options", serde_json::json!({"mode": "create", "color": "#123456"}));
+        store.set_dialog("swatch_name", serde_json::json!("New"));
+        let params = ok_params(&store);
+        act(&mut store, "swatch_options_confirm", params);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "C", "New"]);
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches")[3]["color"], "#123456");
     }
 
     /// `list_toggle`, row for row with the reference's `TestListToggleEffect`.

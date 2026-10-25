@@ -168,6 +168,16 @@ def _id_addressed_actions(node, event):
     return acts
 
 
+def _panel_menu_action(spec, panel, address):
+    if not isinstance(panel, str) or not isinstance(address, dict):
+        return None
+    menu = ((((spec or {}).get("panels") or {}).get(panel)) or {}).get("menu") or []
+    rows = [n for n in menu if isinstance(n, dict)
+            and all(k in n and n[k] == v for k, v in address.items())]
+    act = rows[0].get("action") if len(rows) == 1 else None
+    return act if isinstance(act, str) else None
+
+
 def gather_evidence(root, spec=None):
     ev = {}
     widgets = _widgets_by_id(spec)
@@ -200,6 +210,15 @@ def gather_evidence(root, spec=None):
                 nodes = widgets.get(wid) if isinstance(wid, str) else None
                 if nodes and len(nodes) == 1:
                     ev["actions_dispatched"] |= _id_addressed_actions(nodes[0], de.get("event"))
+            # A panel-menu click resolves, through the bundle, to the action of
+            # the ONE row of the named panel's menu whose every address key
+            # equals its own (the runners' law); zero or two rows resolve to
+            # nothing, so this too can only under-count.
+            pm = a.get("panel_menu")
+            if isinstance(pm, dict):
+                act = _panel_menu_action(spec, pm.get("panel"), pm.get("address"))
+                if act:
+                    ev["actions_dispatched"].add(act)
     # Ops tested at the op layer whose NAME is also an action's. They exercise
     # the layer beneath the action, not the action's spec effects, so they do
     # not cover it; the report counts them so the gap is visible, not silent.
@@ -586,7 +605,10 @@ def self_test():
                 {"dialog_event": {"address": {"id": "w_btn"}, "event": "click"}},
                 {"dialog_event": {"address": {"id": "w_twice"}, "event": "click"}},
                 {"dialog_event": {"address": {"id": "w_nowhere"}, "event": "click"}},
-                {"dialog_event": {"address": {"id": "w_clickonly"}, "event": "commit", "value": "1"}}]}])
+                {"dialog_event": {"address": {"id": "w_clickonly"}, "event": "commit", "value": "1"}},
+                {"panel_menu": {"panel": "p1", "address": {"action": "pm_one"}}},
+                {"panel_menu": {"panel": "p1", "address": {"action": "pm_twice"}}},
+                {"panel_menu": {"panel": "p2", "address": {"action": "pm_elsewhere"}}}]}])
         put("test_fixtures/dialog_actions/b_expected.json",
             {"actions": [{"dialog_event": {"address": {"action": "dlg_decoy"}, "event": "click"}}]})
         put("test_fixtures/gestures/g.json", [{"name": "g", "tool": "rect"}])
@@ -628,6 +650,7 @@ def self_test():
                 "dlg_pressed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_committed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_decoy": {"effects": [{"set": {"a": 1}}]},
+                **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pm_one", "pm_twice", "pm_elsewhere")},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in (
                     "beh_on_change", "beh_not_change", "btn_act", "twice_act", "clickonly_act")},
             },
@@ -645,7 +668,11 @@ def self_test():
                 {"id": "sub2", "label": "Sub", "items": [
                     {"id": "m_in_sub", "action": "in_sub", "label": "In"}]},
                 {"id": "m_golden_only", "action": "golden_only", "label": "G"}]}],
-            "panels": {"p1": {}, "p2": {}},
+            "panels": {"p1": {"menu": [
+                {"label": "One", "action": "pm_one"}, "separator",
+                {"label": "Twice A", "action": "pm_twice", "params": {"t": "a"}},
+                {"label": "Twice B", "action": "pm_twice", "params": {"t": "b"}},
+                {"label": "Elsewhere", "action": "pm_elsewhere"}]}, "p2": {}},
             "dialogs": {"d0": {"content": {"type": "col", "children": [
                 {"id": "w_sel", "type": "select", "behavior": [
                     {"event": "change", "action": "beh_on_change"}, {"event": "click", "action": "beh_not_change"}]},
@@ -676,6 +703,9 @@ def self_test():
         expect(("actions", "dlg_pressed"), COVERED)  # the action a clicked widget names
         expect(("actions", "dlg_committed"), NOT_YET_BUILT)  # a commit is not a press
         expect(("actions", "dlg_decoy"), NOT_YET_BUILT)  # an _expected file is not a case
+        expect(("actions", "pm_one"), COVERED)  # the ONE panel-menu row a step addresses
+        expect(("actions", "pm_twice"), NOT_YET_BUILT)  # an address two rows share resolves to neither
+        expect(("actions", "pm_elsewhere"), NOT_YET_BUILT)  # resolved in the NAMED panel's menu only
         # An id-addressed widget resolves through the spec to what its event runs.
         expect(("actions", "beh_on_change"), COVERED)  # a commit fires the change behavior
         expect(("actions", "beh_not_change"), NOT_YET_BUILT)  # not its click behavior

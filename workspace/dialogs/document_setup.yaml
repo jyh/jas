@@ -19,11 +19,9 @@ document_setup:
     flattener preset, "Discard White Overprint in Output". The Units
     selector remains deferred (no global-units feature yet).
 
-    Phase-1A deferral: the chain-link toggle's bleed_uniform state
-    persists with the document, but mirroring a single-side edit to
-    all four fields is not yet wired (matches the artboard_options
-    chain-link precedent). User types each side individually in
-    Phase 1A.
+    The bleed chain link (dialog.bleed_uniform) persists with the
+    document. While it is engaged, an edit to any one side is mirrored
+    to all four; disengaged, each side is typed individually.
 
   modal: true
   width: 460
@@ -118,12 +116,26 @@ document_setup:
                     min: 0
                     style: { width: 80 }
                     bind: { value: "dialog.bleed_top" }
+                    behavior:
+                      - event: commit
+                        effects:
+                          - if:
+                              condition: "dialog.bleed_uniform"
+                              then:
+                                - set: { dialog.bleed_bottom: "dialog.bleed_top", dialog.bleed_left: "dialog.bleed_top", dialog.bleed_right: "dialog.bleed_top" }
                   - { type: text, content: "Bottom:", style: { font_size: 11, width: 60, padding_left: 12 } }
                   - id: ds_bleed_bottom
                     type: number_input
                     min: 0
                     style: { width: 80 }
                     bind: { value: "dialog.bleed_bottom" }
+                    behavior:
+                      - event: commit
+                        effects:
+                          - if:
+                              condition: "dialog.bleed_uniform"
+                              then:
+                                - set: { dialog.bleed_top: "dialog.bleed_bottom", dialog.bleed_left: "dialog.bleed_bottom", dialog.bleed_right: "dialog.bleed_bottom" }
               - type: container
                 layout: row
                 style: { gap: 12, alignment: center }
@@ -134,12 +146,26 @@ document_setup:
                     min: 0
                     style: { width: 80 }
                     bind: { value: "dialog.bleed_left" }
+                    behavior:
+                      - event: commit
+                        effects:
+                          - if:
+                              condition: "dialog.bleed_uniform"
+                              then:
+                                - set: { dialog.bleed_top: "dialog.bleed_left", dialog.bleed_bottom: "dialog.bleed_left", dialog.bleed_right: "dialog.bleed_left" }
                   - { type: text, content: "Right:",  style: { font_size: 11, width: 60, padding_left: 12 } }
                   - id: ds_bleed_right
                     type: number_input
                     min: 0
                     style: { width: 80 }
                     bind: { value: "dialog.bleed_right" }
+                    behavior:
+                      - event: commit
+                        effects:
+                          - if:
+                              condition: "dialog.bleed_uniform"
+                              then:
+                                - set: { dialog.bleed_top: "dialog.bleed_right", dialog.bleed_bottom: "dialog.bleed_right", dialog.bleed_left: "dialog.bleed_right" }
           - id: ds_bleed_chain
             type: icon_button
             bind:

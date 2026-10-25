@@ -16,7 +16,7 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 }
 
 /// Dispatch a menu command for the Layers panel.
-pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
+pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_json::Value> {
     match cmd {
         "close_panel" => crate::workspace::layout_apply::layout_apply(
             &mut state.workspace_layout,
@@ -34,7 +34,7 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
                 .any(|p| p.len() == 1);
             if !any_top_level {
                 let params = serde_json::Map::new();
-                crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+                return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
             }
         }
         "new_layer"
@@ -46,10 +46,11 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         | "flatten_artwork"
         | "collect_in_new_layer" => {
             let params = serde_json::Map::new();
-            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
         _ => {}
     }
+    Vec::new()
 }
 
 /// Override the static menu label for commands whose displayed text
@@ -144,6 +145,7 @@ mod tests {
             properties_constrain: false,
             concepts_selected: None,
             panel_state: std::collections::HashMap::new(),
+            menu_panel: None,
         }
     }
 

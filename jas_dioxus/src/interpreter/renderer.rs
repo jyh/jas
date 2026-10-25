@@ -225,56 +225,17 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
 
 // ── Generic behavior dispatch ──────────────────────────────────
 
-/// Apply dialog state when a confirm action is dispatched.
-/// This handles swatch_options_confirm by updating or creating a swatch.
+/// Apply dialog state when a confirm action is dispatched (the native
+/// confirms the YAML does not yet express: save_swatch_library_confirm).
 fn apply_dialog_confirm(
     action: &str,
     dialog: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
 ) {
     match action {
-        "swatch_options_confirm" => {
-            let mode = dialog.get("_param_mode").and_then(|v| v.as_str()).unwrap_or("edit");
-            let library = dialog.get("_param_library").and_then(|v| v.as_str()).unwrap_or("");
-            let index = dialog.get("_param_index").and_then(|v| v.as_f64()).map(|n| n as usize);
-            let name = dialog.get("swatch_name").and_then(|v| v.as_str()).unwrap_or("");
-            let color_mode = dialog.get("color_mode").and_then(|v| v.as_str()).unwrap_or("rgb");
-            // Build hex color from the dialog's computed hex value
-            let hex = dialog.get("hex").and_then(|v| v.as_str()).unwrap_or("ffffff");
-            let color = format!("#{hex}");
-
-            let swatch = serde_json::json!({
-                "name": name,
-                "color": color,
-                "color_mode": color_mode,
-                "color_type": "process",
-                "global": false,
-            });
-
-            if mode == "edit" {
-                if let (Some(idx), Some(lib)) = (index, st.swatch_libraries.get_mut(library)) {
-                    if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
-                        if idx < swatches.len() {
-                            swatches[idx] = swatch;
-                        }
-                    }
-                }
-            } else if mode == "create" {
-                // Find a target library; use the first one if none specified
-                let lib_key = if !library.is_empty() {
-                    library.to_string()
-                } else {
-                    st.swatch_libraries.as_object()
-                        .and_then(|m| m.keys().next().cloned())
-                        .unwrap_or_default()
-                };
-                if let Some(lib) = st.swatch_libraries.get_mut(&lib_key) {
-                    if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
-                        swatches.push(swatch);
-                    }
-                }
-            }
-        }
+        // swatch_options_confirm: the YAML's `swatch.store` (run by
+        // `run_in_swatches_store`) does the write, on every route. Until
+        // 2026-10-25 this arm did it natively and the YAML only logged.
         "save_swatch_library_confirm" => {
             // Save dialog 'name' field. Serialize the active swatch
             // library (selected_library) to JSON and trigger a
@@ -1828,6 +1789,13 @@ fn build_appstate_ctx(
         .and_then(|ws| ws.data().get("preferences").cloned())
         .unwrap_or(serde_json::Value::Null);
     ctx.insert("preferences".to_string(), prefs);
+    // The data namespace, from this app's homes for it, as the reference's
+    // and the engine's action contexts carry it: Swatch Options reads the
+    // selected swatch from `data.swatch_libraries` when it opens.
+    ctx.insert("data".to_string(), serde_json::json!({
+        "swatch_libraries": st.swatch_libraries.clone(),
+        "brush_libraries": st.brush_libraries.clone(),
+    }));
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
     }
@@ -2892,17 +2860,34 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // list_toggle: { target, value } — set membership. The one shipped target
-    // is the Layers type filter, which this app holds as a typed set; any
-    // other target is a no-op here, as an unknown `list_push` target is.
+    // list_toggle: { target, value } — set membership. The Layers type filter
+    // is held as a typed set. Any other `panel.<key>` target is the list in
+    // the panel whose menu is running (`AppState::menu_panel`), written through
+    // the panel-named `set_panel_state` route (the Brushes menu's Show <Type>
+    // Brushes). With no running menu panel it is a no-op, as an unknown
+    // `list_push` target is.
     if let Some(lt) = eff.get("list_toggle").and_then(|v| v.as_object()) {
-        if lt.get("target").and_then(|v| v.as_str()) == Some("panel.type_filter") {
-            let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
-            if let super::expr_types::Value::Str(t) = super::expr::eval(value_expr, eval_ctx) {
-                if !st.layers_type_filter.remove(&t) {
-                    st.layers_type_filter.insert(t);
+        let target = lt.get("target").and_then(|v| v.as_str()).unwrap_or("");
+        let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
+        let value = super::effects::value_to_json(&super::expr::eval(value_expr, eval_ctx));
+        if target == "panel.type_filter" {
+            if let Some(t) = value.as_str() {
+                if !st.layers_type_filter.remove(t) {
+                    st.layers_type_filter.insert(t.to_string());
                 }
             }
+        } else if let (Some(key), Some(pid)) = (target.strip_prefix("panel."), st.menu_panel.clone()) {
+            let current = crate::panels::panel_menu::panel_menu_ctx(&pid, st)["panel"][key].clone();
+            let mut list = current.as_array().cloned().unwrap_or_default();
+            match list.iter().position(|v| v == &value) {
+                Some(i) => { list.remove(i); }
+                None => list.push(value),
+            }
+            let mut sps = serde_json::Map::new();
+            sps.insert("panel".into(), serde_json::Value::String(pid));
+            sps.insert("key".into(), serde_json::Value::String(key.to_string()));
+            sps.insert("value".into(), serde_json::Value::Array(list));
+            apply_set_panel_state_with_ctx(&sps, st, None);
         }
         return deferred;
     }
@@ -3000,6 +2985,13 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // Swatch-library edits run in the shared runner, over the app-global
+    // libraries and the Swatches panel's selection.
+    if eff.as_object().is_some_and(|m| m.keys().any(|k| k.starts_with("swatch."))) {
+        run_in_swatches_store(eff, eval_ctx, st);
+        return deferred;
+    }
+
     // Fallback: route Model-level `doc.*` effects (doc.zoom.*,
     // doc.pan.*, doc.translate_selection, doc.add_element, etc.) to
     // the effects.rs dispatcher so view actions like
@@ -3064,6 +3056,34 @@ fn run_in_brushes_store(
         for (k, v) in out {
             entry.insert(k.clone(), v.clone());
         }
+    }
+}
+
+/// Run one `swatch.*` effect in a store seeded with the app-global swatch
+/// libraries and the Swatches panel's `selected_library` and
+/// `selected_swatches`, then write the libraries and the selection back. The
+/// brush-library twin is [`run_in_brushes_store`]; the web keeps the Swatches
+/// panel's state in its typed `swatches_panel`, so the two keys are carried
+/// across by name.
+fn run_in_swatches_store(
+    eff: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    const SWATCHES: &str = "swatches_panel_content";
+    let mut store = super::state_store::StateStore::new();
+    store.set_data_path("swatch_libraries", st.swatch_libraries.clone());
+    let scope: std::collections::HashMap<String, serde_json::Value> = [
+        ("selected_library".to_string(), serde_json::json!(st.swatches_panel.selected_library)),
+        ("selected_swatches".to_string(), serde_json::json!(st.swatches_panel.selected_swatches)),
+    ].into();
+    store.init_panel(SWATCHES, scope);
+    store.set_active_panel(Some(SWATCHES));
+    let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
+    super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
+    st.swatch_libraries = store.get_data_path("swatch_libraries");
+    if let Some(sel) = store.get_panel(SWATCHES, "selected_swatches").as_array() {
+        st.swatches_panel.selected_swatches = sel.iter().filter_map(|v| v.as_i64()).collect();
     }
 }
 

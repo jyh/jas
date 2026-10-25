@@ -3319,15 +3319,21 @@ pub(crate) mod tests {
         });
         let id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let raw = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+        let outer = crate::interpreter::renderer::build_dialog_outer_scope(st);
         let ds = crate::interpreter::dialog_state::build_dialog_state(
             id,
             &raw,
             &crate::workspace::dock_panel::build_live_state_map(st),
-            &crate::interpreter::renderer::build_dialog_outer_scope(st),
+            &outer,
         )
         .unwrap_or_else(|| panic!("Action test '{name}': the workspace defines no dialog {id:?}"));
         assert_eq!(serde_json::json!(ds.id), expected["id"], "Action test '{name}': the dialog opened");
-        for (section, got) in [("params", &ds.params), ("state", &ds.state)] {
+        // `state` is the dialog namespace a widget reads: stored values plus
+        // every derived (`get`) key, as the reference's `eval_context` builds it.
+        let params: std::collections::HashMap<String, serde_json::Value> = ds.params.clone();
+        let state: std::collections::HashMap<String, serde_json::Value> =
+            ds.eval_context_with_outer(Some(&outer)).into_iter().collect();
+        for (section, got) in [("params", &params), ("state", &state)] {
             let Some(want) = expected.get(section).and_then(|v| v.as_object()) else { continue };
             for (key, value) in want {
                 // ABSENT is not NULL: the key must be there for a null to pass.
@@ -7397,7 +7403,12 @@ pub(crate) mod tests {
             let name = tc["name"].as_str().unwrap();
             let func = tc["function"].as_str().unwrap();
             assert_eq!(func, "bind_values", "Unknown function: {}", func);
-            let panel_id = tc["args"]["panel"].as_str().unwrap();
+            // A case names a compiled panel (`panel`) or a dialog (`dialog`).
+            let subject = match tc["args"]["dialog"].as_str() {
+                Some(dialog_id) => &bundle["dialogs"][dialog_id],
+                None => &panels[tc["args"]["panel"].as_str().unwrap()],
+            };
+            assert!(subject.is_object(), "Panel bind values '{}': no such subject", name);
             // ctx is a JSON object data scope (state / panel / data namespaces);
             // it passes straight to the expr evaluator, as in the two sibling
             // panel passes. Default to empty (everything resolves to null).
@@ -7405,7 +7416,7 @@ pub(crate) mod tests {
             let ctx = tc["args"].get("ctx").unwrap_or(&empty);
             let expected = &tc["expected"];
 
-            let actual = bind_values(&panels[panel_id], ctx);
+            let actual = bind_values(subject, ctx);
             assert_eq!(&actual, expected, "Panel bind values '{}' mismatch", name);
         }
     }

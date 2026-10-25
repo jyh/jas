@@ -26,7 +26,8 @@ private func readText(_ path: String) -> String? {
 /// The path of the ONE static node whose every `address` key equals its own;
 /// zero or two matches is a failure that names the count (Rust's
 /// `dialog_address_path`).
-private func addressed(_ content: Any?, _ address: [String: Any]) -> Result<[String: Any], DialogCorpusError> {
+private func addressed(_ content: Any?, _ address: [String: Any],
+                       context: [String: Any]) -> Result<[String: Any], DialogCorpusError> {
     var found: [[String: Any]] = []
     func walk(_ node: Any?) {
         guard let n = node as? [String: Any] else { return }
@@ -34,6 +35,9 @@ private func addressed(_ content: Any?, _ address: [String: Any]) -> Result<[Str
             found.append(n)
         }
         for child in n["children"] as? [Any] ?? [] { walk(child) }
+        // A `tabs` node renders only its ACTIVE page (`renderTabs`), so only
+        // that page's widgets are addressable, as on the engine's route.
+        if n["type"] as? String == "tabs" { walk(activeTabContent(n, context: context)) }
     }
     walk(content)
     guard found.count == 1 else {
@@ -43,6 +47,18 @@ private func addressed(_ content: Any?, _ address: [String: Any]) -> Result<[Str
 }
 
 private struct DialogCorpusError: Error { let text: String }
+
+/// The active page's content of a `tabs` node: `bind.value` evaluated when it
+/// is a non-empty string, else the first tab (`renderTabs`' law).
+private func activeTabContent(_ node: [String: Any], context: [String: Any]) -> [String: Any]? {
+    let tabs = node["tabs"] as? [[String: Any]] ?? []
+    var active = tabs.first?["id"] as? String ?? ""
+    if let e = (node["bind"] as? [String: Any])?["value"] as? String,
+       case .string(let s) = evaluate(e, context: context), !s.isEmpty {
+        active = s
+    }
+    return tabs.first(where: { ($0["id"] as? String) == active })?["content"] as? [String: Any]
+}
 
 /// JSON equality with one number type (Rust's `json_value_eq`).
 private func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
@@ -64,6 +80,36 @@ private func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
     }
 }
 
+/// The panel kind and menu command of a `panel_menu` step: the ONE row of the
+/// panel's YAML `menu:` whose every `address` key equals its own (zero or two
+/// refuse by name, as the engine runner does), taken at that row's index from
+/// the menu the view draws (``panelMenu(_:)``), which must have one item per row.
+private func panelMenuCommand(_ step: [String: Any], ws: WorkspaceData)
+    -> Result<(PanelKind, String), DialogCorpusError> {
+    let pid = step["panel"] as? String ?? ""
+    let kinds = PanelKind.all + [.brushes, .gradient, .concepts]
+    guard let kind = kinds.first(where: { panelKindToContentId($0) == pid }) else {
+        return .failure(DialogCorpusError(text: "no panel kind for \(pid)"))
+    }
+    let address = step["address"] as? [String: Any] ?? [:]
+    let rows = ws.panelMenuRaw(pid)
+    let hits = rows.indices.filter { i in
+        guard let n = rows[i] as? [String: Any] else { return false }
+        return address.allSatisfy { k, v in n[k] != nil && "\(n[k]!)" == "\(v)" }
+    }
+    guard hits.count == 1 else {
+        return .failure(DialogCorpusError(text: "the address \(address) matches \(hits.count) row(s) of \(pid)'s menu, want exactly 1"))
+    }
+    let items = panelMenu(kind)
+    guard items.count == rows.count else {
+        return .failure(DialogCorpusError(text: "\(pid)'s menu draws \(items.count) item(s) for \(rows.count) row(s)"))
+    }
+    switch items[hits[0]] {
+    case .action(_, let cmd, _), .toggle(_, let cmd), .radio(_, let cmd, _): return .success((kind, cmd))
+    case .separator: return .failure(DialogCorpusError(text: "row \(hits[0]) of \(pid)'s menu is a separator"))
+    }
+}
+
 private func runCase(_ tc: [String: Any], root: String) -> [String] {
     let name = tc["name"] as? String ?? "?"
     guard let ws = WorkspaceData.load(),
@@ -72,9 +118,27 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     }
     let m = Model(document: svgToDocument(svg))
     let store = m.stateStore
+    // `panel_state`: a panel's own state as the artist left it (a selection
+    // made by clicking tiles, which no verb sets), seeded over the panel's
+    // declared defaults. The engine runner seeds it the same way.
+    for (pid, keys) in tc["panel_state"] as? [String: Any] ?? [:] {
+        if !store.hasPanel(pid) { store.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+        for (k, v) in keys as? [String: Any] ?? [:] { store.setPanel(pid, k, v) }
+    }
     var atOpen: String? = nil
     for step in tc["actions"] as? [[String: Any]] ?? [] {
-        if let od = step["open_dialog"] {
+        if let pm = step["panel_menu"] as? [String: Any] {
+            // A panel-menu click, through the menu's own route (``panelDispatch``)
+            // with the command the menu view holds for that row.
+            switch panelMenuCommand(pm, ws: ws) {
+            case .success(let (kind, cmd)):
+                var layout = WorkspaceLayout.defaultLayout()
+                panelDispatch(kind, cmd: cmd,
+                              addr: PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0),
+                              layout: &layout, model: m)
+            case .failure(let e): return ["\(name): \(e.text)"]
+            }
+        } else if let od = step["open_dialog"] {
             if atOpen == nil { atOpen = documentToTestJson(m.document) }
             runEffects([["open_dialog": od]], ctx: [:], store: store,
                        actions: ws.actions(), dialogs: ws.dialogs(),
@@ -83,14 +147,14 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             guard let id = store.getDialogId(), let spec = ws.dialog(id) else {
                 return ["\(name): a dialog_event with no dialog open"]
             }
-            let node: [String: Any]
-            switch addressed(spec["content"], ev["address"] as? [String: Any] ?? [:]) {
-            case .success(let n): node = n
-            case .failure(let e): return ["\(name): \(e.text)"]
-            }
             let ctx = buildDialogEvalContextWithGetters(
                 store: store, state: store.getDialogState(),
                 params: store.getDialogParams() ?? [:], outer: [:])
+            let node: [String: Any]
+            switch addressed(spec["content"], ev["address"] as? [String: Any] ?? [:], context: ctx) {
+            case .success(let n): node = n
+            case .failure(let e): return ["\(name): \(e.text)"]
+            }
             let route = PanelWidgetEvents(model: m, panelId: nil, scope: ctx,
                                           onDialogWrite: { k, v in DialogWidgetActions.write(k, v, store: store) })
             switch ev["event"] as? String {
@@ -119,6 +183,15 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                 } else {
                     return ["\(name): a click on a \(kind), which this runner does not route"]
                 }
+            case "change" where node["type"] as? String == "tabs":
+                // A tab pick, as `renderTabs` writes it: the tab id through a
+                // `dialog.` bind. Any other bind, or an id no tab has, refuses.
+                let tabIds = (node["tabs"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+                let expr = (node["bind"] as? [String: Any])?["value"] as? String ?? ""
+                guard expr.hasPrefix("dialog."), let tab = ev["value"] as? String, tabIds.contains(tab) else {
+                    return ["\(name): the tab pick was refused (bind \(expr), value \(ev["value"] ?? "nil"))"]
+                }
+                DialogWidgetActions.write(String(expr.dropFirst("dialog.".count)), tab, store: store)
             default:
                 return ["\(name): unknown dialog event \(ev["event"] ?? "nil")"]
             }
@@ -164,8 +237,13 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     // `expected_data`: a dotted path into the store's `data` namespace, where
     // an integer segment indexes an array and -1 is its last item; a path that
     // does not resolve is a failure. The engine runner reads it the same way.
+    // The swatch libraries are not in the store on the Mac: they are app-global
+    // (``AppSwatchLibraries``, `model.swatchLibraries`), so `data.swatch_libraries`
+    // is read from there.
+    var dataRoot = store.getDataPath("") as? [String: Any] ?? [:]
+    dataRoot["swatch_libraries"] = m.swatchLibraries.libs
     for (path, value) in tc["expected_data"] as? [String: Any] ?? [:] {
-        var cur: Any? = store.getDataPath("")
+        var cur: Any? = dataRoot
         for seg in path.split(separator: ".").map(String.init) {
             if let a = cur as? [Any], let i = Int(seg) {
                 let j = i < 0 ? a.count + i : i
@@ -179,6 +257,15 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             failures.append("\(name): data.\(path) does not resolve")
         } else if !sameJSON(cur, value) {
             failures.append("\(name): data.\(path) is \(String(describing: cur)), the corpus pins \(value)")
+        }
+    }
+    // `expected_panel`: a subset of a panel's own state after the last step.
+    for (pid, keys) in tc["expected_panel"] as? [String: Any] ?? [:] {
+        for (key, value) in keys as? [String: Any] ?? [:] {
+            let have = store.getPanel(pid, key)
+            if have == nil || !sameJSON(have, value) {
+                failures.append("\(name): panel \(pid).\(key) is \(String(describing: have)), the corpus pins \(value)")
+            }
         }
     }
     let after = documentToTestJson(m.document)
@@ -211,6 +298,9 @@ private let dialogActionFixtures = [
     "dialog_actions/paragraph_dialogs.json",
     "dialog_actions/brush_options.json",
     "dialog_actions/artboard_options.json",
+    "dialog_actions/document_setup.json",
+    "dialog_actions/print.json",
+    "dialog_actions/panel_menu_actions.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {
