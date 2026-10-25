@@ -808,5 +808,36 @@
       "swatch_libraries.web_colors.swatches.2.name": "R=0 G=0 B=102",
       "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
     }
+  },
+  {
+    "name": "add_used_colors_appends_the_one_colour_the_library_lacks",
+    "setup_svg": "paste_hidden_named_layer.svg",
+    "note": "swatches.yaml menu Add Used Colors; actions.yaml swatch.add_used_colors appends each document colour the library lacks, sorted by hex, named 'R=r G=g B=b'. The document's blue is already web_colors' #0000ff, its green #008000 is not, so exactly one swatch is appended. Values from the reference.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors"
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "add_used_colors"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "swatch_libraries.web_colors.swatches.216": {
+        "name": "R=0 G=128 B=0",
+        "color": "#008000",
+        "color_mode": "rgb",
+        "color_type": "process",
+        "global": false
+      },
+      "swatch_libraries.web_colors.swatches.-1.color": "#008000",
+      "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
+    }
   }
 ]

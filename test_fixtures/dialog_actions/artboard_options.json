@@ -366,5 +366,13 @@
     "expected_dialog": {
       "id": "color_picker"
     }
-  }
+  },
+ {
+  "name": "artboard_options_delete_removes_the_board_it_opened_on",
+  "setup_svg": "two_artboards.svg",
+  "note": "artboard_options.yaml Delete (ao_delete, enabled while more than one board exists) runs delete_artboard_from_dialog on the board the dialog opened on: ab2 goes, ab1 and ab3 stay, and the dialog closes.",
+  "actions": [{"action": "open_artboard_options", "params": {"artboard_id": "ab2"}}, {"dialog_event": {"address": {"id": "ao_delete"}, "event": "click"}}],
+  "expected_dialog": null,
+  "expected_json": "artboard_options_delete_removes_the_board_it_opened_on_expected.json"
+ }
 ]
