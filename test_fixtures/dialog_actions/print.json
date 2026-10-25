@@ -1,0 +1,119 @@
+[
+  {
+    "name": "print_done_stores_the_edited_copies",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "print_dialog_done writes every dialog field into the document's print preferences; Copies (General, the first tab) is edited to 3, so the golden carries copies 3.",
+    "actions": [
+      {
+        "action": "open_print_dialog",
+        "params": {}
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pr_copies"
+          },
+          "event": "commit",
+          "value": "3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "print_dialog_done"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "changed",
+    "expected_json": "print_done_stores_the_edited_copies_expected.json"
+  },
+  {
+    "name": "print_cancel_stores_nothing",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "Cancel runs dismiss_dialog: the edit to Copies is dropped and the document is as it opened.",
+    "actions": [
+      {
+        "action": "open_print_dialog",
+        "params": {}
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pr_copies"
+          },
+          "event": "commit",
+          "value": "3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "dismiss_dialog"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "print_a_tab_switch_keeps_the_edits",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "The dialog is tabbed: Copies is on General, Flatness on Graphics. A tab switch writes dialog.active_tab and nothing else, so both edits survive switching away and back. A widget is addressable only while its page is the active one.",
+    "actions": [
+      {
+        "action": "open_print_dialog",
+        "params": {}
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pr_copies"
+          },
+          "event": "commit",
+          "value": "3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "print_tabs"
+          },
+          "event": "change",
+          "value": "graphics"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pr_gfx_flatness"
+          },
+          "event": "commit",
+          "value": "2"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "print_tabs"
+          },
+          "event": "change",
+          "value": "general"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "print",
+      "state": {
+        "active_tab": "general",
+        "copies": 3,
+        "gfx_flatness": 2
+      }
+    },
+    "expected_document": "unchanged"
+  }
+]

@@ -26,7 +26,8 @@ private func readText(_ path: String) -> String? {
 /// The path of the ONE static node whose every `address` key equals its own;
 /// zero or two matches is a failure that names the count (Rust's
 /// `dialog_address_path`).
-private func addressed(_ content: Any?, _ address: [String: Any]) -> Result<[String: Any], DialogCorpusError> {
+private func addressed(_ content: Any?, _ address: [String: Any],
+                       context: [String: Any]) -> Result<[String: Any], DialogCorpusError> {
     var found: [[String: Any]] = []
     func walk(_ node: Any?) {
         guard let n = node as? [String: Any] else { return }
@@ -34,6 +35,9 @@ private func addressed(_ content: Any?, _ address: [String: Any]) -> Result<[Str
             found.append(n)
         }
         for child in n["children"] as? [Any] ?? [] { walk(child) }
+        // A `tabs` node renders only its ACTIVE page (`renderTabs`), so only
+        // that page's widgets are addressable, as on the engine's route.
+        if n["type"] as? String == "tabs" { walk(activeTabContent(n, context: context)) }
     }
     walk(content)
     guard found.count == 1 else {
@@ -43,6 +47,18 @@ private func addressed(_ content: Any?, _ address: [String: Any]) -> Result<[Str
 }
 
 private struct DialogCorpusError: Error { let text: String }
+
+/// The active page's content of a `tabs` node: `bind.value` evaluated when it
+/// is a non-empty string, else the first tab (`renderTabs`' law).
+private func activeTabContent(_ node: [String: Any], context: [String: Any]) -> [String: Any]? {
+    let tabs = node["tabs"] as? [[String: Any]] ?? []
+    var active = tabs.first?["id"] as? String ?? ""
+    if let e = (node["bind"] as? [String: Any])?["value"] as? String,
+       case .string(let s) = evaluate(e, context: context), !s.isEmpty {
+        active = s
+    }
+    return tabs.first(where: { ($0["id"] as? String) == active })?["content"] as? [String: Any]
+}
 
 /// JSON equality with one number type (Rust's `json_value_eq`).
 private func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
@@ -83,14 +99,14 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             guard let id = store.getDialogId(), let spec = ws.dialog(id) else {
                 return ["\(name): a dialog_event with no dialog open"]
             }
-            let node: [String: Any]
-            switch addressed(spec["content"], ev["address"] as? [String: Any] ?? [:]) {
-            case .success(let n): node = n
-            case .failure(let e): return ["\(name): \(e.text)"]
-            }
             let ctx = buildDialogEvalContextWithGetters(
                 store: store, state: store.getDialogState(),
                 params: store.getDialogParams() ?? [:], outer: [:])
+            let node: [String: Any]
+            switch addressed(spec["content"], ev["address"] as? [String: Any] ?? [:], context: ctx) {
+            case .success(let n): node = n
+            case .failure(let e): return ["\(name): \(e.text)"]
+            }
             let route = PanelWidgetEvents(model: m, panelId: nil, scope: ctx,
                                           onDialogWrite: { k, v in DialogWidgetActions.write(k, v, store: store) })
             switch ev["event"] as? String {
@@ -119,6 +135,15 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                 } else {
                     return ["\(name): a click on a \(kind), which this runner does not route"]
                 }
+            case "change" where node["type"] as? String == "tabs":
+                // A tab pick, as `renderTabs` writes it: the tab id through a
+                // `dialog.` bind. Any other bind, or an id no tab has, refuses.
+                let tabIds = (node["tabs"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+                let expr = (node["bind"] as? [String: Any])?["value"] as? String ?? ""
+                guard expr.hasPrefix("dialog."), let tab = ev["value"] as? String, tabIds.contains(tab) else {
+                    return ["\(name): the tab pick was refused (bind \(expr), value \(ev["value"] ?? "nil"))"]
+                }
+                DialogWidgetActions.write(String(expr.dropFirst("dialog.".count)), tab, store: store)
             default:
                 return ["\(name): unknown dialog event \(ev["event"] ?? "nil")"]
             }
@@ -212,6 +237,7 @@ private let dialogActionFixtures = [
     "dialog_actions/brush_options.json",
     "dialog_actions/artboard_options.json",
     "dialog_actions/document_setup.json",
+    "dialog_actions/print.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {
