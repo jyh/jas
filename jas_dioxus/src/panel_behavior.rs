@@ -281,6 +281,24 @@ impl EffectHost for EngineHost {
             let options = crate::interpreter::boolean_host::options_from_store(store);
             return crate::interpreter::boolean_host::run(model, key, &options);
         }
+        // Repeat Boolean Operation: the operation `state.last_boolean_op`
+        // names (`union`, `union_compound`, ...), as its `boolean_<op>` key; a
+        // null is a no-op. Expand is not repeatable, so `from_key` refuses it
+        // here too. Swift's `repeat_boolean_operation` reads the same key.
+        // Until 2026-10-25 the engine refused the row (flask STATUS 547 F).
+        if key == "repeat_boolean_operation" {
+            use crate::interpreter::boolean_host::{options_from_store, run, BooleanKey};
+            let Some(last) = store.get("last_boolean_op").as_str().map(str::to_string) else {
+                return true;
+            };
+            let op = format!("boolean_{last}");
+            if !matches!(BooleanKey::from_key(&op), Some(BooleanKey::Destructive(_) | BooleanKey::Compound(_))) {
+                return true;
+            }
+            let options = options_from_store(store);
+            run(model, &op, &options);
+            return true;
+        }
         false
     }
 

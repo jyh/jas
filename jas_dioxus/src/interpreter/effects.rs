@@ -1115,6 +1115,69 @@ fn run_one<'h>(
         return;
     }
 
+    // pop: `panel.<key>` drops the last item of that list in the ACTIVE panel's
+    // scope; any other target, the last item of that global list. An empty or
+    // missing list is left alone (the reference's `pop`). The web's renderer
+    // pops its typed isolation stack before reaching here. Until 2026-10-25
+    // no arm existed and the engine refused Exit Isolation Mode.
+    if let Some(target) = effect.get("pop").and_then(|v| v.as_str()) {
+        let popped = |v: &serde_json::Value| match v.as_array() {
+            Some(a) if !a.is_empty() => Some(serde_json::Value::Array(a[..a.len() - 1].to_vec())),
+            _ => None,
+        };
+        if let Some(key) = target.strip_prefix("panel.") {
+            if let Some(pid) = store.active_panel_id().map(str::to_string) {
+                if let Some(v) = popped(store.get_panel(&pid, key)) {
+                    store.set_panel(&pid, key, v);
+                }
+            }
+        } else if let Some(v) = popped(store.get(target)) {
+            store.set(target, v);
+        }
+        return;
+    }
+
+    // toggle_paragraph_field: <field> and reset_paragraph_panel: the Paragraph
+    // panel menu's Hanging Punctuation and Reset Panel. The panel is derived
+    // from the SELECTION (`paragraph_host::panel_from_document`, the base every
+    // paragraph write uses), the one field is flipped, or the panel reset to
+    // its defaults, and the whole panel is applied to the selected paragraphs.
+    // The web renderer runs its typed copy of the same law before reaching
+    // here. Until 2026-10-25 no arm existed and the engine refused both rows.
+    if let Some(field) = effect.get("toggle_paragraph_field").and_then(|v| v.as_str()) {
+        use super::paragraph_host;
+        if let Some(m) = model.as_deref_mut() {
+            let mut pp = paragraph_host::panel_from_document(m.document());
+            let cur = match field {
+                "hyphenate" => pp.hyphenate,
+                "hanging_punctuation" => pp.hanging_punctuation,
+                _ => {
+                    report.unhandled.push(Unhandled::UnknownEffect(format!("toggle_paragraph_field:{field}")));
+                    return;
+                }
+            };
+            pp.set_field(field, &serde_json::json!(!cur));
+            paragraph_host::apply_to_selection(m, &pp);
+        }
+        return;
+    }
+    if effect.contains_key("reset_paragraph_panel") {
+        if let Some(m) = model.as_deref_mut() {
+            super::paragraph_host::apply_to_selection(m, &Default::default());
+        }
+        return;
+    }
+
+    // reset_boolean_panel: the Boolean panel's Reset Panel. Its transient state
+    // is the last operation, which Repeat replays; outside the web app (whose
+    // renderer clears its typed `boolean_panel.last_op` before reaching here)
+    // that state is `state.last_boolean_op`, so it is cleared there. Until
+    // 2026-10-25 no arm existed and the engine refused the menu row.
+    if effect.contains_key("reset_boolean_panel") {
+        store.set("last_boolean_op", serde_json::Value::Null);
+        return;
+    }
+
     // log: message. It does nothing, and every `log` in actions.yaml marks
     // work a platform supplies, so it is reported as not done.
     if let Some(message) = effect.get("log") {
@@ -15074,6 +15137,33 @@ mod tests {
             let got_scope = store.get_panel("swatches", "lib");
             assert_eq!(got_scope, &want_scope, "{name}");
         }
+    }
+
+    /// pop, as the reference's `pop`: a `panel.` target drops the last item of
+    /// the ACTIVE panel's list, any other target the last item of the global
+    /// list, and an empty or missing list is left alone. Before this arm the
+    /// engine refused the key (Exit Isolation Mode).
+    #[test]
+    fn pop_drops_the_last_item_of_a_panel_or_global_list() {
+        let mut store = StateStore::new();
+        let mut d = std::collections::HashMap::new();
+        d.insert("stack".to_string(), serde_json::json!([[0], [0, 1]]));
+        d.insert("empty".to_string(), serde_json::json!([]));
+        store.init_panel("layers", d);
+        store.set_active_panel(Some("layers"));
+        store.set("g", serde_json::json!(["a", "b", "c"]));
+        let run = |eff: serde_json::Value, store: &mut StateStore| {
+            let report = run_effects(&[eff], &serde_json::json!({}), store, None, None, None, None);
+            assert_eq!(report.unhandled, vec![], "pop reported {:?}", report.unhandled);
+        };
+        run(serde_json::json!({"pop": "panel.stack"}), &mut store);
+        assert_eq!(store.get_panel("layers", "stack"), &serde_json::json!([[0]]));
+        run(serde_json::json!({"pop": "g"}), &mut store);
+        assert_eq!(store.get("g"), &serde_json::json!(["a", "b"]));
+        run(serde_json::json!({"pop": "panel.empty"}), &mut store);
+        assert_eq!(store.get_panel("layers", "empty"), &serde_json::json!([]));
+        run(serde_json::json!({"pop": "missing"}), &mut store);
+        assert_eq!(store.get("missing"), &serde_json::Value::Null);
     }
 
     /// swap_panel_state, both forms, as the reference's
