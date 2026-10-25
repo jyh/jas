@@ -751,5 +751,62 @@
       }
     ],
     "expected_json": "../actions/boolean_union_overlapping_rects_expected.json"
+  },
+  {
+    "name": "swatch_options_ok_edits_the_selected_swatch",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatches.yaml menu Swatch Options... (open_swatch_options, mode edit) opens on the selected swatch; a new name and hex, then OK (swatch_options_confirm -> swatch.store, edit mode) REPLACES that swatch: name and '#rrggbb' lower-case colour, the library's length unchanged.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [
+          3
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "open_swatch_options"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "so_name_input"
+          },
+          "event": "commit",
+          "value": "Navy Three"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "so_hex"
+          },
+          "event": "commit",
+          "value": "1A2B3C"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "swatch_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "swatch_libraries.web_colors.swatches.3.name": "Navy Three",
+      "swatch_libraries.web_colors.swatches.3.color": "#1a2b3c",
+      "swatch_libraries.web_colors.swatches.2.name": "R=0 G=0 B=102",
+      "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
+    }
   }
 ]

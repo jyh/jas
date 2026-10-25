@@ -191,6 +191,21 @@ def gather_evidence(root, spec=None):
     # event. A widget addressed only by label is not resolved, and an id that
     # names no widget or two is not either (an under-count, never an over-count).
     for case in _fixture_cases(root, "dialog_actions"):
+        # A dialog's own `on_change` (the Rotate / Scale / Shear live preview)
+        # runs on every committed field. It counts as witnessed only when the
+        # case commits a field in that dialog, the dialog is STILL OPEN after
+        # the last step, and the case asserts the document CHANGED: closed, the
+        # change could be the OK's; unasserted, nothing saw it run.
+        live = (case.get("expected_dialog") or {}).get("id") \
+            if isinstance(case.get("expected_dialog"), dict) else None
+        opened = {(a.get("open_dialog") or {}).get("id") for a in case.get("actions", [])
+                  if isinstance(a, dict) and isinstance(a.get("open_dialog"), dict)}
+        committed = any(isinstance(a, dict) and isinstance(a.get("dialog_event"), dict)
+                        and a["dialog_event"].get("event") == "commit" for a in case.get("actions", []))
+        if live and live in opened and committed and case.get("expected_document") == "changed":
+            oc = ((((spec or {}).get("dialogs") or {}).get(live)) or {}).get("on_change")
+            if isinstance(oc, str):
+                ev["actions_dispatched"].add(oc)
         for a in case.get("actions", []):
             if not isinstance(a, dict):
                 continue
@@ -609,6 +624,19 @@ def self_test():
                 {"panel_menu": {"panel": "p1", "address": {"action": "pm_one"}}},
                 {"panel_menu": {"panel": "p1", "address": {"action": "pm_twice"}}},
                 {"panel_menu": {"panel": "p2", "address": {"action": "pm_elsewhere"}}}]}])
+        put("test_fixtures/dialog_actions/c.json",
+            [{"name": "live", "actions": [
+                {"open_dialog": {"id": "d_live"}},
+                {"dialog_event": {"address": {"id": "w_live"}, "event": "commit", "value": "1"}}],
+              "expected_dialog": {"id": "d_live"}, "expected_document": "changed"},
+             {"name": "closed", "actions": [
+                {"open_dialog": {"id": "d_shut"}},
+                {"dialog_event": {"address": {"id": "w_shut"}, "event": "commit", "value": "1"}}],
+              "expected_dialog": None, "expected_document": "changed"},
+             {"name": "unasserted", "actions": [
+                {"open_dialog": {"id": "d_mute"}},
+                {"dialog_event": {"address": {"id": "w_mute"}, "event": "commit", "value": "1"}}],
+              "expected_dialog": {"id": "d_mute"}}])
         put("test_fixtures/dialog_actions/b_expected.json",
             {"actions": [{"dialog_event": {"address": {"action": "dlg_decoy"}, "event": "click"}}]})
         put("test_fixtures/gestures/g.json", [{"name": "g", "tool": "rect"}])
@@ -651,6 +679,7 @@ def self_test():
                 "dlg_committed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_decoy": {"effects": [{"set": {"a": 1}}]},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pm_one", "pm_twice", "pm_elsewhere")},
+                **{a: {"effects": [{"set": {"a": 1}}]} for a in ("live_preview", "shut_preview", "mute_preview")},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in (
                     "beh_on_change", "beh_not_change", "btn_act", "twice_act", "clickonly_act")},
             },
@@ -680,7 +709,9 @@ def self_test():
                 {"id": "w_twice", "type": "button", "action": "twice_act"},
                 {"id": "w_clickonly", "type": "button", "action": "clickonly_act"}]}},
                         "d1": {"content": {"type": "col", "children": [
-                {"id": "w_twice", "type": "button", "action": "twice_act"}]}}, "d2": {}},
+                {"id": "w_twice", "type": "button", "action": "twice_act"}]}}, "d2": {},
+                        **{f"d_{k}": {"on_change": f"{k}_preview", "content": {"type": "col", "children": [
+                            {"id": f"w_{k}", "type": "number_input"}]}} for k in ("live", "shut", "mute")}},
             "icons": {"i1": {}},
             "elements": {"e": 1},
         }
@@ -703,6 +734,9 @@ def self_test():
         expect(("actions", "dlg_pressed"), COVERED)  # the action a clicked widget names
         expect(("actions", "dlg_committed"), NOT_YET_BUILT)  # a commit is not a press
         expect(("actions", "dlg_decoy"), NOT_YET_BUILT)  # an _expected file is not a case
+        expect(("actions", "live_preview"), COVERED)  # commit, still open, document changed
+        expect(("actions", "shut_preview"), NOT_YET_BUILT)  # the dialog closed: the change may be the OK's
+        expect(("actions", "mute_preview"), NOT_YET_BUILT)  # nothing asserts the document moved
         expect(("actions", "pm_one"), COVERED)  # the ONE panel-menu row a step addresses
         expect(("actions", "pm_twice"), NOT_YET_BUILT)  # an address two rows share resolves to neither
         expect(("actions", "pm_elsewhere"), NOT_YET_BUILT)  # resolved in the NAMED panel's menu only

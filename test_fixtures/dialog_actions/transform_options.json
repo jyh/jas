@@ -23,6 +23,28 @@
   "expected_document": "changed"
  },
  {
+  "name": "scale_commit_previews_the_percentage_live",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "scale_options"}},
+   {"dialog_event": {"address": {"id": "so_uniform_pct"}, "event": "commit", "value": "50"}}
+  ],
+  "expected_dialog": {"id": "scale_options", "state": {"uniform_pct": 50.0}},
+  "expected_document": "changed"
+ },
+ {
+  "name": "shear_commit_previews_the_angle_live",
+  "setup_svg": "rect_with_stroke.svg",
+  "actions": [
+   {"action": "select_all"},
+   {"open_dialog": {"id": "shear_options"}},
+   {"dialog_event": {"address": {"id": "sho_angle"}, "event": "commit", "value": "20"}}
+  ],
+  "expected_dialog": {"id": "shear_options", "state": {"angle": 20.0}},
+  "expected_document": "changed"
+ },
+ {
   "name": "rotate_cancel_puts_the_previewed_document_back",
   "setup_svg": "rect_with_stroke.svg",
   "actions": [
