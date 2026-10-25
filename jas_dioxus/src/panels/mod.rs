@@ -84,7 +84,7 @@ pub(crate) fn panel_dispatch(
         PanelKind::Stroke => { stroke_panel::dispatch(cmd, addr, state); Vec::new() }
         PanelKind::Properties => { properties_panel::dispatch(cmd, addr, state); Vec::new() }
         PanelKind::Character => { character_panel::dispatch(cmd, addr, state); Vec::new() }
-        PanelKind::Paragraph => { paragraph_panel::dispatch(cmd, addr, state); Vec::new() }
+        PanelKind::Paragraph => paragraph_panel::dispatch(cmd, addr, state),
         PanelKind::Artboards => artboards_panel::dispatch(cmd, addr, state),
         PanelKind::Align => { align_panel::dispatch(cmd, addr, state); Vec::new() }
         PanelKind::Boolean => boolean_panel::dispatch(cmd, addr, state),
@@ -502,6 +502,39 @@ mod tests {
         assert_eq!(opened(&fx), ["artboard_options"], "Artboard Options: {fx:?}");
         let fx = panel_dispatch(PanelKind::Swatches, "set_swatch_thumbnail_size:medium", addr, &mut state);
         assert!(fx.is_empty(), "a row that opens nothing hands back nothing: {fx:?}");
+    }
+
+    /// The four dialogs the web menu view used to open from its own table
+    /// (Justification, Hyphenation, Save Swatch Library, Boolean Options)
+    /// come back from their YAML like every other row, so the table can go.
+    /// Boolean Options' params are the panel's options, read from
+    /// `state.boolean_*` as the table seeded them from `boolean_panel`.
+    #[test]
+    fn the_menu_tables_four_dialogs_come_back_from_their_yaml() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        let opened = |fx: &[serde_json::Value]| -> Vec<String> {
+            fx.iter().filter_map(|e| e.get("open_dialog")?.get("id")?.as_str().map(str::to_string)).collect()
+        };
+        for (kind, cmd, id) in [
+            (PanelKind::Paragraph, "open_paragraph_justification", "paragraph_justification"),
+            (PanelKind::Paragraph, "open_paragraph_hyphenation", "paragraph_hyphenation"),
+            (PanelKind::Swatches, "save_swatch_library", "swatch_library_save"),
+            (PanelKind::Boolean, "open_boolean_options", "boolean_options"),
+        ] {
+            let fx = panel_dispatch(kind, cmd, addr, &mut state);
+            assert_eq!(opened(&fx), [id], "{cmd}: {fx:?}");
+        }
+        state.boolean_panel.precision = 0.125;
+        state.boolean_panel.remove_redundant_points = false;
+        let fx = panel_dispatch(PanelKind::Boolean, "open_boolean_options", addr, &mut state);
+        let p = &fx[0]["open_dialog"]["params"];
+        assert_eq!((p["precision"].as_f64(), p["remove_redundant_points"].as_bool()), (Some(0.125), Some(false)),
+                   "the params are the panel's options: {p}");
     }
 
     /// Two panels declare a `thumbnail_size` and both write it through the SAME
