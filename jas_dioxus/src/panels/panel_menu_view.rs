@@ -170,59 +170,20 @@ pub fn PanelMenuOverlay() -> Element {
                             if !enabled {
                                 return;
                             }
-                            // Some menu actions open dialogs and need
-                            // a Signal<Option<DialogState>> handle
-                            // (out of reach from the AppState-only
-                            // panel_dispatch). Intercept those here
-                            // and call open_dialog directly.
-                            let dialog_id = match cmd {
-                                "open_paragraph_justification" => Some("paragraph_justification"),
-                                "open_paragraph_hyphenation" => Some("paragraph_hyphenation"),
-                                "save_swatch_library" => Some("swatch_library_save"),
-                                "open_boolean_options" => Some("boolean_options"),
-                                _ => None,
-                            };
-                            if let Some(did) = dialog_id {
+                            // The action may defer a dialog (its YAML's
+                            // `open_dialog`): `act` runs synchronously,
+                            // so take what it handed back and open it
+                            // once the AppState borrow is released.
+                            let deferred = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+                            let sink = deferred.clone();
+                            (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                                *sink.borrow_mut() = super::panel_dispatch(kind, cmd, addr, st);
+                            }));
+                            let effects = deferred.take();
+                            if !effects.is_empty() {
                                 let mut sig = dialog_ctx.0;
-                                let st_borrow = app_for_dialog.borrow();
-                                let live = crate::workspace::dock_panel::
-                                    build_live_state_map(&st_borrow);
-                                // Some dialogs need their params
-                                // seeded from current document state
-                                // (the YAML `init:` reads `param.*`,
-                                // not `state.*`, so the params must
-                                // arrive populated). Boolean Options
-                                // is the first such case; pattern is
-                                // ready for future dialogs.
-                                let mut params: serde_json::Map<String, serde_json::Value> =
-                                    serde_json::Map::new();
-                                if did == "boolean_options" {
-                                    let bp = &st_borrow.boolean_panel;
-                                    params.insert("precision".into(), serde_json::json!(bp.precision));
-                                    params.insert("remove_redundant_points".into(), serde_json::json!(bp.remove_redundant_points));
-                                    params.insert("divide_remove_unpainted".into(), serde_json::json!(bp.divide_remove_unpainted));
-                                    params.insert("apply_simplify_after_op".into(), serde_json::json!(bp.apply_simplify_after_op));
-                                    params.insert("simplify_precision".into(), serde_json::json!(bp.simplify_precision));
-                                }
-                                drop(st_borrow);
-                                crate::interpreter::dialog_view::open_dialog(
-                                    &mut sig, did, &params, &live);
-                            } else {
-                                // The action may defer a dialog (its YAML's
-                                // `open_dialog`): `act` runs synchronously,
-                                // so take what it handed back and open it
-                                // once the AppState borrow is released.
-                                let deferred = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-                                let sink = deferred.clone();
-                                (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    *sink.borrow_mut() = super::panel_dispatch(kind, cmd, addr, st);
-                                }));
-                                let effects = deferred.take();
-                                if !effects.is_empty() {
-                                    let mut sig = dialog_ctx.0;
-                                    crate::interpreter::renderer::apply_deferred_dialog_effects(
-                                        &effects, &app_for_dialog, &mut sig);
-                                }
+                                crate::interpreter::renderer::apply_deferred_dialog_effects(
+                                    &effects, &app_for_dialog, &mut sig);
                             }
                             panel_menu.open.set(None);
                         },
