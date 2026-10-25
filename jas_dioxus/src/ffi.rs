@@ -3924,6 +3924,11 @@ mod tests {
                     engine_of(e).store.borrow_mut().set_panel(pid, k, v.clone());
                 }
             }
+            // `state`: globals as an earlier session left them (the operation
+            // Repeat remembers), written before the first step. Swift the same.
+            for (k, v) in tc.get("state").and_then(|v| v.as_object()).into_iter().flatten() {
+                engine_of(e).store.borrow_mut().set(k, v.clone());
+            }
             // `expected_document` compares against the document as the dialog
             // OPENED (after the setup steps), never the setup file itself.
             let mut at_open: Option<String> = None;
