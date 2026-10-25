@@ -88,5 +88,161 @@
       }
     },
     "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_an_engaged_link_rescales_the_height",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "ARTBOARDS.md CHAIN_LINK_BUTTON: engaging captures width/height (612/792); a new width of 306 rescales the height to 396. Opened at the declared 612 x 792 (the action door carries no artboards; see the first cases).",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_chain_link"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_width"
+          },
+          "event": "commit",
+          "value": "306"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "chain_link_engaged": true,
+        "width": 306,
+        "height": 396
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_an_engaged_link_rescales_the_width",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "The same ratio from the other side: a new height of 396 rescales the width to 306. Opened at the declared 612 x 792 (the action door carries no artboards; see the first cases).",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_chain_link"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_height"
+          },
+          "event": "commit",
+          "value": "396"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "chain_link_engaged": true,
+        "width": 306,
+        "height": 396
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_an_open_link_leaves_the_other_side",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "Off on every open: a new width leaves the height. Opened at the declared 612 x 792 (the action door carries no artboards; see the first cases).",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_width"
+          },
+          "event": "commit",
+          "value": "306"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "chain_link_engaged": false,
+        "width": 306,
+        "height": 792
+      }
+    },
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_a_second_click_opens_the_link",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "The button toggles: two clicks disengage it, and a new width leaves the height. Opened at the declared 612 x 792 (the action door carries no artboards; see the first cases).",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_chain_link"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_chain_link"
+          },
+          "event": "click"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_width"
+          },
+          "event": "commit",
+          "value": "306"
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "chain_link_engaged": false,
+        "width": 306,
+        "height": 792
+      }
+    },
+    "expected_document": "unchanged"
   }
 ]

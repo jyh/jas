@@ -3705,11 +3705,25 @@
       ]
     },
     "toggle_artboard_chain_link": {
-      "description": "Toggle dialog.chain_link_engaged; capture dialog.chain_link_ratio on engage.",
+      "description": "Toggle the Artboard Options dialog's chain link (ARTBOARDS.md, CHAIN_LINK_BUTTON). Engaging it captures dialog.chain_link_ratio as the current width divided by height; while it stays engaged, an edit to Width or Height rescales the other side against that ratio (the inputs' own commit behaviors). Disengaging leaves both sizes as they are. The link is dialog-session state: off on every open, never stored.\n",
       "category": "artboards",
       "effects": [
         {
-          "log": "toggle_artboard_chain_link (native)"
+          "set": {
+            "dialog.chain_link_engaged": "not dialog.chain_link_engaged"
+          }
+        },
+        {
+          "if": {
+            "condition": "dialog.chain_link_engaged",
+            "then": [
+              {
+                "set": {
+                  "dialog.chain_link_ratio": "dialog.width / dialog.height"
+                }
+              }
+            ]
+          }
         }
       ]
     },
@@ -3932,11 +3946,13 @@
       ]
     },
     "document_setup_toggle_bleed_uniform": {
-      "description": "Toggle dialog.bleed_uniform. Phase-1A deferral: dialog state mutation from action effects is not yet wired (matches toggle_artboard_chain_link precedent). The chain-link icon ships visually but the click is a no-op until the dialog-state effect framework lands.\n",
+      "description": "Toggle the Document Setup dialog's bleed chain link (dialog.bleed_uniform). While it is engaged, an edit to any one bleed side writes the same value to all four (the side inputs' own commit behaviors); disengaging leaves the four as they are. The state persists with the document through the dialog's OK, so the user's preferred mode survives across sessions.\n",
       "category": "document",
       "effects": [
         {
-          "log": "document_setup_toggle_bleed_uniform (native, deferred)"
+          "set": {
+            "dialog.bleed_uniform": "not dialog.bleed_uniform"
+          }
         }
       ]
     },
@@ -27291,7 +27307,26 @@
                     },
                     "bind": {
                       "value": "dialog.width"
-                    }
+                    },
+                    "behavior": [
+                      {
+                        "event": "commit",
+                        "effects": [
+                          {
+                            "if": {
+                              "condition": "dialog.chain_link_engaged",
+                              "then": [
+                                {
+                                  "set": {
+                                    "dialog.height": "dialog.width / dialog.chain_link_ratio"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               },
@@ -27401,7 +27436,26 @@
                     },
                     "bind": {
                       "value": "dialog.height"
-                    }
+                    },
+                    "behavior": [
+                      {
+                        "event": "commit",
+                        "effects": [
+                          {
+                            "if": {
+                              "condition": "dialog.chain_link_engaged",
+                              "then": [
+                                {
+                                  "set": {
+                                    "dialog.width": "dialog.height * dialog.chain_link_ratio"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               },
@@ -30187,7 +30241,7 @@
     },
     "document_setup": {
       "summary": "Document Setup",
-      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase 6 added the formerly-deferred Phase-1A items: grid size / color, simulate colored paper (with paper color), transparency- flattener preset, \"Discard White Overprint in Output\". The Units selector remains deferred (no global-units feature yet).\nPhase-1A deferral: the chain-link toggle's bleed_uniform state persists with the document, but mirroring a single-side edit to all four fields is not yet wired (matches the artboard_options chain-link precedent). User types each side individually in Phase 1A.\n",
+      "description": "Modal dialog for editing per-document settings: bleed values (PRINT.md \u00a7Phase 1A), an image-outline display toggle, and a substituted-glyph highlight toggle. Edits are batched: changes don't apply until OK; Cancel discards; OK records a single undo entry.\nBleed is the slop area around an artboard that artwork extends into for trim tolerance during commercial printing. Each side has its own value in points. The chain-link toggle, when active, propagates a single-side edit to all four sides \u2014 the chain state persists with the document so the user's preferred mode survives across sessions.\nPhase 6 added the formerly-deferred Phase-1A items: grid size / color, simulate colored paper (with paper color), transparency- flattener preset, \"Discard White Overprint in Output\". The Units selector remains deferred (no global-units feature yet).\nThe bleed chain link (dialog.bleed_uniform) persists with the document. While it is engaged, an edit to any one side is mirrored to all four; disengaged, each side is typed individually.\n",
       "modal": true,
       "width": 460,
       "state": {
@@ -30322,7 +30376,28 @@
                         },
                         "bind": {
                           "value": "dialog.bleed_top"
-                        }
+                        },
+                        "behavior": [
+                          {
+                            "event": "commit",
+                            "effects": [
+                              {
+                                "if": {
+                                  "condition": "dialog.bleed_uniform",
+                                  "then": [
+                                    {
+                                      "set": {
+                                        "dialog.bleed_bottom": "dialog.bleed_top",
+                                        "dialog.bleed_left": "dialog.bleed_top",
+                                        "dialog.bleed_right": "dialog.bleed_top"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       },
                       {
                         "type": "text",
@@ -30342,7 +30417,28 @@
                         },
                         "bind": {
                           "value": "dialog.bleed_bottom"
-                        }
+                        },
+                        "behavior": [
+                          {
+                            "event": "commit",
+                            "effects": [
+                              {
+                                "if": {
+                                  "condition": "dialog.bleed_uniform",
+                                  "then": [
+                                    {
+                                      "set": {
+                                        "dialog.bleed_top": "dialog.bleed_bottom",
+                                        "dialog.bleed_left": "dialog.bleed_bottom",
+                                        "dialog.bleed_right": "dialog.bleed_bottom"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       }
                     ]
                   },
@@ -30371,7 +30467,28 @@
                         },
                         "bind": {
                           "value": "dialog.bleed_left"
-                        }
+                        },
+                        "behavior": [
+                          {
+                            "event": "commit",
+                            "effects": [
+                              {
+                                "if": {
+                                  "condition": "dialog.bleed_uniform",
+                                  "then": [
+                                    {
+                                      "set": {
+                                        "dialog.bleed_top": "dialog.bleed_left",
+                                        "dialog.bleed_bottom": "dialog.bleed_left",
+                                        "dialog.bleed_right": "dialog.bleed_left"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       },
                       {
                         "type": "text",
@@ -30391,7 +30508,28 @@
                         },
                         "bind": {
                           "value": "dialog.bleed_right"
-                        }
+                        },
+                        "behavior": [
+                          {
+                            "event": "commit",
+                            "effects": [
+                              {
+                                "if": {
+                                  "condition": "dialog.bleed_uniform",
+                                  "then": [
+                                    {
+                                      "set": {
+                                        "dialog.bleed_top": "dialog.bleed_right",
+                                        "dialog.bleed_bottom": "dialog.bleed_right",
+                                        "dialog.bleed_left": "dialog.bleed_right"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       }
                     ]
                   }

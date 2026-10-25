@@ -3876,6 +3876,7 @@ mod tests {
         "dialog_actions/paragraph_dialogs.json",
         "dialog_actions/brush_options.json",
         "dialog_actions/artboard_options.json",
+        "dialog_actions/document_setup.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
