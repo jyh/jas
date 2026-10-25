@@ -20,7 +20,8 @@ swatch_library_save:
       - id: swatch_lib_name_input
         type: text_input
         placeholder: "My Swatches"
-        bind: "dialog.name"
+        bind:
+          value: "dialog.name"
       - type: row
         style: { justify: end, gap: 8 }
         children:

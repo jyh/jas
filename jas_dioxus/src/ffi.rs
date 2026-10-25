@@ -4532,6 +4532,41 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The nested Color Picker's derived fields read their values in the plan
+    /// the shell draws (flask §545 finding E: over Artboard Options its setter
+    /// ran and every channel field read empty).
+    #[test]
+    fn the_nested_pickers_derived_fields_read_in_its_plan() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e, r#"{"action":"open_layer_options","params":{"mode":"create"}}"#);
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_color_swatch","event":"click"}"#);
+        assert!(reply.contains(r#""dialog":"color_picker""#), "the swatch opened the picker: {reply} {err}");
+        engine_of(e).store.borrow_mut().set_dialog("color", serde_json::json!("#12ab34"));
+        assert_eq!(engine_of(e).store.borrow().eval_context()["dialog"]["hex"], serde_json::json!("12ab34"),
+                   "the store's dialog scope carries the getter");
+        let plan = take(unsafe { jas_dialog_plan(e, 420, 640) });
+        let v: serde_json::Value = serde_json::from_str(&plan).unwrap();
+        let mut leaves = Vec::new();
+        fn walk(n: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+            match n {
+                serde_json::Value::Object(m) => {
+                    if m.get("id").and_then(|i| i.as_str()).is_some_and(|i| i == "cp_hex" || i == "cp_r") {
+                        out.push(n.clone());
+                    }
+                    m.values().for_each(|c| walk(c, out));
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|c| walk(c, out)),
+                _ => {}
+            }
+        }
+        walk(&v["plan"], &mut leaves);
+        assert_eq!(leaves.len(), 2, "the plan has cp_hex and cp_r: {leaves:?}");
+        let shown: Vec<String> = leaves.iter().map(|l| l["values"]["bind.value"].to_string()).collect();
+        assert_eq!(shown, [r#""18""#, r#""12ab34""#], "cp_r and cp_hex show the colour: {leaves:?}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Document Setup's OK commits through the engine (flask STATUS §270: it
     /// was refused as `UnknownDocEffect:doc.set_document_setup_field`). The
     /// eight print-config `doc.*_field` effects reach the document through

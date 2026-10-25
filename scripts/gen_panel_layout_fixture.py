@@ -398,6 +398,10 @@ DIALOG_BIND_SEED = [
     for label, fill in [("transparent", "transparent"), ("white", "#ffffff"),
                         ("black", "#000000"), ("custom", "#123456")]
 ]
+DIALOG_BIND_SEED.append(
+    ("color_picker@channels", "color_picker",
+     {"dialog": {"color": "#12ab34", "hex": "12ab34", "r": 18, "g": 171, "bl": 52,
+                 "web_only": True}}))
 
 
 def main() -> int:
