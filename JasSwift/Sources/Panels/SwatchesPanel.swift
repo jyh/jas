@@ -80,6 +80,13 @@ public func runYamlActionByName(_ name: String, params: [String: Any], model: Mo
     // body's `dispatchYamlAction`) and as Rust's `dispatch_action`. Stated once
     // in ``mergeDeclaredParamDefaults``.
     ctx["param"] = mergeDeclaredParamDefaults(params, actionDef: actionDef)
+    // The data namespace, from its homes: the store's brush libraries and the
+    // app-global swatch libraries (``AppSwatchLibraries``), as the reference's
+    // and the engine's action contexts carry it. Swatch Options reads the
+    // selected swatch from `data.swatch_libraries` when the menu opens it.
+    var data: [String: Any] = ["swatch_libraries": model.swatchLibraries.libs]
+    if let brushes = store.getDataPath("brush_libraries") { data["brush_libraries"] = brushes }
+    ctx["data"] = data
     let dialogs = ws.data["dialogs"] as? [String: Any]
     let platformEffects = alignPlatformEffects(model: model)
     runEffects(effects, ctx: ctx, store: store,

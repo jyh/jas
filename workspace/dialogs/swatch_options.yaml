@@ -325,4 +325,14 @@ swatch_options:
           - type: spacer
             style: { flex: 1 }
           - { type: button, label: "Cancel", action: dismiss_dialog }
-          - { type: button, label: "OK", action: swatch_options_confirm, variant: primary }
+          - type: button
+            label: "OK"
+            action: swatch_options_confirm
+            variant: primary
+            params:
+              mode: "param.mode"
+              swatch_name: "dialog.swatch_name"
+              color: "dialog.color"
+              color_mode: "dialog.color_mode"
+              library: "param.library"
+              index: "param.index"

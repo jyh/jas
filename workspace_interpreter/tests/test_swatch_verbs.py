@@ -226,3 +226,88 @@ class TestAddUsedColors:
         store = _store([dict(s) for s in ABC], [2], children=[_rect(fill="#123123")])
         _run(store, "add_used_colors")
         assert _sel(store) == [2]
+
+
+# ══════════════════════════════════════════════════════════════════
+# Swatch Options: open in edit mode from the selection, and OK
+# ══════════════════════════════════════════════════════════════════
+#
+# The panel menu's "Swatch Options..." passes only {mode: edit}, so the dialog
+# names its swatch through the panel selection (the first selected swatch of
+# the selected library), and OK stores through `swatch.store`.
+
+with open(os.path.join(_WS, "dialogs", "swatch_options.yaml"), encoding="utf-8") as f:
+    DIALOGS = yaml.safe_load(f)
+
+
+def _open(store, params):
+    run_effects(ACTIONS["open_swatch_options"]["effects"], {"param": params}, store,
+                actions=ACTIONS, dialogs=DIALOGS)
+
+
+def _ok_params(store):
+    """The OK button's params, resolved in the dialog's scope, as a button click does."""
+    from workspace_interpreter.expr import evaluate
+    button = [b for b in _buttons(DIALOGS["swatch_options"]["content"]) if b.get("label") == "OK"][0]
+    ctx = store.eval_context()
+    return {k: evaluate(v, ctx).value for k, v in (button.get("params") or {}).items()}
+
+
+def _buttons(node):
+    if isinstance(node, dict):
+        if node.get("type") == "button":
+            yield node
+        for c in node.get("children") or []:
+            yield from _buttons(c)
+
+
+def _ok(store):
+    params = _ok_params(store)
+    run_effects(ACTIONS["swatch_options_confirm"]["effects"], {"param": params}, store,
+                actions=ACTIONS, dialogs=DIALOGS)
+
+
+class TestSwatchOptions:
+    def test_edit_mode_opens_on_the_first_selected_swatch(self):
+        store = _store([dict(s) for s in ABC], [1, 2])
+        _open(store, {"mode": "edit"})
+        assert store.get_dialog_id() == "swatch_options"
+        assert store.get_dialog("swatch_name") == "B"
+        assert store.get_dialog("color") == "#00ff00"
+
+    def test_ok_in_edit_mode_replaces_that_swatch(self):
+        store = _store([dict(s) for s in ABC], [1])
+        _open(store, {"mode": "edit"})
+        store.set_dialog("swatch_name", "Bee")
+        _ok(store)
+        assert store.get_dialog_id() is None
+        assert _lib(store)[1] == {"name": "Bee", "color": "#00ff00", "color_mode": "rgb",
+                                  "color_type": "process", "global": False}
+        assert _names(store) == ["A", "Bee", "C"]
+
+    def test_ok_in_create_mode_appends_to_the_selected_library(self):
+        store = _store([dict(s) for s in ABC], [])
+        _open(store, {"mode": "create", "color": "#123456"})
+        store.set_dialog("swatch_name", "New")
+        _ok(store)
+        assert _lib(store)[-1]["name"] == "New"
+        assert _lib(store)[-1]["color"] == "#123456"
+        assert _names(store, "lib_b") == ["Other"]
+
+    def test_a_tile_names_its_own_swatch_over_the_selection(self):
+        # A library tile's double-click passes its library and index; with a
+        # multi-selection, the first selected swatch is NOT the one edited.
+        store = _store([dict(s) for s in ABC], [0, 2])
+        _open(store, {"mode": "edit", "swatch_name": "C", "color": "#0000ff",
+                      "color_mode": "rgb", "library": "lib_a", "index": 2})
+        assert store.get_dialog("swatch_name") == "C"
+        store.set_dialog("swatch_name", "Sea")
+        _ok(store)
+        assert _names(store) == ["A", "B", "Sea"]
+
+    def test_cancel_stores_nothing(self):
+        store = _store([dict(s) for s in ABC], [0])
+        _open(store, {"mode": "edit"})
+        store.set_dialog("swatch_name", "Changed")
+        run_effects(ACTIONS["dismiss_dialog"]["effects"], {}, store, actions=ACTIONS, dialogs=DIALOGS)
+        assert _names(store) == ["A", "B", "C"]
