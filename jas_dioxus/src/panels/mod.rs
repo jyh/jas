@@ -445,6 +445,34 @@ mod tests {
         assert_eq!(names, ["A", "Bee", "New"], "create appends exactly once");
     }
 
+    /// The five "Show <Type> Brushes" checkboxes toggle their type in
+    /// `panel.category_filter` (`list_toggle`). They ran a `log:` stub in every
+    /// port, so unchecking one changed nothing and its check mark never moved.
+    /// The command is the one the menu builder produced for the row.
+    #[test]
+    fn a_show_brushes_checkbox_toggles_its_type() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        use super::panel_menu::PanelMenuItem;
+        let cmd: String = brushes_panel::menu_items().into_iter()
+            .find_map(|i| match i {
+                PanelMenuItem::Action { label, command, .. }
+                | PanelMenuItem::Toggle { label, command, .. }
+                | PanelMenuItem::Radio { label, command, .. } if label.contains("Scatter") => Some(command.to_string()),
+                _ => None,
+            })
+            .expect("a Show Scatter Brushes row");
+        assert!(panel_is_checked(PanelKind::Brushes, &cmd, &state), "checked by default");
+        brushes_panel::dispatch(&cmd, addr, &mut state);
+        assert!(!panel_is_checked(PanelKind::Brushes, &cmd, &state), "unchecked after one click ({cmd})");
+        brushes_panel::dispatch(&cmd, addr, &mut state);
+        assert!(panel_is_checked(PanelKind::Brushes, &cmd, &state), "checked again after a second");
+    }
+
     /// Two panels declare a `thumbnail_size` and both write it through the SAME
     /// generic `set_panel_state` effect. A handler that dispatches on the
     /// effect's `key` alone — which is what this app did — cannot tell them
@@ -578,6 +606,7 @@ mod tests {
             properties_constrain: false,
             concepts_selected: None,
             panel_state: std::collections::HashMap::new(),
+            menu_panel: None,
         }
     }
 

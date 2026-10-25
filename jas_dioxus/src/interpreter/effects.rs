@@ -14724,6 +14724,25 @@ mod tests {
         assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!(["b"]));
     }
 
+    /// The Brushes menu's Show <Type> Brushes, through the real action:
+    /// `list_toggle` on the ACTIVE panel's `category_filter`, both ways.
+    #[test]
+    fn the_real_toggle_brush_category_action_toggles_its_type() {
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("category_filter".to_string(), serde_json::json!(["calligraphic", "scatter", "art"]));
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let run = |store: &mut StateStore| run_effects(
+            &[serde_json::json!({"dispatch": {"action": "toggle_brush_category", "params": {"type": "scatter"}}})],
+            &serde_json::json!({}), store, None, Some(ws.actions()), Some(ws.dialogs()), None).unhandled;
+        assert_eq!(run(&mut store), vec![]);
+        assert_eq!(store.get_panel("brushes", "category_filter"), &serde_json::json!(["calligraphic", "art"]));
+        run(&mut store);
+        assert_eq!(store.get_panel("brushes", "category_filter"), &serde_json::json!(["calligraphic", "art", "scatter"]));
+    }
+
     // ── The five swatch verbs, row for row with the reference's
     //    `workspace_interpreter/tests/test_swatch_verbs.py` ──────────────
 
