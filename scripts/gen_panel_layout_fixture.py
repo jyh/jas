@@ -389,6 +389,16 @@ BIND_SEED = [
     ("layers@selection_lists", "layers_panel_content", _BV_LAYERS_LISTS),
 ]
 
+# (case name, dialog id, ctx): a dialog's binds, read the same way. The
+# Artboard Options fill dropdown displays its preset from `dialog.fill`, a
+# `color_or_transparent` that resolves to a COLOR, so a quoted '#000000'
+# never equals it (typed equality) and White/Black displayed "custom".
+DIALOG_BIND_SEED = [
+    (f"artboard_options@fill_{label}", "artboard_options", {"dialog": {"fill": fill}})
+    for label, fill in [("transparent", "transparent"), ("white", "#ffffff"),
+                        ("black", "#000000"), ("custom", "#123456")]
+]
+
 
 def main() -> int:
     bundle = json.load(open(os.path.join(ROOT, "workspace", "workspace.json"), encoding="utf-8"))
@@ -435,6 +445,13 @@ def main() -> int:
             "function": "bind_values",
             "args": {"panel": panel_id, "ctx": ctx},
             "expected": bind_values(panels[panel_id], ctx),
+        })
+    for name, dialog_id, ctx in DIALOG_BIND_SEED:
+        bv_cases.append({
+            "name": name,
+            "function": "bind_values",
+            "args": {"dialog": dialog_id, "ctx": ctx},
+            "expected": bind_values(bundle["dialogs"][dialog_id], ctx),
         })
     bv_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_bind_values.json")
     with open(bv_path, "w", encoding="utf-8", newline="") as f:

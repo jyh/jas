@@ -3552,5 +3552,837 @@
         "value": "[path,text]"
       }
     ]
+  },
+  {
+    "name": "artboard_options@fill_transparent",
+    "function": "bind_values",
+    "args": {
+      "dialog": "artboard_options",
+      "ctx": {
+        "dialog": {
+          "fill": "transparent"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1,
+          0
+        ],
+        "id": "ao_name_input",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          0
+        ],
+        "id": "ao_preset",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          1,
+          0
+        ],
+        "id": "ao_width",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3,
+          0
+        ],
+        "id": "ao_reference_point",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5,
+          0
+        ],
+        "id": "ao_x",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          0
+        ],
+        "id": "ao_height",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          4,
+          0
+        ],
+        "id": "ao_y",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          4,
+          1,
+          0
+        ],
+        "id": "ao_orientation",
+        "key": "bind.value",
+        "type": "string",
+        "value": "landscape"
+      },
+      {
+        "path": [
+          4,
+          4,
+          0
+        ],
+        "id": "ao_fill_dropdown",
+        "key": "bind.value",
+        "type": "string",
+        "value": "transparent"
+      },
+      {
+        "path": [
+          4,
+          5,
+          0
+        ],
+        "id": "ao_fill_swatch",
+        "key": "bind.color",
+        "type": "string",
+        "value": "transparent"
+      },
+      {
+        "path": [
+          7
+        ],
+        "id": "ao_show_center_mark",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          8
+        ],
+        "id": "ao_show_cross_hairs",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          9
+        ],
+        "id": "ao_show_video_safe_areas",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          10,
+          1,
+          0
+        ],
+        "id": "ao_video_par",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          13
+        ],
+        "id": "ao_fade_region",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          16
+        ],
+        "id": "",
+        "key": "content",
+        "type": "string",
+        "value": "Artboards: "
+      },
+      {
+        "path": [
+          17,
+          0
+        ],
+        "id": "ao_delete",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      }
+    ]
+  },
+  {
+    "name": "artboard_options@fill_white",
+    "function": "bind_values",
+    "args": {
+      "dialog": "artboard_options",
+      "ctx": {
+        "dialog": {
+          "fill": "#ffffff"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1,
+          0
+        ],
+        "id": "ao_name_input",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          0
+        ],
+        "id": "ao_preset",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          1,
+          0
+        ],
+        "id": "ao_width",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3,
+          0
+        ],
+        "id": "ao_reference_point",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5,
+          0
+        ],
+        "id": "ao_x",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          0
+        ],
+        "id": "ao_height",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          4,
+          0
+        ],
+        "id": "ao_y",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          4,
+          1,
+          0
+        ],
+        "id": "ao_orientation",
+        "key": "bind.value",
+        "type": "string",
+        "value": "landscape"
+      },
+      {
+        "path": [
+          4,
+          4,
+          0
+        ],
+        "id": "ao_fill_dropdown",
+        "key": "bind.value",
+        "type": "string",
+        "value": "white"
+      },
+      {
+        "path": [
+          4,
+          5,
+          0
+        ],
+        "id": "ao_fill_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ffffff"
+      },
+      {
+        "path": [
+          7
+        ],
+        "id": "ao_show_center_mark",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          8
+        ],
+        "id": "ao_show_cross_hairs",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          9
+        ],
+        "id": "ao_show_video_safe_areas",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          10,
+          1,
+          0
+        ],
+        "id": "ao_video_par",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          13
+        ],
+        "id": "ao_fade_region",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          16
+        ],
+        "id": "",
+        "key": "content",
+        "type": "string",
+        "value": "Artboards: "
+      },
+      {
+        "path": [
+          17,
+          0
+        ],
+        "id": "ao_delete",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      }
+    ]
+  },
+  {
+    "name": "artboard_options@fill_black",
+    "function": "bind_values",
+    "args": {
+      "dialog": "artboard_options",
+      "ctx": {
+        "dialog": {
+          "fill": "#000000"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1,
+          0
+        ],
+        "id": "ao_name_input",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          0
+        ],
+        "id": "ao_preset",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          1,
+          0
+        ],
+        "id": "ao_width",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3,
+          0
+        ],
+        "id": "ao_reference_point",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5,
+          0
+        ],
+        "id": "ao_x",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          0
+        ],
+        "id": "ao_height",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          4,
+          0
+        ],
+        "id": "ao_y",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          4,
+          1,
+          0
+        ],
+        "id": "ao_orientation",
+        "key": "bind.value",
+        "type": "string",
+        "value": "landscape"
+      },
+      {
+        "path": [
+          4,
+          4,
+          0
+        ],
+        "id": "ao_fill_dropdown",
+        "key": "bind.value",
+        "type": "string",
+        "value": "black"
+      },
+      {
+        "path": [
+          4,
+          5,
+          0
+        ],
+        "id": "ao_fill_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#000000"
+      },
+      {
+        "path": [
+          7
+        ],
+        "id": "ao_show_center_mark",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          8
+        ],
+        "id": "ao_show_cross_hairs",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          9
+        ],
+        "id": "ao_show_video_safe_areas",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          10,
+          1,
+          0
+        ],
+        "id": "ao_video_par",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          13
+        ],
+        "id": "ao_fade_region",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          16
+        ],
+        "id": "",
+        "key": "content",
+        "type": "string",
+        "value": "Artboards: "
+      },
+      {
+        "path": [
+          17,
+          0
+        ],
+        "id": "ao_delete",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      }
+    ]
+  },
+  {
+    "name": "artboard_options@fill_custom",
+    "function": "bind_values",
+    "args": {
+      "dialog": "artboard_options",
+      "ctx": {
+        "dialog": {
+          "fill": "#123456"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1,
+          0
+        ],
+        "id": "ao_name_input",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          0
+        ],
+        "id": "ao_preset",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          1,
+          0
+        ],
+        "id": "ao_width",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3,
+          0
+        ],
+        "id": "ao_reference_point",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5,
+          0
+        ],
+        "id": "ao_x",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          0
+        ],
+        "id": "ao_height",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          4,
+          0
+        ],
+        "id": "ao_y",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          4,
+          1,
+          0
+        ],
+        "id": "ao_orientation",
+        "key": "bind.value",
+        "type": "string",
+        "value": "landscape"
+      },
+      {
+        "path": [
+          4,
+          4,
+          0
+        ],
+        "id": "ao_fill_dropdown",
+        "key": "bind.value",
+        "type": "string",
+        "value": "custom"
+      },
+      {
+        "path": [
+          4,
+          5,
+          0
+        ],
+        "id": "ao_fill_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#123456"
+      },
+      {
+        "path": [
+          7
+        ],
+        "id": "ao_show_center_mark",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          8
+        ],
+        "id": "ao_show_cross_hairs",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          9
+        ],
+        "id": "ao_show_video_safe_areas",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          10,
+          1,
+          0
+        ],
+        "id": "ao_video_par",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          13
+        ],
+        "id": "ao_fade_region",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          14
+        ],
+        "id": "ao_update_while_dragging",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          16
+        ],
+        "id": "",
+        "key": "content",
+        "type": "string",
+        "value": "Artboards: "
+      },
+      {
+        "path": [
+          17,
+          0
+        ],
+        "id": "ao_delete",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      }
+    ]
   }
 ]

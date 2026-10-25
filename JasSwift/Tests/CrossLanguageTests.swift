@@ -3280,12 +3280,18 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         let function = tc["function"] as! String
         #expect(function == "bind_values", "Unknown function: \(function)")
         let args = tc["args"] as! [String: Any]
-        let panelId = args["panel"] as! String
         let ctx = (args["ctx"] as? [String: Any]) ?? [:]
         let expected = tc["expected"] as! [[String: Any]]
 
-        let panel = panels[panelId] as! [String: Any]
-        let actual = BindValues.bindValues(panel, ctx: ctx)
+        // A case names a compiled panel (`panel`) or a dialog (`dialog`).
+        let subject: [String: Any]
+        if let dialogId = args["dialog"] as? String {
+            let dialogs = bundle["dialogs"] as! [String: Any]
+            subject = dialogs[dialogId] as! [String: Any]
+        } else {
+            subject = panels[args["panel"] as! String] as! [String: Any]
+        }
+        let actual = BindValues.bindValues(subject, ctx: ctx)
 
         // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
         // with sorted keys and compare bytes. Every field is a string or an
