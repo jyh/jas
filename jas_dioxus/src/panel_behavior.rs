@@ -658,6 +658,10 @@ fn run_widget_behavior_in(
     dialogs: &Value,
     host: &mut dyn EffectHost,
 ) -> Result<Ran, Refusal> {
+    // A `tabs` node is walked as its strip and its active page, in the scope
+    // the plan used, so a path the plan gave names the same node here.
+    let canonical = crate::panel_plan::canonical_tabs(spec, scope);
+    let spec = &canonical;
     let content = spec.get("content").unwrap_or(&Value::Null);
     // W2b-16: an event addressed by `path` resolves the node AND the row scope
     // it runs in; one addressed by id finds the first node with that id, which

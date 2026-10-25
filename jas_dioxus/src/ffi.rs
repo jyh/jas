@@ -3950,6 +3950,10 @@ mod tests {
                         step_failed = true;
                         break;
                     };
+                    // Addressed in the form the door walks: a `tabs` node is its strip
+                    // and its active page, in the dialog's own scope.
+                    let scope = dialog_ctx(engine_of(e), &engine_of(e).store.borrow().eval_context());
+                    let spec = crate::panel_plan::canonical_tabs(spec, &scope);
                     let path = match dialog_address_path(&spec["content"], ev["address"].as_object().unwrap()) {
                         Ok(p) => p,
                         Err(why) => { failures.push(format!("{name}: {why}")); step_failed = true; break; }
@@ -4142,6 +4146,83 @@ mod tests {
         assert_eq!(unsafe { jas_dialog_dismiss(e) }, 1);
         let v = plan(e);
         assert_eq!((v["id"].clone(), v["depth"].clone()), (serde_json::json!("layer_options"), serde_json::json!(1)));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A TABBED dialog plans its tab strip and its ACTIVE page (flask §539
+    /// measured Print showing no fields on Windows: the plan walked only
+    /// `children`, so no page reached it). The strip is a `select` leaf whose
+    /// options are the bundle's tab ids and labels, read from the bundle here
+    /// and never typed, with the active tab selected. A change on the strip
+    /// re-plans with that page's widgets and none of the other's, in BOTH
+    /// directions (a radio-like control is driven both ways).
+    #[test]
+    fn dialog_plan_plans_a_tab_strip_and_the_active_page() {
+        use std::collections::BTreeSet;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().expect("workspace");
+        fn find_tabs(n: &serde_json::Value) -> Option<&serde_json::Value> {
+            if n["type"] == "tabs" {
+                return Some(n);
+            }
+            n["children"].as_array().into_iter().flatten().find_map(find_tabs)
+        }
+        fn ids(n: &serde_json::Value, out: &mut BTreeSet<String>) {
+            if let Some(id) = n["id"].as_str() {
+                out.insert(id.to_string());
+            }
+            for c in n["children"].as_array().into_iter().flatten() {
+                ids(c, out);
+            }
+        }
+        let tabs = find_tabs(&ws.dialog("print").expect("print")["content"]).expect("Print has a tabs node").clone();
+        let pages = tabs["tabs"].as_array().expect("tabs.tabs").clone();
+        assert!(pages.len() >= 2, "two pages to switch between: {pages:?}");
+        let page_ids: Vec<BTreeSet<String>> = pages.iter().map(|p| {
+            let mut s = BTreeSet::new();
+            ids(&p["content"], &mut s);
+            s
+        }).collect();
+        // The page to switch to is the first other page with a widget of its own.
+        let (other, _) = page_ids.iter().enumerate().skip(1).find(|(_, s)| !s.is_empty())
+            .expect("a second page with an addressable widget");
+        assert!(page_ids[0].is_disjoint(&page_ids[other]), "the two pages share no id");
+
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"open_print_dialog","params":{}}"#);
+        assert!(reply.contains(r#""dialog":"print""#), "{reply} {err}");
+        let plan = |e| -> Vec<serde_json::Value> {
+            let v: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 720, 640) })).unwrap();
+            v["plan"]["leaves"].as_array().expect("an open dialog's plan").clone()
+        };
+        let planned = |leaves: &[serde_json::Value]| -> BTreeSet<String> {
+            leaves.iter().filter_map(|l| l["id"].as_str()).filter(|s| !s.is_empty()).map(str::to_string).collect()
+        };
+        let tab_id = tabs["id"].as_str().expect("the tabs node's id");
+        let strip_of = |leaves: &[serde_json::Value]| -> serde_json::Value {
+            leaves.iter().find(|l| l["id"] == tab_id).unwrap_or_else(|| panic!("no strip leaf {tab_id}: {leaves:?}")).clone()
+        };
+        let want = |active: usize| -> serde_json::Value {
+            serde_json::Value::Array(pages.iter().enumerate().map(|(i, p)| serde_json::json!({
+                "kind": "option", "value": p["id"], "label": p["label"], "selected": i == active})).collect())
+        };
+        let mut seen = vec![];
+        for (to, from) in [(other, 0), (0, other)] {
+            let leaves = plan(e);
+            let strip = strip_of(&leaves);
+            assert_eq!(strip["type"], "select", "{strip}");
+            assert_eq!(strip["options"], want(from), "the strip's options and its selection");
+            let ids = planned(&leaves);
+            assert!(page_ids[from].is_subset(&ids), "page {from} is planned: missing {:?}",
+                    page_ids[from].difference(&ids).collect::<Vec<_>>());
+            assert!(ids.is_disjoint(&page_ids[to]), "page {to} is not: {:?}",
+                    ids.intersection(&page_ids[to]).collect::<Vec<_>>());
+            let ev = serde_json::json!({"widget": tab_id, "event": "change", "value": pages[to]["id"]}).to_string();
+            let (reply, err) = dialog_event(e, &ev);
+            assert!(!reply.is_empty(), "the switch to {to} ran: {err}");
+            seen.push(engine_of(e).store.borrow().eval_context()["dialog"]["active_tab"].clone());
+        }
+        assert_eq!(seen, vec![pages[other]["id"].clone(), pages[0]["id"].clone()], "the bind wrote each tab id");
         unsafe { jas_engine_free(e) };
     }
 
