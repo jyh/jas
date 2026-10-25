@@ -300,3 +300,31 @@ def test_no_input_or_toggle_binds_a_bare_string():
         for key, node in bundle[section].items():
             walk(node, f"{section}/{key}")
     assert found == [], found
+
+
+def test_no_checkbox_or_toggle_binds_its_state_as_value():
+    """A checkbox's or toggle's state is `bind.checked`. The web and Mac
+    renderers also accept `bind.value` for it, but the Windows shell reads
+    `bind.checked` alone, so a checkbox bound with `value` drew Off whatever
+    its state (flask STATUS 549 finding G: Paragraph's Hyphenate read Off on
+    hyphenated paragraphs; every Character and Paragraph checkbox had the
+    shape). `bind.value` belongs to inputs and selects."""
+    with open(BUNDLE, encoding="utf-8") as f:
+        bundle = json.load(f)
+    found = []
+
+    def walk(node, where):
+        if isinstance(node, dict):
+            bind = node.get("bind")
+            if (node.get("type") in ("toggle", "checkbox") and isinstance(bind, dict)
+                    and "value" in bind):
+                found.append((where, node.get("id")))
+            for v in node.values():
+                walk(v, where)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, where)
+    for section in ("dialogs", "panels"):
+        for key, node in bundle[section].items():
+            walk(node, f"{section}/{key}")
+    assert found == [], found

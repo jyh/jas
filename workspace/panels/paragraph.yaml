@@ -185,7 +185,7 @@ content:
               description: "Align each line to the left boundary; right is ragged."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.align_left"
+                checked: "panel.align_left"
                 disabled: "not panel.text_selected"
             - id: pg_align_center
               type: checkbox
@@ -194,7 +194,7 @@ content:
               description: "Centre each line; both edges are ragged."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.align_center"
+                checked: "panel.align_center"
                 disabled: "not panel.text_selected"
             - id: pg_align_right
               type: checkbox
@@ -203,7 +203,7 @@ content:
               description: "Align each line to the right boundary; left is ragged."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.align_right"
+                checked: "panel.align_right"
                 disabled: "not panel.text_selected"
             - id: pg_justify_left
               type: checkbox
@@ -212,7 +212,7 @@ content:
               description: "Justify the body of the paragraph; last line aligned left."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.justify_left"
+                checked: "panel.justify_left"
                 disabled: "not panel.area_text_selected"
             - id: pg_justify_center
               type: checkbox
@@ -221,7 +221,7 @@ content:
               description: "Justify the body; last line centred."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.justify_center"
+                checked: "panel.justify_center"
                 disabled: "not panel.area_text_selected"
             - id: pg_justify_right
               type: checkbox
@@ -230,7 +230,7 @@ content:
               description: "Justify the body; last line aligned right."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.justify_right"
+                checked: "panel.justify_right"
                 disabled: "not panel.area_text_selected"
             - id: pg_justify_all
               type: checkbox
@@ -239,7 +239,7 @@ content:
               description: "Force every line — including the last — to justify to both margins."
               style: { width: 24, height: 22 }
               bind:
-                value: "panel.justify_all"
+                checked: "panel.justify_all"
                 disabled: "not panel.area_text_selected"
 
     # ── Row 2: Bullets icon-select + Numbered list icon-select ─
@@ -422,5 +422,5 @@ content:
                 xml:lang. Fine-grained parameters live in the Hyphenation
                 dialog (panel menu → Hyphenation…).
               bind:
-                value: "panel.hyphenate"
+                checked: "panel.hyphenate"
                 disabled: "not panel.area_text_selected"

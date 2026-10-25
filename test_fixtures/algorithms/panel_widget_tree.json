@@ -3156,7 +3156,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3192,7 +3192,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3228,7 +3228,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3264,7 +3264,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3300,7 +3300,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3336,7 +3336,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3593,7 +3593,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3629,7 +3629,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3665,7 +3665,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3701,7 +3701,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3737,7 +3737,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -3773,7 +3773,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "value"
+          "checked"
         ],
         "style": [
           "height",
@@ -5022,8 +5022,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5043,8 +5043,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5064,8 +5064,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5085,8 +5085,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5106,8 +5106,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5127,8 +5127,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5148,8 +5148,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": [
           "height",
@@ -5592,8 +5592,8 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "disabled",
-          "value"
+          "checked",
+          "disabled"
         ],
         "style": []
       }

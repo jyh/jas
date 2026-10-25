@@ -13264,7 +13264,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.all_caps"
+                      "checked": "panel.all_caps"
                     }
                   }
                 ]
@@ -13287,7 +13287,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.small_caps"
+                      "checked": "panel.small_caps"
                     }
                   }
                 ]
@@ -13310,7 +13310,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.superscript"
+                      "checked": "panel.superscript"
                     }
                   }
                 ]
@@ -13333,7 +13333,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.subscript"
+                      "checked": "panel.subscript"
                     }
                   }
                 ]
@@ -13356,7 +13356,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.underline"
+                      "checked": "panel.underline"
                     }
                   }
                 ]
@@ -13379,7 +13379,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.strikethrough"
+                      "checked": "panel.strikethrough"
                     }
                   }
                 ]
@@ -13632,7 +13632,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.snap_baseline"
+                      "checked": "panel.snap_baseline"
                     }
                   }
                 ]
@@ -13655,7 +13655,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.snap_x_height"
+                      "checked": "panel.snap_x_height"
                     }
                   }
                 ]
@@ -13678,7 +13678,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.snap_glyph_bounds"
+                      "checked": "panel.snap_glyph_bounds"
                     }
                   }
                 ]
@@ -13701,7 +13701,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.snap_proximity_guides"
+                      "checked": "panel.snap_proximity_guides"
                     }
                   }
                 ]
@@ -13724,7 +13724,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.snap_angular_guides"
+                      "checked": "panel.snap_angular_guides"
                     }
                   }
                 ]
@@ -13747,7 +13747,7 @@
                       "height": 24
                     },
                     "bind": {
-                      "value": "panel.snap_anchor_point"
+                      "checked": "panel.snap_anchor_point"
                     }
                   }
                 ]
@@ -18169,7 +18169,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.align_left",
+                      "checked": "panel.align_left",
                       "disabled": "not panel.text_selected"
                     }
                   },
@@ -18184,7 +18184,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.align_center",
+                      "checked": "panel.align_center",
                       "disabled": "not panel.text_selected"
                     }
                   },
@@ -18199,7 +18199,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.align_right",
+                      "checked": "panel.align_right",
                       "disabled": "not panel.text_selected"
                     }
                   },
@@ -18214,7 +18214,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_left",
+                      "checked": "panel.justify_left",
                       "disabled": "not panel.area_text_selected"
                     }
                   },
@@ -18229,7 +18229,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_center",
+                      "checked": "panel.justify_center",
                       "disabled": "not panel.area_text_selected"
                     }
                   },
@@ -18244,7 +18244,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_right",
+                      "checked": "panel.justify_right",
                       "disabled": "not panel.area_text_selected"
                     }
                   },
@@ -18259,7 +18259,7 @@
                       "height": 22
                     },
                     "bind": {
-                      "value": "panel.justify_all",
+                      "checked": "panel.justify_all",
                       "disabled": "not panel.area_text_selected"
                     }
                   }
@@ -18583,7 +18583,7 @@
                     "summary": "Hyphenate",
                     "description": "Master switch \u2014 when on, line breaking may use hyphenation. Hyphenation language is inherited from the character-level xml:lang. Fine-grained parameters live in the Hyphenation dialog (panel menu \u2192 Hyphenation\u2026).\n",
                     "bind": {
-                      "value": "panel.hyphenate",
+                      "checked": "panel.hyphenate",
                       "disabled": "not panel.area_text_selected"
                     }
                   }
