@@ -47,8 +47,8 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 /// entry's declared `params`, so `param.view_mode` resolves. Passing the folded
 /// string through with an empty params map — which is what this did — named no
 /// action at all, so every Brushes menu row was a silent no-op.
-pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
+pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_json::Value> {
     // The action evaluates with this panel's scope (selected_library,
     // selected_brushes), which the app scope alone does not carry.
-    super::panel_menu::dispatch_yaml_menu("brushes_panel_content", cmd, addr, state);
+    super::panel_menu::dispatch_yaml_menu("brushes_panel_content", cmd, addr, state)
 }
