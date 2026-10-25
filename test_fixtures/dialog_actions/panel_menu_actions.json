@@ -1,0 +1,552 @@
+[
+  {
+    "name": "duplicate_swatch_copies_each_selected_swatch_after_itself",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatches.yaml menu Duplicate Swatch; actions.yaml swatch.duplicate_selected: indices ascending, each copy right after its original with a running offset, named '<name> copy'; the copies become the selection. Values from the reference (workspace_interpreter/effects.py).",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [
+          1,
+          3
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "duplicate_swatch"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "swatch_libraries.web_colors.swatches.2": {
+        "name": "R=0 G=0 B=51 copy",
+        "color": "#000033",
+        "color_mode": "web_safe_rgb",
+        "color_type": "process",
+        "global": false
+      },
+      "swatch_libraries.web_colors.swatches.5": {
+        "name": "R=0 G=0 B=153 copy",
+        "color": "#000099",
+        "color_mode": "web_safe_rgb",
+        "color_type": "process",
+        "global": false
+      },
+      "swatch_libraries.web_colors.swatches.6.name": "R=0 G=0 B=204"
+    },
+    "expected_panel": {
+      "swatches_panel_content": {
+        "selected_swatches": [
+          2,
+          5
+        ]
+      }
+    }
+  },
+  {
+    "name": "delete_swatch_removes_the_selected_swatches",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatch.delete_selected: indices descending (given unsorted here), the selection cleared.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [
+          3,
+          1
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "delete_swatch"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "swatch_libraries.web_colors.swatches.0.name": "R=0 G=0 B=0",
+      "swatch_libraries.web_colors.swatches.1.name": "R=0 G=0 B=102",
+      "swatch_libraries.web_colors.swatches.2.name": "R=0 G=0 B=204",
+      "swatch_libraries.web_colors.swatches.-1.name": "R=255 G=255 B=255"
+    },
+    "expected_panel": {
+      "swatches_panel_content": {
+        "selected_swatches": []
+      }
+    }
+  },
+  {
+    "name": "sort_swatches_by_name_orders_by_code_point_and_clears_the_selection",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatch.sort_by_name: stable, by code point ('B=102' before 'B=153' before 'B=51'), the selection cleared.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [
+          4
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "sort_swatches_by_name"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "swatch_libraries.web_colors.swatches.0.name": "R=0 G=0 B=0",
+      "swatch_libraries.web_colors.swatches.1.name": "R=0 G=0 B=102",
+      "swatch_libraries.web_colors.swatches.2.name": "R=0 G=0 B=153",
+      "swatch_libraries.web_colors.swatches.-1.name": "R=51 G=51 B=51"
+    },
+    "expected_panel": {
+      "swatches_panel_content": {
+        "selected_swatches": []
+      }
+    }
+  },
+  {
+    "name": "select_all_unused_swatches_skips_the_document_red",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatch.select_unused: every index whose colour is no element's fill or stroke; rect_basic's fill is #ff0000, web_colors index 180, the one index left out.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [
+          0
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "select_all_unused_swatches"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "selected_swatches": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          132,
+          133,
+          134,
+          135,
+          136,
+          137,
+          138,
+          139,
+          140,
+          141,
+          142,
+          143,
+          144,
+          145,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153,
+          154,
+          155,
+          156,
+          157,
+          158,
+          159,
+          160,
+          161,
+          162,
+          163,
+          164,
+          165,
+          166,
+          167,
+          168,
+          169,
+          170,
+          171,
+          172,
+          173,
+          174,
+          175,
+          176,
+          177,
+          178,
+          179,
+          181,
+          182,
+          183,
+          184,
+          185,
+          186,
+          187,
+          188,
+          189,
+          190,
+          191,
+          192,
+          193,
+          194,
+          195,
+          196,
+          197,
+          198,
+          199,
+          200,
+          201,
+          202,
+          203,
+          204,
+          205,
+          206,
+          207,
+          208,
+          209,
+          210,
+          211,
+          212,
+          213,
+          214,
+          215
+        ]
+      }
+    }
+  },
+  {
+    "name": "duplicate_brush_inserts_a_copy_with_a_free_slug",
+    "setup_svg": "corner_path.svg",
+    "note": "brushes.yaml menu Duplicate Brush; brush.duplicate_selected: the copy right after its original, slug <slug>_copy, name '<name> copy'; the copies become the selection.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [
+          "round_3pt"
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "duplicate_brush"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "brush_libraries.default_brushes.brushes.2": {
+        "name": "3 pt. Round copy",
+        "slug": "round_3pt_copy",
+        "type": "calligraphic",
+        "angle": 0,
+        "roundness": 100,
+        "size": 3,
+        "angle_variation": {
+          "mode": "fixed"
+        },
+        "roundness_variation": {
+          "mode": "fixed"
+        },
+        "size_variation": {
+          "mode": "fixed"
+        }
+      },
+      "brush_libraries.default_brushes.brushes.3.slug": "round_7pt"
+    },
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_brushes": [
+          "round_3pt_copy"
+        ]
+      }
+    }
+  },
+  {
+    "name": "delete_brush_removes_the_selected_slugs",
+    "setup_svg": "corner_path.svg",
+    "note": "brush.delete_selected: every brush whose slug is selected, the selection cleared.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [
+          "round_3pt",
+          "flat_5pt"
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "delete_brush"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "brush_libraries.default_brushes.brushes.1.slug": "round_7pt",
+      "brush_libraries.default_brushes.brushes.2.slug": "oval_5pt",
+      "brush_libraries.default_brushes.brushes.-1.slug": "bristle_round"
+    },
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_brushes": []
+      }
+    }
+  },
+  {
+    "name": "sort_brushes_by_name_orders_by_code_point",
+    "setup_svg": "corner_path.svg",
+    "note": "brush.sort_by_name: stable, by code point, so '10 pt. Round' precedes '3 pt. Round' and 'Tapered' is last.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "sort_brushes_by_name"
+          }
+        }
+      }
+    ],
+    "expected_data": {
+      "brush_libraries.default_brushes.brushes.0.slug": "round_10pt",
+      "brush_libraries.default_brushes.brushes.1.slug": "round_3pt",
+      "brush_libraries.default_brushes.brushes.5.slug": "basic",
+      "brush_libraries.default_brushes.brushes.-1.slug": "art_tapered"
+    }
+  },
+  {
+    "name": "select_all_unused_brushes_skips_the_applied_brush",
+    "setup_svg": "corner_path.svg",
+    "note": "brush.select_unused: every slug no element carries as stroke_brush '<library>/<slug>'; the path carries default_brushes/oval_5pt after the apply.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "apply_brush_to_selection",
+        "params": {
+          "library": "default_brushes",
+          "brush_slug": "oval_5pt"
+        }
+      },
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "select_all_unused_brushes"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_brushes": [
+          "basic",
+          "round_3pt",
+          "round_7pt",
+          "flat_5pt",
+          "round_10pt",
+          "art_tapered",
+          "pattern_diamonds",
+          "bristle_round"
+        ]
+      }
+    }
+  },
+  {
+    "name": "show_art_brushes_toggles_art_out_of_the_filter",
+    "setup_svg": "corner_path.svg",
+    "note": "brushes.yaml menu Show Art Brushes (params type: art), five rows share the action so the label separates them; list_toggle removes a present value.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "toggle_brush_category",
+            "label": "Show Art Brushes"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "brushes_panel_content": {
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "pattern",
+          "bristle"
+        ]
+      }
+    }
+  }
+]

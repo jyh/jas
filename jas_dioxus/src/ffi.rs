@@ -3878,18 +3878,24 @@ mod tests {
         "dialog_actions/artboard_options.json",
         "dialog_actions/document_setup.json",
         "dialog_actions/print.json",
+        "dialog_actions/panel_menu_actions.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
     /// `2026-10-24-jas-DESIGN-dialog-action-corpus`), on the engine's route,
     /// which is the Windows shell's: `test_fixtures/dialog_actions/*.json`. A
     /// step is an action (`jas_dispatch_action`), an `open_dialog` (what a
-    /// tool's double-click or an opener action performs), or a `dialog_event`
-    /// (`jas_dialog_event`, addressed by [`dialog_address_path`]). Then:
+    /// tool's double-click or an opener action performs), a `dialog_event`
+    /// (`jas_dialog_event`, addressed by [`dialog_address_path`]), or a
+    /// `panel_menu` click (`{"panel", "address"}`: the one row of that panel's
+    /// menu the address names, sent as `{"panel", "menu_index"}`), after any
+    /// `panel_state` seed (a panel's own state, as a tile click leaves it). Then:
     /// `expected_dialog` is the dialog open AFTER the last step (`null` for
     /// none; `state` is a subset), `expected_state` a subset of the globals,
     /// `expected_document` `"unchanged"` / `"changed"` against the document
-    /// as the dialog opened, and `expected_json` the pinned golden, which Swift must match.
+    /// as the dialog opened, `expected_data` dotted paths into `data`,
+    /// `expected_panel` a subset of a panel's own state, and `expected_json` the
+    /// pinned golden, which Swift must match.
     #[test]
     fn dialog_action_corpus_runs_on_the_engine_route() {
         use crate::geometry::test_json::document_to_test_json;
@@ -3909,6 +3915,15 @@ mod tests {
         for tc in &cases {
             let name = tc["name"].as_str().unwrap();
             let e = engine_on(tc["setup_svg"].as_str().unwrap());
+            // `panel_state`: a panel's own state as the artist left it (a
+            // selection made by clicking tiles, which no verb sets), written
+            // over the panel's declared defaults. Swift seeds it the same way.
+            for (pid, keys) in tc.get("panel_state").and_then(|v| v.as_object()).into_iter().flatten() {
+                seed_panel(engine_of(e), &ws, pid);
+                for (k, v) in keys.as_object().into_iter().flatten() {
+                    engine_of(e).store.borrow_mut().set_panel(pid, k, v.clone());
+                }
+            }
             // `expected_document` compares against the document as the dialog
             // OPENED (after the setup steps), never the setup file itself.
             let mut at_open: Option<String> = None;
@@ -3929,6 +3944,27 @@ mod tests {
                     crate::interpreter::effects::open_dialog_in(
                         id, spec, params, None, &ctx,
                         &mut en.store.borrow_mut(), Some(&mut *en.model.borrow_mut()));
+                } else if let Some(pm) = step.get("panel_menu") {
+                    // A panel-menu click, through the shell's own door: the ONE row
+                    // of the panel's menu whose every `address` key equals its own
+                    // (zero or two refuse by name), sent back by index.
+                    let pid = pm["panel"].as_str().unwrap_or_default();
+                    let address = pm["address"].as_object().cloned().unwrap_or_default();
+                    let hits: Vec<usize> = ws.panel_menu(pid).iter().enumerate()
+                        .filter(|(_, n)| n.is_object() && address.iter().all(|(k, v)| n.get(k) == Some(v)))
+                        .map(|(i, _)| i).collect();
+                    if hits.len() != 1 {
+                        failures.push(format!("{name}: the address {address:?} matches {} row(s) of {pid}'s menu, want exactly 1", hits.len()));
+                        step_failed = true;
+                        break;
+                    }
+                    let msg = serde_json::json!({"panel": pid, "menu_index": hits[0]}).to_string();
+                    let (reply, err) = dispatch(e, &msg);
+                    if reply.is_empty() {
+                        failures.push(format!("{name}: the panel menu refused {msg}: {err}"));
+                        step_failed = true;
+                        break;
+                    }
                 } else if let Some(action) = step.get("action").and_then(|a| a.as_str()) {
                     // An action through the shell's own door, so a dialog it opens
                     // (`open_boolean_options`) resolves its params in the app's
@@ -4028,6 +4064,16 @@ mod tests {
                     failures.push(format!("{name}: data.{path} does not resolve"));
                 } else if !crate::cross_language_test::tests::json_value_eq(&cur, value) {
                     failures.push(format!("{name}: data.{path} is {cur}, the corpus pins {value}"));
+                }
+            }
+            // `expected_panel`: a subset of a panel's own state after the last
+            // step. A key the panel does not hold is a failure, never a null.
+            for (pid, keys) in tc.get("expected_panel").and_then(|v| v.as_object()).into_iter().flatten() {
+                for (key, value) in keys.as_object().into_iter().flatten() {
+                    let have = store.get_panel(pid, key);
+                    if have.is_null() || !crate::cross_language_test::tests::json_value_eq(have, value) {
+                        failures.push(format!("{name}: panel {pid}.{key} is {have}, the corpus pins {value}"));
+                    }
                 }
             }
             drop(store);
