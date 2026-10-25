@@ -17,7 +17,8 @@ appearance_save_as:
       - id: appearance_name_input
         type: text_input
         placeholder: "My Theme"
-        bind: "dialog.name"
+        bind:
+          value: "dialog.name"
       - type: row
         style: { justify: end, gap: 8 }
         children:

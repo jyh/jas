@@ -159,7 +159,8 @@ color_picker:
                 label: "Only Web Colors"
                 summary: "Web-safe color snap"
                 description: "Snap all color values to the web-safe palette (0, 51, 102, 153, 204, 255)"
-                bind: "dialog.web_only"
+                bind:
+                  checked: "dialog.web_only"
 
           # Fields + buttons column
           - type: container
@@ -244,7 +245,7 @@ color_picker:
                         style: { gap: 4, alignment: center, margin: "4 0 0 0" }
                         children:
                           - { type: text, content: "#" }
-                          - { type: text_input, id: cp_hex, placeholder: "000000", style: { width: 60 }, bind: "dialog.hex" }
+                          - { type: text_input, id: cp_hex, placeholder: "000000", style: { width: 60 }, bind: { value: "dialog.hex" } }
                   # CMYK
                   - type: container
                     layout: column

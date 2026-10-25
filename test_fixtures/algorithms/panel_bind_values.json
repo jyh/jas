@@ -4384,5 +4384,250 @@
         "value": "false"
       }
     ]
+  },
+  {
+    "name": "color_picker@channels",
+    "function": "bind_values",
+    "args": {
+      "dialog": "color_picker",
+      "ctx": {
+        "dialog": {
+          "color": "#12ab34",
+          "hex": "12ab34",
+          "r": 18,
+          "g": 171,
+          "bl": 52,
+          "web_only": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "id": "cp_gradient",
+        "key": "bind.brightness",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "id": "cp_gradient",
+        "key": "bind.hue",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "id": "cp_gradient",
+        "key": "bind.saturation",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          0,
+          1
+        ],
+        "id": "cp_colorbar",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          1
+        ],
+        "id": "cp_web_only",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "id": "cp_preview",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#12ab34"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          1,
+          2
+        ],
+        "id": "cp_h",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          2,
+          2
+        ],
+        "id": "cp_s",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          3,
+          2
+        ],
+        "id": "cp_b",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          0,
+          2
+        ],
+        "id": "cp_r",
+        "key": "bind.value",
+        "type": "number",
+        "value": "18"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          1,
+          2
+        ],
+        "id": "cp_g",
+        "key": "bind.value",
+        "type": "number",
+        "value": "171"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          2,
+          2
+        ],
+        "id": "cp_bl",
+        "key": "bind.value",
+        "type": "number",
+        "value": "52"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          3,
+          1
+        ],
+        "id": "cp_hex",
+        "key": "bind.value",
+        "type": "string",
+        "value": "12ab34"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          0,
+          1
+        ],
+        "id": "cp_c",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          1,
+          1
+        ],
+        "id": "cp_m",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          2,
+          1
+        ],
+        "id": "cp_y",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          3,
+          1
+        ],
+        "id": "cp_k",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      }
+    ]
   }
 ]
