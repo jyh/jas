@@ -977,6 +977,40 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_data_path(path, swatches)
             return None
 
+    # swatch.store: { mode, library, index, name, color, color_mode } — Swatch
+    # Options' OK (swatch_options_confirm). Every operand is an EXPRESSION.
+    # The swatch is {name, color, color_mode, color_type: "process", global:
+    # false}, with `color` as "#rrggbb" lower-case. Edit REPLACES the swatch at
+    # `index` (a non-integer, negative or out-of-range index is a no-op);
+    # create appends. A missing library is a no-op.
+    if "swatch.store" in effect:
+        spec = effect["swatch.store"] if isinstance(effect["swatch.store"], dict) else {}
+        lib = _eval(spec.get("library"), store, ctx)
+        if not isinstance(lib, str) or not lib:
+            return None
+        path = f"swatch_libraries.{lib}.swatches"
+        swatches = store.get_data_path(path)
+        if not isinstance(swatches, list):
+            return None
+        name = _eval(spec.get("name"), store, ctx)
+        colour = _colour_hex(_eval(spec.get("color"), store, ctx)) or "000000"
+        mode = _eval(spec.get("color_mode"), store, ctx)
+        swatch = {"name": name if isinstance(name, str) else "", "color": f"#{colour}",
+                  "color_mode": mode if isinstance(mode, str) and mode else "rgb",
+                  "color_type": "process", "global": False}
+        swatches = list(swatches)
+        if _eval(spec.get("mode"), store, ctx) == "edit":
+            index = _eval(spec.get("index"), store, ctx)
+            if (isinstance(index, (int, float)) and not isinstance(index, bool)
+                    and index >= 0 and int(index) == index and int(index) < len(swatches)):
+                swatches[int(index)] = swatch
+            else:
+                return None
+        else:
+            swatches.append(swatch)
+        store.set_data_path(path, swatches)
+        return None
+
     # foreach: { source, as } do: [...] — PHASE3 §5.3
     # Evaluates source once; each iteration runs do: in a fresh scope
     # with `as:` bound to the item. Bindings inside do: do not leak

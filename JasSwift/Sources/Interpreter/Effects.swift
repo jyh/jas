@@ -3409,7 +3409,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
                 "brush.append", "brush.update", "brush.sort_by_name", "brush.select_unused",
                 "swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
-                "swatch.select_unused", "swatch.add_used_colors"] {
+                "swatch.select_unused", "swatch.add_used_colors", "swatch.store"] {
         guard let handler = toolEffects[key] else {
             assertionFailure("brush effect '\(key)' vanished from the tool table")
             continue

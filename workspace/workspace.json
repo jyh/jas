@@ -1337,7 +1337,7 @@
       ]
     },
     "open_swatch_options": {
-      "description": "Open the Swatch Options dialog. In edit mode, populates fields from the selected swatch (passed via params: swatch_name, color, color_mode, library, index). In create mode, populates from the current active color.\n",
+      "description": "Open the Swatch Options dialog on one swatch: the one the caller names by library and index (a library tile's double-click passes them, with its name, color and color mode), else the FIRST selected swatch (panel.selected_swatches[0] in panel.selected_library), which is what the panel menu means, since it passes only the mode. In edit mode a field the caller did not pass is read from that swatch. In create mode the dialog starts from the passed name, color (a recent-colour tile passes its colour) and color mode, and the swatch is appended to that library on OK.\n",
       "category": "swatches",
       "params": {
         "mode": {
@@ -1374,25 +1374,53 @@
             "id": "swatch_options",
             "params": {
               "mode": "param.mode",
-              "swatch_name": "param.swatch_name",
-              "color": "param.color",
-              "color_mode": "param.color_mode",
-              "library": "param.library",
-              "index": "param.index"
+              "swatch_name": "if param.mode == 'edit' and param.swatch_name == null then data.swatch_libraries[panel.selected_library].swatches[panel.selected_swatches.0].name else param.swatch_name",
+              "color": "if param.mode == 'edit' and param.color == null then data.swatch_libraries[panel.selected_library].swatches[panel.selected_swatches.0].color else param.color",
+              "color_mode": "if param.mode == 'edit' and param.color_mode == null then data.swatch_libraries[panel.selected_library].swatches[panel.selected_swatches.0].color_mode else param.color_mode",
+              "library": "if param.library == null then panel.selected_library else param.library",
+              "index": "if param.index == null then panel.selected_swatches.0 else param.index"
             }
           }
         }
       ]
     },
     "swatch_options_confirm": {
-      "description": "Confirm the Swatch Options dialog. In edit mode, updates the selected swatch with the dialog values. In create mode, appends a new swatch to the selected library. Closes the dialog.\n",
+      "description": "Confirm the Swatch Options dialog with the dialog's name, color and color mode and the swatch it was opened on (library, index), all passed by the OK button. In edit mode that swatch is REPLACED by {name, color, color_mode, color_type: process, global: false}; an index out of range changes nothing. In create mode the swatch is appended to that library. An unknown library changes nothing. The dialog closes either way. Not undoable: swatch libraries are app-global and undo is per document.\n",
       "category": "swatches",
+      "params": {
+        "mode": {
+          "type": "string"
+        },
+        "swatch_name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "color"
+        },
+        "color_mode": {
+          "type": "string"
+        },
+        "library": {
+          "type": "string"
+        },
+        "index": {
+          "type": "number",
+          "optional": true
+        }
+      },
       "effects": [
         {
-          "log": "swatch_options_confirm"
+          "swatch.store": {
+            "mode": "param.mode",
+            "library": "param.library",
+            "index": "param.index",
+            "name": "param.swatch_name",
+            "color": "param.color",
+            "color_mode": "param.color_mode"
+          }
         },
         {
-          "close_dialog": "None"
+          "close_dialog": null
         }
       ]
     },
@@ -38132,7 +38160,15 @@
                 "type": "button",
                 "label": "OK",
                 "action": "swatch_options_confirm",
-                "variant": "primary"
+                "variant": "primary",
+                "params": {
+                  "mode": "param.mode",
+                  "swatch_name": "dialog.swatch_name",
+                  "color": "dialog.color",
+                  "color_mode": "dialog.color_mode",
+                  "library": "param.library",
+                  "index": "param.index"
+                }
               }
             ]
           }

@@ -1221,6 +1221,52 @@ fn run_brush_effect(
                 }
             }
         }
+        "swatch.store" => {
+            // Swatch Options' OK (actions.yaml `swatch_options_confirm`; the
+            // reference is workspace_interpreter/effects.py). Edit replaces
+            // the swatch at `index`, create appends; every operand is an
+            // expression. A missing library or a bad edit index is a no-op.
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let path = format!("swatch_libraries.{lib_id}.swatches");
+                if let (false, serde_json::Value::Array(mut swatches)) =
+                    (lib_id.is_empty(), store.get_data_path(&path))
+                {
+                    let eval_json = |k: &str| match args.get(k) {
+                        Some(serde_json::Value::String(e)) => value_to_json(&eval_expr(e, store, ctx)),
+                        Some(other) => other.clone(),
+                        None => serde_json::Value::Null,
+                    };
+                    let hex = match eval_json("color") {
+                        serde_json::Value::String(c) => c.trim_start_matches('#').to_lowercase(),
+                        _ => "000000".to_string(),
+                    };
+                    let mode = eval_json("color_mode").as_str().filter(|m| !m.is_empty()).unwrap_or("rgb").to_string();
+                    let swatch = serde_json::json!({
+                        "name": eval_json("name").as_str().unwrap_or(""),
+                        "color": format!("#{hex}"),
+                        "color_mode": mode,
+                        "color_type": "process",
+                        "global": false,
+                    });
+                    let ok = if eval_json("mode") == serde_json::json!("edit") {
+                        match eval_json("index").as_f64() {
+                            Some(i) if i >= 0.0 && i.fract() == 0.0 && (i as usize) < swatches.len() => {
+                                swatches[i as usize] = swatch;
+                                true
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        swatches.push(swatch);
+                        true
+                    };
+                    if ok {
+                        store.set_data_path(&path, serde_json::Value::Array(swatches));
+                    }
+                }
+            }
+        }
         "swatch.select_unused" | "swatch.add_used_colors" => {
             // Both read the document's fill and stroke colours.
             let Some(m) = model else {
@@ -14856,6 +14902,48 @@ mod tests {
         run_swatch_action(&mut store, "add_used_colors", Some(vec![painted(Some("#FF0000"), None)]));
         assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "C"]);
         assert_eq!(swatch_sel(&store), serde_json::json!([2]), "the selection is not touched");
+    }
+
+    /// Swatch Options from the panel menu (`{mode: edit}` only): the dialog
+    /// opens on the first selected swatch, and OK, with the params its button
+    /// passes, replaces that swatch. Create mode appends. Row for row with the
+    /// reference's `TestSwatchOptions`.
+    #[test]
+    fn swatch_options_edits_the_first_selected_swatch_and_create_appends() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let act = |store: &mut StateStore, action: &str, params: serde_json::Value| run_effects(
+            &[serde_json::json!({"dispatch": {"action": action, "params": params}})],
+            &serde_json::json!({}), store, None, Some(ws.actions()), Some(ws.dialogs()), None).unhandled;
+        // The OK button's params, resolved in the open dialog's scope.
+        let ok_params = |store: &StateStore| {
+            let ctx = store.eval_context();
+            serde_json::json!({
+                "mode": value_to_json(&crate::interpreter::expr::eval("param.mode", &ctx)),
+                "swatch_name": value_to_json(&crate::interpreter::expr::eval("dialog.swatch_name", &ctx)),
+                "color": value_to_json(&crate::interpreter::expr::eval("dialog.color", &ctx)),
+                "color_mode": value_to_json(&crate::interpreter::expr::eval("dialog.color_mode", &ctx)),
+                "library": value_to_json(&crate::interpreter::expr::eval("param.library", &ctx)),
+                "index": value_to_json(&crate::interpreter::expr::eval("param.index", &ctx)),
+            })
+        };
+
+        let mut store = swatch_store(abc(), serde_json::json!([1, 2]), "lib_a");
+        assert_eq!(act(&mut store, "open_swatch_options", serde_json::json!({"mode": "edit"})), vec![]);
+        assert_eq!(store.dialog_id(), Some("swatch_options"));
+        assert_eq!(store.get_dialog("swatch_name"), &serde_json::json!("B"));
+        store.set_dialog("swatch_name", serde_json::json!("Bee"));
+        let params = ok_params(&store);
+        act(&mut store, "swatch_options_confirm", params);
+        assert_eq!(store.dialog_id(), None, "OK closes the dialog");
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches")[1], sw("Bee", "#00ff00"));
+
+        let mut store = swatch_store(abc(), serde_json::json!([]), "lib_a");
+        act(&mut store, "open_swatch_options", serde_json::json!({"mode": "create", "color": "#123456"}));
+        store.set_dialog("swatch_name", serde_json::json!("New"));
+        let params = ok_params(&store);
+        act(&mut store, "swatch_options_confirm", params);
+        assert_eq!(swatch_names(&store, "lib_a"), ["A", "B", "C", "New"]);
+        assert_eq!(store.get_data_path("swatch_libraries.lib_a.swatches")[3]["color"], "#123456");
     }
 
     /// `list_toggle`, row for row with the reference's `TestListToggleEffect`.

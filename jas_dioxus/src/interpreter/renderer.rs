@@ -225,56 +225,17 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
 
 // ── Generic behavior dispatch ──────────────────────────────────
 
-/// Apply dialog state when a confirm action is dispatched.
-/// This handles swatch_options_confirm by updating or creating a swatch.
+/// Apply dialog state when a confirm action is dispatched (the native
+/// confirms the YAML does not yet express: save_swatch_library_confirm).
 fn apply_dialog_confirm(
     action: &str,
     dialog: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
 ) {
     match action {
-        "swatch_options_confirm" => {
-            let mode = dialog.get("_param_mode").and_then(|v| v.as_str()).unwrap_or("edit");
-            let library = dialog.get("_param_library").and_then(|v| v.as_str()).unwrap_or("");
-            let index = dialog.get("_param_index").and_then(|v| v.as_f64()).map(|n| n as usize);
-            let name = dialog.get("swatch_name").and_then(|v| v.as_str()).unwrap_or("");
-            let color_mode = dialog.get("color_mode").and_then(|v| v.as_str()).unwrap_or("rgb");
-            // Build hex color from the dialog's computed hex value
-            let hex = dialog.get("hex").and_then(|v| v.as_str()).unwrap_or("ffffff");
-            let color = format!("#{hex}");
-
-            let swatch = serde_json::json!({
-                "name": name,
-                "color": color,
-                "color_mode": color_mode,
-                "color_type": "process",
-                "global": false,
-            });
-
-            if mode == "edit" {
-                if let (Some(idx), Some(lib)) = (index, st.swatch_libraries.get_mut(library)) {
-                    if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
-                        if idx < swatches.len() {
-                            swatches[idx] = swatch;
-                        }
-                    }
-                }
-            } else if mode == "create" {
-                // Find a target library; use the first one if none specified
-                let lib_key = if !library.is_empty() {
-                    library.to_string()
-                } else {
-                    st.swatch_libraries.as_object()
-                        .and_then(|m| m.keys().next().cloned())
-                        .unwrap_or_default()
-                };
-                if let Some(lib) = st.swatch_libraries.get_mut(&lib_key) {
-                    if let Some(swatches) = lib.get_mut("swatches").and_then(|s| s.as_array_mut()) {
-                        swatches.push(swatch);
-                    }
-                }
-            }
-        }
+        // swatch_options_confirm: the YAML's `swatch.store` (run by
+        // `run_in_swatches_store`) does the write, on every route. Until
+        // 2026-10-25 this arm did it natively and the YAML only logged.
         "save_swatch_library_confirm" => {
             // Save dialog 'name' field. Serialize the active swatch
             // library (selected_library) to JSON and trigger a
@@ -1828,6 +1789,13 @@ fn build_appstate_ctx(
         .and_then(|ws| ws.data().get("preferences").cloned())
         .unwrap_or(serde_json::Value::Null);
     ctx.insert("preferences".to_string(), prefs);
+    // The data namespace, from this app's homes for it, as the reference's
+    // and the engine's action contexts carry it: Swatch Options reads the
+    // selected swatch from `data.swatch_libraries` when it opens.
+    ctx.insert("data".to_string(), serde_json::json!({
+        "swatch_libraries": st.swatch_libraries.clone(),
+        "brush_libraries": st.brush_libraries.clone(),
+    }));
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
     }
