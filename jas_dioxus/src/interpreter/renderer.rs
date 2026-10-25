@@ -3000,6 +3000,13 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // Swatch-library edits run in the shared runner, over the app-global
+    // libraries and the Swatches panel's selection.
+    if eff.as_object().is_some_and(|m| m.keys().any(|k| k.starts_with("swatch."))) {
+        run_in_swatches_store(eff, eval_ctx, st);
+        return deferred;
+    }
+
     // Fallback: route Model-level `doc.*` effects (doc.zoom.*,
     // doc.pan.*, doc.translate_selection, doc.add_element, etc.) to
     // the effects.rs dispatcher so view actions like
@@ -3064,6 +3071,34 @@ fn run_in_brushes_store(
         for (k, v) in out {
             entry.insert(k.clone(), v.clone());
         }
+    }
+}
+
+/// Run one `swatch.*` effect in a store seeded with the app-global swatch
+/// libraries and the Swatches panel's `selected_library` and
+/// `selected_swatches`, then write the libraries and the selection back. The
+/// brush-library twin is [`run_in_brushes_store`]; the web keeps the Swatches
+/// panel's state in its typed `swatches_panel`, so the two keys are carried
+/// across by name.
+fn run_in_swatches_store(
+    eff: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    const SWATCHES: &str = "swatches_panel_content";
+    let mut store = super::state_store::StateStore::new();
+    store.set_data_path("swatch_libraries", st.swatch_libraries.clone());
+    let scope: std::collections::HashMap<String, serde_json::Value> = [
+        ("selected_library".to_string(), serde_json::json!(st.swatches_panel.selected_library)),
+        ("selected_swatches".to_string(), serde_json::json!(st.swatches_panel.selected_swatches)),
+    ].into();
+    store.init_panel(SWATCHES, scope);
+    store.set_active_panel(Some(SWATCHES));
+    let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
+    super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
+    st.swatch_libraries = store.get_data_path("swatch_libraries");
+    if let Some(sel) = store.get_panel(SWATCHES, "selected_swatches").as_array() {
+        st.swatches_panel.selected_swatches = sel.iter().filter_map(|v| v.as_i64()).collect();
     }
 }
 

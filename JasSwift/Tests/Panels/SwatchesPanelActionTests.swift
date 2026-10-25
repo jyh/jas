@@ -1,24 +1,18 @@
 import Testing
 @testable import JasLib
 
-/// THE FIVE SWATCHES VERBS, against jas_dioxus's behaviour.
+/// THE FIVE SWATCHES VERBS, through the route the panel menu takes.
 ///
-/// All five worked in jas_dioxus (`panels/swatches_panel.rs`) and were Swift
-/// NO-OPS: `SwatchesPanel.dispatch` fell to `default: runYamlActionByName(cmd)`,
-/// which runs the action's declared effects — and all five declare a bare
-/// `- log:`. Found by `check_action_implementations.py` on its first run;
-/// council O1.3, 2026-07-30.
+/// Since 2026-10-25 all five are `swatch.*` effects in actions.yaml (the
+/// reference is workspace_interpreter/effects.py, its table
+/// test_swatch_verbs.py), run by ``runYamlActionByName`` like every other
+/// YAML action, over the app-global libraries (``AppSwatchLibraries``; a
+/// per-canvas home would fork them per tab). Until then they were a native
+/// Swift copy of jas_dioxus's native arms (council O1.3, 2026-07-30), and
+/// before that, `- log:` no-ops.
 ///
-/// WHY THEY COULD NOT SIMPLY BE WRITTEN. Four of the five MUTATE a library, and
-/// JasSwift had nowhere to put a mutation: `WorkspaceData` is the immutable
-/// process-cached bundle and the panel re-read it every render. The store
-/// (`AppSwatchLibraries`) had to exist first, app-global, following the
-/// ratified `AppDefaults` precedent — per-canvas would fork the libraries per
-/// tab, which Rust does not do, and every test here would still pass.
-///
-/// Semantics are transliterated from the Rust arms, including the parts that
-/// look like accidents and are not:
-///   * sort is CASE-SENSITIVE ASCII (`na.cmp(nb)`), so "Zinc" precedes "azure"
+/// The laws, which the YAML now states:
+///   * sort is by CODE POINT and STABLE, so "Zinc" precedes "azure"
 ///   * unused-selection compares lowercase hex with the `#` stripped
 ///   * add-used appends in SORTED HEX order, for determinism
 ///   * delete iterates DESCENDING, so earlier removals do not shift later ones
@@ -50,6 +44,19 @@ import Testing
         return m
     }
 
+    /// The panel menu's own route (``panelDispatch``), with ANOTHER panel
+    /// active: in the app the active panel is whichever panel rendered last,
+    /// so a menu that does not make its own panel active reads another
+    /// panel's `panel.selected_library` and does nothing.
+    private func menu(_ cmd: String, _ m: Model) {
+        m.stateStore.initPanel("layers_panel_content", defaults: [:])
+        m.stateStore.setActivePanel("layers_panel_content")
+        var layout = WorkspaceLayout.defaultLayout()
+        panelDispatch(.swatches, cmd: cmd,
+                      addr: PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0),
+                      layout: &layout, model: m)
+    }
+
     private func names(_ m: Model) -> [String] {
         (m.swatchLibraries.swatches(of: Self.LIB) ?? []).map { ($0["name"] as? String) ?? "" }
     }
@@ -66,7 +73,7 @@ import Testing
                        swatch("Zinc", "#7f7f7f"),
                        swatch("Beige", "#f5f5dc")],
                       selected: [0, 2])
-        SwatchesPanel.dispatchSwatchAction("sort_swatches_by_name", model: m)
+        menu("sort_swatches_by_name", m)
         #expect(names(m) == ["Beige", "Zinc", "azure"],
                 "case-sensitive ASCII: uppercase sorts before lowercase")
         #expect(selection(m).isEmpty,
@@ -76,7 +83,7 @@ import Testing
     /// An empty document uses no colours, so every swatch is unused.
     @Test func selectAllUnusedOnAnEmptyDocumentSelectsEverything() {
         let m = model([swatch("a", "#ff0000"), swatch("b", "#00ff00")])
-        SwatchesPanel.dispatchSwatchAction("select_all_unused_swatches", model: m)
+        menu("select_all_unused_swatches", m)
         #expect(selection(m) == [0, 1])
     }
 
@@ -90,7 +97,7 @@ import Testing
         ])], rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
             rawArtboardOptions: .default)
         let m = model([swatch("red", "#FF0000"), swatch("green", "#00ff00")], doc: doc)
-        SwatchesPanel.dispatchSwatchAction("select_all_unused_swatches", model: m)
+        menu("select_all_unused_swatches", m)
         #expect(selection(m) == [1], "the red swatch is in use despite differing case")
     }
 
@@ -105,7 +112,7 @@ import Testing
         ])], rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
             rawArtboardOptions: .default)
         let m = model([swatch("blue", "#0000ff")], doc: doc)
-        SwatchesPanel.dispatchSwatchAction("add_used_colors", model: m)
+        menu("add_used_colors", m)
         #expect(names(m) == ["blue", "R=255 G=0 B=0"],
                 "blue is already present; red is appended with its component name")
     }
@@ -115,7 +122,7 @@ import Testing
         let m = model([swatch("a", "#000000"), swatch("b", "#111111"),
                        swatch("c", "#222222"), swatch("d", "#333333")],
                       selected: [0, 2])
-        SwatchesPanel.dispatchSwatchAction("delete_swatch", model: m)
+        menu("delete_swatch", m)
         #expect(names(m) == ["b", "d"],
                 "ascending removal would delete 'a' then shift, taking 'd' instead of 'c'")
         #expect(selection(m).isEmpty)
@@ -127,7 +134,7 @@ import Testing
         let m = model([swatch("a", "#000000"), swatch("b", "#111111"),
                        swatch("c", "#222222")],
                       selected: [0, 2])
-        SwatchesPanel.dispatchSwatchAction("duplicate_swatch", model: m)
+        menu("duplicate_swatch", m)
         #expect(names(m) == ["a", "a copy", "b", "c", "c copy"],
                 "without the running offset the second copy lands in the wrong slot")
         #expect(selection(m) == [1, 4], "selection follows the new copies")
@@ -137,7 +144,7 @@ import Testing
     /// changes. The preservation law, at swatch scale.
     @Test func duplicatePreservesColourAndMetadata() {
         let m = model([swatch("a", "#abcdef")], selected: [0])
-        SwatchesPanel.dispatchSwatchAction("duplicate_swatch", model: m)
+        menu("duplicate_swatch", m)
         let copy = (m.swatchLibraries.swatches(of: Self.LIB) ?? [])[1]
         #expect((copy["color"] as? String) == "#abcdef")
         #expect((copy["color_mode"] as? String) == "rgb")
@@ -151,7 +158,32 @@ import Testing
     /// CRASH THE APP rather than diverge.
     @Test func outOfRangeSelectionIndicesAreIgnored() {
         let m = model([swatch("a", "#000000")], selected: [-1, 0, 99])
-        SwatchesPanel.dispatchSwatchAction("delete_swatch", model: m)
+        menu("delete_swatch", m)
         #expect(names(m).isEmpty, "the valid index deletes; the others are skipped")
+    }
+
+    /// Code point, not String `<` (canonical equivalence): a decomposed
+    /// "e" + U+0301 sorts with the "e"s, a precomposed "é" after "z". The old
+    /// native copy used `<`, which reads the two as equal and diverged from the
+    /// engine here.
+    @Test func sortIsByCodePointNotCanonicalEquivalence() {
+        let m = model([swatch("\u{e9}", "#000000"), swatch("z", "#000000"),
+                       swatch("e\u{301}", "#000000"), swatch("f", "#000000")])
+        menu("sort_swatches_by_name", m)
+        #expect(names(m) == ["e\u{301}", "f", "z", "\u{e9}"])
+    }
+
+    /// Stable at a size where an unstable sort reorders (Rust's and Swift's
+    /// unstable sorts behave stably on small arrays): 64 swatches over three
+    /// names, each colour its position; equal names keep library order.
+    @Test func sortIsStableOnALargeLibrary() {
+        let m = model((0..<64).map { i in
+            swatch(["Y", "X", "Z"][(i * 7) % 3], "#" + String(format: "%06x", i)) })
+        menu("sort_swatches_by_name", m)
+        let lib = m.swatchLibraries.swatches(of: Self.LIB) ?? []
+        for name in ["X", "Y", "Z"] {
+            let order = lib.filter { ($0["name"] as? String) == name }.map { $0["color"] as? String ?? "" }
+            #expect(order == order.sorted(), "\(name)")
+        }
     }
 }
