@@ -6,6 +6,26 @@ import Foundation
 /// copy of it. The view keeps its SwiftUI binding sync; everything that
 /// touches the store or the document is here.
 enum DialogWidgetActions {
+    /// Open a tool's options dialog, as the toolbar's double-click does
+    /// (``ContentView``'s `dispatchToolOptions`, `tool_options_dialog`): the
+    /// `open_dialog` effect in the model's store, with the tool table (its
+    /// `doc.preview.capture`), as a menu or panel opener's dialog opens, and
+    /// the view is handed the store's dialog. Until 2026-10-25 this opened the
+    /// dialog as VIEW STATE only, so the store held no dialog: a typed field's
+    /// write was dropped, `on_change` never fired and Cancel had no preview to
+    /// restore (design `2026-10-24-jas-DESIGN-dialog-action-corpus` §1). With no
+    /// document open there is no store, and the dialog opens as view state.
+    static func openToolOptions(_ dialogId: String, model m: Model?) -> YamlDialogState? {
+        guard let ws = WorkspaceData.load() else { return nil }
+        guard let m = m else {
+            return openYamlDialog(dialogId: dialogId, rawParams: [:], liveState: ws.stateDefaults())
+        }
+        runEffects([["open_dialog": ["id": dialogId]]], ctx: [:], store: m.stateStore,
+                   actions: ws.actions(), dialogs: ws.dialogs(),
+                   platformEffects: buildYamlToolEffects(model: m), model: m)
+        return yamlDialogStateFromStore(m.stateStore)
+    }
+
     /// A widget's `params`, each string evaluated against the widget's render
     /// context (`params: { angle: "dialog.angle" }` sends the typed angle). A
     /// value that evaluates to null is dropped, as the view always did.
