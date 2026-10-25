@@ -548,5 +548,208 @@
         ]
       }
     }
+  },
+  {
+    "name": "reset_magic_wand_panel_restores_every_option",
+    "setup_svg": "rect_basic.svg",
+    "note": "magic_wand.yaml menu Reset; actions.yaml reset_magic_wand_panel writes every option back to its default in the panel AND in state.magic_wand_*. The seed moves four options off their defaults. Values from the reference.",
+    "panel_state": {
+      "magic_wand_panel_content": {
+        "fill_tolerance": 10,
+        "opacity": false,
+        "blending_mode": true,
+        "stroke_weight_tolerance": 2.5
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "magic_wand_panel_content",
+          "address": {
+            "action": "reset_magic_wand_panel"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "magic_wand_panel_content": {
+        "fill_color": true,
+        "fill_tolerance": 32,
+        "stroke_color": true,
+        "stroke_tolerance": 32,
+        "stroke_weight": true,
+        "stroke_weight_tolerance": 5,
+        "opacity": true,
+        "opacity_tolerance": 5,
+        "blending_mode": false
+      }
+    },
+    "expected_state": {
+      "magic_wand_fill_color": true,
+      "magic_wand_fill_tolerance": 32,
+      "magic_wand_stroke_color": true,
+      "magic_wand_stroke_tolerance": 32,
+      "magic_wand_stroke_weight": true,
+      "magic_wand_stroke_weight_tolerance": 5,
+      "magic_wand_opacity": true,
+      "magic_wand_opacity_tolerance": 5,
+      "magic_wand_blending_mode": false
+    }
+  },
+  {
+    "name": "reset_boolean_panel_clears_the_last_operation",
+    "setup_svg": "overlapping_rects.svg",
+    "note": "boolean.yaml menu Reset Panel; actions.yaml reset_boolean_panel clears state.last_boolean_op, which the union before it set to \"union\", so Repeat has nothing to repeat.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "boolean_union"
+      },
+      {
+        "panel_menu": {
+          "panel": "boolean_panel_content",
+          "address": {
+            "action": "reset_boolean_panel"
+          }
+        }
+      }
+    ],
+    "expected_state": {
+      "last_boolean_op": null
+    }
+  },
+  {
+    "name": "enter_isolation_mode_pushes_the_selected_group",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml menu Enter Isolation Mode; actions.yaml enter_isolation_mode pushes the one selected row (here the group at [0,0]; the menu row is enabled only for one selected container) onto panel.isolation_stack. Value from the reference, given the rollup count 1 the ports compute from this seed.",
+    "panel_state": {
+      "layers_panel_content": {
+        "layers_panel_selection": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "layers_panel_content",
+          "address": {
+            "action": "enter_isolation_mode"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "exit_isolation_mode_pops_one_level",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml menu Exit Isolation Mode; actions.yaml exit_isolation_mode pops the innermost level of panel.isolation_stack. Value from the reference.",
+    "panel_state": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "layers_panel_content",
+          "address": {
+            "action": "exit_isolation_mode"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "hanging_punctuation_turns_on_for_the_selected_paragraph",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "paragraph.yaml menu Hanging Punctuation; actions.yaml toggle_hanging_punctuation flips hanging_punctuation in the panel as derived from the selection, and applies the whole panel to the selected paragraphs. The paragraph starts without it, so it turns on.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "panel_menu": {
+          "panel": "paragraph_panel_content",
+          "address": {
+            "action": "toggle_hanging_punctuation"
+          }
+        }
+      }
+    ],
+    "expected_json": "hanging_punctuation_turns_on_for_the_selected_paragraph_expected.json"
+  },
+  {
+    "name": "reset_paragraph_panel_clears_the_paragraph_fields",
+    "setup_svg": "paragraph_hyphenated_mixed.svg",
+    "note": "paragraph.yaml menu Reset Panel; actions.yaml reset_paragraph_panel applies the panel's defaults to the selected paragraphs, which clears their hyphenate attribute (a default is omitted, never written).",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "panel_menu": {
+          "panel": "paragraph_panel_content",
+          "address": {
+            "action": "reset_paragraph_panel"
+          }
+        }
+      }
+    ],
+    "expected_json": "reset_paragraph_panel_clears_the_paragraph_fields_expected.json"
+  },
+  {
+    "name": "repeat_boolean_operation_reapplies_the_remembered_union",
+    "setup_svg": "overlapping_rects.svg",
+    "note": "boolean.yaml menu Repeat Boolean Operation; actions.yaml repeat_boolean_operation fires the operation state.last_boolean_op names on the current selection. With 'union' remembered, Select All then Repeat must leave exactly the document the action corpus pins for a union of the same two rects, so the golden is that file, not a copy (flask STATUS 547 finding F: the engine refused the row).",
+    "state": {
+      "last_boolean_op": "union"
+    },
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "panel_menu": {
+          "panel": "boolean_panel_content",
+          "address": {
+            "action": "repeat_boolean_operation"
+          }
+        }
+      }
+    ],
+    "expected_json": "../actions/boolean_union_overlapping_rects_expected.json"
   }
 ]

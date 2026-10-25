@@ -110,6 +110,13 @@ private func panelMenuCommand(_ step: [String: Any], ws: WorkspaceData)
     }
 }
 
+/// A seeded isolation stack as the Mac's model holds it: a list of paths.
+private func macIsolationStack(_ v: Any) -> [[Int]] {
+    (v as? [Any] ?? []).compactMap { e in
+        (e as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue }
+    }
+}
+
 private func runCase(_ tc: [String: Any], root: String) -> [String] {
     let name = tc["name"] as? String ?? "?"
     guard let ws = WorkspaceData.load(),
@@ -123,8 +130,16 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     // declared defaults. The engine runner seeds it the same way.
     for (pid, keys) in tc["panel_state"] as? [String: Any] ?? [:] {
         if !store.hasPanel(pid) { store.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
-        for (k, v) in keys as? [String: Any] ?? [:] { store.setPanel(pid, k, v) }
+        for (k, v) in keys as? [String: Any] ?? [:] {
+            store.setPanel(pid, k, v)
+            if pid == "layers_panel_content", k == "isolation_stack" {
+                m.layersIsolationStack = macIsolationStack(v)
+            }
+        }
     }
+    // `state`: globals as an earlier session left them (the operation Repeat
+    // remembers), written before the first step. The engine runner the same.
+    for (k, v) in tc["state"] as? [String: Any] ?? [:] { store.set(k, v) }
     var atOpen: String? = nil
     for step in tc["actions"] as? [[String: Any]] ?? [] {
         if let pm = step["panel_menu"] as? [String: Any] {
@@ -262,7 +277,11 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     // `expected_panel`: a subset of a panel's own state after the last step.
     for (pid, keys) in tc["expected_panel"] as? [String: Any] ?? [:] {
         for (key, value) in keys as? [String: Any] ?? [:] {
-            let have = store.getPanel(pid, key)
+            // The Mac keeps the Layers isolation stack on the model
+            // (`Model.layersIsolationStack`, read by the panel and the tools),
+            // so that key is read from there.
+            let have: Any? = pid == "layers_panel_content" && key == "isolation_stack"
+                ? m.layersIsolationStack : store.getPanel(pid, key)
             if have == nil || !sameJSON(have, value) {
                 failures.append("\(name): panel \(pid).\(key) is \(String(describing: have)), the corpus pins \(value)")
             }

@@ -188,7 +188,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .boolean: BooleanPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .opacity: OpacityPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
-    case .magicWand: MagicWandPanel.dispatch(cmd, addr: addr, layout: &layout)
+    case .magicWand: MagicWandPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .symbols: SymbolsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .brushes: BrushesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .concepts: ConceptsPanel.menuDispatch(cmd, addr: addr, layout: &layout, model: model)
