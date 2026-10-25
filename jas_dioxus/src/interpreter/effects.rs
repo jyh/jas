@@ -1115,6 +1115,16 @@ fn run_one<'h>(
         return;
     }
 
+    // reset_boolean_panel: the Boolean panel's Reset Panel. Its transient state
+    // is the last operation, which Repeat replays; outside the web app (whose
+    // renderer clears its typed `boolean_panel.last_op` before reaching here)
+    // that state is `state.last_boolean_op`, so it is cleared there. Until
+    // 2026-10-25 no arm existed and the engine refused the menu row.
+    if effect.contains_key("reset_boolean_panel") {
+        store.set("last_boolean_op", serde_json::Value::Null);
+        return;
+    }
+
     // log: message. It does nothing, and every `log` in actions.yaml marks
     // work a platform supplies, so it is reported as not done.
     if let Some(message) = effect.get("log") {

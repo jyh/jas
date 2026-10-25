@@ -548,5 +548,76 @@
         ]
       }
     }
+  },
+  {
+    "name": "reset_magic_wand_panel_restores_every_option",
+    "setup_svg": "rect_basic.svg",
+    "note": "magic_wand.yaml menu Reset; actions.yaml reset_magic_wand_panel writes every option back to its default in the panel AND in state.magic_wand_*. The seed moves four options off their defaults. Values from the reference.",
+    "panel_state": {
+      "magic_wand_panel_content": {
+        "fill_tolerance": 10,
+        "opacity": false,
+        "blending_mode": true,
+        "stroke_weight_tolerance": 2.5
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "magic_wand_panel_content",
+          "address": {
+            "action": "reset_magic_wand_panel"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "magic_wand_panel_content": {
+        "fill_color": true,
+        "fill_tolerance": 32,
+        "stroke_color": true,
+        "stroke_tolerance": 32,
+        "stroke_weight": true,
+        "stroke_weight_tolerance": 5,
+        "opacity": true,
+        "opacity_tolerance": 5,
+        "blending_mode": false
+      }
+    },
+    "expected_state": {
+      "magic_wand_fill_color": true,
+      "magic_wand_fill_tolerance": 32,
+      "magic_wand_stroke_color": true,
+      "magic_wand_stroke_tolerance": 32,
+      "magic_wand_stroke_weight": true,
+      "magic_wand_stroke_weight_tolerance": 5,
+      "magic_wand_opacity": true,
+      "magic_wand_opacity_tolerance": 5,
+      "magic_wand_blending_mode": false
+    }
+  },
+  {
+    "name": "reset_boolean_panel_clears_the_last_operation",
+    "setup_svg": "overlapping_rects.svg",
+    "note": "boolean.yaml menu Reset Panel; actions.yaml reset_boolean_panel clears state.last_boolean_op, which the union before it set to \"union\", so Repeat has nothing to repeat.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "boolean_union"
+      },
+      {
+        "panel_menu": {
+          "panel": "boolean_panel_content",
+          "address": {
+            "action": "reset_boolean_panel"
+          }
+        }
+      }
+    ],
+    "expected_state": {
+      "last_boolean_op": null
+    }
   }
 ]
