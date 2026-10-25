@@ -5,6 +5,7 @@
 //! ("Open Swatch Library") and a couple of data-mutating actions
 //! (open_swatch_library, save_swatch_library) are placeholders that
 //! log and no-op until the library-load / library-save plumbing lands.
+//! New Swatch and Swatch Options run their YAML, which opens a dialog.
 //!
 //! Wired: thumbnail size (st.swatches_panel.thumbnail_size). The five
 //! library verbs (duplicate_swatch, delete_swatch, sort_swatches_by_name,
@@ -33,13 +34,13 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 }
 
 /// Dispatch a menu command for the Swatches panel.
-pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
+pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_json::Value> {
     // Thumbnail-size radio arrives param-folded from the generic menu
     // builder (`set_swatch_thumbnail_size:small`); split the value back
     // off and store it.
     if let Some(size) = cmd.strip_prefix("set_swatch_thumbnail_size:") {
         state.swatches_panel.thumbnail_size = size.to_string();
-        return;
+        return Vec::new();
     }
     match cmd {
         "close_panel" => crate::workspace::layout_apply::layout_apply(
@@ -55,7 +56,7 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         | "delete_swatch"
         | "duplicate_swatch" => {
             let params = serde_json::Map::new();
-            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
         // Submenu dispatches encode the chosen library id as a
         // suffix: "open_swatch_library:<lib_id>". Toggle-add into
@@ -75,14 +76,20 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
                 }
             }
         }
-        // Other actions are placeholders — see module doc. Logging
-        // helps surface unwired commands during manual testing.
-        "new_swatch"
-        | "open_swatch_options"
-        | "open_swatch_library" => {
+        // New Swatch and Swatch Options open the Swatch Options dialog from
+        // their YAML; the action evaluates with this panel's scope (Swatch
+        // Options reads the panel's selected swatch), and its deferred
+        // `open_dialog` goes back to the menu view, which opens it.
+        "new_swatch" | "open_swatch_options" => {
+            return super::panel_menu::dispatch_yaml_menu("swatches_panel_content", cmd, addr, state);
+        }
+        // A placeholder — see module doc. Logging helps surface unwired
+        // commands during manual testing.
+        "open_swatch_library" => {
             web_sys::console::log_1(
                 &format!("[swatches] command '{cmd}' is not yet wired").into());
         }
         _ => {}
     }
+    Vec::new()
 }

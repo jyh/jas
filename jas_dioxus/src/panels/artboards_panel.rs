@@ -30,7 +30,7 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 /// the layers panel pattern. Param-bearing actions
 /// (rename_artboard, open_artboard_options) take the topmost
 /// panel-selected artboard id, matching the YAML menu spec.
-pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
+pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_json::Value> {
     match cmd {
         "close_panel" => crate::workspace::layout_apply::layout_apply(
             &mut state.workspace_layout,
@@ -46,7 +46,7 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         | "reset_artboards_panel"
         | "artboards_select_all" => {
             let params = serde_json::Map::new();
-            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
         // Param-bearing actions: derive artboard_id from the
         // topmost panel-selected row (YAML spec uses
@@ -55,11 +55,12 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
             if let Some(id) = state.artboards_panel_selection.first().cloned() {
                 let mut params = serde_json::Map::new();
                 params.insert("artboard_id".into(), serde_json::Value::String(id));
-                crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+                return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
             }
         }
         _ => {}
     }
+    Vec::new()
 }
 
 #[cfg(test)]

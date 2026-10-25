@@ -19,7 +19,7 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
     super::panel_menu::menu_items_from_yaml("boolean_panel_content")
 }
 
-pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
+pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_json::Value> {
     match cmd {
         "close_panel" => crate::workspace::layout_apply::layout_apply(
             &mut state.workspace_layout,
@@ -35,8 +35,9 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         | "expand_compound_shape"
         | "reset_boolean_panel" => {
             let params = serde_json::Map::new();
-            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
         _ => {}
     }
+    Vec::new()
 }

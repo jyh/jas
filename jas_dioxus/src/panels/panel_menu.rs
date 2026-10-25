@@ -222,21 +222,22 @@ pub fn dispatch_yaml_menu(
     cmd: &str,
     addr: crate::workspace::workspace::PanelAddr,
     state: &mut crate::workspace::app_state::AppState,
-) {
+) -> Vec<serde_json::Value> {
     if cmd == "close_panel" {
         crate::workspace::layout_apply::layout_apply(
             &mut state.workspace_layout,
             &crate::workspace::layout_apply::op_close_panel(addr),
         );
-        return;
+        return Vec::new();
     }
     let (action, params) = action_and_params(content_id, cmd)
         .unwrap_or_else(|| (cmd.to_string(), serde_json::Map::new()));
     let scope = panel_menu_ctx(content_id, state)
         .get("panel").cloned().unwrap_or(serde_json::Value::Null);
     let outer = state.menu_panel.replace(content_id.to_string());
-    crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
+    let deferred = crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
     state.menu_panel = outer;
+    deferred
 }
 
 /// The bundle menu entry whose runtime command is `cmd`, matched with the SAME

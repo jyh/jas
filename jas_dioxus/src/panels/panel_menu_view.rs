@@ -208,9 +208,21 @@ pub fn PanelMenuOverlay() -> Element {
                                 crate::interpreter::dialog_view::open_dialog(
                                     &mut sig, did, &params, &live);
                             } else {
+                                // The action may defer a dialog (its YAML's
+                                // `open_dialog`): `act` runs synchronously,
+                                // so take what it handed back and open it
+                                // once the AppState borrow is released.
+                                let deferred = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+                                let sink = deferred.clone();
                                 (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    super::panel_dispatch(kind, cmd, addr, st);
+                                    *sink.borrow_mut() = super::panel_dispatch(kind, cmd, addr, st);
                                 }));
+                                let effects = deferred.take();
+                                if !effects.is_empty() {
+                                    let mut sig = dialog_ctx.0;
+                                    crate::interpreter::renderer::apply_deferred_dialog_effects(
+                                        &effects, &app_for_dialog, &mut sig);
+                                }
                             }
                             panel_menu.open.set(None);
                         },
