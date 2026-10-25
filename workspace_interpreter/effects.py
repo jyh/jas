@@ -7,6 +7,8 @@ no Qt dependency.
 
 from __future__ import annotations
 
+import math
+
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.state_store import StateStore
 from workspace_interpreter.stroke_law import DASH_DEFAULT
@@ -202,6 +204,58 @@ def _used_stroke_brushes(document: dict | None) -> set[str]:
             brush = node.get("stroke_brush")
             if isinstance(brush, str) and brush:
                 used.add(brush)
+            for child in node.get("children") or []:
+                walk(child)
+
+    for layer in (document or {}).get("layers") or []:
+        walk(layer)
+    return used
+
+
+def _colour_hex(colour) -> str | None:
+    """A colour as lower-case 6-digit hex without the ``#``, as the ports'
+    ``Color::to_hex`` gives it: a hex string as written, or a structured colour
+    (``space`` rgb / hsb / cmyk, components in 0..1, hue in degrees) converted
+    to RGB and rounded half away from zero (Rust's ``f64::round``, not Python's
+    half-to-even ``round``). ``None`` for anything else."""
+    if isinstance(colour, str):
+        return colour.lstrip("#").lower()
+    if not isinstance(colour, dict):
+        return None
+    space = colour.get("space", "rgb")
+    num = lambda k: float(colour.get(k) or 0.0)
+    if space == "rgb":
+        r, g, b = num("r"), num("g"), num("b")
+    elif space == "cmyk":
+        c, m, y, k = num("c"), num("m"), num("y"), num("k")
+        r, g, b = (1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)
+    elif space == "hsb":
+        h, s, v = num("h") % 360.0, num("s"), num("b")
+        cc = v * s
+        x = cc * (1 - abs((h / 60.0) % 2 - 1))
+        m = v - cc
+        r, g, b = [(cc, x, 0), (x, cc, 0), (0, cc, x), (0, x, cc), (x, 0, cc), (cc, 0, x)][int(h // 60) % 6]
+        r, g, b = r + m, g + m, b + m
+    else:
+        return None
+    to = lambda v: max(0, min(255, int(math.floor(v * 255.0 + 0.5))))
+    return f"{to(r):02x}{to(g):02x}{to(b):02x}"
+
+
+def _document_colours(document: dict | None) -> set[str]:
+    """Every fill and stroke colour of every element of the document, at any
+    depth (layers and groups nest through ``children``), as ``_colour_hex``
+    gives it. The swatch.select_unused and swatch.add_used_colors arms read it."""
+    used: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for slot in ("fill", "stroke"):
+                paint = node.get(slot)
+                if isinstance(paint, dict):
+                    h = _colour_hex(paint.get("color"))
+                    if h is not None:
+                        used.add(h)
             for child in node.get("children") or []:
                 walk(child)
 
@@ -838,6 +892,89 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 if isinstance(b, dict) and isinstance(b.get("slug"), str)
                 and f"{lib}/{b['slug']}" not in used
             ])
+            return None
+
+    # swatch.duplicate_selected / swatch.delete_selected: { library, indices }
+    # and swatch.sort_by_name / swatch.select_unused / swatch.add_used_colors:
+    # { library } — the Swatches panel's five library verbs (swatches.yaml
+    # § menu). Both operands are EXPRESSIONS (the actions pass
+    # panel.selected_library and panel.selected_swatches, which holds INDICES
+    # into that library). The swatches are data.swatch_libraries.<library>
+    # .swatches; a missing library, or one with no swatch list, is a no-op.
+    # * duplicate: indices ascending, negative or out-of-range skipped; each
+    #   copy goes right after its original (a running offset tracks the
+    #   inserts), named "<name> copy", and the copies become the selection.
+    # * delete: indices descending, negative or out-of-range skipped; the
+    #   selection is cleared.
+    # * sort: by name, STABLE, by code point (Python's str order; a missing
+    #   name is ""); the selection is cleared, since indices move.
+    # * select unused: every index whose colour (lower-case hex, no "#") is
+    #   no element's fill or stroke colour, at any depth.
+    # * add used colours: each document colour the library lacks, sorted by
+    #   hex, appended as {"name": "R=r G=g B=b", "color": "#hex",
+    #   "color_mode": "rgb", "color_type": "process", "global": false}.
+    for key in ("swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
+                "swatch.select_unused", "swatch.add_used_colors"):
+        if key in effect:
+            spec = effect[key] if isinstance(effect[key], dict) else {}
+            lib = _eval(spec.get("library"), store, ctx)
+            if not isinstance(lib, str) or not lib:
+                return None
+            path = f"swatch_libraries.{lib}.swatches"
+            swatches = store.get_data_path(path)
+            if not isinstance(swatches, list):
+                return None
+            swatches = list(swatches)
+            if key in ("swatch.duplicate_selected", "swatch.delete_selected"):
+                raw = _eval(spec.get("indices"), store, ctx)
+                indices = [i for i in (raw if isinstance(raw, list) else [])
+                           if isinstance(i, (int, float)) and not isinstance(i, bool) and i >= 0]
+                indices = [int(i) for i in indices]
+                if key == "swatch.delete_selected":
+                    for i in sorted(indices, reverse=True):
+                        if i < len(swatches):
+                            del swatches[i]
+                    store.set_data_path(path, swatches)
+                    store.set_panel("swatches", "selected_swatches", [])
+                    return None
+                offset, picked = 0, []
+                for i in sorted(indices):
+                    pos = i + offset
+                    if pos >= len(swatches):
+                        continue
+                    original = swatches[pos]
+                    copy = dict(original) if isinstance(original, dict) else {}
+                    name = copy.get("name") if isinstance(copy.get("name"), str) else ""
+                    copy["name"] = f"{name} copy"
+                    swatches.insert(pos + 1, copy)
+                    picked.append(pos + 1)
+                    offset += 1
+                store.set_data_path(path, swatches)
+                store.set_panel("swatches", "selected_swatches", picked)
+                return None
+            if key == "swatch.sort_by_name":
+                def name(s):
+                    n = s.get("name") if isinstance(s, dict) else None
+                    return n if isinstance(n, str) else ""
+                store.set_data_path(path, sorted(swatches, key=name))
+                store.set_panel("swatches", "selected_swatches", [])
+                return None
+            used = _document_colours(store.document())
+            def hex_of(s):
+                c = s.get("color") if isinstance(s, dict) else None
+                return c.lstrip("#").lower() if isinstance(c, str) else ""
+            if key == "swatch.select_unused":
+                store.set_panel("swatches", "selected_swatches",
+                                [i for i, s in enumerate(swatches) if hex_of(s) not in used])
+                return None
+            have = {hex_of(s) for s in swatches}
+            for h in sorted(used):
+                if h in have or len(h) != 6:
+                    continue
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                swatches.append({"name": f"R={r} G={g} B={b}", "color": f"#{h}",
+                                 "color_mode": "rgb", "color_type": "process", "global": False})
+            store.set_data_path(path, swatches)
             return None
 
     # foreach: { source, as } do: [...] — PHASE3 §5.3

@@ -1257,47 +1257,59 @@
       ]
     },
     "duplicate_swatch": {
-      "description": "Duplicate the currently selected swatch(es) in the active library. New swatches are inserted immediately after the originals with \" copy\" appended to the name.\n",
+      "description": "Duplicate every swatch in panel.selected_swatches (indices into panel.selected_library). The indices are taken in ascending order and a negative or out-of-range index is skipped. Each copy keeps every field of its original, has \" copy\" appended to its name, and is inserted immediately after its original; later originals shift down by one per copy already inserted. The copies become the new selection. Not undoable: swatch libraries are app-global and undo is per document.\n",
       "category": "swatches",
       "effects": [
         {
-          "log": "duplicate_swatch"
+          "swatch.duplicate_selected": {
+            "library": "panel.selected_library",
+            "indices": "panel.selected_swatches"
+          }
         }
       ]
     },
     "delete_swatch": {
-      "description": "Delete the currently selected swatch(es) from the active library. Selection is cleared after deletion.\n",
+      "description": "Permanently remove every swatch in panel.selected_swatches (indices into panel.selected_library). The indices are taken in descending order, so one removal never shifts another, and a negative or out-of-range index is skipped. The selection is cleared. Not undoable: swatch libraries are app-global and undo is per document.\n",
       "category": "swatches",
       "effects": [
         {
-          "log": "delete_swatch"
+          "swatch.delete_selected": {
+            "library": "panel.selected_library",
+            "indices": "panel.selected_swatches"
+          }
         }
       ]
     },
     "select_all_unused_swatches": {
-      "description": "Select all swatches in the panel whose color does not appear anywhere in the current document as a fill or stroke color.\n",
+      "description": "Replace panel.selected_swatches with the index of every swatch in panel.selected_library whose color appears nowhere in the current document as a fill or stroke color, in library order. Colors compare as lower-case six-digit hex without the \"#\", so a swatch declared \"#FF0000\" matches a red fill. Every element counts, selected or not, at any depth inside layers and groups. An empty document selects every swatch. The library itself is not changed.\n",
       "category": "swatches",
       "effects": [
         {
-          "log": "select_all_unused_swatches"
+          "swatch.select_unused": {
+            "library": "panel.selected_library"
+          }
         }
       ]
     },
     "add_used_colors": {
-      "description": "Scan the active document for all unique fill and stroke colors in use and add swatches for any that are not already present in the active swatch library. New swatches are appended to the end of the library.\n",
+      "description": "Scan the current document for every unique fill and stroke color in use (every element, at any depth) and append a swatch to panel.selected_library for each one the library does not already hold. Colors compare as lower-case six-digit hex without the \"#\". The new swatches are appended in ascending hex order, each named \"R=<r> G=<g> B=<b>\" with its decimal components, with color \"#<hex>\", color_mode rgb, color_type process and global false. The selection is not changed.\n",
       "category": "swatches",
       "effects": [
         {
-          "log": "add_used_colors"
+          "swatch.add_used_colors": {
+            "library": "panel.selected_library"
+          }
         }
       ]
     },
     "sort_swatches_by_name": {
-      "description": "Permanently reorder swatches in the active library alphabetically by swatch name. This modifies the library data in place.\n",
+      "description": "Permanently reorder panel.selected_library's swatches by name, case-sensitive and lexicographic by Unicode code point: every upper-case ASCII letter sorts before every lower-case one, and two names that differ only in Unicode normalization are NOT equal (a decomposed \"e\" + combining acute sorts with the \"e\"s, a precomposed \"\u00e9\" after \"z\"). No locale collation. The sort is stable, so swatches with equal names keep their relative order; a swatch with no name sorts as the empty string. The selection is cleared, because it holds indices and the indices now name different swatches. Only the selected library moves; an unknown library is a no-op.\n",
       "category": "swatches",
       "effects": [
         {
-          "log": "sort_swatches_by_name"
+          "swatch.sort_by_name": {
+            "library": "panel.selected_library"
+          }
         }
       ]
     },

@@ -368,6 +368,97 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // THE SWATCHES PANEL'S FIVE LIBRARY VERBS (actions.yaml; the reference is
+    // workspace_interpreter/effects.py). They act on `model.swatchLibraries`,
+    // the app-global libraries (``AppSwatchLibraries``), never the per-canvas
+    // store; the selection is the panel's `selected_swatches` (INDICES).
+    func swatchIndices(_ arg: Any?, _ store: StateStore, _ ctx: [String: Any]) -> [Int] {
+        var raw: [Any] = []
+        if let a = arg as? [Any] { raw = a }
+        else if let e = arg as? String, case .list(let items) = evalExprAsValue(e, store: store, ctx: ctx) {
+            raw = items.map { $0.value as Any }
+        }
+        return raw.compactMap { v -> Int? in
+            guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue >= 0 else { return nil }
+            return Int(n.doubleValue)
+        }
+    }
+    func swatchLibrary(_ spec: Any?, _ store: StateStore, _ ctx: [String: Any]) -> (String, [[String: Any]])? {
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        guard !libId.isEmpty, let swatches = model.swatchLibraries.swatches(of: libId) else { return nil }
+        return (libId, swatches)
+    }
+    func swatchHex(_ s: [String: Any]) -> String {
+        SwatchesPanel.normalizeHex((s["color"] as? String) ?? "")
+    }
+    effects["swatch.duplicate_selected"] = { spec, ctx, store in
+        guard var (libId, swatches) = swatchLibrary(spec, store, ctx) else { return nil }
+        let indices = swatchIndices((spec as? [String: Any])?["indices"], store, ctx)
+        var offset = 0
+        var picked: [Int] = []
+        for i in indices.sorted() {
+            let pos = i + offset
+            guard pos < swatches.count else { continue }
+            var copy = swatches[pos]
+            copy["name"] = "\((copy["name"] as? String) ?? "") copy"
+            swatches.insert(copy, at: pos + 1)
+            picked.append(pos + 1)
+            offset += 1
+        }
+        model.swatchLibraries.setSwatches(swatches, of: libId)
+        store.setPanel("swatches", "selected_swatches", picked)
+        _ = libId
+        return nil
+    }
+    effects["swatch.delete_selected"] = { spec, ctx, store in
+        guard var (libId, swatches) = swatchLibrary(spec, store, ctx) else { return nil }
+        let indices = swatchIndices((spec as? [String: Any])?["indices"], store, ctx)
+        for i in indices.sorted(by: >) where i < swatches.count {
+            swatches.remove(at: i)
+        }
+        model.swatchLibraries.setSwatches(swatches, of: libId)
+        store.setPanel("swatches", "selected_swatches", [Int]())
+        _ = libId
+        return nil
+    }
+    // Stable, by CODE POINT (the brush sort's law): not String `<`, which is
+    // canonical-equivalence aware, and not `sort`, which is not stable.
+    effects["swatch.sort_by_name"] = { spec, ctx, store in
+        guard let (libId, swatches) = swatchLibrary(spec, store, ctx) else { return nil }
+        func name(_ s: [String: Any]) -> String.UnicodeScalarView { ((s["name"] as? String) ?? "").unicodeScalars }
+        let sorted = swatches.enumerated().sorted { x, y in
+            let (a, b) = (name(x.element), name(y.element))
+            if a.elementsEqual(b) { return x.offset < y.offset }
+            return a.lexicographicallyPrecedes(b)
+        }.map(\.element)
+        model.swatchLibraries.setSwatches(sorted, of: libId)
+        store.setPanel("swatches", "selected_swatches", [Int]())
+        return nil
+    }
+    effects["swatch.select_unused"] = { spec, ctx, store in
+        guard let (_, swatches) = swatchLibrary(spec, store, ctx) else { return nil }
+        let used = SwatchesPanel.documentColors(model.document)
+        store.setPanel("swatches", "selected_swatches",
+                       swatches.indices.filter { !used.contains(swatchHex(swatches[$0])) })
+        return nil
+    }
+    effects["swatch.add_used_colors"] = { spec, ctx, store in
+        guard var (libId, swatches) = swatchLibrary(spec, store, ctx) else { return nil }
+        let have = Set(swatches.map(swatchHex))
+        for hex in SwatchesPanel.documentColors(model.document).sorted() {
+            guard !have.contains(hex), hex.count == 6,
+                  let r = UInt8(hex.prefix(2), radix: 16),
+                  let g = UInt8(hex.dropFirst(2).prefix(2), radix: 16),
+                  let b = UInt8(hex.dropFirst(4).prefix(2), radix: 16) else { continue }
+            swatches.append(["name": "R=\(r) G=\(g) B=\(b)", "color": "#\(hex)",
+                             "color_mode": "rgb", "color_type": "process", "global": false])
+        }
+        model.swatchLibraries.setSwatches(swatches, of: libId)
+        _ = libId
+        return nil
+    }
+
     // brush.append — append a new brush to a library. Used by
     // brush_options_confirm in create mode.
     effects["brush.append"] = { spec, ctx, store in

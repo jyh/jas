@@ -152,7 +152,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 59
+MIN_LOG_ONLY = 54
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -456,10 +456,12 @@ def self_test() -> int:
         # how a browser should name "the saved version": the tab retains the
         # bytes it was opened from or last saved as, and revert re-parses them.
         "revert": "native_both",
-        # sort_swatches_by_name was DIVERGENT:rust until council O1.3 built
-        # JasSwift's five verbs (2026-07-30). The anchor moves with the fix, and
-        # now asserts the REPAIRED state so it cannot silently regress.
-        "sort_swatches_by_name": "native_both",
+        # sort_swatches_by_name was anchored here as native_both from council
+        # O1.3 (2026-07-30) until 2026-10-25, when it and the other four swatch
+        # verbs became `swatch.*` effects in actions.yaml and LEFT the log-only
+        # set this table classifies. Dropped rather than moved: undo, save_as,
+        # revert, toggle_panel, new_symbol and place_instance still hold the
+        # native_both class.
         # THE TWO CLASSES THAT PRODUCED FALSE DIVERGENCES on the first
         # production run, anchored so they cannot regress:
         #   guard arm -- jas_dioxus routes panel toggles through
@@ -543,6 +545,11 @@ def self_test() -> int:
     # Document Setup bleed link, a toggle plus each side's commit behaviour
     # mirroring to all four while engaged. Its description had cited the
     # chain link as precedent for "not yet wired". One stub, a delta of 1.
+    #
+    # 54 when the five swatch verbs left (2026-10-25, jas STATUS item 8):
+    # duplicate_swatch, delete_swatch, sort_swatches_by_name,
+    # select_all_unused_swatches and add_used_colors are `swatch.*` effects in
+    # actions.yaml, built in the reference first. Five stubs, a delta of 5.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")

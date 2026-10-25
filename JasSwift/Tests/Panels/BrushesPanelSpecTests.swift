@@ -81,6 +81,20 @@ private func slugs(_ m: Model, _ lib: String) -> [String] {
     #expect((m.stateStore.getPanel("brushes_panel_content", "selected_brushes") as? [String]) == [])
 }
 
+// The panel menu makes its OWN panel active before it runs (``panelDispatch``).
+// In the app the active panel is whichever panel rendered last, so with the
+// Layers panel active Delete Brush read Layers' `panel.selected_library`
+// (absent) and did nothing; the tests above set the active panel by hand.
+@Test func theDeleteBrushMenuWorksWithAnotherPanelActive() {
+    let m = brushModel(selected: ["a", "c"])
+    m.stateStore.initPanel("layers_panel_content", defaults: [:])
+    m.stateStore.setActivePanel("layers_panel_content")
+    var layout = WorkspaceLayout.defaultLayout()
+    panelDispatch(.brushes, cmd: "delete_brush", addr: PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0),
+                  layout: &layout, model: m)
+    #expect(slugs(m, "lib_a") == ["b", "a_copy"])
+}
+
 @Test func theRealDuplicateBrushActionCopiesAfterEachOriginal() {
     let m = brushModel(selected: ["a", "b"])
     var layout = WorkspaceLayout.defaultLayout()
