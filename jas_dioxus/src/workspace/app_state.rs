@@ -345,6 +345,11 @@ pub(crate) struct AppState {
     /// `panels::panel_menu::typed_panel_slot_keys`.
     pub(crate) panel_state:
         std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>,
+    /// The panel whose menu is running an action, set by
+    /// `panel_menu::dispatch_yaml_menu` for the length of the dispatch. A
+    /// `list_toggle` whose target is `panel.<key>` writes this panel, as the
+    /// reference and the engine write their ACTIVE panel.
+    pub(crate) menu_panel: Option<String>,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -692,6 +697,7 @@ impl AppState {
             properties_constrain: false,
             concepts_selected: None,
             panel_state: std::collections::HashMap::new(),
+            menu_panel: None,
         }
     }
 

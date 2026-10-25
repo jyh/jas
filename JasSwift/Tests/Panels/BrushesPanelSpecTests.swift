@@ -201,3 +201,20 @@ private func group(_ children: [Element]) -> Element { .group(Group(children: ch
         #expect(slugs(m, "lib_a") == ["a", "b", "c", "a_copy"], "\(name): library untouched")
     }
 }
+
+// The Brushes menu's Show <Type> Brushes ran a `log:` stub; it now toggles the
+// type in `panel.category_filter` (`list_toggle`), through the menu's own
+// route with another panel active.
+@Test func aShowBrushesCheckboxTogglesItsType() {
+    let m = brushModel(selected: [])
+    m.stateStore.setPanel("brushes_panel_content", "category_filter", ["calligraphic", "scatter", "art"])
+    m.stateStore.initPanel("layers_panel_content", defaults: [:])
+    m.stateStore.setActivePanel("layers_panel_content")
+    var layout = WorkspaceLayout.defaultLayout()
+    let addr = PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0)
+    func filter() -> [String] { (m.stateStore.getPanel("brushes_panel_content", "category_filter") as? [String]) ?? [] }
+    panelDispatch(.brushes, cmd: "toggle_brush_category:scatter", addr: addr, layout: &layout, model: m)
+    #expect(filter() == ["calligraphic", "art"])
+    panelDispatch(.brushes, cmd: "toggle_brush_category:scatter", addr: addr, layout: &layout, model: m)
+    #expect(filter() == ["calligraphic", "art", "scatter"])
+}

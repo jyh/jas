@@ -2892,17 +2892,34 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // list_toggle: { target, value } — set membership. The one shipped target
-    // is the Layers type filter, which this app holds as a typed set; any
-    // other target is a no-op here, as an unknown `list_push` target is.
+    // list_toggle: { target, value } — set membership. The Layers type filter
+    // is held as a typed set. Any other `panel.<key>` target is the list in
+    // the panel whose menu is running (`AppState::menu_panel`), written through
+    // the panel-named `set_panel_state` route (the Brushes menu's Show <Type>
+    // Brushes). With no running menu panel it is a no-op, as an unknown
+    // `list_push` target is.
     if let Some(lt) = eff.get("list_toggle").and_then(|v| v.as_object()) {
-        if lt.get("target").and_then(|v| v.as_str()) == Some("panel.type_filter") {
-            let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
-            if let super::expr_types::Value::Str(t) = super::expr::eval(value_expr, eval_ctx) {
-                if !st.layers_type_filter.remove(&t) {
-                    st.layers_type_filter.insert(t);
+        let target = lt.get("target").and_then(|v| v.as_str()).unwrap_or("");
+        let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
+        let value = super::effects::value_to_json(&super::expr::eval(value_expr, eval_ctx));
+        if target == "panel.type_filter" {
+            if let Some(t) = value.as_str() {
+                if !st.layers_type_filter.remove(t) {
+                    st.layers_type_filter.insert(t.to_string());
                 }
             }
+        } else if let (Some(key), Some(pid)) = (target.strip_prefix("panel."), st.menu_panel.clone()) {
+            let current = crate::panels::panel_menu::panel_menu_ctx(&pid, st)["panel"][key].clone();
+            let mut list = current.as_array().cloned().unwrap_or_default();
+            match list.iter().position(|v| v == &value) {
+                Some(i) => { list.remove(i); }
+                None => list.push(value),
+            }
+            let mut sps = serde_json::Map::new();
+            sps.insert("panel".into(), serde_json::Value::String(pid));
+            sps.insert("key".into(), serde_json::Value::String(key.to_string()));
+            sps.insert("value".into(), serde_json::Value::Array(list));
+            apply_set_panel_state_with_ctx(&sps, st, None);
         }
         return deferred;
     }
