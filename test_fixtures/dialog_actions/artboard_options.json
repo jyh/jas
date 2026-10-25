@@ -244,5 +244,127 @@
       }
     },
     "expected_document": "unchanged"
+  },
+  {
+    "name": "artboard_options_fill_white_sets_white",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "set_artboard_fill_preset: White writes dialog.fill #ffffff (ARTBOARDS.md FILL_DROPDOWN).",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_fill_dropdown"
+          },
+          "event": "commit",
+          "value": "white"
+        }
+      }
+    ],
+    "expected_document": "unchanged",
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "fill": "#ffffff"
+      }
+    }
+  },
+  {
+    "name": "artboard_options_fill_black_sets_black",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "set_artboard_fill_preset: Black writes dialog.fill #000000.",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_fill_dropdown"
+          },
+          "event": "commit",
+          "value": "black"
+        }
+      }
+    ],
+    "expected_document": "unchanged",
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "fill": "#000000"
+      }
+    }
+  },
+  {
+    "name": "artboard_options_fill_transparent_drops_the_fill",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "set_artboard_fill_preset: Transparent writes dialog.fill 'transparent' (ART-203). Picked after White, so the write is witnessed, not the default.",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_fill_dropdown"
+          },
+          "event": "commit",
+          "value": "white"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_fill_dropdown"
+          },
+          "event": "commit",
+          "value": "transparent"
+        }
+      }
+    ],
+    "expected_document": "unchanged",
+    "expected_dialog": {
+      "id": "artboard_options",
+      "state": {
+        "fill": "transparent"
+      }
+    }
+  },
+  {
+    "name": "artboard_options_fill_custom_opens_the_color_picker",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "set_artboard_fill_preset: Custom… opens the free-color picker over Artboard Options (ARTBOARDS.md, ART-202), as the fill swatch does.",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "zs8ap4x3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "ao_fill_dropdown"
+          },
+          "event": "commit",
+          "value": "custom"
+        }
+      }
+    ],
+    "expected_document": "unchanged",
+    "expected_dialog": {
+      "id": "color_picker"
+    }
   }
 ]

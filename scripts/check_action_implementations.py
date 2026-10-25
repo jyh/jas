@@ -152,7 +152,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 53
+MIN_LOG_ONLY = 52
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -439,12 +439,13 @@ def self_test() -> int:
         # verified by hand: menu_bar.rs:67 real body / JasCommands "undo"
         "undo": "native_both",
         # verified: neither port contains the string at all (0 files in
-        # jas_dioxus/src and JasSwift/Sources, 2026-10-24). This anchor was
-        # `toggle_artboard_orientation` until 2026-10-15 and then
-        # `toggle_artboard_chain_link` until 2026-10-24; each became effects
-        # in actions.yaml and left the log-only set, and the same dialog's
-        # remaining stub holds the class.
-        "set_artboard_fill_preset": "dead_both",
+        # jas_dioxus/src and JasSwift/Sources, 2026-10-25, with
+        # `convert_to_artboards` found in jas_dioxus/src as the control).
+        # This anchor was `toggle_artboard_orientation` until 2026-10-15,
+        # `toggle_artboard_chain_link` until 2026-10-24 and
+        # `set_artboard_fill_preset` until 2026-10-25; each became effects in
+        # actions.yaml and left the log-only set.
+        "scroll_to_selected": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any
@@ -554,6 +555,10 @@ def self_test() -> int:
     # 53 when `toggle_brush_category` left (2026-10-25, jas STATUS item 8):
     # the Brushes menu's Show <Type> Brushes, a `list_toggle` on
     # panel.category_filter. One stub, a delta of 1.
+    #
+    # 52 when `set_artboard_fill_preset` left (2026-10-25, jas STATUS item 8):
+    # the Artboard Options fill dropdown, written as `set` and a dispatch to
+    # the color picker, driven on both corpus runners. One stub, a delta of 1.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")
