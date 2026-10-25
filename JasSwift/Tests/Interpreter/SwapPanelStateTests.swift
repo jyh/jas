@@ -70,7 +70,11 @@ private func findWidget(_ node: Any, _ id: String) -> [String: Any]? {
     let ws = try #require(WorkspaceData.load())
     let widget = try #require(findWidget(ws.data["panels"] as Any, "stk_swap_arrowheads"))
     let behavior = try #require((widget["behavior"] as? [[String: Any]])?.first)
-    let effects = try #require(behavior["effects"] as? [Any])
+    // The click runs `swap_arrowheads` (one copy of the four effects, since
+    // 2026-10-25); a behavior that still declared them inline is read as is.
+    let effects = try #require(
+        (behavior["action"] as? String).flatMap { (ws.actions()[$0] as? [String: Any])?["effects"] as? [Any] }
+            ?? behavior["effects"] as? [Any])
     let s = strokeStore()
     run(effects, s)
     #expect(panel(s) == ["none", "simple_arrow", "150.0", "100.0"])

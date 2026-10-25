@@ -10510,6 +10510,40 @@ mod tests {
         assert_eq!(st.app_default_stroke.unwrap().width, 7.5);
     }
 
+    /// The Stroke panel's Swap button, on the web's typed slot, run as the
+    /// bundle declares its click: one press trades the start arrowhead and its
+    /// scale with the end's. Until 2026-10-25 the button declared four effects
+    /// inline: the array-form `swap_panel_state` swapped this slot and the
+    /// `swap` of the `stroke_*` state keys (which write the same slot) swapped
+    /// it back, so on the web the button did nothing (measured: this arm, run
+    /// over those four effects, read the seed unchanged). It now runs
+    /// `swap_arrowheads`, whose `swap_panel_state` names its panel and so goes
+    /// to the store, leaving one swap on this slot.
+    #[test]
+    fn the_stroke_swap_button_trades_start_and_end_once_on_the_typed_slot() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        fn find<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) { return Some(n); }
+            n.get("children")?.as_array()?.iter().find_map(|c| find(c, id))
+        }
+        let button = find(&ws.panel("stroke_panel_content").unwrap()["content"], "stk_swap_arrowheads")
+            .expect("the swap button");
+        let click = button["behavior"].as_array().unwrap().iter()
+            .find(|b| b["event"] == "click").expect("a click behavior").clone();
+        let mut st = AppState::new();
+        st.stroke_panel.start_arrowhead = "simple_arrow".into();
+        st.stroke_panel.start_arrowhead_scale = 150.0;
+        if let Some(action) = click.get("action").and_then(|a| a.as_str()) {
+            let _ = dispatch_action(action, &serde_json::Map::new(), &mut st);
+        } else {
+            run_yaml_effects(click["effects"].as_array().unwrap(), &serde_json::json!({}), &mut st);
+        }
+        assert_eq!(
+            (st.stroke_panel.start_arrowhead.as_str(), st.stroke_panel.end_arrowhead.as_str(),
+             st.stroke_panel.start_arrowhead_scale, st.stroke_panel.end_arrowhead_scale),
+            ("none", "simple_arrow", 100.0, 150.0));
+    }
+
     #[test]
     fn swap_fill_stroke_via_run_effects() {
         let mut st = make_state_with_colors("ff0000", "0000ff");
