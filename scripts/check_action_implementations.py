@@ -152,7 +152,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 53
+MIN_LOG_ONLY = 52
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -552,7 +552,11 @@ def self_test() -> int:
     # select_all_unused_swatches and add_used_colors are `swatch.*` effects in
     # actions.yaml, built in the reference first. Five stubs, a delta of 5.
     #
-    # 53 when `set_artboard_fill_preset` left (2026-10-25, jas STATUS item 8):
+    # 53 when `toggle_brush_category` left (2026-10-25, jas STATUS item 8):
+    # the Brushes menu's Show <Type> Brushes, a `list_toggle` on
+    # panel.category_filter. One stub, a delta of 1.
+    #
+    # 52 when `set_artboard_fill_preset` left (2026-10-25, jas STATUS item 8):
     # the Artboard Options fill dropdown, written as `set` and a dispatch to
     # the color picker, driven on both corpus runners. One stub, a delta of 1.
     if len(rust) < MIN_RUST_ARMS:

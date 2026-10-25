@@ -234,7 +234,9 @@ pub fn dispatch_yaml_menu(
         .unwrap_or_else(|| (cmd.to_string(), serde_json::Map::new()));
     let scope = panel_menu_ctx(content_id, state)
         .get("panel").cloned().unwrap_or(serde_json::Value::Null);
+    let outer = state.menu_panel.replace(content_id.to_string());
     crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
+    state.menu_panel = outer;
 }
 
 /// The bundle menu entry whose runtime command is `cmd`, matched with the SAME

@@ -4142,13 +4142,16 @@ actions:
 
   toggle_brush_category:
     description: >
-      Toggle a brush type's membership in panel.category_filter.
-      Unchecking all five hides every tile.
+      Toggle a brush type's membership in panel.category_filter: a type
+      in the filter is removed, a type not in it is appended. The panel
+      shows only brushes whose type is in the filter, so unchecking all
+      five hides every tile. Bound to the panel menu's five "Show <Type>
+      Brushes" checkboxes, each passing its own type.
     category: brushes
     params:
       type: { type: string }
     effects:
-      - log: "toggle_brush_category (type={{param.type}})"
+      - list_toggle: { target: "panel.category_filter", value: "param.type" }
 
   toggle_brush_library_persistent:
     description: >
