@@ -406,7 +406,7 @@ content:
               description: "Render the selection in uppercase."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.all_caps"
+                checked: "panel.all_caps"
         - type: container
           col: 2
           style: { alignment: center }
@@ -418,7 +418,7 @@ content:
               description: "Render lowercase letters as x-height-sized capitals."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.small_caps"
+                checked: "panel.small_caps"
         - type: container
           col: 2
           style: { alignment: center }
@@ -430,7 +430,7 @@ content:
               description: "Position the selection above the baseline."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.superscript"
+                checked: "panel.superscript"
         - type: container
           col: 2
           style: { alignment: center }
@@ -442,7 +442,7 @@ content:
               description: "Position the selection below the baseline."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.subscript"
+                checked: "panel.subscript"
         - type: container
           col: 2
           style: { alignment: center }
@@ -454,7 +454,7 @@ content:
               description: "Underline the selected text."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.underline"
+                checked: "panel.underline"
         - type: container
           col: 2
           style: { alignment: center }
@@ -466,7 +466,7 @@ content:
               description: "Strike through the selected text."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.strikethrough"
+                checked: "panel.strikethrough"
 
     # ── Language (col-6) + Anti-aliasing (col-6) ──────────────
     - type: row
@@ -569,7 +569,7 @@ content:
               description: "Snap to the invisible baseline letters sit on."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.snap_baseline"
+                checked: "panel.snap_baseline"
         - type: container
           col: 2
           style: { alignment: center }
@@ -581,7 +581,7 @@ content:
               description: "Snap to the top of lowercase letters (x, a, e, ...)."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.snap_x_height"
+                checked: "panel.snap_x_height"
         - type: container
           col: 2
           style: { alignment: center }
@@ -593,7 +593,7 @@ content:
               description: "Snap to the left/right/top/bottom edges of a specific letter."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.snap_glyph_bounds"
+                checked: "panel.snap_glyph_bounds"
         - type: container
           col: 2
           style: { alignment: center }
@@ -605,7 +605,7 @@ content:
               description: "Snap to guides near the Baseline, x-Height, and Glyph Bounds, based on the glyph's shape and layout."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.snap_proximity_guides"
+                checked: "panel.snap_proximity_guides"
         - type: container
           col: 2
           style: { alignment: center }
@@ -617,7 +617,7 @@ content:
               description: "Snap to the slant lines of letters like V or A."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.snap_angular_guides"
+                checked: "panel.snap_angular_guides"
         - type: container
           col: 2
           style: { alignment: center }
@@ -629,4 +629,4 @@ content:
               description: "Snap to the actual mathematical anchor points on glyph outlines."
               style: { width: 24, height: 24 }
               bind:
-                value: "panel.snap_anchor_point"
+                checked: "panel.snap_anchor_point"

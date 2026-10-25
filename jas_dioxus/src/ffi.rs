@@ -6737,6 +6737,24 @@ mod tests {
         })
     }
 
+    /// flask STATUS 549 finding G: on Windows the Paragraph panel's Hyphenate
+    /// checkbox read Off with two hyphenated paragraphs selected. The panel
+    /// was opened BEFORE Select All, as flask's was, so this reads the plan the
+    /// shell draws after the selection changed.
+    #[test]
+    fn the_paragraph_panel_hyphenate_checkbox_reads_the_selected_paragraphs() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("paragraph_hyphenated_mixed.svg");
+        assert_eq!(leaf(e, PARAGRAPH, "pg_hyphenate")["values"]["bind.checked"], "false",
+                   "nothing selected: the panel shows its default");
+        let (reply, err) = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        assert!(!reply.is_empty(), "select_all: {err}");
+        assert_eq!(engine_of(e).with_model(|m| m.document().selection.len()), 2);
+        assert_eq!(leaf(e, PARAGRAPH, "pg_hyphenate")["values"]["bind.checked"], "true",
+                   "both selected paragraphs are hyphenated");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2b-7's oracle.** An alignment commit on a selected paragraph puts
     /// that alignment on the element's paragraph wrapper, writes what the
     /// shared host writes, and is ONE undo step.
