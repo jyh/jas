@@ -1137,6 +1137,37 @@ fn run_one<'h>(
         return;
     }
 
+    // toggle_paragraph_field: <field> and reset_paragraph_panel: the Paragraph
+    // panel menu's Hanging Punctuation and Reset Panel. The panel is derived
+    // from the SELECTION (`paragraph_host::panel_from_document`, the base every
+    // paragraph write uses), the one field is flipped, or the panel reset to
+    // its defaults, and the whole panel is applied to the selected paragraphs.
+    // The web renderer runs its typed copy of the same law before reaching
+    // here. Until 2026-10-25 no arm existed and the engine refused both rows.
+    if let Some(field) = effect.get("toggle_paragraph_field").and_then(|v| v.as_str()) {
+        use super::paragraph_host;
+        if let Some(m) = model.as_deref_mut() {
+            let mut pp = paragraph_host::panel_from_document(m.document());
+            let cur = match field {
+                "hyphenate" => pp.hyphenate,
+                "hanging_punctuation" => pp.hanging_punctuation,
+                _ => {
+                    report.unhandled.push(Unhandled::UnknownEffect(format!("toggle_paragraph_field:{field}")));
+                    return;
+                }
+            };
+            pp.set_field(field, &serde_json::json!(!cur));
+            paragraph_host::apply_to_selection(m, &pp);
+        }
+        return;
+    }
+    if effect.contains_key("reset_paragraph_panel") {
+        if let Some(m) = model.as_deref_mut() {
+            super::paragraph_host::apply_to_selection(m, &Default::default());
+        }
+        return;
+    }
+
     // reset_boolean_panel: the Boolean panel's Reset Panel. Its transient state
     // is the last operation, which Repeat replays; outside the web app (whose
     // renderer clears its typed `boolean_panel.last_op` before reaching here)

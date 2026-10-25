@@ -691,5 +691,65 @@
         ]
       }
     }
+  },
+  {
+    "name": "hanging_punctuation_turns_on_for_the_selected_paragraph",
+    "setup_svg": "paragraph_justified.svg",
+    "note": "paragraph.yaml menu Hanging Punctuation; actions.yaml toggle_hanging_punctuation flips hanging_punctuation in the panel as derived from the selection, and applies the whole panel to the selected paragraphs. The paragraph starts without it, so it turns on.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "panel_menu": {
+          "panel": "paragraph_panel_content",
+          "address": {
+            "action": "toggle_hanging_punctuation"
+          }
+        }
+      }
+    ],
+    "expected_json": "hanging_punctuation_turns_on_for_the_selected_paragraph_expected.json"
+  },
+  {
+    "name": "reset_paragraph_panel_clears_the_paragraph_fields",
+    "setup_svg": "paragraph_hyphenated_mixed.svg",
+    "note": "paragraph.yaml menu Reset Panel; actions.yaml reset_paragraph_panel applies the panel's defaults to the selected paragraphs, which clears their hyphenate attribute (a default is omitted, never written).",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "panel_menu": {
+          "panel": "paragraph_panel_content",
+          "address": {
+            "action": "reset_paragraph_panel"
+          }
+        }
+      }
+    ],
+    "expected_json": "reset_paragraph_panel_clears_the_paragraph_fields_expected.json"
+  },
+  {
+    "name": "repeat_boolean_operation_reapplies_the_remembered_union",
+    "setup_svg": "overlapping_rects.svg",
+    "note": "boolean.yaml menu Repeat Boolean Operation; actions.yaml repeat_boolean_operation fires the operation state.last_boolean_op names on the current selection. With 'union' remembered, Select All then Repeat must leave exactly the document the action corpus pins for a union of the same two rects, so the golden is that file, not a copy (flask STATUS 547 finding F: the engine refused the row).",
+    "state": {
+      "last_boolean_op": "union"
+    },
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "panel_menu": {
+          "panel": "boolean_panel_content",
+          "address": {
+            "action": "repeat_boolean_operation"
+          }
+        }
+      }
+    ],
+    "expected_json": "../actions/boolean_union_overlapping_rects_expected.json"
   }
 ]

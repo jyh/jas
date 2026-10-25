@@ -137,6 +137,9 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             }
         }
     }
+    // `state`: globals as an earlier session left them (the operation Repeat
+    // remembers), written before the first step. The engine runner the same.
+    for (k, v) in tc["state"] as? [String: Any] ?? [:] { store.set(k, v) }
     var atOpen: String? = nil
     for step in tc["actions"] as? [[String: Any]] ?? [] {
         if let pm = step["panel_menu"] as? [String: Any] {
