@@ -80,6 +80,36 @@ private func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
     }
 }
 
+/// The panel kind and menu command of a `panel_menu` step: the ONE row of the
+/// panel's YAML `menu:` whose every `address` key equals its own (zero or two
+/// refuse by name, as the engine runner does), taken at that row's index from
+/// the menu the view draws (``panelMenu(_:)``), which must have one item per row.
+private func panelMenuCommand(_ step: [String: Any], ws: WorkspaceData)
+    -> Result<(PanelKind, String), DialogCorpusError> {
+    let pid = step["panel"] as? String ?? ""
+    let kinds = PanelKind.all + [.brushes, .gradient, .concepts]
+    guard let kind = kinds.first(where: { panelKindToContentId($0) == pid }) else {
+        return .failure(DialogCorpusError(text: "no panel kind for \(pid)"))
+    }
+    let address = step["address"] as? [String: Any] ?? [:]
+    let rows = ws.panelMenuRaw(pid)
+    let hits = rows.indices.filter { i in
+        guard let n = rows[i] as? [String: Any] else { return false }
+        return address.allSatisfy { k, v in n[k] != nil && "\(n[k]!)" == "\(v)" }
+    }
+    guard hits.count == 1 else {
+        return .failure(DialogCorpusError(text: "the address \(address) matches \(hits.count) row(s) of \(pid)'s menu, want exactly 1"))
+    }
+    let items = panelMenu(kind)
+    guard items.count == rows.count else {
+        return .failure(DialogCorpusError(text: "\(pid)'s menu draws \(items.count) item(s) for \(rows.count) row(s)"))
+    }
+    switch items[hits[0]] {
+    case .action(_, let cmd, _), .toggle(_, let cmd), .radio(_, let cmd, _): return .success((kind, cmd))
+    case .separator: return .failure(DialogCorpusError(text: "row \(hits[0]) of \(pid)'s menu is a separator"))
+    }
+}
+
 private func runCase(_ tc: [String: Any], root: String) -> [String] {
     let name = tc["name"] as? String ?? "?"
     guard let ws = WorkspaceData.load(),
@@ -88,9 +118,27 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     }
     let m = Model(document: svgToDocument(svg))
     let store = m.stateStore
+    // `panel_state`: a panel's own state as the artist left it (a selection
+    // made by clicking tiles, which no verb sets), seeded over the panel's
+    // declared defaults. The engine runner seeds it the same way.
+    for (pid, keys) in tc["panel_state"] as? [String: Any] ?? [:] {
+        if !store.hasPanel(pid) { store.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+        for (k, v) in keys as? [String: Any] ?? [:] { store.setPanel(pid, k, v) }
+    }
     var atOpen: String? = nil
     for step in tc["actions"] as? [[String: Any]] ?? [] {
-        if let od = step["open_dialog"] {
+        if let pm = step["panel_menu"] as? [String: Any] {
+            // A panel-menu click, through the menu's own route (``panelDispatch``)
+            // with the command the menu view holds for that row.
+            switch panelMenuCommand(pm, ws: ws) {
+            case .success(let (kind, cmd)):
+                var layout = WorkspaceLayout.defaultLayout()
+                panelDispatch(kind, cmd: cmd,
+                              addr: PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0),
+                              layout: &layout, model: m)
+            case .failure(let e): return ["\(name): \(e.text)"]
+            }
+        } else if let od = step["open_dialog"] {
             if atOpen == nil { atOpen = documentToTestJson(m.document) }
             runEffects([["open_dialog": od]], ctx: [:], store: store,
                        actions: ws.actions(), dialogs: ws.dialogs(),
@@ -189,8 +237,13 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     // `expected_data`: a dotted path into the store's `data` namespace, where
     // an integer segment indexes an array and -1 is its last item; a path that
     // does not resolve is a failure. The engine runner reads it the same way.
+    // The swatch libraries are not in the store on the Mac: they are app-global
+    // (``AppSwatchLibraries``, `model.swatchLibraries`), so `data.swatch_libraries`
+    // is read from there.
+    var dataRoot = store.getDataPath("") as? [String: Any] ?? [:]
+    dataRoot["swatch_libraries"] = m.swatchLibraries.libs
     for (path, value) in tc["expected_data"] as? [String: Any] ?? [:] {
-        var cur: Any? = store.getDataPath("")
+        var cur: Any? = dataRoot
         for seg in path.split(separator: ".").map(String.init) {
             if let a = cur as? [Any], let i = Int(seg) {
                 let j = i < 0 ? a.count + i : i
@@ -204,6 +257,15 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             failures.append("\(name): data.\(path) does not resolve")
         } else if !sameJSON(cur, value) {
             failures.append("\(name): data.\(path) is \(String(describing: cur)), the corpus pins \(value)")
+        }
+    }
+    // `expected_panel`: a subset of a panel's own state after the last step.
+    for (pid, keys) in tc["expected_panel"] as? [String: Any] ?? [:] {
+        for (key, value) in keys as? [String: Any] ?? [:] {
+            let have = store.getPanel(pid, key)
+            if have == nil || !sameJSON(have, value) {
+                failures.append("\(name): panel \(pid).\(key) is \(String(describing: have)), the corpus pins \(value)")
+            }
         }
     }
     let after = documentToTestJson(m.document)
@@ -238,6 +300,7 @@ private let dialogActionFixtures = [
     "dialog_actions/artboard_options.json",
     "dialog_actions/document_setup.json",
     "dialog_actions/print.json",
+    "dialog_actions/panel_menu_actions.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {
