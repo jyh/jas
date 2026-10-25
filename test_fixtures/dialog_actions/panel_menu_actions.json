@@ -619,5 +619,77 @@
     "expected_state": {
       "last_boolean_op": null
     }
+  },
+  {
+    "name": "enter_isolation_mode_pushes_the_selected_group",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml menu Enter Isolation Mode; actions.yaml enter_isolation_mode pushes the one selected row (here the group at [0,0]; the menu row is enabled only for one selected container) onto panel.isolation_stack. Value from the reference, given the rollup count 1 the ports compute from this seed.",
+    "panel_state": {
+      "layers_panel_content": {
+        "layers_panel_selection": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "layers_panel_content",
+          "address": {
+            "action": "enter_isolation_mode"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "exit_isolation_mode_pops_one_level",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml menu Exit Isolation Mode; actions.yaml exit_isolation_mode pops the innermost level of panel.isolation_stack. Value from the reference.",
+    "panel_state": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "layers_panel_content",
+          "address": {
+            "action": "exit_isolation_mode"
+          }
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ]
+        ]
+      }
+    }
   }
 ]
