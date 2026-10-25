@@ -186,4 +186,35 @@ import Testing
             #expect(order == order.sorted(), "\(name)")
         }
     }
+
+    /// Swatch Options from the panel menu, which passes only `{mode: edit}`:
+    /// the dialog opens on the FIRST selected swatch (it opened empty on every
+    /// route before), and OK, with the params its button resolves, replaces
+    /// that swatch (OK wrote only on the web before).
+    @Test func swatchOptionsFromTheMenuEditsTheFirstSelectedSwatch() {
+        let m = model([swatch("A", "#ff0000"), swatch("B", "#00ff00"), swatch("C", "#0000ff")],
+                      selected: [1, 2])
+        menu("open_swatch_options", m)
+        #expect(m.stateStore.getDialogId() == "swatch_options")
+        #expect(m.stateStore.getDialog("swatch_name") as? String == "B")
+        m.stateStore.setDialog("swatch_name", "Bee")
+        func okButton(_ n: Any?) -> [String: Any]? {
+            guard let d = n as? [String: Any] else { return nil }
+            if d["type"] as? String == "button", d["label"] as? String == "OK" { return d }
+            for c in d["children"] as? [Any] ?? [] { if let b = okButton(c) { return b } }
+            return nil
+        }
+        let ok = okButton(WorkspaceData.load()?.dialog("swatch_options")?["content"])
+        #expect(ok != nil)
+        let ctx = buildDialogEvalContextWithGetters(
+            store: m.stateStore, state: m.stateStore.getDialogState(),
+            params: m.stateStore.getDialogParams() ?? [:], outer: [:])
+        _ = DialogWidgetActions.run(
+            "swatch_options_confirm",
+            params: DialogWidgetActions.resolveParams(ok?["params"] as? [String: Any] ?? [:], context: ctx),
+            model: m)
+        #expect(m.stateStore.getDialogId() == nil)
+        #expect(names(m) == ["A", "Bee", "C"])
+        #expect((m.swatchLibraries.swatches(of: Self.LIB)?[1]["color"] as? String) == "#00ff00")
+    }
 }

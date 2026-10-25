@@ -459,6 +459,36 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // swatch.store — Swatch Options' OK: edit REPLACES the swatch at `index`
+    // (a non-integer, negative or out-of-range index changes nothing), create
+    // appends; every operand is an expression. On the app-global libraries.
+    effects["swatch.store"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        guard !libId.isEmpty, var swatches = model.swatchLibraries.swatches(of: libId) else { return nil }
+        func value(_ k: String) -> Value { evalExprAsValue(args[k], store: store, ctx: ctx) }
+        var hex = "000000"
+        switch value("color") {
+        case .color(let c), .string(let c): hex = SwatchesPanel.normalizeHex(c)
+        default: break
+        }
+        var mode = "rgb"
+        if case .string(let m) = value("color_mode"), !m.isEmpty { mode = m }
+        var name = ""
+        if case .string(let n) = value("name") { name = n }
+        let swatch: [String: Any] = ["name": name, "color": "#\(hex)", "color_mode": mode,
+                                     "color_type": "process", "global": false]
+        if case .string("edit") = value("mode") {
+            guard case .number(let i) = value("index"), i >= 0, i == i.rounded(), Int(i) < swatches.count
+            else { return nil }
+            swatches[Int(i)] = swatch
+        } else {
+            swatches.append(swatch)
+        }
+        model.swatchLibraries.setSwatches(swatches, of: libId)
+        return nil
+    }
+
     // brush.append — append a new brush to a library. Used by
     // brush_options_confirm in create mode.
     effects["brush.append"] = { spec, ctx, store in

@@ -230,6 +230,7 @@
             "swatch.duplicate_selected": {},
             "swatch.select_unused": {},
             "swatch.sort_by_name": {},
+            "swatch.store": {},
             "switch_appearance": {},
             "tile": {},
             "toggle": {},

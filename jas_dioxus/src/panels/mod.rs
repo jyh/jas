@@ -423,6 +423,28 @@ mod tests {
         assert!(panel_is_checked(PanelKind::Brushes, "set_brush_view_mode:list", &state));
     }
 
+    /// Swatch Options' OK on the web is the YAML's `swatch.store` (its native
+    /// arm in `apply_dialog_confirm` is gone; with both, create mode appended
+    /// twice). Edit replaces the named swatch; create appends.
+    #[test]
+    fn swatch_options_confirm_stores_through_the_yaml() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let sw = |n: &str, c: &str| serde_json::json!({"name": n, "color": c, "color_mode": "rgb",
+                                                        "color_type": "process", "global": false});
+        state.swatch_libraries = serde_json::json!({"lib_a": {"name": "A", "swatches": [sw("A", "#ff0000"), sw("B", "#00ff00")]}});
+        let params = |mode: &str, name: &str, index: serde_json::Value| -> serde_json::Map<String, serde_json::Value> {
+            serde_json::json!({"mode": mode, "swatch_name": name, "color": "#00ff00", "color_mode": "rgb",
+                               "library": "lib_a", "index": index}).as_object().unwrap().clone()
+        };
+        crate::interpreter::renderer::dispatch_action("swatch_options_confirm", &params("edit", "Bee", serde_json::json!(1)), &mut state);
+        assert_eq!(state.swatch_libraries["lib_a"]["swatches"][1], sw("Bee", "#00ff00"));
+        crate::interpreter::renderer::dispatch_action("swatch_options_confirm", &params("create", "New", serde_json::Value::Null), &mut state);
+        let names: Vec<_> = state.swatch_libraries["lib_a"]["swatches"].as_array().unwrap().iter()
+            .map(|s| s["name"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names, ["A", "Bee", "New"], "create appends exactly once");
+    }
+
     /// Two panels declare a `thumbnail_size` and both write it through the SAME
     /// generic `set_panel_state` effect. A handler that dispatches on the
     /// effect's `key` alone — which is what this app did — cannot tell them
