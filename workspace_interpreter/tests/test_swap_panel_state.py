@@ -89,7 +89,11 @@ class TestSwapPanelState:
 
     def test_the_real_swap_arrowheads_widget_swaps_panel_and_globals(self):
         widget = _widget(_yaml("panels", "stroke.yaml"), "stk_swap_arrowheads")
-        effects = widget["behavior"][0]["effects"]
+        # The click runs `swap_arrowheads` (one copy of the four effects, since
+        # 2026-10-25); a behavior still declaring them inline is read as is.
+        behavior = widget["behavior"][0]
+        effects = (_yaml("actions.yaml")["actions"][behavior["action"]]["effects"]
+                   if "action" in behavior else behavior["effects"])
         store = _stroke_store()
         run_effects(effects, {}, store)
         assert _panel(store) == ("none", "simple_arrow", 150.0, 100.0)
