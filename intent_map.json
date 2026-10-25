@@ -882,6 +882,9 @@
     },
     "set_artboard_fill_preset": {
       "class": "ui-state",
+      "dispatches": [
+        "open_color_picker"
+      ],
       "doc_verbs": []
     },
     "set_artboard_reference_point": {

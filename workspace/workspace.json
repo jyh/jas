@@ -3795,7 +3795,7 @@
       ]
     },
     "set_artboard_fill_preset": {
-      "description": "Translate dialog.fill dropdown selection into dialog.fill hex / transparent.",
+      "description": "The Artboard Options fill dropdown's pick, written into dialog.fill (ARTBOARDS.md, FILL_DROPDOWN): Transparent writes \"transparent\", White writes \"#ffffff\" and Black writes \"#000000\". Custom\u2026 opens the free-color picker over the dialog with dialog.fill as its target and its starting color, as the fill swatch beside the dropdown does; the color chosen there becomes the fill. The dropdown shows \"custom\" for any other fill.\n",
       "category": "artboards",
       "params": {
         "preset": {
@@ -3804,7 +3804,56 @@
       },
       "effects": [
         {
-          "log": "set_artboard_fill_preset (native)"
+          "if": {
+            "condition": "param.preset == 'transparent'",
+            "then": [
+              {
+                "set": {
+                  "dialog.fill": "'transparent'"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "condition": "param.preset == 'white'",
+            "then": [
+              {
+                "set": {
+                  "dialog.fill": "'#ffffff'"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "condition": "param.preset == 'black'",
+            "then": [
+              {
+                "set": {
+                  "dialog.fill": "'#000000'"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "condition": "param.preset == 'custom'",
+            "then": [
+              {
+                "dispatch": {
+                  "action": "open_color_picker",
+                  "params": {
+                    "target": "\"dialog.fill\"",
+                    "color": "dialog.fill"
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
     },
