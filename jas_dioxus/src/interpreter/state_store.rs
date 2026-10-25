@@ -24,6 +24,7 @@ struct DialogFrame {
     dirty: bool,
     snapshot: Option<HashMap<String, serde_json::Value>>,
     result_to: Option<String>,
+    props: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -38,6 +39,11 @@ pub struct StateStore {
     dialog: Option<HashMap<String, serde_json::Value>>,
     dialog_id: Option<String>,
     dialog_params: Option<HashMap<String, serde_json::Value>>,
+    /// The open dialog's derived properties, `{key: {"get": expr, "set":
+    /// expr}}` from its `state:` section. A `get` is computed on read from
+    /// the sibling state (`eval_context`); a `set` runs its lambda on write
+    /// (`set_dialog`). The reference's `_dialog_props`.
+    dialog_props: HashMap<String, serde_json::Value>,
     /// Captured original values of state keys named in the open dialog's
     /// `preview_targets`. Restored on close_dialog unless first cleared
     /// by the `clear_dialog_snapshot` effect (used by OK actions).
@@ -117,6 +123,7 @@ impl StateStore {
             dialog: None,
             dialog_id: None,
             dialog_params: None,
+            dialog_props: HashMap::new(),
             dialog_snapshot: None,
             dialog_on_change: None,
             dialog_dirty: false,
@@ -248,9 +255,43 @@ impl StateStore {
         defaults: HashMap<String, serde_json::Value>,
         params: Option<HashMap<String, serde_json::Value>>,
     ) {
+        self.init_dialog_with_props(dialog_id, defaults, params, HashMap::new());
+    }
+
+    /// `init_dialog` with the dialog's derived properties (`dialog_props`).
+    pub fn init_dialog_with_props(
+        &mut self,
+        dialog_id: &str,
+        defaults: HashMap<String, serde_json::Value>,
+        params: Option<HashMap<String, serde_json::Value>>,
+        props: HashMap<String, serde_json::Value>,
+    ) {
         self.dialog_id = Some(dialog_id.to_string());
         self.dialog = Some(defaults);
         self.dialog_params = params;
+        self.dialog_props = props;
+    }
+
+    /// The scope a dialog getter or setter reads: the dialog's stored values
+    /// by bare name, plus `state`, the active panel's `panel` and `param`, as
+    /// the reference's `eval_context` builds it.
+    fn dialog_local_scope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut local: serde_json::Map<String, serde_json::Value> = self.dialog.iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        local.insert("state".to_string(), serde_json::Value::Object(
+            self.state.iter().map(|(k, v)| (k.clone(), v.clone())).collect()));
+        let panel = self.active_panel.as_ref()
+            .and_then(|pid| self.panels.get(pid))
+            .map(|scope| scope.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        local.insert("panel".to_string(), serde_json::Value::Object(panel));
+        if let Some(params) = &self.dialog_params {
+            local.insert("param".to_string(), serde_json::Value::Object(
+                params.iter().map(|(k, v)| (k.clone(), v.clone())).collect()));
+        }
+        local
     }
 
     pub fn get_dialog(&self, key: &str) -> &serde_json::Value {
@@ -260,10 +301,47 @@ impl StateStore {
     }
 
     pub fn set_dialog(&mut self, key: &str, value: serde_json::Value) {
+        if self.dialog.is_none() {
+            return;
+        }
+        // A derived property: its `set` lambda writes the keys it assigns,
+        // and one with a `get` and no `set` is read-only (the reference's
+        // `set_dialog`).
+        if let Some(prop) = self.dialog_props.get(key) {
+            if let Some(set_expr) = prop.get("set").and_then(|v| v.as_str()) {
+                let writes = self.run_dialog_setter(set_expr, &value);
+                if let Some(ref mut d) = self.dialog {
+                    for (target, val) in writes {
+                        d.insert(target, val);
+                    }
+                }
+                self.dialog_dirty = true;
+                return;
+            }
+            if prop.get("get").is_some() {
+                return;
+            }
+        }
         if let Some(ref mut d) = self.dialog {
             d.insert(key.to_string(), value);
             self.dialog_dirty = true;
         }
+    }
+
+    /// Apply a `fun v -> body` setter to `value`, returning the dialog keys
+    /// its `<-` assignments write.
+    fn run_dialog_setter(&self, set_expr: &str, value: &serde_json::Value) -> Vec<(String, serde_json::Value)> {
+        let expr_str = set_expr.trim();
+        let (Some(rest), Some(arrow)) = (expr_str.strip_prefix("fun "), expr_str.find("->")) else {
+            return Vec::new();
+        };
+        let param = rest[..arrow - 4].trim().trim_matches(|c: char| c == '(' || c == ')').trim();
+        let mut local = self.dialog_local_scope();
+        local.insert(param.to_string(), value.clone());
+        super::expr::eval_with_store(expr_str[arrow + 2..].trim(), &serde_json::Value::Object(local))
+            .into_iter()
+            .map(|(target, val)| (target, super::effects::value_to_json(&val)))
+            .collect()
     }
 
     /// Set the dialog's on_change action name. Called by the
@@ -314,6 +392,7 @@ impl StateStore {
             dirty: self.dialog_dirty,
             snapshot: self.dialog_snapshot.take(),
             result_to: self.dialog_result_to.take(),
+            props: std::mem::take(&mut self.dialog_props),
         });
         self.dialog_dirty = false;
         self.dialog_result_to = result_to;
@@ -337,12 +416,14 @@ impl StateStore {
             self.dialog_dirty = parent.dirty;
             self.dialog_snapshot = parent.snapshot;
             self.dialog_result_to = parent.result_to;
+            self.dialog_props = parent.props;
             return;
         }
         self.dialog_result_to = None;
         self.dialog_id = None;
         self.dialog = None;
         self.dialog_params = None;
+        self.dialog_props.clear();
         self.dialog_on_change = None;
         self.dialog_dirty = false;
         // dialog_firing_on_change is intentionally NOT cleared here —
@@ -631,14 +712,25 @@ impl StateStore {
             self.data.clone()
         });
 
-        // Dialog state
+        // Dialog state, with every `get` evaluated so a derived key (the
+        // Color Picker's and Swatch Options' r/g/b/h/s/b/c/m/y/k/hex) reads
+        // its computed value beside the stored ones, as the reference's
+        // `eval_context` does. Until 2026-10-25 the store kept no props, so
+        // on the engine route every derived dialog field read null.
         if let Some(ref dialog) = self.dialog {
-            let dialog_obj: serde_json::Value = serde_json::Value::Object(
-                dialog.iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            );
-            ctx.insert("dialog".to_string(), dialog_obj);
+            let mut dialog_obj: serde_json::Map<String, serde_json::Value> = dialog.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if !self.dialog_props.is_empty() {
+                let local = serde_json::Value::Object(self.dialog_local_scope());
+                for (key, prop) in &self.dialog_props {
+                    if let Some(get_expr) = prop.get("get").and_then(|v| v.as_str()) {
+                        let value = super::expr::eval(get_expr, &local);
+                        dialog_obj.insert(key.clone(), super::effects::value_to_json(&value));
+                    }
+                }
+            }
+            ctx.insert("dialog".to_string(), serde_json::Value::Object(dialog_obj));
         }
 
         // Dialog params
@@ -658,6 +750,54 @@ impl StateStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A dialog's derived properties (the reference's `_dialog_props`): a
+    /// `get` reads in `eval_context`, a `set` writes through its lambda, a
+    /// `get` with no `set` refuses a write, and a nested dialog keeps its
+    /// parent's props under it.
+    fn props_rgb() -> HashMap<String, serde_json::Value> {
+        [
+            ("r".to_string(), serde_json::json!({"get": "rgb_r(color)",
+                "set": "fun v -> color <- rgb(v, rgb_g(color), rgb_b(color))"})),
+            ("hex".to_string(), serde_json::json!({"get": "hex(color)"})),
+        ].into()
+    }
+
+    #[test]
+    fn a_dialog_getter_reads_in_the_eval_context() {
+        let mut store = StateStore::new();
+        store.init_dialog_with_props("so", [("color".to_string(), serde_json::json!("#0000cc"))].into(), None, props_rgb());
+        let ctx = store.eval_context();
+        assert_eq!(ctx["dialog"]["hex"], serde_json::json!("0000cc"));
+        assert_eq!(ctx["dialog"]["r"].as_f64(), Some(0.0));
+        assert_eq!(ctx["dialog"]["color"], serde_json::json!("#0000cc"), "the stored value stays");
+    }
+
+    #[test]
+    fn a_dialog_setter_writes_through_its_lambda_and_a_bare_getter_is_read_only() {
+        let mut store = StateStore::new();
+        store.init_dialog_with_props("so", [("color".to_string(), serde_json::json!("#0000cc"))].into(), None, props_rgb());
+        store.set_dialog("r", serde_json::json!(255));
+        assert_eq!(store.get_dialog("color"), &serde_json::json!("#ff00cc"));
+        assert!(store.get_dialog("r").is_null(), "a derived key is not stored");
+        store.set_dialog("hex", serde_json::json!("123456"));
+        assert_eq!(store.get_dialog("color"), &serde_json::json!("#ff00cc"), "hex has no set");
+        assert!(store.get_dialog("hex").is_null());
+    }
+
+    #[test]
+    fn a_nested_dialog_keeps_its_parents_props() {
+        let mut store = StateStore::new();
+        store.init_dialog_with_props("so", [("color".to_string(), serde_json::json!("#0000cc"))].into(), None, props_rgb());
+        store.push_dialog(Some("color".to_string()));
+        store.init_dialog("child", [("x".to_string(), serde_json::json!(1))].into(), None);
+        assert!(store.eval_context()["dialog"].get("hex").is_none(), "the child has no hex");
+        store.close_dialog();
+        assert_eq!(store.eval_context()["dialog"]["hex"], serde_json::json!("0000cc"), "the parent's getter is back");
+        store.close_dialog();
+        store.init_dialog("other", HashMap::new(), None);
+        assert!(store.eval_context()["dialog"].get("hex").is_none(), "a closed dialog's props do not leak");
+    }
 
     #[test]
     fn the_eval_context_carries_the_data_namespace() {

@@ -449,20 +449,30 @@ pub fn open_dialog_in(
     if let Some(key) = push_over {
         store.push_dialog(Some(key));
     }
-    // Extract state defaults
+    // Extract state defaults and the derived properties: a key with a `get`
+    // is computed on read and stores no default; one with a `set` runs its
+    // lambda on write (the reference's `open_dialog`).
     let mut defaults = std::collections::HashMap::new();
+    let mut props = std::collections::HashMap::new();
     if let Some(serde_json::Value::Object(state_defs)) = dlg_def.get("state") {
         for (key, defn) in state_defs {
-            let default_val = if let serde_json::Value::Object(d) = defn {
-                d.get("default").cloned().unwrap_or(serde_json::Value::Null)
+            if let serde_json::Value::Object(d) = defn {
+                let prop: serde_json::Map<String, serde_json::Value> = ["get", "set"].iter()
+                    .filter_map(|k| d.get(*k).map(|v| (k.to_string(), v.clone())))
+                    .collect();
+                if !prop.is_empty() {
+                    props.insert(key.clone(), serde_json::Value::Object(prop));
+                }
+                if !d.contains_key("get") {
+                    defaults.insert(key.clone(), d.get("default").cloned().unwrap_or(serde_json::Value::Null));
+                }
             } else {
-                defn.clone()
-            };
-            defaults.insert(key.clone(), default_val);
+                defaults.insert(key.clone(), defn.clone());
+            }
         }
     }
     // Init dialog
-    store.init_dialog(dlg_id, defaults, resolved_params);
+    store.init_dialog_with_props(dlg_id, defaults, resolved_params, props);
     // Evaluate init expressions (in order: a later init may read an earlier
     // one). The DIALOG's params must win over the opening action's: an init
     // reads `param.*` meaning its own dialog's. The reference drops the outer

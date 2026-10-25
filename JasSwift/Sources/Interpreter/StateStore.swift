@@ -489,7 +489,24 @@ public class StateStore {
         ctx["data"] = data
 
         if dialogId != nil {
-            ctx["dialog"] = dialog
+            // Every `get` evaluated, so a derived key (the Color Picker's and
+            // Swatch Options' r/g/b/h/s/b/c/m/y/k/hex) reads its computed
+            // value beside the stored ones, as the reference's
+            // `eval_context` does. Its scope is the dialog's stored values by
+            // bare name plus `state`, the active panel's `panel` and `param`.
+            var dlg = dialog
+            if !dialogProps.isEmpty {
+                var local: [String: Any] = dialog
+                local["state"] = state
+                local["panel"] = ctx["panel"]
+                if let params = dialogParams { local["param"] = params }
+                for (key, prop) in dialogProps {
+                    if let getExpr = prop["get"] as? String {
+                        dlg[key] = evaluate(getExpr, context: local).toAny() ?? NSNull()
+                    }
+                }
+            }
+            ctx["dialog"] = dlg
             if let params = dialogParams {
                 ctx["param"] = params
             }
