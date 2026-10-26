@@ -405,3 +405,32 @@ def test_the_spelling_census_names_a_planted_alias():
     bad, seen = _misspelled_menu_state(ws)
     assert seen == 3, seen
     assert bad == ["panels.p.menu[0].checked", "panels.p.menu[2].items[0].disabled"], bad
+
+
+def test_the_layers_menu_labels_read_facts_the_store_builds():
+    """STATUS-jas item 24. The Layers menu's three toggle-all labels read
+    `active_document.any_layer_visible / any_layer_preview / any_layer_unlocked`,
+    and until 2026-10-26 NO port built them (the corpus seeds them), so each
+    app resolved the labels with a native table. The store's view builds them
+    from the document's top-level layers, in the test-JSON form the op bridge
+    writes, and the menu walk resolves the labels from them."""
+    import os, sys
+    jas_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "jas"))
+    if jas_dir not in sys.path:
+        sys.path.insert(0, jas_dir)
+    from document.document import Document
+    from geometry.element import Layer, Visibility
+    from geometry.test_json import document_to_test_json
+    from workspace_interpreter.state_store import StateStore
+
+    def facts(*layers):
+        doc = json.loads(document_to_test_json(Document(layers=tuple(layers))))
+        ad = StateStore(document=doc).eval_context({})["active_document"]
+        return (ad["any_layer_visible"], ad["any_layer_preview"], ad["any_layer_unlocked"])
+
+    L = lambda vis, locked: Layer(name="L", children=(), visibility=vis, locked=locked)
+    assert facts(L(Visibility.PREVIEW, False)) == (True, True, True)
+    assert facts(L(Visibility.INVISIBLE, True)) == (False, False, False)
+    assert facts(L(Visibility.OUTLINE, True)) == (True, False, False)
+    assert facts(L(Visibility.INVISIBLE, True), L(Visibility.OUTLINE, False)) == (True, False, True)
+    assert facts() == (False, False, False), "no layers: every predicate is false"

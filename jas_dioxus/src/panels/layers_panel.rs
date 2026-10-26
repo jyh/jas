@@ -9,8 +9,9 @@ use super::panel_menu::PanelMenuItem;
 /// Source of truth is workspace/panels/layers.yaml's `menu:` block
 /// (review #15); the generic reader builds the items from the bundle.
 /// The three visibility/outline/lock rows carry `{{if …}}` label
-/// templates in the YAML; `dynamic_label` (below) supplies the
-/// resolved text at render time so the raw template never surfaces.
+/// templates in the YAML, over the `active_document.any_layer_*` facts
+/// (`document_views::layer_facts`); the menu view evaluates them as the
+/// shared walk does, so no native table restates them.
 pub fn menu_items() -> Vec<PanelMenuItem> {
     super::panel_menu::menu_items_from_yaml("layers_panel_content")
 }
@@ -51,37 +52,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_j
         _ => {}
     }
     Vec::new()
-}
-
-/// Override the static menu label for commands whose displayed text
-/// depends on document state. Returns None to use the static label.
-pub fn dynamic_label(cmd: &str, state: &AppState) -> Option<String> {
-    use crate::geometry::element::{Element, Visibility};
-    let layers: Vec<&Element> = state.tab()
-        .map(|t| t.model.document().layers.iter().collect())
-        .unwrap_or_default();
-    // The YAML menu labels for these three commands are `{{if …}}`
-    // templates the generic builder leaks verbatim, so we must always
-    // return a resolved string for them — even with no layers (every
-    // predicate is then false, matching the YAML's `else` branch).
-    match cmd {
-        "toggle_all_layers_visibility" => {
-            // "Hide" if any layer is currently NOT invisible; else "Show".
-            let any_visible = layers.iter().any(|l| l.visibility() != Visibility::Invisible);
-            Some(if any_visible { "Hide All Layers".into() } else { "Show All Layers".into() })
-        }
-        "toggle_all_layers_outline" => {
-            // "Outline" if any layer is in preview; else "Preview".
-            let any_preview = layers.iter().any(|l| l.visibility() == Visibility::Preview);
-            Some(if any_preview { "Outline All Layers".into() } else { "Preview All Layers".into() })
-        }
-        "toggle_all_layers_lock" => {
-            // "Lock" if any layer is unlocked; else "Unlock".
-            let any_unlocked = layers.iter().any(|l| !l.locked());
-            Some(if any_unlocked { "Lock All Layers".into() } else { "Unlock All Layers".into() })
-        }
-        _ => None,
-    }
 }
 
 #[cfg(test)]

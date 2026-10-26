@@ -26,7 +26,7 @@
 
 use serde_json::{json, Value};
 
-use super::expr::eval;
+use super::expr::{eval, eval_text};
 
 /// Evaluate `expr` against `ctx` and coerce to bool via the shared expression
 /// evaluator's truthiness (`eval` never raises — it returns `Value::Null` on
@@ -45,13 +45,17 @@ pub(crate) fn eval_bool(expr: &str, ctx: &Value) -> bool {
 /// Walk the compiled `menubar` and evaluate each action item's `enabled_when` /
 /// `checked_when` against `ctx`.
 ///
-/// Returns a flat pre-order JSON array of `{path, action, enabled, checked}` for
-/// every action item.  Separators (bare `"separator"` strings) and the submenu
+/// Returns a flat pre-order JSON array of `{path, action, label, enabled,
+/// checked}` for every action item.  Separators (bare `"separator"` strings) and the submenu
 /// nodes themselves are NOT emitted; a separator still consumes its index, and
 /// submenu CHILDREN are walked with an extended path `[m, i, j]` so their
 /// predicates (e.g. `workspace.has_saved_layout` on Revert to Saved) are
 /// covered.  `enabled` defaults to `true` when there is no `enabled_when`;
 /// `checked` is the evaluated bool when `checked_when` is present, else `null`.
+/// `label` is the item's label with each `{{expr}}` region evaluated against
+/// `ctx` ([`eval_text`]), so a label that says what its action will do (the
+/// Layers panel's "Hide All Layers" / "Show All Layers") is resolved by the
+/// walk every port shares; `null` when the item has no label.
 //
 // ⭐ LIVE SINCE W1 (2026-09-08): `ffi::jas_menu_state` is this pass's FIRST
 // production caller in any port, so the `#[allow(dead_code)]` this carried is
@@ -221,9 +225,12 @@ fn walk(items: &[Value], prefix: &[i64], ctx: &Value, out: &mut Vec<Value>) {
             _ => Value::Null,
         };
         let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let label = obj.get("label").and_then(|v| v.as_str())
+            .map_or(Value::Null, |l| Value::String(eval_text(l, ctx)));
         out.push(json!({
             "path": path,
             "action": action,
+            "label": label,
             "enabled": enabled,
             "checked": checked,
         }));

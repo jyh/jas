@@ -46,6 +46,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -55,6 +56,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -64,6 +66,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -73,6 +76,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -82,6 +86,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -91,6 +96,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -100,6 +106,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -109,6 +116,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": true
         },
@@ -118,6 +126,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": false,
           "checked": true
         },
@@ -127,6 +136,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": false,
           "checked": false
         },
@@ -136,6 +146,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": false,
           "checked": false
         },
@@ -145,6 +156,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": true
         },
@@ -154,6 +166,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": true
         },
@@ -163,6 +176,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": true
         },
@@ -172,6 +186,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": true
         },
@@ -181,6 +196,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": true
         },
@@ -190,6 +206,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": true
         },
@@ -199,6 +216,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -208,6 +226,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -217,6 +236,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -270,6 +290,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -279,6 +300,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -288,6 +310,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -297,6 +320,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -306,6 +330,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -315,6 +340,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -324,6 +350,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -333,6 +360,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": false
         },
@@ -342,6 +370,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -351,6 +380,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -360,6 +390,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -369,6 +400,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": true
         },
@@ -378,6 +410,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": true
         },
@@ -387,6 +420,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": true
         },
@@ -396,6 +430,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": true
         },
@@ -405,6 +440,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": true
         },
@@ -414,6 +450,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": true
         },
@@ -423,6 +460,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -432,6 +470,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -441,6 +480,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -493,6 +533,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -502,6 +543,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -511,6 +553,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -520,6 +563,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -529,6 +573,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -538,6 +583,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -547,6 +593,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -556,6 +603,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": false
         },
@@ -565,6 +613,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -574,6 +623,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -583,6 +633,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -592,6 +643,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": true
         },
@@ -601,6 +653,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": true
         },
@@ -610,6 +663,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": false
         },
@@ -619,6 +673,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": true
         },
@@ -628,6 +683,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": true
         },
@@ -637,6 +693,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": true
         },
@@ -646,6 +703,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -655,6 +713,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -664,6 +723,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -713,6 +773,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -722,6 +783,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -731,6 +793,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -740,6 +803,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -749,6 +813,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -758,6 +823,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -767,6 +833,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -776,6 +843,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": false
         },
@@ -785,6 +853,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -794,6 +863,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -803,6 +873,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -812,6 +883,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": false
         },
@@ -821,6 +893,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": false
         },
@@ -830,6 +903,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": true
         },
@@ -839,6 +913,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": false
         },
@@ -848,6 +923,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": false
         },
@@ -857,6 +933,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": true
         },
@@ -866,6 +943,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -875,6 +953,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -884,6 +963,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -941,6 +1021,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -950,6 +1031,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -959,6 +1041,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -968,6 +1051,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -977,6 +1061,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -986,6 +1071,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -995,6 +1081,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -1004,6 +1091,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": true
         },
@@ -1013,6 +1101,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": false,
           "checked": false
         },
@@ -1022,6 +1111,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": false,
           "checked": true
         },
@@ -1031,6 +1121,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": false,
           "checked": false
         },
@@ -1040,6 +1131,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1049,6 +1141,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1058,6 +1151,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1067,6 +1161,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1076,6 +1171,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1085,6 +1181,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": true
         },
@@ -1094,6 +1191,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -1103,6 +1201,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -1112,6 +1211,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -1165,6 +1265,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -1174,6 +1275,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -1183,6 +1285,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -1192,6 +1295,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -1201,6 +1305,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -1210,6 +1315,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -1219,6 +1325,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -1228,6 +1335,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": false
         },
@@ -1237,6 +1345,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -1246,6 +1355,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -1255,6 +1365,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -1264,6 +1375,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1273,6 +1385,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1282,6 +1395,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1291,6 +1405,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1300,6 +1415,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1309,6 +1425,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": false
         },
@@ -1318,6 +1435,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -1327,6 +1445,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -1336,6 +1455,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -1390,6 +1510,7 @@
             0
           ],
           "action": "open_brush_options",
+          "label": "New Brush",
           "enabled": false,
           "checked": null
         },
@@ -1399,6 +1520,7 @@
             1
           ],
           "action": "duplicate_brush",
+          "label": "Duplicate Brush",
           "enabled": false,
           "checked": null
         },
@@ -1408,6 +1530,7 @@
             2
           ],
           "action": "delete_brush",
+          "label": "Delete Brush",
           "enabled": false,
           "checked": null
         },
@@ -1417,6 +1540,7 @@
             3
           ],
           "action": "open_brush_options",
+          "label": "Brush Options...",
           "enabled": false,
           "checked": null
         },
@@ -1426,6 +1550,7 @@
             5
           ],
           "action": "select_all_unused_brushes",
+          "label": "Select All Unused",
           "enabled": true,
           "checked": null
         },
@@ -1435,6 +1560,7 @@
             7
           ],
           "action": "sort_brushes_by_name",
+          "label": "Sort by Name",
           "enabled": true,
           "checked": null
         },
@@ -1444,6 +1570,7 @@
             9
           ],
           "action": "set_brush_view_mode",
+          "label": "Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -1453,6 +1580,7 @@
             10
           ],
           "action": "set_brush_view_mode",
+          "label": "List View",
           "enabled": true,
           "checked": false
         },
@@ -1462,6 +1590,7 @@
             12
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Small Thumbnail View",
           "enabled": true,
           "checked": true
         },
@@ -1471,6 +1600,7 @@
             13
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Medium Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -1480,6 +1610,7 @@
             14
           ],
           "action": "set_brush_thumbnail_size",
+          "label": "Large Thumbnail View",
           "enabled": true,
           "checked": false
         },
@@ -1489,6 +1620,7 @@
             16
           ],
           "action": "toggle_brush_category",
+          "label": "Show Calligraphic Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1498,6 +1630,7 @@
             17
           ],
           "action": "toggle_brush_category",
+          "label": "Show Scatter Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1507,6 +1640,7 @@
             18
           ],
           "action": "toggle_brush_category",
+          "label": "Show Art Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1516,6 +1650,7 @@
             19
           ],
           "action": "toggle_brush_category",
+          "label": "Show Pattern Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1525,6 +1660,7 @@
             20
           ],
           "action": "toggle_brush_category",
+          "label": "Show Bristle Brushes",
           "enabled": true,
           "checked": true
         },
@@ -1534,6 +1670,7 @@
             22
           ],
           "action": "toggle_brush_library_persistent",
+          "label": "Make Persistent",
           "enabled": true,
           "checked": true
         },
@@ -1543,6 +1680,7 @@
             23
           ],
           "action": "",
+          "label": "Open Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -1552,6 +1690,7 @@
             24
           ],
           "action": "save_brush_library",
+          "label": "Save Brush Library",
           "enabled": true,
           "checked": null
         },
@@ -1561,6 +1700,7 @@
             26
           ],
           "action": "close_panel",
+          "label": "Close Brushes",
           "enabled": true,
           "checked": null
         }
@@ -1598,6 +1738,7 @@
             0
           ],
           "action": "new_symbol",
+          "label": "New Symbol",
           "enabled": false,
           "checked": null
         },
@@ -1607,6 +1748,7 @@
             1
           ],
           "action": "place_instance",
+          "label": "Place Instance",
           "enabled": true,
           "checked": null
         },
@@ -1616,6 +1758,7 @@
             2
           ],
           "action": "delete_symbol_action",
+          "label": "Delete Symbol",
           "enabled": true,
           "checked": null
         },
@@ -1625,6 +1768,7 @@
             4
           ],
           "action": "close_panel",
+          "label": "Close Symbols",
           "enabled": true,
           "checked": null
         }

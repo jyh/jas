@@ -24,34 +24,11 @@ public enum LayersPanel {
     /// Source of truth is workspace/panels/layers.yaml's `menu:` block
     /// (review #15); the generic reader builds the items from the bundle.
     /// The three all-layers rows carry `{{if …}}` label expressions
-    /// (Hide/Show, Outline/Preview, Lock/Unlock); the menu view resolves
-    /// them at render time via ``panelDynamicLabel``.
+    /// (Hide/Show, Outline/Preview, Lock/Unlock) over the
+    /// `active_document.any_layer_*` facts; the menu view evaluates them via
+    /// ``panelMenuLabel``.
     public static func menuItems() -> [PanelMenuItem] {
         menuItemsFromYaml("layers_panel_content")
-    }
-
-    /// Resolve the three all-layers menu rows' `{{if …}}` label
-    /// expressions against the document's any-layer rollups, so the menu
-    /// shows "Hide All Layers" vs "Show All Layers" (etc.) per current
-    /// state. Returns nil for commands without a dynamic label (the menu
-    /// view then keeps the YAML label verbatim). Mirrors the Rust
-    /// reference `layers_panel::dynamic_label`.
-    public static func dynamicLabel(_ cmd: String, model: Model?) -> String? {
-        guard let model = model else { return nil }
-        let layers = model.document.layers
-        switch cmd {
-        case "toggle_all_layers_visibility":
-            let anyVisible = layers.contains { $0.visibility != .invisible }
-            return anyVisible ? "Hide All Layers" : "Show All Layers"
-        case "toggle_all_layers_outline":
-            let anyPreview = layers.contains { $0.visibility == .preview }
-            return anyPreview ? "Outline All Layers" : "Preview All Layers"
-        case "toggle_all_layers_lock":
-            let anyUnlocked = layers.contains { !$0.locked }
-            return anyUnlocked ? "Lock All Layers" : "Unlock All Layers"
-        default:
-            return nil
-        }
     }
 
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {

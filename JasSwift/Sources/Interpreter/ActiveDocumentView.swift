@@ -28,6 +28,10 @@ public func buildActiveDocumentView(
             "layers_panel_selection_count": layersPanelSelection.count,
             "layers_panel_selection_is_container": false,
             "layers_panel_selection_has_group": false,
+            // The Layers menu's toggle-all facts: no layers, all false.
+            "any_layer_visible": false,
+            "any_layer_preview": false,
+            "any_layer_unlocked": false,
             "selection_has_brushed_stroke": false,
             "selection_is_single_brushed_stroke": false,
             // Nothing is selected, so a delete strands nothing.
@@ -198,6 +202,10 @@ public func buildActiveDocumentView(
         "layers_panel_selection_count": layersPanelSelection.count,
         "layers_panel_selection_is_container": layersPanelSelectionIsContainer,
         "layers_panel_selection_has_group": layersPanelSelectionHasGroup,
+        // The Layers menu's toggle-all labels read these (`layers.yaml`).
+        "any_layer_visible": layerFacts(m.document.layers).visible,
+        "any_layer_preview": layerFacts(m.document.layers).preview,
+        "any_layer_unlocked": layerFacts(m.document.layers).unlocked,
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
         // How many live references deleting the selection would strand
@@ -490,4 +498,14 @@ public func buildSelectionPredicates(model: Model?) -> [String: Any] {
         "selection_mask_linked": first?.linked ?? true,
         "editing_target_is_mask": editingMask,
     ]
+}
+
+/// The Layers menu's three toggle-all facts over the top-level layers
+/// (`runtime_contexts.yaml`): any layer not invisible, any layer in preview,
+/// any layer unlocked; all false with no layers. Rust
+/// `document_views::layer_facts`, the reference's `_layer_facts`.
+func layerFacts(_ layers: [Layer]) -> (visible: Bool, preview: Bool, unlocked: Bool) {
+    (layers.contains { $0.visibility != .invisible },
+     layers.contains { $0.visibility == .preview },
+     layers.contains { !$0.locked })
 }

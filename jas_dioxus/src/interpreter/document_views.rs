@@ -426,6 +426,9 @@ pub fn active_document_view(
                  serde_json::Value::Bool(layers_panel_selection_is_container));
         m.insert("layers_panel_selection_has_group".to_string(),
                  serde_json::Value::Bool(layers_panel_selection_has_group));
+        for (k, v) in layer_facts(&doc.layers) {
+            m.insert(k.to_string(), serde_json::Value::Bool(v));
+        }
     }
     // Inserted after the json! literal: the populated active-document
     // object is already at the macro recursion ceiling, so the symbols
@@ -573,4 +576,19 @@ pub fn artboard_row(i: usize, a: &crate::document::artboard::Artboard) -> Value 
         "show_video_safe_areas": a.show_video_safe_areas,
         "video_ruler_pixel_aspect_ratio": a.video_ruler_pixel_aspect_ratio,
     })
+}
+
+/// The Layers menu's three toggle-all facts over the top-level layers
+/// (`runtime_contexts.yaml`): any layer not invisible, any layer in preview,
+/// any layer unlocked; all false with no layers. The labels read them
+/// (`layers.yaml`), so the menu walk resolves "Hide All Layers" / "Show All
+/// Layers" with no native table. The reference's `_layer_facts`, Swift's
+/// `layerFacts`.
+pub fn layer_facts(layers: &[crate::geometry::element::Element]) -> [(&'static str, bool); 3] {
+    use crate::geometry::element::Visibility;
+    [
+        ("any_layer_visible", layers.iter().any(|l| l.visibility() != Visibility::Invisible)),
+        ("any_layer_preview", layers.iter().any(|l| l.visibility() == Visibility::Preview)),
+        ("any_layer_unlocked", layers.iter().any(|l| !l.locked())),
+    ]
 }

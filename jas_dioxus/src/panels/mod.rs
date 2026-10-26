@@ -98,21 +98,6 @@ pub(crate) fn panel_dispatch(
     }
 }
 
-/// Override the static menu label for a panel command, if the panel
-/// declares a dynamic label for that command. Returns None to use
-/// the static label from `panel_menu`. Used by the menu view to show
-/// state-dependent labels like "Hide All Layers" / "Show All Layers".
-pub(crate) fn panel_dynamic_label(
-    kind: PanelKind,
-    cmd: &str,
-    state: &AppState,
-) -> Option<String> {
-    match kind {
-        PanelKind::Layers => layers_panel::dynamic_label(cmd, state),
-        _ => None,
-    }
-}
-
 /// Query whether a toggle/radio command is checked for a panel kind.
 ///
 /// ONE path for every panel: the panel's bundle menu entry is looked up by its
