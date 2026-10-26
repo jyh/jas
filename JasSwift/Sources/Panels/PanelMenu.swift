@@ -147,17 +147,16 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     }
 }
 
-/// Resolve a dynamic (`{{if …}}`) menu-item label for a panel kind, or
-/// nil when the command has no dynamic label (the menu view then shows
-/// the YAML label verbatim). Currently only the Layers panel's
-/// all-layers toggle rows carry dynamic labels. Mirrors the Rust
-/// `panel_dynamic_label` bridge.
-public func panelDynamicLabel(_ kind: PanelKind, cmd: String,
-                              model: Model?) -> String? {
-    switch kind {
-    case .layers: return LayersPanel.dynamicLabel(cmd, model: model)
-    default: return nil
-    }
+/// A panel-menu label as the menu shows it: its `{{expr}}` regions evaluated
+/// against the panel menu's own context (``panelMenuContext``), the context
+/// its `enabled_when` and `checked_when` read, as the shared walk
+/// (`MenuState.menuState`) does. The Layers panel's toggle-all rows read the
+/// `active_document.any_layer_*` facts. No native table restates a label.
+public func panelMenuLabel(_ kind: PanelKind, label: String,
+                           layout: WorkspaceLayout, model: Model?) -> String {
+    guard label.contains("{{") else { return label }
+    let ctx = panelMenuContext(panelKindToContentId(kind), layout: layout, model: model)
+    return evaluateText(label, context: ctx)
 }
 
 /// Dispatch a menu command for a panel kind.

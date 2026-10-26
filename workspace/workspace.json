@@ -9175,6 +9175,9 @@
         "layers_panel_selection_count": 0,
         "layers_panel_selection_is_container": false,
         "layers_panel_selection_has_group": false,
+        "any_layer_visible": false,
+        "any_layer_preview": false,
+        "any_layer_unlocked": false,
         "selection_has_brushed_stroke": false,
         "selection_is_single_brushed_stroke": false,
         "selection_orphan_count": 0,
@@ -9250,6 +9253,18 @@
         "layers_panel_selection_has_group": {
           "type": "bool",
           "description": "True when at least one selected layer item is a group"
+        },
+        "any_layer_visible": {
+          "type": "bool",
+          "description": "True when at least one top-level layer is not invisible (Hide All Layers, else Show All Layers); false with no layers"
+        },
+        "any_layer_preview": {
+          "type": "bool",
+          "description": "True when at least one top-level layer is in preview (Outline All Layers, else Preview All Layers); false with no layers"
+        },
+        "any_layer_unlocked": {
+          "type": "bool",
+          "description": "True when at least one top-level layer is unlocked (Lock All Layers, else Unlock All Layers); false with no layers"
         },
         "selection_has_brushed_stroke": {
           "type": "bool",

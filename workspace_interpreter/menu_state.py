@@ -36,7 +36,7 @@ booleans from it.
 
 from __future__ import annotations
 
-from .expr import evaluate
+from .expr import evaluate, evaluate_text
 
 
 def _eval_bool(expr: str, ctx: dict) -> bool:
@@ -50,13 +50,18 @@ def menu_state(menubar: list, ctx: dict) -> list[dict]:
     """Walk the compiled ``menubar`` and evaluate each action item's
     ``enabled_when`` / ``checked_when`` against ``ctx``.
 
-    Returns a flat pre-order list of ``{path, action, enabled, checked}`` for
+    Returns a flat pre-order list of ``{path, action, label, enabled,
+    checked}`` for
     every action item. Separators (bare ``"separator"`` strings) and the
     submenu nodes themselves are skipped; submenu CHILDREN are walked with an
     extended path so their predicates (e.g. ``workspace.has_saved_layout`` on
     Revert to Saved) are covered. ``enabled`` defaults to True when there is no
     ``enabled_when``; ``checked`` is the evaluated bool when ``checked_when`` is
-    present, else ``None``.
+    present, else ``None``. ``label`` is the item's label with each ``{{expr}}``
+    region evaluated against ``ctx`` (``evaluate_text``), so a label that says
+    what its action will do (the Layers panel's "Hide All Layers" / "Show All
+    Layers") is resolved by the walk every port shares, never by a native
+    table; ``None`` when the item has no label.
     """
     out: list[dict] = []
 
@@ -70,9 +75,11 @@ def menu_state(menubar: list, ctx: dict) -> list[dict]:
                 continue
             ew = item.get("enabled_when")
             cw = item.get("checked_when")
+            label = item.get("label")
             out.append({
                 "path": path,
                 "action": item.get("action", ""),
+                "label": evaluate_text(label, ctx) if isinstance(label, str) else None,
                 "enabled": _eval_bool(ew, ctx) if ew else True,
                 "checked": _eval_bool(cw, ctx) if cw else None,
             })

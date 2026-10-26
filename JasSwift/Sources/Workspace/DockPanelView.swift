@@ -362,12 +362,11 @@ public struct PanelGroupView: View {
         return HamburgerMenuButton(
             items: items,
             color: theme.text,
-            // The YAML carries `{{if …}}` label expressions for a few
-            // rows (e.g. Layers' Hide/Show All Layers); resolve those at
-            // render time, falling back to the static YAML label.
-            displayLabel: { cmd, label in
-                panelDynamicLabel(capturedKind, cmd: cmd,
-                                  model: capturedLabelModel) ?? label
+            // A label's `{{expr}}` regions (Layers' Hide/Show All Layers)
+            // are evaluated in the panel menu's own context.
+            displayLabel: { _, label in
+                panelMenuLabel(capturedKind, label: label,
+                               layout: workspaceLayout, model: capturedLabelModel)
             },
             isChecked: { cmd in
                 panelIsChecked(activeKind, cmd: cmd,

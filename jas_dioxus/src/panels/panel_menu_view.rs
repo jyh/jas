@@ -143,8 +143,10 @@ pub fn PanelMenuOverlay() -> Element {
                 let app_for_dialog = app.clone();
                 let dialog_ctx = dialog_ctx.clone();
                 let cmd = command;
-                let display_label = super::panel_dynamic_label(kind, cmd, &st)
-                    .unwrap_or_else(|| label.to_string());
+                // A label's `{{expr}}` regions are evaluated against the menu's
+                // own context, as the shared walk does (`menu_state`); the
+                // Layers panel's toggle-all rows say what they will do.
+                let display_label = crate::interpreter::expr::eval_text(label, &menu_ctx);
                 let enabled = super::panel_menu::is_enabled_from_yaml(content_id, cmd, &menu_ctx);
                 let (color, cursor, opacity) = if enabled {
                     (THEME_TEXT, "pointer", "1")
@@ -198,6 +200,7 @@ pub fn PanelMenuOverlay() -> Element {
                 }
             }
             PanelMenuItem::Toggle { label, command } => {
+                let label = crate::interpreter::expr::eval_text(label, &menu_ctx);
                 let act = act.clone();
                 let cmd = command;
                 let checked = super::panel_menu::is_checked_from_yaml(content_id, cmd, &menu_ctx);
@@ -220,6 +223,7 @@ pub fn PanelMenuOverlay() -> Element {
                 }
             }
             PanelMenuItem::Radio { label, command, .. } => {
+                let label = crate::interpreter::expr::eval_text(label, &menu_ctx);
                 let act = act.clone();
                 let cmd = command;
                 let checked = super::panel_menu::is_checked_from_yaml(content_id, cmd, &menu_ctx);

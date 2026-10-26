@@ -69,9 +69,15 @@ public enum MenuState {
             let cw = node["checked_when"] as? String
             let enabled: Any = (ew != nil && !ew!.isEmpty) ? evalBool(ew!, ctx) : true
             let checked: Any = (cw != nil && !cw!.isEmpty) ? evalBool(cw!, ctx) : NSNull()
+            // The label with its `{{expr}}` regions evaluated against `ctx`,
+            // so a label that says what its action will do (the Layers
+            // panel's Hide/Show All Layers) is the shared walk's, never a
+            // native table's; NSNull when the item has no label.
+            let label: Any = (node["label"] as? String).map { evaluateText($0, context: ctx) } ?? NSNull()
             out.append([
                 "path": path,
                 "action": (node["action"] as? String) ?? "",
+                "label": label,
                 "enabled": enabled,
                 "checked": checked,
             ])

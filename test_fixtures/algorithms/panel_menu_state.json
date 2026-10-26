@@ -37,6 +37,7 @@
           0
         ],
         "action": "open_brush_options",
+        "label": "New Brush",
         "enabled": false,
         "checked": null
       },
@@ -46,6 +47,7 @@
           1
         ],
         "action": "duplicate_brush",
+        "label": "Duplicate Brush",
         "enabled": false,
         "checked": null
       },
@@ -55,6 +57,7 @@
           2
         ],
         "action": "delete_brush",
+        "label": "Delete Brush",
         "enabled": false,
         "checked": null
       },
@@ -64,6 +67,7 @@
           3
         ],
         "action": "open_brush_options",
+        "label": "Brush Options...",
         "enabled": false,
         "checked": null
       },
@@ -73,6 +77,7 @@
           5
         ],
         "action": "select_all_unused_brushes",
+        "label": "Select All Unused",
         "enabled": true,
         "checked": null
       },
@@ -82,6 +87,7 @@
           7
         ],
         "action": "sort_brushes_by_name",
+        "label": "Sort by Name",
         "enabled": true,
         "checked": null
       },
@@ -91,6 +97,7 @@
           9
         ],
         "action": "set_brush_view_mode",
+        "label": "Thumbnail View",
         "enabled": true,
         "checked": true
       },
@@ -100,6 +107,7 @@
           10
         ],
         "action": "set_brush_view_mode",
+        "label": "List View",
         "enabled": true,
         "checked": false
       },
@@ -109,6 +117,7 @@
           12
         ],
         "action": "set_brush_thumbnail_size",
+        "label": "Small Thumbnail View",
         "enabled": true,
         "checked": true
       },
@@ -118,6 +127,7 @@
           13
         ],
         "action": "set_brush_thumbnail_size",
+        "label": "Medium Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -127,6 +137,7 @@
           14
         ],
         "action": "set_brush_thumbnail_size",
+        "label": "Large Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -136,6 +147,7 @@
           16
         ],
         "action": "toggle_brush_category",
+        "label": "Show Calligraphic Brushes",
         "enabled": true,
         "checked": true
       },
@@ -145,6 +157,7 @@
           17
         ],
         "action": "toggle_brush_category",
+        "label": "Show Scatter Brushes",
         "enabled": true,
         "checked": true
       },
@@ -154,6 +167,7 @@
           18
         ],
         "action": "toggle_brush_category",
+        "label": "Show Art Brushes",
         "enabled": true,
         "checked": true
       },
@@ -163,6 +177,7 @@
           19
         ],
         "action": "toggle_brush_category",
+        "label": "Show Pattern Brushes",
         "enabled": true,
         "checked": true
       },
@@ -172,6 +187,7 @@
           20
         ],
         "action": "toggle_brush_category",
+        "label": "Show Bristle Brushes",
         "enabled": true,
         "checked": true
       },
@@ -181,6 +197,7 @@
           22
         ],
         "action": "toggle_brush_library_persistent",
+        "label": "Make Persistent",
         "enabled": true,
         "checked": true
       },
@@ -190,6 +207,7 @@
           23
         ],
         "action": "",
+        "label": "Open Brush Library",
         "enabled": true,
         "checked": null
       },
@@ -199,6 +217,7 @@
           24
         ],
         "action": "save_brush_library",
+        "label": "Save Brush Library",
         "enabled": true,
         "checked": null
       },
@@ -208,6 +227,7 @@
           26
         ],
         "action": "close_panel",
+        "label": "Close Brushes",
         "enabled": true,
         "checked": null
       }
@@ -249,6 +269,7 @@
           0
         ],
         "action": "open_brush_options",
+        "label": "New Brush",
         "enabled": true,
         "checked": null
       },
@@ -258,6 +279,7 @@
           1
         ],
         "action": "duplicate_brush",
+        "label": "Duplicate Brush",
         "enabled": true,
         "checked": null
       },
@@ -267,6 +289,7 @@
           2
         ],
         "action": "delete_brush",
+        "label": "Delete Brush",
         "enabled": true,
         "checked": null
       },
@@ -276,6 +299,7 @@
           3
         ],
         "action": "open_brush_options",
+        "label": "Brush Options...",
         "enabled": true,
         "checked": null
       },
@@ -285,6 +309,7 @@
           5
         ],
         "action": "select_all_unused_brushes",
+        "label": "Select All Unused",
         "enabled": true,
         "checked": null
       },
@@ -294,6 +319,7 @@
           7
         ],
         "action": "sort_brushes_by_name",
+        "label": "Sort by Name",
         "enabled": true,
         "checked": null
       },
@@ -303,6 +329,7 @@
           9
         ],
         "action": "set_brush_view_mode",
+        "label": "Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -312,6 +339,7 @@
           10
         ],
         "action": "set_brush_view_mode",
+        "label": "List View",
         "enabled": true,
         "checked": true
       },
@@ -321,6 +349,7 @@
           12
         ],
         "action": "set_brush_thumbnail_size",
+        "label": "Small Thumbnail View",
         "enabled": false,
         "checked": false
       },
@@ -330,6 +359,7 @@
           13
         ],
         "action": "set_brush_thumbnail_size",
+        "label": "Medium Thumbnail View",
         "enabled": false,
         "checked": false
       },
@@ -339,6 +369,7 @@
           14
         ],
         "action": "set_brush_thumbnail_size",
+        "label": "Large Thumbnail View",
         "enabled": false,
         "checked": true
       },
@@ -348,6 +379,7 @@
           16
         ],
         "action": "toggle_brush_category",
+        "label": "Show Calligraphic Brushes",
         "enabled": true,
         "checked": false
       },
@@ -357,6 +389,7 @@
           17
         ],
         "action": "toggle_brush_category",
+        "label": "Show Scatter Brushes",
         "enabled": true,
         "checked": false
       },
@@ -366,6 +399,7 @@
           18
         ],
         "action": "toggle_brush_category",
+        "label": "Show Art Brushes",
         "enabled": true,
         "checked": true
       },
@@ -375,6 +409,7 @@
           19
         ],
         "action": "toggle_brush_category",
+        "label": "Show Pattern Brushes",
         "enabled": true,
         "checked": false
       },
@@ -384,6 +419,7 @@
           20
         ],
         "action": "toggle_brush_category",
+        "label": "Show Bristle Brushes",
         "enabled": true,
         "checked": false
       },
@@ -393,6 +429,7 @@
           22
         ],
         "action": "toggle_brush_library_persistent",
+        "label": "Make Persistent",
         "enabled": true,
         "checked": false
       },
@@ -402,6 +439,7 @@
           23
         ],
         "action": "",
+        "label": "Open Brush Library",
         "enabled": true,
         "checked": null
       },
@@ -411,6 +449,7 @@
           24
         ],
         "action": "save_brush_library",
+        "label": "Save Brush Library",
         "enabled": true,
         "checked": null
       },
@@ -420,6 +459,7 @@
           26
         ],
         "action": "close_panel",
+        "label": "Close Brushes",
         "enabled": true,
         "checked": null
       }
@@ -448,6 +488,7 @@
           0
         ],
         "action": "set_color_panel_mode",
+        "label": "Grayscale",
         "enabled": true,
         "checked": false
       },
@@ -457,6 +498,7 @@
           1
         ],
         "action": "set_color_panel_mode",
+        "label": "RGB",
         "enabled": true,
         "checked": false
       },
@@ -466,6 +508,7 @@
           2
         ],
         "action": "set_color_panel_mode",
+        "label": "HSB",
         "enabled": true,
         "checked": false
       },
@@ -475,6 +518,7 @@
           3
         ],
         "action": "set_color_panel_mode",
+        "label": "CMYK",
         "enabled": true,
         "checked": true
       },
@@ -484,6 +528,7 @@
           4
         ],
         "action": "set_color_panel_mode",
+        "label": "Web Safe RGB",
         "enabled": true,
         "checked": false
       },
@@ -493,6 +538,7 @@
           6
         ],
         "action": "invert_active_color",
+        "label": "Invert",
         "enabled": true,
         "checked": null
       },
@@ -502,6 +548,7 @@
           7
         ],
         "action": "complement_active_color",
+        "label": "Complement",
         "enabled": true,
         "checked": null
       },
@@ -511,6 +558,7 @@
           9
         ],
         "action": "",
+        "label": "Create New Swatch...",
         "enabled": false,
         "checked": null
       },
@@ -520,6 +568,7 @@
           11
         ],
         "action": "close_panel",
+        "label": "Close Color",
         "enabled": true,
         "checked": null
       }
@@ -544,6 +593,7 @@
           0
         ],
         "action": "set_stroke_cap",
+        "label": "Butt Cap",
         "enabled": true,
         "checked": false
       },
@@ -553,6 +603,7 @@
           1
         ],
         "action": "set_stroke_cap",
+        "label": "Round Cap",
         "enabled": true,
         "checked": true
       },
@@ -562,6 +613,7 @@
           2
         ],
         "action": "set_stroke_cap",
+        "label": "Square Cap",
         "enabled": true,
         "checked": false
       },
@@ -571,6 +623,7 @@
           4
         ],
         "action": "set_stroke_join",
+        "label": "Miter Join",
         "enabled": true,
         "checked": false
       },
@@ -580,6 +633,7 @@
           5
         ],
         "action": "set_stroke_join",
+        "label": "Round Join",
         "enabled": true,
         "checked": false
       },
@@ -589,6 +643,7 @@
           6
         ],
         "action": "set_stroke_join",
+        "label": "Bevel Join",
         "enabled": true,
         "checked": true
       },
@@ -598,6 +653,7 @@
           8
         ],
         "action": "close_panel",
+        "label": "Close Stroke",
         "enabled": true,
         "checked": null
       }
@@ -622,6 +678,7 @@
           0
         ],
         "action": "new_swatch",
+        "label": "New Swatch",
         "enabled": true,
         "checked": null
       },
@@ -631,6 +688,7 @@
           1
         ],
         "action": "duplicate_swatch",
+        "label": "Duplicate Swatch",
         "enabled": false,
         "checked": null
       },
@@ -640,6 +698,7 @@
           2
         ],
         "action": "delete_swatch",
+        "label": "Delete Swatch",
         "enabled": false,
         "checked": null
       },
@@ -649,6 +708,7 @@
           4
         ],
         "action": "select_all_unused_swatches",
+        "label": "Select All Unused",
         "enabled": true,
         "checked": null
       },
@@ -658,6 +718,7 @@
           5
         ],
         "action": "add_used_colors",
+        "label": "Add Used Colors",
         "enabled": true,
         "checked": null
       },
@@ -667,6 +728,7 @@
           7
         ],
         "action": "sort_swatches_by_name",
+        "label": "Sort by Name",
         "enabled": true,
         "checked": null
       },
@@ -676,6 +738,7 @@
           9
         ],
         "action": "set_swatch_thumbnail_size",
+        "label": "Small Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -685,6 +748,7 @@
           10
         ],
         "action": "set_swatch_thumbnail_size",
+        "label": "Medium Thumbnail View",
         "enabled": true,
         "checked": true
       },
@@ -694,6 +758,7 @@
           11
         ],
         "action": "set_swatch_thumbnail_size",
+        "label": "Large Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -703,6 +768,7 @@
           13
         ],
         "action": "open_swatch_options",
+        "label": "Swatch Options...",
         "enabled": false,
         "checked": null
       },
@@ -712,6 +778,7 @@
           15
         ],
         "action": "open_swatch_library",
+        "label": "Open Swatch Library",
         "enabled": true,
         "checked": null
       },
@@ -721,6 +788,7 @@
           16
         ],
         "action": "save_swatch_library",
+        "label": "Save Swatch Library",
         "enabled": true,
         "checked": null
       },
@@ -730,6 +798,7 @@
           18
         ],
         "action": "close_panel",
+        "label": "Close Swatches",
         "enabled": true,
         "checked": null
       }
@@ -757,6 +826,7 @@
           0
         ],
         "action": "toggle_opacity_thumbnails",
+        "label": "Hide Thumbnails",
         "enabled": true,
         "checked": true
       },
@@ -766,6 +836,7 @@
           1
         ],
         "action": "toggle_opacity_options",
+        "label": "Show Options",
         "enabled": true,
         "checked": false
       },
@@ -775,6 +846,7 @@
           3
         ],
         "action": "make_opacity_mask",
+        "label": "Make Opacity Mask",
         "enabled": true,
         "checked": null
       },
@@ -784,6 +856,7 @@
           4
         ],
         "action": "release_opacity_mask",
+        "label": "Release Opacity Mask",
         "enabled": false,
         "checked": null
       },
@@ -793,6 +866,7 @@
           5
         ],
         "action": "disable_opacity_mask",
+        "label": "Disable Opacity Mask",
         "enabled": false,
         "checked": null
       },
@@ -802,6 +876,7 @@
           6
         ],
         "action": "unlink_opacity_mask",
+        "label": "Unlink Opacity Mask",
         "enabled": false,
         "checked": null
       },
@@ -811,6 +886,7 @@
           8
         ],
         "action": "toggle_new_masks_clipping",
+        "label": "New Opacity Masks Are Clipping",
         "enabled": true,
         "checked": false
       },
@@ -820,6 +896,7 @@
           9
         ],
         "action": "toggle_new_masks_inverted",
+        "label": "New Opacity Masks Are Inverted",
         "enabled": true,
         "checked": true
       },
@@ -829,6 +906,7 @@
           11
         ],
         "action": "toggle_page_isolated_blending",
+        "label": "Page Isolated Blending",
         "enabled": false,
         "checked": null
       },
@@ -838,6 +916,7 @@
           12
         ],
         "action": "toggle_page_knockout_group",
+        "label": "Page Knockout Group",
         "enabled": false,
         "checked": null
       },
@@ -847,6 +926,7 @@
           14
         ],
         "action": "close_panel",
+        "label": "Close Opacity",
         "enabled": true,
         "checked": null
       }
@@ -870,6 +950,7 @@
           0
         ],
         "action": "place_concept_instance",
+        "label": "Place Instance",
         "enabled": false,
         "checked": null
       },
@@ -879,6 +960,7 @@
           2
         ],
         "action": "close_panel",
+        "label": "Close Concepts",
         "enabled": true,
         "checked": null
       }
@@ -902,6 +984,7 @@
           0
         ],
         "action": "place_concept_instance",
+        "label": "Place Instance",
         "enabled": true,
         "checked": null
       },
@@ -911,6 +994,7 @@
           2
         ],
         "action": "close_panel",
+        "label": "Close Concepts",
         "enabled": true,
         "checked": null
       }
@@ -937,6 +1021,7 @@
           0
         ],
         "action": "new_symbol",
+        "label": "New Symbol",
         "enabled": false,
         "checked": null
       },
@@ -946,6 +1031,7 @@
           1
         ],
         "action": "place_instance",
+        "label": "Place Instance",
         "enabled": false,
         "checked": null
       },
@@ -955,6 +1041,7 @@
           2
         ],
         "action": "delete_symbol_action",
+        "label": "Delete Symbol",
         "enabled": false,
         "checked": null
       },
@@ -964,6 +1051,7 @@
           4
         ],
         "action": "close_panel",
+        "label": "Close Symbols",
         "enabled": true,
         "checked": null
       }
@@ -990,6 +1078,7 @@
           0
         ],
         "action": "new_symbol",
+        "label": "New Symbol",
         "enabled": true,
         "checked": null
       },
@@ -999,6 +1088,7 @@
           1
         ],
         "action": "place_instance",
+        "label": "Place Instance",
         "enabled": true,
         "checked": null
       },
@@ -1008,6 +1098,7 @@
           2
         ],
         "action": "delete_symbol_action",
+        "label": "Delete Symbol",
         "enabled": true,
         "checked": null
       },
@@ -1017,6 +1108,7 @@
           4
         ],
         "action": "close_panel",
+        "label": "Close Symbols",
         "enabled": true,
         "checked": null
       }
@@ -1044,6 +1136,7 @@
           0
         ],
         "action": "new_artboard",
+        "label": "New Artboard",
         "enabled": true,
         "checked": null
       },
@@ -1053,6 +1146,7 @@
           1
         ],
         "action": "duplicate_artboards",
+        "label": "Duplicate Artboards",
         "enabled": true,
         "checked": null
       },
@@ -1062,6 +1156,7 @@
           2
         ],
         "action": "delete_artboards",
+        "label": "Delete Artboards",
         "enabled": true,
         "checked": null
       },
@@ -1071,6 +1166,7 @@
           3
         ],
         "action": "rename_artboard",
+        "label": "Rename",
         "enabled": true,
         "checked": null
       },
@@ -1080,6 +1176,7 @@
           5
         ],
         "action": "delete_empty_artboards",
+        "label": "Delete Empty Artboards",
         "enabled": true,
         "checked": null
       },
@@ -1089,6 +1186,7 @@
           7
         ],
         "action": "convert_to_artboards",
+        "label": "Convert to Artboards",
         "enabled": false,
         "checked": null
       },
@@ -1098,6 +1196,7 @@
           8
         ],
         "action": "open_artboard_options",
+        "label": "Artboard Options...",
         "enabled": true,
         "checked": null
       },
@@ -1107,6 +1206,7 @@
           9
         ],
         "action": "rearrange_artboards",
+        "label": "Rearrange...",
         "enabled": false,
         "checked": null
       },
@@ -1116,6 +1216,7 @@
           11
         ],
         "action": "reset_artboards_panel",
+        "label": "Reset Panel",
         "enabled": true,
         "checked": null
       },
@@ -1125,6 +1226,7 @@
           13
         ],
         "action": "close_panel",
+        "label": "Close Artboards",
         "enabled": true,
         "checked": null
       }
@@ -1153,6 +1255,7 @@
           0
         ],
         "action": "new_artboard",
+        "label": "New Artboard",
         "enabled": true,
         "checked": null
       },
@@ -1162,6 +1265,7 @@
           1
         ],
         "action": "duplicate_artboards",
+        "label": "Duplicate Artboards",
         "enabled": true,
         "checked": null
       },
@@ -1171,6 +1275,7 @@
           2
         ],
         "action": "delete_artboards",
+        "label": "Delete Artboards",
         "enabled": false,
         "checked": null
       },
@@ -1180,6 +1285,7 @@
           3
         ],
         "action": "rename_artboard",
+        "label": "Rename",
         "enabled": false,
         "checked": null
       },
@@ -1189,6 +1295,7 @@
           5
         ],
         "action": "delete_empty_artboards",
+        "label": "Delete Empty Artboards",
         "enabled": true,
         "checked": null
       },
@@ -1198,6 +1305,7 @@
           7
         ],
         "action": "convert_to_artboards",
+        "label": "Convert to Artboards",
         "enabled": false,
         "checked": null
       },
@@ -1207,6 +1315,7 @@
           8
         ],
         "action": "open_artboard_options",
+        "label": "Artboard Options...",
         "enabled": true,
         "checked": null
       },
@@ -1216,6 +1325,7 @@
           9
         ],
         "action": "rearrange_artboards",
+        "label": "Rearrange...",
         "enabled": false,
         "checked": null
       },
@@ -1225,6 +1335,7 @@
           11
         ],
         "action": "reset_artboards_panel",
+        "label": "Reset Panel",
         "enabled": true,
         "checked": null
       },
@@ -1234,6 +1345,7 @@
           13
         ],
         "action": "close_panel",
+        "label": "Close Artboards",
         "enabled": true,
         "checked": null
       }
@@ -1255,6 +1367,7 @@
           0
         ],
         "action": "gradient_reverse",
+        "label": "Reverse Gradient",
         "enabled": false,
         "checked": null
       },
@@ -1264,6 +1377,7 @@
           1
         ],
         "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
         "enabled": false,
         "checked": null
       },
@@ -1273,6 +1387,7 @@
           2
         ],
         "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
         "enabled": false,
         "checked": null
       },
@@ -1282,6 +1397,7 @@
           4
         ],
         "action": "",
+        "label": "Open Gradient Library",
         "enabled": true,
         "checked": null
       },
@@ -1291,6 +1407,7 @@
           5
         ],
         "action": "gradient_save_library",
+        "label": "Save Gradient Library",
         "enabled": false,
         "checked": null
       },
@@ -1300,6 +1417,7 @@
           7
         ],
         "action": "close_panel",
+        "label": "Close Gradient",
         "enabled": true,
         "checked": null
       }
@@ -1331,6 +1449,7 @@
           0
         ],
         "action": "new_layer",
+        "label": "New Layer...",
         "enabled": true,
         "checked": null
       },
@@ -1340,6 +1459,7 @@
           1
         ],
         "action": "new_group",
+        "label": "New Group",
         "enabled": true,
         "checked": null
       },
@@ -1349,6 +1469,7 @@
           3
         ],
         "action": "toggle_all_layers_visibility",
+        "label": "Hide All Layers",
         "enabled": true,
         "checked": null
       },
@@ -1358,6 +1479,7 @@
           4
         ],
         "action": "toggle_all_layers_outline",
+        "label": "Outline All Layers",
         "enabled": true,
         "checked": null
       },
@@ -1367,6 +1489,7 @@
           5
         ],
         "action": "toggle_all_layers_lock",
+        "label": "Lock All Layers",
         "enabled": true,
         "checked": null
       },
@@ -1376,6 +1499,7 @@
           7
         ],
         "action": "enter_isolation_mode",
+        "label": "Enter Isolation Mode",
         "enabled": true,
         "checked": null
       },
@@ -1385,6 +1509,7 @@
           8
         ],
         "action": "exit_isolation_mode",
+        "label": "Exit Isolation Mode",
         "enabled": false,
         "checked": null
       },
@@ -1394,6 +1519,7 @@
           10
         ],
         "action": "flatten_artwork",
+        "label": "Flatten Artwork",
         "enabled": true,
         "checked": null
       },
@@ -1403,6 +1529,7 @@
           11
         ],
         "action": "collect_in_new_layer",
+        "label": "Collect in New Layer",
         "enabled": true,
         "checked": null
       },
@@ -1412,6 +1539,129 @@
           13
         ],
         "action": "close_panel",
+        "label": "Close Layers",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "layers_all_hidden_none_in_preview_all_locked",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "layers_panel_content",
+      "ctx": {
+        "panel": {
+          "isolation_stack": []
+        },
+        "active_document": {
+          "layers_panel_selection_count": 1,
+          "layers_panel_selection_is_container": true,
+          "layers_panel_selection_has_group": true,
+          "any_layer_visible": false,
+          "any_layer_preview": false,
+          "any_layer_unlocked": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_layer",
+        "label": "New Layer...",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "new_group",
+        "label": "New Group",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "toggle_all_layers_visibility",
+        "label": "Show All Layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "toggle_all_layers_outline",
+        "label": "Preview All Layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "toggle_all_layers_lock",
+        "label": "Unlock All Layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "enter_isolation_mode",
+        "label": "Enter Isolation Mode",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "exit_isolation_mode",
+        "label": "Exit Isolation Mode",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "flatten_artwork",
+        "label": "Flatten Artwork",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "collect_in_new_layer",
+        "label": "Collect in New Layer",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "close_panel",
+        "label": "Close Layers",
         "enabled": true,
         "checked": null
       }
@@ -1449,6 +1699,7 @@
           0
         ],
         "action": "new_layer",
+        "label": "New Layer...",
         "enabled": true,
         "checked": null
       },
@@ -1458,6 +1709,7 @@
           1
         ],
         "action": "new_group",
+        "label": "New Group",
         "enabled": true,
         "checked": null
       },
@@ -1467,6 +1719,7 @@
           3
         ],
         "action": "toggle_all_layers_visibility",
+        "label": "Hide All Layers",
         "enabled": true,
         "checked": null
       },
@@ -1476,6 +1729,7 @@
           4
         ],
         "action": "toggle_all_layers_outline",
+        "label": "Outline All Layers",
         "enabled": true,
         "checked": null
       },
@@ -1485,6 +1739,7 @@
           5
         ],
         "action": "toggle_all_layers_lock",
+        "label": "Lock All Layers",
         "enabled": true,
         "checked": null
       },
@@ -1494,6 +1749,7 @@
           7
         ],
         "action": "enter_isolation_mode",
+        "label": "Enter Isolation Mode",
         "enabled": false,
         "checked": null
       },
@@ -1503,6 +1759,7 @@
           8
         ],
         "action": "exit_isolation_mode",
+        "label": "Exit Isolation Mode",
         "enabled": true,
         "checked": null
       },
@@ -1512,6 +1769,7 @@
           10
         ],
         "action": "flatten_artwork",
+        "label": "Flatten Artwork",
         "enabled": false,
         "checked": null
       },
@@ -1521,6 +1779,7 @@
           11
         ],
         "action": "collect_in_new_layer",
+        "label": "Collect in New Layer",
         "enabled": false,
         "checked": null
       },
@@ -1530,6 +1789,7 @@
           13
         ],
         "action": "close_panel",
+        "label": "Close Layers",
         "enabled": true,
         "checked": null
       }
@@ -1557,6 +1817,7 @@
           0
         ],
         "action": "toggle_opacity_thumbnails",
+        "label": "Hide Thumbnails",
         "enabled": true,
         "checked": false
       },
@@ -1566,6 +1827,7 @@
           1
         ],
         "action": "toggle_opacity_options",
+        "label": "Show Options",
         "enabled": true,
         "checked": true
       },
@@ -1575,6 +1837,7 @@
           3
         ],
         "action": "make_opacity_mask",
+        "label": "Make Opacity Mask",
         "enabled": false,
         "checked": null
       },
@@ -1584,6 +1847,7 @@
           4
         ],
         "action": "release_opacity_mask",
+        "label": "Release Opacity Mask",
         "enabled": true,
         "checked": null
       },
@@ -1593,6 +1857,7 @@
           5
         ],
         "action": "disable_opacity_mask",
+        "label": "Disable Opacity Mask",
         "enabled": true,
         "checked": null
       },
@@ -1602,6 +1867,7 @@
           6
         ],
         "action": "unlink_opacity_mask",
+        "label": "Unlink Opacity Mask",
         "enabled": true,
         "checked": null
       },
@@ -1611,6 +1877,7 @@
           8
         ],
         "action": "toggle_new_masks_clipping",
+        "label": "New Opacity Masks Are Clipping",
         "enabled": true,
         "checked": true
       },
@@ -1620,6 +1887,7 @@
           9
         ],
         "action": "toggle_new_masks_inverted",
+        "label": "New Opacity Masks Are Inverted",
         "enabled": true,
         "checked": false
       },
@@ -1629,6 +1897,7 @@
           11
         ],
         "action": "toggle_page_isolated_blending",
+        "label": "Page Isolated Blending",
         "enabled": false,
         "checked": null
       },
@@ -1638,6 +1907,7 @@
           12
         ],
         "action": "toggle_page_knockout_group",
+        "label": "Page Knockout Group",
         "enabled": false,
         "checked": null
       },
@@ -1647,6 +1917,7 @@
           14
         ],
         "action": "close_panel",
+        "label": "Close Opacity",
         "enabled": true,
         "checked": null
       }
@@ -1675,6 +1946,7 @@
           0
         ],
         "action": "set_color_panel_mode",
+        "label": "Grayscale",
         "enabled": true,
         "checked": false
       },
@@ -1684,6 +1956,7 @@
           1
         ],
         "action": "set_color_panel_mode",
+        "label": "RGB",
         "enabled": true,
         "checked": false
       },
@@ -1693,6 +1966,7 @@
           2
         ],
         "action": "set_color_panel_mode",
+        "label": "HSB",
         "enabled": true,
         "checked": false
       },
@@ -1702,6 +1976,7 @@
           3
         ],
         "action": "set_color_panel_mode",
+        "label": "CMYK",
         "enabled": true,
         "checked": true
       },
@@ -1711,6 +1986,7 @@
           4
         ],
         "action": "set_color_panel_mode",
+        "label": "Web Safe RGB",
         "enabled": true,
         "checked": false
       },
@@ -1720,6 +1996,7 @@
           6
         ],
         "action": "invert_active_color",
+        "label": "Invert",
         "enabled": false,
         "checked": null
       },
@@ -1729,6 +2006,7 @@
           7
         ],
         "action": "complement_active_color",
+        "label": "Complement",
         "enabled": false,
         "checked": null
       },
@@ -1738,6 +2016,7 @@
           9
         ],
         "action": "",
+        "label": "Create New Swatch...",
         "enabled": false,
         "checked": null
       },
@@ -1747,6 +2026,7 @@
           11
         ],
         "action": "close_panel",
+        "label": "Close Color",
         "enabled": true,
         "checked": null
       }
@@ -1775,6 +2055,7 @@
           0
         ],
         "action": "set_color_panel_mode",
+        "label": "Grayscale",
         "enabled": true,
         "checked": false
       },
@@ -1784,6 +2065,7 @@
           1
         ],
         "action": "set_color_panel_mode",
+        "label": "RGB",
         "enabled": true,
         "checked": false
       },
@@ -1793,6 +2075,7 @@
           2
         ],
         "action": "set_color_panel_mode",
+        "label": "HSB",
         "enabled": true,
         "checked": false
       },
@@ -1802,6 +2085,7 @@
           3
         ],
         "action": "set_color_panel_mode",
+        "label": "CMYK",
         "enabled": true,
         "checked": true
       },
@@ -1811,6 +2095,7 @@
           4
         ],
         "action": "set_color_panel_mode",
+        "label": "Web Safe RGB",
         "enabled": true,
         "checked": false
       },
@@ -1820,6 +2105,7 @@
           6
         ],
         "action": "invert_active_color",
+        "label": "Invert",
         "enabled": true,
         "checked": null
       },
@@ -1829,6 +2115,7 @@
           7
         ],
         "action": "complement_active_color",
+        "label": "Complement",
         "enabled": true,
         "checked": null
       },
@@ -1838,6 +2125,7 @@
           9
         ],
         "action": "",
+        "label": "Create New Swatch...",
         "enabled": false,
         "checked": null
       },
@@ -1847,6 +2135,7 @@
           11
         ],
         "action": "close_panel",
+        "label": "Close Color",
         "enabled": true,
         "checked": null
       }
@@ -1876,6 +2165,7 @@
           0
         ],
         "action": "new_swatch",
+        "label": "New Swatch",
         "enabled": true,
         "checked": null
       },
@@ -1885,6 +2175,7 @@
           1
         ],
         "action": "duplicate_swatch",
+        "label": "Duplicate Swatch",
         "enabled": true,
         "checked": null
       },
@@ -1894,6 +2185,7 @@
           2
         ],
         "action": "delete_swatch",
+        "label": "Delete Swatch",
         "enabled": true,
         "checked": null
       },
@@ -1903,6 +2195,7 @@
           4
         ],
         "action": "select_all_unused_swatches",
+        "label": "Select All Unused",
         "enabled": true,
         "checked": null
       },
@@ -1912,6 +2205,7 @@
           5
         ],
         "action": "add_used_colors",
+        "label": "Add Used Colors",
         "enabled": true,
         "checked": null
       },
@@ -1921,6 +2215,7 @@
           7
         ],
         "action": "sort_swatches_by_name",
+        "label": "Sort by Name",
         "enabled": true,
         "checked": null
       },
@@ -1930,6 +2225,7 @@
           9
         ],
         "action": "set_swatch_thumbnail_size",
+        "label": "Small Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -1939,6 +2235,7 @@
           10
         ],
         "action": "set_swatch_thumbnail_size",
+        "label": "Medium Thumbnail View",
         "enabled": true,
         "checked": false
       },
@@ -1948,6 +2245,7 @@
           11
         ],
         "action": "set_swatch_thumbnail_size",
+        "label": "Large Thumbnail View",
         "enabled": true,
         "checked": true
       },
@@ -1957,6 +2255,7 @@
           13
         ],
         "action": "open_swatch_options",
+        "label": "Swatch Options...",
         "enabled": true,
         "checked": null
       },
@@ -1966,6 +2265,7 @@
           15
         ],
         "action": "open_swatch_library",
+        "label": "Open Swatch Library",
         "enabled": true,
         "checked": null
       },
@@ -1975,6 +2275,7 @@
           16
         ],
         "action": "save_swatch_library",
+        "label": "Save Swatch Library",
         "enabled": true,
         "checked": null
       },
@@ -1984,6 +2285,7 @@
           18
         ],
         "action": "close_panel",
+        "label": "Close Swatches",
         "enabled": true,
         "checked": null
       }
@@ -2007,6 +2309,7 @@
           0
         ],
         "action": "toggle_use_preview_bounds",
+        "label": "Use Preview Bounds",
         "enabled": true,
         "checked": true
       },
@@ -2016,6 +2319,7 @@
           2
         ],
         "action": "reset_align_panel",
+        "label": "Reset Panel",
         "enabled": true,
         "checked": null
       },
@@ -2025,6 +2329,7 @@
           4
         ],
         "action": "close_panel",
+        "label": "Close Align",
         "enabled": true,
         "checked": null
       }
@@ -2048,6 +2353,7 @@
           0
         ],
         "action": "toggle_use_preview_bounds",
+        "label": "Use Preview Bounds",
         "enabled": true,
         "checked": false
       },
@@ -2057,6 +2363,7 @@
           2
         ],
         "action": "reset_align_panel",
+        "label": "Reset Panel",
         "enabled": true,
         "checked": null
       },
@@ -2066,6 +2373,7 @@
           4
         ],
         "action": "close_panel",
+        "label": "Close Align",
         "enabled": true,
         "checked": null
       }
@@ -2093,6 +2401,7 @@
           0
         ],
         "action": "toggle_snap_to_glyph_visible",
+        "label": "Show Snap to Glyph Options",
         "enabled": true,
         "checked": false
       },
@@ -2102,6 +2411,7 @@
           2
         ],
         "action": "toggle_all_caps",
+        "label": "All Caps",
         "enabled": true,
         "checked": true
       },
@@ -2111,6 +2421,7 @@
           3
         ],
         "action": "toggle_small_caps",
+        "label": "Small Caps",
         "enabled": true,
         "checked": false
       },
@@ -2120,6 +2431,7 @@
           4
         ],
         "action": "toggle_superscript",
+        "label": "Superscript",
         "enabled": true,
         "checked": false
       },
@@ -2129,6 +2441,7 @@
           5
         ],
         "action": "toggle_subscript",
+        "label": "Subscript",
         "enabled": true,
         "checked": true
       },
@@ -2138,6 +2451,7 @@
           7
         ],
         "action": "close_panel",
+        "label": "Close Character",
         "enabled": true,
         "checked": null
       }
@@ -2165,6 +2479,7 @@
           0
         ],
         "action": "toggle_snap_to_glyph_visible",
+        "label": "Show Snap to Glyph Options",
         "enabled": true,
         "checked": true
       },
@@ -2174,6 +2489,7 @@
           2
         ],
         "action": "toggle_all_caps",
+        "label": "All Caps",
         "enabled": true,
         "checked": false
       },
@@ -2183,6 +2499,7 @@
           3
         ],
         "action": "toggle_small_caps",
+        "label": "Small Caps",
         "enabled": true,
         "checked": true
       },
@@ -2192,6 +2509,7 @@
           4
         ],
         "action": "toggle_superscript",
+        "label": "Superscript",
         "enabled": true,
         "checked": true
       },
@@ -2201,6 +2519,7 @@
           5
         ],
         "action": "toggle_subscript",
+        "label": "Subscript",
         "enabled": true,
         "checked": false
       },
@@ -2210,6 +2529,7 @@
           7
         ],
         "action": "close_panel",
+        "label": "Close Character",
         "enabled": true,
         "checked": null
       }
@@ -2233,6 +2553,7 @@
           0
         ],
         "action": "toggle_hanging_punctuation",
+        "label": "Hanging Punctuation",
         "enabled": true,
         "checked": true
       },
@@ -2242,6 +2563,7 @@
           2
         ],
         "action": "open_paragraph_justification",
+        "label": "Justification…",
         "enabled": true,
         "checked": null
       },
@@ -2251,6 +2573,7 @@
           3
         ],
         "action": "open_paragraph_hyphenation",
+        "label": "Hyphenation…",
         "enabled": true,
         "checked": null
       },
@@ -2260,6 +2583,7 @@
           5
         ],
         "action": "reset_paragraph_panel",
+        "label": "Reset Panel",
         "enabled": true,
         "checked": null
       },
@@ -2269,6 +2593,7 @@
           7
         ],
         "action": "close_panel",
+        "label": "Close Paragraph",
         "enabled": true,
         "checked": null
       }
@@ -2292,6 +2617,7 @@
           0
         ],
         "action": "toggle_hanging_punctuation",
+        "label": "Hanging Punctuation",
         "enabled": true,
         "checked": false
       },
@@ -2301,6 +2627,7 @@
           2
         ],
         "action": "open_paragraph_justification",
+        "label": "Justification…",
         "enabled": true,
         "checked": null
       },
@@ -2310,6 +2637,7 @@
           3
         ],
         "action": "open_paragraph_hyphenation",
+        "label": "Hyphenation…",
         "enabled": true,
         "checked": null
       },
@@ -2319,6 +2647,7 @@
           5
         ],
         "action": "reset_paragraph_panel",
+        "label": "Reset Panel",
         "enabled": true,
         "checked": null
       },
@@ -2328,6 +2657,7 @@
           7
         ],
         "action": "close_panel",
+        "label": "Close Paragraph",
         "enabled": true,
         "checked": null
       }
