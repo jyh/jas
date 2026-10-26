@@ -268,6 +268,18 @@ public enum PanelLayout {
         return widths.reduce(0, +) + 6 * max(widths.count - 1, 0)
     }
 
+    /// A button's label as it draws: `bind.label` evaluated as an expression
+    /// when that yields a string, else the static `label` (Rust
+    /// `render_button`). Measuring the static key alone planned a bound label
+    /// at 0 (flask STATUS §569, finding L). Rust's `button_label_w`.
+    private static func buttonLabelW(_ n: [String: Any], _ ctx: [String: Any]) -> Int {
+        if let expr = (n["bind"] as? [String: Any])?["label"] as? String,
+           case .string(let s) = evaluate(expr, context: ctx) {
+            return s.unicodeScalars.count * charWidth
+        }
+        return textW(n, "label", ctx)
+    }
+
     private static func textW(_ n: [String: Any], _ key: String, _ ctx: [String: Any]) -> Int {
         guard let raw = n[key] as? String else { return 0 }
         let resolved = evaluateText(raw, context: ctx)
@@ -396,7 +408,7 @@ public enum PanelLayout {
             case "text":
                 w = textW(n, "content", ctx)
             case "button":
-                w = textW(n, "label", ctx) + 16
+                w = buttonLabelW(n, ctx) + 16
             case "checkbox", "toggle", "radio":
                 w = 16 + 4 + textW(n, "label", ctx)
             case "radio_group":

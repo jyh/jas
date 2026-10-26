@@ -248,6 +248,19 @@ fn text_w(n: &Value, key: &str, ctx: &Value) -> i64 {
     }
 }
 
+/// A button's label as it draws: `bind.label` evaluated as an expression when
+/// that yields a string, else the static `label` (`renderer::render_button`).
+/// Measuring the static key alone planned a bound label at 0 (flask STATUS
+/// §569, finding L). The reference's `_button_label_w`.
+fn button_label_w(n: &Value, ctx: &Value) -> i64 {
+    if let Some(expr) = n.get("bind").and_then(|b| b.get("label")).and_then(Value::as_str) {
+        if let super::expr_types::Value::Str(s) = super::expr::eval(expr, ctx) {
+            return s.chars().count() as i64 * CHAR_WIDTH;
+        }
+    }
+    text_w(n, "label", ctx)
+}
+
 /// A `radio_group`'s options in a row: each a 16 indicator plus, when it has
 /// a label, a 4 gap and the label; options 6 apart. Computed options (an
 /// expression) have no declared rows, so the width is 0.
@@ -443,7 +456,7 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
     } else {
         match t {
             "text" => text_w(n, "content", ctx),
-            "button" => text_w(n, "label", ctx) + 16,
+            "button" => button_label_w(n, ctx) + 16,
             "checkbox" | "toggle" | "radio" => 16 + 4 + text_w(n, "label", ctx),
             "radio_group" => radio_group_w(n, ctx),
             "reference_point_widget" => 28, // the web's repeat(3, 8px), gap 2px
@@ -1402,6 +1415,26 @@ mod radio_width_tests {
         let rects = layout_panel(&json!({"content": {"type": "row", "children": [leaf]}}), 400, 0, &json!({}));
         rects.as_array().unwrap().iter().find(|r| r["path"] == json!([0]))
             .and_then(|r| r["rect"]["w"].as_i64()).expect("a rect at [0]")
+    }
+
+    /// A bound label is measured as it draws (flask §569, finding L): the
+    /// reference's test_panel_layout_bound_label.py, one for one.
+    #[test]
+    fn a_bound_label_is_measured_as_it_draws() {
+        let wc = |leaf: Value, ctx: Value| -> i64 {
+            let rects = layout_panel(&json!({"content": {"type": "row", "children": [leaf]}}), 400, 0, &ctx);
+            rects.as_array().unwrap().iter().find(|r| r["path"] == json!([0]))
+                .and_then(|r| r["rect"]["w"].as_i64()).expect("a rect at [0]")
+        };
+        let mask = json!({"type": "button", "bind": {"label": "if selection_has_mask then \"Release\" else \"Make Mask\""}});
+        assert_eq!(wc(mask.clone(), json!({"selection_has_mask": false})), 9 * CHAR_WIDTH + 16);
+        assert_eq!(wc(mask, json!({"selection_has_mask": true})), 7 * CHAR_WIDTH + 16, "the other arm");
+        assert_eq!(wc(json!({"type": "button", "bind": {"label": "op.label"}}), json!({"op": {"label": "Add Side"}})),
+                   8 * CHAR_WIDTH + 16, "a foreach row's label");
+        let both = json!({"type": "button", "label": "Static", "bind": {"label": "op.label"}});
+        assert_eq!(wc(both.clone(), json!({"op": {"label": "Bound label"}})), 11 * CHAR_WIDTH + 16);
+        assert_eq!(wc(both, json!({})), 6 * CHAR_WIDTH + 16, "a non-string result: the static label");
+        assert_eq!(w(json!({"type": "button", "label": "Static"})), 6 * CHAR_WIDTH + 16, "no bind: unchanged");
     }
 
     #[test]
