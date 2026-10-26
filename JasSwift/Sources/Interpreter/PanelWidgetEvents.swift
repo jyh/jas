@@ -366,7 +366,12 @@ func dispatchPanelAction(
             }
         }
         return
-    case "new_symbol", "place_instance", "delete_symbol_action":
+    case "place_instance":
+        // Its YAML says what it does (`doc.place_instance`), through the
+        // dispatcher that holds the `doc.*` handlers.
+        LayersPanel.dispatchYamlAction(name, model: model)
+        return
+    case "new_symbol", "delete_symbol_action":
         // Symbols panel footer buttons. Native intercept: mint ids by
         // the value-in-op rule and call the shared symbol Controller
         // ops (the YAML actions are `log` stubs). Mirrors the Rust

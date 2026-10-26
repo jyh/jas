@@ -34,9 +34,13 @@ public enum SymbolsPanel {
         switch cmd {
         case "close_panel":
             layoutApply(&layout, opClosePanel(addr))
-        case "new_symbol", "place_instance", "delete_symbol_action":
+        case "new_symbol", "delete_symbol_action":
             guard let m = model else { return }
             dispatchSymbolAction(cmd, model: m)
+        // Its YAML says what it does (`doc.place_instance`).
+        case "place_instance":
+            guard let m = model else { return }
+            LayersPanel.dispatchYamlAction(cmd, model: m)
         default:
             break
         }
@@ -72,6 +76,15 @@ public enum SymbolsPanel {
         }
         model.stateStore.setPanel(scopeId, "selected_symbol", id ?? NSNull())
         model.panelStateVersion &+= 1
+    }
+
+    /// The one value-in-op op Place Instance applies (`doc.place_instance` in
+    /// actions.yaml): `place_instance` of `master` with a freshly minted
+    /// reference id (SYMBOLS.md §7), or nil when the mint fails. Rust
+    /// `symbols_host::place_instance_ops`.
+    static func placeInstanceOps(_ doc: Document, master: String) -> [[String: Any]]? {
+        guard let refId = mint(doc, 1)?[0] else { return nil }
+        return [["op": "place_instance", "master_id": master, "ref_id": refId]]
     }
 
     /// Mint `count` collision-free element ids against every id already in
@@ -126,13 +139,6 @@ public enum SymbolsPanel {
                 resolved = r.target.id
             }
             setSelectedSymbol(model, resolved)
-
-        case "place_instance":
-            guard let masterId = selectedSymbol(model) else { return }
-            guard let refId = mint(model.document, 1)?[0] else { return }
-            // The Controller mutator self-brackets one undo step via editDocument.
-            let controller = Controller(model: model)
-            controller.placeInstance(masterId: masterId, refId: refId)
 
         case "delete_symbol_action":
             guard let masterId = selectedSymbol(model) else { return }

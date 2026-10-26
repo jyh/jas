@@ -13634,6 +13634,43 @@ mod tests {
         assert_eq!(view["selection_has_compound_shape"], serde_json::json!(false));
     }
 
+    /// The Symbols panel's Place Instance runs its YAML (`doc.place_instance`
+    /// with `panel.selected_symbol`, which the web's app scope supplies from
+    /// `symbols_selected`): a minted reference to that master is appended and
+    /// selected, as ONE undo step. No master selected: nothing.
+    #[test]
+    fn place_instance_appends_a_reference_to_the_panel_selected_master() {
+        use crate::document::test_fixture::{model_with, rect};
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut doc = model_with(vec![rect(0.0, 0.0, 10.0, 10.0)], &[]).document().clone();
+        let mut master = rect(50.0, 0.0, 10.0, 10.0);
+        master.common_mut().id = Some("m1".into());
+        doc.symbols.push(master);
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        let before = st.tabs[st.active_tab].model.document().clone();
+
+        st.symbols_selected = None;
+        let _ = dispatch_action("place_instance", &serde_json::Map::new(), &mut st);
+        assert_eq!(st.tabs[st.active_tab].model.document().layers, before.layers, "no master: nothing");
+
+        st.symbols_selected = Some("m1".into());
+        let _ = dispatch_action("place_instance", &serde_json::Map::new(), &mut st);
+        let doc = st.tabs[st.active_tab].model.document().clone();
+        let kids = doc.layers[0].children().unwrap();
+        assert_eq!(kids.len(), 2, "the instance is appended");
+        match &*kids[1] {
+            Element::Live(crate::geometry::live::LiveVariant::Reference(r)) => {
+                assert_eq!(r.target.0, "m1");
+                let id = r.common.id.clone().expect("a minted id");
+                assert_ne!(id, "m1");
+            }
+            other => panic!("not a reference: {other:?}"),
+        }
+        assert_eq!(doc.selection.iter().map(|es| es.path.clone()).collect::<Vec<_>>(), vec![vec![0, 1]]);
+        st.tabs[st.active_tab].model.undo();
+        assert_eq!(st.tabs[st.active_tab].model.document().layers, before.layers, "one undo");
+    }
+
     /// W2b-18. The web view publishes the Brushes panel's two gates, from the
     /// ONE definition the engine's scope also calls; with no tab, both are false.
     #[test]

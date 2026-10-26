@@ -171,6 +171,11 @@
               "required": ["offset"],
               "properties": { "offset": { "type": "number" } }
             },
+            "doc.place_instance": {
+              "type": "object",
+              "required": ["master"],
+              "properties": { "master": { "type": "string" } }
+            },
             "doc.move_artboards_down": {},
             "doc.move_artboards_up": {},
             "doc.op": {

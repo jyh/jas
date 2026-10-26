@@ -620,8 +620,10 @@
       "doc_verbs": []
     },
     "place_instance": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.place_instance"
+      ]
     },
     "print_dialog_done": {
       "class": "journaling",
@@ -1184,6 +1186,7 @@
       "doc.move_artboards_down",
       "doc.move_artboards_up",
       "doc.op",
+      "doc.place_instance",
       "doc.preview.clear",
       "doc.preview.restore",
       "doc.rotate.apply",
@@ -1214,11 +1217,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 37,
+      "journaling": 38,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 194,
+      "ui-state": 193,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1268,7 +1271,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 37,
+    "journaling_actions": 38,
     "native_intercepts": [
       "export_to_pdf"
     ],
@@ -1287,6 +1290,7 @@
         "doc.move_artboards_down",
         "doc.move_artboards_up",
         "doc.op",
+        "doc.place_instance",
         "doc.select_in_rect",
         "doc.set_advanced_field",
         "doc.set_artboard_field",

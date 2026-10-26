@@ -161,6 +161,12 @@ VERB_TABLE = {
         "journals": "always", "op": "create_reference + move_selection",
         "evidence": ["effects.rs:2904", "op_apply.rs:2177"],
     },
+    "doc.place_instance": {
+        # The Symbols panel's Place Instance: one value-in-op op whose id the
+        # effect mints first (symbols_host::place_instance_ops), through op_apply.
+        "journals": "always", "op": "place_instance",
+        "evidence": ["effects.rs:2921", "op_apply.rs:2204"],
+    },
     "doc.op": {
         # One journaled op BY NAME: the op is the call site's own `op` field
         # (`doc.op: { op: unlock_all }`), so the row names no single op.
