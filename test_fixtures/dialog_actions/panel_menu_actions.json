@@ -879,5 +879,49 @@
       "stroke_start_arrowhead_scale": 100,
       "stroke_end_arrowhead_scale": 150
     }
+  },
+  {
+    "name": "layers_type_filter_pick_checks_and_unchecks_a_type",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml lp_filter_button (a dropdown; a plain pick of a type item raises `toggle`, whose behavior runs actions.yaml toggle_layers_type_filter with element_type = item.value): Circle, then Path, then Circle again. The set is driven both ways, so a mutant that only adds (or only removes) reads wrong. Values from the reference's list_toggle: [circle], [circle, path], [path].",
+    "actions": [
+      {
+        "panel_event": {
+          "panel": "layers_panel_content",
+          "address": {
+            "id": "lp_filter_button"
+          },
+          "event": "toggle",
+          "value": "circle"
+        }
+      },
+      {
+        "panel_event": {
+          "panel": "layers_panel_content",
+          "address": {
+            "id": "lp_filter_button"
+          },
+          "event": "toggle",
+          "value": "path"
+        }
+      },
+      {
+        "panel_event": {
+          "panel": "layers_panel_content",
+          "address": {
+            "id": "lp_filter_button"
+          },
+          "event": "toggle",
+          "value": "circle"
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "type_filter": [
+          "path"
+        ]
+      }
+    }
   }
 ]

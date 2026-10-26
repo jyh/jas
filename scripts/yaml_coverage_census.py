@@ -154,11 +154,24 @@ def _widgets_by_id(spec):
 
 # The behavior events a dialog_event's event fires on its widget: a commit is a
 # value change, a click is a click. The widget's own `action` runs on a click.
-_EVENT_BEHAVIORS = {"commit": ("change", "commit"), "click": ("click",)}
+_EVENT_BEHAVIORS = {"commit": ("change", "commit"), "click": ("click",),
+                    "toggle": ("toggle",), "alt_toggle": ("alt_toggle",)}
 
 
-def _id_addressed_actions(node, event):
+def _id_addressed_actions(node, event, value=None):
     acts = set()
+    # A dropdown pick (WIDGET_EVENTS.md, "Picking a dropdown item"): an `action`
+    # item runs its own action and nothing else; any other item runs the
+    # behaviors declared for the event. A value no item carries runs nothing.
+    if node.get("type") == "dropdown" and event in ("toggle", "alt_toggle"):
+        item = next((i for i in node.get("items") or []
+                     if isinstance(i, dict) and i.get("value") == value), None)
+        if item is None:
+            return acts
+        if item.get("type") == "action":
+            if isinstance(item.get("action"), str):
+                acts.add(item["action"])
+            return acts
     if event == "click" and isinstance(node.get("action"), str):
         acts.add(node["action"])
     for b in node.get("behavior") or []:
@@ -245,7 +258,8 @@ def gather_evidence(root, spec=None):
                             find(c)
                 find(content)
                 if len(hits) == 1:
-                    ev["actions_dispatched"] |= _id_addressed_actions(hits[0], pe.get("event", "click"))
+                    ev["actions_dispatched"] |= _id_addressed_actions(hits[0], pe.get("event", "click"),
+                                                                     pe.get("value"))
             pm = a.get("panel_menu")
             if isinstance(pm, dict):
                 act = _panel_menu_action(spec, pm.get("panel"), pm.get("address"))
@@ -642,7 +656,10 @@ def self_test():
                 {"panel_menu": {"panel": "p1", "address": {"action": "pm_twice"}}},
                 {"panel_menu": {"panel": "p2", "address": {"action": "pm_elsewhere"}}},
                 {"panel_event": {"panel": "p1", "address": {"id": "pw_btn"}, "event": "click"}},
-                {"panel_event": {"panel": "p2", "address": {"id": "pw_far"}, "event": "click"}}]}])
+                {"panel_event": {"panel": "p2", "address": {"id": "pw_far"}, "event": "click"}},
+                {"panel_event": {"panel": "p1", "address": {"id": "pw_dd"}, "event": "toggle", "value": "t1"}},
+                {"panel_event": {"panel": "p1", "address": {"id": "pw_dd"}, "event": "toggle", "value": "all"}},
+                {"panel_event": {"panel": "p1", "address": {"id": "pw_dd2"}, "event": "toggle", "value": "all"}}]}])
         put("test_fixtures/dialog_actions/c.json",
             [{"name": "live", "actions": [
                 {"open_dialog": {"id": "d_live"}},
@@ -698,7 +715,8 @@ def self_test():
                 "dlg_committed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_decoy": {"effects": [{"set": {"a": 1}}]},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pm_one", "pm_twice", "pm_elsewhere")},
-                **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pe_act", "pe_far")},
+                **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pe_act", "pe_far", "pk_tog", "pk_alt",
+                                                                 "pk_all", "pk_tog2", "pk_all2")},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in ("live_preview", "shut_preview", "mute_preview")},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in (
                     "beh_on_change", "beh_not_change", "btn_act", "twice_act", "clickonly_act")},
@@ -724,7 +742,16 @@ def self_test():
                 {"label": "Elsewhere", "action": "pm_elsewhere"}],
                 "content": {"type": "col", "children": [
                     {"id": "pw_btn", "type": "icon_button", "behavior": [{"event": "click", "action": "pe_act"}]},
-                    {"id": "pw_far", "type": "icon_button", "behavior": [{"event": "click", "action": "pe_far"}]}]}},
+                    {"id": "pw_far", "type": "icon_button", "behavior": [{"event": "click", "action": "pe_far"}]},
+                    {"id": "pw_dd", "type": "dropdown",
+                     "items": [{"value": "all", "type": "action", "action": "pk_all"},
+                               {"value": "t1", "type": "toggle"}],
+                     "behavior": [{"event": "toggle", "action": "pk_tog"},
+                                  {"event": "alt_toggle", "action": "pk_alt"}]},
+                    {"id": "pw_dd2", "type": "dropdown",
+                     "items": [{"value": "all", "type": "action", "action": "pk_all2"},
+                               {"value": "t1", "type": "toggle"}],
+                     "behavior": [{"event": "toggle", "action": "pk_tog2"}]}]}},
                 "p2": {}},
             "dialogs": {"d0": {"content": {"type": "col", "children": [
                 {"id": "w_sel", "type": "select", "behavior": [
@@ -763,6 +790,10 @@ def self_test():
         expect(("actions", "mute_preview"), NOT_YET_BUILT)  # nothing asserts the document moved
         expect(("actions", "pe_act"), COVERED)  # a panel widget's click behavior
         expect(("actions", "pe_far"), NOT_YET_BUILT)  # resolved in the NAMED panel's content only
+        expect(("actions", "pk_tog"), COVERED)  # a dropdown pick of a type item runs the toggle behavior
+        expect(("actions", "pk_all"), COVERED)  # a pick of an action item runs the item's own action
+        expect(("actions", "pk_alt"), NOT_YET_BUILT)  # alt_toggle was never raised
+        expect(("actions", "pk_tog2"), NOT_YET_BUILT)  # picking the action item does NOT run the behavior
         expect(("actions", "pm_one"), COVERED)  # the ONE panel-menu row a step addresses
         expect(("actions", "pm_twice"), NOT_YET_BUILT)  # an address two rows share resolves to neither
         expect(("actions", "pm_elsewhere"), NOT_YET_BUILT)  # resolved in the NAMED panel's menu only
