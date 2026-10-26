@@ -812,6 +812,9 @@ class Controller:
             visibility=getattr(existing, "visibility", Visibility.PREVIEW),
             blend_mode=getattr(existing, "blend_mode", BlendMode.NORMAL),
             mask=getattr(existing, "mask", None),
+            # A promote re-describes the shape, it does not repaint it.
+            fill=getattr(existing, "fill", None),
+            stroke=getattr(existing, "stroke", None),
         )
         self._model.edit_document(doc.replace_element(path, generated))
 

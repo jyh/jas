@@ -592,6 +592,9 @@ public class Controller {
             // port hand-listed six fields and could not list `name` at all,
             // so a promoted element silently came back unnamed.
             name: existing.name,
+            // A promote re-describes the shape, it does not repaint it.
+            fill: existing.fill,
+            stroke: existing.stroke,
             id: existing.id,
             transform: transform,
             opacity: opacity,
