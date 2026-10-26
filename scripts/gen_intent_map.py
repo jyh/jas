@@ -149,7 +149,7 @@ VERB_TABLE = {
     },
     "doc.delete_at": {
         "journals": "always", "op": "delete_at",
-        "evidence": ["renderer.rs:3440-3463", "op_apply.rs:1554"],
+        "evidence": ["layer_doc_effects.rs:75", "op_apply.rs:1554"],
     },
     "doc.delete_selection": {
         "journals": "always", "op": "delete_selection",
@@ -191,23 +191,23 @@ VERB_TABLE = {
     },
     "doc.insert_after": {
         "journals": "always", "op": "insert_after",
-        "evidence": ["renderer.rs:3545-3564", "op_apply.rs:1571"],
+        "evidence": ["layer_doc_effects.rs:81", "op_apply.rs:1571"],
     },
     "doc.insert_at": {
         "journals": "always", "op": "insert_at",
-        "evidence": ["renderer.rs:3675-3706", "op_apply.rs:1578"],
+        "evidence": ["layer_doc_effects.rs:89", "op_apply.rs:1578"],
     },
     "doc.wrap_in_group": {
         "journals": "always", "op": "wrap_in_group",
-        "evidence": ["renderer.rs:3642-3664", "op_apply.rs:1601"],
+        "evidence": ["layer_doc_effects.rs:118", "op_apply.rs:1601"],
     },
     "doc.wrap_in_layer": {
         "journals": "always", "op": "wrap_in_layer",
-        "evidence": ["renderer.rs:3599-3631", "op_apply.rs:1615"],
+        "evidence": ["layer_doc_effects.rs:118", "op_apply.rs:1615"],
     },
     "doc.unpack_group_at": {
         "journals": "always", "op": "unpack_group_at",
-        "evidence": ["renderer.rs:3576-3587", "op_apply.rs:1632"],
+        "evidence": ["layer_doc_effects.rs:110", "op_apply.rs:1632"],
     },
     # -- unconditional journaling: effects.rs run_doc_effect arms -----------
     "doc.set_attr_on_selection": {
@@ -282,20 +282,20 @@ VERB_TABLE = {
     },
     "doc.set": {
         "journals": "never",
-        "note": ("direct per-field document write via apply_doc_set_field; "
+        "note": ("direct per-field document write via layer_doc_effects::set_field; "
                  "not routed through op_apply, so it records no op"),
-        "evidence": ["renderer.rs:3709-3728"],
+        "evidence": ["layer_doc_effects.rs:141"],
     },
     "doc.clone_at": {
         "journals": "never",
         "note": "pure ctx binder: clones an element into scope, no mutation",
-        "evidence": ["renderer.rs:3516-3534"],
+        "evidence": ["layer_doc_effects.rs:46"],
     },
     "doc.create_layer": {
         "journals": "never",
         "note": ("pure ctx binder: deterministic Layer factory bound via "
                  "`as:`; the subsequent doc.insert_at journals"),
-        "evidence": ["renderer.rs:3401-3430"],
+        "evidence": ["layer_doc_effects.rs:31"],
     },
 }
 

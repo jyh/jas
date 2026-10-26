@@ -23,7 +23,7 @@
     "matching NonUndoableIntent."
   ],
   "exemptions": {
-    "jas_dioxus/src/interpreter/renderer.rs::apply_doc_set_field": "UNTRACED. A generic `doc.set` effect write. Whether every dispatch path into it opens a transaction first is not established.",
+    "jas_dioxus/src/interpreter/layer_doc_effects.rs::set_field": "UNTRACED. A generic `doc.set` effect write (moved from renderer.rs::apply_doc_set_field on 2026-10-26, when the engine's runner began calling it too). Whether every dispatch path into it opens a transaction first is not established.",
     "jas_dioxus/src/tools/type_on_path_tool.rs::sync_to_model": "The bracket is opened ONE FRAME UP by `ensure_snapshot` (begin_txn, idempotent while open) and this gate is function-scoped, so it cannot see it. NOT individually verified: whether EVERY call path reaches ensure_snapshot first is untraced.",
     "jas_dioxus/src/tools/type_on_path_tool.rs::paste_text": "As sync_to_model above; same tool, same pattern, same untraced question.",
     "jas_dioxus/src/tools/type_tool.rs::sync_to_model": "As type_on_path_tool::sync_to_model.",

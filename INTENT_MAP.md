@@ -195,11 +195,11 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 | `doc.copy_selection` | always | `copy_selection` | no (tool YAML only) | effects.rs:948-961; op_apply.rs:1397 |
 | `doc.create_artboard` | always | `create_artboard` | yes | renderer.rs:3100-3136; op_apply.rs:1863 |
 | `doc.delete_artboard_by_id` | always | `delete_artboard_by_id` | yes | renderer.rs:3150-3159; op_apply.rs:1832 |
-| `doc.delete_at` | always | `delete_at` | yes | renderer.rs:3440-3463; op_apply.rs:1554 |
+| `doc.delete_at` | always | `delete_at` | yes | layer_doc_effects.rs:75; op_apply.rs:1554 |
 | `doc.delete_selection` | always | `delete_selection` | no (tool YAML only) | renderer.rs:3508-3513; op_apply.rs:1564 |
 | `doc.duplicate_artboard` | always | `duplicate_artboard` | yes | renderer.rs:3176-3229; op_apply.rs:1876 |
-| `doc.insert_after` | always | `insert_after` | yes | renderer.rs:3545-3564; op_apply.rs:1571 |
-| `doc.insert_at` | always | `insert_at` | yes | renderer.rs:3675-3706; op_apply.rs:1578 |
+| `doc.insert_after` | always | `insert_after` | yes | layer_doc_effects.rs:81; op_apply.rs:1571 |
+| `doc.insert_at` | always | `insert_at` | yes | layer_doc_effects.rs:89; op_apply.rs:1578 |
 | `doc.make_instance` | always | `create_reference + move_selection` | yes | effects.rs:2904; op_apply.rs:2177 |
 | `doc.move_artboards_down` | always | `move_artboards_down` | yes | renderer.rs:3390-3396; op_apply.rs:1849 |
 | `doc.move_artboards_up` | always | `move_artboards_up` | yes | renderer.rs:3378-3384; op_apply.rs:1842 |
@@ -220,17 +220,17 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 | `doc.set_output_ink_field` | always | `set_output_ink_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_print_preferences_field` | always | `set_print_preferences_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.translate_selection` | always | `move_selection` | yes | effects.rs:767-785; op_apply.rs:1394 |
-| `doc.unpack_group_at` | always | `unpack_group_at` | yes | renderer.rs:3576-3587; op_apply.rs:1632 |
-| `doc.wrap_in_group` | always | `wrap_in_group` | yes | renderer.rs:3642-3664; op_apply.rs:1601 |
-| `doc.wrap_in_layer` | always | `wrap_in_layer` | yes | renderer.rs:3599-3631; op_apply.rs:1615 |
+| `doc.unpack_group_at` | always | `unpack_group_at` | yes | layer_doc_effects.rs:110; op_apply.rs:1632 |
+| `doc.wrap_in_group` | always | `wrap_in_group` | yes | layer_doc_effects.rs:118; op_apply.rs:1601 |
+| `doc.wrap_in_layer` | always | `wrap_in_layer` | yes | layer_doc_effects.rs:118; op_apply.rs:1615 |
 | `doc.rotate.apply` | param-gated | `rotate_transform` | yes | effects.rs:1658-1683 (gate at :1678); op_apply.rs:1725 |
 | `doc.scale.apply` | param-gated | `scale_transform` | yes | effects.rs:1619-1656 (gate at :1651); op_apply.rs:1710 |
 | `doc.shear.apply` | param-gated | `shear_transform` | yes | effects.rs:1685-1717 (gate at :1711); op_apply.rs:1735 |
-| `doc.clone_at` | never (pure ctx binder: clones an element into scope, no mutation) | -- | yes | renderer.rs:3516-3534 |
-| `doc.create_layer` | never (pure ctx binder: deterministic Layer factory bound via `as:`; the subsequent doc.insert_at journals) | -- | yes | renderer.rs:3401-3430 |
+| `doc.clone_at` | never (pure ctx binder: clones an element into scope, no mutation) | -- | yes | layer_doc_effects.rs:46 |
+| `doc.create_layer` | never (pure ctx binder: deterministic Layer factory bound via `as:`; the subsequent doc.insert_at journals) | -- | yes | layer_doc_effects.rs:31 |
 | `doc.preview.clear` | never (out-of-band preview-snapshot channel (OP_LOG.md par.8)) | -- | yes | effects.rs:709-714 |
 | `doc.preview.restore` | never (out-of-band preview-snapshot channel (OP_LOG.md par.8)) | -- | yes | effects.rs:703-708 |
-| `doc.set` | never (direct per-field document write via apply_doc_set_field; not routed through op_apply, so it records no op) | -- | yes | renderer.rs:3709-3728 |
+| `doc.set` | never (direct per-field document write via layer_doc_effects::set_field; not routed through op_apply, so it records no op) | -- | yes | layer_doc_effects.rs:141 |
 | `doc.snapshot` | never (transaction management: begin_txn only; snapshot/undo/redo manage the journal cursor and are never journaled as ops) | -- | yes | effects.rs:682-684; op_apply.rs:1300-1314 |
 | `doc.zoom.apply` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1719-1768 |
 | `doc.zoom.fit_all_artboards` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1935-1956 |

@@ -3313,6 +3313,105 @@ mod tests {
         e
     }
 
+    /// STATUS-jas item 22. The Layers panel's actions run their YAML in the
+    /// engine: each `doc.*` verb they use (`create_layer insert_at insert_after
+    /// clone_at delete_at set unpack_group_at wrap_in_group wrap_in_layer`) and
+    /// the `as:` binding two of them return through are the shared runner's.
+    /// Until 2026-10-26 they lived only in the web's runner and the engine
+    /// refused every one (`UnknownDocEffect:doc.create_layer`). Each action
+    /// changes the document as stated, and ONE undo restores it.
+    #[test]
+    fn the_layers_panel_actions_run_their_yaml_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::geometry::element::{Element, Visibility};
+        const LAYERS: &str = "layers_panel_content";
+        let layers = |e: *mut JasEngine| unsafe { e.as_ref() }.unwrap().model.borrow().document().layers.clone();
+        let kids = |e: *mut JasEngine, i: usize| layers(e)[i].children().map(|c| c.to_vec()).unwrap_or_default();
+        let select = |e: *mut JasEngine, paths: &[&[usize]]| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let mut store = en.store.borrow_mut();
+            if store.panel_scope("layers").is_none() {
+                store.init_panel("layers", std::collections::HashMap::new());
+            }
+            let v: Vec<serde_json::Value> = paths.iter().map(|p| serde_json::json!({"__path__": p})).collect();
+            store.set_panel("layers", "layers_panel_selection", serde_json::Value::Array(v));
+        };
+        let run = |e: *mut JasEngine, action: &str, params: serde_json::Value| {
+            let req = serde_json::json!({"panel": LAYERS, "action": action, "params": params}).to_string();
+            let (_reply, err) = dispatch(e, &req);
+            assert!(!err.contains("Unknown"), "{action}: {err}");
+        };
+        let undo = |e: *mut JasEngine| unsafe { e.as_ref() }.unwrap().model.borrow_mut().undo();
+        let fresh = || {
+            let e = engine_with(model_with(vec![rect(0.0, 0.0, 10.0, 10.0)], &[]));
+            e
+        };
+
+        // New Layer: a layer named by `next_layer_name`, one undo.
+        let e = fresh();
+        let before = layers(e);
+        run(e, "new_layer", serde_json::json!({}));
+        assert_eq!(layers(e).len(), before.len() + 1, "new_layer adds a layer");
+        undo(e);
+        assert_eq!(layers(e), before, "new_layer: one undo");
+
+        // New Group, then Flatten Artwork back.
+        select(e, &[&[0, 0]]);
+        run(e, "new_group", serde_json::json!({}));
+        assert!(matches!(&*kids(e, 0)[0], Element::Group(_)), "new_group wraps the selection");
+        select(e, &[&[0, 0]]);
+        run(e, "flatten_artwork", serde_json::json!({}));
+        assert!(matches!(&*kids(e, 0)[0], Element::Rect(_)), "flatten_artwork unpacks the group");
+        undo(e);
+        assert!(matches!(&*kids(e, 0)[0], Element::Group(_)), "flatten_artwork: one undo");
+        undo(e);
+        assert_eq!(layers(e), before, "new_group: one undo");
+
+        // Duplicate and Delete.
+        select(e, &[&[0, 0]]);
+        run(e, "duplicate_layer_selection", serde_json::json!({}));
+        assert_eq!(kids(e, 0).len(), 2, "duplicate_layer_selection adds a copy");
+        undo(e);
+        assert_eq!(layers(e), before, "duplicate: one undo");
+        select(e, &[&[0, 0]]);
+        run(e, "delete_layer_selection", serde_json::json!({}));
+        assert_eq!(kids(e, 0).len(), 0, "delete_layer_selection removes it");
+        undo(e);
+        assert_eq!(layers(e), before, "delete: one undo");
+
+        // Collect in New Layer.
+        select(e, &[&[0, 0]]);
+        run(e, "collect_in_new_layer", serde_json::json!({}));
+        assert_eq!(layers(e).len(), 2, "collect_in_new_layer adds a layer");
+        assert_eq!(kids(e, 0).len(), 0, "and moves the selection into it");
+        undo(e);
+        assert_eq!(layers(e), before, "collect: one undo");
+
+        // The three toggle-all actions.
+        run(e, "toggle_all_layers_lock", serde_json::json!({}));
+        assert!(layers(e)[0].common().locked, "toggle_all_layers_lock locks");
+        undo(e);
+        run(e, "toggle_all_layers_visibility", serde_json::json!({}));
+        assert_eq!(layers(e)[0].common().visibility, Visibility::Invisible, "toggle_all_layers_visibility hides");
+        undo(e);
+        run(e, "toggle_all_layers_outline", serde_json::json!({}));
+        assert_eq!(layers(e)[0].common().visibility, Visibility::Outline, "toggle_all_layers_outline outlines");
+        undo(e);
+        assert_eq!(layers(e), before, "the toggles: one undo each");
+
+        // Layer Options OK with no layer: a new named layer.
+        run(e, "layer_options_confirm",
+            serde_json::json!({"layer_id": null, "name": "Inks", "show": true, "preview": true, "lock": true}));
+        let ls = layers(e);
+        assert_eq!(ls.len(), 2, "layer_options_confirm adds a layer");
+        assert!(ls.iter().any(|l| l.common().name.as_deref() == Some("Inks") && l.common().locked),
+            "named and locked as the dialog said: {ls:?}");
+        undo(e);
+        assert_eq!(layers(e), before, "layer options: one undo");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The Concepts panel's Place Instance and a parameter field's commit run
     /// their YAML in the engine (`doc.place_concept_instance` reading the
     /// STORE's `selected_concept`, `doc.set_concept_param` reading
