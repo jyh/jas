@@ -730,9 +730,9 @@ private func makeModelWithTwoArtboards() -> Model {
     model.stateStore.initPanel("concepts_panel_content", defaults: [:])
     model.stateStore.setPanel("concepts_panel_content", "selected_concept", "regular_polygon")
 
-    // (1) Place a hexagon via the REAL production handler (mints the id +
-    // resolves defaults + brackets one undo).
-    ConceptsPanel.dispatch("place_concept_instance", model: model)
+    // (1) Place a hexagon via the REAL production route, its YAML (mints the
+    // id + resolves defaults + brackets one undo).
+    LayersPanel.dispatchYamlAction("place_concept_instance", model: model)
 
     #expect(model.journal.count == before + 1,
             "place_concept_instance commits one transaction")
@@ -753,9 +753,10 @@ private func makeModelWithTwoArtboards() -> Model {
     #expect(gen.conceptId == "regular_polygon")
     #expect(gen.id == mintedId)
 
-    // (2) Tune one param (sides 6 -> 8) via the REAL production handler. The
-    // place auto-selected [0,1], so setParam targets it.
-    ConceptsPanel.setParam(model: model, name: "sides", value: 8)
+    // (2) Tune one param (sides 6 -> 8) via the REAL production route, its
+    // YAML. The place auto-selected [0,1], so the commit targets it.
+    LayersPanel.dispatchYamlAction("set_concept_param", model: model,
+                                   params: ["name": "sides", "value": 8])
 
     #expect(model.journal.count == before + 2,
             "set_concept_param commits a second transaction")
@@ -821,7 +822,7 @@ private func makeModelWithTwoArtboards() -> Model {
 
     // (1) Place a hexagon (sides=6) via the REAL production handler; it lands at
     // [0,1] (after the seeded rect) and is auto-selected.
-    ConceptsPanel.dispatch("place_concept_instance", model: model)
+    LayersPanel.dispatchYamlAction("place_concept_instance", model: model)
     guard case .live(.generated) = model.document.tryGetElement([0, 1]) else {
         Issue.record("expected a Generated at [0,1]"); return
     }
@@ -970,21 +971,20 @@ private func makeModelWithSelectedHexagon() -> Model {
 
 // MARK: - Concepts dispatch-gate regression guards (the REAL action dispatch)
 
-/// CONCEPTS.md §6 / §10 — the concept verbs `place_concept_instance` and
-/// `promote_to_concept` are `log`-stub YAML actions whose real work lives in a
-/// native intercept. `dispatchYamlAction` (the entry the path panel buttons + the
-/// Object menu item take) MUST route them to `ConceptsPanel.dispatch`, or they
-/// fall through to the YAML `log` stub and never fire — the Swift analogue of the
-/// Rust dispatch-gate bug. These drive the same native handler `dispatchYamlAction`
-/// delegates to and assert the mutation lands.
+/// CONCEPTS.md §6 / §10 — `place_concept_instance` runs its YAML
+/// (`doc.place_concept_instance`) and `promote_to_concept` is a `log`-stub YAML
+/// action whose real work lives in a native intercept. `dispatchYamlAction` (the
+/// entry the path panel buttons + the Object menu item take) must reach both, or
+/// they never fire — the Swift analogue of the Rust dispatch-gate bug. These
+/// drive `dispatchYamlAction` and assert the mutation lands.
 @Test func placeConceptInstanceViaDispatchCreatesGenerated() {
-    // (a) Select a concept, then place an instance via the native dispatch arm —
-    // a Generated is appended.
+    // (a) Select a concept, then place an instance through `dispatchYamlAction`
+    // — a Generated is appended.
     let model = Model(document: Document(
         layers: [Layer(name: "L", children: [])], selectedLayer: 0, selection: []))
     model.stateStore.initPanel("concepts_panel_content", defaults: [:])
     model.stateStore.setPanel("concepts_panel_content", "selected_concept", "regular_polygon")
-    ConceptsPanel.dispatch("place_concept_instance", model: model)
+    LayersPanel.dispatchYamlAction("place_concept_instance", model: model)
     if case .live(.generated) = model.document.tryGetElement([0, 0]) {} else {
         Issue.record("place_concept_instance via dispatch should append a Generated")
     }

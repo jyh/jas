@@ -2934,6 +2934,45 @@ fn run_doc_effect(
                 None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.place_instance:{spec}"))),
             }
         }
+        // doc.place_concept_instance: { concept: <expr> }: the Concepts panel's
+        // Place Instance, the value-in-op op
+        // `symbols_host::place_concept_instance_ops` builds for the concept the
+        // expression names (`panel.selected_concept`), under the action's
+        // `snapshot`. The reference's `StateStore.place_concept_instance` the
+        // same. Nothing when the expression names no declared concept.
+        "doc.place_concept_instance" => {
+            match spec.get("concept").and_then(|v| v.as_str()) {
+                Some(expr) => {
+                    if let Value::Str(concept) = eval_expr(expr, store, ctx) {
+                        for op in crate::interpreter::symbols_host::place_concept_instance_ops(model.document(), &concept)
+                            .unwrap_or_default()
+                        {
+                            let _ = crate::document::op_apply::op_apply(model, &op);
+                        }
+                    }
+                }
+                None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.place_concept_instance:{spec}"))),
+            }
+        }
+        // doc.set_concept_param: { name: <expr>, value: <expr> }: a Concepts-panel
+        // parameter field's commit, the op `symbols_host::set_concept_param_ops`
+        // builds for the one selected generated instance, under the action's
+        // `snapshot`. The reference's `StateStore.set_concept_param` the same.
+        "doc.set_concept_param" => {
+            match (spec.get("name").and_then(|v| v.as_str()), spec.get("value").and_then(|v| v.as_str())) {
+                (Some(name_expr), Some(value_expr)) => {
+                    if let Value::Str(name) = eval_expr(name_expr, store, ctx) {
+                        let value = eval_expr(value_expr, store, ctx);
+                        for op in crate::interpreter::symbols_host::set_concept_param_ops(model.document(), &name, &value)
+                            .unwrap_or_default()
+                        {
+                            let _ = crate::document::op_apply::op_apply(model, &op);
+                        }
+                    }
+                }
+                _ => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.set_concept_param:{spec}"))),
+            }
+        }
         "doc.op" => {
             let refused = match spec.get("op").and_then(|v| v.as_str()) {
                 Some(_) => crate::document::op_apply::op_apply(model, spec).is_err(),

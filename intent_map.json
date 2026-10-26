@@ -616,8 +616,10 @@
       "doc_verbs": []
     },
     "place_concept_instance": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.place_concept_instance"
+      ]
     },
     "place_instance": {
       "class": "journaling",
@@ -920,8 +922,10 @@
       "doc_verbs": []
     },
     "set_concept_param": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_concept_param"
+      ]
     },
     "set_fill_none": {
       "class": "ui-state",
@@ -1186,6 +1190,7 @@
       "doc.move_artboards_down",
       "doc.move_artboards_up",
       "doc.op",
+      "doc.place_concept_instance",
       "doc.place_instance",
       "doc.preview.clear",
       "doc.preview.restore",
@@ -1197,6 +1202,7 @@
       "doc.set_artboard_options_field",
       "doc.set_attr_on_selection",
       "doc.set_color_management_field",
+      "doc.set_concept_param",
       "doc.set_document_setup_field",
       "doc.set_graphics_field",
       "doc.set_marks_and_bleed_field",
@@ -1217,11 +1223,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 38,
+      "journaling": 40,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 193,
+      "ui-state": 191,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1271,7 +1277,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 38,
+    "journaling_actions": 40,
     "native_intercepts": [
       "export_to_pdf"
     ],
@@ -1290,6 +1296,7 @@
         "doc.move_artboards_down",
         "doc.move_artboards_up",
         "doc.op",
+        "doc.place_concept_instance",
         "doc.place_instance",
         "doc.select_in_rect",
         "doc.set_advanced_field",
@@ -1297,6 +1304,7 @@
         "doc.set_artboard_options_field",
         "doc.set_attr_on_selection",
         "doc.set_color_management_field",
+        "doc.set_concept_param",
         "doc.set_document_setup_field",
         "doc.set_graphics_field",
         "doc.set_marks_and_bleed_field",

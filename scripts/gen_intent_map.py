@@ -167,6 +167,19 @@ VERB_TABLE = {
         "journals": "always", "op": "place_instance",
         "evidence": ["effects.rs:2921", "op_apply.rs:2204"],
     },
+    "doc.place_concept_instance": {
+        # The Concepts panel's Place Instance: one value-in-op op carrying the
+        # concept's declared defaults and an id the effect mints first
+        # (symbols_host::place_concept_instance_ops), through op_apply.
+        "journals": "always", "op": "place_concept_instance",
+        "evidence": ["effects.rs:2943", "op_apply.rs:2222"],
+    },
+    "doc.set_concept_param": {
+        # A Concepts-panel parameter field's commit: one value-in-op op for the
+        # one selected generated instance (symbols_host::set_concept_param_ops).
+        "journals": "always", "op": "set_concept_param",
+        "evidence": ["effects.rs:2961", "op_apply.rs:2235"],
+    },
     "doc.op": {
         # One journaled op BY NAME: the op is the call site's own `op` field
         # (`doc.op: { op: unlock_all }`), so the row names no single op.
@@ -651,14 +664,11 @@ def render_md(entries, summary):
     a("- **Static classification of the YAML bundle.** Several actions are")
     a("  `log`-stubs in YAML whose real behavior lives in native code:")
     a("  `dispatch_action` natively intercepts the symbol/concept actions")
-    a("  (`new_symbol`, `place_instance`, `delete_symbol_action`,")
-    a("  `delete_symbol_orphan_confirm_ok`, `place_concept_instance`,")
-    a("  `set_concept_param`, `apply_concept_operation`,")
-    a("  `promote_to_concept` -- renderer.rs:549-1010), several of which")
-    a("  journal real ops through `op_apply` natively; and the menu/keyboard")
-    a("  fast paths handle `cut`/`copy`/`paste`/`delete_selection` natively")
-    a("  (journaling `delete_selection` via `journal_delete_selection`,")
-    a("  op_apply.rs:1276). Those actions classify as `ui-state` here")
+    a("  `symbols_host::ACTIONS` names (`new_symbol`, `delete_symbol_action`,")
+    a("  `delete_symbol_orphan_confirm_ok`, `apply_concept_operation`,")
+    a("  `promote_to_concept`), several of which journal real ops through")
+    a("  `op_apply` natively; and `copy`/`paste` are handled natively by")
+    a("  each app's clipboard route. Those actions classify as `ui-state` here")
     a("  because their YAML effect trees reach no `doc.*` verb; the class")
     a("  describes the YAML seam, not the native behavior behind it.")
     a("- **`doc.select_in_rect`** routes through `op_apply` but records only")

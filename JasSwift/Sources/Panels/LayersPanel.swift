@@ -96,21 +96,13 @@ public enum LayersPanel {
         case "new_symbol", "delete_symbol_action":
             SymbolsPanel.dispatchSymbolAction(actionName, model: model)
             return
-        // Native intercept for the Concepts-panel verbs (CONCEPTS.md §6),
-        // mirroring the Symbols arm above. `place_concept_instance`'s YAML action
-        // is a `log` stub — the real work (mint the element id, build the
-        // Generated element from the panel-selected concept + its default params,
-        // append + select) lives in ``ConceptsPanel/dispatch`` so every app mints
-        // an identical value-in-op id. `concepts_panel_select` is normally the
-        // generic `set_panel_state` effect, but that effect is a no-op on an
-        // UNINITIALIZED panel scope (the store's optional-chaining write), so
-        // route it through ``ConceptsPanel/setSelectedConcept`` — which seeds the
-        // scope from its YAML defaults before writing — so a fresh Model (e.g.
-        // the action corpus) records the selection that `place_concept_instance`
-        // then reads.
-        case "place_concept_instance":
-            ConceptsPanel.dispatch(actionName, model: model)
-            return
+        // `concepts_panel_select` is normally the generic `set_panel_state`
+        // effect, but that effect is a no-op on an UNINITIALIZED panel scope
+        // (the store's optional-chaining write), so route it through
+        // ``ConceptsPanel/setSelectedConcept`` — which seeds the scope from its
+        // YAML defaults before writing — so a fresh Model (e.g. the action
+        // corpus) records the selection that `place_concept_instance` (its YAML,
+        // `panel.selected_concept`) then reads.
         case "concepts_panel_select":
             ConceptsPanel.setSelectedConcept(model, params["concept_id"] as? String)
             return
@@ -176,6 +168,9 @@ public enum LayersPanel {
             // The Symbols panel's master (`panel.selected_symbol`), which
             // `place_instance` reads; Rust's app scope carries it the same way.
             "selected_symbol": SymbolsPanel.selectedSymbol(model) ?? NSNull(),
+            // The Concepts panel's concept (`panel.selected_concept`), which
+            // `place_concept_instance` reads; Rust's app scope carries it too.
+            "selected_concept": ConceptsPanel.selectedConcept(model) ?? NSNull(),
         ]
         let ctx: [String: Any] = [
             "active_document": activeDoc,
@@ -596,6 +591,33 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.place_concept_instance: { concept: <expr> }: the Concepts panel's
+        // Place Instance, the value-in-op op
+        // ``ConceptsPanel/placeConceptInstanceOps`` builds for the concept the
+        // expression names. Rust's `doc.place_concept_instance`.
+        let docPlaceConceptInstanceHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let expr = spec["concept"] as? String,
+                  case .string(let concept) = evaluate(expr, context: callCtx),
+                  let ops = ConceptsPanel.placeConceptInstanceOps(model.document, conceptId: concept)
+            else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
+        // doc.set_concept_param: { name: <expr>, value: <expr> }: a parameter
+        // field's commit, the op ``ConceptsPanel/setConceptParamOps`` builds for
+        // the one selected generated instance. Rust's `doc.set_concept_param`.
+        let docSetConceptParamHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let nameExpr = spec["name"] as? String,
+                  let valueExpr = spec["value"] as? String,
+                  case .string(let name) = evaluate(nameExpr, context: callCtx),
+                  let ops = ConceptsPanel.setConceptParamOps(
+                      model.document, name: name, value: evaluate(valueExpr, context: callCtx))
+            else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
         let docOpHandler: PlatformEffect = { value, _, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
             opApply(model, controller, spec)
@@ -882,6 +904,8 @@ public enum LayersPanel {
             "doc.op": docOpHandler,
             "doc.make_instance": docMakeInstanceHandler,
             "doc.place_instance": docPlaceInstanceHandler,
+            "doc.place_concept_instance": docPlaceConceptInstanceHandler,
+            "doc.set_concept_param": docSetConceptParamHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

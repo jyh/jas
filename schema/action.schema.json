@@ -176,6 +176,16 @@
               "required": ["master"],
               "properties": { "master": { "type": "string" } }
             },
+            "doc.place_concept_instance": {
+              "type": "object",
+              "required": ["concept"],
+              "properties": { "concept": { "type": "string" } }
+            },
+            "doc.set_concept_param": {
+              "type": "object",
+              "required": ["name", "value"],
+              "properties": { "name": { "type": "string" }, "value": { "type": "string" } }
+            },
             "doc.move_artboards_down": {},
             "doc.move_artboards_up": {},
             "doc.op": {

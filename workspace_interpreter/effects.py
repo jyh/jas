@@ -547,6 +547,29 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.place_instance(master.value if isinstance(master.value, str) else None)
         return None
 
+    # doc.place_concept_instance: { concept: <expr> } — the Concepts panel's
+    # Place Instance: a generated instance of the concept the expression names
+    # (`panel.selected_concept`), with its declared defaults and a minted id,
+    # appended and selected. StateStore.place_concept_instance.
+    if "doc.place_concept_instance" in effect:
+        spec = effect["doc.place_concept_instance"]
+        if isinstance(spec, dict):
+            concept = evaluate(str(spec.get("concept", "")), store.eval_context(ctx))
+            store.place_concept_instance(concept.value if isinstance(concept.value, str) else None)
+        return None
+
+    # doc.set_concept_param: { name: <expr>, value: <expr> } — a Concepts-panel
+    # parameter field's commit: params[name] = value on the one selected
+    # generated instance. StateStore.set_concept_param.
+    if "doc.set_concept_param" in effect:
+        spec = effect["doc.set_concept_param"]
+        if isinstance(spec, dict):
+            ectx = store.eval_context(ctx)
+            name = evaluate(str(spec.get("name", "")), ectx).value
+            value = evaluate(str(spec.get("value", "")), ectx).value
+            store.set_concept_param(name, value)
+        return None
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.

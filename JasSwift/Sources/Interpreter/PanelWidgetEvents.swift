@@ -381,32 +381,19 @@ func dispatchPanelAction(
         // active panel, so SymbolsPanel reads / writes it directly.
         SymbolsPanel.dispatchSymbolAction(name, model: model)
         return
-    case "place_concept_instance", "promote_to_concept":
-        // Concepts panel: native intercept (the YAML action is a `log`
-        // stub). `place_concept_instance` builds a Generated from the
-        // panel-selected concept + its default params (id minted value-in-op);
-        // `promote_to_concept` (CONCEPTS.md §10 — the fitter / promote)
-        // detects + replaces the single selected raw shape with a Generated.
-        // WITHOUT this native arm, `promote_to_concept` falls through to its
-        // YAML `log` stub and never fires — the Swift analogue of the Rust
-        // dispatch-gate bug. Mirrors the Rust dispatch arm.
-        ConceptsPanel.dispatch(name, model: model)
+    case "place_concept_instance", "set_concept_param":
+        // Their YAML says what they do (`doc.place_concept_instance`,
+        // `doc.set_concept_param`), through the dispatcher that holds the
+        // `doc.*` handlers; the field's `params` ride as `param.*`.
+        LayersPanel.dispatchYamlAction(name, model: model, params: params)
         return
-    case "set_concept_param":
-        // Concepts panel Slice 2: native intercept (the YAML action is a
-        // `log` stub). The committed field value arrives as `event.value`
-        // (params.value) alongside the declared `param.name` (params.name);
-        // write it onto the single selected Generated instance so it
-        // re-generates live. Mirrors the Rust `set_concept_param` arm.
-        if let pname = params["name"] as? String {
-            let value: Double = {
-                if let d = params["value"] as? Double { return d }
-                if let i = params["value"] as? Int { return Double(i) }
-                if let s = params["value"] as? String, let d = Double(s) { return d }
-                return 0
-            }()
-            ConceptsPanel.setParam(model: model, name: pname, value: value)
-        }
+    case "promote_to_concept":
+        // Concepts panel: native intercept (the YAML action is a `log`
+        // stub). `promote_to_concept` (CONCEPTS.md §10 — the fitter /
+        // promote) detects + replaces the single selected raw shape with a
+        // Generated. WITHOUT this native arm it falls through to its YAML
+        // `log` stub and never fires. Mirrors the Rust dispatch arm.
+        ConceptsPanel.dispatch(name, model: model)
         return
     case "apply_concept_operation":
         // Concepts panel Slice 3 (CONCEPTS.md §9): native intercept (the YAML

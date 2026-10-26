@@ -789,6 +789,38 @@ class StateStore:
         for op in place_instance_ops(doc, master_id if isinstance(master_id, str) else None) or []:
             self.apply_op(op)
 
+    def place_concept_instance(self, concept_id) -> None:
+        """The Concepts panel's Place Instance on the store's document: the op
+        ``document.controller.place_concept_instance_ops`` mints, its defaults
+        read from the bundled workspace's concept registry (as Rust's
+        ``Workspace::load`` and Swift's ``WorkspaceData.load``). Nothing
+        without a concept the registry declares."""
+        if self._document is None or not isinstance(concept_id, str):
+            return
+        import json
+        import os
+        from document.controller import place_concept_instance_ops
+        from geometry.test_json import test_json_to_document
+        from workspace_interpreter.loader import concept, load_workspace
+        ws = load_workspace(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "workspace"))
+        doc = test_json_to_document(json.dumps(self._document))
+        for op in place_concept_instance_ops(doc, concept_id, concept(ws, concept_id)) or []:
+            self.apply_op(op)
+
+    def set_concept_param(self, name, value) -> None:
+        """A Concepts-panel parameter field's commit on the store's document:
+        the op ``document.controller.set_concept_param_ops`` builds, applied
+        through the op layer. Nothing unless it builds one."""
+        if self._document is None:
+            return
+        import json
+        from document.controller import set_concept_param_ops
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        for op in set_concept_param_ops(doc, name, value) or []:
+            self.apply_op(op)
+
     def apply_op(self, op: dict) -> None:
         """Apply one journaled op (``{"op": <name>, ...}``) to the document.
 

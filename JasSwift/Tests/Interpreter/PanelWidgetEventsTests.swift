@@ -276,7 +276,7 @@ private let gradient = "gradient_panel_content"
     let concepts = "concepts_panel_content"
     model.stateStore.initPanel(concepts, defaults: [:])
     model.stateStore.setPanel(concepts, "selected_concept", "regular_polygon")
-    ConceptsPanel.dispatch("place_concept_instance", model: model)
+    LayersPanel.dispatchYamlAction("place_concept_instance", model: model)
     guard case .live(.generated) = model.document.tryGetElement([0, 1]) else {
         Issue.record("the arm needs a placed, selected Generated at [0,1]"); return
     }

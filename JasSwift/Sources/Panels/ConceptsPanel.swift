@@ -1,28 +1,27 @@
 import Foundation
 
-/// Native action arm for the Concepts panel (CONCEPTS.md §6). The
-/// `concepts_panel_select` action is generic (`set_panel_state` writes
-/// `selected_concept` into the shared store); `place_concept_instance` is a
-/// `log` stub whose real work — mint a fresh element id (value-in-op), build a
-/// Generated element from the panel-selected concept + its declared default
-/// params, append + select — lives here, mirroring SymbolsPanel and the Rust
-/// dispatch arm.
+/// The Concepts panel (CONCEPTS.md §6). The `concepts_panel_select` action is
+/// generic (`set_panel_state` writes `selected_concept` into the shared store).
+/// `place_concept_instance` and `set_concept_param` run their YAML
+/// (`doc.place_concept_instance`, `doc.set_concept_param`); the ops those
+/// effects apply are built here, as Rust's `symbols_host` builds them.
+/// `promote_to_concept` and `apply_concept_operation` are still native arms.
 public enum ConceptsPanel {
     /// The panel's menu, from concepts.yaml's `menu:` block.
     public static func menuItems() -> [PanelMenuItem] {
         menuItemsFromYaml(scopeId)
     }
 
-    /// A Concepts menu command: Close closes the panel, and Place Instance runs
-    /// the native verb (its YAML action is a `log` stub). Mirrors the Rust
-    /// `panel_menu::dispatch_yaml_menu`, which reaches the same verb through
-    /// `dispatch_action`'s native intercept.
+    /// A Concepts menu command: Close closes the panel, Place Instance runs its
+    /// YAML through the dispatcher that holds the `doc.*` handlers, and Promote
+    /// runs the native verb. Mirrors the Rust `panel_menu::dispatch_yaml_menu`.
     public static func menuDispatch(_ cmd: String, addr: PanelAddr,
                                     layout: inout WorkspaceLayout, model: Model? = nil) {
         if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)); return }
         guard let model = model, !cmd.isEmpty else { return }
         switch cmd {
-        case "place_concept_instance", "promote_to_concept": dispatch(cmd, model: model)
+        case "place_concept_instance": LayersPanel.dispatchYamlAction(cmd, model: model)
+        case "promote_to_concept": dispatch(cmd, model: model)
         default: runYamlActionByName(cmd, params: [:], model: model)
         }
     }
@@ -55,10 +54,10 @@ public enum ConceptsPanel {
         model.panelStateVersion &+= 1
     }
 
-    /// The concept's declared default params as a params object.
-    static func defaultParams(_ conceptId: String) -> [String: Any] {
-        guard let concept = WorkspaceData.load()?.concept(conceptId),
-              let params = concept["params"] as? [[String: Any]] else { return [:] }
+    /// A concept's declared default params (`params: [{name, default}]`) as a
+    /// params object. Rust `symbols_host::concept_default_params`.
+    static func defaultParams(_ concept: [String: Any]) -> [String: Any] {
+        guard let params = concept["params"] as? [[String: Any]] else { return [:] }
         var out: [String: Any] = [:]
         for p in params {
             if let name = p["name"] as? String, let def = p["default"] {
@@ -78,58 +77,61 @@ public enum ConceptsPanel {
                              mint: { generateElementId() })?[0]
     }
 
-    /// Native intercept for the Concepts panel ops (the YAML actions are
-    /// `log` stubs). Routes through `opApply` so the placement JOURNALS as a
-    /// real `place_concept_instance` op (value-in-op: the panel-selected
-    /// concept id + its RESOLVED default params + the minted elem id),
-    /// replayable like the sibling structural verbs. `withTxn` brackets the one
-    /// undo step; the arm both mutates and records. Mirrors the Rust dispatch
-    /// arm and the native-menu delete routing.
+    /// The one value-in-op op Place Instance applies
+    /// (`doc.place_concept_instance` in actions.yaml): `place_concept_instance`
+    /// of `conceptId` with its declared default params and a freshly minted id
+    /// (CONCEPTS.md §6), or nil when the registry does not declare the concept
+    /// or the mint fails. Rust `symbols_host::place_concept_instance_ops`.
+    static func placeConceptInstanceOps(_ doc: Document, conceptId: String) -> [[String: Any]]? {
+        guard let concept = WorkspaceData.load()?.concept(conceptId),
+              let elemId = mint(doc) else { return nil }
+        return [[
+            "op": "place_concept_instance",
+            "concept_id": conceptId,
+            "params": defaultParams(concept),
+            "elem_id": elemId,
+        ]]
+    }
+
+    /// A committed concept-param value as a finite number: a number, or a
+    /// string that is exactly a decimal number (`9`, `-2.5`, `1e3`; never
+    /// `inf`, `nan` or a padded one); anything else nil. Rust
+    /// `symbols_host::concept_param_value`.
+    static func paramValue(_ value: Value) -> Double? {
+        let v: Double
+        switch value {
+        case .number(let n): v = n
+        case .string(let s):
+            guard s.range(of: #"^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$"#,
+                          options: .regularExpression) != nil, let d = Double(s) else { return nil }
+            v = d
+        default: return nil
+        }
+        return v.isFinite ? v : nil
+    }
+
+    /// The one value-in-op op a parameter field's commit applies
+    /// (`doc.set_concept_param` in actions.yaml): `set_concept_param` of the
+    /// one selected generated instance (CONCEPTS.md §6.4), or nil unless
+    /// `value` is a finite number (``paramValue(_:)``) and exactly one
+    /// generated instance is selected. Rust `symbols_host::set_concept_param_ops`.
+    static func setConceptParamOps(_ doc: Document, name: String, value: Value) -> [[String: Any]]? {
+        guard let v = paramValue(value), doc.selection.count == 1,
+              let path = doc.selection.first?.path,
+              case .live(.generated) = doc.tryGetElement(path) else { return nil }
+        return [["op": "set_concept_param", "path": path, "name": name, "value": v]]
+    }
+
+    /// Native intercept for `promote_to_concept` (the YAML action is a `log`
+    /// stub). Mirrors the Rust dispatch arm.
     public static func dispatch(_ action: String, model: Model) {
         switch action {
-        case "place_concept_instance":
-            guard let conceptId = selectedConcept(model) else { return }
-            guard let elemId = mint(model.document) else { return }
-            let op: [String: Any] = [
-                "op": "place_concept_instance",
-                "concept_id": conceptId,
-                "params": defaultParams(conceptId),
-                "elem_id": elemId,
-            ]
-            model.withTxn {
-                model.nameTxn("place_concept_instance")
-                opApply(model, Controller(model: model), op)
-            }
         case "promote_to_concept":
             // CONCEPTS.md §10 — the fitter / promote (the inverse of expand).
             // Detect + replace the single selected raw shape with a Generated.
             promote(model: model)
         default:
             break
-        }
-    }
-
-    /// Native intercept for `set_concept_param` (the YAML action is a `log`
-    /// stub): find the single selected Generated instance and write
-    /// `params[name] = value`. Routes through `opApply` so the edit JOURNALS as
-    /// a real `set_concept_param` op (value-in-op: the RESOLVED path, param
-    /// name, and committed value), replayable like the sibling property verbs.
-    /// `withTxn` brackets the one undo step. Mirrors the Rust `set_concept_param`
-    /// dispatch arm. No-op unless exactly one Generated element is selected.
-    public static func setParam(model: Model, name: String, value: Double) {
-        let doc = model.document
-        guard doc.selection.count == 1, let sel = doc.selection.first else { return }
-        let path = sel.path
-        guard case .live(.generated) = doc.tryGetElement(path) else { return }
-        let op: [String: Any] = [
-            "op": "set_concept_param",
-            "path": path,
-            "name": name,
-            "value": value,
-        ]
-        model.withTxn {
-            model.nameTxn("set_concept_param")
-            opApply(model, Controller(model: model), op)
         }
     }
 

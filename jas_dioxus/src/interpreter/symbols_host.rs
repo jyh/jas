@@ -22,11 +22,14 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The seven action names this module hosts. `place_instance` is not one since
-/// 2026-10-26: its YAML runs `doc.place_instance` ([`place_instance_ops`]).
-pub const ACTIONS: [&str; 7] = [
+/// The five action names this module hosts. Since 2026-10-26 three verbs that
+/// were hosted here run their YAML instead: `place_instance`
+/// (`doc.place_instance`, [`place_instance_ops`]), `place_concept_instance`
+/// (`doc.place_concept_instance`, [`place_concept_instance_ops`]) and
+/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`]).
+pub const ACTIONS: [&str; 5] = [
     "new_symbol", "delete_symbol_action", "delete_symbol_orphan_confirm_ok",
-    "place_concept_instance", "set_concept_param", "apply_concept_operation", "promote_to_concept",
+    "apply_concept_operation", "promote_to_concept",
 ];
 
 /// What a hosted verb asks its caller to do besides the document change it
@@ -51,7 +54,6 @@ pub fn run(
     action: &str,
     params: &Value,
     selected_symbol: Option<&str>,
-    selected_concept: Option<&str>,
 ) -> Option<Outcome> {
     Some(match action {
         "new_symbol" => new_symbol(model),
@@ -75,16 +77,6 @@ pub fn run(
             };
             model.with_txn(|m| Controller::delete_symbol(m, master));
             Outcome::CloseDialog { cleared_selection: true }
-        }
-        "place_concept_instance" => {
-            if let Some(concept_id) = selected_concept {
-                place_concept_instance(model, concept_id);
-            }
-            Outcome::Done
-        }
-        "set_concept_param" => {
-            set_concept_param(model, params);
-            Outcome::Done
         }
         "apply_concept_operation" => {
             apply_concept_operation(model, params);
@@ -142,44 +134,77 @@ fn new_symbol(model: &mut Model) -> Outcome {
     Outcome::SelectSymbol(Some(resolved))
 }
 
-/// Place a generated instance of `concept_id` with its declared default params
-/// (CONCEPTS.md §6), journaled as a `place_concept_instance` op.
-fn place_concept_instance(model: &mut Model, concept_id: &str) {
+/// A concept's declared default params (`params: [{name, default}]`) as a
+/// params object. The reference's `document.controller.concept_default_params`.
+pub fn concept_default_params(concept: &Value) -> Map<String, Value> {
     let mut defaults = Map::new();
-    if let Some(c) = Workspace::load().and_then(|w| w.concept(concept_id).cloned()) {
-        for p in c.get("params").and_then(Value::as_array).into_iter().flatten() {
-            if let (Some(name), Some(def)) = (p.get("name").and_then(Value::as_str), p.get("default")) {
-                defaults.insert(name.to_string(), def.clone());
-            }
+    for p in concept.get("params").and_then(Value::as_array).into_iter().flatten() {
+        if let (Some(name), Some(def)) = (p.get("name").and_then(Value::as_str), p.get("default")) {
+            defaults.insert(name.to_string(), def.clone());
         }
     }
-    let Some(ids) = mint(model, 1) else { return };
-    let op = json!({
-        "op": "place_concept_instance",
-        "concept_id": concept_id,
-        "params": Value::Object(defaults),
-        "elem_id": ids[0],
-    });
-    model.with_txn(|m| {
-        m.name_txn("place_concept_instance");
-        let _ = crate::document::op_apply::op_apply(m, &op);
-    });
+    defaults
 }
 
-/// Set one param of the single selected generated instance (Slice 2).
-fn set_concept_param(model: &mut Model, params: &Value) {
-    let Some(name) = params.get("name").and_then(Value::as_str) else { return };
-    let Some(value) = params.get("value").and_then(|v| {
-        v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-    }) else {
-        return;
+/// The one value-in-op op the Concepts panel's Place Instance applies
+/// (`doc.place_concept_instance` in actions.yaml): `place_concept_instance` of
+/// `concept_id` with its declared default params and a freshly minted id
+/// (CONCEPTS.md §6), or `None` when the registry does not declare the concept
+/// or the mint fails. The reference's `place_concept_instance_ops`.
+pub fn place_concept_instance_ops(doc: &crate::document::document::Document, concept_id: &str) -> Option<Vec<Value>> {
+    let concept = Workspace::load().and_then(|w| w.concept(concept_id).cloned())?;
+    let mut existing = doc.element_ids();
+    let ids = mint_unique_ids(1, &mut existing, &mut || generate_element_id(None))?;
+    Some(vec![json!({
+        "op": "place_concept_instance",
+        "concept_id": concept_id,
+        "params": Value::Object(concept_default_params(&concept)),
+        "elem_id": ids[0],
+    })])
+}
+
+/// A committed concept-param value as a finite number: a number, or a string
+/// that is exactly a decimal number (`9`, `-2.5`, `1e3`; never `inf`, `NaN`
+/// or a padded one); anything else `None`. The reference's
+/// `concept_param_value`.
+pub fn concept_param_value(value: &EVal) -> Option<f64> {
+    let v = match value {
+        EVal::Number(n) => *n,
+        EVal::Str(s) if is_decimal(s) => s.parse::<f64>().ok()?,
+        _ => return None,
     };
-    let Some(path) = single_path(model) else { return };
-    let op = json!({"op": "set_concept_param", "path": path, "name": name, "value": value});
-    model.with_txn(|m| {
-        m.name_txn("set_concept_param");
-        let _ = crate::document::op_apply::op_apply(m, &op);
-    });
+    v.is_finite().then_some(v)
+}
+
+/// `[+-]?(digits[.digits?] | .digits)([eE][+-]?digits)?`, the reference's
+/// pattern.
+fn is_decimal(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    let digits = |i: &mut usize| { let st = *i; while *i < b.len() && b[*i].is_ascii_digit() { *i += 1; } *i - st };
+    if i < b.len() && (b[i] == b'+' || b[i] == b'-') { i += 1; }
+    let int = digits(&mut i);
+    let mut frac = 0;
+    if i < b.len() && b[i] == b'.' { i += 1; frac = digits(&mut i); }
+    if int == 0 && frac == 0 { return false; }
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') { i += 1; }
+        if digits(&mut i) == 0 { return false; }
+    }
+    i == b.len()
+}
+
+/// The one value-in-op op a Concepts-panel parameter field's commit applies
+/// (`doc.set_concept_param` in actions.yaml): `set_concept_param` of the one
+/// selected generated instance (CONCEPTS.md §6.4), or `None` unless `value` is
+/// a finite number ([`concept_param_value`]) and exactly one generated instance
+/// is selected. The reference's `set_concept_param_ops`.
+pub fn set_concept_param_ops(doc: &crate::document::document::Document, name: &str, value: &EVal) -> Option<Vec<Value>> {
+    let value = concept_param_value(value)?;
+    let [es] = doc.selection.as_slice() else { return None };
+    let Some(Element::Live(LiveVariant::Generated(_))) = doc.get_element(&es.path) else { return None };
+    Some(vec![json!({"op": "set_concept_param", "path": es.path, "name": name, "value": value})])
 }
 
 /// Apply a named concept operation to the single selected generated instance
