@@ -6,19 +6,18 @@ import Testing
 // `menu_native::VERBS` / `run`. The live menu and the level-1 script runner
 // both go through it.
 
-@Test func theMenuVerbsAreRustsSix() {
+@Test func theMenuVerbsAreRustsFive() {
     // Rust `menu_native::VERBS`, in its order. The three whose YAML is `doc.op`
     // are not in it: the menu runs their declared action.
-    #expect(MenuActions.verbs == ["select_all", "group", "ungroup", "ungroup_all", "lock",
-                                  "make_instance"])
-    #expect(MenuActions.yamlVerbs == ["unlock_all", "hide_selection", "show_all"])
+    #expect(MenuActions.verbs == ["select_all", "group", "ungroup", "ungroup_all", "make_instance"])
+    #expect(MenuActions.yamlVerbs == ["unlock_all", "hide_selection", "show_all", "lock"])
 }
 
 @Test func runRefusesAnythingElseAndRunsNothing() {
     let model = Model()
     let before = model.document
     for action in ["copy", "paste", "delete_selection", "", "Group",
-                   "unlock_all", "hide_selection", "show_all"] {
+                   "unlock_all", "hide_selection", "show_all", "lock"] {
         #expect(!MenuActions.run(action, model), "\(action)")
     }
     #expect(model.document == before)

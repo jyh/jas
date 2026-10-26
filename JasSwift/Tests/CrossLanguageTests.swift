@@ -5926,7 +5926,6 @@ private let menuNativeHandlers: [String: (Model) -> Void] = [
     "group": MenuActions.groupSelection,
     "ungroup": MenuActions.ungroupSelection,
     "ungroup_all": MenuActions.ungroupAll,
-    "lock": MenuActions.lockSelection,
     "make_instance": MenuActions.makeInstance,
 ]
 

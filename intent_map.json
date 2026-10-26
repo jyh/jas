@@ -460,8 +460,10 @@
       "doc_verbs": []
     },
     "lock": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "make_compound_shape": {
       "class": "ui-state",
@@ -1197,11 +1199,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 29,
+      "journaling": 30,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 202,
+      "ui-state": 201,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1251,7 +1253,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 29,
+    "journaling_actions": 30,
     "native_intercepts": [
       "export_to_pdf"
     ],

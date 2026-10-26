@@ -40,5 +40,19 @@
       }
     ],
     "expected_json": "show_all_reveals_and_selects_what_it_showed_expected.json"
+  },
+  {
+    "name": "lock_locks_the_selection_and_clears_it",
+    "setup_svg": "two_rects.svg",
+    "note": "actions.yaml lock: `doc.op: {op: lock_selection}` locks each selected element and clears the selection. Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "lock"
+      }
+    ],
+    "expected_json": "lock_locks_the_selection_and_clears_it_expected.json"
   }
 ]

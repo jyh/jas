@@ -155,8 +155,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 51 since `exit_isolation_to_level` gained its pops (2026-10-25): both
 # breadcrumbs had truncated their own stacks natively, and now run it. 48 the
 # same day: `unlock_all`, `hide_selection` and `show_all` became `doc.op` (the op
-# layer by name) and left both ports' native menu tables.
-MIN_LOG_ONLY = 48
+# layer by name) and left both ports' native menu tables. 47 the same day:
+# `lock` followed them (`doc.op: {op: lock_selection}`).
+MIN_LOG_ONLY = 47
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
