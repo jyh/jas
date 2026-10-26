@@ -4879,12 +4879,12 @@ mod tests {
     }
 
     /// `delete_selection` BY ACTION, the route a tool's YAML takes (the
-    /// Artboard tool's Delete dispatches it) and the action corpus runs. Its
-    /// `actions.yaml` body is a `log`, the menu's own verb, so until 2026-10-15
-    /// the engine ran nothing on this route. The engine's host now runs the
-    /// Delete key's law: nothing selected changes nothing; an orphan opens
-    /// `delete_orphan_confirm` (the dialog door) and deletes nothing until its
-    /// Delete; otherwise one undo step.
+    /// Artboard tool's Delete dispatches it) and the action corpus runs. Since
+    /// 2026-10-26 the engine runs its `actions.yaml` body: nothing selected
+    /// changes nothing; an orphan (`active_document.selection_orphan_count`)
+    /// opens `delete_orphan_confirm` and deletes nothing until its Delete;
+    /// otherwise one undo step. (Until 10-15 the body was a `log` and the
+    /// engine ran nothing; until 10-26 a native host ran the law.)
     #[test]
     fn delete_selection_by_action_runs_the_delete_keys_law() {
         let _counters = crate::ffi_instr::test_lock::lock();

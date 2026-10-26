@@ -1919,6 +1919,8 @@ pub(crate) fn build_active_document_view(
             // The Brushes panel's two gates (W2b-18): nothing is selected.
             m.insert("selection_has_brushed_stroke".to_string(), serde_json::Value::Bool(false));
             m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
+            // Nothing is selected, so a delete strands nothing.
+            m.insert("selection_orphan_count".to_string(), serde_json::Value::from(0));
             // No document: no recent colours (`active_document.recent_colors`).
             m.insert("recent_colors".to_string(), serde_json::Value::Array(vec![]));
             // No document: nothing to save (`runtime_contexts.yaml` defaults).
@@ -13649,6 +13651,28 @@ mod tests {
         let empty = build_active_document_view(&st);
         assert_eq!(empty["selection_has_brushed_stroke"], serde_json::json!(false));
         assert_eq!(empty["selection_is_single_brushed_stroke"], serde_json::json!(false));
+    }
+
+    /// The reference-aware delete's question (`delete_selection` in
+    /// actions.yaml): how many live references deleting the selection would
+    /// strand. The referenced rect: 1; it and its reference together: 0; with
+    /// no tab: 0.
+    #[test]
+    fn active_document_view_publishes_the_selection_orphan_count() {
+        use crate::document::controller::Controller;
+        use crate::document::test_fixture::{model_with, rect};
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut m = model_with(vec![rect(0.0, 0.0, 10.0, 10.0)], &[0]);
+        crate::workspace::menu_native::make_instance(&mut m);
+        let target = vec![0, 0];
+        Controller::select_element(&mut m, &target);
+        st.tabs[st.active_tab].model.set_document_for_test(m.document().clone());
+        assert_eq!(build_active_document_view(&st)["selection_orphan_count"], serde_json::json!(1));
+        Controller::set_selection(&mut m, vec![ElementSelection::all(vec![0, 0]), ElementSelection::all(vec![0, 1])]);
+        st.tabs[st.active_tab].model.set_document_for_test(m.document().clone());
+        assert_eq!(build_active_document_view(&st)["selection_orphan_count"], serde_json::json!(0));
+        st.tabs.clear();
+        assert_eq!(build_active_document_view(&st)["selection_orphan_count"], serde_json::json!(0));
     }
 
     #[test]

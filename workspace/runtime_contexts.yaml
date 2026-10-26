@@ -21,6 +21,7 @@ runtime_contexts:
       layers_panel_selection_has_group: false
       selection_has_brushed_stroke: false
       selection_is_single_brushed_stroke: false
+      selection_orphan_count: 0
       artboards_count: 0
       artboards_panel_selection_ids: []
       element_tree: null
@@ -120,6 +121,14 @@ runtime_contexts:
           non-empty stroke_brush. Brush Options for Selection edits that one
           stroke's per-instance overrides, so a selection that also holds
           other elements does not qualify.
+      selection_orphan_count:
+        type: int
+        description: >
+          How many live references (instances) deleting the canvas selection
+          would leave pointing at a deleted target: the references whose
+          target is in the selection, or below a selected container, and which
+          are not themselves deleted (REFERENCE_GRAPH.md). 0 when nothing is
+          selected. delete_selection asks before a delete that strands one.
       # Artboards-panel rollups (ARTBOARDS.md § Artboard data model). Built by
       # every port's active-document view since the artboards work landed and
       # read by artboards.yaml's menu, context menu and keyboard rows; declared

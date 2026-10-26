@@ -127,6 +127,19 @@ def canonical_hex(value):
             return "#" + h.lower()
     return value
 
+def _holds_reference(node) -> bool:
+    """True when any element below ``node`` (a document dict, at any depth) is
+    a live reference, in the test-JSON form ``{"type": "live", "kind":
+    "reference"}``."""
+    if isinstance(node, dict):
+        if node.get("type") == "live" and node.get("kind") == "reference":
+            return True
+        return any(_holds_reference(v) for v in node.values())
+    if isinstance(node, list):
+        return any(_holds_reference(v) for v in node)
+    return False
+
+
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
@@ -1131,6 +1144,10 @@ class StateStore:
             "selection_has_brushed_stroke": len(brushed) > 0,
             "selection_is_single_brushed_stroke": selection_count == 1 and len(brushed) == 1,
         }
+        # How many live references deleting the selection would leave pointing
+        # at a deleted target (REFERENCE_GRAPH.md): delete_selection asks
+        # before it strands one. Bridged through test JSON, as apply_op is.
+        brush_facts["selection_orphan_count"] = self._selection_orphan_count(canvas_sel)
         # Artboard-view computation (works whether document is None or not)
         if self._document is None:
             raw_artboards: list = []
@@ -1301,6 +1318,19 @@ class StateStore:
         elem = self.get_element(path) if self._document is not None else None
         brush = elem.get("stroke_brush") if isinstance(elem, dict) else None
         return isinstance(brush, str) and brush != ""
+
+    def _selection_orphan_count(self, canvas_sel: list[tuple[int, ...]]) -> int:
+        # With no reference anywhere in the document nothing can be stranded,
+        # so the answer is 0 by the law itself, not a fallback; only a
+        # document that holds one is bridged (a partial store document, which
+        # many unit tests build, holds none and need not be well-formed).
+        if self._document is None or not canvas_sel or not _holds_reference(self._document):
+            return 0
+        import json
+        from document.dependency_index import orphaned_references
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        return len(orphaned_references(doc, [list(p) for p in canvas_sel]))
 
     def _canvas_selection_paths(self) -> list[tuple[int, ...]]:
         """Extract canvas selection from the document as a list of path

@@ -199,10 +199,16 @@ fn replay_key(model: &mut Model, tool: &mut crate::tools::yaml_tool::YamlTool, e
     let km = KeyMods { shift: b("shift"), ctrl: b("ctrl"), alt: b("alt"), meta: false };
     let route = route_key(name, km, |k| tool.captures_keyboard() || tool.claims_key(k));
     match route {
+        // `delete_selection`'s YAML on this case's model: a delete that would
+        // strand a live reference opens a dialog, which this runner does not
+        // hold, so it changes nothing; otherwise one journaled delete.
         KeyRoute::DeleteSelection => {
-            // The engine's outcome: nothing selected and a would-orphan delete
-            // both change nothing.
-            let _ = crate::workspace::menu_native::delete_selection(model);
+            let doc = model.document();
+            if !doc.selection.is_empty()
+                && crate::interpreter::document_views::selection_orphan_count(doc) == 0
+            {
+                crate::document::op_apply::journal_delete_selection(model, "delete_selection");
+            }
         }
         KeyRoute::ToolKey(k) => { tool.on_key_event(model, k, km); }
         KeyRoute::ToolChar(c) => { tool.on_key_event(model, &c, km); }

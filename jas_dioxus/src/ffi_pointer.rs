@@ -414,7 +414,11 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
         })
     };
     match route {
-        KeyRoute::DeleteSelection => delete_selection_key(engine),
+        // Delete and Backspace are the ACTION `delete_selection`:
+        // `ffi::dispatch_key` runs it through `jas_dispatch_action` (its YAML,
+        // which asks before stranding a live reference) before calling here,
+        // so this arm is the not-reached answer too.
+        KeyRoute::DeleteSelection => JasStatus::UnknownVerb,
         KeyRoute::ToolChar(ch) => {
             let mut slot = engine.tool_slot();
             let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
@@ -465,25 +469,6 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
     }
 }
 
-/// The Delete key's `delete_selection`, the web keyboard's reference-aware
-/// form: with nothing selected nothing changes (`UnknownVerb`, so the shell may
-/// let the key fall through). When deleting would ORPHAN a live instance, the
-/// web asks first (`delete_orphan_confirm`); the engine cannot open that
-/// dialog from a key yet, so it deletes NOTHING and names the refusal in
-/// `jas_last_error` rather than delete without asking. Otherwise ONE undo step.
-fn delete_selection_key(engine: &JasEngine) -> JasStatus {
-    use crate::workspace::menu_native::{delete_selection, DeleteOutcome};
-    match engine.with_model_mut(delete_selection) {
-        DeleteOutcome::NothingSelected => JasStatus::UnknownVerb,
-        DeleteOutcome::WouldOrphan(orphans) => {
-            engine.set_last_error(format!(
-                r#"{{"key":"Delete","refused":"delete_orphan_confirm","orphans":{orphans}}}"#
-            ));
-            JasStatus::UnknownVerb
-        }
-        DeleteOutcome::Deleted => JasStatus::Ok,
-    }
-}
 
 /// How many elements the session currently has selected.
 ///
@@ -1514,63 +1499,41 @@ mod tests {
         let doc = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
             crate::geometry::test_json::document_to_test_json(d)
         });
-        for key in [KEY_DELETE, KEY_BACKSPACE] {
+        // The shell's key door (`jas_dispatch_action` with `{"key"}`), which runs
+        // Delete and Backspace as the action `delete_selection`, its YAML.
+        let key = |e: *mut JasEngine, name: &str| -> String {
+            let req = format!(r#"{{"key":"{name}"}}"#);
+            unsafe {
+                let r = crate::ffi::jas_dispatch_action(e, req.as_ptr(), req.len());
+                let s = String::from_utf8_lossy(std::slice::from_raw_parts(r.ptr, r.len)).into_owned();
+                crate::ffi::jas_free(r);
+                s
+            }
+        };
+        for name in ["Delete", "Backspace"] {
             let e = jas_engine_new();
             seed(e);
             unsafe {
                 jas_set_tool(e, 0);
-                // Nothing selected: the key changes nothing and is not handled.
+                // Nothing selected: the key changes nothing and leaves no undo step.
                 let empty = doc(e);
-                assert_eq!(jas_key_event(e, key, 0), JasStatus::UnknownVerb, "key {key:#x}, nothing selected");
-                assert_eq!(doc(e), empty);
-                assert_eq!(crate::ffi::jas_document_modified(e), 0);
+                let _ = key(e, name);
+                assert_eq!(doc(e), empty, "{name}, nothing selected");
+                assert_eq!(crate::ffi::jas_document_modified(e), 0, "{name}, nothing selected: no edit");
+                assert!(!(&*e).with_model_mut(|m| m.can_undo()), "{name}, nothing selected: no undo step");
                 jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
                 jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
                 assert_eq!(jas_selection_len(e), 1, "the control: the click selected the rect");
                 let before = doc(e);
-                assert_eq!(jas_key_event(e, key, 0), JasStatus::Ok, "key {key:#x}");
-                assert_eq!(jas_selection_len(e), 0, "key {key:#x}: the selection is empty");
-                assert_ne!(doc(e), before, "key {key:#x}: the rect is gone");
-                assert!(!doc(e).contains("\"rect\""), "key {key:#x}: no rect remains: {}", doc(e));
-                assert_eq!(crate::ffi::jas_document_modified(e), 1, "key {key:#x}: an edit");
+                let _ = key(e, name);
+                assert_eq!(jas_selection_len(e), 0, "{name}: the selection is empty");
+                assert_ne!(doc(e), before, "{name}: the rect is gone");
+                assert!(!doc(e).contains("\"rect\""), "{name}: no rect remains: {}", doc(e));
+                assert_eq!(crate::ffi::jas_document_modified(e), 1, "{name}: an edit");
                 assert_eq!(jas_key_event(e, 'z' as u32, MOD_CMD), JasStatus::Ok);
-                assert!(doc(e).contains("\"rect\""), "key {key:#x}: Ctrl+Z brings the rect back");
+                assert!(doc(e).contains("\"rect\""), "{name}: Ctrl+Z brings the rect back");
                 jas_engine_free(e);
             }
-        }
-    }
-
-    /// The Delete key never orphans a live instance without asking. The web
-    /// opens `delete_orphan_confirm`; the engine cannot from a key yet, so it
-    /// deletes NOTHING and names the refusal. The control: the same document
-    /// with the instance selected too orphans nothing, and deletes.
-    #[test]
-    fn the_delete_key_refuses_by_name_to_orphan_an_instance() {
-        let _counters = crate::ffi_instr::test_lock::lock();
-        let doc = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
-            crate::geometry::test_json::document_to_test_json(d)
-        });
-        let e = jas_engine_new();
-        seed(e);
-        unsafe {
-            jas_set_tool(e, 0);
-            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
-            jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
-            let path = (&*e).with_document(|d| d.selection.iter().next().map(|es| es.path.clone())).expect("the rect");
-            (&*e).with_model_mut(crate::workspace::menu_native::make_instance);
-            assert!(doc(e).contains("\"rect\"") && doc(e).matches("\"type\"").count() > 2, "the control: an instance exists");
-            (&*e).with_model_mut(|m| crate::document::controller::Controller::select_element(m, &path));
-            let before = doc(e);
-            assert_eq!(jas_key_event(e, KEY_DELETE, 0), JasStatus::UnknownVerb);
-            assert_eq!(doc(e), before, "nothing deleted");
-            let err = crate::ffi::jas_last_error_json(e);
-            let text = String::from_utf8_lossy(std::slice::from_raw_parts(err.ptr, err.len)).into_owned();
-            crate::ffi::jas_free(err);
-            assert!(text.contains("delete_orphan_confirm"), "the refusal is named: {text}");
-            (&*e).with_model_mut(|m| { crate::document::controller::Controller::select_all(m); });
-            assert_eq!(jas_key_event(e, KEY_DELETE, 0), JasStatus::Ok, "the control: no orphan, deleted");
-            assert!(!doc(e).contains("\"rect\""));
-            jas_engine_free(e);
         }
     }
 
