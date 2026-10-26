@@ -165,7 +165,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 41 on 2026-10-26: `delete_selection` (reference-aware: it asks through
 # `active_document.selection_orphan_count`, else `doc.op: {op: delete_selection}`).
 # 40 the same day: `place_instance` (`doc.place_instance`, which mints its id).
-MIN_LOG_ONLY = 40
+# 38 the same day: `place_concept_instance` and `set_concept_param`
+# (`doc.place_concept_instance`, `doc.set_concept_param`).
+MIN_LOG_ONLY = 38
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 

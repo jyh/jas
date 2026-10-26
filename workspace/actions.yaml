@@ -4451,13 +4451,17 @@ actions:
     description: >
       Append a new generated instance of the panel-selected concept to the active
       layer and select it (CONCEPTS.md §6). The instance is created with the
-      concept's declared default parameters; a fresh element id is minted by the
-      initiator (value-in-op) and carried in the operation, never minted inside the
+      concept's declared default parameters, read from the concept registry; a
+      fresh element id is minted by the initiator (value-in-op) against every id
+      in the document and carried in the operation, never minted inside the
       shared core. Enabled only when a concept is panel-selected. Single undo op.
+      With no concept selected, or one the registry does not declare, nothing
+      happens.
     category: concepts
     enabled_when: "panel.selected_concept != null"
     effects:
-      - log: "place_concept_instance"
+      - snapshot
+      - doc.place_concept_instance: { concept: "panel.selected_concept" }
 
   set_concept_param:
     description: >
@@ -4465,16 +4469,19 @@ actions:
       and re-generate it live (CONCEPTS.md §6.4 — "tune the same parameters without
       redoing anything"). Dispatched by a Concepts-panel parameter field on commit:
       `param.name` is the parameter; the field's committed numeric value is injected
-      as `param.value`. A `log` stub like the other concept mutators — each app's
-      native arm finds the single selected `Generated` element, writes
-      `params[name] = value`, and the geometry re-derives from the generator at the
-      next render. Single undo op.
+      as `param.value`. The one selected element must be a generated instance; its
+      `params[name]` becomes the value, carried in the operation (value-in-op), and
+      the geometry re-derives from the generator at the next render. A value that
+      is a numeric string is read as its number. Single undo op. Nothing happens
+      when the value is not a finite number, or unless exactly one generated
+      instance is selected.
     category: concepts
     params:
       name: { type: string }
       value: { type: number }
     effects:
-      - log: "set_concept_param"
+      - snapshot
+      - doc.set_concept_param: { name: "param.name", value: "param.value" }
 
   apply_concept_operation:
     description: >

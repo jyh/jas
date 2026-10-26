@@ -327,3 +327,60 @@ def test_a_minted_id_never_repeats_a_symbol_masters_id():
     assert place_instance_ops(doc, "m1", mint=lambda: next(offers)) == [
         {"op": "place_instance", "master_id": "m1", "ref_id": "a1"}]
     assert place_instance_ops(doc, None) is None, "no master: nothing"
+def _action_effects(name: str) -> list:
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)["actions"][name]["effects"]
+
+
+def test_place_concept_instance_from_actions_yaml_appends_the_panel_selected_concept():
+    """`actions.yaml` place_concept_instance (CONCEPTS.md §6): a generated
+    instance of the concept `panel.selected_concept` names, with the concept's
+    declared default params and a freshly minted id, appended to the active
+    layer and selected. No concept selected, or an unknown one: nothing."""
+    doc = Document(layers=(Layer(name="L", children=(_rect(id="r1"),)),))
+    effects = _action_effects("place_concept_instance")
+    store = _store(doc)
+    run_effects(effects, {"panel": {"selected_concept": "star"}}, store)
+    after = _doc_of(store)
+    kids = after.layers[0].children
+    assert len(kids) == 2, "the instance is appended"
+    gen = kids[1]
+    assert type(gen).__name__ == "GeneratedElem" and gen.concept_id == "star"
+    assert dict(gen.params) == {"points": 5, "outer": 50, "inner": 20}, \
+        "the concept's declared defaults (workspace/concepts/star.yaml)"
+    assert gen.id is not None and gen.id != "r1", "its id is minted"
+    assert {es.path for es in after.selection} == {(0, 1)}, "the instance is selected"
+
+    for scope in ({"selected_concept": None}, {"selected_concept": "no_such_concept"}):
+        store = _store(doc)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {"panel": scope}, store)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{scope}: nothing"
+
+
+def test_set_concept_param_from_actions_yaml_writes_the_selected_instance():
+    """`actions.yaml` set_concept_param (CONCEPTS.md §6.4): `param.value` is
+    written to `params[param.name]` of the ONE selected generated instance. A
+    value that is not a number (a numeric string is one), no selection, two
+    selected, or a selection that is not a generated instance: nothing."""
+    from geometry.element import GeneratedElem
+    gen = GeneratedElem(concept_id="star", params={"points": 5, "outer": 50, "inner": 20}, id="g1")
+    base = Document(layers=(Layer(name="L", children=(gen, _rect(id="r1"))),))
+    sel = lambda *paths: replace(base, selection=frozenset(ElementSelection.all(p) for p in paths))
+    effects = _action_effects("set_concept_param")
+
+    for value, want in ((7, 7), (7.5, 7.5), ("9", 9)):
+        store = _store(sel((0, 0)))
+        run_effects(effects, {"param": {"name": "points", "value": value}}, store)
+        got = _doc_of(store).layers[0].children[0].params
+        assert got["points"] == want and got["outer"] == 50, f"value {value!r}"
+
+    for doc, value in ((sel((0, 0)), "seven"), (sel((0, 0)), "inf"), (sel((0, 0)), "1e999"),
+                       (sel((0, 0)), None), (base, 7),
+                       (sel((0, 0), (0, 1)), 7), (sel((0, 1)), 7)):
+        store = _store(doc)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {"param": {"name": "points", "value": value}}, store)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{value!r}: nothing"

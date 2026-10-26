@@ -358,8 +358,8 @@ impl EffectHost for EngineHost {
             store.panel_scope(panel).and_then(|p| p.get(key)).and_then(Value::as_str)
                 .map(str::to_string)
         };
-        let (sym, con) = (read("symbols", "selected_symbol"), read("concepts", "selected_concept"));
-        match run(model, action, params, sym.as_deref(), con.as_deref()) {
+        let sym = read("symbols", "selected_symbol");
+        match run(model, action, params, sym.as_deref()) {
             // The dialog door (design 2026-10-14): the confirm opens in the
             // engine's store with the params the verb computed, exactly as
             // an `open_dialog` effect opens one.

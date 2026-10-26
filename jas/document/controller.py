@@ -242,6 +242,72 @@ def place_instance_ops(doc: Document, master_id: str | None,
     return [{"op": "place_instance", "master_id": master_id, "ref_id": ids[0]}]
 
 
+def concept_default_params(concept: dict | None) -> dict:
+    """A concept's declared default params (``params: [{name, default}]``) as
+    a params object. Mirrors Rust ``symbols_host::concept_default_params`` and
+    Swift ``ConceptsPanel.defaultParams``."""
+    out: dict = {}
+    for p in (concept or {}).get("params") or ():
+        if isinstance(p, dict) and isinstance(p.get("name"), str) and "default" in p:
+            out[p["name"]] = p["default"]
+    return out
+
+
+def place_concept_instance_ops(doc: Document, concept_id: str | None, concept: dict | None,
+                               mint: Callable[[], str] | None = None) -> list[dict] | None:
+    """The one value-in-op op the Concepts panel's Place Instance applies, or
+    None (a no-op) when no concept is named, the registry does not declare it
+    (``concept`` is None), or the mint fails: ``place_concept_instance`` of
+    ``concept_id`` with its declared default params and a freshly minted id
+    (CONCEPTS.md §6). Rust ``symbols_host::place_concept_instance_ops``."""
+    from document.artboard import generate_element_id
+    if not concept_id or concept is None:
+        return None
+    ids = _mint_ids(doc, 1, mint or generate_element_id)
+    if ids is None:
+        return None
+    return [{"op": "place_concept_instance", "concept_id": concept_id,
+             "params": concept_default_params(concept), "elem_id": ids[0]}]
+
+
+def concept_param_value(value) -> float | None:
+    """A committed concept-param value as a finite number: a number, or a
+    string that is exactly a decimal number; anything else None. Mirrors Rust
+    ``symbols_host::concept_param_value`` and Swift
+    ``ConceptsPanel.paramValue``."""
+    import math
+    import re
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+    elif isinstance(value, str) and re.fullmatch(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?", value):
+        v = float(value)
+    else:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def set_concept_param_ops(doc: Document, name, value) -> list[dict] | None:
+    """The one value-in-op op a Concepts-panel parameter field's commit
+    applies, or None (a no-op) unless ``name`` is a string, ``value`` is a
+    finite number (:func:`concept_param_value`) and exactly one generated
+    instance is selected: ``set_concept_param`` of its path (CONCEPTS.md §6.4).
+    Rust ``symbols_host::set_concept_param_ops``."""
+    from geometry.element import GeneratedElem
+    v = concept_param_value(value)
+    if not isinstance(name, str) or v is None or len(doc.selection) != 1:
+        return None
+    path = next(iter(doc.selection)).path
+    try:
+        elem = doc.get_element(path)
+    except (ValueError, IndexError, KeyError):
+        return None
+    if not isinstance(elem, GeneratedElem):
+        return None
+    return [{"op": "set_concept_param", "path": list(path), "name": name, "value": v}]
+
+
 def make_instance_ops(doc: Document, offset: float,
                       mint: Callable[[], str] | None = None) -> list[dict] | None:
     """The two value-in-op ops Object > Make Instance applies, or None (a

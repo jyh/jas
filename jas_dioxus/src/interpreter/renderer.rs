@@ -660,10 +660,9 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
     // `set_panel_state` effect, and is tracked natively by the intercept above.
     if crate::interpreter::symbols_host::ACTIONS.contains(&action) {
         use crate::interpreter::symbols_host::{run, Outcome};
-        let (sym, con) = (st.symbols_selected.clone(), st.concepts_selected.clone());
+        let sym = st.symbols_selected.clone();
         let Some(tab) = st.tab_mut() else { return Vec::new(); };
-        match run(&mut tab.model, action, &serde_json::Value::Object(params.clone()),
-                  sym.as_deref(), con.as_deref()) {
+        match run(&mut tab.model, action, &serde_json::Value::Object(params.clone()), sym.as_deref()) {
             Some(Outcome::SelectSymbol(id)) => st.symbols_selected = id,
             Some(Outcome::Dialog { id, params }) => {
                 return vec![serde_json::json!({"open_dialog": {"id": id, "params": params}})];
@@ -1782,6 +1781,11 @@ fn build_appstate_ctx(
         // the symbols actions' enabled_when ("panel.selected_symbol != null")
         // resolves when fired from the panel menu / dispatch path.
         "selected_symbol": st.symbols_selected.clone()
+            .map(serde_json::Value::String)
+            .unwrap_or(serde_json::Value::Null),
+        // Concepts panel: the panel-selected concept id (or null), which
+        // `place_concept_instance` reads (`panel.selected_concept`).
+        "selected_concept": st.concepts_selected.clone()
             .map(serde_json::Value::String)
             .unwrap_or(serde_json::Value::Null),
     });
@@ -13916,6 +13920,77 @@ mod tests {
             t.e.abs() < 1e-6 && t.f.abs() < 1e-6,
             "canonical hexagon places at the origin: {t:?}"
         );
+    }
+
+    /// The Concepts panel's Place Instance runs its YAML
+    /// (`doc.place_concept_instance` with `panel.selected_concept`, which the
+    /// web's app scope supplies from `concepts_selected`): a generated instance
+    /// with the concept's declared defaults and a minted id is appended and
+    /// selected, as ONE undo step. No concept, or one the registry does not
+    /// declare: nothing.
+    #[test]
+    fn place_concept_instance_appends_the_panel_selected_concept_with_its_defaults() {
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let before = st.tabs[st.active_tab].model.document().clone();
+        for none in [None, Some("no_such_concept")] {
+            st.concepts_selected = none.map(String::from);
+            let _ = dispatch_action("place_concept_instance", &serde_json::Map::new(), &mut st);
+            assert_eq!(st.tabs[st.active_tab].model.document().layers, before.layers, "{none:?}: nothing");
+        }
+        st.concepts_selected = Some("star".into());
+        let _ = dispatch_action("place_concept_instance", &serde_json::Map::new(), &mut st);
+        let doc = st.tabs[st.active_tab].model.document().clone();
+        let kids = doc.layers[0].children().unwrap();
+        assert_eq!(kids.len(), 1, "the instance is appended");
+        match &*kids[0] {
+            Element::Live(crate::geometry::live::LiveVariant::Generated(g)) => {
+                assert_eq!(g.concept_id, "star");
+                assert_eq!(g.params, serde_json::json!({"points": 5, "outer": 50, "inner": 20}),
+                    "the concept's declared defaults (workspace/concepts/star.yaml)");
+                assert!(g.common.id.is_some(), "a minted id");
+            }
+            other => panic!("not a generated instance: {other:?}"),
+        }
+        assert_eq!(doc.selection.iter().map(|es| es.path.clone()).collect::<Vec<_>>(), vec![vec![0, 0]]);
+        st.tabs[st.active_tab].model.undo();
+        assert_eq!(st.tabs[st.active_tab].model.document().layers, before.layers, "one undo");
+    }
+
+    /// A Concepts-panel parameter field's commit runs its YAML
+    /// (`doc.set_concept_param` with `param.name` and `param.value`): the one
+    /// selected generated instance's param becomes the value, a numeric string
+    /// read as its number, as ONE undo step. A value that is not a finite
+    /// number, or a selection that is not one generated instance: nothing.
+    #[test]
+    fn set_concept_param_writes_the_one_selected_generated_instance() {
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        st.concepts_selected = Some("star".into());
+        let _ = dispatch_action("place_concept_instance", &serde_json::Map::new(), &mut st);
+        let points = |st: &AppState| match &*st.tabs[st.active_tab].model.document().layers[0].children().unwrap()[0] {
+            Element::Live(crate::geometry::live::LiveVariant::Generated(g)) => g.params["points"].clone(),
+            other => panic!("not a generated instance: {other:?}"),
+        };
+        let set = |st: &mut AppState, value: serde_json::Value| {
+            let mut p = serde_json::Map::new();
+            p.insert("name".into(), serde_json::json!("points"));
+            p.insert("value".into(), value);
+            let _ = dispatch_action("set_concept_param", &p, st);
+        };
+        set(&mut st, serde_json::json!(7));
+        assert_eq!(points(&st).as_f64(), Some(7.0));
+        set(&mut st, serde_json::json!("9"));
+        assert_eq!(points(&st).as_f64(), Some(9.0), "a numeric string is its number");
+        for bad in [serde_json::json!("seven"), serde_json::json!("inf"), serde_json::json!("1e999"), serde_json::Value::Null] {
+            set(&mut st, bad.clone());
+            assert_eq!(points(&st).as_f64(), Some(9.0), "{bad}: nothing");
+        }
+        st.tabs[st.active_tab].model.undo();
+        assert_eq!(points(&st).as_f64(), Some(7.0), "one undo per commit");
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        doc.selection.clear();
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        set(&mut st, serde_json::json!(11));
+        assert_eq!(points(&st).as_f64(), Some(7.0), "nothing selected: nothing");
     }
 
     #[test]

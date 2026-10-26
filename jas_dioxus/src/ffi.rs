@@ -3313,6 +3313,52 @@ mod tests {
         e
     }
 
+    /// The Concepts panel's Place Instance and a parameter field's commit run
+    /// their YAML in the engine (`doc.place_concept_instance` reading the
+    /// STORE's `selected_concept`, `doc.set_concept_param` reading
+    /// `param.*`), each ONE undo step. No concept selected: nothing.
+    #[test]
+    fn the_concept_verbs_run_their_yaml_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const CONCEPTS: &str = "concepts_panel_content";
+        let e = engine_with(crate::document::test_fixture::model_with(vec![], &[]));
+        let kids = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let doc = en.model.borrow().document().clone();
+            doc.layers[0].children().map(|c| c.to_vec()).unwrap_or_default()
+        };
+        let (_reply, _err) = behave(e, CONCEPTS, r#"{"widget":"concept_place","event":"click"}"#);
+        assert!(kids(e).is_empty(), "no concept selected: nothing");
+
+        {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let mut store = en.store.borrow_mut();
+            if store.panel_scope("concepts").is_none() {
+                store.init_panel("concepts", std::collections::HashMap::new());
+            }
+            store.set_panel("concepts", "selected_concept", serde_json::json!("star"));
+        }
+        let (reply, err) = behave(e, CONCEPTS, r#"{"widget":"concept_place","event":"click"}"#);
+        assert!(reply.contains(r#""doc_changed":true"#), "place: {reply} {err}");
+        let points = |e: *mut JasEngine| match &*kids(e)[0] {
+            crate::geometry::element::Element::Live(crate::geometry::live::LiveVariant::Generated(g)) => {
+                assert_eq!(g.concept_id, "star");
+                g.params["points"].as_f64()
+            }
+            other => panic!("not a generated instance: {other:?}"),
+        };
+        assert_eq!(kids(e).len(), 1, "the instance is appended");
+        assert_eq!(points(e), Some(5.0), "the concept's declared default");
+
+        let (_reply, err) = dispatch(e, r#"{"action":"set_concept_param","params":{"name":"points","value":8}}"#);
+        assert_eq!(points(e), Some(8.0), "the param is set: {err}");
+        let _ = dispatch(e, r#"{"action":"set_concept_param","params":{"name":"points","value":"eight"}}"#);
+        assert_eq!(points(e), Some(8.0), "not a number: nothing");
+        unsafe { e.as_ref() }.unwrap().model.borrow_mut().undo();
+        assert_eq!(points(e), Some(5.0), "one undo");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2b-17 (F-J).** The Symbols panel's verbs run in the engine through
     /// `symbols_host`, the web's own implementation, instead of reporting their
     /// `log` stubs. New Symbol promotes the selection and panel-selects the new
