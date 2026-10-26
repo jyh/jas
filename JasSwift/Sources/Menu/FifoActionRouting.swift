@@ -19,15 +19,12 @@ import Foundation
 // JasCommands.dispatchMenuAction is a PRIVATE method on a SwiftUI
 // `struct JasCommands: Commands` (@FocusedValue model + injected
 // closures) and is NOT reachable from the app delegate's FIFO handler.
-// So this dispatcher performs the SAME document-mutation ops the
-// JasCommands handlers use, directly on the active model:
-//   delete_selection -> shared opApply delete_selection in a named txn
-//                       (== the keyboard-only native delete; one named
-//                        undo step via the shared op_apply dispatcher,
-//                        matching Python's _route_delete_selection)
-// Everything else falls through to the generic panel dispatcher for
-// genuine panel / generic-effect actions (panel toggles, etc.), and so does
-// `select_all`: since 2026-10-25 its YAML is `doc.op: {op: select_all}`.
+// No action is mutated natively here any more: every name falls through to
+// the generic panel dispatcher. `select_all` has done so since 2026-10-25 (its
+// YAML is `doc.op: {op: select_all}`), and `delete_selection` since 10-26 (its
+// YAML asks through `active_document.selection_orphan_count`; headless, a
+// delete that would strand a live reference leaves `delete_orphan_confirm`
+// open in the store, and `action delete_orphan_confirm_ok` answers it).
 public enum FifoActionRouting {
     /// Native-first dispatch of a named action for the FIFO `action`
     /// channel. Routes document-mutating natives directly on `model`,
@@ -48,24 +45,7 @@ public enum FifoActionRouting {
                 LayersPanel.dispatchYamlAction(name, model: model, params: params)
             }
     ) {
-        switch name {
-        case "delete_selection":
-            // Keyboard-only native delete: journals ONE named
-            // `delete_selection` op via the shared opApply dispatcher
-            // (OP_LOG.md §9), matching Python's _route_delete_selection.
-            // No-op when nothing is selected (opApply handles the empty
-            // case). The orphan-confirm NSAlert that JasCommands shows is
-            // intentionally skipped here: the FIFO channel is headless
-            // test-only input with no UI to confirm against.
-            guard !model.document.selection.isEmpty else { return }
-            model.withTxn {
-                model.nameTxn("delete_selection")
-                opApply(model, Controller(model: model), ["op": "delete_selection"])
-            }
-        default:
-            // Genuine panel / generic-effect action.
-            fallthroughDispatch(name, model, params)
-        }
+        fallthroughDispatch(name, model, params)
     }
 }
 

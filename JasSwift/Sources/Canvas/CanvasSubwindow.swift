@@ -4163,7 +4163,7 @@ class CanvasNSView: NSView {
     /// Backspace and the context-menu Delete so they behave identically.
     private func performDeleteSelection() {
         guard let model = controller?.model else { return }
-        JasCommands.deleteSelectionReferenceAware(model)
+        JasCommands.runDeleteSelection(model)
     }
 
     /// Two-finger scroll → pan (SH-1). A thin AppKit adapter: read the event's

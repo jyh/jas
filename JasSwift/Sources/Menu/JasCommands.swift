@@ -630,44 +630,23 @@ public struct JasCommands: Commands {
         EditClipboard.pasteClipboard(model, offset: offset, preserveLayers: preserveLayers)
     }
 
-    private func deleteSelection() {
-        guard let model = model else { return }
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        // Reference-aware delete (warn-then-orphan): if deleting the selection
-        // would leave live instances pointing at a now-gone target, confirm
-        // first. Empty -> delete as today (no dialog). Cut is intentionally
-        // left unguarded for now (it may orphan silently — follow-on work).
-        let paths = doc.selection.map(\.path)
-        let orphaned = DependencyIndex.orphanedReferences(doc, paths)
-        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
-            return
+    /// The reference-aware delete every Swift Delete route runs (the canvas's
+    /// Delete key and context menu, a YAML tool's `dispatch: delete_selection`;
+    /// the menubar has no Delete item):
+    /// actions.yaml `delete_selection`. Nothing selected changes nothing; a
+    /// delete that would strand a live reference leaves `delete_orphan_confirm`
+    /// open in the store, which the Mac presents AS its NSAlert (`confirm`,
+    /// injectable for tests): the dialog is closed there, and a Delete runs
+    /// `delete_orphan_confirm_ok`'s YAML. Otherwise ONE undo step.
+    static func runDeleteSelection(_ model: Model,
+                                   confirm: (Int) -> Bool = JasCommands.confirmOrphaningDelete) {
+        LayersPanel.dispatchYamlAction("delete_selection", model: model)
+        guard model.stateStore.getDialogId() == "delete_orphan_confirm" else { return }
+        let count = (model.stateStore.getDialogParams()?["count"] as? Int) ?? 0
+        model.stateStore.closeDialog()
+        if confirm(count) {
+            LayersPanel.dispatchYamlAction("delete_orphan_confirm_ok", model: model)
         }
-        // OP_LOG.md §9 Phase P4 — route the menu Delete through the SHARED
-        // `opApply` dispatcher (`apply_delete_selection`, the SAME
-        // Document.deleteSelection body) so the gesture JOURNALS a real
-        // `delete_selection` op (one named undo step). The synchronous orphan
-        // NSAlert above IS Swift's confirm path; only the mutation routes here.
-        model.withTxn {
-            model.nameTxn("delete_orphan_confirm_ok")
-            opApply(model, Controller(model: model), ["op": "delete_selection"])
-        }
-    }
-
-    /// The reference-aware delete every Swift Delete route runs: nothing
-    /// selected changes nothing; a delete that would ORPHAN a live instance
-    /// asks first (`confirmOrphaningDelete`); otherwise ONE undo step. The
-    /// canvas's Delete key and a YAML tool's `dispatch: delete_selection` (the
-    /// Artboard tool's fall-through) both call it.
-    static func deleteSelectionReferenceAware(_ model: Model) {
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
-        if !orphaned.isEmpty && !confirmOrphaningDelete(orphaned.count) {
-            return
-        }
-        // Undoable: editDocument self-brackets one undo step.
-        model.editDocument(doc.deleteSelection())
     }
 
     /// Present the synchronous warn-then-orphan confirm (mirrors `revert()`'s
