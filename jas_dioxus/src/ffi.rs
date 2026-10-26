@@ -1723,11 +1723,11 @@ pub unsafe extern "C" fn jas_dispatch_action(
             engine_scope_of(engine, "")
         }
     };
-    // The menu's model-pure verbs whose `actions.yaml` entries are `log`
-    // stubs (group, ungroup, ungroup_all, make_instance): the menu runs them
-    // in every app, through one table (`menu_native`), and so does this route.
-    // A panel menu never names one, so only the menubar's. (Select All, flask
-    // STATUS §242, and the lock/hide verbs now run their YAML, `doc.op`.)
+    // The menu's model-pure verb whose `actions.yaml` entry is a `log` stub
+    // (make_instance): the menu runs it in every app, through one table
+    // (`menu_native`), and so does this route. A panel menu never names it, so
+    // only the menubar's. (Select All, flask STATUS §242, and the lock, hide
+    // and group verbs now run their YAML, `doc.op`.)
     let native = (panel.is_none() && clip_verb.is_none()).then(|| {
         let mut model = engine.model.borrow_mut();
         let generation = model.generation();
@@ -5419,7 +5419,7 @@ mod tests {
             assert!(!refused.iter().any(|r| r.starts_with(&format!("{verb} -> "))),
                     "{verb} is the menu's own and the engine runs it");
         }
-        assert!(ran >= 9, "at least the nine model verbs ran (four native, five `doc.op`); {ran} items ran");
+        assert!(ran >= 9, "at least the nine model verbs ran (one native, eight `doc.op`); {ran} items ran");
     }
 
     /// WHETHER THE DOCUMENT IS MODIFIED, FOR A SHELL'S DIRTY FLAG (flask §246,

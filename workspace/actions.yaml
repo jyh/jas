@@ -491,7 +491,10 @@ actions:
     tier: 3
     enabled_when: "active_document.selection_count >= 2"
     effects:
-      - log: "group"
+      # One undo step through the op layer (`doc.op`); until 2026-10-25 a
+      # `log` stub whose meaning lived in each port's native menu table.
+      - snapshot
+      - doc.op: { op: group_selection }
   ungroup:
     description: >
       Ungroup the selected Group elements one level, replacing each group
@@ -502,7 +505,10 @@ actions:
     tier: 3
     enabled_when: "active_document.has_selection"
     effects:
-      - log: "ungroup"
+      # One undo step through the op layer (`doc.op`); until 2026-10-25 a
+      # `log` stub whose meaning lived in each port's native menu table.
+      - snapshot
+      - doc.op: { op: ungroup_selection }
   ungroup_all:
     description: >
       Recursively ungroup every unlocked Group in the document until no
@@ -515,7 +521,10 @@ actions:
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "ungroup_all"
+      # One undo step through the op layer (`doc.op`); until 2026-10-25 a
+      # `log` stub whose meaning lived in each port's native menu table.
+      - snapshot
+      - doc.op: { op: ungroup_all }
   lock:
     description: >
       Lock the selected elements to prevent editing. Locked objects cannot

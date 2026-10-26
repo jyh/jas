@@ -670,11 +670,14 @@
   ],
   "verbs_with_no_corpus_instance": [
     "apply_concept_operation",
+    "group_selection",
     "place_concept_instance",
     "promote_to_concept",
     "redo",
     "set_concept_param",
     "snapshot",
-    "undo"
+    "undo",
+    "ungroup_all",
+    "ungroup_selection"
   ]
 }

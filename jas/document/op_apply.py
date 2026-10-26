@@ -1812,6 +1812,12 @@ def op_apply(model: Model, op: dict) -> None:
         ctrl.hide_selection()
     elif name == "show_all":
         ctrl.show_all()
+    elif name == "group_selection":
+        ctrl.group_selection()
+    elif name == "ungroup_selection":
+        ctrl.ungroup_selection()
+    elif name == "ungroup_all":
+        ctrl.ungroup_all()
     elif name == "boolean_union":
         from panels.boolean_apply import apply_destructive_boolean
         apply_destructive_boolean(model, "union")

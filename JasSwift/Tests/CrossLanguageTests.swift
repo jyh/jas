@@ -5922,9 +5922,6 @@ private let actionFixtures = [
 /// document mutation. Mirrors the Python `_MENU_NATIVE_HANDLERS` intercept and
 /// the symbols / concepts native intercepts already in ``runActionModel``.
 private let menuNativeHandlers: [String: (Model) -> Void] = [
-    "group": MenuActions.groupSelection,
-    "ungroup": MenuActions.ungroupSelection,
-    "ungroup_all": MenuActions.ungroupAll,
     "make_instance": MenuActions.makeInstance,
 ]
 
