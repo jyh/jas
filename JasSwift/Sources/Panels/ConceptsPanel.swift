@@ -128,8 +128,10 @@ public enum ConceptsPanel {
     /// unless exactly one Generated instance is selected and its concept
     /// declares the operation `opId` whose `set:` expressions, evaluated over
     /// the instance's CURRENT params (bound under `param`), give at least one
-    /// number: `apply_concept_operation` of its path with those numbers as
-    /// `changes`. Replay merges `changes` and never re-evaluates. Rust
+    /// number other than the param's current value: `apply_concept_operation`
+    /// of its path with those numbers as `changes`, and nil for an operation
+    /// that changes nothing (Remove Side at 3). Replay merges `changes` and
+    /// never re-evaluates. Rust
     /// `symbols_host::apply_concept_operation_ops`.
     static func applyConceptOperationOps(_ doc: Document, opId: String) -> [[String: Any]]? {
         guard doc.selection.count == 1, let sel = doc.selection.first else { return nil }
@@ -147,7 +149,9 @@ public enum ConceptsPanel {
         var changes: [String: Any] = [:]
         for (name, exprV) in set {
             guard let src = exprV as? String else { continue }
-            if case .number(let n) = evaluate(src, context: ctx) {
+            // A change equal to the current value is no change.
+            if case .number(let n) = evaluate(src, context: ctx),
+               (gen.params[name] as? NSNumber)?.doubleValue != n {
                 changes[name] = n
             }
         }

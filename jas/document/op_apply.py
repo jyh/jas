@@ -1615,6 +1615,16 @@ def op_apply(model: Model, op: dict) -> None:
             params = {}
         transform = parse_transform(op.get("transform"))
         ctrl.promote_to_concept(path, concept_id, params, transform)
+    # The fill/stroke widget's Gradient button (GRADIENT.md §Fill-type
+    # coupling): every selected member whose active attribute holds no
+    # gradient takes its own solid colour's seed. Selection-relative: the seed
+    # is a function of the document the op applies to, so replay rebuilds it.
+    # A non-bool ``fill_on_top`` SKIPS. Mirrors the Rust promote_to_gradient arm.
+    elif name == "promote_to_gradient":
+        fill_on_top = op.get("fill_on_top")
+        if not isinstance(fill_on_top, bool):
+            return
+        ctrl.promote_selection_to_gradient(fill_on_top)
     elif name == "detach":
         path = parse_path(op.get("path"))
         if path is None:

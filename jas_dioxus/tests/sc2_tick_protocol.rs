@@ -194,6 +194,13 @@ fn whole_panel_bytes(e: *mut JasEngine) -> usize {
 /// worse than no baseline. Ruled: re-run and report unchanged, or report the
 /// delta. **Measured, not assumed.**
 ///
+/// ⚠️ **RE-MEASURED 2026-10-26: 23,050 -> 22,947 (out 23,012 -> 22,909).** The
+/// colour panel's fill/stroke widget lost one bind: its Gradient button had
+/// `bind: disabled: "true"` while `set_fill_type_gradient` was a placeholder,
+/// and the bind came off when the action grew effects. Widget tree -10 bytes
+/// (15,974 -> 15,964), bind values -93 (7,038 -> 6,945): the delta is that one
+/// row. The published 23,050 described the panel before that change.
+///
 /// It comes back unchanged, and the reason is checkable rather than lucky:
 /// `color.yaml` contains **zero** `active_document` references, so nothing it
 /// binds can see the new namespace. The `panel.*`-follows-`fill_on_top`
@@ -217,12 +224,12 @@ fn c1_is_unchanged_by_the_scope_growth() {
     assert_eq!(nodes, 106, "the C1 population");
     assert_eq!(n(&c, "crossings"), 4, "C1 crossings");
     assert_eq!(n(&c, "bytes_in"), 38, "C1 bytes in");
-    assert_eq!(n(&c, "bytes_out"), 23_012, "C1 bytes out");
-    assert_eq!(n(&c, "bytes_total"), 23_050, "the published C1 figure");
+    assert_eq!(n(&c, "bytes_out"), 22_909, "C1 bytes out");
+    assert_eq!(n(&c, "bytes_total"), 22_947, "the C1 figure as re-measured 2026-10-26 (published: 23,050)");
 
     // The BREAKDOWN, not just the total — the fork's answer lives there.
-    assert_eq!(per_fn(&c, "jas_widget_tree"), (1, 19, 15_974));
-    assert_eq!(per_fn(&c, "jas_bind_values"), (1, 19, 7_038));
+    assert_eq!(per_fn(&c, "jas_widget_tree"), (1, 19, 15_964));
+    assert_eq!(per_fn(&c, "jas_bind_values"), (1, 19, 6_945));
     assert_eq!(per_fn(&c, "jas_free"), (2, 0, 0), "two frees for two reads");
     assert_eq!(per_fn(&c, "jas_panel_event"), (0, 0, 0), "C1 does not tick");
     // C1 performs no tick, so no engine-side sync work may be attributed to it.
@@ -232,7 +239,8 @@ fn c1_is_unchanged_by_the_scope_growth() {
 }
 
 /// The other half of the same guard: with **200 artboards in the document**, C1
-/// on the colour panel is STILL 23,050. If this ever moves, the colour panel has
+/// on the colour panel is STILL 22,947 (23,050 before 2026-10-26; see
+/// above). If this ever moves, the colour panel has
 /// grown a document binding and C1's published figure is describing something
 /// else.
 #[test]
@@ -247,7 +255,7 @@ fn c1_does_not_move_when_the_document_is_large() {
         |e| open(*e, COLOUR),
     );
     assert_eq!(nodes, 106);
-    assert_eq!(n(&c, "bytes_total"), 23_050, "C1 is document-independent");
+    assert_eq!(n(&c, "bytes_total"), 22_947, "C1 is document-independent");
     serialised(|| unsafe { jas_engine_free(e) });
 }
 
@@ -428,33 +436,37 @@ fn the_tick_is_flat_across_two_document_sizes_and_the_engine_is_not() {
     );
 }
 
-/// ⛔ **GATE ③'s CEILING IS NOT A CONSTANT OF THE PANEL — it is the payload at
-/// ONE COLOUR, and the naive re-read exceeds it at others.**
+/// ⛔ **GATE ③'s CEILING IS NOT A CONSTANT OF THE PANEL — it was the payload at
+/// ONE COLOUR, of the panel as it stood that day.**
 ///
 /// Amendment 8 ② states that the trivial whole-panel re-read passes ③ *by
 /// construction*, "exactly 7,038 bytes because ③ was derived from that number."
-/// Measured: 7,038 is the payload at the **C1 seed** (`664040`). Sweep the hue
-/// and the same trivial re-read reaches **7,044** — the resolved values are
-/// decimal strings and their DIGIT COUNTS move with the colour.
+/// Measured: 7,038 was the payload at the **C1 seed** (`664040`). Sweep the hue
+/// and the same trivial re-read moved by **6 bytes** — the resolved values are
+/// decimal strings and their DIGIT COUNTS move with the colour — so it reached
+/// **7,044**, over the ceiling it was supposed to define.
 ///
-/// So the naive implementation the ceiling was defined to bound **breaches the
-/// ceiling** at colours the seed happens not to be. That does not make ③
-/// useless — a 6-byte overshoot is not the O(n) regression it was built to catch
-/// — but **a pass or a breach within a few bytes of 7,038 says nothing**, and a
-/// report must not treat the threshold as sharp.
-///
-/// Reported, not patched. Re-deriving the constant to a worst case would be
-/// setting a threshold from the thing being gated, which is the error the
-/// sequencer refused at 21:00 and is not mine to make unilaterally.
+/// ⚠️ **RE-MEASURED 2026-10-26, AND THE BREACH IS GONE FOR A REASON THAT IS NOT
+/// A FIX.** The colour panel lost a row (the fill/stroke widget's Gradient
+/// button's `bind.disabled`, removed when `set_fill_type_gradient` grew
+/// effects): the payload at the seed is now **6,945** and the sweep reads
+/// 6,945..6,951, all under 7,038. The "not a constant" half still holds and is
+/// asserted; the "exceeds" half was this test's name until that date and is
+/// retired by the panel shrinking, which is exactly the point: **a pass or a
+/// breach within a few bytes of 7,038 says nothing**, and a report must not
+/// treat the threshold as sharp. The ceiling stays 7,038; re-deriving it from
+/// the thing being gated is the error the sequencer refused, and not mine to
+/// make.
 #[test]
-fn the_naive_re_read_is_not_a_constant_and_exceeds_the_ceiling() {
+fn the_naive_re_read_is_not_a_constant() {
     serialised(|| {
         let e = jas_engine_new();
         seed_report_colour(e);
         open(e, COLOUR);
 
-        // At the seed, the ceiling's own number.
-        assert_eq!(whole_panel_bytes(e), 7_038, "the payload gate ③ was derived from");
+        // At the seed: 7,038 when gate ③ was derived from it, 6,945 since
+        // 2026-10-26 (see above).
+        assert_eq!(whole_panel_bytes(e), 6_945, "the payload at the C1 seed");
 
         let mut sizes = vec![];
         for h in [45.0, 120.0, 210.0, 300.0, 359.0] {
@@ -464,14 +476,17 @@ fn the_naive_re_read_is_not_a_constant_and_exceeds_the_ceiling() {
         }
         let (min, max) = (*sizes.iter().min().unwrap(), *sizes.iter().max().unwrap());
         println!("\nNAIVE WHOLE-PANEL RE-READ, colour panel, one hue sweep");
-        println!("  seed 664040 : 7038 bytes  (gate ③'s ceiling)");
+        println!("  seed 664040 : 6945 bytes  (gate ③'s ceiling: 7038)");
         println!("  sweep       : min {min}, max {max}  -> spread {} bytes\n", max - min);
 
-        assert!(max > 7_038, "if it never exceeds 7,038 this flag is stale: max {max}");
-        // PIN THE UNIT: the overshoot is BYTES and it is small. Bounded so a
+        assert!(max > min, "the payload moves with the colour: it is not a constant");
+        // PIN THE UNIT: the spread is BYTES and it is small. Bounded so a
         // change turning 6 bytes into 600 fails here rather than quietly
         // widening the claim.
-        assert!(max - 7_038 < 100, "the overshoot is small: {} bytes", max - 7_038);
+        assert!(max - min < 100, "the spread is small: {} bytes", max - min);
+        // Today's panel sits under the ceiling at every swept colour. If this
+        // reds, the breach is back: report it, do not move the ceiling.
+        assert!(max <= 7_038, "the naive re-read breaches gate ③ again: max {max}");
 
         unsafe { jas_engine_free(e) };
     });

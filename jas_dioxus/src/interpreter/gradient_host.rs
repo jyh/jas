@@ -99,11 +99,24 @@ pub fn selection_gradient(doc: &Document, fill_on_top: bool) -> SelectionGradien
 /// from none, `[#000000@0, #ffffff@100]`; linear, 0°, 100 %, classic, no
 /// dither, within.
 pub fn seed_gradient(solid: Option<Color>) -> Gradient {
-    let stop = |color, location| GradientStop { color, opacity: 100.0, location, midpoint_to_next: 50.0 };
-    Gradient {
-        stops: vec![stop(solid.unwrap_or(Color::BLACK), 0.0), stop(Color::WHITE, 100.0)],
-        ..Gradient::default()
-    }
+    Gradient::seed(solid)
+}
+
+/// The one op the fill/stroke widget's Gradient button applies
+/// (`doc.promote_to_gradient`, GRADIENT.md §Fill-type coupling: "ensure the
+/// active attribute is a gradient object"): `promote_to_gradient` of the
+/// active attribute, or none when promoting would change no selected element
+/// (nothing selected, every member already a gradient, or no member able to
+/// carry one), so a click that changes nothing builds no op. The op is
+/// selection-relative: each member's seed is a function of the document it
+/// applies to. The reference's `promote_to_gradient_ops`.
+pub fn promote_to_gradient_ops(doc: &Document, fill_on_top: bool) -> Vec<Value> {
+    use crate::geometry::element::{map_paintable, promote_leaf_to_gradient};
+    let changes = doc.selection.iter().any(|es| {
+        doc.get_element(&es.path)
+            .is_some_and(|elem| map_paintable(elem, &|leaf| promote_leaf_to_gradient(leaf, fill_on_top)) != *elem)
+    });
+    if changes { vec![json!({"op": "promote_to_gradient", "fill_on_top": fill_on_top})] } else { Vec::new() }
 }
 
 /// Write `g` onto the active attribute of every selected element. The solid
@@ -686,6 +699,34 @@ mod tests {
         assert!(matches!(read(group(vec![rect(Some(RED)), rect(Some(BLUE))])), SelectionGradient::Solid(Some(RED))),
                 "all solid: the first member's colour seeds");
         assert!(matches!(read(group(vec![])), SelectionGradient::Empty), "an empty group contributes nothing");
+    }
+
+    /// The Gradient button's op builder and its op, each guarded on its own:
+    /// the builder returns no op when promoting would change nothing (the
+    /// reference's `promote_to_gradient_ops` the same), and the op applied to a
+    /// document with nothing to promote does not edit it, so a replayed or
+    /// hand-sent op cannot move the generation either. In the engine one guard
+    /// hides the other (a builder that always built survived the engine arm).
+    #[test]
+    fn the_gradient_button_builds_and_applies_nothing_when_nothing_would_change() {
+        use crate::geometry::element::LineElem;
+        let line = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 10.0, y2: 0.0, stroke: None, width_points: Vec::new(),
+            common: CommonProps::default(), stroke_gradient: None,
+        });
+        let op = |f: bool| vec![json!({"op": "promote_to_gradient", "fill_on_top": f})];
+        let ops = |e: Element, f: bool| promote_to_gradient_ops(model_with(vec![e], &[0]).document(), f);
+        assert_eq!(ops(rect(Some(RED)), true), op(true));
+        assert_eq!(ops(graded(Some(RED), RED, BLUE), true), Vec::<Value>::new(), "already a gradient");
+        assert_eq!(ops(line.clone(), true), Vec::<Value>::new(), "a line carries no fill gradient");
+        assert_eq!(ops(line, false), op(false), "but a stroke one");
+        assert_eq!(promote_to_gradient_ops(model_with(vec![rect(Some(RED))], &[]).document(), true), Vec::<Value>::new(),
+                   "nothing selected");
+
+        let mut m = model_with(vec![graded(Some(RED), RED, BLUE)], &[0]);
+        let generation = m.generation();
+        crate::document::op_apply::op_apply(&mut m, &op(true)[0]).expect("a well-formed op");
+        assert_eq!(m.generation(), generation, "nothing to promote: the document is not edited");
     }
 
     #[test]

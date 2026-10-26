@@ -1502,6 +1502,32 @@ impl Controller {
     }
 
     /// Set the `stroke_gradient` field of every selected element.
+    /// Every selected paintable member whose active attribute (fill when
+    /// `fill_on_top`, else stroke) holds no gradient takes the seed of its own
+    /// solid colour; a member holding one keeps it (the fill/stroke widget's
+    /// Gradient button, GRADIENT.md §Fill-type coupling). The solid
+    /// fill/stroke stays: it is the demote target. Nothing to promote: the
+    /// document is not edited. The reference's
+    /// `Controller.promote_selection_to_gradient`.
+    pub fn promote_selection_to_gradient(model: &mut Model, fill_on_top: bool) {
+        use crate::geometry::element::{map_paintable, promote_leaf_to_gradient};
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        let mut changed = false;
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                let promoted = map_paintable(elem, &|leaf| promote_leaf_to_gradient(leaf, fill_on_top));
+                if promoted != *elem {
+                    new_doc = new_doc.replace_element(&es.path, promoted);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            model.edit_document(new_doc);
+        }
+    }
+
     pub fn set_selection_stroke_gradient(model: &mut Model, gradient: Option<Box<crate::geometry::element::Gradient>>) {
         use crate::geometry::element::with_stroke_gradient;
         let doc = model.document().clone();

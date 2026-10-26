@@ -200,6 +200,11 @@
         "string"
       ]
     },
+    "promote_to_gradient": {
+      "fill_on_top": [
+        "boolean"
+      ]
+    },
     "redefine": {
       "master_id": [
         "string"
@@ -546,6 +551,9 @@
     "place_instance": {
       "master_id": "witnessed",
       "ref_id": "witnessed"
+    },
+    "promote_to_gradient": {
+      "fill_on_top": "witnessed"
     },
     "redefine": {
       "master_id": "witnessed",

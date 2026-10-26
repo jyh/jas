@@ -478,6 +478,20 @@ impl Default for Gradient {
     }
 }
 
+impl Gradient {
+    /// The seed table's gradient (GRADIENT.md §Promotion to gradient): from a
+    /// solid colour `C`, `[C@0, #ffffff@100]`; from none,
+    /// `[#000000@0, #ffffff@100]`; linear, 0°, 100 %, classic, no dither,
+    /// within. The reference's `seed_gradient`, Swift's `seedGradient`.
+    pub fn seed(solid: Option<Color>) -> Gradient {
+        let stop = |color, location| GradientStop { color, opacity: 100.0, location, midpoint_to_next: 50.0 };
+        Gradient {
+            stops: vec![stop(solid.unwrap_or(Color::BLACK), 0.0), stop(Color::WHITE, 100.0)],
+            ..Gradient::default()
+        }
+    }
+}
+
 /// SVG fill presentation attribute.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Fill {
@@ -3476,6 +3490,25 @@ pub fn with_fill_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> El
         Element::Polygon(e) => Element::Polygon(PolygonElem { fill_gradient: gradient, ..e.clone() }),
         Element::Path(e) => Element::Path(PathElem { fill_gradient: gradient, ..e.clone() }),
         _ => elem.clone(),
+    }
+}
+
+/// `elem` with its active attribute (fill when `fill_on_top`, else stroke)
+/// promoted from its own solid colour's seed ([`Gradient::seed`]), or a copy of
+/// `elem` when that attribute already holds a gradient or `elem` cannot carry
+/// one. The solid fill/stroke is kept: it is the demote target. The
+/// reference's `promote_leaf_to_gradient`.
+pub fn promote_leaf_to_gradient(elem: &Element, fill_on_top: bool) -> Element {
+    if fill_on_top {
+        if elem.fill_gradient().is_some() {
+            return elem.clone();
+        }
+        with_fill_gradient(elem, Some(Box::new(Gradient::seed(elem.fill().map(|f| f.color)))))
+    } else {
+        if elem.stroke_gradient().is_some() {
+            return elem.clone();
+        }
+        with_stroke_gradient(elem, Some(Box::new(Gradient::seed(elem.stroke().map(|s| s.color)))))
     }
 }
 

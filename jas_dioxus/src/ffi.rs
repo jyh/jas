@@ -750,8 +750,8 @@ pub unsafe extern "C" fn jas_bind_values(
 ///    assumed the two were separate calls; folding them is why this comes in
 ///    under it.
 /// 2. **Only rows that CHANGED are sent.** The trivial alternative is to re-read
-///    the panel whole, which is 7,038 bytes on the colour panel and is where
-///    gate ③'s ceiling comes from.
+///    the panel whole, which was 7,038 bytes on the colour panel when gate ③'s
+///    ceiling was taken from it (6,945 since 2026-10-26).
 /// 3. ⭐ **Every OPEN panel is re-resolved, not just the edited one.** Refreshing
 ///    only the edited panel is cheaper and is WRONG in general — a colour change
 ///    with a selection moves what other panels display. The cost of being right
@@ -3507,6 +3507,62 @@ mod tests {
         let _ = dispatch(tri, &req("remove_side"));
         assert_eq!(sides(tri), (Some(3.0), Some(40.0)), "remove_side clamps at 3");
         unsafe { jas_engine_free(tri) };
+
+        // An operation that changes nothing records nothing: from 4, Remove
+        // Side gives 3, a second one is a no-op, and ONE Undo gives 4 back
+        // (flask STATUS § 568; an empty step would leave it at 3).
+        let quad = engine_with(crate::document::test_fixture::model_with(vec![instance(4.0)], &[0]));
+        let _ = dispatch(quad, &req("remove_side"));
+        let journal = unsafe { quad.as_ref() }.unwrap().model.borrow().journal().len();
+        let (reply, err) = dispatch(quad, &req("remove_side"));
+        assert!(reply.contains(r#""doc_changed":false"#), "a no-op does not report a change: {reply} {err}");
+        assert_eq!(sides(quad), (Some(3.0), Some(40.0)));
+        assert_eq!(unsafe { quad.as_ref() }.unwrap().model.borrow().journal().len(), journal, "a no-op journals nothing");
+        unsafe { quad.as_ref() }.unwrap().model.borrow_mut().undo();
+        assert_eq!(sides(quad), (Some(4.0), Some(40.0)), "ONE undo undoes the last REAL change");
+        unsafe { jas_engine_free(quad) };
+    }
+
+    /// The fill/stroke widget's Gradient button runs its YAML in the engine
+    /// (`set_fill_type_gradient` -> `doc.promote_to_gradient`, GRADIENT.md
+    /// §Fill-type coupling): each selected member without a gradient takes its
+    /// OWN seed (red -> `[red, white]`, none -> `[black, white]`), a member
+    /// holding one keeps it, the solid fill stays; ONE undo. A second click
+    /// has nothing to promote: it journals nothing and reads `Unchanged`.
+    #[test]
+    fn set_fill_type_gradient_promotes_each_member_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::geometry::element::{Color, CommonProps, Element, Fill, Gradient, RectElem};
+        use crate::interpreter::gradient_host::seed_gradient;
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let rect = |fill: Option<Color>, g: Option<Gradient>| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: fill.map(Fill::new), stroke: None, common: CommonProps::default(),
+            fill_gradient: g.map(Box::new), stroke_gradient: None,
+        });
+        let held = Gradient { angle: 30.0, ..seed_gradient(Some(Color::rgb(0.0, 0.0, 1.0))) };
+        let e = engine_with(crate::document::test_fixture::model_with(
+            vec![rect(Some(red), None), rect(None, None), rect(Some(red), Some(held.clone()))], &[0, 1, 2]));
+        let kids = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let doc = en.model.borrow().document().clone();
+            doc.layers[0].children().unwrap().iter().map(|c| (**c).clone()).collect::<Vec<_>>()
+        };
+        let before = kids(e);
+        let req = r#"{"action":"set_fill_type_gradient"}"#;
+        let (_reply, err) = dispatch(e, req);
+        let after = kids(e);
+        assert_eq!(after[0].fill_gradient(), Some(&seed_gradient(Some(red))), "red promotes from red ({err})");
+        assert_eq!(after[0].fill(), before[0].fill(), "the solid fill stays: the demote target");
+        assert_eq!(after[1].fill_gradient(), Some(&seed_gradient(None)), "none promotes from black");
+        assert_eq!(after[2].fill_gradient(), Some(&held), "a held gradient is kept");
+        let journal = unsafe { e.as_ref() }.unwrap().model.borrow().journal().len();
+        let (_reply, err) = dispatch(e, req);
+        assert!(err.contains("Unchanged"), "nothing left to promote reads Unchanged: {err}");
+        assert_eq!(unsafe { e.as_ref() }.unwrap().model.borrow().journal().len(), journal, "and journals nothing");
+        unsafe { e.as_ref() }.unwrap().model.borrow_mut().undo();
+        assert_eq!(kids(e), before, "one undo");
+        unsafe { jas_engine_free(e) };
     }
 
     /// Object > Promote to Concept runs its YAML in the engine
