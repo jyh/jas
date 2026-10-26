@@ -707,9 +707,16 @@
       ]
     },
     "set_fill_type_gradient": {
-      "description": "Sets the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. Currently a placeholder \u2014 gradient editing is not yet implemented, so this action declares NO effects and a dispatch is a silent no-op. Because of that, the control that invokes it (the fill/stroke widget's Gradient button) is rendered DISABLED rather than merely inert: an enabled control that can never do anything is a dead control. The behavior stays declared on the button, so the wiring is already in place when this action grows effects \u2014 at which point the button's bind.disabled comes off in the same change.\n",
+      "description": "Ensures the active attribute (fill or stroke, per fill_on_top) is a gradient (GRADIENT.md \u00a7Fill-type coupling, the Gradient button). Every selected paintable member whose active attribute holds no gradient is promoted from ITS OWN seed: a solid colour C gives [C@0, #ffffff@100], none gives [#000000@0, #ffffff@100]; linear, angle 0, aspect 100 %, classic, no dither, within. A member that already holds a gradient keeps it, a selected group reaches its members at any depth, and the solid fill/stroke under the gradient is left alone (it is what the Color button demotes to). Each member keeps its own colour rather than all taking the first member's: the button ensures each attribute's TYPE. With nothing selected, or every member already a gradient, nothing changes and no undo step is added.\n",
       "category": "fill_stroke",
-      "effects": []
+      "effects": [
+        "snapshot",
+        {
+          "doc.promote_to_gradient": {
+            "fill_on_top": "state.fill_on_top"
+          }
+        }
+      ]
     },
     "invert_active_color": {
       "description": "Invert the active color (fill or stroke, per fill_on_top) by computing (255 \u2212 R, 255 \u2212 G, 255 \u2212 B) in RGB. The result is committed via set_active_color, which adds it to recent colors. The current color mode is unchanged. Disabled when the active attribute is none. Enabled only when the active color is non-null.\n",
@@ -6321,7 +6328,7 @@
       ]
     },
     "apply_concept_operation": {
-      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). The one selected element must be a generated instance; the operation is looked up in its concept's `operations`, and each of its `set:` expressions is evaluated over the instance's CURRENT params, bound under `param` (so `remove_side`'s `max(param.sides - 1, 3)` clamps against the sides the instance has now). Every expression that gives a number becomes a param change, and the changes are merged into the instance's params; one that does not give a number is skipped. The geometry re-derives from the generator at the next render. With an unknown operation, no number, or unless exactly one generated instance is selected, nothing happens. Single undo op.\n",
+      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). The one selected element must be a generated instance; the operation is looked up in its concept's `operations`, and each of its `set:` expressions is evaluated over the instance's CURRENT params, bound under `param` (so `remove_side`'s `max(param.sides - 1, 3)` clamps against the sides the instance has now). Every expression that gives a number other than the param's current value becomes a param change, and the changes are merged into the instance's params; one that does not give a number, or gives the value the param already has, is skipped. The geometry re-derives from the generator at the next render. With an unknown operation, no change left (Remove Side on a triangle), or unless exactly one generated instance is selected, nothing happens and nothing is recorded. Single undo op.\n",
       "category": "concepts",
       "params": {
         "op_id": {
@@ -8367,13 +8374,10 @@
                       "id": "gradient_btn",
                       "type": "icon_button",
                       "summary": "Gradient",
-                      "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                      "description": "Ensures the active attribute (fill or stroke, per fill_on_top) is a gradient: each selected member without one is promoted from its own colour's seed (set_fill_type_gradient). A member that already holds a gradient keeps it.\n",
                       "icon": "fill_gradient",
                       "style": {
                         "size": 13.44
-                      },
-                      "bind": {
-                        "disabled": "true"
                       },
                       "behavior": [
                         {
@@ -14512,13 +14516,10 @@
                         "id": "cp_gradient_btn",
                         "type": "icon_button",
                         "summary": "Gradient",
-                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "description": "Ensures the active attribute (fill or stroke, per fill_on_top) is a gradient: each selected member without one is promoted from its own colour's seed (set_fill_type_gradient). A member that already holds a gradient keeps it.\n",
                         "icon": "fill_gradient",
                         "style": {
                           "size": 11.52
-                        },
-                        "bind": {
-                          "disabled": "true"
                         },
                         "behavior": [
                           {
@@ -16162,13 +16163,10 @@
                         "id": "grad_gradient_btn",
                         "type": "icon_button",
                         "summary": "Gradient",
-                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "description": "Ensures the active attribute (fill or stroke, per fill_on_top) is a gradient: each selected member without one is promoted from its own colour's seed (set_fill_type_gradient). A member that already holds a gradient keeps it.\n",
                         "icon": "fill_gradient",
                         "style": {
                           "size": 11.52
-                        },
-                        "bind": {
-                          "disabled": "true"
                         },
                         "behavior": [
                           {
@@ -21036,13 +21034,10 @@
                         "id": "sp_gradient_btn",
                         "type": "icon_button",
                         "summary": "Gradient",
-                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "description": "Ensures the active attribute (fill or stroke, per fill_on_top) is a gradient: each selected member without one is promoted from its own colour's seed (set_fill_type_gradient). A member that already holds a gradient keeps it.\n",
                         "icon": "fill_gradient",
                         "style": {
                           "size": 12
-                        },
-                        "bind": {
-                          "disabled": "true"
                         },
                         "behavior": [
                           {
@@ -39496,13 +39491,10 @@
                 "id": "${id_prefix}gradient_btn",
                 "type": "icon_button",
                 "summary": "Gradient",
-                "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                "description": "Ensures the active attribute (fill or stroke, per fill_on_top) is a gradient: each selected member without one is promoted from its own colour's seed (set_fill_type_gradient). A member that already holds a gradient keeps it.\n",
                 "icon": "fill_gradient",
                 "style": {
                   "size": "${mode_btn_size}"
-                },
-                "bind": {
-                  "disabled": "true"
                 },
                 "behavior": [
                   {

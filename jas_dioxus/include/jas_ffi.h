@@ -556,8 +556,8 @@ struct JasBytes jas_bind_values(struct JasEngine *e, const uint8_t *panel_id, ui
  *    assumed the two were separate calls; folding them is why this comes in
  *    under it.
  * 2. **Only rows that CHANGED are sent.** The trivial alternative is to re-read
- *    the panel whole, which is 7,038 bytes on the colour panel and is where
- *    gate ③'s ceiling comes from.
+ *    the panel whole, which was 7,038 bytes on the colour panel when gate ③'s
+ *    ceiling was taken from it (6,945 since 2026-10-26).
  * 3. ⭐ **Every OPEN panel is re-resolved, not just the edited one.** Refreshing
  *    only the edited panel is cheaper and is WRONG in general — a colour change
  *    with a selection moves what other panels display. The cost of being right

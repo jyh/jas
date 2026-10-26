@@ -2275,6 +2275,17 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             let transform = parse_transform(op.get("transform"));
             Controller::promote_to_concept(model, &path, concept_id, params, transform);
         }
+        // The fill/stroke widget's Gradient button (GRADIENT.md §Fill-type
+        // coupling): every selected member whose active attribute holds no
+        // gradient takes its own solid colour's seed. Selection-relative: the
+        // seed is a function of the document the op applies to, so replay
+        // rebuilds it.
+        "promote_to_gradient" => {
+            let Some(fill_on_top) = op.get("fill_on_top").and_then(serde_json::Value::as_bool) else {
+                return Err(req_err(op, "fill_on_top"));
+            };
+            Controller::promote_selection_to_gradient(model, fill_on_top);
+        }
         "detach" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return Err(req_err(op, "path"));

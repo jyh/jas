@@ -139,8 +139,15 @@ private func points(_ model: Model) -> Double? {
     #expect(sides(model) == placed, "ONE undo")
     for _ in 0..<8 { apply("remove_side") }
     #expect(sides(model) == 3, "remove_side clamps at 3 against the current params")
+    // An operation that changes nothing records nothing (flask STATUS § 568):
+    // one Undo undoes the last REAL change, 4 -> 3.
+    let journal = model.journal.count
+    apply("remove_side")
+    #expect(model.journal.count == journal, "a no-op journals nothing")
+    model.undo()
+    #expect(sides(model) == 4, "ONE undo undoes the last real change")
     model.setDocumentUnbracketed(Document(layers: model.document.layers, selectedLayer: 0, selection: []),
                                  intent: .testOnly)
     apply("add_side")
-    #expect(sides(model) == 3, "nothing selected: nothing")
+    #expect(sides(model) == 4, "nothing selected: nothing")
 }

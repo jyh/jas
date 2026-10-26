@@ -2649,6 +2649,26 @@ public class Controller {
         model.editDocument(doc)
     }
 
+    /// Every selected paintable member whose active attribute (fill when
+    /// `fillOnTop`, else stroke) holds no gradient takes the seed of its own
+    /// solid colour; a member holding one keeps it (the fill/stroke widget's
+    /// Gradient button, GRADIENT.md §Fill-type coupling). Nothing to promote:
+    /// the document is not edited. Rust's
+    /// `Controller::promote_selection_to_gradient`.
+    public func promoteSelectionToGradient(fillOnTop: Bool) {
+        var doc = model.document
+        var changed = false
+        for es in doc.selection {
+            guard let elem = doc.tryGetElement(es.path) else { continue }
+            let promoted = elem.mapPaintable { promoteLeafToGradient($0, fillOnTop: fillOnTop) }
+            if promoted != elem {
+                doc = doc.replaceElement(es.path, with: promoted)
+                changed = true
+            }
+        }
+        if changed { model.editDocument(doc) }
+    }
+
     /// Set the strokeGradient of every element in the current selection.
     public func setSelectionStrokeGradient(_ gradient: Gradient?) {
         var doc = model.document

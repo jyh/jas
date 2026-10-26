@@ -942,8 +942,10 @@
       "doc_verbs": []
     },
     "set_fill_type_gradient": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.promote_to_gradient"
+      ]
     },
     "set_fill_type_solid": {
       "class": "ui-state",
@@ -1208,6 +1210,7 @@
       "doc.preview.clear",
       "doc.preview.restore",
       "doc.promote_to_concept",
+      "doc.promote_to_gradient",
       "doc.rotate.apply",
       "doc.scale.apply",
       "doc.set",
@@ -1237,11 +1240,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 45,
+      "journaling": 46,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 186,
+      "ui-state": 185,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1291,7 +1294,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 45,
+    "journaling_actions": 46,
     "native_intercepts": [
       "export_to_pdf"
     ],
@@ -1316,6 +1319,7 @@
         "doc.place_concept_instance",
         "doc.place_instance",
         "doc.promote_to_concept",
+        "doc.promote_to_gradient",
         "doc.select_in_rect",
         "doc.set_advanced_field",
         "doc.set_artboard_field",

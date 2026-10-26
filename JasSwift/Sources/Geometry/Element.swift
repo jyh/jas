@@ -2050,6 +2050,20 @@ public func withFillGradient(_ element: Element, fillGradient: Gradient?) -> Ele
     }
 }
 
+/// `element` with its active attribute (fill when `fillOnTop`, else stroke)
+/// promoted from its own solid colour's seed (``seedGradient(_:)``), or
+/// `element` itself when that attribute already holds a gradient or it cannot
+/// carry one. The solid fill/stroke is kept: it is the demote target. Rust's
+/// `promote_leaf_to_gradient`.
+public func promoteLeafToGradient(_ element: Element, fillOnTop: Bool) -> Element {
+    if fillOnTop {
+        if element.fillGradient != nil { return element }
+        return withFillGradient(element, fillGradient: seedGradient(element.fill?.color))
+    }
+    if element.strokeGradient != nil { return element }
+    return withStrokeGradient(element, strokeGradient: seedGradient(element.stroke?.color))
+}
+
 /// Return a copy of the element with its `strokeGradient` replaced.
 /// Elements that do not support a stroke gradient (Text, TextPath, Group,
 /// Layer, Live) are returned unchanged.

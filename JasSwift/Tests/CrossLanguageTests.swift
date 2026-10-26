@@ -1621,6 +1621,9 @@ private func preservationPinReport(
 // P6 — set_attr_on_selection (brush attrs).
 @Test func operationSetAttrOnSelection() throws { try runOperationFixture("set_attr_on_selection.json") }
 
+// The fill/stroke widget's Gradient button (GRADIENT.md §Fill-type coupling).
+@Test func operationPromoteToGradient() throws { try runOperationFixture("promote_to_gradient.json") }
+
 // P7 — transforms (scale / rotate / shear / copy).
 @Test func operationTransformScale() throws { try runOperationFixture("transform_scale.json") }
 /// Route 4 slice 5: `scale_transform` with `wrap: true` wraps, absorbs a same-flag

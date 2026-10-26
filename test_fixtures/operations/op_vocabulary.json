@@ -47,6 +47,7 @@
     "place_concept_instance": "edit",
     "place_instance": "edit",
     "promote_to_concept": "edit",
+    "promote_to_gradient": "edit",
     "redefine": "edit",
     "redo": "history",
     "rotate_transform": "edit",

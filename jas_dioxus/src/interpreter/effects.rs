@@ -997,9 +997,8 @@ fn run_one<'h>(
                     Some(action_name), host.as_deref_mut(), report);
             }
             // No effects list at all: nothing runs. The compiled workspace
-            // gives every action a list (a declared placeholder such as
-            // `set_fill_type_gradient` gets `[]`, the arm above), so only a
-            // hand-built catalog reaches this.
+            // gives every action a list (a declared placeholder gets `[]`,
+            // the arm above), so only a hand-built catalog reaches this.
             _ => report.unhandled.push(Unhandled::EmptyAction(action_name.to_string())),
         }
         return;
@@ -2998,6 +2997,22 @@ fn run_doc_effect(
         "doc.new_symbol" => {
             let _ = crate::interpreter::symbols_host::run_new_symbol(model);
         }
+        // doc.promote_to_gradient: { fill_on_top: <expr> }: the fill/stroke
+        // widget's Gradient button, the op
+        // `gradient_host::promote_to_gradient_ops` builds for the active
+        // attribute, under the action's `snapshot`. The reference's
+        // `StateStore.promote_to_gradient`. Nothing when the expression is not
+        // a bool, or nothing would change.
+        "doc.promote_to_gradient" => match spec.get("fill_on_top").and_then(|v| v.as_str()) {
+            Some(expr) => {
+                if let Value::Bool(fill_on_top) = eval_expr(expr, store, ctx) {
+                    for op in crate::interpreter::gradient_host::promote_to_gradient_ops(model.document(), fill_on_top) {
+                        let _ = crate::document::op_apply::op_apply(model, &op);
+                    }
+                }
+            }
+            None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.promote_to_gradient:{spec}"))),
+        },
         "doc.promote_to_concept" => {
             for op in crate::interpreter::symbols_host::promote_to_concept_ops(model.document()).unwrap_or_default() {
                 let _ = crate::document::op_apply::op_apply(model, &op);
@@ -15443,11 +15458,10 @@ mod tests {
         // which no host here claims.
         assert_eq!(report_of_real_action("save_all_and_close"),
                    vec![Unhandled::Logged("save_all_then_close".into())]);
-        // A declared placeholder. The YAML omits `effects`, and the compiled
-        // workspace writes `effects: []`, so this is the EMPTY-LIST path; the
-        // no-list path is driven by the hand-built catalog above.
-        assert_eq!(report_of_real_action("set_fill_type_gradient"),
-                   vec![Unhandled::EmptyAction("set_fill_type_gradient".into())]);
+        // No real action is a declared placeholder any more:
+        // `set_fill_type_gradient`, the last, became
+        // `doc.promote_to_gradient` on 2026-10-26. The EMPTY-LIST path is
+        // driven by the hand-built catalog's `declared_empty_list` above.
     }
 
     // -----------------------------------------------------------------------

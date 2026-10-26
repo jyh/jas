@@ -160,8 +160,10 @@ pub fn set_concept_param_ops(doc: &crate::document::document::Document, name: &s
 /// the operation `op_id` whose `set:` expressions, evaluated over the
 /// instance's CURRENT params (bound under `param`), give at least one number:
 /// `apply_concept_operation` of its path with those numbers as `changes`. An
-/// expression that is not a string or not a number is skipped. The
-/// reference's `apply_concept_operation_ops`.
+/// expression that is not a string or not a number is skipped, and so is a
+/// number equal to the param's current value: an operation that changes
+/// nothing builds no op (Remove Side at 3). The reference's
+/// `apply_concept_operation_ops`.
 pub fn apply_concept_operation_ops(doc: &crate::document::document::Document, op_id: &str) -> Option<Vec<Value>> {
     let [es] = doc.selection.as_slice() else { return None };
     let path = es.path.clone();
@@ -176,8 +178,11 @@ pub fn apply_concept_operation_ops(doc: &crate::document::document::Document, op
         let mut changes = Map::new();
         for (name, expr_v) in &set {
             if let Some(src) = expr_v.as_str() {
+                // A change equal to the current value is no change.
                 if let EVal::Number(n) = eval(src, &ctx) {
-                    changes.insert(name.clone(), json!(n));
+                    if ge.params.get(name).and_then(Value::as_f64) != Some(n) {
+                        changes.insert(name.clone(), json!(n));
+                    }
                 }
             }
         }

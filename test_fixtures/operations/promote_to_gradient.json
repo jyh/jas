@@ -1,0 +1,82 @@
+[
+  {
+    "name": "promote_to_gradient_fill",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": true
+      }
+    ],
+    "expected_json": "promote_to_gradient_fill_expected.json"
+  },
+  {
+    "name": "promote_to_gradient_twice_is_once",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": true
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": true
+      }
+    ],
+    "expected_json": "promote_to_gradient_fill_expected.json"
+  },
+  {
+    "name": "promote_to_gradient_stroke",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": false
+      }
+    ],
+    "expected_json": "promote_to_gradient_stroke_expected.json"
+  },
+  {
+    "name": "promote_to_gradient_missing_fill_on_top_skips",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "expected_error": "MissingParam"
+      }
+    ],
+    "expected_json": "promote_to_gradient_unchanged_expected.json"
+  }
+]
