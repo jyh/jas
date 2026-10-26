@@ -37,11 +37,12 @@ private func fifoTwoRectModel(selected: Bool) -> Model {
     return Model(document: doc)
 }
 
-@Test func fifoSelectAllSelectsViaNativeHandler() {
+@Test func fifoSelectAllSelectsThroughItsYaml() {
     let model = fifoTwoRectModel(selected: false)
     #expect(model.document.selection.isEmpty)
     FifoActionRouting.dispatch("select_all", model: model)
-    // Native Controller.selectAll ran (NOT the log stub) -> both selected.
+    // The default fall-through ran its YAML (`doc.op: {op: select_all}`) ->
+    // both selected.
     #expect(fifoSelPaths(model.document.selection) == Set([[0, 0], [0, 1]]))
 }
 

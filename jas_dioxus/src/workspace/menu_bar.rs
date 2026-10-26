@@ -177,24 +177,15 @@ pub(crate) fn MenuBarView(
                         );
                     }
                 }
-                // The menu's model-pure verbs: one table, shared with the
-                // action corpus and the engine's menu dispatch
-                // (`menu_native`).
-                "select_all" | "group" | "ungroup" | "ungroup_all" | "make_instance" => {
+                // The menu's model verbs, as the web keyboard runs them
+                // ([`run_model_verb`]): the declared action where the YAML is
+                // `doc.op`, else the native table shared with the action
+                // corpus and the engine's menu dispatch (`menu_native`).
+                "select_all" | "unlock_all" | "hide" | "show_all" | "lock"
+                | "group" | "ungroup" | "ungroup_all" | "make_instance" => {
                     let action = cmd.to_string();
                     (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            super::menu_native::run(&action, &mut tab.model);
-                        }
-                    }));
-                }
-                // Their YAML is `doc.op` (the op layer by name), so the menu
-                // runs the declared action. `hide` is `hide_selection`'s cmd name.
-                "unlock_all" | "hide" | "show_all" | "lock" => {
-                    let action = if cmd == "hide" { "hide_selection" } else { cmd }.to_string();
-                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                        let _ = crate::interpreter::renderer::dispatch_action(
-                            &action, &serde_json::Map::new(), st);
+                        run_model_verb(&action, st);
                     }));
                 }
                 "delete" => {
@@ -1007,9 +998,108 @@ fn filename_stem(filename: &str) -> String {
     trimmed.to_string()
 }
 
+/// Run one of the menu's model verbs on the active tab, as the web menu and
+/// the web keyboard both do: those whose YAML is `doc.op` (the op layer by
+/// name) run the declared action, the rest the shared native table
+/// (`menu_native`). `hide` is `hide_selection`'s cmd name. `false` (nothing
+/// run) for any other name.
+pub(crate) fn run_model_verb(cmd: &str, st: &mut AppState) -> bool {
+    match cmd {
+        "select_all" | "unlock_all" | "hide" | "show_all" | "lock" => {
+            let action = if cmd == "hide" { "hide_selection" } else { cmd };
+            let _ = crate::interpreter::renderer::dispatch_action(
+                action, &serde_json::Map::new(), st);
+            true
+        }
+        _ if super::menu_native::VERBS.contains(&cmd) => {
+            if let Some(tab) = st.tab_mut() {
+                super::menu_native::run(cmd, &mut tab.model);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn state_on(svg: &str) -> AppState {
+        let mut st = AppState::new();
+        st.add_tab(TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        st
+    }
+
+    fn selected_paths(st: &AppState) -> Vec<Vec<usize>> {
+        let mut p: Vec<Vec<usize>> = st.tabs[st.active_tab].model.document()
+            .selection.iter().map(|es| es.path.clone()).collect();
+        p.sort();
+        p
+    }
+
+    /// Select All on the web (menu and Cmd+A) runs its YAML, `doc.op:
+    /// {op: select_all}`: every visible, unlocked direct child of a layer, a
+    /// group as one object, and selecting is not an undo step.
+    #[test]
+    fn select_all_runs_its_yaml_and_records_no_undo_step() {
+        let mut st = state_on(include_str!("../../../test_fixtures/svg/locked_inheritance.svg"));
+        assert!(run_model_verb("select_all", &mut st));
+        assert_eq!(selected_paths(&st), vec![vec![1, 2], vec![1, 3]],
+                   "the cyan rect and the Mixed Group; nothing locked");
+        assert!(!st.tabs[st.active_tab].model.can_undo(), "select_all recorded an undo step");
+    }
+
+    /// The `doc.op` verbs the web keyboard reaches (Cmd+2, Cmd+Alt+2, Cmd+3,
+    /// Cmd+Alt+3) are each ONE undo step on this route, as the native table
+    /// made them with `with_txn`.
+    #[test]
+    fn the_doc_op_verbs_are_each_one_undo_step_on_the_web_route() {
+        let svg = include_str!("../../../test_fixtures/svg/two_rects.svg");
+        let locked = |st: &AppState| -> Vec<bool> {
+            st.tabs[st.active_tab].model.document().layers[0].children()
+                .map(|cs| cs.iter().map(|c| c.locked()).collect()).unwrap_or_default()
+        };
+        let hidden = |st: &AppState| -> Vec<bool> {
+            st.tabs[st.active_tab].model.document().layers[0].children()
+                .map(|cs| cs.iter().map(|c| c.visibility() == crate::geometry::element::Visibility::Invisible).collect())
+                .unwrap_or_default()
+        };
+        let mut st = state_on(svg);
+        run_model_verb("select_all", &mut st);
+        assert!(run_model_verb("lock", &mut st));
+        assert_eq!(locked(&st), vec![true, true], "lock");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(locked(&st), vec![false, false], "one undo restores lock");
+        run_model_verb("lock", &mut st);
+        assert!(run_model_verb("unlock_all", &mut st));
+        assert_eq!(locked(&st), vec![false, false], "unlock_all");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(locked(&st), vec![true, true], "one undo restores unlock_all");
+
+        let mut st = state_on(svg);
+        run_model_verb("select_all", &mut st);
+        assert!(run_model_verb("hide", &mut st));
+        assert_eq!(hidden(&st), vec![true, true], "hide is hide_selection");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(hidden(&st), vec![false, false], "one undo restores hide");
+        run_model_verb("hide", &mut st);
+        assert!(run_model_verb("show_all", &mut st));
+        assert_eq!(hidden(&st), vec![false, false], "show_all");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(hidden(&st), vec![true, true], "one undo restores show_all");
+    }
+
+    #[test]
+    fn run_model_verb_refuses_anything_else() {
+        let mut st = state_on(include_str!("../../../test_fixtures/svg/two_rects.svg"));
+        for other in ["copy", "paste", "delete", "", "Select_all", "hide_selection"] {
+            assert!(!run_model_verb(other, &mut st), "{other:?}");
+        }
+        assert!(selected_paths(&st).is_empty());
+    }
 
     #[test]
     fn filename_stem_strips_known_extensions() {

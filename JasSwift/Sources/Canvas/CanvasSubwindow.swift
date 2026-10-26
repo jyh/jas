@@ -4046,8 +4046,8 @@ class CanvasNSView: NSView {
     /// data-described ``CanvasContextMenu`` (which mirrors the menubar.yaml Edit
     /// predicates); each item dispatches through the SAME path the main menu /
     /// keyboard use — cut/copy/paste share ``EditClipboard`` with the Edit menu,
-    /// Delete mirrors the canvas keyboard Delete, Select All calls
-    /// ``MenuActions.selectAll``. No new verbs, no new dispatch channel.
+    /// Delete mirrors the canvas keyboard Delete, Select All runs its YAML as
+    /// the menu does. No new verbs, no new dispatch channel.
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let model = controller?.model else { return nil }
         let hasSelection = !model.document.selection.isEmpty
@@ -4155,7 +4155,7 @@ class CanvasNSView: NSView {
 
     @objc private func contextSelectAll(_ sender: Any?) {
         guard let model = controller?.model else { return }
-        MenuActions.selectAll(model)
+        LayersPanel.dispatchYamlAction("select_all", model: model)
     }
 
     /// Delete the current selection with the reference-aware warn-then-orphan

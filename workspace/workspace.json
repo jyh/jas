@@ -220,7 +220,9 @@
       "enabled_when": "state.tab_count > 0",
       "effects": [
         {
-          "log": "select_all"
+          "doc.op": {
+            "op": "select_all"
+          }
         }
       ]
     },

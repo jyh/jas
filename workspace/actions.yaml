@@ -385,7 +385,10 @@ actions:
     tier: 3
     enabled_when: "state.tab_count > 0"
     effects:
-      - log: "select_all"
+      # Through the op layer (`doc.op`), with no `snapshot`: selecting is not
+      # an edit. Until 2026-10-25 a `log` stub whose meaning lived in each
+      # port's native menu table and in two direct calls beside it.
+      - doc.op: { op: select_all }
   delete_selection:
     description: >
       Delete the selected objects from the canvas. The deletion is recorded

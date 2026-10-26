@@ -12,7 +12,6 @@ use super::app_state::AppState;
 use super::clipboard::{
     clipboard_read_and_paste, clipboard_write, download_file, open_file_dialog, selection_to_svg,
 };
-use crate::document::controller::Controller;
 use crate::geometry::svg::document_to_svg;
 use crate::tools::tool::ToolKind;
 
@@ -404,23 +403,20 @@ pub(crate) fn make_keydown_handler(
             }
             Key::Character(ref c) if (c == "a" || c == "A") && cmd => {
                 evt.prevent_default();
+                // As the menu runs it (its YAML), never a direct call.
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    if let Some(tab) = st.tab_mut() { Controller::select_all(&mut tab.model); }
+                    super::menu_bar::run_model_verb("select_all", st);
                 }));
             }
             Key::Character(ref c) if (c == "2") && cmd => {
                 evt.prevent_default();
                 if mods.alt() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::unlock_all(m));
-                        }
+                        super::menu_bar::run_model_verb("unlock_all", st);
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::lock_selection(m));
-                        }
+                        super::menu_bar::run_model_verb("lock", st);
                     }));
                 }
             }
@@ -428,15 +424,11 @@ pub(crate) fn make_keydown_handler(
                 evt.prevent_default();
                 if mods.alt() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::show_all(m));
-                        }
+                        super::menu_bar::run_model_verb("show_all", st);
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::hide_selection(m));
-                        }
+                        super::menu_bar::run_model_verb("hide", st);
                     }));
                 }
             }
@@ -483,15 +475,11 @@ pub(crate) fn make_keydown_handler(
                 evt.prevent_default();
                 if mods.shift() {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::ungroup_selection(m));
-                        }
+                        super::menu_bar::run_model_verb("ungroup", st);
                     }));
                 } else {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::group_selection(m));
-                        }
+                        super::menu_bar::run_model_verb("group", st);
                     }));
                 }
             }

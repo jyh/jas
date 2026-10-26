@@ -1,5 +1,16 @@
 [
   {
+    "name": "select_all_selects_each_unlocked_top_level_object_once",
+    "setup_svg": "locked_inheritance.svg",
+    "note": "actions.yaml select_all: `doc.op: {op: select_all}` selects every visible, unlocked direct child of a layer, a group as one object: here the cyan rect and the Mixed Group, never the locked layer's contents, the locked rect or the Locked Group. Not an undo step. Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",
+    "actions": [
+      {
+        "action": "select_all"
+      }
+    ],
+    "expected_json": "select_all_selects_each_unlocked_top_level_object_once_expected.json"
+  },
+  {
     "name": "unlock_all_clears_every_lock",
     "setup_svg": "locked_layer_and_element.svg",
     "note": "actions.yaml unlock_all: `doc.op: {op: unlock_all}` clears the flag on every element at every depth, a layer's own included, and keeps the selection (UNLOCKSEL). Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",

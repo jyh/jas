@@ -80,3 +80,21 @@ def test_an_op_the_layer_does_not_know_changes_nothing():
     before = json.dumps(store._document, sort_keys=True)
     run_effects([{"doc.op": {"op": "zz_no_such_op"}}], {}, store)
     assert json.dumps(store._document, sort_keys=True) == before
+
+
+def test_select_all_from_actions_yaml_selects_each_unlocked_top_level_object_once():
+    """`actions.yaml` select_all is `doc.op: {op: select_all}`: every visible,
+    unlocked direct child of a layer, a group counting as one, and nothing in a
+    locked layer. Driven from the real YAML entry, so a `log` stub reds here."""
+    import yaml
+    from geometry.element import Group
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        effects = yaml.safe_load(f)["actions"]["select_all"]["effects"]
+    locked_layer = Layer(name="Locked", children=(_rect(),), locked=True)
+    open_layer = Layer(name="Open", children=(
+        _rect(locked=True), _rect(), _rect(visibility=Visibility.INVISIBLE),
+        Group(children=(_rect(locked=True), _rect()))))
+    store = _store(Document(layers=(locked_layer, open_layer)))
+    run_effects(effects, {}, store)
+    assert {es.path for es in _doc_of(store).selection} == {(1, 1), (1, 3)}
