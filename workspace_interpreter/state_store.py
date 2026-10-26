@@ -241,6 +241,11 @@ class StateStore:
         # "artboard_options": {...}}. Real apps use a native Model; tests
         # use plain dicts.
         self._document: dict | None = document
+        # The paste run (`actions.yaml` paste: 24, 48, 72 for one payload) is
+        # on the op layer's Document and test JSON does not carry it, so it is
+        # kept HERE across the bridge (`apply_op`), the way the apps keep it on
+        # the one Model their document lives in.
+        self._paste_run: tuple[str, int] | None = None
         # Random-like rng (has .choices()) used for artboard id generation.
         # ensure_artboards_invariant expects a zero-arg callable, so wrap.
         self._artboard_id_rng = artboard_id_generator
@@ -979,11 +984,14 @@ class StateStore:
         from document.model import Model
         from document.op_apply import op_apply
         from geometry.test_json import document_to_test_json, test_json_to_document
-        doc = test_json_to_document(json.dumps(self._document))
+        from dataclasses import replace
+        doc = replace(test_json_to_document(json.dumps(self._document)),
+                      paste_run=self._paste_run)
         model = Model(document=doc)
         op_apply(model, op)
         if model.document is doc:
             return
+        self._paste_run = model.document.paste_run
         new = json.loads(document_to_test_json(model.document))
         for k, v in self._document.items():
             if k not in new:

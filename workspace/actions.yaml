@@ -257,8 +257,11 @@ actions:
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0 && !active_document.active_layer_locked"
+    # The clipboard is the shell's to read; the paste law is the op layer's.
+    params:
+      clipboard: { type: string }
     effects:
-      - log: "paste: offset 24pt"
+      - doc.paste: { text: "param.clipboard", offset: 24, preserve_layers: false }
   paste_preserving_layers:
     description: >
       Paste objects from the clipboard while keeping the layer structure the
@@ -326,8 +329,11 @@ actions:
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
+    # The clipboard is the shell's to read; the paste law is the op layer's.
+    params:
+      clipboard: { type: string }
     effects:
-      - log: "paste_preserving_layers: offset 24pt"
+      - doc.paste: { text: "param.clipboard", offset: 24, preserve_layers: true }
   paste_in_place:
     description: >
       Paste objects from the clipboard at their original coordinates (no
@@ -354,8 +360,11 @@ actions:
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0 && !active_document.active_layer_locked"
+    # The clipboard is the shell's to read; the paste law is the op layer's.
+    params:
+      clipboard: { type: string }
     effects:
-      - log: "paste_in_place: offset 0"
+      - doc.paste: { text: "param.clipboard", offset: 0, preserve_layers: false }
   select_all:
     description: >
       Select all unlocked, visible objects in the active document. Hidden

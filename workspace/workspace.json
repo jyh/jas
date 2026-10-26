@@ -188,9 +188,18 @@
       "category": "edit",
       "tier": 3,
       "enabled_when": "state.tab_count > 0 && !active_document.active_layer_locked",
+      "params": {
+        "clipboard": {
+          "type": "string"
+        }
+      },
       "effects": [
         {
-          "log": "paste: offset 24pt"
+          "doc.paste": {
+            "text": "param.clipboard",
+            "offset": 24,
+            "preserve_layers": false
+          }
         }
       ]
     },
@@ -199,9 +208,18 @@
       "category": "edit",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
+      "params": {
+        "clipboard": {
+          "type": "string"
+        }
+      },
       "effects": [
         {
-          "log": "paste_preserving_layers: offset 24pt"
+          "doc.paste": {
+            "text": "param.clipboard",
+            "offset": 24,
+            "preserve_layers": true
+          }
         }
       ]
     },
@@ -210,9 +228,18 @@
       "category": "edit",
       "tier": 3,
       "enabled_when": "state.tab_count > 0 && !active_document.active_layer_locked",
+      "params": {
+        "clipboard": {
+          "type": "string"
+        }
+      },
       "effects": [
         {
-          "log": "paste_in_place: offset 0"
+          "doc.paste": {
+            "text": "param.clipboard",
+            "offset": 0,
+            "preserve_layers": false
+          }
         }
       ]
     },
