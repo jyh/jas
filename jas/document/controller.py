@@ -332,7 +332,8 @@ def apply_concept_operation_ops(doc: Document, op_id, concept: dict | None) -> l
     instance's CURRENT params (bound under ``param``), give at least one
     number: ``apply_concept_operation`` of its path with those numbers as
     ``changes``. An expression that is not a string, or does not evaluate to a
-    number, is skipped. Rust ``symbols_host::apply_concept_operation_ops``,
+    number, is skipped, and so is a number equal to the param's current value:
+    an operation that changes nothing builds no op (Remove Side at 3). Rust ``symbols_host::apply_concept_operation_ops``,
     Swift ``ConceptsPanel.applyConceptOperationOps``."""
     from geometry.element import GeneratedElem
     from workspace_interpreter.expr import evaluate
@@ -355,7 +356,11 @@ def apply_concept_operation_ops(doc: Document, op_id, concept: dict | None) -> l
     for name, src in sets.items():
         if isinstance(src, str):
             r = evaluate(src, ctx)
-            if r.type == ValueType.NUMBER:
+            current = elem.params.get(name)
+            # A change equal to the current value is no change.
+            if r.type == ValueType.NUMBER and not (
+                    isinstance(current, (int, float)) and not isinstance(current, bool)
+                    and float(current) == float(r.value)):
                 changes[name] = r.value
     if not changes:
         return None

@@ -607,3 +607,21 @@ def test_layer_walk_reads_and_writes_a_bridged_documents_layers():
     assert [l.locked for l in _doc_of(store).layers] == [True, True]
     _run_yaml_action(store, "toggle_all_layers_lock")
     assert [l.locked for l in _doc_of(store).layers] == [False, False]
+
+
+def test_apply_concept_operation_that_changes_nothing_builds_no_op():
+    """flask STATUS § 568: Remove Side on a triangle resolves to sides 3, the
+    value it already has. A change equal to the current value is dropped, and
+    an operation left with no change builds no op (so nothing is journaled)."""
+    from document.controller import apply_concept_operation_ops
+    from geometry.element import GeneratedElem
+    from workspace_interpreter.loader import concept, load_workspace
+    ws = load_workspace(os.path.join(os.path.dirname(__file__), "..", "..", "workspace"))
+    reg = concept(ws, "regular_polygon")
+    def doc(sides):
+        gen = GeneratedElem(concept_id="regular_polygon", params={"sides": sides, "radius": 40})
+        return Document(layers=(Layer(name="L", children=(gen,)),),
+                        selection=frozenset({ElementSelection.all((0, 0))}))
+    assert apply_concept_operation_ops(doc(3), "remove_side", reg) is None
+    assert apply_concept_operation_ops(doc(3.0), "remove_side", reg) is None, "3.0 is 3"
+    assert apply_concept_operation_ops(doc(4), "remove_side", reg)[0]["changes"] == {"sides": 3}

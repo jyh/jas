@@ -4524,11 +4524,13 @@ actions:
       expressions is evaluated over the instance's CURRENT params, bound under
       `param` (so `remove_side`'s `max(param.sides - 1, 3)` clamps against the
       sides the instance has now). Every expression that gives a number
-      becomes a param change, and the changes are merged into the instance's
-      params; one that does not give a number is skipped. The geometry
-      re-derives from the generator at the next render. With an unknown
-      operation, no number, or unless exactly one generated instance is
-      selected, nothing happens. Single undo op.
+      other than the param's current value becomes a param change, and the
+      changes are merged into the instance's params; one that does not give a
+      number, or gives the value the param already has, is skipped. The
+      geometry re-derives from the generator at the next render. With an
+      unknown operation, no change left (Remove Side on a triangle), or unless
+      exactly one generated instance is selected, nothing happens and nothing
+      is recorded. Single undo op.
     category: concepts
     params:
       op_id: { type: string }

@@ -3507,6 +3507,20 @@ mod tests {
         let _ = dispatch(tri, &req("remove_side"));
         assert_eq!(sides(tri), (Some(3.0), Some(40.0)), "remove_side clamps at 3");
         unsafe { jas_engine_free(tri) };
+
+        // An operation that changes nothing records nothing: from 4, Remove
+        // Side gives 3, a second one is a no-op, and ONE Undo gives 4 back
+        // (flask STATUS § 568; an empty step would leave it at 3).
+        let quad = engine_with(crate::document::test_fixture::model_with(vec![instance(4.0)], &[0]));
+        let _ = dispatch(quad, &req("remove_side"));
+        let journal = unsafe { quad.as_ref() }.unwrap().model.borrow().journal().len();
+        let (reply, err) = dispatch(quad, &req("remove_side"));
+        assert!(reply.contains(r#""doc_changed":false"#), "a no-op does not report a change: {reply} {err}");
+        assert_eq!(sides(quad), (Some(3.0), Some(40.0)));
+        assert_eq!(unsafe { quad.as_ref() }.unwrap().model.borrow().journal().len(), journal, "a no-op journals nothing");
+        unsafe { quad.as_ref() }.unwrap().model.borrow_mut().undo();
+        assert_eq!(sides(quad), (Some(4.0), Some(40.0)), "ONE undo undoes the last REAL change");
+        unsafe { jas_engine_free(quad) };
     }
 
     /// Object > Promote to Concept runs its YAML in the engine
