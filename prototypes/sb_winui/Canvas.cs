@@ -861,6 +861,12 @@ internal sealed unsafe class Canvas : IDisposable
     internal Action<bool>? DocumentDirtyChanged { get; set; }
 
     /// <summary>
+    /// flask §556 finding H: the menu action a refused command chord names,
+    /// posted to the UI thread for the menu item to run (`MainWindow.InvokeByKey`).
+    /// </summary>
+    internal Action<string>? MenuKeyChord { get; set; }
+
+    /// <summary>
     /// A new <see cref="Menu"/> has been published. Raised on the UI thread.
     ///
     /// ⚖️ THIS REPLACES §3.2's `Opening`-PULL, AND THE CHANGE IMPROVES THE
@@ -1117,6 +1123,12 @@ internal sealed unsafe class Canvas : IDisposable
                 _report(channel.Length == 0
                     ? $"RUSTFAIL KEY SILENT {head} -- an empty reply and an empty error channel {Tids()}"
                     : $"KEY REFUSED {head} channel={channel} {Tids()}");
+            }
+            else if (KeyWire.MenuAction(channel) is string menuAction)
+            {
+                // flask §556 finding H: a command chord the engine leaves to
+                // the menu, which `OnKeyDown` kept from the accelerator.
+                PostToUi(() => MenuKeyChord?.Invoke(menuAction));
             }
             return false;
         }

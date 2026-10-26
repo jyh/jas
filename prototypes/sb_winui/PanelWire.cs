@@ -1275,6 +1275,29 @@ internal static class KeyWire
     /// the canvas the engine's tool takes it, so a text session keeps focus.</summary>
     internal static bool TakesTab(bool fromCanvas) => fromCanvas;
 
+    /// <summary>flask §556 finding H: the menu action a refused COMMAND chord
+    /// names (`{"panel_event":"KeyUnhandled",...,"menu_action":<action>}`), or
+    /// null when the refusal names none, is another class, or is unreadable.
+    /// `OnKeyDown` kept that chord from the menu's accelerator, so the shell
+    /// runs the item itself.</summary>
+    internal static string? MenuAction(string channel)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(channel);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) { return null; }
+            if (!root.TryGetProperty("panel_event", out var cls)
+                || cls.ValueKind != System.Text.Json.JsonValueKind.String
+                || cls.GetString() != "KeyUnhandled") { return null; }
+            if (!root.TryGetProperty("menu_action", out var action)
+                || action.ValueKind != System.Text.Json.JsonValueKind.String) { return null; }
+            var name = action.GetString();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
     /// <summary>A typed character's key name: the character itself, or null
     /// for a control character (the named keys arrive by their own codes).</summary>
     internal static string? CharName(uint c) =>
