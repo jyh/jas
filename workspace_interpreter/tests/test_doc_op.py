@@ -765,3 +765,16 @@ def test_set_fill_type_solid_from_actions_yaml_demotes_a_gradient():
     assert demote_to_solid_ops(one(_rect(fill=Fill(hexc("ff0000")))), True) == []
     assert demote_to_solid_ops(one(bare), False) == [], "no stroke gradient to demote"
     assert demote_to_solid_ops(one(bare), True) == [{"op": "demote_to_solid", "fill_on_top": True}]
+
+
+def test_noop_does_nothing_by_declaration_and_is_never_enabled():
+    """`noop` backs the Print dialog's disabled Page Setup... and Setup...
+    buttons. It does nothing on purpose, so its YAML says so with an EMPTY
+    effect list rather than a `log` stub (item 8 class D), and it is never
+    enabled."""
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        spec = yaml.safe_load(f)["actions"]["noop"]
+    assert spec["effects"] == []
+    assert spec["enabled_when"] == "false"

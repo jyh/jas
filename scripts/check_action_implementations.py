@@ -172,7 +172,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 35 the same day: `apply_concept_operation` (`doc.apply_concept_operation`).
 # 33 the same day: `delete_symbol_action` and `delete_symbol_orphan_confirm_ok`
 # (`doc.delete_symbol`, the confirm asked through `active_document.symbol_usage`).
-MIN_LOG_ONLY = 33
+# 32 on 2026-10-26 evening: `noop` (the Print dialog's two disabled
+# placeholders) declares an EMPTY effect list: it does nothing on purpose.
+MIN_LOG_ONLY = 32
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
