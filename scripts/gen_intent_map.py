@@ -178,7 +178,7 @@ VERB_TABLE = {
         # A Concepts-panel parameter field's commit: one value-in-op op for the
         # one selected generated instance (symbols_host::set_concept_param_ops).
         "journals": "always", "op": "set_concept_param",
-        "evidence": ["effects.rs:2961", "op_apply.rs:2235"],
+        "evidence": ["effects.rs:3026", "op_apply.rs:2235"],
     },
     "doc.new_symbol": {
         # Make Symbol: one value-in-op op whose two ids the effect mints first;
@@ -191,7 +191,14 @@ VERB_TABLE = {
         # Object > Promote to Concept: one op replacing the one selected shape a
         # fitter matches (symbols_host::promote_to_concept_ops), through op_apply.
         "journals": "always", "op": "promote_to_concept",
-        "evidence": ["effects.rs:2984", "op_apply.rs:2264"],
+        "evidence": ["effects.rs:3001", "op_apply.rs:2264"],
+    },
+    "doc.apply_concept_operation": {
+        # A Concepts-panel operation button: one op carrying the operation's
+        # `set:` resolved over the selected instance's params
+        # (symbols_host::apply_concept_operation_ops), through op_apply.
+        "journals": "always", "op": "apply_concept_operation",
+        "evidence": ["effects.rs:3010", "op_apply.rs:2251"],
     },
     "doc.op": {
         # One journaled op BY NAME: the op is the call site's own `op` field
@@ -678,8 +685,7 @@ def render_md(entries, summary):
     a("  `log`-stubs in YAML whose real behavior lives in native code:")
     a("  `dispatch_action` natively intercepts the symbol/concept actions")
     a("  `symbols_host::ACTIONS` names (`delete_symbol_action`,")
-    a("  `delete_symbol_orphan_confirm_ok`, `apply_concept_operation`), several")
-    a("  of which journal real ops through")
+    a("  `delete_symbol_orphan_confirm_ok`), which journal real ops through")
     a("  `op_apply` natively; and `copy`/`paste` are handled natively by")
     a("  each app's clipboard route. Those actions classify as `ui-state` here")
     a("  because their YAML effect trees reach no `doc.*` verb; the class")

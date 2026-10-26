@@ -868,6 +868,33 @@ class StateStore:
             self.apply_op(op)
         return new_symbol_master(test_json_to_document(json.dumps(self._document)), ops[0]["path"])
 
+    def apply_concept_operation(self, op_id) -> None:
+        """A Concepts-panel operation button on the store's document: the op
+        ``document.controller.apply_concept_operation_ops`` builds for the one
+        selected generated instance against its concept in the bundled
+        workspace, applied through the op layer. Nothing unless it builds one."""
+        if self._document is None:
+            return
+        import json
+        import os
+        from document.controller import apply_concept_operation_ops
+        from geometry.element import GeneratedElem
+        from geometry.test_json import test_json_to_document
+        from workspace_interpreter.loader import concept, load_workspace
+        doc = test_json_to_document(json.dumps(self._document))
+        if len(doc.selection) != 1:
+            return
+        try:
+            elem = doc.get_element(next(iter(doc.selection)).path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if not isinstance(elem, GeneratedElem):
+            return
+        ws = load_workspace(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "workspace"))
+        for op in apply_concept_operation_ops(doc, op_id, concept(ws, elem.concept_id)) or []:
+            self.apply_op(op)
+
     def set_concept_param(self, name, value) -> None:
         """A Concepts-panel parameter field's commit on the store's document:
         the op ``document.controller.set_concept_param_ops`` builds, applied

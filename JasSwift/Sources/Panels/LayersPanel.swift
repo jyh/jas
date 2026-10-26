@@ -605,6 +605,19 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.apply_concept_operation: { op_id: <expr> }: a Concepts-panel
+        // operation button, the op ``ConceptsPanel/applyConceptOperationOps``
+        // resolves for the one selected generated instance. Rust's
+        // `doc.apply_concept_operation`.
+        let docApplyConceptOperationHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let opIdExpr = spec["op_id"] as? String,
+                  case .string(let opId) = evaluate(opIdExpr, context: callCtx),
+                  let ops = ConceptsPanel.applyConceptOperationOps(model.document, opId: opId)
+            else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
         // doc.promote_to_concept: {}: Object > Promote to Concept, the op
         // ``ConceptsPanel/promoteToConceptOps`` builds for the one selected
         // shape a fitter matches. Rust's `doc.promote_to_concept`.
@@ -903,6 +916,7 @@ public enum LayersPanel {
             "doc.place_concept_instance": docPlaceConceptInstanceHandler,
             "doc.set_concept_param": docSetConceptParamHandler,
             "doc.promote_to_concept": docPromoteToConceptHandler,
+            "doc.apply_concept_operation": docApplyConceptOperationHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

@@ -169,7 +169,8 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # (`doc.place_concept_instance`, `doc.set_concept_param`).
 # 37 the same day: `promote_to_concept` (`doc.promote_to_concept`).
 # 36 the same day: `new_symbol` (`doc.new_symbol`, which binds its master).
-MIN_LOG_ONLY = 36
+# 35 the same day: `apply_concept_operation` (`doc.apply_concept_operation`).
+MIN_LOG_ONLY = 35
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 

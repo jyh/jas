@@ -382,26 +382,17 @@ func dispatchPanelAction(
         // active panel, so SymbolsPanel reads / writes it directly.
         SymbolsPanel.dispatchSymbolAction(name, model: model)
         return
-    case "place_concept_instance", "set_concept_param":
+    case "place_concept_instance", "set_concept_param", "apply_concept_operation":
         // Their YAML says what they do (`doc.place_concept_instance`,
-        // `doc.set_concept_param`), through the dispatcher that holds the
-        // `doc.*` handlers; the field's `params` ride as `param.*`.
+        // `doc.set_concept_param`, `doc.apply_concept_operation`), through the
+        // dispatcher that holds the `doc.*` handlers; the widget's `params`
+        // ride as `param.*`.
         LayersPanel.dispatchYamlAction(name, model: model, params: params)
         return
     case "promote_to_concept":
         // Its YAML says what it does (`doc.promote_to_concept`), through the
         // dispatcher that holds the `doc.*` handlers.
         LayersPanel.dispatchYamlAction(name, model: model)
-        return
-    case "apply_concept_operation":
-        // Concepts panel Slice 3 (CONCEPTS.md §9): native intercept (the YAML
-        // action is a `log` stub). The operation id arrives as `params.op_id`;
-        // resolve its `set:` expressions over the single selected Generated
-        // instance's current params and bake the result into the op.
-        // Mirrors the Rust `apply_concept_operation` arm.
-        if let opId = params["op_id"] as? String {
-            ConceptsPanel.applyOperation(model: model, opId: opId)
-        }
         return
     default:
         break

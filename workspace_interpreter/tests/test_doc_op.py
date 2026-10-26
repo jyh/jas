@@ -471,3 +471,37 @@ def test_new_symbol_from_actions_yaml_promotes_and_panel_selects_the_master():
     before = json.dumps(store._document, sort_keys=True)
     run_effects(effects, {}, store)
     assert json.dumps(store._document, sort_keys=True) == before, "a partial selection: nothing"
+
+
+def test_apply_concept_operation_from_actions_yaml_resolves_the_operation():
+    """`actions.yaml` apply_concept_operation (CONCEPTS.md §9): the operation
+    `param.op_id` of the ONE selected generated instance's concept is looked
+    up, its `set:` expressions are evaluated over the instance's CURRENT
+    params (bound under `param`), and the numbers are merged into its params.
+    An unknown operation, no selection, two selected, or a selection that is
+    not a generated instance: nothing."""
+    from geometry.element import GeneratedElem
+    gen = GeneratedElem(concept_id="regular_polygon", params={"sides": 5, "radius": 40}, id="g1")
+    base = Document(layers=(Layer(name="L", children=(gen, _rect(id="r1"))),))
+    sel = lambda *paths: replace(base, selection=frozenset(ElementSelection.all(p) for p in paths))
+    effects = _action_effects("apply_concept_operation")
+
+    for op_id, want in (("add_side", 6), ("remove_side", 4)):
+        store = _store(sel((0, 0)))
+        run_effects(effects, {"param": {"op_id": op_id}}, store)
+        got = _doc_of(store).layers[0].children[0].params
+        assert got["sides"] == want and got["radius"] == 40, f"{op_id}: {got}"
+
+    # The expression reads the CURRENT params: remove_side clamps at 3.
+    tri = replace(gen, params={"sides": 3, "radius": 40})
+    store = _store(replace(base, layers=(Layer(name="L", children=(tri,)),),
+                           selection=frozenset({ElementSelection.all((0, 0))})))
+    run_effects(effects, {"param": {"op_id": "remove_side"}}, store)
+    assert _doc_of(store).layers[0].children[0].params["sides"] == 3
+
+    for doc, op_id in ((sel((0, 0)), "no_such_operation"), (sel((0, 0)), None), (base, "add_side"),
+                       (sel((0, 0), (0, 1)), "add_side"), (sel((0, 1)), "add_side")):
+        store = _store(doc)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {"param": {"op_id": op_id}}, store)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{op_id!r}: nothing"

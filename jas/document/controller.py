@@ -313,6 +313,44 @@ def promote_to_concept_ops(doc: Document, registry: dict) -> list[dict] | None:
     return None
 
 
+def apply_concept_operation_ops(doc: Document, op_id, concept: dict | None) -> list[dict] | None:
+    """The one value-in-op op a Concepts-panel operation button applies
+    (CONCEPTS.md §9), or None (a no-op) unless exactly one generated instance
+    is selected, ``concept`` is its concept, and that concept declares an
+    operation ``op_id`` whose ``set:`` expressions, evaluated over the
+    instance's CURRENT params (bound under ``param``), give at least one
+    number: ``apply_concept_operation`` of its path with those numbers as
+    ``changes``. An expression that is not a string, or does not evaluate to a
+    number, is skipped. Rust ``symbols_host::apply_concept_operation_ops``,
+    Swift ``ConceptsPanel.applyConceptOperationOps``."""
+    from geometry.element import GeneratedElem
+    from workspace_interpreter.expr import evaluate
+    from workspace_interpreter.expr_types import ValueType
+    if not isinstance(op_id, str) or len(doc.selection) != 1 or not isinstance(concept, dict):
+        return None
+    path = next(iter(doc.selection)).path
+    try:
+        elem = doc.get_element(path)
+    except (ValueError, IndexError, KeyError):
+        return None
+    if not isinstance(elem, GeneratedElem):
+        return None
+    operation = next((o for o in concept.get("operations") or () if isinstance(o, dict) and o.get("id") == op_id), None)
+    sets = operation.get("set") if operation else None
+    if not isinstance(sets, dict):
+        return None
+    ctx = {"param": dict(elem.params)}
+    changes = {}
+    for name, src in sets.items():
+        if isinstance(src, str):
+            r = evaluate(src, ctx)
+            if r.type == ValueType.NUMBER:
+                changes[name] = r.value
+    if not changes:
+        return None
+    return [{"op": "apply_concept_operation", "path": list(path), "op_id": op_id, "changes": changes}]
+
+
 def concept_default_params(concept: dict | None) -> dict:
     """A concept's declared default params (``params: [{name, default}]``) as
     a params object. Mirrors Rust ``symbols_host::concept_default_params`` and

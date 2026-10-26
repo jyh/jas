@@ -44,8 +44,10 @@
       ]
     },
     "apply_concept_operation": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.apply_concept_operation"
+      ]
     },
     "artboard_options_confirm": {
       "class": "journaling",
@@ -1182,6 +1184,7 @@
   "scope_note": "ACTION seam (dispatch_action) ONLY. 45 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
   "summary": {
     "action_seam_doc_verbs": [
+      "doc.apply_concept_operation",
       "doc.clone_at",
       "doc.create_artboard",
       "doc.create_layer",
@@ -1229,11 +1232,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 42,
+      "journaling": 43,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 189,
+      "ui-state": 188,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1283,13 +1286,14 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 42,
+    "journaling_actions": 43,
     "native_intercepts": [
       "export_to_pdf"
     ],
     "total_actions": 244,
     "verb_table": {
       "always": [
+        "doc.apply_concept_operation",
         "doc.copy_selection",
         "doc.create_artboard",
         "doc.delete_artboard_by_id",

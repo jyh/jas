@@ -6282,7 +6282,7 @@
       ]
     },
     "apply_concept_operation": {
-      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). A `log` stub like the other concept mutators \u2014 each app's native arm finds the single selected `Generated`, looks the operation up in the registry, evaluates its `set:` expressions over the instance's current params bound under `param`, and bakes the resulting param changes into one journaled op (value-in-op); the geometry re-derives from the generator at the next render. Single undo op.\n",
+      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). The one selected element must be a generated instance; the operation is looked up in its concept's `operations`, and each of its `set:` expressions is evaluated over the instance's CURRENT params, bound under `param` (so `remove_side`'s `max(param.sides - 1, 3)` clamps against the sides the instance has now). Every expression that gives a number becomes a param change, and the changes are merged into the instance's params; one that does not give a number is skipped. The geometry re-derives from the generator at the next render. With an unknown operation, no number, or unless exactly one generated instance is selected, nothing happens. Single undo op.\n",
       "category": "concepts",
       "params": {
         "op_id": {
@@ -6290,8 +6290,11 @@
         }
       },
       "effects": [
+        "snapshot",
         {
-          "log": "apply_concept_operation"
+          "doc.apply_concept_operation": {
+            "op_id": "param.op_id"
+          }
         }
       ]
     },

@@ -22,17 +22,16 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The three action names this module hosts. Since 2026-10-26 five verbs that
+/// The two action names this module hosts. Since 2026-10-26 six verbs that
 /// were hosted here run their YAML instead: `new_symbol` (`doc.new_symbol`,
 /// [`run_new_symbol`]), `place_instance`
 /// (`doc.place_instance`, [`place_instance_ops`]), `place_concept_instance`
 /// (`doc.place_concept_instance`, [`place_concept_instance_ops`]),
-/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`])
-/// and `promote_to_concept` (`doc.promote_to_concept`,
-/// [`promote_to_concept_ops`]).
-pub const ACTIONS: [&str; 3] = [
-    "delete_symbol_action", "delete_symbol_orphan_confirm_ok", "apply_concept_operation",
-];
+/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`]),
+/// `promote_to_concept` (`doc.promote_to_concept`, [`promote_to_concept_ops`])
+/// and `apply_concept_operation` (`doc.apply_concept_operation`,
+/// [`apply_concept_operation_ops`]).
+pub const ACTIONS: [&str; 2] = ["delete_symbol_action", "delete_symbol_orphan_confirm_ok"];
 
 /// What a hosted verb asks its caller to do besides the document change it
 /// already made.
@@ -54,7 +53,7 @@ pub enum Outcome {
 pub fn run(
     model: &mut Model,
     action: &str,
-    params: &Value,
+    _params: &Value, // no hosted verb reads its params since apply_concept_operation left
     selected_symbol: Option<&str>,
 ) -> Option<Outcome> {
     Some(match action {
@@ -79,10 +78,6 @@ pub fn run(
             model.with_txn(|m| Controller::delete_symbol(m, master));
             Outcome::CloseDialog { cleared_selection: true }
         }
-        "apply_concept_operation" => {
-            apply_concept_operation(model, params);
-            Outcome::Done
-        }
         _ => return None,
     })
 }
@@ -95,12 +90,6 @@ pub fn place_instance_ops(doc: &crate::document::document::Document, master: &st
     let mut existing = doc.element_ids();
     let ids = mint_unique_ids(1, &mut existing, &mut || generate_element_id(None))?;
     Some(vec![json!({"op": "place_instance", "master_id": master, "ref_id": ids[0]})])
-}
-
-/// The path of the single selected element, if exactly one is selected.
-fn single_path(model: &Model) -> Option<Vec<usize>> {
-    let sel = &model.document().selection;
-    (sel.len() == 1).then(|| sel[0].path.clone())
 }
 
 /// The one value-in-op op Make Symbol applies (`doc.new_symbol` in
@@ -213,15 +202,19 @@ pub fn set_concept_param_ops(doc: &crate::document::document::Document, name: &s
     Some(vec![json!({"op": "set_concept_param", "path": es.path, "name": name, "value": value})])
 }
 
-/// Apply a named concept operation to the single selected generated instance
-/// (CONCEPTS.md §9), resolving its `set:` expressions over the instance's
-/// current params at production time and baking the `changes` into the op.
-fn apply_concept_operation(model: &mut Model, params: &Value) {
-    let Some(op_id) = params.get("op_id").and_then(Value::as_str) else { return };
-    let Some(path) = single_path(model) else { return };
-    let Some(Element::Live(LiveVariant::Generated(ge))) = model.document().get_element(&path).cloned()
-    else {
-        return;
+/// The one value-in-op op a Concepts-panel operation button applies
+/// (`doc.apply_concept_operation` in actions.yaml, CONCEPTS.md §9), or `None`
+/// unless exactly one generated instance is selected and its concept declares
+/// the operation `op_id` whose `set:` expressions, evaluated over the
+/// instance's CURRENT params (bound under `param`), give at least one number:
+/// `apply_concept_operation` of its path with those numbers as `changes`. An
+/// expression that is not a string or not a number is skipped. The
+/// reference's `apply_concept_operation_ops`.
+pub fn apply_concept_operation_ops(doc: &crate::document::document::Document, op_id: &str) -> Option<Vec<Value>> {
+    let [es] = doc.selection.as_slice() else { return None };
+    let path = es.path.clone();
+    let Some(Element::Live(LiveVariant::Generated(ge))) = doc.get_element(&path).cloned() else {
+        return None;
     };
     let changes = Workspace::load().and_then(|w| w.concept(&ge.concept_id).cloned()).and_then(|c| {
         let operation = c.get("operations")?.as_array()?.iter()
@@ -238,17 +231,13 @@ fn apply_concept_operation(model: &mut Model, params: &Value) {
         }
         Some(changes)
     });
-    let Some(changes) = changes.filter(|c| !c.is_empty()) else { return };
-    let op = json!({
+    let changes = changes.filter(|c| !c.is_empty())?;
+    Some(vec![json!({
         "op": "apply_concept_operation",
         "path": path,
         "op_id": op_id,
         "changes": Value::Object(changes),
-    });
-    model.with_txn(|m| {
-        m.name_txn("apply_concept_operation");
-        let _ = crate::document::op_apply::op_apply(m, &op);
-    });
+    })])
 }
 
 /// Promote the single selected polygon or polyline to a generated concept

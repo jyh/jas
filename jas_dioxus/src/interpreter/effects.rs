@@ -3003,6 +3003,22 @@ fn run_doc_effect(
                 let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
+        // doc.apply_concept_operation: { op_id: <expr> }: a Concepts-panel
+        // operation button, the op `symbols_host::apply_concept_operation_ops`
+        // resolves for the one selected generated instance, under the action's
+        // `snapshot`. The reference's `StateStore.apply_concept_operation`.
+        "doc.apply_concept_operation" => match spec.get("op_id").and_then(|v| v.as_str()) {
+            Some(op_id_expr) => {
+                if let Value::Str(op_id) = eval_expr(op_id_expr, store, ctx) {
+                    for op in crate::interpreter::symbols_host::apply_concept_operation_ops(model.document(), &op_id)
+                        .unwrap_or_default()
+                    {
+                        let _ = crate::document::op_apply::op_apply(model, &op);
+                    }
+                }
+            }
+            None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.apply_concept_operation:{spec}"))),
+        },
         // doc.set_concept_param: { name: <expr>, value: <expr> }: a Concepts-panel
         // parameter field's commit, the op `symbols_host::set_concept_param_ops`
         // builds for the one selected generated instance, under the action's

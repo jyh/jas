@@ -571,6 +571,16 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     if "doc.new_symbol" in effect:
         return None, store.new_symbol()
 
+    # doc.apply_concept_operation: { op_id: <expr> } — a Concepts-panel
+    # operation button: the operation's `set:` resolved over the one selected
+    # generated instance's params. StateStore.apply_concept_operation.
+    if "doc.apply_concept_operation" in effect:
+        spec = effect["doc.apply_concept_operation"]
+        if isinstance(spec, dict):
+            op_id = evaluate(str(spec.get("op_id", "")), store.eval_context(ctx)).value
+            store.apply_concept_operation(op_id)
+        return None
+
     # doc.set_concept_param: { name: <expr>, value: <expr> } — a Concepts-panel
     # parameter field's commit: params[name] = value on the one selected
     # generated instance. StateStore.set_concept_param.
