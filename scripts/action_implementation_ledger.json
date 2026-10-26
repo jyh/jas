@@ -12,7 +12,7 @@
     "Ruled at council 2026-07-30 (O1); queued as Stubb's first stones.",
     "",
     "`bypassed` -- declared, named by no dispatch table, but the FEATURE works",
-    "natively behind another entry point. EMPTY ON PURPOSE. 32 actions have no",
+    "natively behind another entry point. Two TRACED rows (2026-10-26); add none on a guess. 32 actions have no",
     "dispatch entry and that bucket MIXES unbuilt with bypassed; the known",
     "bypassed family is the Layers row controls (eye/lock/twirl/rename/select),",
     "which live in `lp_tree.row_template` -- a widget NO port reads, since both",
@@ -22,5 +22,8 @@
     "confident-and-wrong claim this mechanism exists to prevent."
   ],
   "known_divergences": {},
-  "bypassed": {}
+  "bypassed": {
+      "close_window": "TRACED 2026-10-26 (jas, item 8 class H): no port's dispatch table names it because each shell closes its own window. Windows: the engine names it in its reply (`close_window: true`) and prototypes/sb_winui/Canvas.cs closes on it. Mac: quit is native (JasCommands' NSApplication.shared.terminate, JasApp.applicationShouldTerminate). Web: no window of its own, a no-op the action's description states.",
+      "save_all_then_close": "TRACED 2026-10-26 (jas, item 8 class H): the save-then-close is the shell's. Windows: the engine names it in its reply (`save_all_then_close: true`) and prototypes/sb_winui/Canvas.cs saves, then closes. Mac: quit is native (JasApp.applicationShouldTerminate). Web: no window of its own, a no-op the action's description states."
+  }
 }
