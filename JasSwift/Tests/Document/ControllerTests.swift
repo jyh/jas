@@ -1229,9 +1229,11 @@ private func symbolInstanceCtrl() -> Controller {
     // stopped at `id`, so `promoteToConcept`'s hand-listed six-field rebuild
     // dropped the name and nothing said so. Rust's twin has asserted
     // `g.common.name == Some("my square")` the whole time.
+    let fill = Fill(color: Color(r: 1, g: 0, b: 0))
+    let stroke = Stroke(color: Color(r: 0, g: 1, b: 0), width: 3.0)
     let poly = Element.polygon(Polygon(
         points: [(10, 0), (0, 10), (-10, 0), (0, -10)],
-        name: "my square", id: "p1"))
+        fill: fill, stroke: stroke, name: "my square", id: "p1"))
     let doc = Document(layers: [Layer(name: "Layer", children: [poly])], symbols: [])
     let ctrl = Controller(model: Model(document: doc))
     ctrl.promoteToConcept(
@@ -1250,6 +1252,9 @@ private func symbolInstanceCtrl() -> Controller {
     // … and the original identity preserved.
     #expect(g.id == "p1")
     #expect(g.name == "my square")
+    // … and its paint: a promote re-describes the shape, it does not repaint
+    // it (flask STATUS § 567: the fill was dropped).
+    #expect(g.fill == fill && g.stroke == stroke, "the paint is kept")
 }
 
 @Test func promoteToConceptMissingPathIsNoop() {

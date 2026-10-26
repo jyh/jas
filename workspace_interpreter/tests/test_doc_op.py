@@ -587,3 +587,23 @@ def test_delete_symbol_without_a_master_does_nothing():
         _run_yaml_action_with_dialogs(store, "delete_symbol_action", {"panel": panel})
         assert json.dumps(store._document, sort_keys=True) == before, f"{panel}: nothing"
         assert store.get_dialog_id() is None
+
+
+def test_layer_walk_reads_and_writes_a_bridged_documents_layers():
+    """STATUS-jas item 25. The store's document is in the op bridge's test-JSON
+    form (`type: layer`, common props flattened) after ANY op, while the YAML
+    reads and writes the native form (`l.common.locked`, `common.locked`).
+    `toggle_all_layers_lock` must lock every layer of a bridged document, and
+    unlock them on the next run; until 10-26 `top_level_layers` was empty there,
+    so the walk saw no layers and the action did nothing."""
+    doc = Document(layers=(Layer(name="A", children=(_rect(),)), Layer(name="B", children=())))
+    store = _store(doc)
+    assert store._document["layers"][0].get("type") == "layer", "the control: a bridged document"
+    view = store._active_document_view()
+    assert [l["name"] for l in view["top_level_layers"]] == ["A", "B"]
+    assert [l["common"]["locked"] for l in view["top_level_layers"]] == [False, False]
+
+    _run_yaml_action(store, "toggle_all_layers_lock")
+    assert [l.locked for l in _doc_of(store).layers] == [True, True]
+    _run_yaml_action(store, "toggle_all_layers_lock")
+    assert [l.locked for l in _doc_of(store).layers] == [False, False]

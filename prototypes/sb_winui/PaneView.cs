@@ -1344,7 +1344,8 @@ public sealed partial class MainWindow
                     if (leaf.Type == "button" && btn.Content is TextBlock face)
                     {
                         face.Text = PanelWire.ButtonLabel(
-                            leaf.Value("label"), leaf.Literal("label"), leaf.Literal("summary"), leaf.Id);
+                            leaf.Value("bind.label"), leaf.Value("label"), leaf.Literal("label"),
+                            leaf.Literal("summary"), leaf.Id);
                     }
                     btn.IsEnabled = !off;
                     if (on)

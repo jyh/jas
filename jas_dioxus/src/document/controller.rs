@@ -692,12 +692,15 @@ impl Controller {
         let Some(existing) = doc.get_element(path) else {
             return;
         };
-        // Preserve the raw element's identity; (re)set only the placement.
+        // Preserve the raw element's identity and its paint (a promote
+        // re-describes the shape, it does not repaint it); (re)set only the
+        // placement.
         let mut common = existing.common().clone();
         common.transform = Some(transform);
-        let generated = Element::Live(crate::geometry::live::LiveVariant::Generated(
-            crate::geometry::live::GeneratedElem::new(concept_id.to_string(), params, common),
-        ));
+        let mut ge = crate::geometry::live::GeneratedElem::new(concept_id.to_string(), params, common);
+        ge.fill = existing.fill().cloned();
+        ge.stroke = existing.stroke().cloned();
+        let generated = Element::Live(crate::geometry::live::LiveVariant::Generated(ge));
         model.edit_document(doc.replace_element(path, generated));
     }
 
@@ -7791,10 +7794,12 @@ mod tests {
         // preserving the original element's identity (id/name).
         use crate::geometry::element::{CommonProps, Element, PolygonElem, Transform};
         let mut model = Model::default();
+        let fill = Some(Fill::new(Color::BLACK));
+        let stroke = Some(Stroke::new(Color::BLACK, 2.0));
         let poly = Element::Polygon(PolygonElem {
             points: vec![(10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0)],
-            fill: None,
-            stroke: None,
+            fill,
+            stroke,
             common: CommonProps {
                 id: Some("p1".into()),
                 name: Some("my square".into()),
@@ -7822,6 +7827,9 @@ mod tests {
         // … and the original identity preserved.
         assert_eq!(g.common.id.as_deref(), Some("p1"));
         assert_eq!(g.common.name.as_deref(), Some("my square"));
+        // … and its paint: a promote re-describes the shape, it does not
+        // repaint it (flask STATUS § 567: the fill was dropped).
+        assert_eq!((g.fill, g.stroke), (fill, stroke), "the paint is kept");
     }
 
     #[test]
