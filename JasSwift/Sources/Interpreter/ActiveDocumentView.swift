@@ -30,6 +30,8 @@ public func buildActiveDocumentView(
             "layers_panel_selection_has_group": false,
             "selection_has_brushed_stroke": false,
             "selection_is_single_brushed_stroke": false,
+            // Nothing is selected, so a delete strands nothing.
+            "selection_orphan_count": 0,
             "has_selection": false,
             "selection_count": 0,
             "element_selection": [] as [Any],
@@ -198,6 +200,10 @@ public func buildActiveDocumentView(
         "layers_panel_selection_has_group": layersPanelSelectionHasGroup,
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
+        // How many live references deleting the selection would strand
+        // (`runtime_contexts.yaml`); `delete_selection` asks before one.
+        "selection_orphan_count": m.document.selection.isEmpty ? 0
+            : DependencyIndex.orphanedReferences(m.document, m.document.selection.map(\.path)).count,
         "element_selection": elementSelection,
         // The per-document recent colours, the one writable document list
         // (`runtime_contexts.yaml`), which Color and Swatches both read.

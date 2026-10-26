@@ -1573,11 +1573,11 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     }
 
     // `dispatch: delete_selection` from a tool (the Artboard tool's Delete
-    // falls through to it): its YAML body is the menu's `log`, so the runner
-    // asks this `action:` entry first and the reference-aware delete RUNS
-    // (Rust `ToolHost::run_action`).
+    // falls through to it): the reference-aware delete, actions.yaml's, run on
+    // the model with the full active-document view (a tool's own context
+    // carries only part of it), the confirm presented as the Mac's NSAlert.
     effects["action:delete_selection"] = { _, _, _ in
-        JasCommands.deleteSelectionReferenceAware(model)
+        JasCommands.runDeleteSelection(model)
         return nil
     }
 
