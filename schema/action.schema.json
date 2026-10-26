@@ -168,6 +168,11 @@
             "doc.insert_at": {},
             "doc.move_artboards_down": {},
             "doc.move_artboards_up": {},
+            "doc.op": {
+              "type": "object",
+              "required": ["op"],
+              "properties": { "op": { "type": "string" } }
+            },
             "doc.preview.clear": {},
             "doc.preview.restore": {},
             "doc.rotate.apply": {},

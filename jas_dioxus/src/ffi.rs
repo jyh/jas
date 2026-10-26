@@ -3886,6 +3886,7 @@ mod tests {
         "dialog_actions/document_setup.json",
         "dialog_actions/print.json",
         "dialog_actions/panel_menu_actions.json",
+        "dialog_actions/model_verbs.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
@@ -5418,7 +5419,7 @@ mod tests {
             assert!(!refused.iter().any(|r| r.starts_with(&format!("{verb} -> "))),
                     "{verb} is the menu's own and the engine runs it");
         }
-        assert!(ran >= 9, "at least the nine menu verbs ran; {ran} items ran");
+        assert!(ran >= 9, "at least the nine model verbs ran (six native, three `doc.op`); {ran} items ran");
     }
 
     /// WHETHER THE DOCUMENT IS MODIFIED, FOR A SHELL'S DIRTY FLAG (flask §246,

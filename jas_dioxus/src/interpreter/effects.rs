@@ -2890,6 +2890,20 @@ fn run_doc_effect(
             let _ = crate::document::op_apply::op_apply(
                 model, &serde_json::json!({ "op": "delete_selection" }));
         }
+        // doc.op: { op: <name>, ...literal fields }: one journaled op by name,
+        // the model verbs' route (unlock_all, show_all) to the layer the menu's
+        // native table reaches too. The reference's `StateStore.apply_op`
+        // applies the same op through `document.op_apply`. An op the layer
+        // refuses is reported, so a misspelt name is never silent.
+        "doc.op" => {
+            let refused = match spec.get("op").and_then(|v| v.as_str()) {
+                Some(_) => crate::document::op_apply::op_apply(model, spec).is_err(),
+                None => true,
+            };
+            if refused {
+                report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.op:{spec}")));
+            }
+        }
         _ => {
             // Effects not implemented in this phase change nothing, and are
             // reported. doc.add_element and doc.set_attr land in later phases
@@ -8232,6 +8246,42 @@ mod tests {
             &effects, &serde_json::json!({}), &mut store,
             Some(&mut model), None, None, None);
         assert_eq!(model.document().selection.len(), 0);
+    }
+
+    /// `doc.op` applies one journaled op by name through `op_apply`, the
+    /// layer the menu's native table also reaches (`menu_native`): the model
+    /// verbs' YAML says what they do. Unlock All keeps the selection
+    /// (UNLOCKSEL); Show All selects what it showed; an unknown name is
+    /// reported, never run.
+    #[test]
+    fn doc_op_runs_unlock_all_and_show_all_through_the_op_layer() {
+        let path = vec![0, 0];
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        Controller::select_element(&mut model, &path);
+        Controller::lock_selection(&mut model);
+        assert!(model.document().get_element(&path).unwrap().locked(), "seeded locked");
+        Controller::select_element(&mut model, &vec![0, 1]);
+        run_effects(&[serde_json::json!({"doc.op": {"op": "unlock_all"}})],
+            &serde_json::json!({}), &mut store, Some(&mut model), None, None, None);
+        assert!(!model.document().get_element(&path).unwrap().locked(), "unlocked");
+        assert!(model.document().get_element_selection(&vec![0, 1]).is_some(), "selection kept");
+
+        Controller::select_element(&mut model, &path);
+        Controller::hide_selection(&mut model);
+        assert_eq!(model.document().get_element(&path).unwrap().visibility(), crate::geometry::element::Visibility::Invisible);
+        run_effects(&[serde_json::json!({"doc.op": {"op": "show_all"}})],
+            &serde_json::json!({}), &mut store, Some(&mut model), None, None, None);
+        assert_eq!(model.document().get_element(&path).unwrap().visibility(), crate::geometry::element::Visibility::Preview);
+        assert!(model.document().get_element_selection(&path).is_some(), "selects what it showed");
+        assert_eq!(model.document().selection.len(), 1);
+
+        let generation = model.generation();
+        let report = run_effects(&[serde_json::json!({"doc.op": {"op": "zz_no_such_op"}})],
+            &serde_json::json!({}), &mut store, Some(&mut model), None, None, None);
+        assert_eq!(model.generation(), generation, "an unknown op changes nothing");
+        assert!(report.unhandled.iter().any(|u| matches!(u, Unhandled::UnknownDocEffect(d) if d.contains("zz_no_such_op"))),
+            "and is reported: {:?}", report.unhandled);
     }
 
     // ── Scope-routed `set:` targets ────────────────────────────────

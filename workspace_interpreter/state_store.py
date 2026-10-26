@@ -745,6 +745,33 @@ class StateStore:
         children.insert(index, element)
         return True
 
+    def apply_op(self, op: dict) -> None:
+        """Apply one journaled op (``{"op": <name>, ...}``) to the document.
+
+        The op layer is ``document.op_apply`` (beside the frozen Python app,
+        the same import root ``effects.py`` uses for ``geometry.element``), so
+        the reference's meaning of an op IS that layer's. The document is a
+        dict here, so it is bridged through canonical test JSON, and the keys
+        the bridge does not produce (``artboard_options``) are carried across
+        untouched. An op name the layer does not know changes nothing.
+        """
+        if self._document is None:
+            return
+        import json
+        from document.model import Model
+        from document.op_apply import op_apply
+        from geometry.test_json import document_to_test_json, test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        model = Model(document=doc)
+        op_apply(model, op)
+        if model.document is doc:
+            return
+        new = json.loads(document_to_test_json(model.document))
+        for k, v in self._document.items():
+            if k not in new:
+                new[k] = v
+        self._document = new
+
     def delete_element_at(self, path: tuple[int, ...]):
         """Delete the element at path. Returns the deleted element, or None."""
         if self._document is None or len(path) == 0:

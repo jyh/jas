@@ -358,6 +358,7 @@ private let dialogActionFixtures = [
     "dialog_actions/document_setup.json",
     "dialog_actions/print.json",
     "dialog_actions/panel_menu_actions.json",
+    "dialog_actions/model_verbs.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {

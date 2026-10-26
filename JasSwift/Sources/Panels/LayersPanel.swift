@@ -565,6 +565,17 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.op: { op: <name>, ...literal fields }: one journaled op by name,
+        // the model verbs' route (unlock_all, show_all, hide_selection) to the
+        // op layer the menu's `MenuActions` reaches too. The engine's
+        // `run_doc_effect` and the reference's `StateStore.apply_op` apply the
+        // same op. A spec with no `op` name runs nothing.
+        let docOpHandler: PlatformEffect = { value, _, _ in
+            guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
+            opApply(model, controller, spec)
+            return nil
+        }
+
         // make_compound_shape — replace the >=2 selected siblings with a single
         // live compound shape (UNION). A self-bracketing edit: makeCompoundShape
         // joins the txn the `snapshot` effect already opened and the runEffects
@@ -842,6 +853,7 @@ public enum LayersPanel {
             "doc.move_artboards_up": docMoveArtboardsUpHandler,
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "doc.delete_selection": docDeleteSelectionHandler,
+            "doc.op": docOpHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,
