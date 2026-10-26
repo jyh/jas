@@ -427,7 +427,10 @@ public sealed partial class MainWindow
                     case "length_input":
                     case "text_input":
                         inputs++;
-                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        // A field a `foreach` stamps out (Concepts' param rows) has
+                        // NO id; its plan path addresses it, as a library swatch's
+                        // does (STATUS-flask §563 finding I).
+                        if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { unaddressable++; }
                         el = BuildNumberInput(leaf);
                         break;
 
@@ -439,7 +442,7 @@ public sealed partial class MainWindow
                     case "toggle":
                     case "checkbox":
                         toggles++;
-                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { unaddressable++; }
                         el = BuildToggle(leaf, icons);
                         break;
 
@@ -1381,7 +1384,7 @@ public sealed partial class MainWindow
                     // showing "12 pt" would commit on every focus loss.
                     box.Tag = value;
                     if (!typing) { box.Text = value; }
-                    off = off || leaf.Id.Length == 0;
+                    off = off || !PanelWire.Addressable(leaf.Id, leaf.Path);
                     box.IsEnabled = !off;
                     break;
 
@@ -1500,7 +1503,7 @@ public sealed partial class MainWindow
                 // A `CheckBox` IS a `ToggleButton`, so one case holds both faces
                 // `BuildToggle` makes.
                 case ToggleButton toggle:
-                    off = off || leaf.Id.Length == 0;
+                    off = off || !PanelWire.Addressable(leaf.Id, leaf.Path);
                     toggle.Tag = on;
                     toggle.IsChecked = on;
                     toggle.IsEnabled = !off;
@@ -1562,8 +1565,9 @@ public sealed partial class MainWindow
         /// <summary>
         /// A `number_input`. Enter commits; losing focus commits only a changed
         /// text (<see cref="PanelWire.CommitOnBlur"/>). A declared unit is the
-        /// tooltip, since the box holds exactly what a commit sends. A box with no
-        /// id cannot be addressed, so it is read-only.
+        /// tooltip, since the box holds exactly what a commit sends. A box with
+        /// neither an id nor a plan path cannot be addressed, so it is read-only;
+        /// a template's box (no id) commits by its path.
         /// </summary>
         private TextBox BuildNumberInput(PaneLeaf leaf)
         {
@@ -1574,14 +1578,14 @@ public sealed partial class MainWindow
                 MinHeight = 0,
                 Padding = new Thickness(4, 0, 4, 0),
                 IsSpellCheckEnabled = false,
-                IsReadOnly = leaf.Id.Length == 0,
+                IsReadOnly = !PanelWire.Addressable(leaf.Id, leaf.Path),
             };
             var unit = leaf.Literal("unit") ?? leaf.Literal("suffix");
             if (!string.IsNullOrEmpty(unit)) { ToolTipService.SetToolTip(box, unit); }
             // The spec's literal hint for an empty box (`cp_hex`'s "000000",
             // Layers' "Search All"); the plan sends it in `static`.
             if (leaf.Literal("placeholder") is { Length: > 0 } hint) { box.PlaceholderText = hint; }
-            if (leaf.Id.Length == 0) { return box; }
+            if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { return box; }
 
             var id = leaf.Id;
             box.KeyDown += (_, e) =>
