@@ -1550,7 +1550,23 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
     let status = unsafe { crate::ffi_pointer::jas_key_event(e, code, mask) };
     let doc_changed = engine.model.borrow().generation() != generation;
     if status != JasStatus::Ok && !doc_changed {
-        set_panel_event_error(engine, "KeyUnhandled", name);
+        // flask §556 finding H: a command chord the engine does not run
+        // (W5-3c) is the menu's, and the shell has already kept it from the
+        // menu's accelerator, so the refusal names the action `shortcuts.yaml`
+        // binds and the shell runs that menu item. Reached only after the tool
+        // declined it, so a text session's Ctrl+A never names one.
+        let bound = (mask & MOD_CMD != 0).then(|| {
+            let chord = crate::workspace::resolve_key::KeyChord::new(
+                name, true, mask & MOD_SHIFT != 0, mask & MOD_ALT != 0, false);
+            crate::workspace::resolve_key::resolve_key(&chord)
+        }).flatten();
+        match bound {
+            Some(cmd) => *engine.last_error.borrow_mut() = Some(serde_json::json!({
+                "panel_event": "KeyUnhandled", "detail": name,
+                "menu_action": cmd.action, "params": cmd.params,
+            }).to_string()),
+            None => set_panel_event_error(engine, "KeyUnhandled", name),
+        }
         return JasBytes::empty();
     }
     let _ = crate::ffi_pointer::sync_tool_to_state(engine);
@@ -4934,6 +4950,48 @@ mod tests {
     /// pastes the clipboard's TEXT at it (the web's `tool.paste_text`, before
     /// the element paste), so a paste adds no element. With no session a caret
     /// key is `KeyUnhandled` (the shell's own default), never `BadKey`.
+    /// flask §556 finding H: a Ctrl chord the engine does not run itself
+    /// (anything but undo, redo and the clipboard verbs, W5-3c) stays the
+    /// menu's, but the shell has already kept the chord from the menu's
+    /// accelerator, so the refusal NAMES the action `shortcuts.yaml` binds:
+    /// `{"panel_event":"KeyUnhandled","detail":<key>,"menu_action":<action>}`,
+    /// and the shell runs that menu item. A chord the engine runs, a chord
+    /// nothing binds, and a chord a text session takes name nothing.
+    #[test]
+    fn an_unrun_command_chord_names_the_menu_action_it_binds() {
+        use crate::ffi_pointer::{jas_pointer_event, jas_set_tool, KIND_PRESS, KIND_RELEASE, TOOL_IDS};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let named = |err: &str| serde_json::from_str::<serde_json::Value>(err).ok()
+            .and_then(|v| v["menu_action"].as_str().map(str::to_string));
+        for (key, shift, action) in [("a", false, "select_all"), ("g", false, "group"),
+                                     ("g", true, "ungroup"), ("s", false, "save"),
+                                     ("s", true, "save_as"), ("n", false, "new_document"),
+                                     ("o", false, "open_file"), ("p", false, "open_print_dialog"),
+                                     ("q", false, "quit")] {
+            let msg = format!(r#"{{"key":"{key}","mods":{{"ctrl":true,"shift":{shift}}}}}"#);
+            let (reply, err) = dispatch(e, &msg);
+            assert_eq!(reply, "", "{msg}: the engine does not run it");
+            assert!(err.contains("KeyUnhandled"), "{msg}: {err}");
+            assert_eq!(named(&err).as_deref(), Some(action), "{msg}: {err}");
+        }
+        let (_, err) = dispatch(e, r#"{"key":"k","mods":{"ctrl":true}}"#);
+        assert!(err.contains("KeyUnhandled") && named(&err).is_none(), "an unbound chord names nothing: {err}");
+        let (_, err) = dispatch(e, r#"{"key":"ArrowLeft"}"#);
+        assert!(err.contains("KeyUnhandled") && named(&err).is_none(), "a caret key names nothing: {err}");
+        let (_, err) = dispatch(e, r#"{"key":"z","mods":{"ctrl":true}}"#);
+        assert!(named(&err).is_none(), "undo is the engine's own: {err}");
+        let ty = TOOL_IDS.iter().position(|t| *t == "type").expect("the Type tool");
+        unsafe {
+            assert_eq!(jas_set_tool(e, ty), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 500.0, 500.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 500.0, 500.0, 0);
+        }
+        let (_, err) = dispatch(e, r#"{"key":"a","mods":{"ctrl":true}}"#);
+        assert!(!err.contains("KeyUnhandled") && named(&err).is_none(), "a text session takes Ctrl+A: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_text_session_takes_the_caret_keys_and_a_paste_of_text() {
         use crate::ffi_pointer::{jas_pointer_event, jas_set_tool, KIND_PRESS, KIND_RELEASE, TOOL_IDS};

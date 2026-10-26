@@ -873,6 +873,7 @@ public sealed partial class MainWindow : Window
         _canvas.SceneCompleted = AfterScene;
         _canvas.MenuChanged = OnMenuChanged;
         _canvas.DocumentDirtyChanged = OnDocumentDirtyChanged;
+        _canvas.MenuKeyChord = InvokeByKey;
         _canvas.HashTaken = OnHashTaken;
         _canvas.PanelChanged = OnPanelChanged;
         _canvas.PaneChanged = OnPaneChanged;
@@ -1461,9 +1462,13 @@ public sealed partial class MainWindow : Window
             // jas §364: the ENGINE resolves this chord (`shortcuts.yaml` binds
             // every Ctrl+letter the menu shows), so the menu item's accelerator
             // must not run it a second time. Measured before this line: one
-            // Ctrl+V pasted twice, by `{"key"}` and by `menu_paste`. A chord
-            // this route does not send (Ctrl+2, Ctrl+=, any chord with no
-            // document shown) stays the accelerator's.
+            // Ctrl+V pasted twice, by `{"key"}` and by `menu_paste`. The engine
+            // RUNS only undo, redo and the clipboard verbs (W5-3c); any other
+            // chord comes back `KeyUnhandled` naming its menu action, which
+            // `InvokeByKey` runs (flask §556 finding H: until then Ctrl+A, G, S,
+            // O, N, P and Q did nothing by key). A chord this route does not
+            // send (Ctrl+2, Ctrl+=, any chord with no document shown) stays the
+            // accelerator's.
             e.Handled = true;
         }
         if (code != 0) { _canvas.Key(code, mods); }
@@ -2429,6 +2434,28 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Each built menu item's action, by its id: what SB_MENU_SYNTH reads.</summary>
     private readonly Dictionary<string, string> _menuActions = new(StringComparer.Ordinal);
+    /// <summary>Each built menu item, by its id: whether a key's menu action may run it.</summary>
+    private readonly Dictionary<string, MenuFlyoutItem> _menuItems = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// flask §556 finding H: a Ctrl+letter chord `OnKeyDown` kept from the
+    /// menu's accelerator, and the engine did not run, comes back naming its
+    /// action. Run it as the accelerator would have, through the method a click
+    /// reaches (`Invoke`), and only when its item is drawn and enabled: an
+    /// accelerator never fires on a disabled item. Refused by name otherwise.
+    /// </summary>
+    private void InvokeByKey(string action)
+    {
+        foreach (var (id, itemAction) in _menuActions)
+        {
+            if (itemAction != action || !_menuItems.TryGetValue(id, out var item)) { continue; }
+            if (!item.IsEnabled) { Report($"MENU KEY DISABLED item={id} action={action}"); return; }
+            Report($"MENU KEY item={id} action={action}");
+            Invoke(action, id);
+            return;
+        }
+        Report($"RUSTFAIL MENU KEY REFUSED action={action} -- the menubar holds no item that runs it ({_menuActions.Count} items)");
+    }
     private bool _menuSynthDone;
 
     /// <summary>
@@ -2534,6 +2561,7 @@ public sealed partial class MainWindow : Window
                     if (itemId.Length > 0)
                     {
                         _menuActions[itemId] = action;
+                        _menuItems[itemId] = item;
                         // jas §392: a menu step names the item by this node id.
                         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, itemId);
                     }

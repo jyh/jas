@@ -762,6 +762,17 @@ static class Program
         Eq("key: a quote is escaped as JSON", """{"key":"\"","mods":{"shift":false,"alt":true,"ctrl":false}}""",
             KeyWire.Request("\"", shift: false, alt: true, ctrl: false));
         Eq("key: an empty name is no request", "(null)", KeyWire.Request("", false, false, false) ?? "(null)");
+        // flask §556 finding H: a refused command chord names its menu action,
+        // which the shell runs; nothing else is read as one.
+        Eq("key: a refused chord names its menu action", "save",
+            KeyWire.MenuAction("""{"panel_event":"KeyUnhandled","detail":"s","menu_action":"save","params":{}}""") ?? "(null)");
+        Eq("key: an unhandled key with no action names none", "(null)",
+            KeyWire.MenuAction("""{"panel_event":"KeyUnhandled","detail":"k"}""") ?? "(null)");
+        Eq("key: another refusal class is never a menu action", "(null)",
+            KeyWire.MenuAction("""{"panel_event":"BadKey","detail":"s","menu_action":"save"}""") ?? "(null)");
+        Eq("key: an empty or unreadable channel names none", "(null)|(null)|(null)",
+            (KeyWire.MenuAction("") ?? "(null)") + "|" + (KeyWire.MenuAction("not json") ?? "(null)")
+            + "|" + (KeyWire.MenuAction("""{"panel_event":"KeyUnhandled","menu_action":7}""") ?? "(null)"));
         // The gradient slider's picture (gradient.yaml grad_slider), DISPLAY ONLY
         // as in every port: `bind.stops` is the plan's JSON text, each stop
         // {color, location, midpoint_to_next?, opacity}, keys in any order.
