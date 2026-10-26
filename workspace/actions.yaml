@@ -541,7 +541,10 @@ actions:
     tier: 3
     enabled_when: "active_document.has_selection"
     effects:
-      - log: "lock"
+      # One undo step through the op layer (`doc.op`); until 2026-10-25 a
+      # `log` stub whose meaning lived in each port's native menu table.
+      - snapshot
+      - doc.op: { op: lock_selection }
   unlock_all:
     description: >
       Unlock all locked elements in the active document, making them

@@ -299,8 +299,11 @@
       "tier": 3,
       "enabled_when": "active_document.has_selection",
       "effects": [
+        "snapshot",
         {
-          "log": "lock"
+          "doc.op": {
+            "op": "lock_selection"
+          }
         }
       ]
     },

@@ -13,16 +13,15 @@ import Foundation
 enum MenuActions {
     /// The model-pure menu verbs, by action name: Rust `menu_native::VERBS`,
     /// in its order. ``run(_:_:)`` runs exactly these.
-    /// `unlock_all`, `hide_selection` and `show_all` left it 2026-10-25: their
-    /// YAML is `doc.op` (the op layer by name), so the menu runs the declared
-    /// action (``yamlVerbs``).
-    static let verbs = ["select_all", "group", "ungroup", "ungroup_all", "lock",
-                        "make_instance"]
+    /// `unlock_all`, `hide_selection`, `show_all` and `lock` left it 2026-10-25:
+    /// their YAML is `doc.op` (the op layer by name), so the menu runs the
+    /// declared action (``yamlVerbs``).
+    static let verbs = ["select_all", "group", "ungroup", "ungroup_all", "make_instance"]
 
     /// The model verbs whose YAML says what they do (`doc.op`): the menu runs
     /// the declared action through ``LayersPanel/dispatchYamlAction``, as the
     /// engine's door and the web menu do.
-    static let yamlVerbs = ["unlock_all", "hide_selection", "show_all"]
+    static let yamlVerbs = ["unlock_all", "hide_selection", "show_all", "lock"]
 
     /// Run `action` on `model` if it is one of ``verbs``; `false` (nothing
     /// run) otherwise. Rust `menu_native::run`. The live menu (``JasCommands``)
@@ -34,7 +33,6 @@ enum MenuActions {
         case "group": groupSelection(model)
         case "ungroup": ungroupSelection(model)
         case "ungroup_all": ungroupAll(model)
-        case "lock": lockSelection(model)
         case "make_instance": makeInstance(model)
         default: return false
         }
@@ -146,14 +144,6 @@ enum MenuActions {
         guard changed else { return }
         // Undoable: editDocument self-brackets one undo step.
         model.editDocument(doc.replacing(layers: newLayers, selection: []))
-    }
-
-    /// Lock the current selection under ONE undo step.
-    static func lockSelection(_ model: Model) {
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.lockSelection() }
     }
 
     /// "Make Instance": the first user-facing way to create a live reference.

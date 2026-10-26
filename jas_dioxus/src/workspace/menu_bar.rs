@@ -180,7 +180,7 @@ pub(crate) fn MenuBarView(
                 // The menu's model-pure verbs: one table, shared with the
                 // action corpus and the engine's menu dispatch
                 // (`menu_native`).
-                "select_all" | "group" | "ungroup" | "ungroup_all" | "lock" | "make_instance" => {
+                "select_all" | "group" | "ungroup" | "ungroup_all" | "make_instance" => {
                     let action = cmd.to_string();
                     (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                         if let Some(tab) = st.tab_mut() {
@@ -190,7 +190,7 @@ pub(crate) fn MenuBarView(
                 }
                 // Their YAML is `doc.op` (the op layer by name), so the menu
                 // runs the declared action. `hide` is `hide_selection`'s cmd name.
-                "unlock_all" | "hide" | "show_all" => {
+                "unlock_all" | "hide" | "show_all" | "lock" => {
                     let action = if cmd == "hide" { "hide_selection" } else { cmd }.to_string();
                     (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
                         let _ = crate::interpreter::renderer::dispatch_action(
