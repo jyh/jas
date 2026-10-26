@@ -10,6 +10,13 @@ The jas boot brief carried the recipe as prose -- six `gh` calls -- and said
 re-derived from prose on each use is re-derived WRONG on some of them. It has
 been reconstructed at least twice in one week. Prose is not a tool.
 
+MERGE WITH `--merge`, NEVER WITH A SHELL LINE AFTER IT. `merge_preflight.py N
+--merge` merges only on a pass, only at the head it verified
+(`--match-head-commit`), and exits 0 only when the PR reads back MERGED. A
+separate `gh pr merge` after this tool is a line a pipe can get between:
+`merge_preflight.py 694 | tail -1 && gh pr merge 694` merged past a REFUSED on
+2026-10-26, because `&&` read tail's status.
+
 WHAT IT REFUSES, and each condition was bought by a real merge, not imagined:
 
   (1) DRAFT           a draft PR's checks describe an intention, not a request.
@@ -375,6 +382,30 @@ def self_test(fixture: Path | None = None) -> int:
                 f"{label}: refused, but no refusal names {want_word!r}: {v.refusals}"
             )
 
+    # (m) --merge: the gate and the act are ONE process. A refusal must never
+    #     reach the merger; a pass calls it exactly once, for the head the
+    #     verdict was about; a merge that does not read back MERGED is rc 1.
+    #     (2026-10-26: `merge_preflight.py 694 | tail -1 && gh pr merge` merged
+    #     past a REFUSED, because `&&` read tail's status.)
+    for label, st, merged, want_rc, want_calls in (
+        ("a refusal with --merge", _state(draft=True), "MERGED", 1, 0),
+        ("a pass with --merge", _state(), "MERGED", 0, 1),
+        ("a pass whose merge does not read MERGED", _state(), "OPEN", 1, 1),
+    ):
+        declared += 1
+        calls: list[tuple[int, str, str]] = []
+
+        def merger(pr: int, repo: str, head: str, _m=merged) -> str:
+            calls.append((pr, repo, head))
+            return _m
+
+        rc = decide_and_merge(7, "o/r", st, merger, lambda *_: None)
+        if (rc, len(calls)) != (want_rc, want_calls):
+            failures.append(f"{label}: rc {rc} with {len(calls)} merge call(s), "
+                            f"expected rc {want_rc} with {want_calls}")
+        elif calls and calls[0][2] != st.head_sha:
+            failures.append(f"{label}: merged head {calls[0][2]!r}, verified {st.head_sha!r}")
+
     # (a) THE POSITIVE CONTROL FIRST. Without it every arm below is satisfied
     #     by `return Verdict(False, ...)`, and the suite would be green for a
     #     tool that refuses every merge forever.
@@ -671,6 +702,39 @@ def self_test(fixture: Path | None = None) -> int:
     return 0
 
 
+def decide_and_merge(pr: int, repo: str, state: State, merger, say=print) -> int:
+    """`--merge`: the gate and the act in ONE process, so no shell line can sit
+    between them (2026-10-26: `merge_preflight.py 694 | tail -1 && gh pr merge`
+    merged past a REFUSED, because `&&` read tail's status). The merger is
+    called only on a pass, for `state.head_sha` (the head the verdict was
+    about), and returns the PR's state as read back from the forge. 0 iff that
+    reads MERGED."""
+    v = evaluate(state)
+    if not v.ok:
+        say(f"merge_preflight --merge: NOT MERGED -- refused on {len(v.refusals)} condition(s)")
+        return 1
+    result = merger(pr, repo, state.head_sha)
+    if result != "MERGED":
+        say(f"merge_preflight --merge: merge requested at head {state.head_sha[:8]}, "
+            f"but the PR reads {result!r}")
+        return 1
+    say(f"merge_preflight --merge: MERGED {repo}#{pr} at head {state.head_sha[:8]}")
+    return 0
+
+
+def gh_merge(pr: int, repo: str, head: str) -> str:
+    """Merge `pr` as a merge commit, ONLY if its head is still `head`
+    (`--match-head-commit`, so a push after the verdict refuses the merge),
+    then read its state back from the forge."""
+    proc = subprocess.run(
+        ("gh", "pr", "merge", str(pr), "-R", repo, "--merge", "--match-head-commit", head),
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if proc.returncode != 0:
+        print(f"  gh pr merge rc {proc.returncode}: {proc.stderr.strip()}")
+    return _gh("pr", "view", str(pr), "-R", repo, "--json", "state", "--jq", ".state").strip()
+
+
 def level2_notice(pr: int, repo: str = REPO) -> list[str]:
     """The LEVEL-2 NOTICE lines for the files the PR changes (read from the
     forge), or one line saying why none could be computed."""
@@ -688,6 +752,8 @@ def main() -> int:
     ap.add_argument("--repo", default=REPO)
     ap.add_argument("--base", default=BASE)
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--merge", action="store_true",
+                    help="on a pass, merge the PR at the verified head and read back MERGED")
     ap.add_argument(
         "--fixture",
         type=Path,
@@ -713,11 +779,13 @@ def main() -> int:
         print(f"  {line}")
     if verdict.ok:
         print("merge_preflight: OK -- every condition holds; the green tree IS the merged tree")
-        return 0
-    print(f"merge_preflight: REFUSED on {len(verdict.refusals)} condition(s)")
-    for r in verdict.refusals:
-        print(f"{PREFIX_REFUSAL}{r}")
-    return 1
+    else:
+        print(f"merge_preflight: REFUSED on {len(verdict.refusals)} condition(s)")
+        for r in verdict.refusals:
+            print(f"{PREFIX_REFUSAL}{r}")
+    if args.merge:
+        return decide_and_merge(args.pr, args.repo, state, gh_merge)
+    return 0 if verdict.ok else 1
 
 
 if __name__ == "__main__":
