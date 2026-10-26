@@ -160,6 +160,10 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             // through `jas_panel_behavior`.
             let pid = pe["panel"] as? String ?? ""
             guard let panel = ws.panel(pid) else { return ["\(name): no panel \(pid) in the bundle"] }
+            // A widget is pressed only once its panel has rendered, and the
+            // render seeds the panel's state (`DockPanelView`'s `initPanel`);
+            // without it `list_toggle` has no scope to write and does nothing.
+            if !store.hasPanel(pid) { store.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
             let scope = panelMenuContext(pid, layout: WorkspaceLayout.defaultLayout(), model: m)
             let node: [String: Any]
             switch addressed(panel["content"], pe["address"] as? [String: Any] ?? [:], context: scope) {
@@ -178,6 +182,12 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             case "click":
                 let r = route.click(node)
                 if r.outcome == "refused" { return ["\(name): the click was refused (\(r.reason ?? "-"))"] }
+            case let ev where ev == "toggle" || ev == "alt_toggle":
+                // A dropdown item's pick: `value` names the item, as the
+                // engine's `pick` reads `event.value`.
+                guard let v = pe["value"] as? String else { return ["\(name): a pick names no value"] }
+                let r = route.pick(node, value: v, alt: ev == "alt_toggle")
+                if r.outcome == "refused" { return ["\(name): the pick was refused (\(r.reason ?? "-"))"] }
             default:
                 return ["\(name): unknown panel event \(pe["event"] ?? "nil")"]
             }
