@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 3 |
-| `journaling` | 45 |
+| `journaling` | 46 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 186 |
+| `ui-state` | 185 |
 | `view` | 6 |
 | **total** | **245** |
 
 (The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (45)
+## Journaling actions (46)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -93,6 +93,7 @@ come additively from `native_intercepts`.)
 | `scale_options_confirm` | `doc.preview.clear`, `doc.preview.restore`, `doc.scale.apply` (`doc.scale.apply` journal:true) |
 | `select_all` | `doc.op` |
 | `set_concept_param` | `doc.set_concept_param` |
+| `set_fill_type_gradient` | `doc.promote_to_gradient` |
 | `shear_options_confirm` | `doc.preview.clear`, `doc.preview.restore`, `doc.shear.apply` (`doc.shear.apply` journal:true) |
 | `show_all` | `doc.op` |
 | `ungroup` | `doc.op` |
@@ -134,7 +135,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (186)
+## UI-state actions (185)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -174,17 +175,17 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `save_workspace_confirm`, `scale_options_reset`, `scroll_to_selected`, `select_all_unused_brushes`,
 `select_all_unused_swatches`, `set_active_color`, `set_active_color_none`, `set_align_to`,
 `set_arrow_align`, `set_artboard_fill_preset`, `set_artboard_reference_point`, `set_brush_thumbnail_size`,
-`set_brush_view_mode`, `set_color_panel_mode`, `set_fill_none`, `set_fill_type_gradient`,
-`set_fill_type_solid`, `set_layers_search`, `set_stroke_align`, `set_stroke_cap`,
-`set_stroke_join`, `set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`,
-`shear_options_reset`, `show_panel`, `solo_element_visibility`, `solo_layers_type_filter`,
-`sort_brushes_by_name`, `sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`,
-`swatch_options_confirm`, `switch_appearance`, `switch_workspace`, `symbols_panel_select`,
-`tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`,
-`toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`,
-`toggle_element_lock`, `toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`,
-`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`,
-`toggle_use_preview_bounds`, `undo`
+`set_brush_view_mode`, `set_color_panel_mode`, `set_fill_none`, `set_fill_type_solid`,
+`set_layers_search`, `set_stroke_align`, `set_stroke_cap`, `set_stroke_join`,
+`set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`,
+`show_panel`, `solo_element_visibility`, `solo_layers_type_filter`, `sort_brushes_by_name`,
+`sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`,
+`switch_appearance`, `switch_workspace`, `symbols_panel_select`, `tile_panes`,
+`toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`,
+`toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`,
+`toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`,
+`toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`,
+`undo`
 
 ## Verb -> journaling evidence table
 
@@ -214,6 +215,7 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 | `doc.place_concept_instance` | always | `place_concept_instance` | yes | effects.rs:2943; op_apply.rs:2222 |
 | `doc.place_instance` | always | `place_instance` | yes | effects.rs:2921; op_apply.rs:2204 |
 | `doc.promote_to_concept` | always | `promote_to_concept` | yes | effects.rs:3001; op_apply.rs:2264 |
+| `doc.promote_to_gradient` | always | `promote_to_gradient` | yes | effects.rs:3006; op_apply.rs:2283 |
 | `doc.select_in_rect` | always (selection-only / non-undoable: op_apply records it only into an ALREADY-OPEN transaction and never opens one (op_apply.rs:1329-1336), so a bare marquee stays journal-neutral) | `select_rect` | no (tool YAML only) | effects.rs:987-1013; op_apply.rs:1380 |
 | `doc.set_advanced_field` | always | `set_advanced_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_artboard_field` | always | `set_artboard_field` | yes | renderer.rs:3241-3265; op_apply.rs:1802 |

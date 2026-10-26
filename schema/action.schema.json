@@ -192,6 +192,11 @@
               "properties": { "op_id": { "type": "string" } }
             },
             "doc.promote_to_concept": { "type": "object" },
+            "doc.promote_to_gradient": {
+              "type": "object",
+              "required": ["fill_on_top"],
+              "properties": { "fill_on_top": { "type": "string" } }
+            },
             "doc.new_symbol": { "type": "object" },
             "doc.set_concept_param": {
               "type": "object",

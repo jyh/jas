@@ -558,6 +558,17 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.place_concept_instance(concept.value if isinstance(concept.value, str) else None)
         return None
 
+    # doc.promote_to_gradient: { fill_on_top: <expr> } — the fill/stroke
+    # widget's Gradient button: the active attribute of every selected member
+    # without a gradient is promoted from its own seed. StateStore.promote_to_gradient.
+    if "doc.promote_to_gradient" in effect:
+        spec = effect["doc.promote_to_gradient"]
+        if isinstance(spec, dict):
+            fill_on_top = evaluate(str(spec.get("fill_on_top", "")), store.eval_context(ctx)).value
+            if isinstance(fill_on_top, bool):
+                store.promote_to_gradient(fill_on_top)
+        return None
+
     # doc.promote_to_concept: {} — Object > Promote to Concept: the one
     # selected shape a concept's fitter matches becomes a Generated instance
     # at its path. StateStore.promote_to_concept.

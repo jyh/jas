@@ -625,3 +625,92 @@ def test_apply_concept_operation_that_changes_nothing_builds_no_op():
     assert apply_concept_operation_ops(doc(3), "remove_side", reg) is None
     assert apply_concept_operation_ops(doc(3.0), "remove_side", reg) is None, "3.0 is 3"
     assert apply_concept_operation_ops(doc(4), "remove_side", reg)[0]["changes"] == {"sides": 3}
+
+
+def test_set_fill_type_gradient_from_actions_yaml_promotes_each_member():
+    """`actions.yaml` set_fill_type_gradient (GRADIENT.md §Fill-type coupling,
+    "Gradient button → ensure the active attribute is a gradient object"):
+    every selected paintable member whose active attribute (fill when
+    fill_on_top, else stroke) holds no gradient is promoted from ITS OWN seed
+    (solid `C` -> `[C@0, #ffffff@100]`, none -> `[#000000@0, #ffffff@100]`;
+    linear, 0°, 100 %, classic); a member that holds one keeps it; a selected
+    group reaches its members. The solid fill/stroke stays (the demote
+    target), and the other attribute is untouched. Nothing selected, or
+    nothing left to promote: nothing."""
+    from geometry.element import (Color, Fill, Gradient, GradientStop, GradientType,
+                                  Group, Line, Stroke)
+    hexc = Color.from_hex
+    own = Gradient(type=GradientType.RADIAL, angle=30,
+                   stops=(GradientStop("#123456", 0), GradientStop("#abcdef", 100)))
+    red = _rect(fill=Fill(hexc("ff0000")), stroke=Stroke(hexc("0000ff")))
+    bare = _rect(fill=None)
+    held = _rect(fill=Fill(hexc("00ff00")), fill_gradient=own)
+    inner = _rect(fill=Fill(hexc("00ff00")))
+    effects = _action_effects("set_fill_type_gradient")
+
+    def seed(c):
+        return Gradient(stops=(GradientStop(c, 0), GradientStop("#ffffff", 100)))
+
+    def run(children, selected, fill_on_top=True):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),),
+                       selection=frozenset(ElementSelection.all(p) for p in selected))
+        store = _store(doc)
+        store.set("fill_on_top", fill_on_top)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {}, store)
+        return _doc_of(store).layers[0].children, before, store
+
+    kids, _, _ = run([red, bare, held, Group(children=(inner,))],
+                     [(0, 0), (0, 1), (0, 2), (0, 3)])
+    assert kids[0].fill_gradient == seed("#ff0000"), kids[0].fill_gradient
+    assert kids[0].fill == red.fill, "the solid fill stays: it is the demote target"
+    assert kids[0].stroke_gradient is None, "the stroke is not the active attribute"
+    assert kids[1].fill_gradient == seed("#000000"), "none promotes from black"
+    assert kids[2].fill_gradient == own, "a member that holds a gradient keeps it"
+    assert kids[3].children[0].fill_gradient == seed("#00ff00"), "a group reaches its member"
+
+    kids, _, _ = run([red], [(0, 0)], fill_on_top=False)
+    assert kids[0].stroke_gradient == seed("#0000ff"), kids[0].stroke_gradient
+    assert kids[0].fill_gradient is None, "the fill is not the active attribute"
+
+    # A Line carries no fill gradient, so with the fill active it has nothing
+    # to promote: no op, not an op that changes nothing.
+    line = Line(x1=0, y1=0, x2=10, y2=0, stroke=Stroke(hexc("0000ff")))
+    for children, selected in (([red], []), ([held], [(0, 0)]), ([line], [(0, 0)])):
+        _, before, store = run(children, selected)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{selected}: nothing"
+
+    # ...and the builder says so: an unchanged document is not evidence that
+    # no op was built (item 27: a no-op must not report a change).
+    from document.controller import promote_to_gradient_ops
+    one = lambda e: Document(layers=(Layer(name="L", children=(e,)),),
+                             selection=frozenset({ElementSelection.all((0, 0))}))
+    assert promote_to_gradient_ops(one(line), True) == []
+    assert promote_to_gradient_ops(one(held), True) == []
+    assert promote_to_gradient_ops(one(line), False) == [{"op": "promote_to_gradient", "fill_on_top": False}]
+
+
+def test_the_gradient_button_is_enabled_now_its_action_has_effects():
+    """The fill/stroke widget's Gradient button was rendered disabled while
+    set_fill_type_gradient declared no effects; its own description said the
+    bind comes off when the action grows effects."""
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace",
+                        "templates", "fill_stroke_widget.yaml")
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("id"), str) and node["id"].endswith("gradient_btn"):
+                found.append(node)
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(yaml.safe_load(text))
+    assert len(found) == 1, found
+    assert "disabled" not in (found[0].get("bind") or {}), found[0].get("bind")
+    assert _action_effects("set_fill_type_gradient"), "the action has effects"

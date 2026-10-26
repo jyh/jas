@@ -1375,6 +1375,19 @@ public func seedGradient(_ solid: Color?) -> Gradient {
     ])
 }
 
+/// The one op the fill/stroke widget's Gradient button applies
+/// (`doc.promote_to_gradient`): `promote_to_gradient` of the active attribute,
+/// or none when promoting would change no selected element (nothing selected,
+/// every member already a gradient, or no member able to carry one). Mirrors
+/// `gradient_host::promote_to_gradient_ops`.
+public func promoteToGradientOps(_ doc: Document, fillOnTop: Bool) -> [[String: Any]] {
+    let changes = doc.selection.contains { es in
+        guard let elem = doc.tryGetElement(es.path) else { return false }
+        return elem.mapPaintable { promoteLeafToGradient($0, fillOnTop: fillOnTop) } != elem
+    }
+    return changes ? [["op": "promote_to_gradient", "fill_on_top": fillOnTop]] : []
+}
+
 /// `g` with the field a render key names set from a stored value, or nil
 /// when the value is outside its set or of the wrong type. Mirrors
 /// `gradient_host::set_render_field`.

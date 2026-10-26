@@ -895,17 +895,22 @@ actions:
 
   set_fill_type_gradient:
     description: >
-      Sets the active attribute (fill or stroke, per fill_on_top) to gradient
-      fill mode. Currently a placeholder — gradient editing is not yet
-      implemented, so this action declares NO effects and a dispatch is a
-      silent no-op. Because of that, the control that invokes it (the
-      fill/stroke widget's Gradient button) is rendered DISABLED rather than
-      merely inert: an enabled control that can never do anything is a dead
-      control. The behavior stays declared on the button, so the wiring is
-      already in place when this action grows effects — at which point the
-      button's bind.disabled comes off in the same change.
+      Ensures the active attribute (fill or stroke, per fill_on_top) is a
+      gradient (GRADIENT.md §Fill-type coupling, the Gradient button). Every
+      selected paintable member whose active attribute holds no gradient is
+      promoted from ITS OWN seed: a solid colour C gives [C@0, #ffffff@100],
+      none gives [#000000@0, #ffffff@100]; linear, angle 0, aspect 100 %,
+      classic, no dither, within. A member that already holds a gradient keeps
+      it, a selected group reaches its members at any depth, and the solid
+      fill/stroke under the gradient is left alone (it is what the Color
+      button demotes to). Each member keeps its own colour rather than all
+      taking the first member's: the button ensures each attribute's TYPE.
+      With nothing selected, or every member already a gradient, nothing
+      changes and no undo step is added.
     category: fill_stroke
-    effects: []
+    effects:
+      - snapshot
+      - doc.promote_to_gradient: { fill_on_top: "state.fill_on_top" }
 
   invert_active_color:
     description: >

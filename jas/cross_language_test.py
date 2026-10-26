@@ -1699,6 +1699,12 @@ class CrossLanguageTest(absltest.TestCase):
         # empty value clears, unknown attr skips.
         self._run_operation_fixture("set_attr_on_selection.json")
 
+    def test_operation_promote_to_gradient(self):
+        # The fill/stroke widget's Gradient button: each selected member takes
+        # its own seed on the active attribute; a second op promotes nothing
+        # more; a missing fill_on_top skips.
+        self._run_operation_fixture("promote_to_gradient.json")
+
     def test_operation_transform_scale(self):
         # P7: scale_transform (resolved matrix; identity no-ops; strokes/corners).
         self._run_operation_fixture("transform_scale.json")

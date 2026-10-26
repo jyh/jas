@@ -193,6 +193,14 @@ VERB_TABLE = {
         "journals": "always", "op": "promote_to_concept",
         "evidence": ["effects.rs:3001", "op_apply.rs:2264"],
     },
+    "doc.promote_to_gradient": {
+        # The fill/stroke widget's Gradient button: one op promoting the active
+        # attribute of every selected member without a gradient
+        # (gradient_host::promote_to_gradient_ops; none when nothing would
+        # change), through op_apply.
+        "journals": "always", "op": "promote_to_gradient",
+        "evidence": ["effects.rs:3006", "op_apply.rs:2283"],
+    },
     "doc.delete_symbol": {
         # Delete Symbol: one op removing the master the expression names
         # (symbols_host::delete_symbol_ops), through op_apply; whether to ask

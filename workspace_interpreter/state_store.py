@@ -849,6 +849,20 @@ class StateStore:
         for op in place_concept_instance_ops(doc, concept_id, concept(ws, concept_id)) or []:
             self.apply_op(op)
 
+    def promote_to_gradient(self, fill_on_top: bool) -> None:
+        """The fill/stroke widget's Gradient button on the store's document:
+        the op ``document.controller.promote_to_gradient_ops`` builds, applied
+        through the op layer. Nothing when no selected member is left without
+        a gradient on the active attribute."""
+        if self._document is None:
+            return
+        import json
+        from document.controller import promote_to_gradient_ops
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        for op in promote_to_gradient_ops(doc, fill_on_top):
+            self.apply_op(op)
+
     def promote_to_concept(self) -> None:
         """Object > Promote to Concept on the store's document: the op
         ``document.controller.promote_to_concept_ops`` builds against the

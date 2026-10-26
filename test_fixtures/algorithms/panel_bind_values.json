@@ -201,18 +201,6 @@
       {
         "path": [
           1,
-          0,
-          4,
-          1
-        ],
-        "id": "cp_gradient_btn",
-        "key": "bind.disabled",
-        "type": "bool",
-        "value": "true"
-      },
-      {
-        "path": [
-          1,
           1,
           0
         ],
@@ -1231,18 +1219,6 @@
       {
         "path": [
           1,
-          0,
-          4,
-          1
-        ],
-        "id": "cp_gradient_btn",
-        "key": "bind.disabled",
-        "type": "bool",
-        "value": "true"
-      },
-      {
-        "path": [
-          1,
           1,
           0
         ],
@@ -2167,18 +2143,6 @@
       },
       {
         "path": [
-          0,
-          0,
-          4,
-          1
-        ],
-        "id": "sp_gradient_btn",
-        "key": "bind.disabled",
-        "type": "bool",
-        "value": "true"
-      },
-      {
-        "path": [
           2,
           0
         ],
@@ -2904,18 +2868,6 @@
       },
       {
         "path": [
-          0,
-          0,
-          4,
-          1
-        ],
-        "id": "sp_gradient_btn",
-        "key": "bind.disabled",
-        "type": "bool",
-        "value": "true"
-      },
-      {
-        "path": [
           2,
           0
         ],
@@ -3222,18 +3174,6 @@
         "key": "bind.z_index",
         "type": "number",
         "value": "1"
-      },
-      {
-        "path": [
-          0,
-          0,
-          4,
-          1
-        ],
-        "id": "sp_gradient_btn",
-        "key": "bind.disabled",
-        "type": "bool",
-        "value": "true"
       },
       {
         "path": [

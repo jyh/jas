@@ -6288,6 +6288,15 @@ pub(crate) mod tests {
         run_operation_fixture("operations/set_attr_on_selection.json");
     }
 
+    /// The fill/stroke widget's Gradient button's op (GRADIENT.md §Fill-type
+    /// coupling): each selected member takes its own seed on the active
+    /// attribute (red rect, none path; a line has no fill gradient), a second
+    /// op promotes nothing more, a missing `fill_on_top` skips.
+    #[test]
+    fn operation_promote_to_gradient() {
+        run_operation_fixture("operations/promote_to_gradient.json");
+    }
+
     /// OP_LOG.md §9 Phase P6 — pin the ACTUAL stroke_brush mutation (the
     /// canonical-document gate is blind to it). Reads the PathElem fields after
     /// both the live run AND a journal replay, asserting they agree and carry the

@@ -1875,6 +1875,13 @@ public func opApply(
         let transform = parseTransform(op["transform"])
         controller.promoteToConcept(
             path, conceptId: conceptId, params: params, transform: transform)
+    // The fill/stroke widget's Gradient button (GRADIENT.md §Fill-type
+    // coupling): every selected member whose active attribute holds no
+    // gradient takes its own solid colour's seed. Selection-relative: the seed
+    // is a function of the document the op applies to, so replay rebuilds it.
+    case "promote_to_gradient":
+        guard let fillOnTop = op["fill_on_top"] as? Bool else { return reqErr(op, "fill_on_top") }
+        controller.promoteSelectionToGradient(fillOnTop: fillOnTop)
     case "detach":
         guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
         controller.detach(path)

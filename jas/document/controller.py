@@ -270,6 +270,48 @@ def place_instance_ops(doc: Document, master_id: str | None,
     return [{"op": "place_instance", "master_id": master_id, "ref_id": ids[0]}]
 
 
+def seed_gradient(solid: "Color | None") -> Gradient:
+    """The seed table's gradient (GRADIENT.md §Promotion to gradient): from a
+    solid colour ``C``, ``[C@0, #ffffff@100]``; from none,
+    ``[#000000@0, #ffffff@100]``; linear, 0°, 100 %, classic, no dither,
+    within. Rust ``Gradient::seed``, Swift ``seedGradient``."""
+    from geometry.element import GradientStop
+    first = "#" + solid.to_hex() if solid is not None else "#000000"
+    return Gradient(stops=(GradientStop(first, 0), GradientStop("#ffffff", 100)))
+
+
+def promote_leaf_to_gradient(e: Element, fill_on_top: bool) -> Element:
+    """``e`` with its active attribute (fill when ``fill_on_top``, else
+    stroke) promoted from its own solid colour's seed, or ``e`` itself when
+    that attribute already holds a gradient or ``e`` cannot carry one."""
+    if fill_on_top:
+        if getattr(e, "fill_gradient", True) is not None:
+            return e
+        return _with_fill_gradient(e, seed_gradient(e.fill.color if e.fill else None))
+    if getattr(e, "stroke_gradient", True) is not None:
+        return e
+    return _with_stroke_gradient(e, seed_gradient(e.stroke.color if e.stroke else None))
+
+
+def promote_to_gradient_ops(doc: Document, fill_on_top: bool) -> list[dict]:
+    """The one op the fill/stroke widget's Gradient button applies
+    (GRADIENT.md §Fill-type coupling: "ensure the active attribute is a
+    gradient object"): ``promote_to_gradient`` of the active attribute, or
+    nothing when no selected member would change (nothing selected, every member
+    already a gradient, or no member able to carry one), so a click that changes nothing builds no op. The
+    op is selection-relative: each member's seed is a function of the
+    document it applies to. Rust ``gradient_host::promote_to_gradient_ops``,
+    Swift ``promoteToGradientOps``."""
+    for es in doc.selection:
+        try:
+            elem = doc.get_element(es.path)
+        except (ValueError, IndexError, KeyError):
+            continue
+        if map_paintable(elem, lambda e: promote_leaf_to_gradient(e, fill_on_top)) != elem:
+            return [{"op": "promote_to_gradient", "fill_on_top": bool(fill_on_top)}]
+    return []
+
+
 def promote_to_concept_ops(doc: Document, registry: dict) -> list[dict] | None:
     """The one op Object > Promote to Concept applies (CONCEPTS.md §10), or
     None (a no-op) unless exactly one polygon or polyline is selected and a
@@ -1828,6 +1870,22 @@ class Controller:
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
+
+    def promote_selection_to_gradient(self, fill_on_top: bool) -> None:
+        """Every selected paintable member whose active attribute (fill when
+        ``fill_on_top``, else stroke) holds no gradient takes the seed of its
+        own solid colour (``seed_gradient``); a member holding one keeps it.
+        The solid fill/stroke is left alone: it is the demote target. Rust
+        ``Controller::promote_selection_to_gradient``."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = map_paintable(elem, lambda e: promote_leaf_to_gradient(e, fill_on_top))
+            if new_elem != elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        if new_doc is not doc:
+            self._model.edit_document(new_doc)
 
     def set_selection_stroke_gradient(self, gradient: Gradient | None) -> None:
         """Phase 5: set the stroke_gradient of all selected elements."""
