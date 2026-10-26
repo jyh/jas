@@ -66,3 +66,35 @@ private func model(_ kids: [Element], fillOnTop: Bool = true) -> Model {
     _ = opApply(m, Controller(model: m), ["op": "promote_to_gradient", "fill_on_top": true])
     #expect(m.generation == generation, "nothing to promote: the document is not edited")
 }
+
+// The Color button demotes (`set_fill_type_solid` -> `doc.demote_to_solid`,
+// then its null guard, GRADIENT.md §Demotion to solid): the gradient's FIRST
+// stop becomes the solid, the fill's opacity kept, the gradient gone; ONE
+// undo. The YAML's KNOWN LIMIT, as in Rust: a member with NO solid under its
+// gradient ends on the null guard's black. The builder and the op are guarded
+// on their own.
+@Test func setFillTypeSolidDemotesAGradientToItsFirstStop() {
+    let green = Color(r: 0, g: 1, b: 0), blue = Color(r: 0, g: 0, b: 1)
+    let m = model([.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: Fill(color: red, opacity: 0.5),
+                              fillGradient: seedGradient(green)))])
+    let before = m.document
+    LayersPanel.dispatchYamlAction("set_fill_type_solid", model: m)
+    let k = m.document.layers[0].children[0]
+    #expect(k.fillGradient == nil, "the gradient goes")
+    #expect(k.fill == Fill(color: green, opacity: 0.5), "the first stop, opacity kept")
+    m.undo()
+    #expect(m.document.layers == before.layers, "ONE undo")
+
+    let bare = model([.rect(Rect(x: 0, y: 0, width: 10, height: 10, fillGradient: seedGradient(blue)))])
+    LayersPanel.dispatchYamlAction("set_fill_type_solid", model: bare)
+    #expect(bare.document.layers[0].children[0].fill?.color == Color(r: 0, g: 0, b: 0),
+            "the KNOWN LIMIT: no solid under the gradient ends on the null guard's black")
+    #expect(bare.document.layers[0].children[0].fillGradient == nil)
+
+    let solid = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, fill: Fill(color: red)))
+    #expect(demoteToSolidOps(model([solid]).document, fillOnTop: true).isEmpty, "solid already: no op")
+    let s = model([solid])
+    let generation = s.generation
+    _ = opApply(s, Controller(model: s), ["op": "demote_to_solid", "fill_on_top": true])
+    #expect(s.generation == generation, "nothing to demote: the document is not edited")
+}

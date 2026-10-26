@@ -119,6 +119,21 @@ pub fn promote_to_gradient_ops(doc: &Document, fill_on_top: bool) -> Vec<Value> 
     if changes { vec![json!({"op": "promote_to_gradient", "fill_on_top": fill_on_top})] } else { Vec::new() }
 }
 
+/// The one op the fill/stroke widget's Color button applies after its null
+/// guard (`doc.demote_to_solid`, GRADIENT.md §Demotion to solid):
+/// `demote_to_solid` of the active attribute, or none when no selected member
+/// holds a gradient there, so a click that changes nothing builds no op.
+/// Selection-relative, as [`promote_to_gradient_ops`]. The reference's
+/// `demote_to_solid_ops`.
+pub fn demote_to_solid_ops(doc: &Document, fill_on_top: bool) -> Vec<Value> {
+    use crate::geometry::element::{demote_leaf_to_solid, map_paintable};
+    let changes = doc.selection.iter().any(|es| {
+        doc.get_element(&es.path)
+            .is_some_and(|elem| map_paintable(elem, &|leaf| demote_leaf_to_solid(leaf, fill_on_top)) != *elem)
+    });
+    if changes { vec![json!({"op": "demote_to_solid", "fill_on_top": fill_on_top})] } else { Vec::new() }
+}
+
 /// Write `g` onto the active attribute of every selected element. The solid
 /// `fill` / `stroke` is left alone: it is the demote target.
 pub fn apply_gradient_to_selection(model: &mut Model, fill_on_top: bool, g: Gradient) {
@@ -727,6 +742,31 @@ mod tests {
         let generation = m.generation();
         crate::document::op_apply::op_apply(&mut m, &op(true)[0]).expect("a well-formed op");
         assert_eq!(m.generation(), generation, "nothing to promote: the document is not edited");
+    }
+
+    /// The Color button's demote builder and op, each guarded on its own, as
+    /// the Gradient button's: no op when no selected member holds a gradient
+    /// on the active attribute, and the op on such a document edits nothing.
+    #[test]
+    fn the_color_button_builds_and_applies_nothing_when_nothing_would_change() {
+        let op = |f: bool| vec![json!({"op": "demote_to_solid", "fill_on_top": f})];
+        let ops = |e: Element, f: bool| demote_to_solid_ops(model_with(vec![e], &[0]).document(), f);
+        assert_eq!(ops(graded(Some(RED), RED, BLUE), true), op(true));
+        assert_eq!(ops(graded(Some(RED), RED, BLUE), false), Vec::<Value>::new(), "no stroke gradient");
+        assert_eq!(ops(rect(Some(RED)), true), Vec::<Value>::new(), "solid already");
+        assert_eq!(demote_to_solid_ops(model_with(vec![graded(None, RED, BLUE)], &[]).document(), true),
+                   Vec::<Value>::new(), "nothing selected");
+
+        let mut m = model_with(vec![rect(Some(RED))], &[0]);
+        let generation = m.generation();
+        crate::document::op_apply::op_apply(&mut m, &op(true)[0]).expect("a well-formed op");
+        assert_eq!(m.generation(), generation, "nothing to demote: the document is not edited");
+
+        let mut m = model_with(vec![group(vec![graded(None, BLUE, RED)])], &[0]);
+        crate::document::op_apply::op_apply(&mut m, &op(true)[0]).expect("a well-formed op");
+        let Element::Group(g) = m.document().get_element(&vec![0, 0]).unwrap() else { panic!("still a group") };
+        assert_eq!((g.children[0].fill_gradient(), g.children[0].fill().map(|f| f.color)), (None, Some(BLUE)),
+                   "a group reaches its member");
     }
 
     #[test]

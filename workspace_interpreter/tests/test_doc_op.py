@@ -714,3 +714,54 @@ def test_the_gradient_button_is_enabled_now_its_action_has_effects():
     assert len(found) == 1, found
     assert "disabled" not in (found[0].get("bind") or {}), found[0].get("bind")
     assert _action_effects("set_fill_type_gradient"), "the action has effects"
+
+
+def test_set_fill_type_solid_from_actions_yaml_demotes_a_gradient():
+    """`actions.yaml` set_fill_type_solid (GRADIENT.md §Demotion to solid:
+    the Color button is the one demote trigger): every selected member whose
+    active attribute holds a gradient takes the gradient's FIRST stop as its
+    solid colour and loses the gradient; the solid's opacity and the stroke's
+    other properties are kept; the other attribute is untouched. A member with
+    no gradient is not demoted. Nothing selected: nothing."""
+    from geometry.element import (Color, Fill, Gradient, GradientStop, Stroke)
+    hexc = Color.from_hex
+    green = Gradient(stops=(GradientStop("#00ff00", 0), GradientStop("#ffffff", 100)))
+    blue = Gradient(stops=(GradientStop("#0000ff", 0), GradientStop("#ffffff", 100)))
+    effects = _action_effects("set_fill_type_solid")
+
+    def run(children, selected, fill_on_top=True):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),),
+                       selection=frozenset(ElementSelection.all(p) for p in selected))
+        store = _store(doc)
+        store.set("fill_on_top", fill_on_top)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {}, store)
+        return _doc_of(store).layers[0].children, before, store
+
+    graded = _rect(fill=Fill(hexc("ff0000"), opacity=0.5), fill_gradient=green,
+                   stroke=Stroke(hexc("ff0000"), width=3), stroke_gradient=blue)
+    bare = _rect(fill=None, fill_gradient=blue)
+    kids, _, _ = run([graded, bare], [(0, 0), (0, 1)])
+    assert kids[0].fill_gradient is None and kids[0].fill == Fill(hexc("00ff00"), opacity=0.5), kids[0].fill
+    assert kids[0].stroke_gradient == blue, "the stroke is not the active attribute"
+    assert kids[1].fill_gradient is None and kids[1].fill == Fill(hexc("0000ff")), "no solid under it: one is made"
+
+    kids, _, _ = run([graded], [(0, 0)], fill_on_top=False)
+    assert kids[0].stroke_gradient is None and kids[0].stroke == Stroke(hexc("0000ff"), width=3), kids[0].stroke
+    assert kids[0].fill_gradient == green, "the fill is not the active attribute"
+
+    # The null guard is a STATE write; the reference store does not carry it
+    # to the selection (the apps do), so here it reads in state only. The
+    # guard-then-demote ORDER is witnessed in the engine.
+    kids, _, store = run([_rect(fill=None)], [(0, 0)])
+    assert kids[0].fill is None and kids[0].fill_gradient is None, "no gradient: nothing demoted"
+
+    _, before, store = run([graded], [])
+    assert json.dumps(store._document, sort_keys=True) == before, "nothing selected: nothing"
+
+    from document.controller import demote_to_solid_ops
+    one = lambda e: Document(layers=(Layer(name="L", children=(e,)),),
+                             selection=frozenset({ElementSelection.all((0, 0))}))
+    assert demote_to_solid_ops(one(_rect(fill=Fill(hexc("ff0000")))), True) == []
+    assert demote_to_solid_ops(one(bare), False) == [], "no stroke gradient to demote"
+    assert demote_to_solid_ops(one(bare), True) == [{"op": "demote_to_solid", "fill_on_top": True}]

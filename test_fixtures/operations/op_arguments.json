@@ -94,6 +94,11 @@
         "string"
       ]
     },
+    "demote_to_solid": {
+      "fill_on_top": [
+        "boolean"
+      ]
+    },
     "detach": {
       "path": [
         "array"
@@ -500,6 +505,9 @@
     "delete_selection": {},
     "delete_symbol": {
       "master_id": "witnessed"
+    },
+    "demote_to_solid": {
+      "fill_on_top": "witnessed"
     },
     "detach": {
       "path": "witnessed"

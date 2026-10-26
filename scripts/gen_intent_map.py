@@ -196,6 +196,14 @@ VERB_TABLE = {
         "journals": "always", "op": "promote_to_concept",
         "evidence": ["effects.rs `\"doc.promote_to_concept\" =>`", "op_apply.rs `\"promote_to_concept\" =>`"],
     },
+    "doc.demote_to_solid": {
+        # The fill/stroke widget's Color button: one op demoting the active
+        # attribute of every selected member holding a gradient to its first
+        # stop (gradient_host::demote_to_solid_ops; none when nothing would
+        # change), through op_apply.
+        "journals": "always", "op": "demote_to_solid",
+        "evidence": ["effects.rs `\"doc.demote_to_solid\" =>`", "op_apply.rs `\"demote_to_solid\" =>`"],
+    },
     "doc.promote_to_gradient": {
         # The fill/stroke widget's Gradient button: one op promoting the active
         # attribute of every selected member without a gradient

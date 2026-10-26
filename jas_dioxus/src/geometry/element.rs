@@ -3512,6 +3512,33 @@ pub fn promote_leaf_to_gradient(elem: &Element, fill_on_top: bool) -> Element {
     }
 }
 
+/// `elem` with its active attribute's gradient (fill when `fill_on_top`, else
+/// stroke) demoted to a solid of the gradient's FIRST stop (GRADIENT.md
+/// §Demotion to solid), or a copy of `elem` when that attribute holds no
+/// gradient. The solid's other properties (a fill's opacity, a stroke's width,
+/// caps, dashes) are kept; a member with no solid under the gradient gets one
+/// with the defaults. A gradient with no stops is discarded and the solid left
+/// as it was. The reference's `demote_leaf_to_solid`.
+pub fn demote_leaf_to_solid(elem: &Element, fill_on_top: bool) -> Element {
+    if fill_on_top {
+        let Some(g) = elem.fill_gradient() else { return elem.clone() };
+        let first = g.stops.first().map(|s| s.color);
+        let out = with_fill_gradient(elem, None);
+        match first {
+            Some(c) => with_fill(&out, Some(elem.fill().map_or(Fill::new(c), |f| Fill { color: c, ..*f }))),
+            None => out,
+        }
+    } else {
+        let Some(g) = elem.stroke_gradient() else { return elem.clone() };
+        let first = g.stops.first().map(|s| s.color);
+        let out = with_stroke_gradient(elem, None);
+        match first {
+            Some(c) => with_stroke(&out, Some(elem.stroke().map_or(Stroke::new(c, 1.0), |s| Stroke { color: c, ..*s }))),
+            None => out,
+        }
+    }
+}
+
 /// Return a copy of the element with its `stroke_gradient` replaced.
 /// Elements that do not support a stroke gradient (Text, TextPath,
 /// Group, Layer, Live) are returned unchanged.

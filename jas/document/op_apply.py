@@ -1625,6 +1625,15 @@ def op_apply(model: Model, op: dict) -> None:
         if not isinstance(fill_on_top, bool):
             return
         ctrl.promote_selection_to_gradient(fill_on_top)
+    # The fill/stroke widget's Color button (GRADIENT.md §Demotion to solid):
+    # every selected member whose active attribute holds a gradient takes its
+    # first stop as the solid. Selection-relative, as promote_to_gradient. A
+    # non-bool ``fill_on_top`` SKIPS. Mirrors the Rust demote_to_solid arm.
+    elif name == "demote_to_solid":
+        fill_on_top = op.get("fill_on_top")
+        if not isinstance(fill_on_top, bool):
+            return
+        ctrl.demote_selection_to_solid(fill_on_top)
     elif name == "detach":
         path = parse_path(op.get("path"))
         if path is None:

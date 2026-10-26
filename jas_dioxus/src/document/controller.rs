@@ -1528,6 +1528,30 @@ impl Controller {
         }
     }
 
+    /// Every selected paintable member whose active attribute holds a
+    /// gradient takes the gradient's first stop as its solid and loses the
+    /// gradient (the fill/stroke widget's Color button, GRADIENT.md §Demotion
+    /// to solid). Nothing to demote: the document is not edited. The
+    /// reference's `Controller.demote_selection_to_solid`.
+    pub fn demote_selection_to_solid(model: &mut Model, fill_on_top: bool) {
+        use crate::geometry::element::{demote_leaf_to_solid, map_paintable};
+        let doc = model.document().clone();
+        let mut new_doc = doc.clone();
+        let mut changed = false;
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                let demoted = map_paintable(elem, &|leaf| demote_leaf_to_solid(leaf, fill_on_top));
+                if demoted != *elem {
+                    new_doc = new_doc.replace_element(&es.path, demoted);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            model.edit_document(new_doc);
+        }
+    }
+
     pub fn set_selection_stroke_gradient(model: &mut Model, gradient: Option<Box<crate::geometry::element::Gradient>>) {
         use crate::geometry::element::with_stroke_gradient;
         let doc = model.document().clone();

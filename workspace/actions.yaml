@@ -52,6 +52,7 @@ actions:
       duplicate. Otherwise create a new tab, parse the SVG, and display it
       on the canvas. The tab label shows the filename.
     category: file
+    native: "the OS file-open dialog, then a tab per file the shell reads"
     effects:
       - log: "open_file: show native file dialog"
   save:
@@ -76,6 +77,7 @@ actions:
       SVG, updates the tab label to the new filename, and clears the
       modified flag.
     category: file
+    native: "the OS save dialog; the shell writes the file the engine serialises"
     enabled_when: "state.tab_count > 0"
     effects:
       - log: "save_as: show native save dialog"
@@ -88,6 +90,7 @@ actions:
       artist can take a revert back, and the modified flag is reset. Only
       enabled when the document has a filename and has been modified.
     category: file
+    native: "the shell re-reads the bytes the tab was opened from or last saved as"
     enabled_when: "active_document.is_modified and active_document.has_filename"
     effects:
       - log: "revert: reload {{active_document.filename}}"
@@ -877,9 +880,22 @@ actions:
       SHAPE's fill: clicking Solid on a stroke-only shape paints its fill
       black. With nothing selected it asks about the default fill, and with a
       mixed selection the guard sees the default standing in scope and the
-      click is a no-op.
+      click is a no-op. It also DEMOTES (GRADIENT.md §Demotion to solid; this
+      button is the one demote trigger), FIRST: every selected member whose
+      active attribute holds a gradient takes the gradient's FIRST stop as its
+      solid colour and the gradient is discarded. The solid's other properties
+      are kept (a fill's opacity; a stroke's width, caps and dashes). One undo
+      step for the whole click. KNOWN LIMIT: a member with NO solid under its
+      gradient ends black, not on its first stop, because the null guard reads
+      the active colour as it stood when the click began (none) and runs after
+      the demote. Its first stop is black anyway unless it was edited. The
+      demote runs first because the other order splits the ports: a colour
+      write clears the gradient in one port and carries it in the other (the
+      named cross-port delta under EDIT_SEMANTICS_FREEZE §3.6, unruled).
     category: fill_stroke
     effects:
+      - snapshot
+      - doc.demote_to_solid: { fill_on_top: "state.fill_on_top" }
       - if:
           condition: "state.fill_on_top"
           then:
@@ -998,6 +1014,7 @@ actions:
       hide, place, and activate identically. This is the single generic
       panel-toggle path — there are no per-panel variants.
     category: window
+    native: "the dock: showing or hiding a panel is the shell's window layout"
     params:
       panel: { type: enum, values: [layers, color, swatches, brushes, gradient, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magic_wand, symbols, concepts] }
     effects:

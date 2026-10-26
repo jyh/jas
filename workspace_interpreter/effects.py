@@ -569,6 +569,17 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 store.promote_to_gradient(fill_on_top)
         return None
 
+    # doc.demote_to_solid: { fill_on_top: <expr> } — the fill/stroke widget's
+    # Color button: the active attribute of every selected member holding a
+    # gradient becomes its first stop. StateStore.demote_to_solid.
+    if "doc.demote_to_solid" in effect:
+        spec = effect["doc.demote_to_solid"]
+        if isinstance(spec, dict):
+            fill_on_top = evaluate(str(spec.get("fill_on_top", "")), store.eval_context(ctx)).value
+            if isinstance(fill_on_top, bool):
+                store.demote_to_solid(fill_on_top)
+        return None
+
     # doc.promote_to_concept: {} — Object > Promote to Concept: the one
     # selected shape a concept's fitter matches becomes a Generated instance
     # at its path. StateStore.promote_to_concept.

@@ -2286,6 +2286,16 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             };
             Controller::promote_selection_to_gradient(model, fill_on_top);
         }
+        // The fill/stroke widget's Color button (GRADIENT.md §Demotion to
+        // solid): every selected member whose active attribute holds a
+        // gradient takes its first stop as the solid. Selection-relative, as
+        // promote_to_gradient.
+        "demote_to_solid" => {
+            let Some(fill_on_top) = op.get("fill_on_top").and_then(serde_json::Value::as_bool) else {
+                return Err(req_err(op, "fill_on_top"));
+            };
+            Controller::demote_selection_to_solid(model, fill_on_top);
+        }
         "detach" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return Err(req_err(op, "path"));

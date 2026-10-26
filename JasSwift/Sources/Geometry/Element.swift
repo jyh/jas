@@ -2064,6 +2064,25 @@ public func promoteLeafToGradient(_ element: Element, fillOnTop: Bool) -> Elemen
     return withStrokeGradient(element, strokeGradient: seedGradient(element.stroke?.color))
 }
 
+/// `element` with its active attribute's gradient (fill when `fillOnTop`,
+/// else stroke) demoted to a solid of the gradient's FIRST stop (GRADIENT.md
+/// §Demotion to solid), or `element` itself when that attribute holds no
+/// gradient. The solid's other properties are kept; a member with no solid
+/// under the gradient gets one. A gradient with no stops is discarded and the
+/// solid left as it was. Rust's `demote_leaf_to_solid`.
+public func demoteLeafToSolid(_ element: Element, fillOnTop: Bool) -> Element {
+    if fillOnTop {
+        guard let g = element.fillGradient else { return element }
+        let out = withFillGradient(element, fillGradient: nil)
+        guard let c = g.stops.first.flatMap({ Color.fromHex($0.color) }) else { return out }
+        return withFill(out, fill: Fill(color: c, opacity: element.fill?.opacity ?? 1.0))
+    }
+    guard let g = element.strokeGradient else { return element }
+    let out = withStrokeGradient(element, strokeGradient: nil)
+    guard let c = g.stops.first.flatMap({ Color.fromHex($0.color) }) else { return out }
+    return withStroke(out, stroke: ColorPanel.recolorStroke(element.stroke, c))
+}
+
 /// Return a copy of the element with its `strokeGradient` replaced.
 /// Elements that do not support a stroke gradient (Text, TextPath, Group,
 /// Layer, Live) are returned unchanged.

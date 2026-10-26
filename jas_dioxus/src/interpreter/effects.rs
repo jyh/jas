@@ -3013,6 +3013,20 @@ fn run_doc_effect(
             }
             None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.promote_to_gradient:{spec}"))),
         },
+        // doc.demote_to_solid: { fill_on_top: <expr> }: the fill/stroke widget's
+        // Color button, the op `gradient_host::demote_to_solid_ops` builds for
+        // the active attribute, after the action's null guard. The reference's
+        // `StateStore.demote_to_solid`.
+        "doc.demote_to_solid" => match spec.get("fill_on_top").and_then(|v| v.as_str()) {
+            Some(expr) => {
+                if let Value::Bool(fill_on_top) = eval_expr(expr, store, ctx) {
+                    for op in crate::interpreter::gradient_host::demote_to_solid_ops(model.document(), fill_on_top) {
+                        let _ = crate::document::op_apply::op_apply(model, &op);
+                    }
+                }
+            }
+            None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.demote_to_solid:{spec}"))),
+        },
         "doc.promote_to_concept" => {
             for op in crate::interpreter::symbols_host::promote_to_concept_ops(model.document()).unwrap_or_default() {
                 let _ = crate::document::op_apply::op_apply(model, &op);

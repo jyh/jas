@@ -6297,6 +6297,15 @@ pub(crate) mod tests {
         run_operation_fixture("operations/promote_to_gradient.json");
     }
 
+    /// The Color button's demote (GRADIENT.md §Demotion to solid): promote then
+    /// demote restores each member's solid (a none fill ends on its seed's
+    /// first stop, black); with no gradient, nothing; a missing `fill_on_top`
+    /// skips.
+    #[test]
+    fn operation_demote_to_solid() {
+        run_operation_fixture("operations/demote_to_solid.json");
+    }
+
     /// OP_LOG.md §9 Phase P6 — pin the ACTUAL stroke_brush mutation (the
     /// canonical-document gate is blind to it). Reads the PathElem fields after
     /// both the live run AND a journal replay, asserting they agree and carry the
