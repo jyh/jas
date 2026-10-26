@@ -2054,7 +2054,7 @@
       ]
     },
     "exit_isolation_to_level": {
-      "description": "Exit isolation mode to a specific level, as triggered by clicking a breadcrumb segment. Pops all isolation levels above the target level, restoring saved visibility states for each popped level. A level_index of 0 exits isolation entirely.\n",
+      "description": "Exit isolation mode to a specific level, as triggered by clicking a breadcrumb segment. level_index is the number of levels KEPT: the first crumb passes 1 and keeps the outermost level, the n-th crumb keeps n, and the chevron passes 0, which exits isolation entirely. Every level above the target is popped, one at a time, exactly as exit_isolation_mode pops one, so each popped level is restored as that action restores it. A level_index at or above the stack's length pops nothing.\n",
       "category": "layers",
       "tier": 3,
       "params": {
@@ -2065,7 +2065,15 @@
       "enabled_when": "panel.isolation_stack.length > 0",
       "effects": [
         {
-          "log": "exit_isolation_to_level"
+          "foreach": {
+            "source": "range(param.level_index, panel.isolation_stack.length)",
+            "as": "_level"
+          },
+          "do": [
+            {
+              "pop": "panel.isolation_stack"
+            }
+          ]
         }
       ]
     },

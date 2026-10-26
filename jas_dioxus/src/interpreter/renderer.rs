@@ -1768,8 +1768,16 @@ fn build_appstate_ctx(
             "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>()
         }))
         .collect();
+    // The isolation stack, the same markers: exit_isolation_to_level pops
+    // `length - level_index` levels of it (the pop arm writes this tab's stack).
+    let isolation: Vec<serde_json::Value> = st.isolation_stack().iter()
+        .map(|p| serde_json::json!({
+            "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>()
+        }))
+        .collect();
     let panel = serde_json::json!({
         "layers_panel_selection": sel_paths,
+        "isolation_stack": isolation,
         // Symbols panel: the panel-selected master id (or null). Needed so
         // the symbols actions' enabled_when ("panel.selected_symbol != null")
         // resolves when fired from the panel menu / dispatch path.
@@ -8463,7 +8471,14 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 onclick: move |_: Event<MouseData>| {
                                     let a = home_app.clone();
                                     spawn(async move {
-                                        if let Some(s) = a.borrow_mut().isolation_stack_mut() { s.clear(); }
+                                        // The chevron's declared action (layers.yaml
+                                        // lp_breadcrumb): level 0 exits isolation. The
+                                        // borrow ends with its block, before the bump.
+                                        {
+                                            let mut params = serde_json::Map::new();
+                                            params.insert("level_index".into(), serde_json::json!(0));
+                                            let _ = dispatch_action("exit_isolation_to_level", &params, &mut a.borrow_mut());
+                                        }
                                         home_rev += 1;
                                     });
                                 },
@@ -8485,8 +8500,13 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                 let a = b_app.clone();
                                                 let target = exit_to;
                                                 spawn(async move {
-                                                    let mut st = a.borrow_mut();
-                                                    if let Some(s) = st.isolation_stack_mut() { s.truncate(target); }
+                                                    // The crumb's declared action: keep
+                                                    // `level._index + 1` levels.
+                                                    {
+                                                        let mut params = serde_json::Map::new();
+                                                        params.insert("level_index".into(), serde_json::json!(target));
+                                                        let _ = dispatch_action("exit_isolation_to_level", &params, &mut a.borrow_mut());
+                                                    }
                                                     b_rev += 1;
                                                 });
                                             },
@@ -12195,6 +12215,24 @@ mod tests {
             other => panic!("expected Group at idx 0, got {:?}", other),
         }
         assert_eq!(tab_layer(&st, 1).name(), "B");
+    }
+
+    /// The breadcrumb's action keeps `level_index` levels: the first crumb
+    /// (1) keeps the outermost, the chevron (0) exits, and a level at or
+    /// above the depth pops nothing. It was a `log` stub, so the breadcrumb
+    /// truncated the stack natively and this route never ran.
+    #[test]
+    fn exit_isolation_to_level_via_yaml_keeps_that_many_levels() {
+        for (level, want) in [(1, vec![vec![0]]), (0, vec![]), (2, vec![vec![0], vec![0, 0]])] {
+            let mut st = make_state_with_layers(vec![
+                ("A".into(), Visibility::Preview, false),
+            ]);
+            *st.isolation_stack_mut().unwrap() = vec![vec![0], vec![0, 0]];
+            let mut params = serde_json::Map::new();
+            params.insert("level_index".into(), serde_json::json!(level));
+            dispatch_action("exit_isolation_to_level", &params, &mut st);
+            assert_eq!(st.isolation_stack(), &want[..], "level_index {level}");
+        }
     }
 
     #[test]

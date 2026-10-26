@@ -1568,7 +1568,10 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
 /// item was chosen, BL1, and never authors params; the menu structure carries
 /// none), or `{"action": <id>, "params": {...}}` directly, `params` optional.
 /// The core runs the action's effects as `jas_panel_behavior` runs a widget's,
-/// with no panel made active.
+/// with no panel made active. `{"panel": <content id>, "action": <id>,
+/// "params": {...}}` (no `menu_index`) runs it with that panel active and in
+/// its scope, as the panel's own widget runs it (a Layers breadcrumb's
+/// `exit_isolation_to_level`, on no menu); its params are values, as above.
 ///
 /// `{"key": <name>, "mods": {"shift": b, "alt": b, "ctrl": b}}` is a KEY: the
 /// engine resolves it (the active tool, then `shortcuts.yaml`; an unclaimed
@@ -1644,6 +1647,9 @@ pub unsafe extern "C" fn jas_dispatch_action(
     }
     // `{"panel": <content id>, "menu_index": <i>}`: that PANEL menu's item i,
     // run with its panel active and in its panel's scope.
+    // `{"panel": <content id>, "action": <id>, "params"?}`, with no index: an
+    // action a panel's own widget runs (a breadcrumb's, on no menu), run the
+    // same way, its params bound as values as a menubar caller's are.
     let panel = req.get("panel").and_then(serde_json::Value::as_str);
     if let Some(pid) = panel {
         if ws.panel(pid).is_none() {
@@ -1661,6 +1667,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
                 return JasBytes::empty();
             }
         },
+        (None, Some(_)) if req.get("menu_index").is_none() && req.get("action").is_some() => None,
         (None, Some(menu)) => {
             let at = req.get("menu_index").and_then(serde_json::Value::as_u64);
             match at.and_then(|i| menu.get(i as usize)) {
@@ -4003,8 +4010,12 @@ mod tests {
                     // (`open_boolean_options`) resolves its params in the app's
                     // scope, as the app does. The document is taken as it opens.
                     let before = document_to_test_json(engine_of(e).model.borrow().document());
-                    let msg = serde_json::json!({"action": action,
-                        "params": step.get("params").cloned().unwrap_or(serde_json::json!({}))}).to_string();
+                    // `panel`, when the step names one: the action runs in that
+                    // panel's scope, as its own widget runs it (a breadcrumb's).
+                    let mut msg = serde_json::json!({"action": action,
+                        "params": step.get("params").cloned().unwrap_or(serde_json::json!({}))});
+                    if let Some(pid) = step.get("panel") { msg["panel"] = pid.clone(); }
+                    let msg = msg.to_string();
                     let (reply, err) = dispatch(e, &msg);
                     if reply.is_empty() {
                         failures.push(format!("{name}: the action {action} was refused: {err}"));
@@ -6031,6 +6042,28 @@ mod tests {
         assert_eq!(engine_of(f).store.borrow().get_panel(pid, "use_preview_bounds"), &was,
             "without its panel the action cannot reach the panel's state");
         unsafe { jas_engine_free(f) };
+    }
+
+    #[test]
+    fn dispatch_runs_an_action_by_id_in_a_named_panels_scope() {
+        // `{"panel", "action"}`: an action a panel's own widget runs (a
+        // breadcrumb's `exit_isolation_to_level`, on no menu), with that panel
+        // active and in its scope, as the widget's click runs it. The same
+        // action with no panel cannot reach the panel's state (the control in
+        // the test above).
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let pid = "align_panel_content";
+        let _ = panel_menu(e, pid);
+        let before = engine_of(e).store.borrow().get_panel(pid, "use_preview_bounds").clone();
+        let (reply, err) = dispatch(e, r#"{"panel":"align_panel_content","action":"toggle_use_preview_bounds"}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "the action ran in its panel: {err}");
+        let after = engine_of(e).store.borrow().get_panel(pid, "use_preview_bounds").clone();
+        assert_ne!(before, after, "the panel's own flag moved: {before} -> {after}");
+        // Neither a menu index nor an action names nothing to run.
+        let (r2, e2) = dispatch(e, r#"{"panel":"align_panel_content"}"#);
+        assert!(r2.is_empty() && e2.contains("UnknownMenuItem"), "{e2}");
+        unsafe { jas_engine_free(e) };
     }
 
     #[test]

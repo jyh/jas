@@ -166,9 +166,13 @@ public enum LayersPanel {
         let selectionMarkers: [[String: Any]] = panelSelection.map {
             ["__path__": $0]
         }
+        // panel.isolation_stack is the model's (`Model.layersIsolationStack`,
+        // the stack the push and pop handlers below write), as __path__ markers:
+        // exit_isolation_to_level pops `length - level_index` levels of it.
         let panel: [String: Any] = [
             "layers_panel_selection": selectionMarkers,
             "artboards_panel_selection": artboardsPanelSelection,
+            "isolation_stack": model.layersIsolationStack.map { ["__path__": $0] },
         ]
         let ctx: [String: Any] = [
             "active_document": activeDoc,
