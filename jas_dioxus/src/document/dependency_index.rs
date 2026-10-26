@@ -937,8 +937,9 @@ mod tests {
     // -----------------------------------------------------------------------
     // Reference-aware delete CONFIRM gate (warn-then-orphan)
     //
-    // The delete handlers (menu_bar.rs "delete" arm; keyboard.rs
-    // Delete/Backspace) branch on `orphaned_references(...).is_empty()`:
+    // The delete routes (actions.yaml `delete_selection`, through
+    // `active_document.selection_orphan_count`) branch on whether
+    // `orphaned_references(...)` is empty:
     //   empty     -> delete inline, no dialog
     //   non-empty -> open the confirm dialog with N = orphaned.len()
     // The dialog UI is not unit-testable, but the gate predicate and the

@@ -186,22 +186,6 @@ pub(crate) fn MenuBarView(
                         run_model_verb(&action, st);
                     }));
                 }
-                "delete" => {
-                    // Through the YAML `delete_selection`, the reference-aware
-                    // delete: a delete that would strand a live reference
-                    // defers `open_dialog: delete_orphan_confirm`, applied
-                    // once the AppState borrow is released.
-                    let deferred = Rc::new(RefCell::new(Vec::new()));
-                    let out = deferred.clone();
-                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                        *out.borrow_mut() = crate::interpreter::renderer::dispatch_action(
-                            "delete_selection", &serde_json::Map::new(), st);
-                    }));
-                    let mut sig = yaml_dialog_sig;
-                    let effects = deferred.borrow().clone();
-                    crate::interpreter::renderer::apply_deferred_dialog_effects(
-                        &effects, &app_for_menu, &mut sig);
-                }
                 "simplify" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         let precision = st.boolean_panel.simplify_precision;

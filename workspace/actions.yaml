@@ -399,8 +399,9 @@ actions:
       (delete_orphan_confirm_ok) commits the same delete and Cancel changes
       nothing. A selection that holds a target and every reference to it
       strands nothing, so it deletes at once. Every Delete route runs this:
-      Edit > Delete, the Delete and Backspace keys, and a tool that
-      dispatches delete_selection.
+      the Delete and Backspace keys and a tool that dispatches
+      delete_selection; on the Mac, the canvas context menu's Delete too.
+      The menubar has no Delete item.
     category: edit
     tier: 3
     enabled_when: "active_document.has_selection"
