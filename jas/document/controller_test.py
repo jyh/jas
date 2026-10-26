@@ -1531,9 +1531,11 @@ class SymbolOpsTest(absltest.TestCase):
         # promote_to_concept_replaces_with_generated.
         from geometry.element import GeneratedElem
         ctrl = Controller(model=Model())
+        fill = Fill(color=RgbColor(1, 0, 0))
+        stroke = Stroke(color=RgbColor(0, 1, 0), width=3.0)
         ctrl.add_element(Polygon(
             points=((10.0, 0.0), (0.0, 10.0), (-10.0, 0.0), (0.0, -10.0)),
-            id="p1", name="my square"))
+            fill=fill, stroke=stroke, id="p1", name="my square"))
         params = {"sides": 4.0, "radius": 10.0}
         t = Transform.translate(5.0, 7.0)
         ctrl.promote_to_concept((0, 0), "regular_polygon", params, t)
@@ -1548,6 +1550,9 @@ class SymbolOpsTest(absltest.TestCase):
         # … and the original identity preserved.
         self.assertEqual(el.id, "p1")
         self.assertEqual(el.name, "my square")
+        # … and its paint: a promote re-describes the shape, it does not
+        # repaint it (flask STATUS § 567: the fill was dropped).
+        self.assertEqual((el.fill, el.stroke), (fill, stroke), "the paint is kept")
 
     def test_promote_to_concept_missing_path_is_noop(self):
         # A missing path mutates nothing; the rect at [0,0] is untouched. Mirrors
