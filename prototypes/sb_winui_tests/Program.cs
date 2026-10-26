@@ -323,6 +323,18 @@ static class Program
         Check("W2b-19: an object is left out", NoPath("{\"a\":1}"), "{\"a\":1}");
         Check("W2b-19: unparseable text is left out", NoPath("[0,1"), "[0,1");
         Check("W2b-19: a bare number is left out", NoPath("0"), "0");
+        // STATUS-jas item 23 (flask §563 finding I): a field a `foreach` stamps
+        // out has NO id, so its commit crosses with an EMPTY widget, its typed
+        // text and its plan path -- the shape the engine's
+        // `a_template_param_field_commits_by_its_plan_path` arm sends.
+        var templated = Parse(PanelWire.EventJson("", "commit", "8", false, false, false, false, "[0,1,2,0,1]"));
+        Check("item 23: an id-less field's commit carries its value and its plan path",
+            templated is not null && Str(templated, "widget") == "" && Str(templated, "event") == "commit"
+            && Str(templated, "value") == "8"
+            && templated.RootElement.TryGetProperty("path", out var tp)
+            && string.Join(",", tp.EnumerateArray().Select(x => x.GetInt32())) == "0,1,2,0,1", Show(templated));
+        Check("item 23: an id-less field is addressable by its plan path",
+            PanelWire.Addressable("", "[0,1,2,0,1]"), "");
         Check("W2b-19: no path given means no path key",
             press is not null && !press.RootElement.TryGetProperty("path", out _), Show(press));
 

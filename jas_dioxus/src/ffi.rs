@@ -3313,6 +3313,58 @@ mod tests {
         e
     }
 
+    /// STATUS-jas item 23. A param field is a `number_input` a `foreach`
+    /// stamps out, so it has NO id; the shell can address it only by its plan
+    /// path. A `commit` sent by that path runs the field's behavior with the
+    /// row's item in scope (`p.name`), so the shell's address is the whole
+    /// remaining gap (the field is read-only on Windows, flask §563 finding I).
+    #[test]
+    fn a_template_param_field_commits_by_its_plan_path() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const CONCEPTS: &str = "concepts_panel_content";
+        let e = engine_with(crate::document::test_fixture::model_with(vec![], &[]));
+        {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let mut store = en.store.borrow_mut();
+            if store.panel_scope("concepts").is_none() {
+                store.init_panel("concepts", std::collections::HashMap::new());
+            }
+            store.set_panel("concepts", "selected_concept", serde_json::json!("star"));
+        }
+        let (reply, err) = behave(e, CONCEPTS, r#"{"widget":"concept_place","event":"click"}"#);
+        assert!(reply.contains(r#""doc_changed":true"#), "the control: a placed, selected star: {reply} {err}");
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, CONCEPTS, 228, 600)).expect("plan JSON");
+        let inputs: Vec<&serde_json::Value> = plan["leaves"].as_array().expect("leaves").iter()
+            .filter(|l| l["type"] == "number_input").collect();
+        assert_eq!(inputs.len(), 3, "one field per star param: {inputs:?}");
+        let first = inputs[0];
+        assert!(first.get("id").and_then(|v| v.as_str()).unwrap_or("").is_empty(), "the field has no id: {first}");
+        let path = first["path"].clone();
+        assert!(path.is_array(), "it has a plan path: {first}");
+        let points = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let doc = en.model.borrow().document().clone();
+            match &*doc.layers[0].children().unwrap()[0] {
+                crate::geometry::element::Element::Live(crate::geometry::live::LiveVariant::Generated(g)) => g.params.clone(),
+                other => panic!("not a generated instance: {other:?}"),
+            }
+        };
+        let before = points(e);
+        // The bytes the Windows shell sends for an id-less field
+        // (`PanelWire.EventJson("", "commit", text, …, path)`).
+        let ev = serde_json::json!({
+            "widget": "", "event": "commit", "value": "8",
+            "alt": false, "shift": false, "ctrl": false, "meta": false, "path": path,
+        }).to_string();
+        let (_reply, err) = behave(e, CONCEPTS, &ev);
+        let after = points(e);
+        let changed: Vec<&String> = after.as_object().unwrap().iter()
+            .filter(|(k, v)| before.get(k.as_str()) != Some(*v)).map(|(k, _)| k).collect();
+        assert_eq!(changed.len(), 1, "exactly the row's param is set: {before} -> {after} ({err})");
+        assert_eq!(after[changed[0].as_str()].as_f64(), Some(8.0), "to the committed value");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// STATUS-jas item 22. The Layers panel's actions run their YAML in the
     /// engine: each `doc.*` verb they use (`create_layer insert_at insert_after
     /// clone_at delete_at set unpack_group_at wrap_in_group wrap_in_layer`) and
