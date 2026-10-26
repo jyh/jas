@@ -48,6 +48,11 @@
     "tier": {
       "type": "integer"
     },
+    "native": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A host act a YAML cannot express (an OS dialog, the window, the dock), with its reason. The effects stay a log stub; scripts/check_action_implementations.py verifies the action is native in both active ports."
+    },
     "enabled_when": {
       "type": "string",
       "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
