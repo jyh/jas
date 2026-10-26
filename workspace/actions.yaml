@@ -498,9 +498,13 @@ actions:
   ungroup:
     description: >
       Ungroup the selected Group elements one level, replacing each group
-      with its direct children at the group's z-order position. Non-group
-      objects in the selection are left unchanged. The children become the
-      new selection.
+      with its direct children at the group's z-order position, inside the
+      group's own parent: a group nested in another group gives its members
+      to that outer group, not to the layer. When a group and one of its
+      ancestors are both selected, both are ungrouped and every member lands
+      at the outer group's position. Non-group objects in the selection are
+      left unchanged. The children become the new selection, in every layer
+      and group the selection touched.
     category: object
     tier: 3
     enabled_when: "active_document.has_selection"

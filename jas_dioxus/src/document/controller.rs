@@ -1869,54 +1869,55 @@ impl Controller {
         }
         group_paths.sort();
 
-        let orig_doc = doc.clone();
         let mut new_doc = doc.clone();
 
-        // Process in reverse order to preserve indices
+        // Reverse path order: a descendant is ungrouped before its ancestor, and
+        // ungrouping a path edits only its parent at indices >= its own, which
+        // no earlier path passes through. The selection is built in the same
+        // walk: each ungroup remaps the paths already recorded (STATUS-jas item
+        // 20; a separate offset pass carried one parent's shift into the next).
+        let mut new_selection: Vec<ElementPath> = Vec::new();
         for gpath in group_paths.iter().rev() {
-            let group_elem = match new_doc.get_element(gpath).cloned() {
-                Some(e) => e,
-                None => continue,
-            };
-            let children = match group_elem.children() {
+            if gpath.len() < 2 {
+                continue;
+            }
+            let children = match new_doc.get_element(gpath).and_then(|e| e.children()) {
                 Some(c) => c.to_vec(),
                 None => continue,
             };
-            // Delete the group
+            let n = children.len();
+            let (parent, idx) = (&gpath[..gpath.len() - 1], gpath[gpath.len() - 1]);
+            // Splice the members into the group's own parent at its index.
             new_doc = new_doc.delete_element(gpath);
-            // Insert children at the group's position
-            if gpath.len() >= 2 {
-                let layer_idx = gpath[0];
-                let child_idx = gpath[1];
-                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
-                    for (j, child) in children.into_iter().enumerate() {
-                        layer_children.insert(child_idx + j, child);
-                    }
+            for (j, child) in children.into_iter().enumerate() {
+                let mut at = parent.to_vec();
+                at.push(idx + j);
+                new_doc = new_doc.insert_element_at(&at, (*child).clone());
+            }
+            for p in new_selection.iter_mut() {
+                if p.len() > gpath.len() && p.starts_with(gpath) {
+                    let c = p[gpath.len()];
+                    let mut moved = parent.to_vec();
+                    moved.push(idx + c);
+                    moved.extend_from_slice(&p[gpath.len() + 1..]);
+                    *p = moved;
+                } else if p.len() > parent.len() && p.starts_with(parent) && p[parent.len()] > idx {
+                    // p[..] > idx >= 0, so adding first cannot underflow for an empty group.
+                    p[parent.len()] = p[parent.len()] + n - 1;
                 }
             }
-        }
-
-        // Build selection for ungrouped children
-        let mut new_selection = Vec::new();
-        let mut offset: i64 = 0;
-        for gpath in &group_paths {
-            let orig_group = match orig_doc.get_element(gpath) {
-                Some(e) => e,
-                None => continue,
-            };
-            let n_children = orig_group.children().map_or(0, |c| c.len());
-            if gpath.len() >= 2 {
-                let layer_idx = gpath[0];
-                let child_idx = (gpath[1] as i64 + offset) as usize;
-                for j in 0..n_children {
-                    let path = vec![layer_idx, child_idx + j];
-                    if new_doc.get_element(&path).is_some() {
-                        new_selection.push(ElementSelection::all(path));
-                    }
-                }
+            for j in 0..n {
+                let mut at = parent.to_vec();
+                at.push(idx + j);
+                new_selection.push(at);
             }
-            offset += n_children as i64 - 1;
         }
+        new_selection.sort();
+        new_selection.dedup();
+        let new_selection: Vec<ElementSelection> = new_selection.into_iter()
+            .filter(|p| new_doc.get_element(p).is_some())
+            .map(ElementSelection::all)
+            .collect();
         new_doc.selection = new_selection;
         model.edit_document(new_doc);
     }
@@ -5461,6 +5462,101 @@ mod tests {
         // No more groups (the original group should be ungrouped)
         let group_count = children.iter().filter(|c| matches!(***c, Element::Group(_))).count();
         assert_eq!(group_count, 0);
+    }
+
+    /// Item 20's arms: a tree as text, `r<x>` for a rect at x, `G[..]` for a
+    /// group, one `L[..]` per layer, so a misplaced member reads as a moved token.
+    fn ungroup_shape(doc: &Document) -> String {
+        fn walk(e: &Element) -> String {
+            match e {
+                Element::Rect(r) => format!("r{}", r.x),
+                Element::Group(g) => format!("G[{}]", g.children.iter().map(|c| walk(c)).collect::<Vec<_>>().join(" ")),
+                _ => "?".to_string(),
+            }
+        }
+        doc.layers.iter().map(|l| format!("L[{}]", l.children().unwrap().iter().map(|c| walk(c)).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join(" ")
+    }
+
+    fn ungroup_case(layers: Vec<Vec<Element>>, selected: Vec<Vec<usize>>) -> (String, Vec<Vec<usize>>) {
+        let layers = layers.into_iter().map(|children| Element::Layer(LayerElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        })).collect();
+        let doc = Document { layers, selected_layer: 0, selection: vec![], ..Document::default() };
+        let mut model = Model::new(doc, None);
+        Controller::set_selection(&mut model, selected.into_iter().map(ElementSelection::all).collect());
+        Controller::ungroup_selection(&mut model);
+        let mut sel: Vec<Vec<usize>> = model.document().selection.iter().map(|es| es.path.clone()).collect();
+        sel.sort();
+        (ungroup_shape(model.document()), sel)
+    }
+
+    fn r(x: f64) -> Element { make_rect(x, 0.0, 1.0, 1.0) }
+
+    /// C1: a nested group's members stay inside the outer group, at its index
+    /// (MENU.md: "into the parent container at the Group's position").
+    #[test]
+    fn ungroup_nested_group_keeps_members_in_its_parent() {
+        let (shape, sel) = ungroup_case(
+            vec![vec![r(0.0), make_group(vec![make_group(vec![r(1.0), r(2.0)]), r(3.0)]), r(4.0)]],
+            vec![vec![0, 1, 0]]);
+        assert_eq!(shape, "L[r0 G[r1 r2 r3] r4]");
+        assert_eq!(sel, vec![vec![0, 1, 0], vec![0, 1, 1]]);
+    }
+
+    /// C2: two groups in different layers; the selection offset is per parent.
+    #[test]
+    fn ungroup_in_two_layers_selects_each_layers_members() {
+        let (shape, sel) = ungroup_case(
+            vec![vec![r(0.0), make_group(vec![r(1.0), r(2.0), r(3.0)])],
+                 vec![make_group(vec![r(5.0), r(6.0)]), r(7.0)]],
+            vec![vec![0, 1], vec![1, 0]]);
+        assert_eq!(shape, "L[r0 r1 r2 r3] L[r5 r6 r7]");
+        assert_eq!(sel, vec![vec![0, 1], vec![0, 2], vec![0, 3], vec![1, 0], vec![1, 1]]);
+    }
+
+    /// C3: two groups in one parent (the case the old offset pass got right).
+    #[test]
+    fn ungroup_two_groups_in_one_parent() {
+        let (shape, sel) = ungroup_case(
+            vec![vec![make_group(vec![r(0.0), r(1.0)]), r(2.0), make_group(vec![r(3.0), r(4.0)])]],
+            vec![vec![0, 0], vec![0, 2]]);
+        assert_eq!(shape, "L[r0 r1 r2 r3 r4]");
+        assert_eq!(sel, vec![vec![0, 0], vec![0, 1], vec![0, 3], vec![0, 4]]);
+    }
+
+    /// C4: a group and its own ancestor both selected: both dissolve, every
+    /// member lands at the outer group's index, and all of them are selected.
+    #[test]
+    fn ungroup_group_and_its_ancestor_dissolves_both() {
+        let (shape, sel) = ungroup_case(
+            vec![vec![r(0.0), make_group(vec![make_group(vec![r(1.0), r(2.0)]), r(3.0)]), r(4.0)]],
+            vec![vec![0, 1], vec![0, 1, 0]]);
+        assert_eq!(shape, "L[r0 r1 r2 r3 r4]");
+        assert_eq!(sel, vec![vec![0, 1], vec![0, 2], vec![0, 3]]);
+    }
+
+    /// An EMPTY group before a selected sibling: the later sibling shifts back by one.
+    #[test]
+    fn ungroup_empty_group_before_another() {
+        let (shape, sel) = ungroup_case(
+            vec![vec![make_group(vec![]), r(1.0), make_group(vec![r(2.0), r(3.0)])]],
+            vec![vec![0, 0], vec![0, 2]]);
+        assert_eq!(shape, "L[r1 r2 r3]");
+        assert_eq!(sel, vec![vec![0, 1], vec![0, 2]]);
+    }
+
+    /// C5: mixed depths in two parents: a nested group and a later top-level one.
+    #[test]
+    fn ungroup_mixed_depths_in_two_parents() {
+        let (shape, sel) = ungroup_case(
+            vec![vec![r(0.0), make_group(vec![make_group(vec![r(1.0), r(2.0)]), r(3.0)]),
+                      make_group(vec![r(4.0), r(5.0)])]],
+            vec![vec![0, 1, 0], vec![0, 2]]);
+        assert_eq!(shape, "L[r0 G[r1 r2 r3] r4 r5]");
+        assert_eq!(sel, vec![vec![0, 1, 0], vec![0, 1, 1], vec![0, 2], vec![0, 3]]);
     }
 
     #[test]

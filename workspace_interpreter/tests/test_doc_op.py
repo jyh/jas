@@ -13,6 +13,8 @@ import json
 import os
 import sys
 
+import pytest
+
 # The op layer lives beside the frozen Python app (``document.op_apply``), the
 # same import root as `test_character_apply.py`'s bridge-level arms.
 _JAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "jas"))
@@ -129,6 +131,61 @@ def test_ungroup_from_actions_yaml_replaces_the_group_with_its_members_selected(
     after = _doc_of(store)
     assert [type(c).__name__ for c in after.layers[0].children] == ["Rect", "Rect"]
     assert {es.path for es in after.selection} == {(0, 0), (0, 1)}
+
+
+def _ungroup_shape(doc: Document) -> str:
+    """Item 20's arms: ``r<x>`` for a rect at x, ``G[..]`` for a group, one
+    ``L[..]`` per layer, the same text as the Rust and Swift arms."""
+    from geometry.element import Group
+
+    def walk(e) -> str:
+        if isinstance(e, Group):
+            return "G[" + " ".join(walk(c) for c in e.children) + "]"
+        return f"r{e.x:g}"
+    return " ".join("L[" + " ".join(walk(c) for c in l.children) + "]" for l in doc.layers)
+
+
+def _ungroup_case(layers, selected):
+    doc = Document(layers=tuple(Layer(name=f"L{i}", children=tuple(cs)) for i, cs in enumerate(layers)))
+    doc = replace(doc, selection=frozenset(ElementSelection.all(tuple(p)) for p in selected))
+    store = _store(doc)
+    _run_yaml_action(store, "ungroup")
+    after = _doc_of(store)
+    return _ungroup_shape(after), sorted(es.path for es in after.selection)
+
+
+def _r(x):
+    return Rect(x=x, y=0, width=1, height=1)
+
+
+def _g(*cs):
+    from geometry.element import Group
+    return Group(children=tuple(cs))
+
+
+
+@pytest.mark.parametrize("layers, selected, shape, selection", [
+    # C1: a nested group's members stay in its parent (MENU.md "parent container").
+    ([[_r(0), _g(_g(_r(1), _r(2)), _r(3)), _r(4)]], [(0, 1, 0)],
+     "L[r0 G[r1 r2 r3] r4]", [(0, 1, 0), (0, 1, 1)]),
+    # C2: two layers; the selection offset is per parent.
+    ([[_r(0), _g(_r(1), _r(2), _r(3))], [_g(_r(5), _r(6)), _r(7)]], [(0, 1), (1, 0)],
+     "L[r0 r1 r2 r3] L[r5 r6 r7]", [(0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]),
+    # C3: two groups in one parent.
+    ([[_g(_r(0), _r(1)), _r(2), _g(_r(3), _r(4))]], [(0, 0), (0, 2)],
+     "L[r0 r1 r2 r3 r4]", [(0, 0), (0, 1), (0, 3), (0, 4)]),
+    # C4: a group and its own ancestor: both dissolve.
+    ([[_r(0), _g(_g(_r(1), _r(2)), _r(3)), _r(4)]], [(0, 1), (0, 1, 0)],
+     "L[r0 r1 r2 r3 r4]", [(0, 1), (0, 2), (0, 3)]),
+    # An empty group before a selected sibling.
+    ([[_g(), _r(1), _g(_r(2), _r(3))]], [(0, 0), (0, 2)],
+     "L[r1 r2 r3]", [(0, 1), (0, 2)]),
+    # C5: mixed depths in two parents.
+    ([[_r(0), _g(_g(_r(1), _r(2)), _r(3)), _g(_r(4), _r(5))]], [(0, 1, 0), (0, 2)],
+     "L[r0 G[r1 r2 r3] r4 r5]", [(0, 1, 0), (0, 1, 1), (0, 2), (0, 3)]),
+], ids=["C1-nested", "C2-two-layers", "C3-one-parent", "C4-with-ancestor", "empty-group", "C5-mixed"])
+def test_ungroup_splices_members_into_the_groups_own_parent(layers, selected, shape, selection):
+    assert _ungroup_case(layers, selected) == (shape, selection)
 
 
 def test_ungroup_all_from_actions_yaml_keeps_every_locked_group():

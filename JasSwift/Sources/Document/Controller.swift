@@ -1785,41 +1785,42 @@ public class Controller {
         }
         guard !groupPaths.isEmpty else { return }
         groupPaths.sort { $0.lexicographicallyPrecedes($1) }
-        // Process in reverse order to preserve indices
+        // Reverse path order ungroups a descendant before its ancestor, and
+        // ungrouping a path edits only its parent at indices >= its own. The
+        // members splice into the group's OWN parent (MENU.md), and the
+        // selection is remapped in the same walk (STATUS-jas item 20: a
+        // separate offset pass carried one parent's shift into the next).
         var newDoc = doc
-        for gpath in groupPaths.reversed() {
-            let groupElem = newDoc.getElement(gpath)
-            guard case .group(let g) = groupElem else { continue }
-            let children = g.children
-            // Delete the group
+        var recorded: [ElementPath] = []
+        for gpath in groupPaths.reversed() where gpath.count >= 2 {
+            guard case .group(let g) = newDoc.getElement(gpath) else { continue }
+            let n = g.children.count
+            let parent = Array(gpath.dropLast())
+            let idx = gpath[gpath.count - 1]
             newDoc = newDoc.deleteElement(gpath)
-            let layerIdx = gpath[0]
-            let childIdx = gpath.count > 1 ? gpath[1] : 0
-            let layer = newDoc.layers[layerIdx]
-            var newChildren = layer.children
-            newChildren.insert(contentsOf: children, at: childIdx)
-            // T4 bystander clause: see `addElement`. Same four-of-eleven
-            // literal, same seven fields lost, once per iteration.
-            let newLayer = layer.withChildren(newChildren)
-            var newLayers = newDoc.layers
-            newLayers[layerIdx] = newLayer
-            newDoc = newDoc.replacing(layers: newLayers, selection: [])
-        }
-        // Build selection for all unpacked children
-        var newSelection: Selection = []
-        var offset = 0
-        for gpath in groupPaths {
-            let groupElem = doc.getElement(gpath)
-            guard case .group(let g) = groupElem else { continue }
-            let nChildren = g.children.count
-            let layerIdx = gpath[0]
-            let childIdx = (gpath.count > 1 ? gpath[1] : 0) + offset
-            for j in 0..<nChildren {
-                let path: ElementPath = [layerIdx, childIdx + j]
-                newSelection.append(ElementSelection.all(path))
+            var siblings = childrenOfPath(newDoc, parent)
+            siblings.insert(contentsOf: g.children, at: idx)
+            // setChildrenOfPath rebuilds the container with withChildren, so a
+            // layer keeps every field (the T4 bystander clause).
+            newDoc = setChildrenOfPath(newDoc, parent, siblings)
+            recorded = recorded.map { p in
+                if p.count > gpath.count && Array(p.prefix(gpath.count)) == gpath {
+                    return parent + [idx + p[gpath.count]] + Array(p.dropFirst(gpath.count + 1))
+                }
+                if p.count > parent.count && Array(p.prefix(parent.count)) == parent && p[parent.count] > idx {
+                    var q = p
+                    q[parent.count] += n - 1
+                    return q
+                }
+                return p
             }
-            offset += nChildren - 1
+            recorded += (0..<n).map { parent + [idx + $0] }
         }
+        var seen = Set<ElementPath>()
+        let newSelection: Selection = recorded
+            .filter { seen.insert($0).inserted }
+            .sorted { $0.lexicographicallyPrecedes($1) }
+            .map { ElementSelection.all($0) }
         model.editDocument(newDoc.replacing(selection: newSelection))
     }
 
