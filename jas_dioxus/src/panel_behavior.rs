@@ -78,9 +78,7 @@ use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::colour_host;
 use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
-use crate::interpreter::effects::{
-    close_dialog_in, open_dialog_in, run_effects_hosted, EffectHost, Unhandled,
-};
+use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
 use crate::interpreter::character_host::{self, CHARACTER_PANEL};
@@ -301,10 +299,10 @@ impl EffectHost for EngineHost {
         false
     }
 
-    /// W2b-17: the Symbols and Concepts panels' native verbs, through
-    /// `symbols_host`, the one implementation the web calls too. The panel
-    /// selection is read from the STORE, where the YAML's `set_panel_state`
-    /// writes it. The orphan confirm opens in the engine's store (the dialog door).
+    /// The actions the engine claims or intercepts by name. Since 2026-10-26
+    /// none of the Symbols and Concepts panels' verbs is one: each runs its
+    /// YAML (`doc.*` effects through `symbols_host`'s op builders), and Delete
+    /// Symbol's orphan confirm opens through the runner's `open_dialog` arm.
     fn run_action(
         &mut self,
         action: &str,
@@ -312,7 +310,6 @@ impl EffectHost for EngineHost {
         store: &mut StateStore,
         model: Option<&mut Model>,
     ) -> Option<Option<Unhandled>> {
-        use crate::interpreter::symbols_host::{run, Outcome, ACTIONS};
         // An index that is not an integer is declined, so the YAML runs and
         // its `remove_child` refuses by name rather than removing a guess.
         if action == "close_window" {
@@ -350,42 +347,7 @@ impl EffectHost for EngineHost {
             }
             return None;
         }
-        if !ACTIONS.contains(&action) {
-            return None;
-        }
-        let Some(model) = model else { return Some(Some(Unhandled::NoModel(action.into()))) };
-        let read = |panel: &str, key: &str| {
-            store.panel_scope(panel).and_then(|p| p.get(key)).and_then(Value::as_str)
-                .map(str::to_string)
-        };
-        let sym = read("symbols", "selected_symbol");
-        match run(model, action, params, sym.as_deref()) {
-            // The dialog door (design 2026-10-14): the confirm opens in the
-            // engine's store with the params the verb computed, exactly as
-            // an `open_dialog` effect opens one.
-            Some(Outcome::Dialog { id, params }) => {
-                let ws = crate::interpreter::workspace::Workspace::load();
-                let Some(def) = ws.as_ref().and_then(|w| w.dialog(&id)) else {
-                    return Some(Some(Unhandled::UnknownDialog(id)));
-                };
-                let params = params.as_object()
-                    .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-                open_dialog_in(&id, def, params, None, &Value::Null, store, Some(model));
-                Some(None)
-            }
-            Some(Outcome::SelectSymbol(id)) => {
-                store.set_panel("symbols", "selected_symbol", id.map(Value::String).unwrap_or(Value::Null));
-                Some(None)
-            }
-            Some(Outcome::CloseDialog { cleared_selection }) => {
-                close_dialog_in(store, Some(model));
-                if cleared_selection {
-                    store.set_panel("symbols", "selected_symbol", Value::Null);
-                }
-                Some(None)
-            }
-            Some(Outcome::Done) | None => Some(None),
-        }
+        None
     }
 
     /// A11: a write to a Stroke render key applies that field of the Stroke

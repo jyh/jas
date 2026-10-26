@@ -652,32 +652,6 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
             .map(String::from);
     }
 
-    // Native intercept: the Symbols and Concepts panels' native verbs
-    // (SYMBOLS.md §7-8, CONCEPTS.md §6-10). Their YAML actions are `log`
-    // stubs, so they run here, through the ONE implementation the engine's
-    // host also calls (W2b-17), and return without further YAML effects.
-    // `concepts_panel_select` is NOT one of them: it must ALSO run its generic
-    // `set_panel_state` effect, and is tracked natively by the intercept above.
-    if crate::interpreter::symbols_host::ACTIONS.contains(&action) {
-        use crate::interpreter::symbols_host::{run, Outcome};
-        let sym = st.symbols_selected.clone();
-        let Some(tab) = st.tab_mut() else { return Vec::new(); };
-        match run(&mut tab.model, action, &serde_json::Value::Object(params.clone()), sym.as_deref()) {
-            Some(Outcome::SelectSymbol(id)) => st.symbols_selected = id,
-            Some(Outcome::Dialog { id, params }) => {
-                return vec![serde_json::json!({"open_dialog": {"id": id, "params": params}})];
-            }
-            Some(Outcome::CloseDialog { cleared_selection }) => {
-                if cleared_selection {
-                    st.symbols_selected = None;
-                }
-                return vec![serde_json::json!({ "close_dialog": null })];
-            }
-            Some(Outcome::Done) | None => {}
-        }
-        return Vec::new();
-    }
-
     // Phase 4: open_layer_options is now pure YAML. It resolves the
     // target layer via element_at(path_from_id(param.layer_id)) and
     // packs its current state as open_dialog params.
@@ -1929,6 +1903,8 @@ pub(crate) fn build_active_document_view(
             m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
             // Nothing is selected, so a delete strands nothing.
             m.insert("selection_orphan_count".to_string(), serde_json::Value::from(0));
+            // No document: no masters to count.
+            m.insert("symbol_usage".to_string(), serde_json::json!({}));
             // No document: no recent colours (`active_document.recent_colors`).
             m.insert("recent_colors".to_string(), serde_json::Value::Array(vec![]));
             // No document: nothing to save (`runtime_contexts.yaml` defaults).

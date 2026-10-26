@@ -170,7 +170,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 37 the same day: `promote_to_concept` (`doc.promote_to_concept`).
 # 36 the same day: `new_symbol` (`doc.new_symbol`, which binds its master).
 # 35 the same day: `apply_concept_operation` (`doc.apply_concept_operation`).
-MIN_LOG_ONLY = 35
+# 33 the same day: `delete_symbol_action` and `delete_symbol_orphan_confirm_ok`
+# (`doc.delete_symbol`, the confirm asked through `active_document.symbol_usage`).
+MIN_LOG_ONLY = 33
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -480,20 +482,20 @@ def self_test() -> int:
         # verbs became `swatch.*` effects in actions.yaml and LEFT the log-only
         # set this table classifies. Dropped rather than moved: undo, save_as,
         # revert and toggle_panel still hold the native_both class.
-        # place_instance and then new_symbol anchored the `symbols_host::ACTIONS`
-        # scan until 2026-10-26, when each became a `doc.*` effect and left the
-        # set; delete_symbol_action, still hosted there, anchors it now.
+        # place_instance, new_symbol and then delete_symbol_action anchored the
+        # `symbols_host::ACTIONS` scan until 2026-10-26, when each became a
+        # `doc.*` effect and left the set. symbols_host no longer declares
+        # ACTIONS and no other host does, so that scan has no anchor: it stays
+        # because it reads any host that declares one later.
         # THE TWO CLASSES THAT PRODUCED FALSE DIVERGENCES on the first
         # production run, anchored so they cannot regress:
         #   guard arm -- jas_dioxus routes panel toggles through
         #   `c if c.starts_with("toggle_panel_")`, invisible to a
         #   string-literal scan
         "toggle_panel": "native_both",
-        #   native intercept -- symbols_panel.rs's arm deliberately routes to
-        #   `dispatch_action`, where the work is done. Since W2b-17 the verbs
-        #   live in `symbols_host.rs`'s `pub const ACTIONS`, and these two
-        #   anchors are what caught the literal scan going blind to them.
-        "delete_symbol_action": "native_both",
+        #   native intercept -- a host's `pub const ACTIONS` (W2b-17's
+        #   symbols_host, until 2026-10-26): its anchors caught the literal
+        #   scan going blind to them, and none is left to anchor.
     }
     for a, want in anchors.items():
         got = rows.get(a, "<not in the log-only set>")

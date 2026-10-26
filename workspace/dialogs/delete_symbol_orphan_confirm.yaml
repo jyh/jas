@@ -24,6 +24,7 @@ delete_symbol_orphan_confirm:
   modal: true
   params:
     count: { type: number }
+    master: { type: string }
   content:
     type: container
     layout: column
@@ -40,3 +41,5 @@ delete_symbol_orphan_confirm:
             label: "Delete"
             variant: primary
             action: delete_symbol_orphan_confirm_ok
+            # The master the user was asked about, so Delete deletes exactly it.
+            params: { master: "param.master" }

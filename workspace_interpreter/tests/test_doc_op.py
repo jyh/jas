@@ -258,14 +258,14 @@ def test_selection_orphan_count_counts_references_a_delete_would_strand(select, 
     assert store._active_document_view()["selection_orphan_count"] == count
 
 
-def _run_yaml_action_with_dialogs(store: StateStore, name: str) -> None:
+def _run_yaml_action_with_dialogs(store: StateStore, name: str, ctx: dict | None = None) -> None:
     import yaml
     root = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
     with open(os.path.join(root, "actions.yaml"), encoding="utf-8") as f:
         effects = yaml.safe_load(f)["actions"][name]["effects"]
     with open(os.path.join(root, "workspace.json"), encoding="utf-8") as f:
         dialogs = json.load(f)["dialogs"]
-    run_effects(effects, {}, store, dialogs=dialogs)
+    run_effects(effects, ctx or {}, store, dialogs=dialogs)
 
 
 def test_delete_selection_from_actions_yaml_deletes_when_nothing_would_dangle():
@@ -505,3 +505,85 @@ def test_apply_concept_operation_from_actions_yaml_resolves_the_operation():
         before = json.dumps(store._document, sort_keys=True)
         run_effects(effects, {"param": {"op_id": op_id}}, store)
         assert json.dumps(store._document, sort_keys=True) == before, f"{op_id!r}: nothing"
+
+
+def _symbols_store(instances: int) -> StateStore:
+    """Two masters, `m1` with `instances` live references and `m2` with none."""
+    from geometry.element import ReferenceElem
+    refs = tuple(ReferenceElem(target="m1", id=f"i{k}") for k in range(instances))
+    doc = replace(Document(layers=(Layer(name="L", children=(_rect(),) + refs),)),
+                  symbols=(_rect(id="m1"), _rect(id="m2")))
+    store = _store(doc)
+    store.init_panel("symbols_panel_content", {"selected_symbol": "m1"})
+    return store
+
+
+@pytest.mark.parametrize("instances", [0, 1, 2])
+def test_symbol_usage_counts_every_masters_live_instances(instances):
+    """`active_document.symbol_usage` (runtime_contexts.yaml): every master's
+    id -> how many live references target it, 0 for an unused master, so
+    `symbol_usage[id] > 0` never reads null for a master that exists."""
+    view = _symbols_store(instances)._active_document_view()
+    assert view["symbol_usage"] == {"m1": instances, "m2": 0}
+
+
+def test_symbol_usage_is_empty_without_masters():
+    assert _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))._active_document_view()[
+        "symbol_usage"] == {}
+
+
+def _symbol_ids(store: StateStore) -> list:
+    return [m.id for m in _doc_of(store).symbols]
+
+
+def test_delete_symbol_action_from_actions_yaml_deletes_an_unused_master():
+    """`actions.yaml` delete_symbol_action (SYMBOLS.md §7): a panel-selected
+    master with no live instance is deleted at once and the panel selection
+    clears; no dialog opens."""
+    store = _symbols_store(0)
+    _run_yaml_action_with_dialogs(store, "delete_symbol_action",
+                                  {"panel": {"selected_symbol": "m1"}})
+    assert _symbol_ids(store) == ["m2"]
+    assert store.get_panel_state("symbols_panel_content")["selected_symbol"] is None
+    assert store.get_dialog_id() is None
+
+
+def test_delete_symbol_action_asks_before_emptying_instances_and_the_ok_deletes():
+    """A master with live instances is NOT deleted: the confirm opens with the
+    count and the master. Its OK deletes the master it was asked about
+    (`dialog.master`), clears the panel selection and closes; the instances
+    stay in place, resolving to nothing."""
+    store = _symbols_store(2)
+    before = json.dumps(store._document, sort_keys=True)
+    _run_yaml_action_with_dialogs(store, "delete_symbol_action",
+                                  {"panel": {"selected_symbol": "m1"}})
+    assert json.dumps(store._document, sort_keys=True) == before, "nothing is deleted before the answer"
+    assert store.get_dialog_id() == "delete_symbol_orphan_confirm"
+    assert {k: (store.get_dialog_params() or {}).get(k) for k in ("count", "master")} == {"count": 2, "master": "m1"}
+
+    # The dialog's Delete button passes its params, evaluated over the
+    # dialog's own params, as the OK's `param`.
+    from workspace_interpreter.expr import evaluate
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
+    with open(os.path.join(root, "workspace.json"), encoding="utf-8") as f:
+        dialog = json.load(f)["dialogs"]["delete_symbol_orphan_confirm"]
+    button = next(c for c in dialog["content"]["children"][1]["children"]
+                  if c.get("action") == "delete_symbol_orphan_confirm_ok")
+    button_params = {k: evaluate(v, {"param": store.get_dialog_params()}).value
+                     for k, v in button["params"].items()}
+    assert button_params == {"master": "m1"}
+    _run_yaml_action_with_dialogs(store, "delete_symbol_orphan_confirm_ok", {"param": button_params})
+    assert _symbol_ids(store) == ["m2"]
+    assert [type(c).__name__ for c in _doc_of(store).layers[0].children] == \
+        ["Rect", "ReferenceElem", "ReferenceElem"], "the instances stay"
+    assert store.get_panel_state("symbols_panel_content")["selected_symbol"] is None
+    assert store.get_dialog_id() is None
+
+
+def test_delete_symbol_without_a_master_does_nothing():
+    for panel in ({"selected_symbol": None}, {"selected_symbol": "no_such_master"}):
+        store = _symbols_store(1)
+        before = json.dumps(store._document, sort_keys=True)
+        _run_yaml_action_with_dialogs(store, "delete_symbol_action", {"panel": panel})
+        assert json.dumps(store._document, sort_keys=True) == before, f"{panel}: nothing"
+        assert store.get_dialog_id() is None

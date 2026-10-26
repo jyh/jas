@@ -21,17 +21,6 @@
     "function names and got one of three. A row added on a guess is the",
     "confident-and-wrong claim this mechanism exists to prevent."
   ],
-  "known_divergences": {
-    "delete_symbol_orphan_confirm_ok": {
-      "reason": "Native intercept in jas_dioxus's dispatch_action; no JasSwift handler. Found by this gate on its first run -- the one divergence the hand spot-check missed.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Panels/SymbolsPanel.swift",
-          "lacks": "delete_symbol_orphan_confirm_ok",
-          "why": "Reds when JasSwift gains the handler."
-        }
-      ]
-    }
-  },
+  "known_divergences": {},
   "bypassed": {}
 }

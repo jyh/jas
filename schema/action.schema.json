@@ -181,6 +181,11 @@
               "required": ["concept"],
               "properties": { "concept": { "type": "string" } }
             },
+            "doc.delete_symbol": {
+              "type": "object",
+              "required": ["master"],
+              "properties": { "master": { "type": "string" } }
+            },
             "doc.apply_concept_operation": {
               "type": "object",
               "required": ["op_id"],

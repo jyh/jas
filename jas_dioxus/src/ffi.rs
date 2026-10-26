@@ -3605,8 +3605,8 @@ mod tests {
     /// Delete on a master that still has instances OPENS the orphan confirm in
     /// the engine's store (the dialog door; until 2026-10-14 it was refused by
     /// the dialog's name), with the instance count as its param, and changes
-    /// nothing; the confirm's OK action then deletes the master, closes the
-    /// dialog and clears the panel selection.
+    /// nothing; the confirm's Delete button then deletes that master, closes
+    /// the dialog and clears the panel selection.
     #[test]
     fn the_symbol_verbs_run_in_the_engine_and_the_orphan_confirm_opens() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -3641,13 +3641,54 @@ mod tests {
         {
             let ctx = engine_of(e).store.borrow().eval_context();
             assert_eq!(ctx["param"]["count"], 2, "the confirm names the two instances: {ctx}");
+            assert_eq!(ctx["param"]["master"], serde_json::json!(master), "and the master it asks about");
         }
-        let (reply, err) = dispatch(e, r#"{"action":"delete_symbol_orphan_confirm_ok"}"#);
+        // The shell answers by clicking the dialog's Delete button, which
+        // passes the dialog's `master` to the OK action as `param.master`.
+        let (reply, err) = dialog_event(e, r#"{"widget":"delete_symbol_orphan_ok_btn","event":"click"}"#);
         let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
         assert_eq!(v["dialog"], serde_json::Value::Null, "OK closes the confirm");
         let (doc, sel) = state(e);
         assert!(doc.symbols.is_empty(), "OK deletes the master");
         assert_eq!(sel, Some(serde_json::Value::Null), "and clears the panel selection");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Delete Symbol on a master NO instance uses runs its YAML's other branch:
+    /// the master is deleted at once, with no confirm, as ONE undo step, and
+    /// the panel selection clears (`active_document.symbol_usage` reads 0).
+    /// A selected id that names no master deletes nothing.
+    #[test]
+    fn delete_symbol_deletes_an_unused_master_at_once() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::test_fixture::{model_with, rect};
+        let mut model = model_with(vec![rect(0.0, 0.0, 10.0, 10.0)], &[]);
+        let mut doc = model.document().clone();
+        for id in ["m1", "m2"] {
+            let mut master = rect(50.0, 0.0, 10.0, 10.0);
+            master.common_mut().id = Some(id.into());
+            doc.symbols.push(master);
+        }
+        model.set_document_for_test(doc);
+        let e = engine_with(model);
+        let select = |id: serde_json::Value| engine_of(e).store.borrow_mut().set_panel("symbols", "selected_symbol", id);
+        let ids = || engine_of(e).model.borrow().document().symbols.iter()
+            .map(|m| m.common().id.clone().unwrap()).collect::<Vec<_>>();
+
+        select(serde_json::json!("no_such_master"));
+        let (reply, err) = behave(e, "symbols_panel_content", r#"{"widget":"sym_delete","event":"click"}"#);
+        assert_eq!(ids(), ["m1", "m2"], "an unknown id: nothing ({reply} {err})");
+
+        select(serde_json::json!("m1"));
+        let (reply, err) = behave(e, "symbols_panel_content", r#"{"widget":"sym_delete","event":"click"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "no instance: no confirm");
+        assert_eq!(ids(), ["m2"], "the master is deleted at once");
+        let sel = engine_of(e).store.borrow().panel_scope("symbols")
+            .and_then(|p| p.get("selected_symbol")).cloned();
+        assert_eq!(sel, Some(serde_json::Value::Null), "and the panel selection clears");
+        engine_of(e).model.borrow_mut().undo();
+        assert_eq!(ids(), ["m1", "m2"], "one undo");
         unsafe { jas_engine_free(e) };
     }
 

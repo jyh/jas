@@ -4408,29 +4408,50 @@ actions:
     description: >
       Delete the panel-selected master from the master store (SYMBOLS.md
       §7 Delete Symbol). Reference-aware: when the master still has live
-      instances (usage count > 0) a confirmation warning first reports how
-      many instances will be left empty; confirming deletes the master.
-      With no instances it deletes silently. The master's instances are
-      never touched — they become recoverable via undo. Enabled only when
-      a master is panel-selected. Single undo op.
+      instances (its count in active_document.symbol_usage is above 0),
+      nothing is deleted yet and the delete_symbol_orphan_confirm dialog
+      opens with that count and the master's id; its Delete button
+      (delete_symbol_orphan_confirm_ok) deletes that master and Cancel
+      changes nothing. With no instances the master is deleted at once and
+      the panel selection clears. The master's instances are never touched:
+      they stay in place, resolving to nothing, and undo brings the master
+      back. A selected id that names no master deletes nothing. Enabled only
+      when a master is panel-selected. Single undo op.
     category: symbols
     enabled_when: "panel.selected_symbol != null"
     effects:
-      - log: "delete_symbol_action"
+      - if:
+          condition: "active_document.symbol_usage[panel.selected_symbol] > 0"
+          then:
+            - open_dialog:
+                id: delete_symbol_orphan_confirm
+                params:
+                  count: "active_document.symbol_usage[panel.selected_symbol]"
+                  master: "panel.selected_symbol"
+          else:
+            - snapshot
+            - doc.delete_symbol: { master: "panel.selected_symbol" }
+            - set_panel_state: { panel: symbols, key: selected_symbol, value: "null" }
 
   delete_symbol_orphan_confirm_ok:
     description: >
       Confirm the reference-aware Symbols-panel delete from the
-      delete_symbol_orphan_confirm dialog. The panel Delete entry point
-      opens that dialog only when the panel-selected master still has live
-      instances; clicking Delete here commits the deletion. A DISTINCT
-      action id from delete_symbol_action so the native warn intercept does
-      not re-fire. The native arm snapshots and removes the master; the
-      orphaned instances resolve to nothing until undone. Cancel uses
-      dismiss_dialog (no snapshot, no delete).
+      delete_symbol_orphan_confirm dialog. delete_symbol_action opens that
+      dialog only when the panel-selected master still has live instances,
+      and passes the master's id; clicking Delete here deletes THAT master
+      (`param.master`, which the dialog's Delete button passes from the
+      dialog's own `master` param: the one the user was asked about), clears the
+      Symbols panel's selection and closes the dialog, as one undo step. A
+      DISTINCT action id from delete_symbol_action so the question is not
+      asked again. The orphaned instances stay in place, resolving to
+      nothing until undone. Cancel uses dismiss_dialog (no snapshot, no
+      delete).
     category: dialog
     effects:
-      - log: "delete_symbol_orphan_confirm_ok"
+      - snapshot
+      - doc.delete_symbol: { master: "param.master" }
+      - set_panel_state: { panel: symbols, key: selected_symbol, value: "null" }
+      - close_dialog
 
   # ── Concepts panel (CONCEPTS.md §6 / VISION.md §6.3) ──────────────
   #

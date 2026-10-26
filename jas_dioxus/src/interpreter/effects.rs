@@ -3003,6 +3003,22 @@ fn run_doc_effect(
                 let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
+        // doc.delete_symbol: { master: <expr> }: Delete Symbol, the op
+        // `symbols_host::delete_symbol_ops` builds for the master the
+        // expression names, under the action's `snapshot`. The reference's
+        // `StateStore.delete_symbol`.
+        "doc.delete_symbol" => match spec.get("master").and_then(|v| v.as_str()) {
+            Some(master_expr) => {
+                if let Value::Str(master) = eval_expr(master_expr, store, ctx) {
+                    for op in crate::interpreter::symbols_host::delete_symbol_ops(model.document(), &master)
+                        .unwrap_or_default()
+                    {
+                        let _ = crate::document::op_apply::op_apply(model, &op);
+                    }
+                }
+            }
+            None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.delete_symbol:{spec}"))),
+        },
         // doc.apply_concept_operation: { op_id: <expr> }: a Concepts-panel
         // operation button, the op `symbols_host::apply_concept_operation_ops`
         // resolves for the one selected generated instance, under the action's

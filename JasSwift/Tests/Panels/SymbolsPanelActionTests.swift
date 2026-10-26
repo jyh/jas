@@ -111,11 +111,44 @@ import Testing
     let model = Model(document: doc)
     model.stateStore.initPanel("symbols_panel_content", defaults: [:])
     model.stateStore.setPanel("symbols_panel_content", "selected_symbol", "M1")
-    // No instances → usage 0 → no confirm modal, deletes inline.
-    SymbolsPanel.dispatchSymbolAction("delete_symbol_action", model: model)
+    // No instances → usage 0 → the YAML deletes inline; nothing is asked.
+    var asked = false
+    SymbolsPanel.runDeleteSymbol(model, confirm: { _ in asked = true; return true })
+    #expect(!asked, "no instance: no confirm")
     #expect(model.document.symbols.isEmpty)
     // Panel selection cleared after delete.
     #expect(SymbolsPanel.selectedSymbol(model) == nil)
+    model.undo()
+    #expect(model.document.symbols.count == 1, "ONE undo")
+}
+
+// MARK: - delete_symbol_action (instances → the confirm, then its OK's YAML)
+
+// A master with two live instances: the YAML leaves the confirm open with the
+// count, which the Mac presents as its NSAlert; Cancel changes nothing, and
+// Delete runs the OK's YAML with the dialog's `master`, deleting exactly it
+// (the other master stays), clearing the panel selection, ONE undo.
+@Test func deleteSymbolWithInstancesAsksAndTheOkDeletesThatMaster() {
+    let m1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "M1"))
+    let m2 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "M2"))
+    let refs: [Element] = ["i1", "i2"].map { .live(.reference(ReferenceElem(target: ElementRef("M1"), name: nil, id: $0))) }
+    let model = Model(document: Document(layers: [Layer(children: refs)], symbols: [m1, m2]))
+    model.stateStore.initPanel("symbols_panel_content", defaults: [:])
+    model.stateStore.setPanel("symbols_panel_content", "selected_symbol", "M1")
+    let ids = { model.document.symbols.compactMap(\.id) }
+
+    var counts: [Int] = []
+    SymbolsPanel.runDeleteSymbol(model, confirm: { counts.append($0); return false })
+    #expect(counts == [2], "asked once, naming the two instances")
+    #expect(ids() == ["M1", "M2"], "Cancel: nothing")
+    #expect(model.stateStore.getDialogId() == nil, "the store's dialog is closed")
+
+    SymbolsPanel.runDeleteSymbol(model, confirm: { _ in true })
+    #expect(ids() == ["M2"], "Delete deletes the master it asked about")
+    #expect(model.document.layers[0].children.count == 2, "the instances stay")
+    #expect(SymbolsPanel.selectedSymbol(model) == nil)
+    model.undo()
+    #expect(ids() == ["M1", "M2"], "ONE undo")
 }
 
 // The Symbols panel menu's New Symbol, through the production route

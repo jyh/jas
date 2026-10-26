@@ -371,6 +371,7 @@ pub fn document_facts(model: &Model) -> Map<String, Value> {
     m.insert("selection_is_single_brushed_stroke".into(), single_brushed.into());
     m.insert("selection_orphan_count".into(),
              crate::interpreter::document_views::selection_orphan_count(model.document()).into());
+    m.insert("symbol_usage".into(), crate::interpreter::document_views::symbol_usage(model.document()));
     // The per-document recent colours (`active_document.recent_colors`), which
     // `set_active_color` pushes onto the model and Color and Swatches read.
     m.insert("recent_colors".into(), serde_json::json!(model.recent_colors));

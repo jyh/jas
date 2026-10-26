@@ -1,19 +1,21 @@
-//! W2b-17 (fork F-J): the Symbols and Concepts panels' native verbs, web-free.
+//! W2b-17 (fork F-J): the Symbols and Concepts panels' verbs, web-free.
 //!
-//! Their YAML actions are `log` stubs: the verbs mint ids by the value-in-op
-//! rule and call the shared Controller / `op_apply` ops, which the effects
-//! runner cannot express. The web's `dispatch_action` and the engine's
-//! `EngineHost` both call [`run`], so there is ONE implementation.
-//!
-//! The panel selection is a PARAMETER, not a slot: the web passes its
-//! `AppState` fields, and the engine passes the store's `symbols.selected_symbol`
-//! and `concepts.selected_concept`, which is where the YAML's own
-//! `set_panel_state` writes them and where Swift reads them.
+//! Until 2026-10-26 their YAML actions were `log` stubs and the verbs ran
+//! here, through a `run` the web's `dispatch_action` and the engine's
+//! `EngineHost` both called. Each now runs its YAML, and this module builds
+//! the value-in-op ops those `doc.*` effects apply (minting ids where a verb
+//! needs them): `doc.new_symbol` ([`run_new_symbol`]), `doc.place_instance`
+//! ([`place_instance_ops`]), `doc.place_concept_instance`
+//! ([`place_concept_instance_ops`]), `doc.set_concept_param`
+//! ([`set_concept_param_ops`]), `doc.promote_to_concept`
+//! ([`promote_to_concept_ops`]), `doc.apply_concept_operation`
+//! ([`apply_concept_operation_ops`]) and `doc.delete_symbol`
+//! ([`delete_symbol_ops`]). The panel selections are the YAML's to read and
+//! write (`panel.selected_symbol`, `set_panel_state`).
 
 use serde_json::{json, Map, Value};
 
 use crate::document::artboard::{generate_element_id, mint_unique_ids};
-use crate::document::controller::Controller;
 use crate::document::document::SelectionKind;
 use crate::document::model::Model;
 use crate::geometry::element::{Element, Transform};
@@ -22,64 +24,14 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The two action names this module hosts. Since 2026-10-26 six verbs that
-/// were hosted here run their YAML instead: `new_symbol` (`doc.new_symbol`,
-/// [`run_new_symbol`]), `place_instance`
-/// (`doc.place_instance`, [`place_instance_ops`]), `place_concept_instance`
-/// (`doc.place_concept_instance`, [`place_concept_instance_ops`]),
-/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`]),
-/// `promote_to_concept` (`doc.promote_to_concept`, [`promote_to_concept_ops`])
-/// and `apply_concept_operation` (`doc.apply_concept_operation`,
-/// [`apply_concept_operation_ops`]).
-pub const ACTIONS: [&str; 2] = ["delete_symbol_action", "delete_symbol_orphan_confirm_ok"];
-
-/// What a hosted verb asks its caller to do besides the document change it
-/// already made.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Outcome {
-    /// Nothing further (including a verb that found nothing to do).
-    Done,
-    /// The Symbols panel's selection becomes this (`None` clears it).
-    SelectSymbol(Option<String>),
-    /// Open the named confirm dialog with these params; the document is
-    /// unchanged. The engine opens it in its store (the dialog door).
-    Dialog { id: String, params: Value },
-    /// Close the open dialog (the confirm's OK already ran). When it deleted
-    /// the master, the Symbols panel's selection is cleared as well.
-    CloseDialog { cleared_selection: bool },
-}
-
-/// Run the hosted verb `action`, or `None` when it is not one of [`ACTIONS`].
-pub fn run(
-    model: &mut Model,
-    action: &str,
-    _params: &Value, // no hosted verb reads its params since apply_concept_operation left
-    selected_symbol: Option<&str>,
-) -> Option<Outcome> {
-    Some(match action {
-        "delete_symbol_action" => {
-            let Some(master) = selected_symbol else { return Some(Outcome::Done) };
-            let usage = crate::document::dependency_index::dependency_index(model.document())
-                .rdeps.get(master).map(|v| v.len()).unwrap_or(0);
-            if usage > 0 {
-                // Reference-aware: warn first, mutate nothing.
-                return Some(Outcome::Dialog {
-                    id: "delete_symbol_orphan_confirm".into(),
-                    params: json!({"count": usage}),
-                });
-            }
-            model.with_txn(|m| Controller::delete_symbol(m, master));
-            Outcome::SelectSymbol(None)
-        }
-        "delete_symbol_orphan_confirm_ok" => {
-            let Some(master) = selected_symbol else {
-                return Some(Outcome::CloseDialog { cleared_selection: false });
-            };
-            model.with_txn(|m| Controller::delete_symbol(m, master));
-            Outcome::CloseDialog { cleared_selection: true }
-        }
-        _ => return None,
-    })
+/// The one op the Symbols panel's Delete Symbol applies (`doc.delete_symbol`
+/// in actions.yaml, SYMBOLS.md §7), or `None` unless `master` names a master
+/// in the store: `delete_symbol` of that id. Its instances are left in place,
+/// resolving to nothing. Whether to ask first is the YAML's
+/// (`active_document.symbol_usage`). The reference's `delete_symbol_ops`.
+pub fn delete_symbol_ops(doc: &crate::document::document::Document, master: &str) -> Option<Vec<Value>> {
+    doc.symbols.iter().any(|e| e.common().id.as_deref() == Some(master))
+        .then(|| vec![json!({"op": "delete_symbol", "master_id": master})])
 }
 
 /// The one value-in-op op the Symbols panel's Place Instance applies

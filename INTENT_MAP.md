@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 3 |
-| `journaling` | 43 |
+| `journaling` | 45 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 188 |
+| `ui-state` | 186 |
 | `view` | 6 |
 | **total** | **245** |
 
 (The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (43)
+## Journaling actions (45)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -65,6 +65,8 @@ come additively from `native_intercepts`.)
 | `delete_layer_orphan_confirm_ok` | `doc.delete_at` |
 | `delete_layer_selection` | `doc.delete_at` |
 | `delete_selection` | `doc.op` |
+| `delete_symbol_action` | `doc.delete_symbol` |
+| `delete_symbol_orphan_confirm_ok` | `doc.delete_symbol` |
 | `document_setup_confirm` | `doc.set_document_setup_field` |
 | `duplicate_artboards` | `doc.duplicate_artboard` |
 | `duplicate_layer_selection` | `doc.clone_at`, `doc.insert_after` |
@@ -132,7 +134,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (188)
+## UI-state actions (186)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -147,42 +149,42 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `close_tab`, `close_window`, `close_without_saving`, `collapse_dock`,
 `complement_active_color`, `concepts_panel_select`, `confirm_rename`, `convert_to_artboards`,
 `copy`, `cut_orphan_confirm_ok`, `cycle_element_visibility`, `delete_brush`,
-`delete_orphan_confirm_ok`, `delete_swatch`, `delete_symbol_action`, `delete_symbol_orphan_confirm_ok`,
-`delete_workspace`, `discard_and_close_tab`, `dismiss_dialog`, `distribute_bottom`,
-`distribute_horizontal_center`, `distribute_horizontal_spacing`, `distribute_left`, `distribute_right`,
-`distribute_top`, `distribute_vertical_center`, `distribute_vertical_spacing`, `document_setup_toggle_bleed_uniform`,
-`duplicate_brush`, `duplicate_swatch`, `enter_isolation_mode`, `exit_isolation_mode`,
-`exit_isolation_to_level`, `expand_compound_shape`, `expand_dock`, `eyedropper_tool_options_confirm`,
-`eyedropper_tool_options_reset`, `flip_stroke_profile`, `invert_active_color`, `layers_element_select`,
-`layers_nav_down`, `layers_nav_left`, `layers_nav_right`, `layers_nav_up`,
-`layers_panel_select`, `layers_select_all`, `make_compound_shape`, `maximize_canvas`,
-`new_document`, `new_swatch`, `noop`, `open_artboard_options`,
-`open_boolean_options`, `open_brush_libraries_menu`, `open_brush_options`, `open_color_picker`,
-`open_document_setup`, `open_file`, `open_layer_options`, `open_paragraph_hyphenation`,
-`open_paragraph_justification`, `open_print_dialog`, `open_swatch_options`, `paintbrush_tool_options_confirm`,
-`paintbrush_tool_options_reset`, `paragraph_hyphenation_confirm`, `paragraph_justification_confirm`, `paste`,
-`paste_in_place`, `paste_preserving_layers`, `quit`, `rearrange_artboards`,
-`redo`, `release_compound_shape`, `release_transform`, `remove_tab`,
-`rename_artboard`, `rename_element`, `repeat_boolean_operation`, `reset_align_panel`,
-`reset_artboards_panel`, `reset_boolean_panel`, `reset_fill_stroke`, `reset_magic_wand_panel`,
-`reset_paragraph_panel`, `reset_stroke_profile`, `reset_workspace`, `restore_canvas`,
-`revert`, `revert_workspace`, `rotate_options_reset`, `save`,
-`save_all_and_close`, `save_all_then_close`, `save_and_close`, `save_appearance_as`,
-`save_appearance_confirm`, `save_as`, `save_brush_library`, `save_swatch_library`,
-`save_swatch_library_confirm`, `save_workspace_as`, `save_workspace_confirm`, `scale_options_reset`,
-`scroll_to_selected`, `select_all_unused_brushes`, `select_all_unused_swatches`, `set_active_color`,
-`set_active_color_none`, `set_align_to`, `set_arrow_align`, `set_artboard_fill_preset`,
-`set_artboard_reference_point`, `set_brush_thumbnail_size`, `set_brush_view_mode`, `set_color_panel_mode`,
-`set_fill_none`, `set_fill_type_gradient`, `set_fill_type_solid`, `set_layers_search`,
-`set_stroke_align`, `set_stroke_cap`, `set_stroke_join`, `set_stroke_none`,
-`set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`, `show_panel`,
-`solo_element_visibility`, `solo_layers_type_filter`, `sort_brushes_by_name`, `sort_swatches_by_name`,
-`swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`, `switch_appearance`,
-`switch_workspace`, `symbols_panel_select`, `tile_panes`, `toggle_artboard_chain_link`,
-`toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`, `toggle_canvas_maximize`,
-`toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`, `toggle_element_twirl`,
-`toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`, `toggle_link_arrowhead_scale`,
-`toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`, `undo`
+`delete_orphan_confirm_ok`, `delete_swatch`, `delete_workspace`, `discard_and_close_tab`,
+`dismiss_dialog`, `distribute_bottom`, `distribute_horizontal_center`, `distribute_horizontal_spacing`,
+`distribute_left`, `distribute_right`, `distribute_top`, `distribute_vertical_center`,
+`distribute_vertical_spacing`, `document_setup_toggle_bleed_uniform`, `duplicate_brush`, `duplicate_swatch`,
+`enter_isolation_mode`, `exit_isolation_mode`, `exit_isolation_to_level`, `expand_compound_shape`,
+`expand_dock`, `eyedropper_tool_options_confirm`, `eyedropper_tool_options_reset`, `flip_stroke_profile`,
+`invert_active_color`, `layers_element_select`, `layers_nav_down`, `layers_nav_left`,
+`layers_nav_right`, `layers_nav_up`, `layers_panel_select`, `layers_select_all`,
+`make_compound_shape`, `maximize_canvas`, `new_document`, `new_swatch`,
+`noop`, `open_artboard_options`, `open_boolean_options`, `open_brush_libraries_menu`,
+`open_brush_options`, `open_color_picker`, `open_document_setup`, `open_file`,
+`open_layer_options`, `open_paragraph_hyphenation`, `open_paragraph_justification`, `open_print_dialog`,
+`open_swatch_options`, `paintbrush_tool_options_confirm`, `paintbrush_tool_options_reset`, `paragraph_hyphenation_confirm`,
+`paragraph_justification_confirm`, `paste`, `paste_in_place`, `paste_preserving_layers`,
+`quit`, `rearrange_artboards`, `redo`, `release_compound_shape`,
+`release_transform`, `remove_tab`, `rename_artboard`, `rename_element`,
+`repeat_boolean_operation`, `reset_align_panel`, `reset_artboards_panel`, `reset_boolean_panel`,
+`reset_fill_stroke`, `reset_magic_wand_panel`, `reset_paragraph_panel`, `reset_stroke_profile`,
+`reset_workspace`, `restore_canvas`, `revert`, `revert_workspace`,
+`rotate_options_reset`, `save`, `save_all_and_close`, `save_all_then_close`,
+`save_and_close`, `save_appearance_as`, `save_appearance_confirm`, `save_as`,
+`save_brush_library`, `save_swatch_library`, `save_swatch_library_confirm`, `save_workspace_as`,
+`save_workspace_confirm`, `scale_options_reset`, `scroll_to_selected`, `select_all_unused_brushes`,
+`select_all_unused_swatches`, `set_active_color`, `set_active_color_none`, `set_align_to`,
+`set_arrow_align`, `set_artboard_fill_preset`, `set_artboard_reference_point`, `set_brush_thumbnail_size`,
+`set_brush_view_mode`, `set_color_panel_mode`, `set_fill_none`, `set_fill_type_gradient`,
+`set_fill_type_solid`, `set_layers_search`, `set_stroke_align`, `set_stroke_cap`,
+`set_stroke_join`, `set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`,
+`shear_options_reset`, `show_panel`, `solo_element_visibility`, `solo_layers_type_filter`,
+`sort_brushes_by_name`, `sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`,
+`swatch_options_confirm`, `switch_appearance`, `switch_workspace`, `symbols_panel_select`,
+`tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`,
+`toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`,
+`toggle_element_lock`, `toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`,
+`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`,
+`toggle_use_preview_bounds`, `undo`
 
 ## Verb -> journaling evidence table
 
@@ -194,12 +196,13 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 
 | doc.* verb | journals | op | reachable from actions | evidence |
 |---|---|---|---|---|
-| `doc.apply_concept_operation` | always | `apply_concept_operation` | yes | effects.rs:3010; op_apply.rs:2251 |
+| `doc.apply_concept_operation` | always | `apply_concept_operation` | yes | effects.rs:3026; op_apply.rs:2251 |
 | `doc.copy_selection` | always | `copy_selection` | no (tool YAML only) | effects.rs:948-961; op_apply.rs:1397 |
 | `doc.create_artboard` | always | `create_artboard` | yes | renderer.rs:3100-3136; op_apply.rs:1863 |
 | `doc.delete_artboard_by_id` | always | `delete_artboard_by_id` | yes | renderer.rs:3150-3159; op_apply.rs:1832 |
 | `doc.delete_at` | always | `delete_at` | yes | layer_doc_effects.rs:75; op_apply.rs:1554 |
 | `doc.delete_selection` | always | `delete_selection` | no (tool YAML only) | renderer.rs:3508-3513; op_apply.rs:1564 |
+| `doc.delete_symbol` | always | `delete_symbol` | yes | effects.rs:3010; op_apply.rs:2296 |
 | `doc.duplicate_artboard` | always | `duplicate_artboard` | yes | renderer.rs:3176-3229; op_apply.rs:1876 |
 | `doc.insert_after` | always | `insert_after` | yes | layer_doc_effects.rs:81; op_apply.rs:1571 |
 | `doc.insert_at` | always | `insert_at` | yes | layer_doc_effects.rs:89; op_apply.rs:1578 |
@@ -217,7 +220,7 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 | `doc.set_artboard_options_field` | always | `set_artboard_options_field` | yes | renderer.rs:3273-3290; op_apply.rs:1817 |
 | `doc.set_attr_on_selection` | always | `set_attr_on_selection` | yes | effects.rs:901-946; op_apply.rs:1676 |
 | `doc.set_color_management_field` | always | `set_color_management_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_concept_param` | always | `set_concept_param` | yes | effects.rs:3026; op_apply.rs:2235 |
+| `doc.set_concept_param` | always | `set_concept_param` | yes | effects.rs:3042; op_apply.rs:2235 |
 | `doc.set_document_setup_field` | always | `set_document_setup_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_graphics_field` | always | `set_graphics_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_marks_and_bleed_field` | always | `set_marks_and_bleed_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
@@ -247,10 +250,7 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 
 - **Static classification of the YAML bundle.** Several actions are
   `log`-stubs in YAML whose real behavior lives in native code:
-  `dispatch_action` natively intercepts the symbol/concept actions
-  `symbols_host::ACTIONS` names (`delete_symbol_action`,
-  `delete_symbol_orphan_confirm_ok`), which journal real ops through
-  `op_apply` natively; and `copy`/`paste` are handled natively by
+  `copy`/`paste` are handled natively by
   each app's clipboard route. Those actions classify as `ui-state` here
   because their YAML effect trees reach no `doc.*` verb; the class
   describes the YAML seam, not the native behavior behind it.

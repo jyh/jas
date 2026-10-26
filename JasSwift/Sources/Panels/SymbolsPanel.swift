@@ -1,19 +1,13 @@
-/// Symbols panel menu definition + native action arms (SYMBOLS.md §8, P3
-/// first slice).
+/// Symbols panel menu definition and the ops its YAML effects apply
+/// (SYMBOLS.md §8).
 ///
 /// The panel body (master row list + footer) is rendered by the generic
 /// YAML interpreter from `workspace/panels/symbols.yaml`; this module
-/// provides the hamburger-menu wiring (Window-menu integration) and the
-/// NATIVE action arms for the mutating symbol ops.
-///
-/// The mutating ops (new_symbol / place_instance / delete_symbol_action)
-/// mint ids by the value-in-op rule (like `makeInstance` in JasCommands)
-/// and call the shared symbol Controller ops, so the YAML actions are
-/// `log` stubs. ``dispatchSymbolAction(_:model:)`` is the single native
-/// entry point, called both from the hamburger menu (`dispatch`) and from
-/// the panel-footer button clicks (`YamlPanelBodyView.dispatchYamlAction`
-/// native fast-path). Mirrors the Rust lead's `dispatch_action` symbol
-/// intercept in `interpreter::renderer`.
+/// provides the hamburger-menu wiring (Window-menu integration), the
+/// value-in-op ops the `doc.*` effects apply (minting ids where a verb
+/// needs them, as Rust's `symbols_host` does), and Delete Symbol's confirm
+/// presenter (``runDeleteSymbol(_:confirm:)``). Since 2026-10-26 every
+/// symbol verb runs its YAML.
 
 import Foundation
 
@@ -24,10 +18,9 @@ public enum SymbolsPanel {
         menuItemsFromYaml("symbols_panel_content")
     }
 
-    /// Dispatch a menu command. `close_panel` is handled locally; the
-    /// symbol mutations route through the native ``dispatchSymbolAction``
-    /// arm (which reads the panel-selected master from the store, mints
-    /// ids, and calls the Controller ops).
+    /// Dispatch a menu command. `close_panel` is handled locally; New Symbol
+    /// and Place Instance run their YAML, and Delete Symbol runs its YAML
+    /// through ``runDeleteSymbol(_:confirm:)``, which presents its confirm.
     public static func dispatch(_ cmd: String, addr: PanelAddr,
                                  layout: inout WorkspaceLayout,
                                  model: Model? = nil) {
@@ -36,7 +29,7 @@ public enum SymbolsPanel {
             layoutApply(&layout, opClosePanel(addr))
         case "delete_symbol_action":
             guard let m = model else { return }
-            dispatchSymbolAction(cmd, model: m)
+            runDeleteSymbol(m)
         // Their YAML says what they do (`doc.new_symbol`, `doc.place_instance`).
         case "new_symbol", "place_instance":
             guard let m = model else { return }
@@ -115,53 +108,34 @@ public enum SymbolsPanel {
                              mint: { generateElementId() })
     }
 
-    /// Native intercept for the Symbols panel ops. Each takes a single
-    /// snapshot so the op is one undo step, then returns. Mirrors the
-    /// Rust `dispatch_action` symbol arms.
-    ///
-    /// - `new_symbol`: promote the single whole-element canvas selection
-    ///   to a master (mint master_id + ref_id, snapshot, makeSymbol),
-    ///   keeping the new master panel-selected.
-    /// - `place_instance`: place a new instance of the panel-selected
-    ///   master (mint ref_id, snapshot, placeInstance).
-    /// - `delete_symbol_action`: delete the panel-selected master.
-    ///   Reference-aware: when the master still has live instances, warn
-    ///   first via the synchronous orphan confirm (Swift's native modal
-    ///   precedent — same wording as the YAML dialog); confirming deletes
-    ///   it, Cancel does nothing. With no instances it deletes silently.
-    ///   Clears the panel selection after a delete.
-    static func dispatchSymbolAction(_ action: String, model: Model) {
-        switch action {
-        case "delete_symbol_action":
-            guard let masterId = selectedSymbol(model) else { return }
-            let usage = DependencyIndex.build(model.document)
-                .rdeps[masterId]?.count ?? 0
-            if usage > 0 {
-                // Reference-aware: warn before leaving live instances
-                // empty. Swift uses the synchronous native modal (the
-                // same precedent as the element-delete orphan confirm),
-                // with verbatim wording matching the YAML dialog. Cancel
-                // does nothing (no snapshot, no delete).
-                if !confirmOrphaningDeleteSymbol(usage) { return }
-            }
-            // The Controller mutator self-brackets one undo step via editDocument.
-            let controller = Controller(model: model)
-            controller.deleteSymbol(masterId: masterId)
-            setSelectedSymbol(model, nil)
-
-        default:
-            break
-        }
+    /// The one op Delete Symbol applies (`doc.delete_symbol` in actions.yaml,
+    /// SYMBOLS.md §7), or nil unless `master` names a master in the store:
+    /// `delete_symbol` of that id. Its instances stay in place, resolving to
+    /// nothing. Rust `symbols_host::delete_symbol_ops`.
+    static func deleteSymbolOps(_ doc: Document, master: String) -> [[String: Any]]? {
+        guard doc.symbols.contains(where: { $0.id == master }) else { return nil }
+        return [["op": "delete_symbol", "master_id": master]]
     }
 
-    /// Present the synchronous reference-aware delete confirm for the
-    /// Symbols panel. Body text is the cross-language-pinned
-    /// `orphanWarningBody` ("Deleting will leave N live instance(s)
-    /// empty.") so it reads identically to the YAML dialog. "Cancel" is
-    /// the safe default; "Delete" is the destructive confirming button.
-    /// Returns true when the user confirms. Mirrors JasCommands'
-    /// `confirmOrphaningDelete`.
-    static func confirmOrphaningDeleteSymbol(_ count: Int) -> Bool {
-        JasCommands.confirmOrphaningDelete(count)
+    /// Delete Symbol, every Mac route (the panel's Delete button and its
+    /// menu): actions.yaml `delete_symbol_action`. A master with live
+    /// instances leaves `delete_symbol_orphan_confirm` open in the store,
+    /// which the Mac presents AS its NSAlert (`confirm`, injectable for
+    /// tests): the dialog is closed there, and a Delete runs
+    /// `delete_symbol_orphan_confirm_ok`'s YAML with the dialog's `master` as
+    /// `param.master`, exactly as the dialog's Delete button passes it.
+    /// Otherwise the YAML deleted the master already, as ONE undo step.
+    /// `JasCommands.runDeleteSelection`'s form.
+    static func runDeleteSymbol(_ model: Model,
+                                confirm: (Int) -> Bool = JasCommands.confirmOrphaningDelete) {
+        LayersPanel.dispatchYamlAction("delete_symbol_action", model: model)
+        guard model.stateStore.getDialogId() == "delete_symbol_orphan_confirm" else { return }
+        let params = model.stateStore.getDialogParams() ?? [:]
+        let count = (params["count"] as? NSNumber)?.intValue ?? 0
+        model.stateStore.closeDialog()
+        if confirm(count) {
+            LayersPanel.dispatchYamlAction("delete_symbol_orphan_confirm_ok", model: model,
+                                           params: ["master": params["master"] ?? NSNull()])
+        }
     }
 }

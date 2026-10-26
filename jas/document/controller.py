@@ -313,6 +313,17 @@ def promote_to_concept_ops(doc: Document, registry: dict) -> list[dict] | None:
     return None
 
 
+def delete_symbol_ops(doc: Document, master) -> list[dict] | None:
+    """The one op the Symbols panel's Delete Symbol applies (SYMBOLS.md §7),
+    or None (a no-op) unless ``master`` names a master in the store:
+    ``delete_symbol`` of that id. Its instances are left in place, resolving
+    to nothing. Rust ``symbols_host::delete_symbol_ops``, Swift
+    ``SymbolsPanel.deleteSymbolOps``."""
+    if not isinstance(master, str) or not any(m.id == master for m in doc.symbols):
+        return None
+    return [{"op": "delete_symbol", "master_id": master}]
+
+
 def apply_concept_operation_ops(doc: Document, op_id, concept: dict | None) -> list[dict] | None:
     """The one value-in-op op a Concepts-panel operation button applies
     (CONCEPTS.md §9), or None (a no-op) unless exactly one generated instance

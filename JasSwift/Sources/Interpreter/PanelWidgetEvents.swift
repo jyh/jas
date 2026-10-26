@@ -373,14 +373,9 @@ func dispatchPanelAction(
         LayersPanel.dispatchYamlAction(name, model: model)
         return
     case "delete_symbol_action":
-        // Symbols panel footer button. Native intercept: mint ids by
-        // the value-in-op rule and call the shared symbol Controller
-        // ops (the YAML actions are `log` stubs). Mirrors the Rust
-        // `dispatch_action` symbol arms; the reference-aware delete
-        // confirm is a synchronous native modal. The panel's
-        // `selected_symbol` is already pinned in the store as the
-        // active panel, so SymbolsPanel reads / writes it directly.
-        SymbolsPanel.dispatchSymbolAction(name, model: model)
+        // Symbols panel footer button: its YAML, with the confirm presented
+        // as the Mac's NSAlert (``SymbolsPanel/runDeleteSymbol(_:confirm:)``).
+        SymbolsPanel.runDeleteSymbol(model)
         return
     case "place_concept_instance", "set_concept_param", "apply_concept_operation":
         // Their YAML says what they do (`doc.place_concept_instance`,
