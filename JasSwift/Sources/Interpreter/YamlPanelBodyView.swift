@@ -4344,12 +4344,21 @@ struct TreeViewContent: View {
         collect(tops, prefix: [])
     }
 
+    /// Run `exit_isolation_to_level`, which keeps `level` levels of the
+    /// model's stack (the action's pop handler writes `isolationStack`'s home).
+    private func exitIsolation(toLevel level: Int) {
+        LayersPanel.dispatchYamlAction("exit_isolation_to_level", model: model,
+                                       params: ["level_index": level])
+    }
+
     @ViewBuilder
     private var breadcrumbBar: some View {
         HStack(spacing: 4) {
             SwiftUI.Text("⌂")
                 .font(.system(size: 11))
-                .onTapGesture { isolationStack.removeAll() }
+                // The breadcrumb's declared action (layers.yaml lp_breadcrumb):
+                // the chevron passes 0, which exits isolation.
+                .onTapGesture { exitIsolation(toLevel: 0) }
             ForEach(Array(isolationStack.enumerated()), id: \.offset) { idx, p in
                 SwiftUI.Text(">")
                     .font(.system(size: 9))
@@ -4361,7 +4370,7 @@ struct TreeViewContent: View {
                 }()
                 SwiftUI.Text(label)
                     .font(.system(size: 11))
-                    .onTapGesture { isolationStack = Array(isolationStack.prefix(idx + 1)) }
+                    .onTapGesture { exitIsolation(toLevel: idx + 1) }
             }
             Spacer()
         }

@@ -774,7 +774,10 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
  * item was chosen, BL1, and never authors params; the menu structure carries
  * none), or `{"action": <id>, "params": {...}}` directly, `params` optional.
  * The core runs the action's effects as `jas_panel_behavior` runs a widget's,
- * with no panel made active.
+ * with no panel made active. `{"panel": <content id>, "action": <id>,
+ * "params": {...}}` (no `menu_index`) runs it with that panel active and in
+ * its scope, as the panel's own widget runs it (a Layers breadcrumb's
+ * `exit_isolation_to_level`, on no menu); its params are values, as above.
  *
  * `{"key": <name>, "mods": {"shift": b, "alt": b, "ctrl": b}}` is a KEY: the
  * engine resolves it (the active tool, then `shortcuts.yaml`; an unclaimed

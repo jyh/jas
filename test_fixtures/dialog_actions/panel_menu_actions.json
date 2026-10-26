@@ -923,5 +923,73 @@
         ]
       }
     }
+  },
+  {
+    "name": "exit_isolation_to_level_keeps_the_levels_up_to_the_clicked_crumb",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml lp_breadcrumb: clicking the first crumb passes level_index = level._index + 1 = 1; actions.yaml exit_isolation_to_level keeps that many levels of panel.isolation_stack, popping the rest (two levels seeded, one kept). The web and Mac breadcrumbs truncate natively to the same length.",
+    "panel_state": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "exit_isolation_to_level",
+        "panel": "layers_panel_content",
+        "params": {
+          "level_index": 1
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ]
+        ]
+      }
+    }
+  },
+  {
+    "name": "exit_isolation_to_level_zero_exits_isolation",
+    "setup_svg": "group_nested.svg",
+    "note": "layers.yaml lp_breadcrumb's chevron passes level_index 0: every level is popped and isolation is fully exited.",
+    "panel_state": {
+      "layers_panel_content": {
+        "isolation_stack": [
+          [
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "exit_isolation_to_level",
+        "panel": "layers_panel_content",
+        "params": {
+          "level_index": 0
+        }
+      }
+    ],
+    "expected_panel": {
+      "layers_panel_content": {
+        "isolation_stack": []
+      }
+    }
   }
 ]

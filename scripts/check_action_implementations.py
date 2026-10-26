@@ -152,7 +152,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 52
+# 51 since `exit_isolation_to_level` gained its pops (2026-10-25): both
+# breadcrumbs had truncated their own stacks natively, and now run it.
+MIN_LOG_ONLY = 51
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
