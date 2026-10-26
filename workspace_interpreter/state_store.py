@@ -140,24 +140,38 @@ def _holds_reference(node) -> bool:
     return False
 
 
+# The common props the op bridge flattens to an element's top level
+# (``geometry.test_json._common_fields``), and its lowercase container types.
+_BRIDGED_COMMON = ("locked", "name", "id", "opacity", "transform", "visibility")
+_BRIDGED_KIND = {"layer": "Layer", "group": "Group"}
+
+
+def _native_view(elem):
+    """An element of the store's document as the YAML reads it, in the native
+    form (``kind``, props under ``common``), from either form the store holds:
+    the native one, or the op bridge's test JSON (``type``, common props
+    flattened), which ``apply_op`` writes back after ANY op. A shallow copy for
+    a bridged element; the element itself otherwise. STATUS-jas item 25."""
+    if not isinstance(elem, dict) or "type" not in elem or "kind" in elem:
+        return elem
+    view = dict(elem)
+    view["kind"] = _BRIDGED_KIND.get(elem["type"], elem["type"])
+    view["common"] = {k: elem[k] for k in _BRIDGED_COMMON if k in elem}
+    return view
+
+
 def _layer_facts(layers) -> dict:
     """The Layers menu's three toggle-all facts over the document's top-level
     layers (`runtime_contexts.yaml`): any layer not invisible, any layer in
     preview, any layer unlocked; all false with no layers. A layer is read in
-    either form the store holds: the op bridge's test JSON (``type: layer``,
-    ``visibility``/``locked`` at top level) or the native form (``kind:
-    Layer``, under ``common``). Mirrors Rust ``document_views::layer_facts``
-    and Swift ``layerFacts``."""
+    either form the store holds, through ``_native_view``. Mirrors Rust
+    ``document_views::layer_facts`` and Swift ``layerFacts``."""
     vis, locked = [], []
     for elem in layers or ():
-        if not isinstance(elem, dict):
+        elem = _native_view(elem)
+        if not isinstance(elem, dict) or elem.get("kind") != "Layer":
             continue
-        if elem.get("type") == "layer":
-            props = elem
-        elif elem.get("kind") == "Layer":
-            props = elem.get("common") or {}
-        else:
-            continue
+        props = elem.get("common") or {}
         vis.append(props.get("visibility", "preview"))
         locked.append(bool(props.get("locked", False)))
     return {
@@ -1162,6 +1176,10 @@ class StateStore:
         if elem is None or not isinstance(elem, dict):
             return False
         keys = dotted_field.split(".")
+        # A bridged element keeps its common props at its top level.
+        if "type" in elem and "kind" not in elem and keys[0] == "common" \
+                and len(keys) == 2 and keys[1] in _BRIDGED_COMMON:
+            keys = keys[1:]
         for k in keys[:-1]:
             if k not in elem or not isinstance(elem[k], dict):
                 elem[k] = {}
@@ -1378,6 +1396,7 @@ class StateStore:
         top_level_layer_paths = []
         layer_names = set()
         for i, elem in enumerate(layers):
+            elem = _native_view(elem)
             if isinstance(elem, dict) and elem.get("kind") == "Layer":
                 # Expose layer with its path for HOF predicates
                 view = dict(elem)
@@ -1440,7 +1459,7 @@ class StateStore:
         # found both unpublished. Mirrors build_active_document_view in
         # jas_dioxus and buildActiveDocumentView in JasSwift.
         def _kind(path: tuple[int, ...]) -> str | None:
-            elem = self.get_element(path)
+            elem = _native_view(self.get_element(path))
             return elem.get("kind") if isinstance(elem, dict) else None
         layers_panel_selection_is_container = (
             len(sel_paths) == 1 and _kind(sel_paths[0]) in ("Group", "Layer")
