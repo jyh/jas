@@ -173,6 +173,12 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 33 the same day: `delete_symbol_action` and `delete_symbol_orphan_confirm_ok`
 # (`doc.delete_symbol`, the confirm asked through `active_document.symbol_usage`).
 MIN_LOG_ONLY = 33
+# Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
+# the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
+# 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
+# close_window and save_all_then_close have no arm in either port, so they
+# cannot declare it, and the clipboard four are engine law plus a host write).
+NATIVE_DECLARED = 4
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -193,6 +199,32 @@ def log_only_actions(doc: dict) -> set[str]:
         kinds = [next(iter(e)) if isinstance(e, dict) else str(e) for e in eff]
         if set(kinds) == {"log"}:
             out.add(name)
+    return out
+
+
+def native_declared(doc: dict) -> dict[str, str]:
+    """Actions that DECLARE themselves native: `native: <reason>` on the action
+    entry (a non-empty string), the host acts a YAML cannot do (an OS dialog,
+    the window, the dock). Declared ON the entry, not in `native_intercepts`,
+    because `check_workspace_ids` refuses a verb in both tables and the entry
+    keeps its description and `enabled_when`."""
+    out = {}
+    for name, spec in (doc.get("actions") or {}).items():
+        if isinstance(spec, dict) and isinstance(spec.get("native"), str) and spec["native"]:
+            out[name] = spec["native"]
+    return out
+
+
+def check_native_declared(declared: dict, rows: dict) -> list[str]:
+    """A declaration is a claim, so verify it: each declared action must be a
+    log-only action native in BOTH ports. Returns one line per false one."""
+    out = []
+    for a in sorted(declared):
+        v = rows.get(a)
+        if v is None:
+            out.append(f"{a}: declares `native:` but is not a log-only action, so its YAML does the work")
+        elif v != "native_both":
+            out.append(f"{a}: declares `native:` but classifies {v}")
     return out
 
 
@@ -455,6 +487,19 @@ def self_test() -> int:
         print(f"SELF-TEST FAILED -- cannot read the tree: {e}")
         return 1
 
+    # (c) A `native:` declaration is a CLAIM, verified: the action must be
+    #     native in both ports, or the declaration is false.
+    if check_native_declared({"x": "the OS"}, {"x": "native_both"}):
+        failures.append("  c: a declared action native in both ports must pass")
+    for rows_x, why in (({"x": "dead_both"}, "no arm in either port"),
+                        ({"x": "DIVERGENT:rust"}, "an arm in one port"),
+                        ({}, "not a log-only action at all")):
+        if len(check_native_declared({"x": "the OS"}, rows_x)) != 1:
+            failures.append(f"  c: a declaration over {why} must be refused")
+    if native_declared({"actions": {"x": {"native": ""}, "y": {"native": 3},
+                                    "z": {"native": "the OS"}}}) != {"z": "the OS"}:
+        failures.append("  c: only a non-empty string declares")
+
     anchors = {
         # verified by hand: menu_bar.rs:67 real body / JasCommands "undo"
         "undo": "native_both",
@@ -638,6 +683,16 @@ def main() -> int:
               "is a result.", file=sys.stderr)
         return 1
 
+    declared = native_declared(doc)
+    false_decl = check_native_declared(declared, rows)
+    if false_decl or len(declared) != NATIVE_DECLARED:
+        print(f"ERROR: {len(declared)} action(s) declare `native:` (exactly "
+              f"{NATIVE_DECLARED} expected); {len(false_decl)} declaration(s) do "
+              f"not hold:", file=sys.stderr)
+        for line in false_decl:
+            print(f"  {line}", file=sys.stderr)
+        return 1
+
     divergent = {a: v for a, v in rows.items() if v.startswith("DIVERGENT")}
 
     # A declared divergence is RULED AND SCHEDULED, not accepted -- and its
@@ -671,12 +726,16 @@ def main() -> int:
           f"{len(known)} DECLARED divergence(s) awaiting their queued fix, "
           f"{len(divergent)} UNDECLARED.")
     print()
+    print(f"  declared `native:` ({len(declared)}, each verified native in both): "
+          f"{', '.join(sorted(declared))}; {len(lo) - len(declared)} log-only "
+          f"action(s) undeclared.")
     if both:
-        missing_ni = sorted(set(both) - ni)
+        missing_ni = sorted(set(both) - ni - set(declared))
         print(f"  native in both ({len(both)}): {', '.join(sorted(both))}")
         if missing_ni:
-            print(f"    -> {len(missing_ni)} not yet in `native_intercepts`, which is "
-                  f"where a permanent native action belongs.")
+            print(f"    -> {len(missing_ni)} not yet declared: a permanent host act "
+                  f"takes `native: <reason>` on its entry (not `native_intercepts`, "
+                  f"which check_workspace_ids refuses for a verb `actions:` defines).")
     if dead:
         print()
         print(f"  NO DISPATCH ENTRY IN EITHER PORT ({len(dead)}) -- a MIXED "

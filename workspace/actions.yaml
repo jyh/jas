@@ -52,6 +52,7 @@ actions:
       duplicate. Otherwise create a new tab, parse the SVG, and display it
       on the canvas. The tab label shows the filename.
     category: file
+    native: "the OS file-open dialog, then a tab per file the shell reads"
     effects:
       - log: "open_file: show native file dialog"
   save:
@@ -76,6 +77,7 @@ actions:
       SVG, updates the tab label to the new filename, and clears the
       modified flag.
     category: file
+    native: "the OS save dialog; the shell writes the file the engine serialises"
     enabled_when: "state.tab_count > 0"
     effects:
       - log: "save_as: show native save dialog"
@@ -88,6 +90,7 @@ actions:
       artist can take a revert back, and the modified flag is reset. Only
       enabled when the document has a filename and has been modified.
     category: file
+    native: "the shell re-reads the bytes the tab was opened from or last saved as"
     enabled_when: "active_document.is_modified and active_document.has_filename"
     effects:
       - log: "revert: reload {{active_document.filename}}"
@@ -1011,6 +1014,7 @@ actions:
       hide, place, and activate identically. This is the single generic
       panel-toggle path — there are no per-panel variants.
     category: window
+    native: "the dock: showing or hiding a panel is the shell's window layout"
     params:
       panel: { type: enum, values: [layers, color, swatches, brushes, gradient, stroke, properties, character, paragraph, artboards, align, boolean, opacity, magic_wand, symbols, concepts] }
     effects:
