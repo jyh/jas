@@ -267,8 +267,24 @@ fn run_effects_into<'h>(
                 }
             }
             serde_json::Value::Object(map) => {
+                // `as:` binds a Layers verb's return value for the rest of the
+                // batch (`layer_doc_effects::binding`), computed BEFORE the verb
+                // runs, so a deletion binds the element it removes.
+                let bound = match (map.get("as").and_then(|v| v.as_str()), model.as_deref()) {
+                    (Some(as_name), Some(m)) => map.iter()
+                        .find(|(k, _)| crate::interpreter::layer_doc_effects::VERBS.contains(&k.as_str()))
+                        .and_then(|(k, spec)| crate::interpreter::layer_doc_effects::binding(
+                            k, spec, &|e| eval_expr(e, store, &ctx), m))
+                        .map(|v| (as_name.to_string(), v)),
+                    _ => None,
+                };
                 run_one(map, &ctx, store, model.as_deref_mut(), actions, dialogs,
                         host.as_deref_mut(), report);
+                if let Some((as_name, v)) = bound {
+                    if let Some(m) = ctx.to_mut().as_object_mut() {
+                        m.insert(as_name, v);
+                    }
+                }
             }
             // `- snapshot` (every align and boolean action's first effect) is
             // a string. The reference runs a bare string as `{s: null}`
@@ -1500,6 +1516,13 @@ fn run_doc_effect(
     model: &mut Model,
     report: &mut EffectsReport,
 ) {
+    // The Layers panel's structural verbs: one implementation, the web's too.
+    {
+        let snapshot = &*store;
+        if crate::interpreter::layer_doc_effects::run(name, spec, ctx, &|e| eval_expr(e, snapshot, ctx), model) {
+            return;
+        }
+    }
     match name {
         "doc.snapshot" => {
             model.begin_txn();
