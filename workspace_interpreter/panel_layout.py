@@ -174,6 +174,23 @@ def _text_w(node: dict, key: str, ctx: dict) -> int:
     return len(resolved) * CHAR_WIDTH
 
 
+def _button_label_w(node: dict, ctx: dict) -> int:
+    """A button's label as it draws: ``bind.label`` evaluated as an
+    expression when that yields a string, else the static ``label`` (Rust
+    ``render_button``). Measuring the static key alone planned a bound label
+    at 0 (flask STATUS §569, finding L)."""
+    bind = node.get("bind")
+    expr = bind.get("label") if isinstance(bind, dict) else None
+    if isinstance(expr, str):
+        try:
+            value = evaluate(expr, ctx).value
+        except Exception:
+            value = None
+        if isinstance(value, str):
+            return len(value) * CHAR_WIDTH
+    return _text_w(node, "label", ctx)
+
+
 def _radio_group_w(node: dict, ctx: dict) -> int:
     """A ``radio_group``'s options in a row: each a 16 indicator plus, when it
     has a label, a 4 gap and the label; options 6 apart. Computed options (an
@@ -273,7 +290,7 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
     elif t == "text":
         w = _text_w(node, "content", ctx)
     elif t == "button":
-        w = _text_w(node, "label", ctx) + 16
+        w = _button_label_w(node, ctx) + 16
     elif t in ("checkbox", "toggle", "radio"):
         w = 16 + 4 + _text_w(node, "label", ctx)
     elif t == "radio_group":
