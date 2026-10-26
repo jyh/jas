@@ -4352,11 +4352,21 @@ actions:
       canvas looks unchanged. Enabled only when exactly one whole canvas
       element is selected. A fresh master id and instance id are minted by
       the initiator (value-in-op) and carried in the operation; never
-      minted inside the shared core. Single undo op.
+      minted inside the shared core. An element that already has an id keeps
+      it as the master's id, so the master is known only after the operation:
+      the effect returns it, and the Symbols panel then selects it, so Place
+      Instance and Delete target it at once. Single undo op. Unless exactly
+      one whole element is selected, nothing happens.
     category: symbols
     enabled_when: "active_document.selection_count == 1"
     effects:
-      - log: "new_symbol"
+      - snapshot
+      - doc.new_symbol: {}
+        as: master
+      - if:
+          condition: "master != null"
+          then:
+            - set_panel_state: { panel: symbols, key: selected_symbol, value: "master" }
 
   make_instance:
     description: >

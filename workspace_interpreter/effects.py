@@ -565,6 +565,12 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.promote_to_concept()
         return None
 
+    # doc.new_symbol: {} — Make Symbol: the one wholly selected element becomes
+    # a master; returns the master's id (read after the op) for `as:`.
+    # StateStore.new_symbol.
+    if "doc.new_symbol" in effect:
+        return None, store.new_symbol()
+
     # doc.set_concept_param: { name: <expr>, value: <expr> } — a Concepts-panel
     # parameter field's commit: params[name] = value on the one selected
     # generated instance. StateStore.set_concept_param.

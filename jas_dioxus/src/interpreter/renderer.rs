@@ -2496,6 +2496,19 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // doc.new_symbol: Make Symbol, `symbols_host::run_new_symbol` (the
+    // engine's runner calls it too); `as:` binds the master it made, which
+    // exists only after the op, in this runner's ctx.
+    if eff.get("doc.new_symbol").is_some() {
+        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+            let master = super::symbols_host::run_new_symbol(&mut tab.model);
+            if let (Some(as_n), Some(map)) = (as_name, eval_ctx.as_object_mut()) {
+                map.insert(as_n, master.map_or(serde_json::Value::Null, serde_json::Value::String));
+            }
+        }
+        return deferred;
+    }
+
     // doc.copy_selection_to_clipboard — copy the current selection to the
     // SYSTEM clipboard as SVG (cut OK path). Mirrors the inline copy the
     // menu/keyboard cut runs. This is a non-document side effect (no snapshot
@@ -13590,6 +13603,33 @@ mod tests {
         let _ = dispatch_action("toggle_all_layers_visibility", &serde_json::Map::new(), &mut st);
         assert_eq!(label(&st, "toggle_all_layers_visibility"), "Show All Layers", "every layer is hidden");
         assert_eq!(label(&st, "toggle_all_layers_outline"), "Preview All Layers", "none is in preview");
+    }
+
+    /// Make Symbol runs its YAML on the web (`doc.new_symbol` + `as: master` +
+    /// `set_panel_state`): the selected element becomes a master (keeping its
+    /// own id when it has one, a minted one otherwise), a reference stays in
+    /// its place, and the Symbols panel selects the master, ONE undo.
+    #[test]
+    fn new_symbol_promotes_and_panel_selects_the_master_on_the_web() {
+        use crate::document::test_fixture::{model_with, rect};
+        for own_id in [Some("r1"), None] {
+            let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+            let mut r = rect(0.0, 0.0, 10.0, 10.0);
+            r.common_mut().id = own_id.map(String::from);
+            st.tabs[st.active_tab].model.set_document_for_test(model_with(vec![r], &[0]).document().clone());
+            let before = st.tabs[st.active_tab].model.document().clone();
+            st.symbols_selected = None;
+            let _ = dispatch_action("new_symbol", &serde_json::Map::new(), &mut st);
+            let doc = st.tabs[st.active_tab].model.document().clone();
+            assert_eq!(doc.symbols.len(), 1, "{own_id:?}: one master");
+            let master = doc.symbols[0].common().id.clone().expect("the master has an id");
+            if let Some(id) = own_id {
+                assert_eq!(master, id, "an element keeps its own id as the master's");
+            }
+            assert_eq!(st.symbols_selected.as_deref(), Some(master.as_str()), "{own_id:?}: the panel selects it");
+            st.tabs[st.active_tab].model.undo();
+            assert_eq!(st.tabs[st.active_tab].model.document().layers, before.layers, "{own_id:?}: one undo");
+        }
     }
 
     #[test]

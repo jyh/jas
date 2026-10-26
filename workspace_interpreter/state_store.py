@@ -852,6 +852,21 @@ class StateStore:
         doc = test_json_to_document(json.dumps(self._document))
         for op in promote_to_concept_ops(doc, concepts(ws)) or []:
             self.apply_op(op)
+    def new_symbol(self):
+        """Make Symbol on the store's document: the op
+        ``document.controller.new_symbol_ops`` mints, applied through the op
+        layer; returns the master it made (read after the op), or None."""
+        if self._document is None:
+            return None
+        import json
+        from document.controller import new_symbol_ops, new_symbol_master
+        from geometry.test_json import test_json_to_document
+        ops = new_symbol_ops(test_json_to_document(json.dumps(self._document)))
+        if not ops:
+            return None
+        for op in ops:
+            self.apply_op(op)
+        return new_symbol_master(test_json_to_document(json.dumps(self._document)), ops[0]["path"])
 
     def set_concept_param(self, name, value) -> None:
         """A Concepts-panel parameter field's commit on the store's document:

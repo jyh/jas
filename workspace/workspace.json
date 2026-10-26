@@ -6159,12 +6159,28 @@
       ]
     },
     "new_symbol": {
-      "description": "Promote the single selected canvas element to a master (SYMBOLS.md \u00a77 Make Symbol). The selected element moves off-canvas into the master store and an instance of it is left in its place, so the canvas looks unchanged. Enabled only when exactly one whole canvas element is selected. A fresh master id and instance id are minted by the initiator (value-in-op) and carried in the operation; never minted inside the shared core. Single undo op.\n",
+      "description": "Promote the single selected canvas element to a master (SYMBOLS.md \u00a77 Make Symbol). The selected element moves off-canvas into the master store and an instance of it is left in its place, so the canvas looks unchanged. Enabled only when exactly one whole canvas element is selected. A fresh master id and instance id are minted by the initiator (value-in-op) and carried in the operation; never minted inside the shared core. An element that already has an id keeps it as the master's id, so the master is known only after the operation: the effect returns it, and the Symbols panel then selects it, so Place Instance and Delete target it at once. Single undo op. Unless exactly one whole element is selected, nothing happens.\n",
       "category": "symbols",
       "enabled_when": "active_document.selection_count == 1",
       "effects": [
+        "snapshot",
         {
-          "log": "new_symbol"
+          "doc.new_symbol": {},
+          "as": "master"
+        },
+        {
+          "if": {
+            "condition": "master != null",
+            "then": [
+              {
+                "set_panel_state": {
+                  "panel": "symbols",
+                  "key": "selected_symbol",
+                  "value": "master"
+                }
+              }
+            ]
+          }
         }
       ]
     },

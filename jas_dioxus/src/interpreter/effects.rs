@@ -278,6 +278,17 @@ fn run_effects_into<'h>(
                         .map(|v| (as_name.to_string(), v)),
                     _ => None,
                 };
+                // `doc.new_symbol` binds a value that exists only AFTER it runs
+                // (the master id), so with an `as:` name it runs here.
+                if let (true, Some(as_name), Some(m)) = (map.contains_key("doc.new_symbol"),
+                        map.get("as").and_then(|v| v.as_str()), model.as_deref_mut()) {
+                    let master = crate::interpreter::symbols_host::run_new_symbol(m);
+                    if let Some(c) = ctx.to_mut().as_object_mut() {
+                        c.insert(as_name.to_string(), master.map_or(serde_json::Value::Null, serde_json::Value::String));
+                    }
+                    report_writes(store, model.as_deref_mut(), host.as_deref_mut());
+                    continue;
+                }
                 run_one(map, &ctx, store, model.as_deref_mut(), actions, dialogs,
                         host.as_deref_mut(), report);
                 if let Some((as_name, v)) = bound {
@@ -2981,6 +2992,12 @@ fn run_doc_effect(
         // `symbols_host::promote_to_concept_ops` builds for the one selected
         // shape a fitter matches, under the action's `snapshot`. The
         // reference's `StateStore.promote_to_concept` the same.
+        // doc.new_symbol: {}: Make Symbol, `symbols_host::run_new_symbol`. The
+        // batch loop runs it when an `as:` name binds its master, which
+        // exists only after the op; this arm is the unbound case.
+        "doc.new_symbol" => {
+            let _ = crate::interpreter::symbols_host::run_new_symbol(model);
+        }
         "doc.promote_to_concept" => {
             for op in crate::interpreter::symbols_host::promote_to_concept_ops(model.document()).unwrap_or_default() {
                 let _ = crate::document::op_apply::op_apply(model, &op);
@@ -15379,9 +15396,11 @@ mod tests {
 
     #[test]
     fn real_stub_actions_report_as_not_done() {
-        // A log-only body: the purest successful no-op.
-        assert_eq!(report_of_real_action("new_symbol"),
-                   vec![Unhandled::Logged("new_symbol".into())]);
+        // A log-only body: the purest successful no-op. (`new_symbol` was the
+        // example until 2026-10-26, when it became `doc.new_symbol`; any
+        // `log`-only action serves, and this one moves when it leaves too.)
+        assert_eq!(report_of_real_action("layers_nav_down"),
+                   vec![Unhandled::Logged("layers_nav_down".into())]);
         // A log BESIDE a handled effect is still a stub for the real work.
         // (`save` on an untitled document dispatches `save_as`, a log too.)
         assert_eq!(report_of_real_action("save_and_close"),

@@ -182,6 +182,7 @@
               "properties": { "concept": { "type": "string" } }
             },
             "doc.promote_to_concept": { "type": "object" },
+            "doc.new_symbol": { "type": "object" },
             "doc.set_concept_param": {
               "type": "object",
               "required": ["name", "value"],

@@ -180,6 +180,13 @@ VERB_TABLE = {
         "journals": "always", "op": "set_concept_param",
         "evidence": ["effects.rs:2961", "op_apply.rs:2235"],
     },
+    "doc.new_symbol": {
+        # Make Symbol: one value-in-op op whose two ids the effect mints first;
+        # its `as:` value is the master, read after the op
+        # (symbols_host::run_new_symbol), through op_apply.
+        "journals": "always", "op": "make_symbol",
+        "evidence": ["effects.rs:2998", "op_apply.rs:2192"],
+    },
     "doc.promote_to_concept": {
         # Object > Promote to Concept: one op replacing the one selected shape a
         # fitter matches (symbols_host::promote_to_concept_ops), through op_apply.
@@ -670,7 +677,7 @@ def render_md(entries, summary):
     a("- **Static classification of the YAML bundle.** Several actions are")
     a("  `log`-stubs in YAML whose real behavior lives in native code:")
     a("  `dispatch_action` natively intercepts the symbol/concept actions")
-    a("  `symbols_host::ACTIONS` names (`new_symbol`, `delete_symbol_action`,")
+    a("  `symbols_host::ACTIONS` names (`delete_symbol_action`,")
     a("  `delete_symbol_orphan_confirm_ok`, `apply_concept_operation`), several")
     a("  of which journal real ops through")
     a("  `op_apply` natively; and `copy`/`paste` are handled natively by")

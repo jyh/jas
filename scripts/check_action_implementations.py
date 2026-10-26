@@ -168,7 +168,8 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 38 the same day: `place_concept_instance` and `set_concept_param`
 # (`doc.place_concept_instance`, `doc.set_concept_param`).
 # 37 the same day: `promote_to_concept` (`doc.promote_to_concept`).
-MIN_LOG_ONLY = 37
+# 36 the same day: `new_symbol` (`doc.new_symbol`, which binds its master).
+MIN_LOG_ONLY = 36
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -477,10 +478,10 @@ def self_test() -> int:
         # O1.3 (2026-07-30) until 2026-10-25, when it and the other four swatch
         # verbs became `swatch.*` effects in actions.yaml and LEFT the log-only
         # set this table classifies. Dropped rather than moved: undo, save_as,
-        # revert, toggle_panel and new_symbol still hold the native_both class.
-        # place_instance was anchored beside new_symbol until 2026-10-26, when it
-        # became `doc.place_instance` and left the set; new_symbol alone now
-        # anchors the `symbols_host::ACTIONS` scan.
+        # revert and toggle_panel still hold the native_both class.
+        # place_instance and then new_symbol anchored the `symbols_host::ACTIONS`
+        # scan until 2026-10-26, when each became a `doc.*` effect and left the
+        # set; delete_symbol_action, still hosted there, anchors it now.
         # THE TWO CLASSES THAT PRODUCED FALSE DIVERGENCES on the first
         # production run, anchored so they cannot regress:
         #   guard arm -- jas_dioxus routes panel toggles through
@@ -491,7 +492,7 @@ def self_test() -> int:
         #   `dispatch_action`, where the work is done. Since W2b-17 the verbs
         #   live in `symbols_host.rs`'s `pub const ACTIONS`, and these two
         #   anchors are what caught the literal scan going blind to them.
-        "new_symbol": "native_both",
+        "delete_symbol_action": "native_both",
     }
     for a, want in anchors.items():
         got = rows.get(a, "<not in the log-only set>")

@@ -427,3 +427,47 @@ def test_promote_to_concept_from_actions_yaml_replaces_a_fitted_shape():
                                ((square, square), [(0, 0), (0, 1)]), ((square,), [])):
         store, before = run(*children, selected=selected)
         assert json.dumps(store._document, sort_keys=True) == before, f"{children} {selected}: nothing"
+
+
+def test_new_symbol_from_actions_yaml_promotes_and_panel_selects_the_master():
+    """`actions.yaml` new_symbol (SYMBOLS.md §7 Make Symbol): the ONE wholly
+    selected element becomes a master and a reference to it stays in its
+    place, and the Symbols panel selects the master. The master's id is the
+    element's own when it has one (make_symbol keeps it) and a minted one
+    otherwise, so the id the panel selects is read AFTER the op: the YAML
+    binds it (`as: master`) and writes it with `set_panel_state`. Two selected,
+    or none: nothing."""
+    effects = _action_effects("new_symbol")
+
+    def run(*children, selected):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),),
+                       selection=frozenset(ElementSelection.all(p) for p in selected))
+        store = _store(doc)
+        store.init_panel("symbols_panel_content", {"selected_symbol": None})
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {}, store)
+        return store, before
+
+    for elem, kept in ((_rect(id="r1"), "r1"), (_rect(), None)):
+        store, _ = run(elem, selected=[(0, 0)])
+        after = _doc_of(store)
+        assert len(after.symbols) == 1, "one master"
+        master = after.symbols[0].id
+        assert master and (kept is None or master == kept), (master, kept)
+        ref = after.layers[0].children[0]
+        assert type(ref).__name__ == "ReferenceElem" and ref.target == master
+        assert store.get_panel_state("symbols_panel_content")["selected_symbol"] == master, \
+            "the panel selects the master"
+
+    for children, selected in (((_rect(), _rect()), [(0, 0), (0, 1)]), ((_rect(),), [])):
+        store, before = run(*children, selected=selected)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{selected}: nothing"
+        assert store.get_panel_state("symbols_panel_content")["selected_symbol"] is None
+
+    # A PARTIAL selection (some control points) is not a whole element.
+    doc = Document(layers=(Layer(name="L", children=(_rect(),)),),
+                   selection=frozenset({ElementSelection.partial((0, 0), [0])}))
+    store = _store(doc)
+    before = json.dumps(store._document, sort_keys=True)
+    run_effects(effects, {}, store)
+    assert json.dumps(store._document, sort_keys=True) == before, "a partial selection: nothing"

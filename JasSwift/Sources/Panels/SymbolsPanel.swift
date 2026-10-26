@@ -34,11 +34,11 @@ public enum SymbolsPanel {
         switch cmd {
         case "close_panel":
             layoutApply(&layout, opClosePanel(addr))
-        case "new_symbol", "delete_symbol_action":
+        case "delete_symbol_action":
             guard let m = model else { return }
             dispatchSymbolAction(cmd, model: m)
-        // Its YAML says what it does (`doc.place_instance`).
-        case "place_instance":
+        // Their YAML says what they do (`doc.new_symbol`, `doc.place_instance`).
+        case "new_symbol", "place_instance":
             guard let m = model else { return }
             LayersPanel.dispatchYamlAction(cmd, model: m)
         default:
@@ -78,6 +78,24 @@ public enum SymbolsPanel {
         model.panelStateVersion &+= 1
     }
 
+    /// The one value-in-op op Make Symbol applies (`doc.new_symbol` in
+    /// actions.yaml, SYMBOLS.md §7), or nil unless exactly ONE element is
+    /// wholly selected, or the mint fails: `make_symbol` of its path with a
+    /// minted master id and reference id. Rust `symbols_host::new_symbol_ops`.
+    static func newSymbolOps(_ doc: Document) -> [[String: Any]]? {
+        guard doc.selection.count == 1, let es = doc.selection.first, es.kind == .all,
+              let ids = mint(doc, 2) else { return nil }
+        return [["op": "make_symbol", "path": es.path, "master_id": ids[0], "ref_id": ids[1]]]
+    }
+
+    /// The master a Make Symbol at `path` made, read AFTER the op: an element
+    /// that had an id keeps it as the master's. Rust
+    /// `symbols_host::new_symbol_master`.
+    static func newSymbolMaster(_ doc: Document, path: [Int]) -> String? {
+        if case .live(.reference(let r)) = doc.tryGetElement(path) { return r.target.id }
+        return nil
+    }
+
     /// The one value-in-op op Place Instance applies (`doc.place_instance` in
     /// actions.yaml): `place_instance` of `master` with a freshly minted
     /// reference id (SYMBOLS.md §7), or nil when the mint fails. Rust
@@ -114,32 +132,6 @@ public enum SymbolsPanel {
     ///   Clears the panel selection after a delete.
     static func dispatchSymbolAction(_ action: String, model: Model) {
         switch action {
-        case "new_symbol":
-            // Enabled only when exactly ONE whole element (kind=.all;
-            // not a control-point sub-selection) is selected, mirroring
-            // makeInstance.
-            let doc = model.document
-            let sorted = doc.selection.sorted {
-                $0.path.lexicographicallyPrecedes($1.path)
-            }
-            guard sorted.count == 1, let es = sorted.first else { return }
-            guard es.kind == .all else { return }
-            let path = es.path
-            guard let ids = mint(doc, 2) else { return }
-            let (masterId, refId) = (ids[0], ids[1])
-            // The Controller mutator self-brackets one undo step via editDocument.
-            let controller = Controller(model: model)
-            controller.makeSymbol(path, masterId: masterId, refId: refId)
-            // Keep the new master panel-selected so Place / Delete target
-            // it immediately. makeSymbol keeps an existing id as the
-            // master key (assign-on-create), so resolve which id actually
-            // became the master from the in-place instance's target.
-            var resolved = masterId
-            if case .live(.reference(let r)) = model.document.tryGetElement(path) {
-                resolved = r.target.id
-            }
-            setSelectedSymbol(model, resolved)
-
         case "delete_symbol_action":
             guard let masterId = selectedSymbol(model) else { return }
             let usage = DependencyIndex.build(model.document)

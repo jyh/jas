@@ -227,6 +227,34 @@ def _mint_ids(doc: Document, count: int, mint: Callable[[], str]) -> list[str] |
     return ids
 
 
+def new_symbol_ops(doc: Document, mint: Callable[[], str] | None = None) -> list[dict] | None:
+    """The one value-in-op op Make Symbol applies (SYMBOLS.md §7), or None (a
+    no-op) unless exactly ONE element is wholly selected, or the mint fails:
+    ``make_symbol`` of its path with a minted master id and reference id (an
+    element that has an id keeps it as the master's: :func:`new_symbol_master`
+    reads which). Rust ``symbols_host::new_symbol_ops``."""
+    from document.artboard import generate_element_id
+    sel = list(doc.selection)
+    if len(sel) != 1 or not isinstance(sel[0].kind, _SelectionAll):
+        return None
+    ids = _mint_ids(doc, 2, mint or generate_element_id)
+    if ids is None:
+        return None
+    return [{"op": "make_symbol", "path": list(sel[0].path), "master_id": ids[0], "ref_id": ids[1]}]
+
+
+def new_symbol_master(doc: Document, path) -> str | None:
+    """The master a Make Symbol at ``path`` made, read from the document
+    AFTER the op: the target of the reference now at ``path``, else None.
+    Rust ``symbols_host::new_symbol_master``."""
+    from geometry.element import ReferenceElem
+    try:
+        elem = doc.get_element(tuple(path))
+    except (ValueError, IndexError, KeyError):
+        return None
+    return elem.target if isinstance(elem, ReferenceElem) else None
+
+
 def place_instance_ops(doc: Document, master_id: str | None,
                        mint: Callable[[], str] | None = None) -> list[dict] | None:
     """The one value-in-op op the Symbols panel's Place Instance applies, or

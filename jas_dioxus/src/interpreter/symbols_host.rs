@@ -22,16 +22,16 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The four action names this module hosts. Since 2026-10-26 four verbs that
-/// were hosted here run their YAML instead: `place_instance`
+/// The three action names this module hosts. Since 2026-10-26 five verbs that
+/// were hosted here run their YAML instead: `new_symbol` (`doc.new_symbol`,
+/// [`run_new_symbol`]), `place_instance`
 /// (`doc.place_instance`, [`place_instance_ops`]), `place_concept_instance`
 /// (`doc.place_concept_instance`, [`place_concept_instance_ops`]),
 /// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`])
 /// and `promote_to_concept` (`doc.promote_to_concept`,
 /// [`promote_to_concept_ops`]).
-pub const ACTIONS: [&str; 4] = [
-    "new_symbol", "delete_symbol_action", "delete_symbol_orphan_confirm_ok",
-    "apply_concept_operation",
+pub const ACTIONS: [&str; 3] = [
+    "delete_symbol_action", "delete_symbol_orphan_confirm_ok", "apply_concept_operation",
 ];
 
 /// What a hosted verb asks its caller to do besides the document change it
@@ -58,7 +58,6 @@ pub fn run(
     selected_symbol: Option<&str>,
 ) -> Option<Outcome> {
     Some(match action {
-        "new_symbol" => new_symbol(model),
         "delete_symbol_action" => {
             let Some(master) = selected_symbol else { return Some(Outcome::Done) };
             let usage = crate::document::dependency_index::dependency_index(model.document())
@@ -98,38 +97,47 @@ pub fn place_instance_ops(doc: &crate::document::document::Document, master: &st
     Some(vec![json!({"op": "place_instance", "master_id": master, "ref_id": ids[0]})])
 }
 
-/// Mint `count` collision-free element ids against every id already in the
-/// document, through THE ONE MINT LOOP.
-fn mint(model: &Model, count: usize) -> Option<Vec<String>> {
-    let mut existing = model.document().element_ids();
-    mint_unique_ids(count, &mut existing, &mut || generate_element_id(None))
-}
-
 /// The path of the single selected element, if exactly one is selected.
 fn single_path(model: &Model) -> Option<Vec<usize>> {
     let sel = &model.document().selection;
     (sel.len() == 1).then(|| sel[0].path.clone())
 }
 
-/// Promote the single selected whole element to a master (SYMBOLS.md §7), and
-/// select the new master so Place and Delete target it at once.
-fn new_symbol(model: &mut Model) -> Outcome {
-    let sel = &model.document().selection;
-    let [es] = sel.as_slice() else { return Outcome::Done };
+/// The one value-in-op op Make Symbol applies (`doc.new_symbol` in
+/// actions.yaml, SYMBOLS.md §7), or `None` unless exactly ONE element is
+/// wholly selected, or the mint fails: `make_symbol` of its path with a minted
+/// master id and reference id. The reference's `new_symbol_ops`.
+pub fn new_symbol_ops(doc: &crate::document::document::Document) -> Option<Vec<Value>> {
+    let [es] = doc.selection.as_slice() else { return None };
     if es.kind != SelectionKind::All {
-        return Outcome::Done;
+        return None;
     }
-    let path = es.path.clone();
-    let Some(ids) = mint(model, 2) else { return Outcome::Done };
-    let (master_id, ref_id) = (ids[0].clone(), ids[1].clone());
-    model.with_txn(|m| Controller::make_symbol(m, &path, &master_id, &ref_id));
-    // make_symbol keeps an existing id as the master key; resolve which id
-    // actually became the master from the path's instance target.
-    let resolved = match model.document().get_element(&path) {
-        Some(Element::Live(LiveVariant::Reference(r))) => r.target.0.clone(),
-        _ => master_id,
-    };
-    Outcome::SelectSymbol(Some(resolved))
+    let mut existing = doc.element_ids();
+    let ids = mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))?;
+    Some(vec![json!({"op": "make_symbol", "path": es.path, "master_id": ids[0], "ref_id": ids[1]})])
+}
+
+/// The master a Make Symbol at `path` made, read AFTER the op: make_symbol
+/// keeps an element's own id as the master key, so the minted id is not
+/// always the master. The target of the reference now at `path`, else `None`.
+/// The reference's `new_symbol_master`.
+pub fn new_symbol_master(doc: &crate::document::document::Document, path: &[usize]) -> Option<String> {
+    match doc.get_element(&path.to_vec()) {
+        Some(Element::Live(LiveVariant::Reference(r))) => Some(r.target.0.clone()),
+        _ => None,
+    }
+}
+
+/// Run Make Symbol on `model` (`doc.new_symbol`): its op, then the master it
+/// made, for an `as:` name (`None` when nothing ran). Both Rust runners call it.
+pub fn run_new_symbol(model: &mut Model) -> Option<String> {
+    let ops = new_symbol_ops(model.document())?;
+    let path: Vec<usize> = ops[0]["path"].as_array()?.iter()
+        .filter_map(|v| v.as_u64().map(|n| n as usize)).collect();
+    for op in &ops {
+        let _ = crate::document::op_apply::op_apply(model, op);
+    }
+    new_symbol_master(model.document(), &path)
 }
 
 /// A concept's declared default params (`params: [{name, default}]`) as a

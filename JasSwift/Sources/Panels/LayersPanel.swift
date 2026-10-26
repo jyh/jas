@@ -70,7 +70,7 @@ public enum LayersPanel {
         // master-then-ref via the no-arg `generateElementId()` (the seeded test
         // minter) and self-brackets one undo step via the Controller mutator.
         switch actionName {
-        case "new_symbol", "delete_symbol_action":
+        case "delete_symbol_action":
             SymbolsPanel.dispatchSymbolAction(actionName, model: model)
             return
         // `concepts_panel_select` is normally the generic `set_panel_state`
@@ -560,6 +560,16 @@ public enum LayersPanel {
         // doc.place_instance: { master: <expr> }: the Symbols panel's Place
         // Instance, the value-in-op op ``SymbolsPanel/placeInstanceOps`` mints
         // for the master the expression names. Rust's `doc.place_instance`.
+        // doc.new_symbol: {}: Make Symbol, the op ``SymbolsPanel/newSymbolOps``
+        // mints; returns the master it made (read after the op) for `as:`,
+        // which the YAML then panel-selects. Rust's `doc.new_symbol`.
+        let docNewSymbolHandler: PlatformEffect = { _, _, _ in
+            guard let ops = SymbolsPanel.newSymbolOps(model.document),
+                  let path = ops[0]["path"] as? [Int] else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return SymbolsPanel.newSymbolMaster(model.document, path: path)
+        }
+
         let docPlaceInstanceHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any], let expr = spec["master"] as? String,
                   case .string(let master) = evaluate(expr, context: callCtx), !master.isEmpty,
@@ -889,6 +899,7 @@ public enum LayersPanel {
             "doc.op": docOpHandler,
             "doc.make_instance": docMakeInstanceHandler,
             "doc.place_instance": docPlaceInstanceHandler,
+            "doc.new_symbol": docNewSymbolHandler,
             "doc.place_concept_instance": docPlaceConceptInstanceHandler,
             "doc.set_concept_param": docSetConceptParamHandler,
             "doc.promote_to_concept": docPromoteToConceptHandler,
