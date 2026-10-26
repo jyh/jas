@@ -384,3 +384,46 @@ def test_set_concept_param_from_actions_yaml_writes_the_selected_instance():
         before = json.dumps(store._document, sort_keys=True)
         run_effects(effects, {"param": {"name": "points", "value": value}}, store)
         assert json.dumps(store._document, sort_keys=True) == before, f"{value!r}: nothing"
+
+
+def test_promote_to_concept_from_actions_yaml_replaces_a_fitted_shape():
+    """`actions.yaml` promote_to_concept (CONCEPTS.md §10): the ONE selected
+    polygon whose points a registered concept's fitter matches (concepts in
+    sorted-id order; the first fitter returning k params + cx, cy, rot wins)
+    is replaced at its path by a Generated instance, placed at
+    translate(cx, cy) · rotate(rot). The square is the fitter corpus's own
+    `[4, 10, 100, 20, 0]` case. A shape no fitter matches, a non-polygon, or
+    two selected: nothing."""
+    from geometry.element import GeneratedElem, Polygon
+    square = Polygon(points=((110, 20), (100, 30), (90, 20), (100, 10)))
+    oblong = Polygon(points=((0, 0), (20, 0), (20, 10), (0, 10)))
+    effects = _action_effects("promote_to_concept")
+
+    def run(*children, selected):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),),
+                       selection=frozenset(ElementSelection.all(p) for p in selected))
+        store = _store(doc)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {}, store)
+        return store, before
+
+    store, _ = run(square, _rect(id="r1"), selected=[(0, 0)])
+    gen = _doc_of(store).layers[0].children[0]
+    assert isinstance(gen, GeneratedElem) and gen.concept_id == "regular_polygon"
+    assert (gen.params["sides"], gen.params["radius"]) == (4, 10)
+    t = gen.transform
+    assert (t.a, t.b, t.c, t.d, t.e, t.f) == (1, 0, 0, 1, 100, 20), t
+    assert isinstance(_doc_of(store).layers[0].children[1], Rect), "the sibling is untouched"
+
+    # The element's transform is baked into its points: the corpus's origin
+    # square (`[4, 10, 0, 0, 0]`) moved by translate(5, 7) is fitted at (5, 7).
+    from geometry.element import Transform
+    moved = Polygon(points=((10, 0), (0, 10), (-10, 0), (0, -10)), transform=Transform.translate(5, 7))
+    store, _ = run(moved, selected=[(0, 0)])
+    t = _doc_of(store).layers[0].children[0].transform
+    assert (t.e, t.f) == (5, 7), "fitted in world space"
+
+    for children, selected in (((oblong,), [(0, 0)]), ((_rect(),), [(0, 0)]),
+                               ((square, square), [(0, 0), (0, 1)]), ((square,), [])):
+        store, before = run(*children, selected=selected)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{children} {selected}: nothing"

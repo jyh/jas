@@ -3464,6 +3464,49 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Object > Promote to Concept runs its YAML in the engine
+    /// (`doc.promote_to_concept`): the selected square (the fitter corpus's
+    /// `[4, 10, 100, 20, 0]` case) becomes a Generated `regular_polygon` at
+    /// translate(100, 20), ONE undo; a non-regular shape: nothing.
+    #[test]
+    fn promote_to_concept_runs_its_yaml_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::geometry::element::{CommonProps, Element, PolygonElem};
+        let poly = |pts: &[(f64, f64)]| Element::Polygon(PolygonElem {
+            points: pts.to_vec(), fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let first = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let doc = en.model.borrow().document().clone();
+            doc.layers[0].children().unwrap()[0].clone()
+        };
+        let req = r#"{"action":"promote_to_concept"}"#;
+        let oblong = engine_with(crate::document::test_fixture::model_with(
+            vec![poly(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)])], &[0]));
+        let before = first(oblong);
+        let _ = dispatch(oblong, req);
+        assert_eq!(first(oblong), before, "no fitter matches an oblong: nothing");
+        unsafe { jas_engine_free(oblong) };
+
+        let e = engine_with(crate::document::test_fixture::model_with(
+            vec![poly(&[(110.0, 20.0), (100.0, 30.0), (90.0, 20.0), (100.0, 10.0)])], &[0]));
+        let before = first(e);
+        let (_reply, err) = dispatch(e, req);
+        match &*first(e) {
+            Element::Live(crate::geometry::live::LiveVariant::Generated(g)) => {
+                assert_eq!(g.concept_id, "regular_polygon");
+                assert_eq!((g.params["sides"].as_f64(), g.params["radius"].as_f64()), (Some(4.0), Some(10.0)));
+                let t = g.common.transform.expect("a placement");
+                assert_eq!((t.e, t.f), (100.0, 20.0));
+            }
+            other => panic!("not promoted: {other:?} ({err})"),
+        }
+        unsafe { e.as_ref() }.unwrap().model.borrow_mut().undo();
+        assert_eq!(first(e), before, "one undo");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The Concepts panel's Place Instance and a parameter field's commit run
     /// their YAML in the engine (`doc.place_concept_instance` reading the
     /// STORE's `selected_concept`, `doc.set_concept_param` reading

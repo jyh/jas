@@ -899,7 +899,7 @@ private func makeModelWithSelectedHexagon() -> Model {
 
     // Drive the REAL native production handler (what dispatchYamlAction routes
     // `promote_to_concept` to — the path the Object-menu item + panel take).
-    ConceptsPanel.dispatch("promote_to_concept", model: model)
+    LayersPanel.dispatchYamlAction("promote_to_concept", model: model)
 
     #expect(model.journal.count == before + 1,
             "promote_to_concept commits one transaction")
@@ -962,7 +962,7 @@ private func makeModelWithSelectedHexagon() -> Model {
         selection: [ElementSelection.all([0, 0])]
     ))
     let before = model.journal.count
-    ConceptsPanel.dispatch("promote_to_concept", model: model)
+    LayersPanel.dispatchYamlAction("promote_to_concept", model: model)
     #expect(model.journal.count == before, "a no-match promote journals nothing")
     if case .polygon = model.document.getElement([0, 0]) {} else {
         Issue.record("the raw polygon should be untouched on a no-match")
@@ -995,7 +995,7 @@ private func makeModelWithSelectedHexagon() -> Model {
     // dispatch arm — it becomes a Generated{regular_polygon, sides:6, radius:50}
     // at ~identity placement.
     let model = makeModelWithSelectedHexagon()
-    ConceptsPanel.dispatch("promote_to_concept", model: model)
+    LayersPanel.dispatchYamlAction("promote_to_concept", model: model)
     guard case .live(.generated(let g)) = model.document.tryGetElement([0, 0]) else {
         Issue.record("promote_to_concept via dispatch should produce a Generated"); return
     }

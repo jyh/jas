@@ -808,6 +808,24 @@ class StateStore:
         for op in place_concept_instance_ops(doc, concept_id, concept(ws, concept_id)) or []:
             self.apply_op(op)
 
+    def promote_to_concept(self) -> None:
+        """Object > Promote to Concept on the store's document: the op
+        ``document.controller.promote_to_concept_ops`` builds against the
+        bundled workspace's concept registry, applied through the op layer.
+        Nothing unless a fitter matches the one selected shape."""
+        if self._document is None:
+            return
+        import json
+        import os
+        from document.controller import promote_to_concept_ops
+        from geometry.test_json import test_json_to_document
+        from workspace_interpreter.loader import concepts, load_workspace
+        ws = load_workspace(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "workspace"))
+        doc = test_json_to_document(json.dumps(self._document))
+        for op in promote_to_concept_ops(doc, concepts(ws)) or []:
+            self.apply_op(op)
+
     def set_concept_param(self, name, value) -> None:
         """A Concepts-panel parameter field's commit on the store's document:
         the op ``document.controller.set_concept_param_ops`` builds, applied

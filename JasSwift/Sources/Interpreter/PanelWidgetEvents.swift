@@ -388,12 +388,9 @@ func dispatchPanelAction(
         LayersPanel.dispatchYamlAction(name, model: model, params: params)
         return
     case "promote_to_concept":
-        // Concepts panel: native intercept (the YAML action is a `log`
-        // stub). `promote_to_concept` (CONCEPTS.md §10 — the fitter /
-        // promote) detects + replaces the single selected raw shape with a
-        // Generated. WITHOUT this native arm it falls through to its YAML
-        // `log` stub and never fires. Mirrors the Rust dispatch arm.
-        ConceptsPanel.dispatch(name, model: model)
+        // Its YAML says what it does (`doc.promote_to_concept`), through the
+        // dispatcher that holds the `doc.*` handlers.
+        LayersPanel.dispatchYamlAction(name, model: model)
         return
     case "apply_concept_operation":
         // Concepts panel Slice 3 (CONCEPTS.md §9): native intercept (the YAML

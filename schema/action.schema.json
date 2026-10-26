@@ -181,6 +181,7 @@
               "required": ["concept"],
               "properties": { "concept": { "type": "string" } }
             },
+            "doc.promote_to_concept": { "type": "object" },
             "doc.set_concept_param": {
               "type": "object",
               "required": ["name", "value"],
