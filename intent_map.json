@@ -948,8 +948,10 @@
       ]
     },
     "set_fill_type_solid": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.demote_to_solid"
+      ]
     },
     "set_layers_search": {
       "class": "ui-state",
@@ -1197,6 +1199,7 @@
       "doc.delete_artboard_by_id",
       "doc.delete_at",
       "doc.delete_symbol",
+      "doc.demote_to_solid",
       "doc.duplicate_artboard",
       "doc.insert_after",
       "doc.insert_at",
@@ -1240,11 +1243,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 46,
+      "journaling": 47,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 185,
+      "ui-state": 184,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1294,7 +1297,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 46,
+    "journaling_actions": 47,
     "native_intercepts": [
       "export_to_pdf"
     ],
@@ -1308,6 +1311,7 @@
         "doc.delete_at",
         "doc.delete_selection",
         "doc.delete_symbol",
+        "doc.demote_to_solid",
         "doc.duplicate_artboard",
         "doc.insert_after",
         "doc.insert_at",

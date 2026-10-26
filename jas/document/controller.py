@@ -312,6 +312,47 @@ def promote_to_gradient_ops(doc: Document, fill_on_top: bool) -> list[dict]:
     return []
 
 
+def demote_leaf_to_solid(e: Element, fill_on_top: bool) -> Element:
+    """``e`` with its active attribute's gradient (fill when ``fill_on_top``,
+    else stroke) demoted to a solid of the gradient's FIRST stop
+    (GRADIENT.md §Demotion to solid), or ``e`` itself when that attribute
+    holds no gradient. The solid's other properties (a fill's opacity, a
+    stroke's width, caps, dashes) are kept; a member with no solid under the
+    gradient gets one with the defaults. A gradient with no stops is
+    discarded and the solid left as it was. Rust ``demote_leaf_to_solid``."""
+    from geometry.element import Color
+    g = getattr(e, "fill_gradient" if fill_on_top else "stroke_gradient", None)
+    if g is None:
+        return e
+    first = Color.from_hex(g.stops[0].color) if g.stops else None
+    if fill_on_top:
+        e = _with_fill_gradient(e, None)
+        if first is not None:
+            e = _with_fill(e, replace(e.fill, color=first) if e.fill else Fill(first))
+        return e
+    e = _with_stroke_gradient(e, None)
+    if first is not None:
+        e = _with_stroke(e, replace(e.stroke, color=first) if e.stroke else Stroke(first))
+    return e
+
+
+def demote_to_solid_ops(doc: Document, fill_on_top: bool) -> list[dict]:
+    """The one op the fill/stroke widget's Color button applies ahead of its
+    null guard (GRADIENT.md §Demotion to solid): ``demote_to_solid`` of the
+    active attribute, or nothing when no selected member holds a gradient
+    there, so a click that changes nothing builds no op. Selection-relative,
+    as ``promote_to_gradient``. Rust ``gradient_host::demote_to_solid_ops``,
+    Swift ``demoteToSolidOps``."""
+    for es in doc.selection:
+        try:
+            elem = doc.get_element(es.path)
+        except (ValueError, IndexError, KeyError):
+            continue
+        if map_paintable(elem, lambda e: demote_leaf_to_solid(e, fill_on_top)) != elem:
+            return [{"op": "demote_to_solid", "fill_on_top": bool(fill_on_top)}]
+    return []
+
+
 def promote_to_concept_ops(doc: Document, registry: dict) -> list[dict] | None:
     """The one op Object > Promote to Concept applies (CONCEPTS.md §10), or
     None (a no-op) unless exactly one polygon or polyline is selected and a
@@ -1882,6 +1923,21 @@ class Controller:
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
             new_elem = map_paintable(elem, lambda e: promote_leaf_to_gradient(e, fill_on_top))
+            if new_elem != elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        if new_doc is not doc:
+            self._model.edit_document(new_doc)
+
+    def demote_selection_to_solid(self, fill_on_top: bool) -> None:
+        """Every selected paintable member whose active attribute holds a
+        gradient takes its first stop as the solid and loses the gradient
+        (``demote_leaf_to_solid``); nothing to demote: the document is not
+        edited. Rust ``Controller::demote_selection_to_solid``."""
+        doc = self._model.document
+        new_doc = doc
+        for es in doc.selection:
+            elem = new_doc.get_element(es.path)
+            new_elem = map_paintable(elem, lambda e: demote_leaf_to_solid(e, fill_on_top))
             if new_elem != elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         if new_doc is not doc:

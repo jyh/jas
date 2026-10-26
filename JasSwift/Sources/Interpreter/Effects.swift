@@ -1388,6 +1388,18 @@ public func promoteToGradientOps(_ doc: Document, fillOnTop: Bool) -> [[String: 
     return changes ? [["op": "promote_to_gradient", "fill_on_top": fillOnTop]] : []
 }
 
+/// The one op the fill/stroke widget's Color button applies after its null
+/// guard (`doc.demote_to_solid`): `demote_to_solid` of the active attribute,
+/// or none when no selected member holds a gradient there. Mirrors
+/// `gradient_host::demote_to_solid_ops`.
+public func demoteToSolidOps(_ doc: Document, fillOnTop: Bool) -> [[String: Any]] {
+    let changes = doc.selection.contains { es in
+        guard let elem = doc.tryGetElement(es.path) else { return false }
+        return elem.mapPaintable { demoteLeafToSolid($0, fillOnTop: fillOnTop) } != elem
+    }
+    return changes ? [["op": "demote_to_solid", "fill_on_top": fillOnTop]] : []
+}
+
 /// `g` with the field a render key names set from a stored value, or nil
 /// when the value is outside its set or of the wrong type. Mirrors
 /// `gradient_host::set_render_field`.

@@ -1623,6 +1623,8 @@ private func preservationPinReport(
 
 // The fill/stroke widget's Gradient button (GRADIENT.md §Fill-type coupling).
 @Test func operationPromoteToGradient() throws { try runOperationFixture("promote_to_gradient.json") }
+// The Color button's demote (GRADIENT.md §Demotion to solid).
+@Test func operationDemoteToSolid() throws { try runOperationFixture("demote_to_solid.json") }
 
 // P7 — transforms (scale / rotate / shear / copy).
 @Test func operationTransformScale() throws { try runOperationFixture("transform_scale.json") }

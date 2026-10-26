@@ -2669,6 +2669,25 @@ public class Controller {
         if changed { model.editDocument(doc) }
     }
 
+    /// Every selected paintable member whose active attribute holds a
+    /// gradient takes its first stop as the solid and loses the gradient (the
+    /// fill/stroke widget's Color button, GRADIENT.md §Demotion to solid).
+    /// Nothing to demote: the document is not edited. Rust's
+    /// `Controller::demote_selection_to_solid`.
+    public func demoteSelectionToSolid(fillOnTop: Bool) {
+        var doc = model.document
+        var changed = false
+        for es in doc.selection {
+            guard let elem = doc.tryGetElement(es.path) else { continue }
+            let demoted = elem.mapPaintable { demoteLeafToSolid($0, fillOnTop: fillOnTop) }
+            if demoted != elem {
+                doc = doc.replaceElement(es.path, with: demoted)
+                changed = true
+            }
+        }
+        if changed { model.editDocument(doc) }
+    }
+
     /// Set the strokeGradient of every element in the current selection.
     public func setSelectionStrokeGradient(_ gradient: Gradient?) {
         var doc = model.document

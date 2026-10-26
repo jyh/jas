@@ -1,0 +1,90 @@
+[
+  {
+    "name": "demote_to_solid_after_promote_fill",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": true
+      },
+      {
+        "op": "demote_to_solid",
+        "fill_on_top": true
+      }
+    ],
+    "expected_json": "demote_to_solid_fill_expected.json"
+  },
+  {
+    "name": "demote_to_solid_after_promote_stroke",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": false
+      },
+      {
+        "op": "demote_to_solid",
+        "fill_on_top": false
+      }
+    ],
+    "expected_json": "demote_to_solid_stroke_expected.json"
+  },
+  {
+    "name": "demote_to_solid_with_no_gradient_changes_nothing",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "demote_to_solid",
+        "fill_on_top": true
+      }
+    ],
+    "expected_json": "promote_to_gradient_unchanged_expected.json"
+  },
+  {
+    "name": "demote_to_solid_missing_fill_on_top_skips",
+    "setup_svg": "gradient_promote_setup.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": -5,
+        "y": -5,
+        "width": 100,
+        "height": 100,
+        "extend": false
+      },
+      {
+        "op": "promote_to_gradient",
+        "fill_on_top": true
+      },
+      {
+        "op": "demote_to_solid",
+        "expected_error": "MissingParam"
+      }
+    ],
+    "expected_json": "promote_to_gradient_fill_expected.json"
+  }
+]

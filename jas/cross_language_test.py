@@ -1705,6 +1705,11 @@ class CrossLanguageTest(absltest.TestCase):
         # more; a missing fill_on_top skips.
         self._run_operation_fixture("promote_to_gradient.json")
 
+    def test_operation_demote_to_solid(self):
+        # The Color button's demote: promote then demote restores each
+        # member's solid; with no gradient, nothing; a missing fill_on_top skips.
+        self._run_operation_fixture("demote_to_solid.json")
+
     def test_operation_transform_scale(self):
         # P7: scale_transform (resolved matrix; identity no-ops; strokes/corners).
         self._run_operation_fixture("transform_scale.json")

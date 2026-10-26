@@ -1882,6 +1882,12 @@ public func opApply(
     case "promote_to_gradient":
         guard let fillOnTop = op["fill_on_top"] as? Bool else { return reqErr(op, "fill_on_top") }
         controller.promoteSelectionToGradient(fillOnTop: fillOnTop)
+    // The fill/stroke widget's Color button (GRADIENT.md §Demotion to solid):
+    // every selected member whose active attribute holds a gradient takes its
+    // first stop as the solid. Selection-relative, as promote_to_gradient.
+    case "demote_to_solid":
+        guard let fillOnTop = op["fill_on_top"] as? Bool else { return reqErr(op, "fill_on_top") }
+        controller.demoteSelectionToSolid(fillOnTop: fillOnTop)
     case "detach":
         guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
         controller.detach(path)

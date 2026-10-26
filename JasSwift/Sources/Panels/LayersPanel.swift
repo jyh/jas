@@ -637,6 +637,17 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.demote_to_solid: { fill_on_top: <expr> }: the fill/stroke widget's
+        // Color button, the op ``demoteToSolidOps(_:fillOnTop:)`` builds for the
+        // active attribute. Rust's `doc.demote_to_solid`.
+        let docDemoteToSolidHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let expr = spec["fill_on_top"] as? String,
+                  case .bool(let fillOnTop) = evaluate(expr, context: callCtx)
+            else { return nil }
+            for op in demoteToSolidOps(model.document, fillOnTop: fillOnTop) { opApply(model, controller, op) }
+            return nil
+        }
+
         let docOpHandler: PlatformEffect = { value, _, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
             opApply(model, controller, spec)
@@ -928,6 +939,7 @@ public enum LayersPanel {
             "doc.set_concept_param": docSetConceptParamHandler,
             "doc.promote_to_concept": docPromoteToConceptHandler,
             "doc.promote_to_gradient": docPromoteToGradientHandler,
+            "doc.demote_to_solid": docDemoteToSolidHandler,
             "doc.apply_concept_operation": docApplyConceptOperationHandler,
             "doc.delete_symbol": docDeleteSymbolHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,

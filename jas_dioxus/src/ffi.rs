@@ -3565,6 +3565,49 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The fill/stroke widget's Color button demotes in the engine
+    /// (`set_fill_type_solid` -> `doc.demote_to_solid`, then its null guard,
+    /// GRADIENT.md §Demotion to solid): a gradient's FIRST stop becomes the
+    /// solid and the gradient goes, the fill's opacity kept; ONE undo. The
+    /// YAML's KNOWN LIMIT is pinned too: a member with NO solid under its
+    /// gradient ends black, the null guard's, because the guard reads the
+    /// colour from before the click and runs after the demote. Swift agrees;
+    /// the other order would split the two ports (the §3.6 delta).
+    #[test]
+    fn set_fill_type_solid_demotes_a_gradient_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::geometry::element::{Color, CommonProps, Element, Fill, Gradient, RectElem};
+        let (red, green, blue) = (Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0), Color::rgb(0.0, 0.0, 1.0));
+        let rect = |fill: Option<Fill>, g: Color| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill, stroke: None, common: CommonProps::default(),
+            fill_gradient: Some(Box::new(Gradient::seed(Some(g)))), stroke_gradient: None,
+        });
+        let first = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let doc = en.model.borrow().document().clone();
+            (*doc.layers[0].children().unwrap()[0]).clone()
+        };
+        let req = r#"{"action":"set_fill_type_solid"}"#;
+
+        let e = engine_with(crate::document::test_fixture::model_with(
+            vec![rect(Some(Fill { color: red, opacity: 0.5 }), green)], &[0]));
+        let before = first(e);
+        let (_reply, err) = dispatch(e, req);
+        assert_eq!(first(e).fill_gradient(), None, "the gradient goes ({err})");
+        assert_eq!(first(e).fill(), Some(&Fill { color: green, opacity: 0.5 }), "the first stop, opacity kept");
+        unsafe { e.as_ref() }.unwrap().model.borrow_mut().undo();
+        assert_eq!(first(e), before, "one undo");
+        unsafe { jas_engine_free(e) };
+
+        let bare = engine_with(crate::document::test_fixture::model_with(vec![rect(None, blue)], &[0]));
+        let _ = dispatch(bare, req);
+        assert_eq!(first(bare).fill_gradient(), None);
+        assert_eq!(first(bare).fill().map(|f| f.color), Some(Color::BLACK),
+                   "the KNOWN LIMIT: no solid under the gradient ends on the null guard's black");
+        unsafe { jas_engine_free(bare) };
+    }
+
     /// Object > Promote to Concept runs its YAML in the engine
     /// (`doc.promote_to_concept`): the selected square (the fitter corpus's
     /// `[4, 10, 100, 20, 0]` case) becomes a Generated `regular_polygon` at
