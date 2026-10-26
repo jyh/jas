@@ -155,6 +155,12 @@ VERB_TABLE = {
         "journals": "always", "op": "delete_selection",
         "evidence": ["renderer.rs:3508-3513", "op_apply.rs:1564"],
     },
+    "doc.make_instance": {
+        # Object > Make Instance: two value-in-op ops whose ids the effect mints
+        # first (menu_native::make_instance_ops), each through op_apply.
+        "journals": "always", "op": "create_reference + move_selection",
+        "evidence": ["effects.rs:2904", "op_apply.rs:2177"],
+    },
     "doc.op": {
         # One journaled op BY NAME: the op is the call site's own `op` field
         # (`doc.op: { op: unlock_all }`), so the row names no single op.

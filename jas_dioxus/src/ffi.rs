@@ -1739,26 +1739,13 @@ pub unsafe extern "C" fn jas_dispatch_action(
             engine_scope_of(engine, "")
         }
     };
-    // The menu's model-pure verb whose `actions.yaml` entry is a `log` stub
-    // (make_instance): the menu runs it in every app, through one table
-    // (`menu_native`), and so does this route. A panel menu never names it, so
-    // only the menubar's. (Select All, flask STATUS §242, and the lock, hide
-    // and group verbs now run their YAML, `doc.op`.)
-    let native = (panel.is_none() && clip_verb.is_none()).then(|| {
-        let mut model = engine.model.borrow_mut();
-        let generation = model.generation();
-        crate::workspace::menu_native::run(action, &mut model).then(|| crate::panel_behavior::Ran {
-            doc_changed: model.generation() != generation,
-            state_changed: false,
-        })
-    }).flatten();
     // File > Revert (finding 12 of the 10-20 sitting): a `log` stub in
     // `actions.yaml`, and its bytes are the engine's, so the engine runs it.
     let revert = (panel.is_none() && action == "revert").then(|| engine.revert());
     let (ran, named) = if let Some(verb) = clip_verb {
         let (ran, named) = run_clipboard_verb(engine, verb, req.get("clipboard"));
         (Ok(ran), named)
-    } else if let Some(ran) = native.or(revert) {
+    } else if let Some(ran) = revert {
         (Ok(ran), Named::default())
     } else {
         let mut store = engine.store.borrow_mut();
@@ -5418,7 +5405,7 @@ mod tests {
 
     /// THE CLASS, NOT THE INSTANCE: every menubar item, run on a document with
     /// content and a selection, and every `PlatformEffect` refusal recorded as
-    /// `action -> detail`. The model-pure verbs (`menu_native::VERBS`) run;
+    /// `action -> detail`. The model verbs run (from their YAML);
     /// what remains is PINNED here by class, so a newly refused item, or one
     /// that starts running, moves this list in a diff someone reads.
     #[test]
@@ -5473,11 +5460,7 @@ mod tests {
         let mut expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
         expected.sort();
         assert_eq!(refused, expected, "the menubar's PlatformEffect refusals moved");
-        for verb in crate::workspace::menu_native::VERBS {
-            assert!(!refused.iter().any(|r| r.starts_with(&format!("{verb} -> "))),
-                    "{verb} is the menu's own and the engine runs it");
-        }
-        assert!(ran >= 9, "at least the nine model verbs ran (one native, eight `doc.op`); {ran} items ran");
+        assert!(ran >= 9, "at least the nine model verbs ran (each from its YAML); {ran} items ran");
     }
 
     /// WHETHER THE DOCUMENT IS MODIFIED, FOR A SHELL'S DIRTY FLAG (flask §246,

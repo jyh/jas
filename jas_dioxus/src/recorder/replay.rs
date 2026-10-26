@@ -340,15 +340,6 @@ pub(crate) fn run_action_case_deferred(
             .and_then(|p| p.as_object())
             .cloned()
             .unwrap_or_default();
-        // Object / Edit menu model-pure verbs are bespoke-native: their
-        // actions.yaml entries are `log` stubs, so the generic dispatcher
-        // would no-op them. Route each through the SAME table the menu and
-        // the engine run (`workspace::menu_native`), so the action corpus
-        // gates their cross-app document mutation. Mirrors the Python
-        // _MENU_NATIVE_HANDLERS intercept in _dispatch_action.
-        let handled = crate::workspace::menu_native::run(
-            action, &mut st.tabs[st.active_tab].model);
-        if handled { continue; }
         deferred.extend(crate::interpreter::renderer::dispatch_action(action, &params, &mut st));
     }
     crate::document::artboard::set_test_id_rng(None);

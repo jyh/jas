@@ -570,6 +570,18 @@ public enum LayersPanel {
         // op layer the menu's `MenuActions` reaches too. The engine's
         // `run_doc_effect` and the reference's `StateStore.apply_op` apply the
         // same op. A spec with no `op` name runs nothing.
+        // doc.make_instance: { offset }: Object > Make Instance, the two
+        // value-in-op ops ``MenuActions/makeInstanceOps(_:offset:)`` mints (an
+        // offset by-id reference to the one selected element), each through
+        // the op layer. Rust `run_doc_effect` and the reference's
+        // `StateStore.make_instance` the same.
+        let docMakeInstanceHandler: PlatformEffect = { value, _, _ in
+            guard let spec = value as? [String: Any], let offset = (spec["offset"] as? NSNumber)?.doubleValue,
+                  let ops = MenuActions.makeInstanceOps(model.document, offset: offset) else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
         let docOpHandler: PlatformEffect = { value, _, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
             opApply(model, controller, spec)
@@ -854,6 +866,7 @@ public enum LayersPanel {
             "doc.move_artboards_down": docMoveArtboardsDownHandler,
             "doc.delete_selection": docDeleteSelectionHandler,
             "doc.op": docOpHandler,
+            "doc.make_instance": docMakeInstanceHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

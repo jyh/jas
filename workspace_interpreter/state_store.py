@@ -745,6 +745,24 @@ class StateStore:
         children.insert(index, element)
         return True
 
+    def make_instance(self, offset: float) -> None:
+        """Object > Make Instance on the store's document: the two ops
+        ``document.controller.make_instance_ops`` mints (an offset by-id
+        reference to the one selected element), applied in order through the
+        op layer, across the same test-JSON bridge as :meth:`apply_op`.
+        Nothing changes unless exactly one whole element is selected."""
+        if self._document is None:
+            return
+        import json
+        from document.controller import make_instance_ops
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        ops = make_instance_ops(doc, offset)
+        if ops is None:
+            return
+        for op in ops:
+            self.apply_op(op)
+
     def apply_op(self, op: dict) -> None:
         """Apply one journaled op (``{"op": <name>, ...}``) to the document.
 

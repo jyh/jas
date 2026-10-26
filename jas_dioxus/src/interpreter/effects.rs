@@ -2895,6 +2895,24 @@ fn run_doc_effect(
         // native table reaches too. The reference's `StateStore.apply_op`
         // applies the same op through `document.op_apply`. An op the layer
         // refuses is reported, so a misspelt name is never silent.
+        // doc.make_instance: { offset }: Object > Make Instance, the two
+        // value-in-op ops `menu_native::make_instance_ops` mints (an offset
+        // by-id reference to the one selected element), each through the op
+        // layer under the action's `snapshot`. The reference's
+        // `StateStore.make_instance` the same. Nothing when the selection is
+        // not exactly one whole element.
+        "doc.make_instance" => {
+            match spec.get("offset").and_then(|v| v.as_f64()) {
+                Some(offset) => {
+                    if let Some(ops) = crate::workspace::menu_native::make_instance_ops(model.document(), offset) {
+                        for op in &ops {
+                            let _ = crate::document::op_apply::op_apply(model, op);
+                        }
+                    }
+                }
+                None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.make_instance:{spec}"))),
+            }
+        }
         "doc.op" => {
             let refused = match spec.get("op").and_then(|v| v.as_str()) {
                 Some(_) => crate::document::op_apply::op_apply(model, spec).is_err(),
