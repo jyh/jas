@@ -188,63 +188,63 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
 ## Verb -> journaling evidence table
 
-Derived by reading the Rust reference dispatchers. File aliases:
-`effects.rs` = `jas_dioxus/src/interpreter/effects.rs`,
-`renderer.rs` = `jas_dioxus/src/interpreter/renderer.rs`,
-`op_apply.rs` = `jas_dioxus/src/document/op_apply.rs`. Line numbers
-are as of authoring (2026-07-22, post `five-port-parity`).
+Derived by reading the Rust reference dispatchers. Each citation is a
+file under `jas_dioxus/src` (named by its unique basename) and the
+dispatch arm's own literal. The generator finds every literal in its
+file or refuses to write, so a citation cannot go stale silently; and
+none carries a line number, so a moved arm needs no regeneration.
 
 | doc.* verb | journals | op | reachable from actions | evidence |
 |---|---|---|---|---|
-| `doc.apply_concept_operation` | always | `apply_concept_operation` | yes | effects.rs:3026; op_apply.rs:2251 |
-| `doc.copy_selection` | always | `copy_selection` | no (tool YAML only) | effects.rs:948-961; op_apply.rs:1397 |
-| `doc.create_artboard` | always | `create_artboard` | yes | renderer.rs:3100-3136; op_apply.rs:1863 |
-| `doc.delete_artboard_by_id` | always | `delete_artboard_by_id` | yes | renderer.rs:3150-3159; op_apply.rs:1832 |
-| `doc.delete_at` | always | `delete_at` | yes | layer_doc_effects.rs:75; op_apply.rs:1554 |
-| `doc.delete_selection` | always | `delete_selection` | no (tool YAML only) | renderer.rs:3508-3513; op_apply.rs:1564 |
-| `doc.delete_symbol` | always | `delete_symbol` | yes | effects.rs:3010; op_apply.rs:2296 |
-| `doc.duplicate_artboard` | always | `duplicate_artboard` | yes | renderer.rs:3176-3229; op_apply.rs:1876 |
-| `doc.insert_after` | always | `insert_after` | yes | layer_doc_effects.rs:81; op_apply.rs:1571 |
-| `doc.insert_at` | always | `insert_at` | yes | layer_doc_effects.rs:89; op_apply.rs:1578 |
-| `doc.make_instance` | always | `create_reference + move_selection` | yes | effects.rs:2904; op_apply.rs:2177 |
-| `doc.move_artboards_down` | always | `move_artboards_down` | yes | renderer.rs:3390-3396; op_apply.rs:1849 |
-| `doc.move_artboards_up` | always | `move_artboards_up` | yes | renderer.rs:3378-3384; op_apply.rs:1842 |
-| `doc.new_symbol` | always | `make_symbol` | yes | effects.rs:2998; op_apply.rs:2192 |
-| `doc.op` | always (a selection-only op (`select_all`) is journal-neutral as `doc.select_in_rect` is: op_apply opens no transaction for it (op_apply.rs:1878 is_selection_only_verb)) | `(the call site's op)` | yes | effects.rs:2898; op_apply.rs:2004 |
-| `doc.place_concept_instance` | always | `place_concept_instance` | yes | effects.rs:2943; op_apply.rs:2222 |
-| `doc.place_instance` | always | `place_instance` | yes | effects.rs:2921; op_apply.rs:2204 |
-| `doc.promote_to_concept` | always | `promote_to_concept` | yes | effects.rs:3001; op_apply.rs:2264 |
-| `doc.select_in_rect` | always (selection-only / non-undoable: op_apply records it only into an ALREADY-OPEN transaction and never opens one (op_apply.rs:1329-1336), so a bare marquee stays journal-neutral) | `select_rect` | no (tool YAML only) | effects.rs:987-1013; op_apply.rs:1380 |
-| `doc.set_advanced_field` | always | `set_advanced_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_artboard_field` | always | `set_artboard_field` | yes | renderer.rs:3241-3265; op_apply.rs:1802 |
-| `doc.set_artboard_options_field` | always | `set_artboard_options_field` | yes | renderer.rs:3273-3290; op_apply.rs:1817 |
-| `doc.set_attr_on_selection` | always | `set_attr_on_selection` | yes | effects.rs:901-946; op_apply.rs:1676 |
-| `doc.set_color_management_field` | always | `set_color_management_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_concept_param` | always | `set_concept_param` | yes | effects.rs:3042; op_apply.rs:2235 |
-| `doc.set_document_setup_field` | always | `set_document_setup_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_graphics_field` | always | `set_graphics_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_marks_and_bleed_field` | always | `set_marks_and_bleed_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_output_field` | always | `set_output_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_output_ink_field` | always | `set_output_ink_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.set_print_preferences_field` | always | `set_print_preferences_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.translate_selection` | always | `move_selection` | yes | effects.rs:767-785; op_apply.rs:1394 |
-| `doc.unpack_group_at` | always | `unpack_group_at` | yes | layer_doc_effects.rs:110; op_apply.rs:1632 |
-| `doc.wrap_in_group` | always | `wrap_in_group` | yes | layer_doc_effects.rs:118; op_apply.rs:1601 |
-| `doc.wrap_in_layer` | always | `wrap_in_layer` | yes | layer_doc_effects.rs:118; op_apply.rs:1615 |
-| `doc.rotate.apply` | param-gated | `rotate_transform` | yes | effects.rs:1658-1683 (gate at :1678); op_apply.rs:1725 |
-| `doc.scale.apply` | param-gated | `scale_transform` | yes | effects.rs:1619-1656 (gate at :1651); op_apply.rs:1710 |
-| `doc.shear.apply` | param-gated | `shear_transform` | yes | effects.rs:1685-1717 (gate at :1711); op_apply.rs:1735 |
-| `doc.clone_at` | never (pure ctx binder: clones an element into scope, no mutation) | -- | yes | layer_doc_effects.rs:46 |
-| `doc.create_layer` | never (pure ctx binder: deterministic Layer factory bound via `as:`; the subsequent doc.insert_at journals) | -- | yes | layer_doc_effects.rs:31 |
-| `doc.preview.clear` | never (out-of-band preview-snapshot channel (OP_LOG.md par.8)) | -- | yes | effects.rs:709-714 |
-| `doc.preview.restore` | never (out-of-band preview-snapshot channel (OP_LOG.md par.8)) | -- | yes | effects.rs:703-708 |
-| `doc.set` | never (direct per-field document write via layer_doc_effects::set_field; not routed through op_apply, so it records no op) | -- | yes | layer_doc_effects.rs:141 |
-| `doc.snapshot` | never (transaction management: begin_txn only; snapshot/undo/redo manage the journal cursor and are never journaled as ops) | -- | yes | effects.rs:682-684; op_apply.rs:1300-1314 |
-| `doc.zoom.apply` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1719-1768 |
-| `doc.zoom.fit_all_artboards` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1935-1956 |
-| `doc.zoom.fit_elements` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1914-1933 |
-| `doc.zoom.fit_rect` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1869-1881 |
-| `doc.zoom.set` | never (view state only (zoom/pan)) | -- | yes | effects.rs:1770-1795 |
+| `doc.apply_concept_operation` | always | `apply_concept_operation` | yes | effects.rs `"doc.apply_concept_operation" =>`; op_apply.rs `"apply_concept_operation" =>` |
+| `doc.copy_selection` | always | `copy_selection` | no (tool YAML only) | effects.rs `"doc.copy_selection" =>`; op_apply.rs `"copy_selection" =>` |
+| `doc.create_artboard` | always | `create_artboard` | yes | artboard_effects.rs `"doc.create_artboard" =>`; op_apply.rs `"create_artboard" =>` |
+| `doc.delete_artboard_by_id` | always | `delete_artboard_by_id` | yes | artboard_effects.rs `"doc.delete_artboard_by_id" =>`; op_apply.rs `"delete_artboard_by_id" =>` |
+| `doc.delete_at` | always | `delete_at` | yes | layer_doc_effects.rs `"doc.delete_at" =>`; op_apply.rs `"delete_at" =>` |
+| `doc.delete_selection` | always | `delete_selection` | no (tool YAML only) | effects.rs `"doc.delete_selection" =>`; op_apply.rs `"delete_selection" =>` |
+| `doc.delete_symbol` | always | `delete_symbol` | yes | effects.rs `"doc.delete_symbol" =>`; op_apply.rs `"delete_symbol" =>` |
+| `doc.duplicate_artboard` | always | `duplicate_artboard` | yes | artboard_effects.rs `"doc.duplicate_artboard" =>`; op_apply.rs `"duplicate_artboard" =>` |
+| `doc.insert_after` | always | `insert_after` | yes | layer_doc_effects.rs `"doc.insert_after" =>`; op_apply.rs `"insert_after" =>` |
+| `doc.insert_at` | always | `insert_at` | yes | layer_doc_effects.rs `"doc.insert_at" =>`; op_apply.rs `"insert_at" =>` |
+| `doc.make_instance` | always | `create_reference + move_selection` | yes | effects.rs `"doc.make_instance" =>`; op_apply.rs `"create_reference" =>` |
+| `doc.move_artboards_down` | always | `move_artboards_down` | yes | artboard_effects.rs `"doc.move_artboards_up" \| "doc.move_artboards_down" =>`; op_apply.rs `"move_artboards_down" =>` |
+| `doc.move_artboards_up` | always | `move_artboards_up` | yes | artboard_effects.rs `"doc.move_artboards_up" \| "doc.move_artboards_down" =>`; op_apply.rs `"move_artboards_up" =>` |
+| `doc.new_symbol` | always | `make_symbol` | yes | effects.rs `"doc.new_symbol" =>`; op_apply.rs `"make_symbol" =>` |
+| `doc.op` | always (a selection-only op (`select_all`) is journal-neutral as `doc.select_in_rect` is: op_apply opens no transaction for it (op_apply.rs:1878 is_selection_only_verb)) | `(the call site's op)` | yes | effects.rs `"doc.op" =>`; op_apply.rs `pub fn op_apply(` |
+| `doc.place_concept_instance` | always | `place_concept_instance` | yes | effects.rs `"doc.place_concept_instance" =>`; op_apply.rs `"place_concept_instance" =>` |
+| `doc.place_instance` | always | `place_instance` | yes | effects.rs `"doc.place_instance" =>`; op_apply.rs `"place_instance" =>` |
+| `doc.promote_to_concept` | always | `promote_to_concept` | yes | effects.rs `"doc.promote_to_concept" =>`; op_apply.rs `"promote_to_concept" =>` |
+| `doc.select_in_rect` | always (selection-only / non-undoable: op_apply records it only into an ALREADY-OPEN transaction and never opens one (op_apply.rs:1329-1336), so a bare marquee stays journal-neutral) | `select_rect` | no (tool YAML only) | effects.rs `"doc.select_in_rect" =>`; op_apply.rs `"select_rect" =>` |
+| `doc.set_advanced_field` | always | `set_advanced_field` | yes | effects.rs `("doc.set_advanced_field", "set_advanced_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_artboard_field` | always | `set_artboard_field` | yes | artboard_effects.rs `"doc.set_artboard_field" =>`; op_apply.rs `"set_artboard_field" =>` |
+| `doc.set_artboard_options_field` | always | `set_artboard_options_field` | yes | artboard_effects.rs `"doc.set_artboard_options_field" =>`; op_apply.rs `"set_artboard_options_field" =>` |
+| `doc.set_attr_on_selection` | always | `set_attr_on_selection` | yes | effects.rs `"doc.set_attr_on_selection" =>`; op_apply.rs `"set_attr_on_selection" =>` |
+| `doc.set_color_management_field` | always | `set_color_management_field` | yes | effects.rs `("doc.set_color_management_field", "set_color_management_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_concept_param` | always | `set_concept_param` | yes | effects.rs `"doc.set_concept_param" =>`; op_apply.rs `"set_concept_param" =>` |
+| `doc.set_document_setup_field` | always | `set_document_setup_field` | yes | effects.rs `("doc.set_document_setup_field", "set_document_setup_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_graphics_field` | always | `set_graphics_field` | yes | effects.rs `("doc.set_graphics_field", "set_graphics_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_marks_and_bleed_field` | always | `set_marks_and_bleed_field` | yes | effects.rs `("doc.set_marks_and_bleed_field", "set_marks_and_bleed_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_output_field` | always | `set_output_field` | yes | effects.rs `("doc.set_output_field", "set_output_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_output_ink_field` | always | `set_output_ink_field` | yes | effects.rs `("doc.set_output_ink_field", "set_output_ink_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.set_print_preferences_field` | always | `set_print_preferences_field` | yes | effects.rs `("doc.set_print_preferences_field", "set_print_preferences_field")`; op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>` |
+| `doc.translate_selection` | always | `move_selection` | yes | effects.rs `"doc.translate_selection" =>`; op_apply.rs `"move_selection" =>` |
+| `doc.unpack_group_at` | always | `unpack_group_at` | yes | layer_doc_effects.rs `"doc.unpack_group_at" =>`; op_apply.rs `"unpack_group_at" =>` |
+| `doc.wrap_in_group` | always | `wrap_in_group` | yes | layer_doc_effects.rs `"doc.wrap_in_layer" \| "doc.wrap_in_group" =>`; op_apply.rs `"wrap_in_group" =>` |
+| `doc.wrap_in_layer` | always | `wrap_in_layer` | yes | layer_doc_effects.rs `"doc.wrap_in_layer" \| "doc.wrap_in_group" =>`; op_apply.rs `"wrap_in_layer" =>` |
+| `doc.rotate.apply` | param-gated | `rotate_transform` | yes | effects.rs `"doc.rotate.apply" =>`; op_apply.rs `"rotate_transform" =>` |
+| `doc.scale.apply` | param-gated | `scale_transform` | yes | effects.rs `"doc.scale.apply" =>`; op_apply.rs `"scale_transform" =>` |
+| `doc.shear.apply` | param-gated | `shear_transform` | yes | effects.rs `"doc.shear.apply" =>`; op_apply.rs `"shear_transform" =>` |
+| `doc.clone_at` | never (pure ctx binder: clones an element into scope, no mutation) | -- | yes | layer_doc_effects.rs `"doc.clone_at" \| "doc.delete_at" =>` |
+| `doc.create_layer` | never (pure ctx binder: deterministic Layer factory bound via `as:`; the subsequent doc.insert_at journals) | -- | yes | layer_doc_effects.rs `"doc.create_layer" =>` |
+| `doc.preview.clear` | never (out-of-band preview-snapshot channel (OP_LOG.md par.8)) | -- | yes | effects.rs `"doc.preview.clear" =>` |
+| `doc.preview.restore` | never (out-of-band preview-snapshot channel (OP_LOG.md par.8)) | -- | yes | effects.rs `"doc.preview.restore" =>` |
+| `doc.set` | never (direct per-field document write via layer_doc_effects::set_field; not routed through op_apply, so it records no op) | -- | yes | layer_doc_effects.rs `"doc.set" =>` |
+| `doc.snapshot` | never (transaction management: begin_txn only; snapshot/undo/redo manage the journal cursor and are never journaled as ops) | -- | yes | effects.rs `"doc.snapshot" =>`; op_apply.rs `"snapshot" =>` |
+| `doc.zoom.apply` | never (view state only (zoom/pan)) | -- | yes | effects.rs `"doc.zoom.apply" =>` |
+| `doc.zoom.fit_all_artboards` | never (view state only (zoom/pan)) | -- | yes | effects.rs `"doc.zoom.fit_all_artboards" =>` |
+| `doc.zoom.fit_elements` | never (view state only (zoom/pan)) | -- | yes | effects.rs `"doc.zoom.fit_elements" =>` |
+| `doc.zoom.fit_rect` | never (view state only (zoom/pan)) | -- | yes | effects.rs `"doc.zoom.fit_rect" =>` |
+| `doc.zoom.set` | never (view state only (zoom/pan)) | -- | yes | effects.rs `"doc.zoom.set" =>` |
 
 ## Caveats
 
