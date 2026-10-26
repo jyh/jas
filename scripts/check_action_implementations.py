@@ -160,7 +160,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # `select_all` (`doc.op: {op: select_all}`, no snapshot), and every route to it.
 # 43 the same day: `group`, `ungroup` and `ungroup_all` (by-name ops
 # `group_selection`, `ungroup_selection`, `ungroup_all` in all three op layers).
-MIN_LOG_ONLY = 43
+# 42 the same day: `make_instance` (`doc.make_instance`, which mints its two ids
+# and applies create_reference + move_selection); every native table is gone.
+MIN_LOG_ONLY = 42
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 

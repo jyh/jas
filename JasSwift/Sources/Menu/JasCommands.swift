@@ -326,10 +326,8 @@ public struct JasCommands: Commands {
         // design — see workspace/shortcuts.yaml for why it takes no chord.
         case "paste_preserving_layers":
             pasteClipboard(offset: pasteOffset, preserveLayers: true)
-        // The model-pure Edit / Object verbs: one table (``MenuActions/run``,
-        // Rust `menu_native::run`), shared with the level-1 script runner.
-        case _ where MenuActions.verbs.contains(action):
-            if let model = model { MenuActions.run(action, model) }
+        // The Edit / Object model verbs run their declared action (`doc.op`,
+        // or `doc.make_instance`), as the engine's door and the web menu do.
         case _ where MenuActions.yamlVerbs.contains(action):
             if let model = model { LayersPanel.dispatchYamlAction(action, model: model) }
         case "promote_to_concept":

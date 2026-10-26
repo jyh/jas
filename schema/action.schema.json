@@ -166,6 +166,11 @@
             "doc.duplicate_artboard": {},
             "doc.insert_after": {},
             "doc.insert_at": {},
+            "doc.make_instance": {
+              "type": "object",
+              "required": ["offset"],
+              "properties": { "offset": { "type": "number" } }
+            },
             "doc.move_artboards_down": {},
             "doc.move_artboards_up": {},
             "doc.op": {

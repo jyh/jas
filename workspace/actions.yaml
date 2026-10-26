@@ -4339,16 +4339,26 @@ actions:
 
   make_instance:
     description: >
-      The Object-menu entry point for Make Symbol (SYMBOLS.md §7): promote the
-      single selected canvas element to a master and leave an instance of it in
-      its place. Enabled only when exactly one whole canvas element is selected.
-      A `log` stub like the other symbol mutators; the real work lives in each
-      app's native arm, which mints the master + instance ids by the value-in-op
-      rule. (This declaration closes a dangling Object-menu action reference.)
+      Object > Make Instance: leave a live, by-id REFERENCE to the single
+      selected canvas element beside it, offset 24 pt right and 24 pt down,
+      and select the reference. Enabled only when exactly one whole canvas
+      element is selected; anything else changes nothing. This is NOT Make
+      Symbol (SYMBOLS.md section 7 keeps the two apart: Make Symbol promotes
+      the element to a master, Make Instance offsets a reference to it).
+
+      The target keeps its place and gains an id if it had none; the
+      reference renders the target's current geometry wherever the target
+      is edited later. Both ids are minted by the app before the edit, each
+      unique in the document (the value-in-op rule), so the recorded edit
+      replays to the same ids. The whole operation is ONE undo step.
     category: symbols
     enabled_when: "active_document.selection_count == 1"
     effects:
-      - log: "make_instance"
+      # One undo step: the reference, then the offset. Until 2026-10-25 a
+      # `log` stub whose meaning lived in each app's native menu arm, under a
+      # description of Make Symbol.
+      - snapshot
+      - doc.make_instance: { offset: 24 }
 
   place_instance:
     description: >

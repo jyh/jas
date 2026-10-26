@@ -1,35 +1,18 @@
-//! THE MENU'S MODEL-PURE VERBS, ONE TABLE FOR EVERY ROUTE.
+//! THE MENU'S NATIVE VERBS: the clipboard and Delete laws every route shares.
 //!
-//! One Object menu action is a `log` stub in `actions.yaml`: its behaviour is
-//! the menu's own, in every app. (`unlock_all`, `hide_selection`, `show_all`,
-//! `lock`, `select_all`, `group`, `ungroup` and `ungroup_all` left this table
-//! 2026-10-25: their YAML is `doc.op`, the op layer by name, so every route
-//! runs the declared action.) The reference routes it
-//! through `_MENU_NATIVE_HANDLERS`, Swift through `MenuActions`. Here the web
-//! menu (`menu_bar`), the action corpus (`recorder::replay`) and the engine's
-//! menu dispatch (`ffi::jas_dispatch_action`, flask STATUS §242: Select All
-//! was refused on Windows) all call [`run`], so no route can hold a verb the
-//! others lack. Not web-gated: the engine has no web.
+//! Its model-verb table is GONE (2026-10-25): `unlock_all`, `hide_selection`,
+//! `show_all`, `lock`, `select_all`, `group`, `ungroup`, `ungroup_all` and
+//! `make_instance` were `log` stubs in `actions.yaml` whose behaviour lived in
+//! one native table per port, and each now runs its YAML (`doc.op`, or
+//! `doc.make_instance` for the last) on every route. What remains here is
+//! [`make_instance_ops`], the ops that effect applies. Not web-gated: the
+//! engine has no web.
 //!
-//! This is the UI layer, so [`make_instance`] mints its ids here, never
+//! This is the UI layer, so [`make_instance_ops`] mints its ids here, never
 //! inside a `Controller` method (see `generate_element_id`'s contract).
 
-use crate::document::controller::Controller;
 use crate::document::model::Model;
 use crate::tools::tool::PASTE_OFFSET;
-
-/// The actions [`run`] handles, in the reference's order.
-pub const VERBS: [&str; 1] = ["make_instance"];
-
-/// Run `action` on `model` if it is one of [`VERBS`]; `false` (nothing run)
-/// otherwise. Each is ONE undo step.
-pub fn run(action: &str, model: &mut Model) -> bool {
-    match action {
-        "make_instance" => make_instance(model),
-        _ => return false,
-    }
-    true
-}
 
 /// One Edit menu clipboard verb, as every route runs it. The offsets live
 /// HERE: Paste and Paste, Preserving Layers land [`PASTE_OFFSET`] down and
@@ -61,42 +44,43 @@ pub fn clipboard_verb(action: &str) -> Option<ClipVerb> {
     })
 }
 
-/// Object > Make Instance, as a headless mutation on a [`Model`].
+/// Object > Make Instance's two value-in-op ops, or `None` (a no-op) unless
+/// exactly ONE `All`-kind element is selected and two ids could be minted.
 ///
-/// Replaces the single whole-element selection with a by-id reference to it,
-/// offset by [`PASTE_OFFSET`], under ONE undo transaction. No-op unless
-/// exactly ONE `All`-kind element is selected (the same guard the menu item's
-/// enablement uses).
-///
-/// The two element ids are minted HERE, in the UI layer, through the shared
-/// `mint_unique_ids` loop, then passed in to `create_reference`. Under the
-/// action corpus's deterministic id source that yields the golden-pinned
-/// `"01234567"` / `"89abcdef"`.
-pub fn make_instance(model: &mut Model) {
+/// Make Instance is an OFFSET REFERENCE (SYMBOLS.md: "offset like Make
+/// Instance"), never Make Symbol: `create_reference` to the selected element,
+/// then `move_selection` by `offset` (the YAML's own number). The two ids are
+/// minted HERE, before the ops, through the shared `mint_unique_ids` loop, so
+/// the journal replays to the same ids; under the action corpus's
+/// deterministic id source they are the golden-pinned `"01234567"` /
+/// `"89abcdef"`. `doc.make_instance` applies them under the YAML's `snapshot`.
+pub fn make_instance_ops(doc: &crate::document::document::Document, offset: f64)
+    -> Option<[serde_json::Value; 2]>
+{
     use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::document::document::SelectionKind;
-    // Enabled only when exactly ONE whole element is selected (kind = All; not
-    // a control-point sub-selection). Otherwise no-op, like group's guard.
-    let target_path = {
-        let sel = &model.document().selection;
-        let [es] = sel.as_slice() else { return; };
-        if es.kind != SelectionKind::All { return; }
-        es.path.clone()
-    };
-    // Mint two distinct, collision-free ids against every id already in the
-    // document (see `Document::element_ids`), through the shared mint loop.
-    let mut existing = model.document().element_ids();
-    let Some(ids) =
-        mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))
-    else {
-        return;
-    };
-    let (target_id, ref_id) = (&ids[0], &ids[1]);
-    // create_reference + offset-move under ONE snapshot = a single undo step
-    // (offset rides on the new reference's common.transform via move_selection).
+    let [es] = doc.selection.as_slice() else { return None; };
+    if es.kind != SelectionKind::All { return None; }
+    // Two distinct ids, collision-free against every id already in the
+    // document (see `Document::element_ids`).
+    let mut existing = doc.element_ids();
+    let ids = mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))?;
+    Some([
+        serde_json::json!({"op": "create_reference", "target_path": es.path,
+                           "target_id": ids[0], "ref_id": ids[1]}),
+        serde_json::json!({"op": "move_selection", "dx": offset, "dy": offset}),
+    ])
+}
+
+/// Make Instance on a model, as the YAML runs it (ONE undo step, the paste
+/// offset): the tests' setup step for a document holding a reference.
+#[cfg(test)]
+pub fn make_instance(model: &mut Model) {
+    let Some(ops) = make_instance_ops(model.document(), PASTE_OFFSET) else { return };
     model.with_txn(|m| {
-        Controller::create_reference(m, &target_path, &target_id, &ref_id);
-        Controller::move_selection(m, PASTE_OFFSET, PASTE_OFFSET);
+        for op in &ops {
+            let _ = crate::document::op_apply::op_apply(m, op);
+        }
     });
 }
 
@@ -122,16 +106,11 @@ mod tests {
         }
     }
 
-    /// [`VERBS`] is the list the routes and their tests read; [`run`] is what
-    /// runs. Each verb in the list must be one `run` handles, and nothing
-    /// else is, or a route reads a verb as run that ran nothing.
-    /// [`CLIPBOARD_VERBS`] is exactly what [`clipboard_verb`] knows, and no
-    /// clipboard verb is also a model verb (one route each).
+    /// [`CLIPBOARD_VERBS`] is exactly what [`clipboard_verb`] knows.
     #[test]
     fn every_clipboard_verb_is_known_and_nothing_else_is() {
         for verb in CLIPBOARD_VERBS {
             assert!(clipboard_verb(verb).is_some(), "{verb}");
-            assert!(!VERBS.contains(&verb), "{verb} is not a model verb");
         }
         for other in ["select_all", "undo", "copy ", "paste_text", ""] {
             assert_eq!(clipboard_verb(other), None, "{other:?}");
@@ -139,21 +118,6 @@ mod tests {
         assert_eq!(clipboard_verb("paste"), Some(ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: false }));
         assert_eq!(clipboard_verb("paste_in_place"), Some(ClipVerb::Paste { offset: 0.0, preserve_layers: false }));
         assert_eq!(clipboard_verb("paste_preserving_layers"), Some(ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: true }));
-    }
-
-    #[test]
-    fn every_verb_is_run_and_nothing_else_is() {
-        for verb in VERBS {
-            let mut model = Model::new(Document::default(), None);
-            assert!(run(verb, &mut model), "{verb} is listed and run handles it");
-        }
-        // Those whose YAML is `doc.op` run from the declared action, never here.
-        for other in ["copy", "paste", "undo", "hide", "select_all ", "", "unlock_all",
-                      "hide_selection", "show_all", "lock", "select_all", "group", "ungroup",
-                      "ungroup_all"] {
-            let mut model = Model::new(Document::default(), None);
-            assert!(!run(other, &mut model), "{other:?} is not a menu verb");
-        }
     }
 }
 

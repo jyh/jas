@@ -178,9 +178,7 @@ pub(crate) fn MenuBarView(
                     }
                 }
                 // The menu's model verbs, as the web keyboard runs them
-                // ([`run_model_verb`]): the declared action where the YAML is
-                // `doc.op`, else the native table shared with the action
-                // corpus and the engine's menu dispatch (`menu_native`).
+                // ([`run_model_verb`]): each runs its declared action.
                 "select_all" | "unlock_all" | "hide" | "show_all" | "lock"
                 | "group" | "ungroup" | "ungroup_all" | "make_instance" => {
                     let action = cmd.to_string();
@@ -999,23 +997,17 @@ fn filename_stem(filename: &str) -> String {
 }
 
 /// Run one of the menu's model verbs on the active tab, as the web menu and
-/// the web keyboard both do: those whose YAML is `doc.op` (the op layer by
-/// name) run the declared action, the rest the shared native table
-/// (`menu_native`). `hide` is `hide_selection`'s cmd name. `false` (nothing
+/// the web keyboard both do: each runs its declared action (`doc.op`, or
+/// `doc.make_instance`), as the engine's door and the Mac do. `hide` is
+/// `hide_selection`'s cmd name. `false` (nothing
 /// run) for any other name.
 pub(crate) fn run_model_verb(cmd: &str, st: &mut AppState) -> bool {
     match cmd {
         "select_all" | "unlock_all" | "hide" | "show_all" | "lock" | "group" | "ungroup"
-        | "ungroup_all" => {
+        | "ungroup_all" | "make_instance" => {
             let action = if cmd == "hide" { "hide_selection" } else { cmd };
             let _ = crate::interpreter::renderer::dispatch_action(
                 action, &serde_json::Map::new(), st);
-            true
-        }
-        _ if super::menu_native::VERBS.contains(&cmd) => {
-            if let Some(tab) = st.tab_mut() {
-                super::menu_native::run(cmd, &mut tab.model);
-            }
             true
         }
         _ => false,
@@ -1122,6 +1114,32 @@ mod tests {
         st.tab_mut().unwrap().model.undo();
         assert_eq!(kinds(&st), vec!["group"], "one undo restores ungroup_all");
         assert!(!st.tabs[st.active_tab].model.can_undo(), "ungroup_all was ONE step");
+    }
+
+    /// Make Instance runs its YAML (`snapshot` + `doc.make_instance`) from the
+    /// web menu: a reference to the one selected element, selected, as ONE
+    /// undo step; with two selected it changes nothing.
+    #[test]
+    fn make_instance_runs_its_yaml_as_one_undo_step() {
+        let mut st = state_on(include_str!("../../../test_fixtures/svg/two_rects.svg"));
+        let count = |st: &AppState| st.tabs[st.active_tab].model.document().layers[0]
+            .children().map_or(0, |c| c.len());
+        run_model_verb("select_all", &mut st);
+        assert!(run_model_verb("make_instance", &mut st));
+        assert_eq!(count(&st), 2, "two selected: nothing");
+        assert!(!st.tabs[st.active_tab].model.can_undo(), "and no undo step");
+        let model = &mut st.tab_mut().unwrap().model;
+        let doc = model.document().clone();
+        let mut one = doc.clone();
+        one.selection = vec![crate::document::document::ElementSelection::all(vec![0, 0])];
+        model.edit_document(one);
+        let steps_before = model.can_undo();
+        assert!(run_model_verb("make_instance", &mut st));
+        assert_eq!(count(&st), 3, "the reference is added");
+        assert_eq!(selected_paths(&st), vec![vec![0, 2]], "and selected");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(count(&st), 2, "ONE undo removes it");
+        assert_eq!(st.tabs[st.active_tab].model.can_undo(), steps_before, "it was one step");
     }
 
     #[test]

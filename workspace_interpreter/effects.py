@@ -528,6 +528,15 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.apply_op(dict(spec))
         return None
 
+    # doc.make_instance: { offset: <number> } — Object > Make Instance, an
+    # offset by-id reference to the one selected element; its two ids are
+    # minted before the ops (value-in-op). StateStore.make_instance.
+    if "doc.make_instance" in effect:
+        spec = effect["doc.make_instance"]
+        if isinstance(spec, dict) and isinstance(spec.get("offset"), (int, float)):
+            store.make_instance(float(spec["offset"]))
+        return None
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.

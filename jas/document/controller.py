@@ -184,6 +184,52 @@ def _tspan_omit_identity(ts, parent, attribute: str):
     return ts
 
 
+def make_instance_ops(doc: Document, offset: float,
+                      mint: Callable[[], str] | None = None) -> list[dict] | None:
+    """The two value-in-op ops Object > Make Instance applies, or None (a
+    no-op) unless exactly ONE whole element is selected or the mint fails.
+
+    Make Instance is an OFFSET REFERENCE (SYMBOLS.md: "offset like Make
+    Instance"), never Make Symbol: ``create_reference`` to the selected
+    element with two freshly minted ids, then ``move_selection`` by
+    ``offset``. The ids are minted HERE, before the ops (value-in-op), each
+    retried against every id already in the document. Mirrors Rust
+    ``menu_native::make_instance_ops``.
+    """
+    from document.artboard import generate_element_id
+    mint = mint or generate_element_id
+    if len(doc.selection) != 1:
+        return None
+    es = next(iter(doc.selection))
+    if not isinstance(es.kind, _SelectionAll):
+        return None
+    existing: set[str] = set()
+
+    def _gather(elem) -> None:
+        if getattr(elem, "id", None) is not None:
+            existing.add(elem.id)
+        for c in getattr(elem, "children", None) or ():
+            _gather(c)
+
+    for layer in doc.layers:
+        _gather(layer)
+    ids = []
+    for _ in range(2):
+        for _ in range(100):
+            candidate = mint()
+            if candidate not in existing:
+                existing.add(candidate)
+                ids.append(candidate)
+                break
+        else:
+            return None
+    return [
+        {"op": "create_reference", "target_path": list(es.path),
+         "target_id": ids[0], "ref_id": ids[1]},
+        {"op": "move_selection", "dx": offset, "dy": offset},
+    ]
+
+
 def _insert_element_at(doc: Document, path: ElementPath, elem: Element) -> Document:
     """``doc`` with ``elem`` inserted so that it sits at ``path``. Mirrors Rust
     ``Document::insert_element_at``."""

@@ -4943,7 +4943,7 @@ private func runScriptMenuStep(_ itemId: String, model: Model) -> Bool {
         LayersPanel.dispatchYamlAction(action, model: model)
         return true
     }
-    return MenuActions.run(action, model)
+    return false
 }
 
 /// One panel step, `{"panel", "widget", "event", "value"?}`, run as the app
@@ -5914,17 +5914,6 @@ private let actionFixtures = [
     "nudge_actions.json",
 ]
 
-/// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml
-/// entries are `log` stubs (the real behavior lives in the menu dispatch — see
-/// ``JasCommands`` / ``MenuActions``), so the generic layers dispatcher would
-/// no-op them. The corpus routes them to the SAME extracted ``MenuActions``
-/// handlers the live menu invokes, so the action corpus gates their cross-app
-/// document mutation. Mirrors the Python `_MENU_NATIVE_HANDLERS` intercept and
-/// the symbols / concepts native intercepts already in ``runActionModel``.
-private let menuNativeHandlers: [String: (Model) -> Void] = [
-    "make_instance": MenuActions.makeInstance,
-]
-
 /// Build a Model whose document is parsed from `setupSvg`. Mirrors Rust
 /// `action_state_from_svg` (loads the tree from a shared SVG fixture instead of
 /// constructing layers inline) and the gesture runner's identity-view setup.
@@ -6071,15 +6060,9 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
         // Params are an object of resolved literals (mirrors the production-route
         // transform tests). Default to empty.
         let params = (step["params"] as? [String: Any]) ?? [:]
-        if let handler = menuNativeHandlers[action] {
-            // Bespoke-native menu verb: route to the SAME extracted handler the
-            // live menu invokes (the deterministic id source installed above
-            // covers make_instance's id minting, exactly as it does for
-            // new_artboard / new_symbol). Mirrors Python's _MENU_NATIVE_HANDLERS.
-            handler(model)
-        } else {
-            LayersPanel.dispatchYamlAction(action, model: model, params: params)
-        }
+        // Every menu verb runs its YAML (the deterministic id source installed
+        // above covers make_instance's mint, as it does new_artboard's).
+        LayersPanel.dispatchYamlAction(action, model: model, params: params)
     }
     return model
 }

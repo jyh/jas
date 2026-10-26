@@ -2,27 +2,35 @@ import Foundation
 import Testing
 @testable import JasLib
 
-// MenuActions.run: the model-pure menu verbs by name, one table, mirroring Rust
-// `menu_native::VERBS` / `run`. The live menu and the level-1 script runner
-// both go through it.
+// The Edit / Object model verbs: since 2026-10-25 none has a native table; the
+// menu runs each one's declared action (`MenuActions.yamlVerbs`), as the
+// engine's door and the web menu do (Rust `menu_native` keeps only the
+// clipboard and Delete laws).
 
-@Test func theMenuVerbsAreRustsOne() {
-    // Rust `menu_native::VERBS`. Those whose YAML is `doc.op` are not in it:
-    // the menu runs their declared action.
-    #expect(MenuActions.verbs == ["make_instance"])
+@Test func everyMenuModelVerbRunsItsYaml() {
     #expect(MenuActions.yamlVerbs == ["unlock_all", "hide_selection", "show_all", "lock", "select_all",
-                                      "group", "ungroup", "ungroup_all"])
+                                      "group", "ungroup", "ungroup_all", "make_instance"])
 }
 
-@Test func runRefusesAnythingElseAndRunsNothing() {
+// Make Instance runs its YAML (`snapshot` + `doc.make_instance`): an offset
+// reference to the ONE selected element, selected, as ONE undo step; with two
+// selected it changes nothing.
+@Test func makeInstanceRunsItsYamlAsOneUndoStep() {
     let model = Model()
-    let before = model.document
-    for action in ["copy", "paste", "delete_selection", "", "Group",
-                   "unlock_all", "hide_selection", "show_all", "lock", "select_all",
-                   "group", "ungroup", "ungroup_all"] {
-        #expect(!MenuActions.run(action, model), "\(action)")
-    }
-    #expect(model.document == before)
+    let r = { (x: Double) in Element.rect(Rect(x: x, y: 0, width: 10, height: 10)) }
+    model.setDocumentForTest(Document(layers: [Layer(children: [r(0), r(20)])], selectedLayer: 0,
+                                      selection: [ElementSelection.all([0, 0]), ElementSelection.all([0, 1])]))
+    LayersPanel.dispatchYamlAction("make_instance", model: model)
+    #expect(model.document.layers[0].children.count == 2, "two selected: nothing")
+    #expect(!model.canUndo, "and no undo step")
+    model.setDocumentForTest(Document(layers: [Layer(children: [r(0), r(20)])], selectedLayer: 0,
+                                      selection: [ElementSelection.all([0, 0])]))
+    LayersPanel.dispatchYamlAction("make_instance", model: model)
+    #expect(model.document.layers[0].children.count == 3, "the reference is added")
+    #expect(Set(model.document.selection.map(\.path)) == Set([[0, 2]]), "and selected")
+    model.undo()
+    #expect(model.document.layers[0].children.count == 2, "ONE undo removes it")
+    #expect(!model.canUndo, "it was one step")
 }
 
 // Group, Ungroup and Ungroup All run their YAML (`snapshot` + `doc.op`) from

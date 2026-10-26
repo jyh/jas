@@ -142,3 +142,36 @@ def test_ungroup_all_from_actions_yaml_keeps_every_locked_group():
     after = _doc_of(store)
     assert [type(c).__name__ for c in after.layers[0].children] == ["Group"], "inside a locked layer"
     assert [type(c).__name__ for c in after.layers[1].children] == ["Group", "Rect", "Rect"]
+
+
+def test_make_instance_from_actions_yaml_leaves_an_offset_reference_selected():
+    """`actions.yaml` make_instance: a by-id reference to the ONE selected
+    element (SYMBOLS.md: an offset reference, not Make Symbol), offset by the
+    YAML's own `offset` and selected; the target gains an id. Two selected,
+    or none, is a no-op."""
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        spec = yaml.safe_load(f)["actions"]["make_instance"]
+    offset = next(e["doc.make_instance"]["offset"] for e in spec["effects"]
+                  if isinstance(e, dict) and "doc.make_instance" in e)
+    doc = _two_rects(_rect(), Rect(x=20, y=0, width=10, height=10))
+    doc = replace(doc, selection=frozenset({ElementSelection.all((0, 0))}))
+    store = _store(doc)
+    _run_yaml_action(store, "make_instance")
+    after = _doc_of(store)
+    kids = after.layers[0].children
+    assert len(kids) == 3, "the reference is added"
+    ref = kids[2]
+    assert type(ref).__name__ == "ReferenceElem", type(ref).__name__
+    assert kids[0].id is not None and ref.target == kids[0].id, "it references the target by id"
+    assert ref.id is not None and ref.id != kids[0].id
+    assert ref.transform is not None and (ref.transform.e, ref.transform.f) == (offset, offset)
+    assert {es.path for es in after.selection} == {(0, 2)}, "the reference is selected"
+
+    two = replace(_two_rects(_rect(), _rect()),
+                  selection=frozenset({ElementSelection.all((0, 0)), ElementSelection.all((0, 1))}))
+    store = _store(two)
+    before = json.dumps(store._document, sort_keys=True)
+    _run_yaml_action(store, "make_instance")
+    assert json.dumps(store._document, sort_keys=True) == before, "two selected: nothing"
