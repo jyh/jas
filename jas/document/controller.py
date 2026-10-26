@@ -184,6 +184,64 @@ def _tspan_omit_identity(ts, parent, attribute: str):
     return ts
 
 
+def element_ids(doc: Document) -> set[str]:
+    """Every element id in ``doc``: the layers' trees and the symbol masters,
+    a compound shape's operands and a transformed element's child included,
+    never a reference's or a recorded/generated element's contents. Mirrors
+    Rust ``Document::element_ids`` and Swift ``Document.elementIds``."""
+    out: set[str] = set()
+
+    def walk(elem) -> None:
+        if getattr(elem, "id", None) is not None:
+            out.add(elem.id)
+        for c in getattr(elem, "children", None) or ():
+            walk(c)
+        for c in getattr(elem, "operands", None) or ():
+            walk(c)
+        child = getattr(elem, "child", None)
+        if child is not None:
+            walk(child)
+
+    for layer in doc.layers:
+        walk(layer)
+    for master in doc.symbols:
+        walk(master)
+    return out
+
+
+def _mint_ids(doc: Document, count: int, mint: Callable[[], str]) -> list[str] | None:
+    """``count`` ids, each retried up to 100 times against every id already in
+    ``doc`` (:func:`element_ids`), or None when the mint keeps colliding.
+    Mirrors Rust ``mint_unique_ids``."""
+    existing = element_ids(doc)
+    ids = []
+    for _ in range(count):
+        for _ in range(100):
+            candidate = mint()
+            if candidate not in existing:
+                existing.add(candidate)
+                ids.append(candidate)
+                break
+        else:
+            return None
+    return ids
+
+
+def place_instance_ops(doc: Document, master_id: str | None,
+                       mint: Callable[[], str] | None = None) -> list[dict] | None:
+    """The one value-in-op op the Symbols panel's Place Instance applies, or
+    None (a no-op) when no master is named or the mint fails: ``place_instance``
+    of ``master_id`` with a freshly minted reference id (SYMBOLS.md §7). Rust
+    ``symbols_host`` (``place_instance``) mints and applies the same op."""
+    from document.artboard import generate_element_id
+    if not master_id:
+        return None
+    ids = _mint_ids(doc, 1, mint or generate_element_id)
+    if ids is None:
+        return None
+    return [{"op": "place_instance", "master_id": master_id, "ref_id": ids[0]}]
+
+
 def make_instance_ops(doc: Document, offset: float,
                       mint: Callable[[], str] | None = None) -> list[dict] | None:
     """The two value-in-op ops Object > Make Instance applies, or None (a
@@ -203,26 +261,9 @@ def make_instance_ops(doc: Document, offset: float,
     es = next(iter(doc.selection))
     if not isinstance(es.kind, _SelectionAll):
         return None
-    existing: set[str] = set()
-
-    def _gather(elem) -> None:
-        if getattr(elem, "id", None) is not None:
-            existing.add(elem.id)
-        for c in getattr(elem, "children", None) or ():
-            _gather(c)
-
-    for layer in doc.layers:
-        _gather(layer)
-    ids = []
-    for _ in range(2):
-        for _ in range(100):
-            candidate = mint()
-            if candidate not in existing:
-                existing.add(candidate)
-                ids.append(candidate)
-                break
-        else:
-            return None
+    ids = _mint_ids(doc, 2, mint)
+    if ids is None:
+        return None
     return [
         {"op": "create_reference", "target_path": list(es.path),
          "target_id": ids[0], "ref_id": ids[1]},

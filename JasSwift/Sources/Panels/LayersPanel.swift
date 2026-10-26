@@ -93,7 +93,7 @@ public enum LayersPanel {
         // master-then-ref via the no-arg `generateElementId()` (the seeded test
         // minter) and self-brackets one undo step via the Controller mutator.
         switch actionName {
-        case "new_symbol", "place_instance", "delete_symbol_action":
+        case "new_symbol", "delete_symbol_action":
             SymbolsPanel.dispatchSymbolAction(actionName, model: model)
             return
         // Native intercept for the Concepts-panel verbs (CONCEPTS.md §6),
@@ -173,6 +173,9 @@ public enum LayersPanel {
             "layers_panel_selection": selectionMarkers,
             "artboards_panel_selection": artboardsPanelSelection,
             "isolation_stack": model.layersIsolationStack.map { ["__path__": $0] },
+            // The Symbols panel's master (`panel.selected_symbol`), which
+            // `place_instance` reads; Rust's app scope carries it the same way.
+            "selected_symbol": SymbolsPanel.selectedSymbol(model) ?? NSNull(),
         ]
         let ctx: [String: Any] = [
             "active_document": activeDoc,
@@ -582,6 +585,17 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.place_instance: { master: <expr> }: the Symbols panel's Place
+        // Instance, the value-in-op op ``SymbolsPanel/placeInstanceOps`` mints
+        // for the master the expression names. Rust's `doc.place_instance`.
+        let docPlaceInstanceHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let expr = spec["master"] as? String,
+                  case .string(let master) = evaluate(expr, context: callCtx), !master.isEmpty,
+                  let ops = SymbolsPanel.placeInstanceOps(model.document, master: master) else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
         let docOpHandler: PlatformEffect = { value, _, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
             opApply(model, controller, spec)
@@ -867,6 +881,7 @@ public enum LayersPanel {
             "doc.delete_selection": docDeleteSelectionHandler,
             "doc.op": docOpHandler,
             "doc.make_instance": docMakeInstanceHandler,
+            "doc.place_instance": docPlaceInstanceHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

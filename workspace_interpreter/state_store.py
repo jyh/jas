@@ -776,6 +776,19 @@ class StateStore:
         for op in ops:
             self.apply_op(op)
 
+    def place_instance(self, master_id) -> None:
+        """The Symbols panel's Place Instance on the store's document: the op
+        ``document.controller.place_instance_ops`` mints, applied through the
+        op layer (as :meth:`make_instance`). Nothing without a master."""
+        if self._document is None:
+            return
+        import json
+        from document.controller import place_instance_ops
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        for op in place_instance_ops(doc, master_id if isinstance(master_id, str) else None) or []:
+            self.apply_op(op)
+
     def apply_op(self, op: dict) -> None:
         """Apply one journaled op (``{"op": <name>, ...}``) to the document.
 

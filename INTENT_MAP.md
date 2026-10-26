@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 3 |
-| `journaling` | 37 |
+| `journaling` | 38 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 194 |
+| `ui-state` | 193 |
 | `view` | 6 |
 | **total** | **245** |
 
 (The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (37)
+## Journaling actions (38)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -79,6 +79,7 @@ come additively from `native_intercepts`.)
 | `new_group` | `doc.wrap_in_group` |
 | `new_layer` | `doc.create_layer`, `doc.insert_at` |
 | `nudge_selection` | `doc.snapshot`, `doc.translate_selection` |
+| `place_instance` | `doc.place_instance` |
 | `print_dialog_done` | `doc.set_advanced_field`, `doc.set_color_management_field`, `doc.set_graphics_field`, `doc.set_marks_and_bleed_field`, `doc.set_output_field`, `doc.set_output_ink_field`, `doc.set_print_preferences_field` |
 | `print_dialog_print` | `doc.set_advanced_field`, `doc.set_color_management_field`, `doc.set_graphics_field`, `doc.set_marks_and_bleed_field`, `doc.set_output_field`, `doc.set_output_ink_field`, `doc.set_print_preferences_field` |
 | `remove_brush_from_selection` | `doc.set_attr_on_selection`, `doc.snapshot` |
@@ -126,7 +127,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (194)
+## UI-state actions (193)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -156,29 +157,29 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `open_layer_options`, `open_paragraph_hyphenation`, `open_paragraph_justification`, `open_print_dialog`,
 `open_swatch_options`, `paintbrush_tool_options_confirm`, `paintbrush_tool_options_reset`, `paragraph_hyphenation_confirm`,
 `paragraph_justification_confirm`, `paste`, `paste_in_place`, `paste_preserving_layers`,
-`place_concept_instance`, `place_instance`, `promote_to_concept`, `quit`,
-`rearrange_artboards`, `redo`, `release_compound_shape`, `release_transform`,
-`remove_tab`, `rename_artboard`, `rename_element`, `repeat_boolean_operation`,
-`reset_align_panel`, `reset_artboards_panel`, `reset_boolean_panel`, `reset_fill_stroke`,
-`reset_magic_wand_panel`, `reset_paragraph_panel`, `reset_stroke_profile`, `reset_workspace`,
-`restore_canvas`, `revert`, `revert_workspace`, `rotate_options_reset`,
-`save`, `save_all_and_close`, `save_all_then_close`, `save_and_close`,
-`save_appearance_as`, `save_appearance_confirm`, `save_as`, `save_brush_library`,
-`save_swatch_library`, `save_swatch_library_confirm`, `save_workspace_as`, `save_workspace_confirm`,
-`scale_options_reset`, `scroll_to_selected`, `select_all_unused_brushes`, `select_all_unused_swatches`,
-`set_active_color`, `set_active_color_none`, `set_align_to`, `set_arrow_align`,
-`set_artboard_fill_preset`, `set_artboard_reference_point`, `set_brush_thumbnail_size`, `set_brush_view_mode`,
-`set_color_panel_mode`, `set_concept_param`, `set_fill_none`, `set_fill_type_gradient`,
-`set_fill_type_solid`, `set_layers_search`, `set_stroke_align`, `set_stroke_cap`,
-`set_stroke_join`, `set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`,
-`shear_options_reset`, `show_panel`, `solo_element_visibility`, `solo_layers_type_filter`,
-`sort_brushes_by_name`, `sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`,
-`swatch_options_confirm`, `switch_appearance`, `switch_workspace`, `symbols_panel_select`,
-`tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`,
-`toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`,
-`toggle_element_lock`, `toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`,
-`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`,
-`toggle_use_preview_bounds`, `undo`
+`place_concept_instance`, `promote_to_concept`, `quit`, `rearrange_artboards`,
+`redo`, `release_compound_shape`, `release_transform`, `remove_tab`,
+`rename_artboard`, `rename_element`, `repeat_boolean_operation`, `reset_align_panel`,
+`reset_artboards_panel`, `reset_boolean_panel`, `reset_fill_stroke`, `reset_magic_wand_panel`,
+`reset_paragraph_panel`, `reset_stroke_profile`, `reset_workspace`, `restore_canvas`,
+`revert`, `revert_workspace`, `rotate_options_reset`, `save`,
+`save_all_and_close`, `save_all_then_close`, `save_and_close`, `save_appearance_as`,
+`save_appearance_confirm`, `save_as`, `save_brush_library`, `save_swatch_library`,
+`save_swatch_library_confirm`, `save_workspace_as`, `save_workspace_confirm`, `scale_options_reset`,
+`scroll_to_selected`, `select_all_unused_brushes`, `select_all_unused_swatches`, `set_active_color`,
+`set_active_color_none`, `set_align_to`, `set_arrow_align`, `set_artboard_fill_preset`,
+`set_artboard_reference_point`, `set_brush_thumbnail_size`, `set_brush_view_mode`, `set_color_panel_mode`,
+`set_concept_param`, `set_fill_none`, `set_fill_type_gradient`, `set_fill_type_solid`,
+`set_layers_search`, `set_stroke_align`, `set_stroke_cap`, `set_stroke_join`,
+`set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`,
+`show_panel`, `solo_element_visibility`, `solo_layers_type_filter`, `sort_brushes_by_name`,
+`sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`,
+`switch_appearance`, `switch_workspace`, `symbols_panel_select`, `tile_panes`,
+`toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`,
+`toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`,
+`toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`,
+`toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`,
+`undo`
 
 ## Verb -> journaling evidence table
 
@@ -202,6 +203,7 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 | `doc.move_artboards_down` | always | `move_artboards_down` | yes | renderer.rs:3390-3396; op_apply.rs:1849 |
 | `doc.move_artboards_up` | always | `move_artboards_up` | yes | renderer.rs:3378-3384; op_apply.rs:1842 |
 | `doc.op` | always (a selection-only op (`select_all`) is journal-neutral as `doc.select_in_rect` is: op_apply opens no transaction for it (op_apply.rs:1878 is_selection_only_verb)) | `(the call site's op)` | yes | effects.rs:2898; op_apply.rs:2004 |
+| `doc.place_instance` | always | `place_instance` | yes | effects.rs:2921; op_apply.rs:2204 |
 | `doc.select_in_rect` | always (selection-only / non-undoable: op_apply records it only into an ALREADY-OPEN transaction and never opens one (op_apply.rs:1329-1336), so a bare marquee stays journal-neutral) | `select_rect` | no (tool YAML only) | effects.rs:987-1013; op_apply.rs:1380 |
 | `doc.set_advanced_field` | always | `set_advanced_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_artboard_field` | always | `set_artboard_field` | yes | renderer.rs:3241-3265; op_apply.rs:1802 |

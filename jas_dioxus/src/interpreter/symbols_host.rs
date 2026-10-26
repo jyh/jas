@@ -22,9 +22,10 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The eight action names this module hosts.
-pub const ACTIONS: [&str; 8] = [
-    "new_symbol", "place_instance", "delete_symbol_action", "delete_symbol_orphan_confirm_ok",
+/// The seven action names this module hosts. `place_instance` is not one since
+/// 2026-10-26: its YAML runs `doc.place_instance` ([`place_instance_ops`]).
+pub const ACTIONS: [&str; 7] = [
+    "new_symbol", "delete_symbol_action", "delete_symbol_orphan_confirm_ok",
     "place_concept_instance", "set_concept_param", "apply_concept_operation", "promote_to_concept",
 ];
 
@@ -54,12 +55,6 @@ pub fn run(
 ) -> Option<Outcome> {
     Some(match action {
         "new_symbol" => new_symbol(model),
-        "place_instance" => {
-            if let (Some(master), Some(ids)) = (selected_symbol, mint(model, 1)) {
-                model.with_txn(|m| Controller::place_instance(m, master, &ids[0]));
-            }
-            Outcome::Done
-        }
         "delete_symbol_action" => {
             let Some(master) = selected_symbol else { return Some(Outcome::Done) };
             let usage = crate::document::dependency_index::dependency_index(model.document())
@@ -101,6 +96,16 @@ pub fn run(
         }
         _ => return None,
     })
+}
+
+/// The one value-in-op op the Symbols panel's Place Instance applies
+/// (`doc.place_instance` in actions.yaml): `place_instance` of `master` with a
+/// freshly minted reference id (SYMBOLS.md §7), or `None` when the mint fails.
+/// The reference's `document.controller.place_instance_ops` mints the same op.
+pub fn place_instance_ops(doc: &crate::document::document::Document, master: &str) -> Option<Vec<Value>> {
+    let mut existing = doc.element_ids();
+    let ids = mint_unique_ids(1, &mut existing, &mut || generate_element_id(None))?;
+    Some(vec![json!({"op": "place_instance", "master_id": master, "ref_id": ids[0]})])
 }
 
 /// Mint `count` collision-free element ids against every id already in the

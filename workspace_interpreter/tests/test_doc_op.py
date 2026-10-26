@@ -284,3 +284,46 @@ def test_delete_selection_from_actions_yaml_asks_before_stranding_a_reference():
     assert json.dumps(store._document, sort_keys=True) == before, "nothing is deleted before the answer"
     assert store.get_dialog_id() == "delete_orphan_confirm"
     assert (store.get_dialog_params() or {}).get("count") == 1
+
+
+def test_place_instance_from_actions_yaml_appends_a_reference_to_the_panel_selected_master():
+    """`actions.yaml` place_instance (SYMBOLS.md §7): a by-id reference to the
+    master `panel.selected_symbol` names, with a freshly minted id, appended to
+    the active layer and selected. No master selected: nothing."""
+    import yaml
+    master = Rect(x=0, y=0, width=10, height=10, id="m1")
+    doc = replace(Document(layers=(Layer(name="L", children=(_rect(),)),)), symbols=(master,))
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        effects = yaml.safe_load(f)["actions"]["place_instance"]["effects"]
+    store = _store(doc)
+    run_effects(effects, {"panel": {"selected_symbol": "m1"}}, store)
+    after = _doc_of(store)
+    kids = after.layers[0].children
+    assert len(kids) == 2, "the instance is appended"
+    ref = kids[1]
+    assert type(ref).__name__ == "ReferenceElem" and ref.target == "m1"
+    assert ref.id is not None and ref.id != "m1", "its id is minted"
+    assert {es.path for es in after.selection} == {(0, 1)}, "the instance is selected"
+
+    store = _store(doc)
+    before = json.dumps(store._document, sort_keys=True)
+    run_effects(effects, {"panel": {"selected_symbol": None}}, store)
+    assert json.dumps(store._document, sort_keys=True) == before, "no master: nothing"
+
+
+def test_a_minted_id_never_repeats_a_symbol_masters_id():
+    """The value-in-op mint retries against EVERY id in the document, the
+    symbol masters' included (Rust `Document::element_ids`, Swift
+    `elementIds`): a mint that offers a master's id first gets a fresh one."""
+    from document.controller import make_instance_ops, place_instance_ops
+    master = Rect(x=0, y=0, width=10, height=10, id="m1")
+    doc = replace(Document(layers=(Layer(name="L", children=(_rect(),)),)), symbols=(master,),
+                  selection=frozenset({ElementSelection.all((0, 0))}))
+    offers = iter(["m1", "a1", "a2"])
+    ops = make_instance_ops(doc, 24, mint=lambda: next(offers))
+    assert (ops[0]["target_id"], ops[0]["ref_id"]) == ("a1", "a2")
+    offers = iter(["m1", "a1"])
+    assert place_instance_ops(doc, "m1", mint=lambda: next(offers)) == [
+        {"op": "place_instance", "master_id": "m1", "ref_id": "a1"}]
+    assert place_instance_ops(doc, None) is None, "no master: nothing"

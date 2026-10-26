@@ -79,7 +79,7 @@ import Testing
     let model = Model(document: doc)
     model.stateStore.initPanel("symbols_panel_content", defaults: [:])
     model.stateStore.setPanel("symbols_panel_content", "selected_symbol", "M1")
-    SymbolsPanel.dispatchSymbolAction("place_instance", model: model)
+    LayersPanel.dispatchYamlAction("place_instance", model: model)
     // A new instance targeting M1 was appended to the active layer.
     let kids = model.document.layers[model.document.selectedLayer].children
     let instances = kids.filter {
@@ -93,7 +93,7 @@ import Testing
     let master = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "M1"))
     let doc = Document(layers: [Layer(children: [])], symbols: [master])
     let model = Model(document: doc)
-    SymbolsPanel.dispatchSymbolAction("place_instance", model: model)
+    LayersPanel.dispatchYamlAction("place_instance", model: model)
     #expect(model.document.layers[0].children.isEmpty)
 }
 

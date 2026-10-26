@@ -164,7 +164,8 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # and applies create_reference + move_selection); every native table is gone.
 # 41 on 2026-10-26: `delete_selection` (reference-aware: it asks through
 # `active_document.selection_orphan_count`, else `doc.op: {op: delete_selection}`).
-MIN_LOG_ONLY = 41
+# 40 the same day: `place_instance` (`doc.place_instance`, which mints its id).
+MIN_LOG_ONLY = 40
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -473,8 +474,10 @@ def self_test() -> int:
         # O1.3 (2026-07-30) until 2026-10-25, when it and the other four swatch
         # verbs became `swatch.*` effects in actions.yaml and LEFT the log-only
         # set this table classifies. Dropped rather than moved: undo, save_as,
-        # revert, toggle_panel, new_symbol and place_instance still hold the
-        # native_both class.
+        # revert, toggle_panel and new_symbol still hold the native_both class.
+        # place_instance was anchored beside new_symbol until 2026-10-26, when it
+        # became `doc.place_instance` and left the set; new_symbol alone now
+        # anchors the `symbols_host::ACTIONS` scan.
         # THE TWO CLASSES THAT PRODUCED FALSE DIVERGENCES on the first
         # production run, anchored so they cannot regress:
         #   guard arm -- jas_dioxus routes panel toggles through
@@ -486,7 +489,6 @@ def self_test() -> int:
         #   live in `symbols_host.rs`'s `pub const ACTIONS`, and these two
         #   anchors are what caught the literal scan going blind to them.
         "new_symbol": "native_both",
-        "place_instance": "native_both",
     }
     for a, want in anchors.items():
         got = rows.get(a, "<not in the log-only set>")

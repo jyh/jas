@@ -2913,6 +2913,27 @@ fn run_doc_effect(
                 None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.make_instance:{spec}"))),
             }
         }
+        // doc.place_instance: { master: <expr> }: the Symbols panel's Place
+        // Instance, the value-in-op op `symbols_host::place_instance_ops` mints
+        // for the master the expression names (`panel.selected_symbol`), under
+        // the action's `snapshot`. The reference's `StateStore.place_instance`
+        // the same. Nothing when the expression names no master.
+        "doc.place_instance" => {
+            match spec.get("master").and_then(|v| v.as_str()) {
+                Some(expr) => {
+                    if let Value::Str(master) = eval_expr(expr, store, ctx) {
+                        if !master.is_empty() {
+                            for op in crate::interpreter::symbols_host::place_instance_ops(model.document(), &master)
+                                .unwrap_or_default()
+                            {
+                                let _ = crate::document::op_apply::op_apply(model, &op);
+                            }
+                        }
+                    }
+                }
+                None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.place_instance:{spec}"))),
+            }
+        }
         "doc.op" => {
             let refused = match spec.get("op").and_then(|v| v.as_str()) {
                 Some(_) => crate::document::op_apply::op_apply(model, spec).is_err(),

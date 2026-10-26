@@ -537,6 +537,16 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.make_instance(float(spec["offset"]))
         return None
 
+    # doc.place_instance: { master: <expr> } — the Symbols panel's Place
+    # Instance: a minted by-id reference to the master the expression names
+    # (`panel.selected_symbol`), appended and selected. StateStore.place_instance.
+    if "doc.place_instance" in effect:
+        spec = effect["doc.place_instance"]
+        if isinstance(spec, dict):
+            master = evaluate(str(spec.get("master", "")), store.eval_context(ctx))
+            store.place_instance(master.value if isinstance(master.value, str) else None)
+        return None
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.
