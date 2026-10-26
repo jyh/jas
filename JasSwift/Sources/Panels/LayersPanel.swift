@@ -545,6 +545,23 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.paste: { text: <expr>, offset, preserve_layers }: the three paste
+        // actions. `text` names the pasteboard read (`param.clipboard`; null
+        // when unreadable), handed to the op layer's `paste` op: the run, the
+        // SVG-or-text rule and the lock are that one law, which self-brackets,
+        // so a paste of nothing records nothing. Rust's `doc.paste`.
+        let docPasteHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any],
+                  let offset = (spec["offset"] as? NSNumber)?.doubleValue else { return nil }
+            var text: Any = NSNull()
+            if let expr = spec["text"] as? String, case .string(let t) = evaluate(expr, context: callCtx) {
+                text = t
+            }
+            opApply(model, controller, ["op": "paste", "text": text, "offset": offset,
+                                        "preserve_layers": (spec["preserve_layers"] as? Bool) ?? false])
+            return nil
+        }
+
         // doc.place_instance: { master: <expr> }: the Symbols panel's Place
         // Instance, the value-in-op op ``SymbolsPanel/placeInstanceOps`` mints
         // for the master the expression names. Rust's `doc.place_instance`.
@@ -933,6 +950,7 @@ public enum LayersPanel {
             "doc.delete_selection": docDeleteSelectionHandler,
             "doc.op": docOpHandler,
             "doc.make_instance": docMakeInstanceHandler,
+            "doc.paste": docPasteHandler,
             "doc.place_instance": docPlaceInstanceHandler,
             "doc.new_symbol": docNewSymbolHandler,
             "doc.place_concept_instance": docPlaceConceptInstanceHandler,

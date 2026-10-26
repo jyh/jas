@@ -236,12 +236,9 @@ pub(crate) fn make_keydown_handler(
                 }
             } else {
                 evt.prevent_default();
-                clipboard_read_and_paste(
-                    app_for_keys.clone(),
-                    revision_for_keys,
-                    0.0,
-                    false,
-                );
+                // Reached when the session declined the text: lands in place,
+                // as this site always has (offset 0).
+                clipboard_read_and_paste(app_for_keys.clone(), revision_for_keys, "paste_in_place");
                 return;
             }
         }
@@ -387,19 +384,12 @@ pub(crate) fn make_keydown_handler(
             }
             Key::Character(ref c) if (c == "v" || c == "V") && cmd => {
                 evt.prevent_default();
-                // Ctrl+Shift+V is Paste in Place; the offset is the clipboard
-                // table's (`menu_native`), as the engine's key route reads it.
+                // Ctrl+Shift+V is Paste in Place; each runs its action's YAML,
+                // which holds the offset, as the engine's key route does.
                 // R2: the keyboard paste is always the FLATTENING one. R3 is
                 // menu-only by design (see workspace/shortcuts.yaml).
                 let action = if mods.shift() { "paste_in_place" } else { "paste" };
-                let Some(super::menu_native::ClipVerb::Paste { offset, .. }) =
-                    super::menu_native::clipboard_verb(action) else { return };
-                clipboard_read_and_paste(
-                    app_for_keys.clone(),
-                    revision_for_keys,
-                    offset,
-                    false,
-                );
+                clipboard_read_and_paste(app_for_keys.clone(), revision_for_keys, action);
             }
             Key::Character(ref c) if (c == "a" || c == "A") && cmd => {
                 evt.prevent_default();
