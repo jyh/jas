@@ -19,8 +19,11 @@ Usage:
   python scripts/gen_intent_map.py --json X --md Y # write to explicit paths
   python scripts/gen_intent_map.py --self-test     # assertions only, no writes
 
-The verb -> journaling table below is AUTHORED, with file:line evidence read
-from the Rust reference implementation (jas_dioxus). The walk itself is
+The verb -> journaling table below is AUTHORED, with evidence read from the
+Rust reference implementation (jas_dioxus): each citation names a file and the
+dispatch arm's literal, which `evidence_problems` finds in that file or the
+generator refuses to write. Until 2026-10-26 the citations were `file:line`
+pins, and ~30 of 89 had drifted off their arm with nothing to notice. The walk itself is
 generic: dicts/lists are recursed exhaustively (effects arrays, if/then/else
 branches, foreach bodies, created-element subtrees, unknown node shapes),
 and `dispatch` effects are followed transitively across actions (cycle-safe).
@@ -89,123 +92,123 @@ VERB_TABLE = {
     # -- unconditional journaling: renderer.rs run_yaml_effect arms ---------
     "doc.create_artboard": {
         "journals": "always", "op": "create_artboard",
-        "evidence": ["renderer.rs:3100-3136", "op_apply.rs:1863"],
+        "evidence": ["artboard_effects.rs `\"doc.create_artboard\" =>`", "op_apply.rs `\"create_artboard\" =>`"],
     },
     "doc.delete_artboard_by_id": {
         "journals": "always", "op": "delete_artboard_by_id",
-        "evidence": ["renderer.rs:3150-3159", "op_apply.rs:1832"],
+        "evidence": ["artboard_effects.rs `\"doc.delete_artboard_by_id\" =>`", "op_apply.rs `\"delete_artboard_by_id\" =>`"],
     },
     "doc.duplicate_artboard": {
         "journals": "always", "op": "duplicate_artboard",
-        "evidence": ["renderer.rs:3176-3229", "op_apply.rs:1876"],
+        "evidence": ["artboard_effects.rs `\"doc.duplicate_artboard\" =>`", "op_apply.rs `\"duplicate_artboard\" =>`"],
     },
     "doc.set_artboard_field": {
         "journals": "always", "op": "set_artboard_field",
-        "evidence": ["renderer.rs:3241-3265", "op_apply.rs:1802"],
+        "evidence": ["artboard_effects.rs `\"doc.set_artboard_field\" =>`", "op_apply.rs `\"set_artboard_field\" =>`"],
     },
     "doc.set_artboard_options_field": {
         "journals": "always", "op": "set_artboard_options_field",
-        "evidence": ["renderer.rs:3273-3290", "op_apply.rs:1817"],
+        "evidence": ["artboard_effects.rs `\"doc.set_artboard_options_field\" =>`", "op_apply.rs `\"set_artboard_options_field\" =>`"],
     },
     "doc.set_print_preferences_field": {
         "journals": "always", "op": "set_print_preferences_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_print_preferences_field\", \"set_print_preferences_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_marks_and_bleed_field": {
         "journals": "always", "op": "set_marks_and_bleed_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_marks_and_bleed_field\", \"set_marks_and_bleed_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_output_field": {
         "journals": "always", "op": "set_output_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_output_field\", \"set_output_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_output_ink_field": {
         "journals": "always", "op": "set_output_ink_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_output_ink_field\", \"set_output_ink_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_graphics_field": {
         "journals": "always", "op": "set_graphics_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_graphics_field\", \"set_graphics_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_color_management_field": {
         "journals": "always", "op": "set_color_management_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_color_management_field\", \"set_color_management_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_document_setup_field": {
         "journals": "always", "op": "set_document_setup_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_document_setup_field\", \"set_document_setup_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.set_advanced_field": {
         "journals": "always", "op": "set_advanced_field",
-        "evidence": ["renderer.rs:3326-3367", "op_apply.rs:1775 (PRINT_CONFIG_VERBS)"],
+        "evidence": ["effects.rs `(\"doc.set_advanced_field\", \"set_advanced_field\")`", "op_apply.rs `v if PRINT_CONFIG_VERBS.contains(&v) =>`"],
     },
     "doc.move_artboards_up": {
         "journals": "always", "op": "move_artboards_up",
-        "evidence": ["renderer.rs:3378-3384", "op_apply.rs:1842"],
+        "evidence": ["artboard_effects.rs `\"doc.move_artboards_up\" | \"doc.move_artboards_down\" =>`", "op_apply.rs `\"move_artboards_up\" =>`"],
     },
     "doc.move_artboards_down": {
         "journals": "always", "op": "move_artboards_down",
-        "evidence": ["renderer.rs:3390-3396", "op_apply.rs:1849"],
+        "evidence": ["artboard_effects.rs `\"doc.move_artboards_up\" | \"doc.move_artboards_down\" =>`", "op_apply.rs `\"move_artboards_down\" =>`"],
     },
     "doc.delete_at": {
         "journals": "always", "op": "delete_at",
-        "evidence": ["layer_doc_effects.rs:75", "op_apply.rs:1554"],
+        "evidence": ["layer_doc_effects.rs `\"doc.delete_at\" =>`", "op_apply.rs `\"delete_at\" =>`"],
     },
     "doc.delete_selection": {
         "journals": "always", "op": "delete_selection",
-        "evidence": ["renderer.rs:3508-3513", "op_apply.rs:1564"],
+        "evidence": ["effects.rs `\"doc.delete_selection\" =>`", "op_apply.rs `\"delete_selection\" =>`"],
     },
     "doc.make_instance": {
         # Object > Make Instance: two value-in-op ops whose ids the effect mints
         # first (menu_native::make_instance_ops), each through op_apply.
         "journals": "always", "op": "create_reference + move_selection",
-        "evidence": ["effects.rs:2904", "op_apply.rs:2177"],
+        "evidence": ["effects.rs `\"doc.make_instance\" =>`", "op_apply.rs `\"create_reference\" =>`"],
     },
     "doc.place_instance": {
         # The Symbols panel's Place Instance: one value-in-op op whose id the
         # effect mints first (symbols_host::place_instance_ops), through op_apply.
         "journals": "always", "op": "place_instance",
-        "evidence": ["effects.rs:2921", "op_apply.rs:2204"],
+        "evidence": ["effects.rs `\"doc.place_instance\" =>`", "op_apply.rs `\"place_instance\" =>`"],
     },
     "doc.place_concept_instance": {
         # The Concepts panel's Place Instance: one value-in-op op carrying the
         # concept's declared defaults and an id the effect mints first
         # (symbols_host::place_concept_instance_ops), through op_apply.
         "journals": "always", "op": "place_concept_instance",
-        "evidence": ["effects.rs:2943", "op_apply.rs:2222"],
+        "evidence": ["effects.rs `\"doc.place_concept_instance\" =>`", "op_apply.rs `\"place_concept_instance\" =>`"],
     },
     "doc.set_concept_param": {
         # A Concepts-panel parameter field's commit: one value-in-op op for the
         # one selected generated instance (symbols_host::set_concept_param_ops).
         "journals": "always", "op": "set_concept_param",
-        "evidence": ["effects.rs:3042", "op_apply.rs:2235"],
+        "evidence": ["effects.rs `\"doc.set_concept_param\" =>`", "op_apply.rs `\"set_concept_param\" =>`"],
     },
     "doc.new_symbol": {
         # Make Symbol: one value-in-op op whose two ids the effect mints first;
         # its `as:` value is the master, read after the op
         # (symbols_host::run_new_symbol), through op_apply.
         "journals": "always", "op": "make_symbol",
-        "evidence": ["effects.rs:2998", "op_apply.rs:2192"],
+        "evidence": ["effects.rs `\"doc.new_symbol\" =>`", "op_apply.rs `\"make_symbol\" =>`"],
     },
     "doc.promote_to_concept": {
         # Object > Promote to Concept: one op replacing the one selected shape a
         # fitter matches (symbols_host::promote_to_concept_ops), through op_apply.
         "journals": "always", "op": "promote_to_concept",
-        "evidence": ["effects.rs:3001", "op_apply.rs:2264"],
+        "evidence": ["effects.rs `\"doc.promote_to_concept\" =>`", "op_apply.rs `\"promote_to_concept\" =>`"],
     },
     "doc.delete_symbol": {
         # Delete Symbol: one op removing the master the expression names
         # (symbols_host::delete_symbol_ops), through op_apply; whether to ask
         # first is the YAML's (active_document.symbol_usage).
         "journals": "always", "op": "delete_symbol",
-        "evidence": ["effects.rs:3010", "op_apply.rs:2296"],
+        "evidence": ["effects.rs `\"doc.delete_symbol\" =>`", "op_apply.rs `\"delete_symbol\" =>`"],
     },
     "doc.apply_concept_operation": {
         # A Concepts-panel operation button: one op carrying the operation's
         # `set:` resolved over the selected instance's params
         # (symbols_host::apply_concept_operation_ops), through op_apply.
         "journals": "always", "op": "apply_concept_operation",
-        "evidence": ["effects.rs:3026", "op_apply.rs:2251"],
+        "evidence": ["effects.rs `\"doc.apply_concept_operation\" =>`", "op_apply.rs `\"apply_concept_operation\" =>`"],
     },
     "doc.op": {
         # One journaled op BY NAME: the op is the call site's own `op` field
@@ -214,40 +217,40 @@ VERB_TABLE = {
         "note": ("a selection-only op (`select_all`) is journal-neutral as "
                  "`doc.select_in_rect` is: op_apply opens no transaction "
                  "for it (op_apply.rs:1878 is_selection_only_verb)"),
-        "evidence": ["effects.rs:2898", "op_apply.rs:2004"],
+        "evidence": ["effects.rs `\"doc.op\" =>`", "op_apply.rs `pub fn op_apply(`"],
     },
     "doc.insert_after": {
         "journals": "always", "op": "insert_after",
-        "evidence": ["layer_doc_effects.rs:81", "op_apply.rs:1571"],
+        "evidence": ["layer_doc_effects.rs `\"doc.insert_after\" =>`", "op_apply.rs `\"insert_after\" =>`"],
     },
     "doc.insert_at": {
         "journals": "always", "op": "insert_at",
-        "evidence": ["layer_doc_effects.rs:89", "op_apply.rs:1578"],
+        "evidence": ["layer_doc_effects.rs `\"doc.insert_at\" =>`", "op_apply.rs `\"insert_at\" =>`"],
     },
     "doc.wrap_in_group": {
         "journals": "always", "op": "wrap_in_group",
-        "evidence": ["layer_doc_effects.rs:118", "op_apply.rs:1601"],
+        "evidence": ["layer_doc_effects.rs `\"doc.wrap_in_layer\" | \"doc.wrap_in_group\" =>`", "op_apply.rs `\"wrap_in_group\" =>`"],
     },
     "doc.wrap_in_layer": {
         "journals": "always", "op": "wrap_in_layer",
-        "evidence": ["layer_doc_effects.rs:118", "op_apply.rs:1615"],
+        "evidence": ["layer_doc_effects.rs `\"doc.wrap_in_layer\" | \"doc.wrap_in_group\" =>`", "op_apply.rs `\"wrap_in_layer\" =>`"],
     },
     "doc.unpack_group_at": {
         "journals": "always", "op": "unpack_group_at",
-        "evidence": ["layer_doc_effects.rs:110", "op_apply.rs:1632"],
+        "evidence": ["layer_doc_effects.rs `\"doc.unpack_group_at\" =>`", "op_apply.rs `\"unpack_group_at\" =>`"],
     },
     # -- unconditional journaling: effects.rs run_doc_effect arms -----------
     "doc.set_attr_on_selection": {
         "journals": "always", "op": "set_attr_on_selection",
-        "evidence": ["effects.rs:901-946", "op_apply.rs:1676"],
+        "evidence": ["effects.rs `\"doc.set_attr_on_selection\" =>`", "op_apply.rs `\"set_attr_on_selection\" =>`"],
     },
     "doc.translate_selection": {
         "journals": "always", "op": "move_selection",
-        "evidence": ["effects.rs:767-785", "op_apply.rs:1394"],
+        "evidence": ["effects.rs `\"doc.translate_selection\" =>`", "op_apply.rs `\"move_selection\" =>`"],
     },
     "doc.copy_selection": {
         "journals": "always", "op": "copy_selection",
-        "evidence": ["effects.rs:948-961", "op_apply.rs:1397"],
+        "evidence": ["effects.rs `\"doc.copy_selection\" =>`", "op_apply.rs `\"copy_selection\" =>`"],
     },
     "doc.select_in_rect": {
         "journals": "always", "op": "select_rect",
@@ -255,74 +258,74 @@ VERB_TABLE = {
                  "into an ALREADY-OPEN transaction and never opens one "
                  "(op_apply.rs:1329-1336), so a bare marquee stays "
                  "journal-neutral"),
-        "evidence": ["effects.rs:987-1013", "op_apply.rs:1380"],
+        "evidence": ["effects.rs `\"doc.select_in_rect\" =>`", "op_apply.rs `\"select_rect\" =>`"],
     },
     # -- param-gated journaling (OP_LOG.md par.9 Phase P7) ------------------
     "doc.scale.apply": {
         "journals": "param-gated", "op": "scale_transform",
-        "evidence": ["effects.rs:1619-1656 (gate at :1651)", "op_apply.rs:1710"],
+        "evidence": ["effects.rs `\"doc.scale.apply\" =>`", "op_apply.rs `\"scale_transform\" =>`"],
     },
     "doc.rotate.apply": {
         "journals": "param-gated", "op": "rotate_transform",
-        "evidence": ["effects.rs:1658-1683 (gate at :1678)", "op_apply.rs:1725"],
+        "evidence": ["effects.rs `\"doc.rotate.apply\" =>`", "op_apply.rs `\"rotate_transform\" =>`"],
     },
     "doc.shear.apply": {
         "journals": "param-gated", "op": "shear_transform",
-        "evidence": ["effects.rs:1685-1717 (gate at :1711)", "op_apply.rs:1735"],
+        "evidence": ["effects.rs `\"doc.shear.apply\" =>`", "op_apply.rs `\"shear_transform\" =>`"],
     },
     # -- never journals ------------------------------------------------------
     "doc.snapshot": {
         "journals": "never",
         "note": ("transaction management: begin_txn only; snapshot/undo/redo "
                  "manage the journal cursor and are never journaled as ops"),
-        "evidence": ["effects.rs:682-684", "op_apply.rs:1300-1314"],
+        "evidence": ["effects.rs `\"doc.snapshot\" =>`", "op_apply.rs `\"snapshot\" =>`"],
     },
     "doc.preview.restore": {
         "journals": "never",
         "note": "out-of-band preview-snapshot channel (OP_LOG.md par.8)",
-        "evidence": ["effects.rs:703-708"],
+        "evidence": ["effects.rs `\"doc.preview.restore\" =>`"],
     },
     "doc.preview.clear": {
         "journals": "never",
         "note": "out-of-band preview-snapshot channel (OP_LOG.md par.8)",
-        "evidence": ["effects.rs:709-714"],
+        "evidence": ["effects.rs `\"doc.preview.clear\" =>`"],
     },
     "doc.zoom.apply": {
         "journals": "never", "note": "view state only (zoom/pan)",
-        "evidence": ["effects.rs:1719-1768"],
+        "evidence": ["effects.rs `\"doc.zoom.apply\" =>`"],
     },
     "doc.zoom.set": {
         "journals": "never", "note": "view state only (zoom/pan)",
-        "evidence": ["effects.rs:1770-1795"],
+        "evidence": ["effects.rs `\"doc.zoom.set\" =>`"],
     },
     "doc.zoom.fit_rect": {
         "journals": "never", "note": "view state only (zoom/pan)",
-        "evidence": ["effects.rs:1869-1881"],
+        "evidence": ["effects.rs `\"doc.zoom.fit_rect\" =>`"],
     },
     "doc.zoom.fit_elements": {
         "journals": "never", "note": "view state only (zoom/pan)",
-        "evidence": ["effects.rs:1914-1933"],
+        "evidence": ["effects.rs `\"doc.zoom.fit_elements\" =>`"],
     },
     "doc.zoom.fit_all_artboards": {
         "journals": "never", "note": "view state only (zoom/pan)",
-        "evidence": ["effects.rs:1935-1956"],
+        "evidence": ["effects.rs `\"doc.zoom.fit_all_artboards\" =>`"],
     },
     "doc.set": {
         "journals": "never",
         "note": ("direct per-field document write via layer_doc_effects::set_field; "
                  "not routed through op_apply, so it records no op"),
-        "evidence": ["layer_doc_effects.rs:141"],
+        "evidence": ["layer_doc_effects.rs `\"doc.set\" =>`"],
     },
     "doc.clone_at": {
         "journals": "never",
         "note": "pure ctx binder: clones an element into scope, no mutation",
-        "evidence": ["layer_doc_effects.rs:46"],
+        "evidence": ["layer_doc_effects.rs `\"doc.clone_at\" | \"doc.delete_at\" =>`"],
     },
     "doc.create_layer": {
         "journals": "never",
         "note": ("pure ctx binder: deterministic Layer factory bound via "
                  "`as:`; the subsequent doc.insert_at journals"),
-        "evidence": ["layer_doc_effects.rs:31"],
+        "evidence": ["layer_doc_effects.rs `\"doc.create_layer\" =>`"],
     },
 }
 
@@ -665,11 +668,11 @@ def render_md(entries, summary):
     a("")
     a("## Verb -> journaling evidence table")
     a("")
-    a("Derived by reading the Rust reference dispatchers. File aliases:")
-    a("`effects.rs` = `jas_dioxus/src/interpreter/effects.rs`,")
-    a("`renderer.rs` = `jas_dioxus/src/interpreter/renderer.rs`,")
-    a("`op_apply.rs` = `jas_dioxus/src/document/op_apply.rs`. Line numbers")
-    a("are as of authoring (2026-07-22, post `five-port-parity`).")
+    a("Derived by reading the Rust reference dispatchers. Each citation is a")
+    a("file under `jas_dioxus/src` (named by its unique basename) and the")
+    a("dispatch arm's own literal. The generator finds every literal in its")
+    a("file or refuses to write, so a citation cannot go stale silently; and")
+    a("none carries a line number, so a moved arm needs no regeneration.")
     a("")
     a("| doc.* verb | journals | op | reachable from actions | evidence |")
     a("|---|---|---|---|---|")
@@ -679,7 +682,7 @@ def render_md(entries, summary):
         row = VERB_TABLE[verb]
         op = f"`{row['op']}`" if "op" in row else "--"
         reach = "yes" if verb in seam else "no (tool YAML only)"
-        ev = "; ".join(row["evidence"])
+        ev = "; ".join(e.replace("|", "\\|") for e in row["evidence"])
         note = row.get("note")
         j = row["journals"]
         if note:
@@ -740,10 +743,44 @@ def assert_map_covers_bundle(ws, entries):
         f"outliving what it described: {extra}")
 
 
+SRC_ROOT = REPO_ROOT / "jas_dioxus" / "src"
+
+
+def evidence_problems(table: dict) -> list[str]:
+    """One line per verb-table citation that does not resolve: the form is
+    ``<basename>.rs `<literal>` ``, the basename must name exactly one file
+    under jas_dioxus/src, and the literal must occur in it. Empty when every
+    citation holds."""
+    import re
+    by_name: dict[str, list[Path]] = {}
+    for f in SRC_ROOT.rglob("*.rs"):
+        by_name.setdefault(f.name, []).append(f)
+    out = []
+    for verb, row in table.items():
+        for ev in row.get("evidence", []):
+            m = re.fullmatch(r"([A-Za-z0-9_]+\.rs) `(.+)`", ev)
+            if not m:
+                out.append(f"{verb}: {ev!r} is not `<file>.rs `<literal>``")
+                continue
+            files = by_name.get(m.group(1), [])
+            if len(files) != 1:
+                out.append(f"{verb}: {m.group(1)} names {len(files)} files under jas_dioxus/src")
+            elif m.group(2) not in files[0].read_text(encoding="utf-8"):
+                out.append(f"{verb}: {m.group(2)!r} is not in {m.group(1)}")
+    return out
+
+
 def self_test(ws):
     entries, summary = build_map(ws)
 
     assert_map_covers_bundle(ws, entries)
+    # Every citation resolves, and the resolver can refuse: an absent literal,
+    # an unknown file and a malformed citation each give one problem.
+    problems = evidence_problems(VERB_TABLE)
+    assert not problems, problems
+    assert sum(len(r["evidence"]) for r in VERB_TABLE.values()) > 50, "the census read the table"
+    for bad in ('effects.rs `"doc.no_such_verb" =>`', 'no_such_file.rs `x`', "effects.rs:2898"):
+        assert len(evidence_problems({"doc.x": {"evidence": [bad]}})) == 1, bad
     assert entries["export_to_pdf"]["class"] == "native-intercept", (
         "export_to_pdf must classify native-intercept")
     assert entries["select_tool"]["class"] == "tool-lifecycle", (
@@ -791,6 +828,12 @@ def main():
     if args.self_test:
         return self_test(ws)
 
+    problems = evidence_problems(VERB_TABLE)
+    if problems:
+        print("ERROR: verb-table evidence does not resolve; nothing written:", file=sys.stderr)
+        for line in problems:
+            print(f"  {line}", file=sys.stderr)
+        return 1
     entries, summary = build_map(ws)
     args.json.write_text(render_json(entries, summary), encoding="utf-8", newline="")
     args.md.write_text(render_md(entries, summary), encoding="utf-8", newline="")
