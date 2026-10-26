@@ -839,5 +839,45 @@
       "swatch_libraries.web_colors.swatches.-1.color": "#008000",
       "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
     }
+  },
+  {
+    "name": "stroke_swap_arrowheads_exchanges_shape_and_scale",
+    "setup_svg": "line_basic.svg",
+    "note": "stroke.yaml stk_swap_arrowheads (an icon button; its click runs actions.yaml swap_arrowheads): the start arrowhead and its scale trade places with the end's, in the panel and in state. Seeded with a 150 % simple arrow at the start, the defaults (none, 100 %) at the end.",
+    "panel_state": {
+      "stroke_panel_content": {
+        "start_arrowhead": "simple_arrow",
+        "start_arrowhead_scale": 150
+      }
+    },
+    "state": {
+      "stroke_start_arrowhead": "simple_arrow",
+      "stroke_start_arrowhead_scale": 150
+    },
+    "actions": [
+      {
+        "panel_event": {
+          "panel": "stroke_panel_content",
+          "address": {
+            "id": "stk_swap_arrowheads"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_panel": {
+      "stroke_panel_content": {
+        "start_arrowhead": "none",
+        "end_arrowhead": "simple_arrow",
+        "start_arrowhead_scale": 100,
+        "end_arrowhead_scale": 150
+      }
+    },
+    "expected_state": {
+      "stroke_start_arrowhead": "none",
+      "stroke_end_arrowhead": "simple_arrow",
+      "stroke_start_arrowhead_scale": 100,
+      "stroke_end_arrowhead_scale": 150
+    }
   }
 ]

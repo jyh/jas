@@ -153,6 +153,34 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                               layout: &layout, model: m)
             case .failure(let e): return ["\(name): \(e.text)"]
             }
+        } else if let pe = step["panel_event"] as? [String: Any] {
+            // A panel widget's event, through the panel body's own route
+            // (``PanelWidgetEvents``), in the scope the body renders against
+            // (``panelMenuContext``). The engine runner sends the same event
+            // through `jas_panel_behavior`.
+            let pid = pe["panel"] as? String ?? ""
+            guard let panel = ws.panel(pid) else { return ["\(name): no panel \(pid) in the bundle"] }
+            let scope = panelMenuContext(pid, layout: WorkspaceLayout.defaultLayout(), model: m)
+            let node: [String: Any]
+            switch addressed(panel["content"], pe["address"] as? [String: Any] ?? [:], context: scope) {
+            case .success(let n): node = n
+            case .failure(let e): return ["\(name): \(e.text)"]
+            }
+            let route = PanelWidgetEvents(model: m, panelId: pid, scope: scope)
+            let kind = node["type"] as? String ?? ""
+            switch pe["event"] as? String ?? "click" {
+            case "commit":
+                let r = route.commit(node, text: pe["value"] as? String)
+                if r.outcome == "refused" { return ["\(name): the commit was refused (\(r.reason ?? "-"))"] }
+            case "click" where WidgetEvent.booleanKinds.contains(kind):
+                let r = route.press(node)
+                if r.outcome == "refused" { return ["\(name): the press was refused (\(r.reason ?? "-"))"] }
+            case "click":
+                let r = route.click(node)
+                if r.outcome == "refused" { return ["\(name): the click was refused (\(r.reason ?? "-"))"] }
+            default:
+                return ["\(name): unknown panel event \(pe["event"] ?? "nil")"]
+            }
         } else if let od = step["open_dialog"] {
             if atOpen == nil { atOpen = documentToTestJson(m.document) }
             runEffects([["open_dialog": od]], ctx: [:], store: store,

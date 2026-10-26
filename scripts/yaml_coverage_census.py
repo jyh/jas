@@ -229,6 +229,23 @@ def gather_evidence(root, spec=None):
             # the ONE row of the named panel's menu whose every address key
             # equals its own (the runners' law); zero or two rows resolve to
             # nothing, so this too can only under-count.
+            # A panel widget's event resolves, through the bundle, to the action
+            # its behavior runs: the ONE node of the NAMED panel's content whose
+            # every address key equals its own, as the runners resolve it.
+            pe = a.get("panel_event")
+            if isinstance(pe, dict) and isinstance(pe.get("address"), dict):
+                content = ((((spec or {}).get("panels") or {}).get(pe.get("panel"))) or {}).get("content")
+                hits = []
+
+                def find(n, addr=pe["address"]):
+                    if isinstance(n, dict):
+                        if all(k in n and n[k] == v for k, v in addr.items()):
+                            hits.append(n)
+                        for c in n.get("children") or []:
+                            find(c)
+                find(content)
+                if len(hits) == 1:
+                    ev["actions_dispatched"] |= _id_addressed_actions(hits[0], pe.get("event", "click"))
             pm = a.get("panel_menu")
             if isinstance(pm, dict):
                 act = _panel_menu_action(spec, pm.get("panel"), pm.get("address"))
@@ -623,7 +640,9 @@ def self_test():
                 {"dialog_event": {"address": {"id": "w_clickonly"}, "event": "commit", "value": "1"}},
                 {"panel_menu": {"panel": "p1", "address": {"action": "pm_one"}}},
                 {"panel_menu": {"panel": "p1", "address": {"action": "pm_twice"}}},
-                {"panel_menu": {"panel": "p2", "address": {"action": "pm_elsewhere"}}}]}])
+                {"panel_menu": {"panel": "p2", "address": {"action": "pm_elsewhere"}}},
+                {"panel_event": {"panel": "p1", "address": {"id": "pw_btn"}, "event": "click"}},
+                {"panel_event": {"panel": "p2", "address": {"id": "pw_far"}, "event": "click"}}]}])
         put("test_fixtures/dialog_actions/c.json",
             [{"name": "live", "actions": [
                 {"open_dialog": {"id": "d_live"}},
@@ -679,6 +698,7 @@ def self_test():
                 "dlg_committed": {"effects": [{"set": {"a": 1}}]},
                 "dlg_decoy": {"effects": [{"set": {"a": 1}}]},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pm_one", "pm_twice", "pm_elsewhere")},
+                **{a: {"effects": [{"set": {"a": 1}}]} for a in ("pe_act", "pe_far")},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in ("live_preview", "shut_preview", "mute_preview")},
                 **{a: {"effects": [{"set": {"a": 1}}]} for a in (
                     "beh_on_change", "beh_not_change", "btn_act", "twice_act", "clickonly_act")},
@@ -701,7 +721,11 @@ def self_test():
                 {"label": "One", "action": "pm_one"}, "separator",
                 {"label": "Twice A", "action": "pm_twice", "params": {"t": "a"}},
                 {"label": "Twice B", "action": "pm_twice", "params": {"t": "b"}},
-                {"label": "Elsewhere", "action": "pm_elsewhere"}]}, "p2": {}},
+                {"label": "Elsewhere", "action": "pm_elsewhere"}],
+                "content": {"type": "col", "children": [
+                    {"id": "pw_btn", "type": "icon_button", "behavior": [{"event": "click", "action": "pe_act"}]},
+                    {"id": "pw_far", "type": "icon_button", "behavior": [{"event": "click", "action": "pe_far"}]}]}},
+                "p2": {}},
             "dialogs": {"d0": {"content": {"type": "col", "children": [
                 {"id": "w_sel", "type": "select", "behavior": [
                     {"event": "change", "action": "beh_on_change"}, {"event": "click", "action": "beh_not_change"}]},
@@ -737,6 +761,8 @@ def self_test():
         expect(("actions", "live_preview"), COVERED)  # commit, still open, document changed
         expect(("actions", "shut_preview"), NOT_YET_BUILT)  # the dialog closed: the change may be the OK's
         expect(("actions", "mute_preview"), NOT_YET_BUILT)  # nothing asserts the document moved
+        expect(("actions", "pe_act"), COVERED)  # a panel widget's click behavior
+        expect(("actions", "pe_far"), NOT_YET_BUILT)  # resolved in the NAMED panel's content only
         expect(("actions", "pm_one"), COVERED)  # the ONE panel-menu row a step addresses
         expect(("actions", "pm_twice"), NOT_YET_BUILT)  # an address two rows share resolves to neither
         expect(("actions", "pm_elsewhere"), NOT_YET_BUILT)  # resolved in the NAMED panel's menu only

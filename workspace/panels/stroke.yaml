@@ -710,11 +710,7 @@ content:
           style: { size: 16 }
           behavior:
             - event: click
-              effects:
-                - swap_panel_state: [start_arrowhead, end_arrowhead]
-                - swap_panel_state: [start_arrowhead_scale, end_arrowhead_scale]
-                - swap: [stroke_start_arrowhead, stroke_end_arrowhead]
-                - swap: [stroke_start_arrowhead_scale, stroke_end_arrowhead_scale]
+              action: swap_arrowheads
 
     # ── Arrowhead Scale ────────────────────────────────────
     - type: container

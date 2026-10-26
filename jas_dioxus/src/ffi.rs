@@ -3970,6 +3970,34 @@ mod tests {
                         step_failed = true;
                         break;
                     }
+                } else if let Some(pe) = step.get("panel_event") {
+                    // A panel widget's event, through the shell's own door
+                    // (`jas_panel_behavior`): the ONE static widget of the panel's
+                    // content whose every `address` key equals its own, by its id.
+                    let pid = pe["panel"].as_str().unwrap_or_default();
+                    let Some(panel) = ws.panel(pid) else {
+                        failures.push(format!("{name}: no panel {pid:?} in the bundle"));
+                        step_failed = true;
+                        break;
+                    };
+                    let address = pe["address"].as_object().cloned().unwrap_or_default();
+                    let node = dialog_address_path(&panel["content"], &address).map(|path|
+                        path.iter().fold(&panel["content"], |n, i| &n["children"][*i]).clone());
+                    let id = match node {
+                        Ok(n) => match n.get("id").and_then(|v| v.as_str()) {
+                            Some(id) => id.to_string(),
+                            None => { failures.push(format!("{name}: the addressed widget has no id")); step_failed = true; break; }
+                        },
+                        Err(why) => { failures.push(format!("{name}: {why}")); step_failed = true; break; }
+                    };
+                    let mut msg = serde_json::json!({"widget": id, "event": pe.get("event").cloned().unwrap_or(serde_json::json!("click"))});
+                    if let Some(v) = pe.get("value") { msg["value"] = v.clone(); }
+                    let (reply, err) = behave(e, pid, &msg.to_string());
+                    if reply.is_empty() && !err.contains("Unchanged") {
+                        failures.push(format!("{name}: the panel refused {msg}: {err}"));
+                        step_failed = true;
+                        break;
+                    }
                 } else if let Some(action) = step.get("action").and_then(|a| a.as_str()) {
                     // An action through the shell's own door, so a dialog it opens
                     // (`open_boolean_options`) resolves its params in the app's
@@ -6484,7 +6512,8 @@ mod tests {
         let _counters = crate::ffi_instr::test_lock::lock();
         let ws = Workspace::load().unwrap();
         let mut clicks: Vec<(String, Vec<String>)> = vec![];
-        fn walk(node: &serde_json::Value, out: &mut Vec<(String, Vec<String>)>) {
+        fn walk(node: &serde_json::Value, actions: &serde_json::Value,
+                out: &mut Vec<(String, Vec<String>)>) {
             if let (Some(id), Some(behaviors)) = (node["id"].as_str(), node["behavior"].as_array()) {
                 for b in behaviors {
                     if b["event"].as_str().unwrap_or("click") != "click" {
@@ -6492,8 +6521,14 @@ mod tests {
                     }
                     // A render key is written by `set:` or by `swap:` (Swap
                     // Arrowheads, whose batch the engine refused until it
-                    // hosted `swap_panel_state`).
-                    let effects = || b["effects"].as_array().into_iter().flatten();
+                    // hosted `swap_panel_state`). A behavior that names an
+                    // `action` writes what that action's effects write (the
+                    // Swap button, since 2026-10-25).
+                    let body = match b["action"].as_str() {
+                        Some(a) => &actions[a]["effects"],
+                        None => &b["effects"],
+                    };
+                    let effects = || body.as_array().into_iter().flatten();
                     let keys: Vec<String> = effects()
                         .filter_map(|eff| eff["set"].as_object())
                         .flat_map(|m| m.keys().cloned())
@@ -6508,11 +6543,11 @@ mod tests {
             }
             for k in ["children", "do"] {
                 if let Some(items) = node[k].as_array() {
-                    items.iter().for_each(|c| walk(c, out));
+                    items.iter().for_each(|c| walk(c, actions, out));
                 }
             }
         }
-        walk(&ws.panel(STROKE).unwrap()["content"], &mut clicks);
+        walk(&ws.panel(STROKE).unwrap()["content"], ws.actions(), &mut clicks);
         assert!(clicks.len() >= 10, "the census read {} clicks: {clicks:?}", clicks.len());
         assert!(clicks.iter().any(|(w, _)| w == "stk_swap_arrowheads"),
                 "the `swap:` writes are not in the census: {clicks:?}");
