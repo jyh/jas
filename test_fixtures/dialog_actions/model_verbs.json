@@ -65,5 +65,44 @@
       }
     ],
     "expected_json": "lock_locks_the_selection_and_clears_it_expected.json"
+  },
+  {
+    "name": "group_wraps_the_selection_in_one_group",
+    "setup_svg": "two_rects.svg",
+    "note": "actions.yaml group: `doc.op: {op: group_selection}` wraps the selected siblings in one new group, selected. Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "group"
+      }
+    ],
+    "expected_json": "group_wraps_the_selection_in_one_group_expected.json"
+  },
+  {
+    "name": "ungroup_replaces_the_group_with_its_members",
+    "setup_svg": "group_nested.svg",
+    "note": "actions.yaml ungroup: `doc.op: {op: ungroup_selection}` replaces each selected group with its members, selected. Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "ungroup"
+      }
+    ],
+    "expected_json": "ungroup_replaces_the_group_with_its_members_expected.json"
+  },
+  {
+    "name": "ungroup_all_flattens_every_unlocked_group",
+    "setup_svg": "locked_inheritance.svg",
+    "note": "actions.yaml ungroup_all: `doc.op: {op: ungroup_all}` flattens every group that is not locked, by its own flag or by an ancestor's: the Mixed Group dissolves, the Locked Group and the locked layer's Inner Group stay. Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",
+    "actions": [
+      {
+        "action": "ungroup_all"
+      }
+    ],
+    "expected_json": "ungroup_all_flattens_every_unlocked_group_expected.json"
   }
 ]

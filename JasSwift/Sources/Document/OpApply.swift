@@ -2046,6 +2046,14 @@ public func opApply(
         controller.hideSelection()
     case "show_all":
         controller.showAll()
+    // The Object menu's composite verbs by name (`doc.op`), each the production
+    // Controller law; none mints an id. Rust `op_apply` the same.
+    case "group_selection":
+        controller.groupSelection()
+    case "ungroup_selection":
+        controller.ungroupSelection()
+    case "ungroup_all":
+        controller.ungroupAll()
     // Tspan character-attribute write (TSPAN.md). char_start/char_end default
     // to 0 (an empty range no-ops inside the helper); a missing/non-text
     // target is a benign no-op. Mirrors the Rust arm exactly.

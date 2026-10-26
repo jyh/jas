@@ -268,8 +268,11 @@
       "tier": 3,
       "enabled_when": "active_document.selection_count >= 2",
       "effects": [
+        "snapshot",
         {
-          "log": "group"
+          "doc.op": {
+            "op": "group_selection"
+          }
         }
       ]
     },
@@ -279,8 +282,11 @@
       "tier": 3,
       "enabled_when": "active_document.has_selection",
       "effects": [
+        "snapshot",
         {
-          "log": "ungroup"
+          "doc.op": {
+            "op": "ungroup_selection"
+          }
         }
       ]
     },
@@ -290,8 +296,11 @@
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "ungroup_all"
+          "doc.op": {
+            "op": "ungroup_all"
+          }
         }
       ]
     },

@@ -1005,7 +1005,8 @@ fn filename_stem(filename: &str) -> String {
 /// run) for any other name.
 pub(crate) fn run_model_verb(cmd: &str, st: &mut AppState) -> bool {
     match cmd {
-        "select_all" | "unlock_all" | "hide" | "show_all" | "lock" => {
+        "select_all" | "unlock_all" | "hide" | "show_all" | "lock" | "group" | "ungroup"
+        | "ungroup_all" => {
             let action = if cmd == "hide" { "hide_selection" } else { cmd };
             let _ = crate::interpreter::renderer::dispatch_action(
                 action, &serde_json::Map::new(), st);
@@ -1090,6 +1091,37 @@ mod tests {
         assert_eq!(hidden(&st), vec![false, false], "show_all");
         st.tab_mut().unwrap().model.undo();
         assert_eq!(hidden(&st), vec![true, true], "one undo restores show_all");
+    }
+
+    /// Group, Ungroup and Ungroup All run their YAML (`snapshot` + `doc.op`)
+    /// from the web menu and Cmd+G / Cmd+Shift+G: each ONE undo step, as the
+    /// native table made them with `with_txn`.
+    #[test]
+    fn the_group_verbs_are_each_one_undo_step_on_the_web_route() {
+        let kinds = |st: &AppState| -> Vec<&'static str> {
+            st.tabs[st.active_tab].model.document().layers[0].children()
+                .map(|cs| cs.iter().map(|c| if c.is_group() { "group" } else { "leaf" }).collect())
+                .unwrap_or_default()
+        };
+        let mut st = state_on(include_str!("../../../test_fixtures/svg/two_rects.svg"));
+        run_model_verb("select_all", &mut st);
+        assert!(run_model_verb("group", &mut st));
+        assert_eq!(kinds(&st), vec!["group"], "group");
+        assert_eq!(selected_paths(&st), vec![vec![0, 0]], "the new group is selected");
+        assert!(run_model_verb("ungroup", &mut st));
+        assert_eq!(kinds(&st), vec!["leaf", "leaf"], "ungroup");
+        assert_eq!(selected_paths(&st), vec![vec![0, 0], vec![0, 1]], "its members are selected");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(kinds(&st), vec!["group"], "one undo restores ungroup");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(kinds(&st), vec!["leaf", "leaf"], "one more restores group");
+
+        let mut st = state_on(include_str!("../../../test_fixtures/svg/group_nested.svg"));
+        assert!(run_model_verb("ungroup_all", &mut st));
+        assert_eq!(kinds(&st), vec!["leaf", "leaf"], "ungroup_all");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(kinds(&st), vec!["group"], "one undo restores ungroup_all");
+        assert!(!st.tabs[st.active_tab].model.can_undo(), "ungroup_all was ONE step");
     }
 
     #[test]

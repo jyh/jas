@@ -158,7 +158,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # layer by name) and left both ports' native menu tables. 47 the same day:
 # `lock` followed them (`doc.op: {op: lock_selection}`). 46 the same day:
 # `select_all` (`doc.op: {op: select_all}`, no snapshot), and every route to it.
-MIN_LOG_ONLY = 46
+# 43 the same day: `group`, `ungroup` and `ungroup_all` (by-name ops
+# `group_selection`, `ungroup_selection`, `ungroup_all` in all three op layers).
+MIN_LOG_ONLY = 43
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 

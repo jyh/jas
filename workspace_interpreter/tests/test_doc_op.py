@@ -98,3 +98,47 @@ def test_select_all_from_actions_yaml_selects_each_unlocked_top_level_object_onc
     store = _store(Document(layers=(locked_layer, open_layer)))
     run_effects(effects, {}, store)
     assert {es.path for es in _doc_of(store).selection} == {(1, 1), (1, 3)}
+
+
+def _run_yaml_action(store: StateStore, name: str) -> None:
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        effects = yaml.safe_load(f)["actions"][name]["effects"]
+    run_effects(effects, {}, store)
+
+
+def test_group_from_actions_yaml_wraps_the_selection_in_one_selected_group():
+    from geometry.element import Group
+    doc = _two_rects(_rect(), Rect(x=20, y=0, width=10, height=10))
+    doc = replace(doc, selection=frozenset({ElementSelection.all((0, 0)), ElementSelection.all((0, 1))}))
+    store = _store(doc)
+    _run_yaml_action(store, "group")
+    after = _doc_of(store)
+    assert len(after.layers[0].children) == 1 and isinstance(after.layers[0].children[0], Group)
+    assert len(after.layers[0].children[0].children) == 2
+    assert {es.path for es in after.selection} == {(0, 0)}
+
+
+def test_ungroup_from_actions_yaml_replaces_the_group_with_its_members_selected():
+    from geometry.element import Group
+    doc = Document(layers=(Layer(name="L", children=(Group(children=(_rect(), _rect())),)),))
+    doc = replace(doc, selection=frozenset({ElementSelection.all((0, 0))}))
+    store = _store(doc)
+    _run_yaml_action(store, "ungroup")
+    after = _doc_of(store)
+    assert [type(c).__name__ for c in after.layers[0].children] == ["Rect", "Rect"]
+    assert {es.path for es in after.selection} == {(0, 0), (0, 1)}
+
+
+def test_ungroup_all_from_actions_yaml_keeps_every_locked_group():
+    from geometry.element import Group
+    doc = Document(layers=(
+        Layer(name="Locked", children=(Group(children=(_rect(),)),), locked=True),
+        Layer(name="Open", children=(
+            Group(children=(_rect(),), locked=True), Group(children=(_rect(), _rect()))))))
+    store = _store(doc)
+    _run_yaml_action(store, "ungroup_all")
+    after = _doc_of(store)
+    assert [type(c).__name__ for c in after.layers[0].children] == ["Group"], "inside a locked layer"
+    assert [type(c).__name__ for c in after.layers[1].children] == ["Group", "Rect", "Rect"]

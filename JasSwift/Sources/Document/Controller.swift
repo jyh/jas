@@ -1559,6 +1559,68 @@ public class Controller {
         model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
     }
 
+    /// Recursively flatten every unlocked group across all layers (locked
+    /// groups are kept, but their children are still flattened). Moved here
+    /// from `MenuActions` 2026-10-25 so the op layer (`ungroup_all`, reached by
+    /// the YAML's `doc.op`) runs this law; Rust `Controller::ungroup_all`. No-op (no undo
+    /// step) when nothing changed. Undoable: editDocument self-brackets one undo
+    /// step.
+    ///
+    /// PRESERVATION. Ungroup All speaks to group NESTING and to the selection.
+    /// Everything else — a kept locked group's name, id, mask, blend mode and
+    /// opacity flags; every layer's own attributes; the document's symbols,
+    /// artboards, artboard options, Document Setup and print preferences — is a
+    /// bystander and comes back untouched. That is structural here, not a
+    /// checklist: the three writes below are clone-then-mutate
+    /// (``Group/withChildren(_:)``, ``Layer/withChildren(_:)``,
+    /// ``Document/replacing(layers:symbols:selectedLayer:selection:artboards:artboardOptions:documentSetup:printPreferences:)``),
+    /// so there is no field list that can fall behind the structs.
+    ///
+    /// This body used to rebuild all three through their memberwise
+    /// initializers naming 4 of 11, 5 of 11 and 3 of 8 fields — the Swift
+    /// copy-site omission class (EDIT_SEMANTICS_FREEZE.md §3.1), landing at a
+    /// shipping menu action. Ungroup All DELETED every artboard and reset the
+    /// Print dialog; a kept locked group lost its name, id and mask. Rust never
+    /// had the defect (`(**child).clone()` / `new_doc.layers = new_layers`,
+    /// `controller.rs:2348,2376` — the same in-place shape). Gated by
+    /// `UngroupAllPreservationTests`, which asserts BY VALUE.
+    ///
+    /// "Unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13): a Group
+    /// inside a locked layer or a locked group is left alone, structure
+    /// included, exactly as one with its own flag set is.
+    public func ungroupAll() {
+        let doc = model.document
+        var changed = false
+
+        // `ancestorLocked` is the INHERITED half of the lock read
+        // (transcripts/LAYER_STRUCTURE.md §13): a Group survives when its own
+        // flag is set OR when anything it sits inside is locked. This is the
+        // same `effectiveLocked` fold, threaded through a walk that already has
+        // the ancestors in hand. It is NOT a new guard — `ungroup_all` always
+        // read lock; §13 changed what the word means.
+        func flatten(_ children: [Element], _ ancestorLocked: Bool) -> [Element] {
+            var result: [Element] = []
+            for child in children {
+                switch child {
+                case .group(let g) where !(ancestorLocked || g.locked):
+                    changed = true
+                    result.append(contentsOf: flatten(g.children, false))
+                case .group(let g):
+                    // Locked group: recurse into children but keep the group
+                    result.append(.group(g.withChildren(flatten(g.children, true))))
+                default:
+                    result.append(child)
+                }
+            }
+            return result
+        }
+
+        let newLayers = doc.layers.map { $0.withChildren(flatten($0.children, $0.locked)) }
+        guard changed else { return }
+        // Undoable: editDocument self-brackets one undo step.
+        model.editDocument(doc.replacing(layers: newLayers, selection: []))
+    }
+
     /// Group the selected elements into a new Group. **R1 — group ALWAYS
     /// flattens** (transcripts/LAYER_STRUCTURE.md §3, ratified 2026-07-28).
     ///

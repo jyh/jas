@@ -2524,6 +2524,18 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         "show_all" => {
             Controller::show_all(model);
         }
+        // The Object menu's composite verbs by name (`doc.op`), each the
+        // production Controller law; none mints an id, so replay re-derives
+        // the same edit from the journaled selection.
+        "group_selection" => {
+            Controller::group_selection(model);
+        }
+        "ungroup_selection" => {
+            Controller::ungroup_selection(model);
+        }
+        "ungroup_all" => {
+            Controller::ungroup_all(model);
+        }
         "set_character_attribute" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return Err(req_err(op, "path"));

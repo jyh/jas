@@ -83,7 +83,7 @@ struct UngroupAllPreservationTests {
                                                artboardRange: "2-4")
         )
         let model = Model(document: doc)
-        MenuActions.ungroupAll(model)
+        Controller(model: model).ungroupAll()
         let out = model.document
 
         // The operation actually ran (guard against a vacuous pass).
@@ -152,7 +152,7 @@ struct UngroupAllPreservationTests {
         let model = Model(document: Document(
             layers: [Layer(name: "L", children: [.group(keeper)])],
             artboards: [Artboard(id: "ab-1")]))
-        MenuActions.ungroupAll(model)
+        Controller(model: model).ungroupAll()
 
         guard case .group(let g) = model.document.layers[0].children[0] else {
             Issue.record("the locked group was not kept")
@@ -206,7 +206,7 @@ struct UngroupAllPreservationTests {
                            id: "lay-keep")
         let model = Model(document: Document(layers: [styled],
                                              artboards: [Artboard(id: "ab-1")]))
-        MenuActions.ungroupAll(model)
+        Controller(model: model).ungroupAll()
         let l = model.document.layers[0]
 
         // The operation ran.
@@ -240,7 +240,7 @@ struct UngroupAllPreservationTests {
         let model = Model(document: Document(
             layers: [Layer(name: "Locked", children: [nest], locked: true)],
             artboards: [Artboard(id: "ab-1")]))
-        MenuActions.ungroupAll(model)
+        Controller(model: model).ungroupAll()
         #expect(model.document.layers[0].locked == true)
         #expect(model.document.layers[0].children.count == 1)
         // The group inside a LOCKED layer is left alone, structure included.

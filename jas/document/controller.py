@@ -184,6 +184,19 @@ def _tspan_omit_identity(ts, parent, attribute: str):
     return ts
 
 
+def _insert_element_at(doc: Document, path: ElementPath, elem: Element) -> Document:
+    """``doc`` with ``elem`` inserted so that it sits at ``path``. Mirrors Rust
+    ``Document::insert_element_at``."""
+    if not path:
+        return doc
+    if len(path) == 1:
+        return replace(doc, layers=doc.layers[:path[0]] + (elem,) + doc.layers[path[0]:])
+    parent_path, i = path[:-1], path[-1]
+    parent = doc.get_element(parent_path)
+    return doc.replace_element(parent_path, replace(
+        parent, children=parent.children[:i] + (elem,) + parent.children[i:]))
+
+
 def _shift_path_for_insertion(path: ElementPath,
                               inserted_at: ElementPath) -> ElementPath:
     """``path`` rewritten for an element having been inserted at
@@ -1243,6 +1256,112 @@ class Controller:
             copy_paths.append(copy_path)
         self._model.edit_document(replace(new_doc, selection=frozenset(
             ElementSelection.all(p) for p in copy_paths)))
+
+    def group_selection(self) -> None:
+        """Group the selection into ONE new Group, selected, as one edit.
+
+        Mirrors Rust ``Controller::group_selection`` (the law the frozen app's
+        ``menu._group_selection`` predates): a selected path under another
+        selected path is dropped (an ancestor carries its children); fewer
+        than two roots is a no-op; the group lands at the FRONTMOST root's
+        path, each component shifted down by the deletions that land earlier
+        in the same container; and the group is a fresh container that never
+        wears a member's identity.
+        """
+        doc = self._model.document
+        if not doc.selection:
+            return
+        paths = sorted({es.path for es in doc.selection})
+        roots = [p for p in paths
+                 if not any(q != p and p[:len(q)] == q for q in paths)]
+        if len(roots) < 2:
+            return
+        elements = [doc.get_element_opt(p) for p in roots]
+        if any(e is None for e in elements):
+            return
+        front = roots[-1]
+        insert_path = list(front)
+        for k in range(len(front)):
+            insert_path[k] -= sum(
+                1 for d in roots
+                if d != front and len(d) == k + 1 and d[:k] == front[:k] and d[k] < front[k])
+        insert_path = tuple(insert_path)
+        new_doc = doc
+        for p in reversed(roots):
+            new_doc = new_doc.delete_element(p)
+        new_doc = _insert_element_at(new_doc, insert_path, Group(children=tuple(elements)))
+        self._model.edit_document(replace(
+            new_doc, selection=frozenset({ElementSelection.all(insert_path)})))
+
+    def ungroup_selection(self) -> None:
+        """Replace each selected Group with its children, which become the
+        selection, as one edit. Mirrors Rust ``Controller::ungroup_selection``,
+        including where the children land: at the group's index in its LAYER.
+        """
+        doc = self._model.document
+        if not doc.selection:
+            return
+        group_paths = sorted(
+            es.path for es in doc.selection
+            if isinstance(doc.get_element_opt(es.path), Group)
+            and not isinstance(doc.get_element_opt(es.path), Layer))
+        if not group_paths:
+            return
+        new_doc = doc
+        for gpath in reversed(group_paths):
+            group = new_doc.get_element_opt(gpath)
+            if group is None:
+                continue
+            new_doc = new_doc.delete_element(gpath)
+            if len(gpath) >= 2:
+                layer_idx, child_idx = gpath[0], gpath[1]
+                layer = new_doc.layers[layer_idx]
+                new_layer = replace(layer, children=(
+                    layer.children[:child_idx] + tuple(group.children)
+                    + layer.children[child_idx:]))
+                new_doc = replace(new_doc, layers=(
+                    new_doc.layers[:layer_idx] + (new_layer,) + new_doc.layers[layer_idx + 1:]))
+        new_selection = []
+        offset = 0
+        for gpath in group_paths:
+            n = len(doc.get_element(gpath).children)
+            if len(gpath) >= 2:
+                for j in range(n):
+                    path = (gpath[0], gpath[1] + offset + j)
+                    if new_doc.get_element_opt(path) is not None:
+                        new_selection.append(ElementSelection.all(path))
+            offset += n - 1
+        self._model.edit_document(replace(new_doc, selection=frozenset(new_selection)))
+
+    def ungroup_all(self) -> None:
+        """Flatten every Group that is not locked, where "locked" is INHERITED
+        (transcripts/LAYER_STRUCTURE.md section 13): a Group inside a locked
+        layer or a locked group is kept, structure included, as one with its
+        own flag set is. Clears the selection; one edit, or nothing when no
+        group was flattened. Mirrors Rust ``Controller::ungroup_all``.
+        """
+        doc = self._model.document
+        changed = False
+
+        def _flatten(children, ancestor_locked: bool) -> tuple:
+            nonlocal changed
+            result = []
+            for child in children:
+                locked = ancestor_locked or child.locked
+                if isinstance(child, Group) and not locked:
+                    changed = True
+                    result.extend(_flatten(child.children, locked))
+                elif isinstance(child, Group):
+                    result.append(replace(child, children=_flatten(child.children, locked)))
+                else:
+                    result.append(child)
+            return tuple(result)
+
+        new_layers = tuple(replace(layer, children=_flatten(layer.children, layer.locked))
+                           for layer in doc.layers)
+        if not changed:
+            return
+        self._model.edit_document(replace(doc, layers=new_layers, selection=frozenset()))
 
     def lock_selection(self) -> None:
         """Lock all selected elements and clear the selection.
