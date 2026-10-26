@@ -595,6 +595,14 @@ public enum LayersPanel {
             return nil
         }
 
+        // doc.promote_to_concept: {}: Object > Promote to Concept, the op
+        // ``ConceptsPanel/promoteToConceptOps`` builds for the one selected
+        // shape a fitter matches. Rust's `doc.promote_to_concept`.
+        let docPromoteToConceptHandler: PlatformEffect = { _, _, _ in
+            for op in ConceptsPanel.promoteToConceptOps(model.document) ?? [] { opApply(model, controller, op) }
+            return nil
+        }
+
         let docOpHandler: PlatformEffect = { value, _, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
             opApply(model, controller, spec)
@@ -883,6 +891,7 @@ public enum LayersPanel {
             "doc.place_instance": docPlaceInstanceHandler,
             "doc.place_concept_instance": docPlaceConceptInstanceHandler,
             "doc.set_concept_param": docSetConceptParamHandler,
+            "doc.promote_to_concept": docPromoteToConceptHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

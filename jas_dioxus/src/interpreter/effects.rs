@@ -2977,6 +2977,15 @@ fn run_doc_effect(
                 None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.place_concept_instance:{spec}"))),
             }
         }
+        // doc.promote_to_concept: {}: Object > Promote to Concept, the op
+        // `symbols_host::promote_to_concept_ops` builds for the one selected
+        // shape a fitter matches, under the action's `snapshot`. The
+        // reference's `StateStore.promote_to_concept` the same.
+        "doc.promote_to_concept" => {
+            for op in crate::interpreter::symbols_host::promote_to_concept_ops(model.document()).unwrap_or_default() {
+                let _ = crate::document::op_apply::op_apply(model, &op);
+            }
+        }
         // doc.set_concept_param: { name: <expr>, value: <expr> }: a Concepts-panel
         // parameter field's commit, the op `symbols_host::set_concept_param_ops`
         // builds for the one selected generated instance, under the action's

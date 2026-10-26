@@ -21,7 +21,7 @@ public enum ConceptsPanel {
         guard let model = model, !cmd.isEmpty else { return }
         switch cmd {
         case "place_concept_instance": LayersPanel.dispatchYamlAction(cmd, model: model)
-        case "promote_to_concept": dispatch(cmd, model: model)
+        case "promote_to_concept": LayersPanel.dispatchYamlAction(cmd, model: model)
         default: runYamlActionByName(cmd, params: [:], model: model)
         }
     }
@@ -122,19 +122,6 @@ public enum ConceptsPanel {
         return [["op": "set_concept_param", "path": path, "name": name, "value": v]]
     }
 
-    /// Native intercept for `promote_to_concept` (the YAML action is a `log`
-    /// stub). Mirrors the Rust dispatch arm.
-    public static func dispatch(_ action: String, model: Model) {
-        switch action {
-        case "promote_to_concept":
-            // CONCEPTS.md §10 — the fitter / promote (the inverse of expand).
-            // Detect + replace the single selected raw shape with a Generated.
-            promote(model: model)
-        default:
-            break
-        }
-    }
-
     /// Native intercept for `apply_concept_operation` (CONCEPTS.md §9): apply a
     /// named concept operation to the single selected Generated instance. The
     /// operation's effect is RESOLVED here, at production time — look the
@@ -180,30 +167,24 @@ public enum ConceptsPanel {
         }
     }
 
-    /// Native intercept for `promote_to_concept` (CONCEPTS.md §10 — the fitter /
-    /// promote, the inverse of expand). Promote the single selected raw shape to
-    /// a `Generated` concept instance: extract the element's WORLD-space vertices
-    /// (bake any element transform into the points so the fitter sees world
-    /// space), try each registered concept's `fitter` expression over them (bound
-    /// under `shape.points`) in sorted-id order, and on the FIRST match split its
-    /// flat result `[params..., cx, cy, rotation]` into the concept params (first
-    /// K, by declared order) and a placement transform (`translate(cx,cy) ·
-    /// rotate(rot)`). Everything is baked into the op value-in-op and routed
-    /// through `opApply` in the one-undo `withTxn`/`nameTxn` bracket; a no-match
-    /// (or a non-Polygon/Polyline selection) is a silent no-op. Mirrors the Rust
-    /// `promote_to_concept` dispatch arm.
-    public static func promote(model: Model) {
-        let doc = model.document
-        guard doc.selection.count == 1, let sel = doc.selection.first else { return }
+    /// The one op Object > Promote to Concept applies
+    /// (`doc.promote_to_concept` in actions.yaml, CONCEPTS.md §10), or nil
+    /// unless exactly one polygon or polyline is selected and a registered
+    /// concept's fitter matches it: the element's transform baked into its
+    /// points, concepts in sorted-id order, the first fitter returning k params
+    /// + cx, cy, rot wins, placed at translate(cx, cy) · rotate(rot). Rust
+    /// `symbols_host::promote_to_concept_ops`.
+    static func promoteToConceptOps(_ doc: Document) -> [[String: Any]]? {
+        guard doc.selection.count == 1, let sel = doc.selection.first else { return nil }
         let path = sel.path
-        guard let elem = doc.tryGetElement(path) else { return }
+        guard let elem = doc.tryGetElement(path) else { return nil }
 
         // Only a Polygon / Polyline carries promotable vertices in v1.
         let rawPoints: [(Double, Double)]
         switch elem {
         case .polygon(let p): rawPoints = p.points
         case .polyline(let p): rawPoints = p.points
-        default: return
+        default: return nil
         }
         // Bake any element transform into the points so the fitter sees WORLD
         // space (the promoted instance re-places via its own transform).
@@ -218,7 +199,7 @@ public enum ConceptsPanel {
 
         // Try each registered concept's fitter in sorted-id order (a
         // deterministic first-match); keep the first that matches.
-        guard let registry = WorkspaceData.load()?.concepts() else { return }
+        guard let registry = WorkspaceData.load()?.concepts() else { return nil }
         var chosen: (conceptId: String, params: [String: Any],
                      cx: Double, cy: Double, rot: Double)?
         for id in registry.keys.sorted() {
@@ -237,22 +218,18 @@ public enum ConceptsPanel {
             chosen = (id, params, nums[k], nums[k + 1], nums[k + 2])
             break
         }
-        guard let pick = chosen else { return }  // nothing matched: no-op
+        guard let pick = chosen else { return nil }  // nothing matched: no-op
 
         // Placement: translate(cx,cy) * rotate(rot) — rotate then translate.
         let t = Transform.translate(pick.cx, pick.cy)
             .multiply(Transform.rotate(pick.rot))
-        let op: [String: Any] = [
+        return [[
             "op": "promote_to_concept",
             "path": path,
             "concept_id": pick.conceptId,
             "params": pick.params,
             "transform": [t.a, t.b, t.c, t.d, t.e, t.f],
-        ]
-        model.withTxn {
-            model.nameTxn("promote_to_concept")
-            opApply(model, Controller(model: model), op)
-        }
+        ]]
     }
 }
 

@@ -180,6 +180,12 @@ VERB_TABLE = {
         "journals": "always", "op": "set_concept_param",
         "evidence": ["effects.rs:2961", "op_apply.rs:2235"],
     },
+    "doc.promote_to_concept": {
+        # Object > Promote to Concept: one op replacing the one selected shape a
+        # fitter matches (symbols_host::promote_to_concept_ops), through op_apply.
+        "journals": "always", "op": "promote_to_concept",
+        "evidence": ["effects.rs:2984", "op_apply.rs:2264"],
+    },
     "doc.op": {
         # One journaled op BY NAME: the op is the call site's own `op` field
         # (`doc.op: { op: unlock_all }`), so the row names no single op.
@@ -665,8 +671,8 @@ def render_md(entries, summary):
     a("  `log`-stubs in YAML whose real behavior lives in native code:")
     a("  `dispatch_action` natively intercepts the symbol/concept actions")
     a("  `symbols_host::ACTIONS` names (`new_symbol`, `delete_symbol_action`,")
-    a("  `delete_symbol_orphan_confirm_ok`, `apply_concept_operation`,")
-    a("  `promote_to_concept`), several of which journal real ops through")
+    a("  `delete_symbol_orphan_confirm_ok`, `apply_concept_operation`), several")
+    a("  of which journal real ops through")
     a("  `op_apply` natively; and `copy`/`paste` are handled natively by")
     a("  each app's clipboard route. Those actions classify as `ui-state` here")
     a("  because their YAML effect trees reach no `doc.*` verb; the class")

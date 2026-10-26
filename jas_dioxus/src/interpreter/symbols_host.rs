@@ -22,14 +22,16 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The five action names this module hosts. Since 2026-10-26 three verbs that
+/// The four action names this module hosts. Since 2026-10-26 four verbs that
 /// were hosted here run their YAML instead: `place_instance`
 /// (`doc.place_instance`, [`place_instance_ops`]), `place_concept_instance`
-/// (`doc.place_concept_instance`, [`place_concept_instance_ops`]) and
-/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`]).
-pub const ACTIONS: [&str; 5] = [
+/// (`doc.place_concept_instance`, [`place_concept_instance_ops`]),
+/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`])
+/// and `promote_to_concept` (`doc.promote_to_concept`,
+/// [`promote_to_concept_ops`]).
+pub const ACTIONS: [&str; 4] = [
     "new_symbol", "delete_symbol_action", "delete_symbol_orphan_confirm_ok",
-    "apply_concept_operation", "promote_to_concept",
+    "apply_concept_operation",
 ];
 
 /// What a hosted verb asks its caller to do besides the document change it
@@ -80,10 +82,6 @@ pub fn run(
         }
         "apply_concept_operation" => {
             apply_concept_operation(model, params);
-            Outcome::Done
-        }
-        "promote_to_concept" => {
-            promote_to_concept(model);
             Outcome::Done
         }
         _ => return None,
@@ -249,21 +247,28 @@ fn apply_concept_operation(model: &mut Model, params: &Value) {
 /// instance (CONCEPTS.md §10): try each registered concept's `fitter` over the
 /// element's WORLD-space points, in sorted-id order, and take the first match.
 /// A no-match is a silent no-op.
-fn promote_to_concept(model: &mut Model) {
-    let Some(path) = single_path(model) else { return };
-    let Some(elem) = model.document().get_element(&path).cloned() else { return };
+/// The one op Object > Promote to Concept applies (`doc.promote_to_concept`
+/// in actions.yaml, CONCEPTS.md §10), or `None` unless exactly one polygon or
+/// polyline is selected and a registered concept's fitter matches it: the
+/// element's transform baked into its points, concepts in sorted-id order,
+/// the first fitter returning k params + cx, cy, rot wins, placed at
+/// translate(cx, cy) · rotate(rot). The reference's `promote_to_concept_ops`.
+pub fn promote_to_concept_ops(doc: &crate::document::document::Document) -> Option<Vec<Value>> {
+    let [es] = doc.selection.as_slice() else { return None };
+    let path = es.path.clone();
+    let elem = doc.get_element(&path).cloned()?;
     let raw_points: Vec<(f64, f64)> = match &elem {
         Element::Polygon(p) => p.points.clone(),
         Element::Polyline(p) => p.points.clone(),
-        _ => return,
+        _ => return None,
     };
     let pts: Vec<(f64, f64)> = match elem.common().transform.as_ref() {
         Some(t) => raw_points.iter().map(|(x, y)| t.apply_point(*x, *y)).collect(),
         None => raw_points,
     };
     let ctx = json!({"shape": {"points": pts.iter().map(|(x, y)| json!([*x, *y])).collect::<Vec<_>>()}});
-    let Some(ws) = Workspace::load() else { return };
-    let Some(registry) = ws.concepts() else { return };
+    let ws = Workspace::load()?;
+    let registry = ws.concepts()?;
     let mut ids: Vec<&String> = registry.keys().collect();
     ids.sort();
     let mut chosen: Option<(String, Value, f64, f64, f64)> = None;
@@ -287,18 +292,14 @@ fn promote_to_concept(model: &mut Model) {
         chosen = Some((id.clone(), Value::Object(p), nums[k], nums[k + 1], nums[k + 2]));
         break;
     }
-    let Some((concept_id, params, cx, cy, rot)) = chosen else { return };
+    let (concept_id, params, cx, cy, rot) = chosen?;
     // Placement: translate(cx, cy) * rotate(rot).
     let t = Transform::translate(cx, cy).multiply(&Transform::rotate(rot));
-    let op = json!({
+    Some(vec![json!({
         "op": "promote_to_concept",
         "path": path,
         "concept_id": concept_id,
         "params": params,
         "transform": [t.a, t.b, t.c, t.d, t.e, t.f],
-    });
-    model.with_txn(|m| {
-        m.name_txn("promote_to_concept");
-        let _ = crate::document::op_apply::op_apply(m, &op);
-    });
+    })])
 }

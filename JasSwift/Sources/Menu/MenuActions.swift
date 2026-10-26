@@ -15,7 +15,7 @@ enum MenuActions {
     /// the declared action through ``LayersPanel/dispatchYamlAction``, as the
     /// engine's door and the web menu do.
     static let yamlVerbs = ["unlock_all", "hide_selection", "show_all", "lock", "select_all",
-                            "group", "ungroup", "ungroup_all", "make_instance"]
+                            "group", "ungroup", "ungroup_all", "make_instance", "promote_to_concept"]
 
     /// Revert is offered only when there are changes AND a saved version to
     /// return to (an `Untitled-` document was never saved). Mirrors Rust

@@ -80,3 +80,34 @@ private func points(_ model: Model) -> Double? {
     set(11)
     #expect(points(model) == 7, "nothing selected: nothing")
 }
+
+// Object > Promote to Concept runs its YAML (`doc.promote_to_concept`): the
+// selected square (the fitter corpus's `[4, 10, 100, 20, 0]` case) becomes a
+// Generated regular_polygon at translate(100, 20), ONE undo; an oblong, which
+// no fitter matches, changes nothing.
+@Test func promoteToConceptRunsItsYamlFromThePanelMenu() {
+    func model(_ pts: [(Double, Double)]) -> Model {
+        let m = Model()
+        m.setDocumentForTest(Document(layers: [Layer(children: [.polygon(Polygon(points: pts))])],
+                                      selectedLayer: 0, selection: [ElementSelection.all([0, 0])]))
+        return m
+    }
+    var layout = WorkspaceLayout.defaultLayout()
+    let addr = PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0)
+    let oblong = model([(0, 0), (20, 0), (20, 10), (0, 10)])
+    let before = oblong.document
+    ConceptsPanel.menuDispatch("promote_to_concept", addr: addr, layout: &layout, model: oblong)
+    #expect(oblong.document == before, "no fitter matches an oblong: nothing")
+
+    let square = model([(110, 20), (100, 30), (90, 20), (100, 10)])
+    let squareBefore = square.document
+    ConceptsPanel.menuDispatch("promote_to_concept", addr: addr, layout: &layout, model: square)
+    guard case .live(.generated(let g)) = square.document.layers[0].children[0] else {
+        Issue.record("not promoted"); return
+    }
+    #expect(g.conceptId == "regular_polygon")
+    #expect((g.params["sides"] as? NSNumber)?.doubleValue == 4 && (g.params["radius"] as? NSNumber)?.doubleValue == 10)
+    #expect(g.transform?.e == 100 && g.transform?.f == 20)
+    square.undo()
+    #expect(square.document.layers == squareBefore.layers, "ONE undo")
+}

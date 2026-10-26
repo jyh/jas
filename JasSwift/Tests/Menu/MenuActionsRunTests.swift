@@ -9,7 +9,7 @@ import Testing
 
 @Test func everyMenuModelVerbRunsItsYaml() {
     #expect(MenuActions.yamlVerbs == ["unlock_all", "hide_selection", "show_all", "lock", "select_all",
-                                      "group", "ungroup", "ungroup_all", "make_instance"])
+                                      "group", "ungroup", "ungroup_all", "make_instance", "promote_to_concept"])
 }
 
 // Make Instance runs its YAML (`snapshot` + `doc.make_instance`): an offset

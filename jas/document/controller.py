@@ -242,6 +242,49 @@ def place_instance_ops(doc: Document, master_id: str | None,
     return [{"op": "place_instance", "master_id": master_id, "ref_id": ids[0]}]
 
 
+def promote_to_concept_ops(doc: Document, registry: dict) -> list[dict] | None:
+    """The one op Object > Promote to Concept applies (CONCEPTS.md §10), or
+    None (a no-op) unless exactly one polygon or polyline is selected and a
+    registered concept's fitter matches it: ``promote_to_concept`` of its
+    path, replacing it with a Generated instance. The element's transform is
+    baked into its points (the fitter sees world space); concepts are tried
+    in sorted-id order and the first fitter returning at least k + 3 numbers
+    (k params, then cx, cy, rot) wins; the instance is placed at
+    translate(cx, cy) · rotate(rot). A non-number in the fitter's list reads
+    0. Rust ``symbols_host::promote_to_concept_ops``, Swift
+    ``ConceptsPanel.promoteToConceptOps``."""
+    from geometry.element import Polygon, Polyline, Transform
+    from workspace_interpreter.expr import evaluate
+    if len(doc.selection) != 1:
+        return None
+    path = next(iter(doc.selection)).path
+    try:
+        elem = doc.get_element(path)
+    except (ValueError, IndexError, KeyError):
+        return None
+    if not isinstance(elem, (Polygon, Polyline)):
+        return None
+    pts = [elem.transform.apply_point(x, y) if elem.transform else (x, y) for x, y in elem.points]
+    ctx = {"shape": {"points": [[x, y] for x, y in pts]}}
+    for concept_id in sorted(registry or {}):
+        concept = registry[concept_id]
+        fitter = concept.get("fitter") if isinstance(concept, dict) else None
+        if not isinstance(fitter, str):
+            continue
+        items = evaluate(fitter, ctx).value
+        if not isinstance(items, list):
+            continue
+        names = [p["name"] for p in concept.get("params") or () if isinstance(p, dict) and isinstance(p.get("name"), str)]
+        k = len(names)
+        if len(items) < k + 3:
+            continue  # malformed: k params, then cx, cy, rot
+        nums = [float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0 for v in items]
+        t = Transform.translate(nums[k], nums[k + 1]).multiply(Transform.rotate(nums[k + 2]))
+        return [{"op": "promote_to_concept", "path": list(path), "concept_id": concept_id,
+                 "params": dict(zip(names, nums[:k])), "transform": [t.a, t.b, t.c, t.d, t.e, t.f]}]
+    return None
+
+
 def concept_default_params(concept: dict | None) -> dict:
     """A concept's declared default params (``params: [{name, default}]``) as
     a params object. Mirrors Rust ``symbols_host::concept_default_params`` and

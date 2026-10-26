@@ -330,13 +330,6 @@ public struct JasCommands: Commands {
         // or `doc.make_instance`), as the engine's door and the web menu do.
         case _ where MenuActions.yamlVerbs.contains(action):
             if let model = model { LayersPanel.dispatchYamlAction(action, model: model) }
-        case "promote_to_concept":
-            // CONCEPTS.md §10 — the fitter / promote. New menu route to the
-            // existing ConceptsPanel intercept (was only reachable from the
-            // panel before). No-op unless exactly one element is selected
-            // (the native enabled predicate already gates the menu item).
-            guard let model = model else { return }
-            ConceptsPanel.dispatch("promote_to_concept", model: model)
         // View — the six zoom / fit verbs go through the ONE seam the canvas
         // keyboard chords and the toolbar double-click also use
         // (``ViewActions``), so all three surfaces agree with each other and

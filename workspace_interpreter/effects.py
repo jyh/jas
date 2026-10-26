@@ -558,6 +558,13 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.place_concept_instance(concept.value if isinstance(concept.value, str) else None)
         return None
 
+    # doc.promote_to_concept: {} — Object > Promote to Concept: the one
+    # selected shape a concept's fitter matches becomes a Generated instance
+    # at its path. StateStore.promote_to_concept.
+    if "doc.promote_to_concept" in effect:
+        store.promote_to_concept()
+        return None
+
     # doc.set_concept_param: { name: <expr>, value: <expr> } — a Concepts-panel
     # parameter field's commit: params[name] = value on the one selected
     # generated instance. StateStore.set_concept_param.

@@ -167,7 +167,8 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 40 the same day: `place_instance` (`doc.place_instance`, which mints its id).
 # 38 the same day: `place_concept_instance` and `set_concept_param`
 # (`doc.place_concept_instance`, `doc.set_concept_param`).
-MIN_LOG_ONLY = 38
+# 37 the same day: `promote_to_concept` (`doc.promote_to_concept`).
+MIN_LOG_ONLY = 37
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
