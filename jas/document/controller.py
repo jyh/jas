@@ -1341,8 +1341,8 @@ class Controller:
 
     def ungroup_selection(self) -> None:
         """Replace each selected Group with its children, which become the
-        selection, as one edit. Mirrors Rust ``Controller::ungroup_selection``,
-        including where the children land: at the group's index in its LAYER.
+        selection, as one edit: the children land in the group's own parent at its
+        index (MENU.md). Mirrors Rust ``Controller::ungroup_selection``.
         """
         doc = self._model.document
         if not doc.selection:
@@ -1353,30 +1353,31 @@ class Controller:
             and not isinstance(doc.get_element_opt(es.path), Layer))
         if not group_paths:
             return
+        # Reverse path order ungroups a descendant before its ancestor; the
+        # selection is remapped in the same walk (STATUS-jas item 20).
         new_doc = doc
+        recorded: list[tuple[int, ...]] = []
         for gpath in reversed(group_paths):
-            group = new_doc.get_element_opt(gpath)
-            if group is None:
+            if len(gpath) < 2:
                 continue
+            group = new_doc.get_element_opt(gpath)
+            if not isinstance(group, Group):
+                continue
+            n = len(group.children)
+            parent, idx = gpath[:-1], gpath[-1]
             new_doc = new_doc.delete_element(gpath)
-            if len(gpath) >= 2:
-                layer_idx, child_idx = gpath[0], gpath[1]
-                layer = new_doc.layers[layer_idx]
-                new_layer = replace(layer, children=(
-                    layer.children[:child_idx] + tuple(group.children)
-                    + layer.children[child_idx:]))
-                new_doc = replace(new_doc, layers=(
-                    new_doc.layers[:layer_idx] + (new_layer,) + new_doc.layers[layer_idx + 1:]))
-        new_selection = []
-        offset = 0
-        for gpath in group_paths:
-            n = len(doc.get_element(gpath).children)
-            if len(gpath) >= 2:
-                for j in range(n):
-                    path = (gpath[0], gpath[1] + offset + j)
-                    if new_doc.get_element_opt(path) is not None:
-                        new_selection.append(ElementSelection.all(path))
-            offset += n - 1
+            for j, child in enumerate(group.children):
+                new_doc = _insert_element_at(new_doc, parent + (idx + j,), child)
+            remapped = []
+            for p in recorded:
+                if len(p) > len(gpath) and p[:len(gpath)] == gpath:
+                    p = parent + (idx + p[len(gpath)],) + p[len(gpath) + 1:]
+                elif len(p) > len(parent) and p[:len(parent)] == parent and p[len(parent)] > idx:
+                    p = p[:len(parent)] + (p[len(parent)] + n - 1,) + p[len(parent) + 1:]
+                remapped.append(p)
+            recorded = remapped + [parent + (idx + j,) for j in range(n)]
+        new_selection = [ElementSelection.all(p) for p in sorted(set(recorded))
+                         if new_doc.get_element_opt(p) is not None]
         self._model.edit_document(replace(new_doc, selection=frozenset(new_selection)))
 
     def ungroup_all(self) -> None:
