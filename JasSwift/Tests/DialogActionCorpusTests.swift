@@ -252,11 +252,7 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
             // A dialog an action opens (`open_boolean_options`) is compared
             // from the document as it opened, as the engine runner does.
             let before = documentToTestJson(m.document)
-            if action == "select_all" {
-                MenuActions.selectAll(m)
-            } else {
-                LayersPanel.dispatchYamlAction(action, model: m, params: step["params"] as? [String: Any] ?? [:])
-            }
+            LayersPanel.dispatchYamlAction(action, model: m, params: step["params"] as? [String: Any] ?? [:])
             if atOpen == nil, store.getDialogId() != nil { atOpen = before }
         } else {
             return ["\(name): a step this runner does not know: \(step)"]

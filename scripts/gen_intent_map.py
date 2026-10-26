@@ -159,6 +159,9 @@ VERB_TABLE = {
         # One journaled op BY NAME: the op is the call site's own `op` field
         # (`doc.op: { op: unlock_all }`), so the row names no single op.
         "journals": "always", "op": "(the call site's op)",
+        "note": ("a selection-only op (`select_all`) is journal-neutral as "
+                 "`doc.select_in_rect` is: op_apply opens no transaction "
+                 "for it (op_apply.rs:1878 is_selection_only_verb)"),
         "evidence": ["effects.rs:2898", "op_apply.rs:2004"],
     },
     "doc.insert_after": {

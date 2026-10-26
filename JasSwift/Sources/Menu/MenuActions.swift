@@ -13,15 +13,15 @@ import Foundation
 enum MenuActions {
     /// The model-pure menu verbs, by action name: Rust `menu_native::VERBS`,
     /// in its order. ``run(_:_:)`` runs exactly these.
-    /// `unlock_all`, `hide_selection`, `show_all` and `lock` left it 2026-10-25:
-    /// their YAML is `doc.op` (the op layer by name), so the menu runs the
-    /// declared action (``yamlVerbs``).
-    static let verbs = ["select_all", "group", "ungroup", "ungroup_all", "make_instance"]
+    /// `unlock_all`, `hide_selection`, `show_all`, `lock` and `select_all` left
+    /// it 2026-10-25: their YAML is `doc.op` (the op layer by name), so the menu
+    /// runs the declared action (``yamlVerbs``).
+    static let verbs = ["group", "ungroup", "ungroup_all", "make_instance"]
 
     /// The model verbs whose YAML says what they do (`doc.op`): the menu runs
     /// the declared action through ``LayersPanel/dispatchYamlAction``, as the
     /// engine's door and the web menu do.
-    static let yamlVerbs = ["unlock_all", "hide_selection", "show_all", "lock"]
+    static let yamlVerbs = ["unlock_all", "hide_selection", "show_all", "lock", "select_all"]
 
     /// Run `action` on `model` if it is one of ``verbs``; `false` (nothing
     /// run) otherwise. Rust `menu_native::run`. The live menu (``JasCommands``)
@@ -29,7 +29,6 @@ enum MenuActions {
     @discardableResult
     static func run(_ action: String, _ model: Model) -> Bool {
         switch action {
-        case "select_all": selectAll(model)
         case "group": groupSelection(model)
         case "ungroup": ungroupSelection(model)
         case "ungroup_all": ungroupAll(model)
@@ -59,13 +58,6 @@ enum MenuActions {
         model.editDocument(documentForOpen(svg))
         model.markSaved()
         return true
-    }
-
-    /// Select every element on the canvas. Non-undoable selection write through
-    /// the Controller (matches the prior `selectAll()` body).
-    static func selectAll(_ model: Model) {
-        let controller = Controller(model: model)
-        controller.selectAll()
     }
 
     /// Group the current selection under ONE undo step. `withTxn` opens ONE

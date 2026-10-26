@@ -21,13 +21,13 @@ import Foundation
 // closures) and is NOT reachable from the app delegate's FIFO handler.
 // So this dispatcher performs the SAME document-mutation ops the
 // JasCommands handlers use, directly on the active model:
-//   select_all       -> Controller.selectAll()      (== JasCommands.selectAll)
 //   delete_selection -> shared opApply delete_selection in a named txn
 //                       (== the keyboard-only native delete; one named
 //                        undo step via the shared op_apply dispatcher,
 //                        matching Python's _route_delete_selection)
 // Everything else falls through to the generic panel dispatcher for
-// genuine panel / generic-effect actions (panel toggles, etc.).
+// genuine panel / generic-effect actions (panel toggles, etc.), and so does
+// `select_all`: since 2026-10-25 its YAML is `doc.op: {op: select_all}`.
 public enum FifoActionRouting {
     /// Native-first dispatch of a named action for the FIFO `action`
     /// channel. Routes document-mutating natives directly on `model`,
@@ -49,10 +49,6 @@ public enum FifoActionRouting {
             }
     ) {
         switch name {
-        case "select_all":
-            // Same op JasCommands.selectAll() runs (selection-only,
-            // non-undoable per OP_LOG.md §7/§8).
-            Controller(model: model).selectAll()
         case "delete_selection":
             // Keyboard-only native delete: journals ONE named
             // `delete_selection` op via the shared opApply dispatcher

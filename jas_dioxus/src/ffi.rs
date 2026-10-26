@@ -1723,10 +1723,11 @@ pub unsafe extern "C" fn jas_dispatch_action(
             engine_scope_of(engine, "")
         }
     };
-    // The menu's model-pure verbs (flask STATUS §242: Select All was refused
-    // `Logged:select_all`). Their `actions.yaml` entries are `log` stubs; the
-    // menu runs them in every app, through one table (`menu_native`), and so
-    // does this route. A panel menu never names one, so only the menubar's.
+    // The menu's model-pure verbs whose `actions.yaml` entries are `log`
+    // stubs (group, ungroup, ungroup_all, make_instance): the menu runs them
+    // in every app, through one table (`menu_native`), and so does this route.
+    // A panel menu never names one, so only the menubar's. (Select All, flask
+    // STATUS §242, and the lock/hide verbs now run their YAML, `doc.op`.)
     let native = (panel.is_none() && clip_verb.is_none()).then(|| {
         let mut model = engine.model.borrow_mut();
         let generation = model.generation();
@@ -5322,10 +5323,9 @@ mod tests {
     }
 
     /// SELECT ALL FROM THE MENU (flask STATUS §242, 2026-10-13: Edit > Select
-    /// All on Windows read `PlatformEffect`, `Logged:select_all`). Its
-    /// `actions.yaml` entry is a `log` stub: the behaviour is the menu's own,
-    /// in every app (the reference's `_MENU_NATIVE_HANDLERS`, Swift's
-    /// `MenuActions`). The engine runs the same model verb.
+    /// All on Windows read `PlatformEffect`, `Logged:select_all`). Since
+    /// 2026-10-25 its `actions.yaml` entry says what it does, `doc.op: {op:
+    /// select_all}` with no `snapshot`, and the engine runs it from there.
     #[test]
     fn dispatch_menu_select_all_selects_and_records_no_undo_step() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -5419,7 +5419,7 @@ mod tests {
             assert!(!refused.iter().any(|r| r.starts_with(&format!("{verb} -> "))),
                     "{verb} is the menu's own and the engine runs it");
         }
-        assert!(ran >= 9, "at least the nine model verbs ran (six native, three `doc.op`); {ran} items ran");
+        assert!(ran >= 9, "at least the nine model verbs ran (four native, five `doc.op`); {ran} items ran");
     }
 
     /// WHETHER THE DOCUMENT IS MODIFIED, FOR A SHELL'S DIRTY FLAG (flask §246,

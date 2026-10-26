@@ -9,7 +9,7 @@ enum CanvasContextMenu {
     /// The edit verbs offered on the canvas, in display order. Each maps to an
     /// existing dispatch: cut/copy/paste route through ``EditClipboard`` (the
     /// same code the Edit menu now shares); delete mirrors the canvas keyboard
-    /// Delete; selectAll calls ``MenuActions.selectAll``.
+    /// Delete; selectAll runs its YAML (`select_all`) as the menu does.
     enum Item: CaseIterable {
         case cut, copy, paste, delete, selectAll
     }
