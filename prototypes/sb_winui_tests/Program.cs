@@ -663,12 +663,18 @@ static class Program
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.
+        // Finding K (flask § 568): a `bind: label:` arrives as `bind.label` and
+        // replaces every other label, as the web's render_button does.
+        Eq("button: a bound label (bind.label) wins over everything", "Add Side",
+            PanelWire.ButtonLabel("Add Side", "Save “doc.svg”", "OK", "tip", "b"));
+        Eq("button: a bound label with no other label at all", "Add Side",
+            PanelWire.ButtonLabel("Add Side", null, null, null, ""));
         Eq("button: an engine-resolved label wins over the literal", "Save “doc.svg”",
-            PanelWire.ButtonLabel("Save “doc.svg”", "OK", "tip", "b"));
-        Eq("button: the literal label", "OK", PanelWire.ButtonLabel(null, "OK", "tip", "b"));
-        Eq("button: no label falls back to the summary", "tip", PanelWire.ButtonLabel(null, null, "tip", "b"));
-        Eq("button: then to the id", "b", PanelWire.ButtonLabel(null, null, null, "b"));
-        Eq("button: nothing at all is an empty face, never null", "", PanelWire.ButtonLabel(null, null, null, ""));
+            PanelWire.ButtonLabel(null, "Save “doc.svg”", "OK", "tip", "b"));
+        Eq("button: the literal label", "OK", PanelWire.ButtonLabel(null, null, "OK", "tip", "b"));
+        Eq("button: no label falls back to the summary", "tip", PanelWire.ButtonLabel(null, null, null, "tip", "b"));
+        Eq("button: then to the id", "b", PanelWire.ButtonLabel(null, null, null, null, "b"));
+        Eq("button: nothing at all is an empty face, never null", "", PanelWire.ButtonLabel(null, null, null, null, ""));
         Eq("clickable: a button by plan path alone, a dialog's OK", "True",
             PanelWire.Clickable("button", "", "[1,0]").ToString());
         Eq("clickable: a button with neither id nor path", "False",

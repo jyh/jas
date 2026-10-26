@@ -246,13 +246,18 @@ internal static class PanelWire
         events is not null && events.Contains("click") && Addressable(id, path);
 
     /// <summary>
-    /// S1: a `button`'s face. The core resolves a `{{`-bearing label into the
-    /// leaf's `values` (Save Changes' "Save {{param.filename}}") and sends a
-    /// literal one in `static`; the resolved one wins. With no label, the
+    /// S1: a `button`'s face. A `bind: label:` expression arrives in the
+    /// leaf's `values` as `bind.label` and replaces the label, as the web's
+    /// `render_button` does (a Concepts operation button's "Add Side", the
+    /// Opacity panel's Make Mask / Release); until 2026-10-26 the shell never
+    /// read it and drew those buttons blank (flask STATUS § 568, finding K).
+    /// Next, the core resolves a `{{`-bearing label into `values` as `label`
+    /// (Save Changes' "Save {{param.filename}}") and sends a literal one in
+    /// `static`; the resolved one wins over the literal. With no label, the
     /// summary, then the id, as `icon_button`'s text face falls back. Never null.
     /// </summary>
-    internal static string ButtonLabel(string? boundLabel, string? literalLabel, string? summary, string id) =>
-        boundLabel ?? literalLabel ?? summary ?? id;
+    internal static string ButtonLabel(string? bindLabel, string? resolvedLabel, string? literalLabel, string? summary, string id) =>
+        bindLabel ?? resolvedLabel ?? literalLabel ?? summary ?? id;
 
     /// <summary>
     /// S1: whether a press on a button can reach the core, so whether it is
