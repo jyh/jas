@@ -13,8 +13,16 @@ import Foundation
 enum MenuActions {
     /// The model-pure menu verbs, by action name: Rust `menu_native::VERBS`,
     /// in its order. ``run(_:_:)`` runs exactly these.
+    /// `unlock_all`, `hide_selection` and `show_all` left it 2026-10-25: their
+    /// YAML is `doc.op` (the op layer by name), so the menu runs the declared
+    /// action (``yamlVerbs``).
     static let verbs = ["select_all", "group", "ungroup", "ungroup_all", "lock",
-                        "unlock_all", "hide_selection", "show_all", "make_instance"]
+                        "make_instance"]
+
+    /// The model verbs whose YAML says what they do (`doc.op`): the menu runs
+    /// the declared action through ``LayersPanel/dispatchYamlAction``, as the
+    /// engine's door and the web menu do.
+    static let yamlVerbs = ["unlock_all", "hide_selection", "show_all"]
 
     /// Run `action` on `model` if it is one of ``verbs``; `false` (nothing
     /// run) otherwise. Rust `menu_native::run`. The live menu (``JasCommands``)
@@ -27,9 +35,6 @@ enum MenuActions {
         case "ungroup": ungroupSelection(model)
         case "ungroup_all": ungroupAll(model)
         case "lock": lockSelection(model)
-        case "unlock_all": unlockAll(model)
-        case "hide_selection": hideSelection(model)
-        case "show_all": showAll(model)
         case "make_instance": makeInstance(model)
         default: return false
         }
@@ -149,26 +154,6 @@ enum MenuActions {
         guard !doc.selection.isEmpty else { return }
         let controller = Controller(model: model)
         model.withTxn { controller.lockSelection() }
-    }
-
-    /// Unlock every locked element under ONE undo step.
-    static func unlockAll(_ model: Model) {
-        let controller = Controller(model: model)
-        model.withTxn { controller.unlockAll() }
-    }
-
-    /// Hide (set visibility=invisible) the current selection under ONE undo step.
-    static func hideSelection(_ model: Model) {
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        let controller = Controller(model: model)
-        model.withTxn { controller.hideSelection() }
-    }
-
-    /// Show every hidden element under ONE undo step.
-    static func showAll(_ model: Model) {
-        let controller = Controller(model: model)
-        model.withTxn { controller.showAll() }
     }
 
     /// "Make Instance": the first user-facing way to create a live reference.

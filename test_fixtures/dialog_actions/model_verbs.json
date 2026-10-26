@@ -1,0 +1,44 @@
+[
+  {
+    "name": "unlock_all_clears_every_lock",
+    "setup_svg": "locked_layer_and_element.svg",
+    "note": "actions.yaml unlock_all: `doc.op: {op: unlock_all}` clears the flag on every element at every depth, a layer's own included, and keeps the selection (UNLOCKSEL). Expected bytes from the engine's native table before the YAML route existed; the Mac reproduces them independently.",
+    "actions": [
+      {
+        "action": "unlock_all"
+      }
+    ],
+    "expected_json": "unlock_all_clears_every_lock_expected.json"
+  },
+  {
+    "name": "hide_selection_hides_and_clears_the_selection",
+    "setup_svg": "two_rects.svg",
+    "note": "actions.yaml hide_selection: `doc.op: {op: hide_selection}` sets each selected element invisible and clears the selection.",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "hide_selection"
+      }
+    ],
+    "expected_json": "hide_selection_hides_and_clears_the_selection_expected.json"
+  },
+  {
+    "name": "show_all_reveals_and_selects_what_it_showed",
+    "setup_svg": "two_rects.svg",
+    "note": "actions.yaml show_all: `doc.op: {op: show_all}` makes every invisible element visible and selects exactly those (here both rects, hidden by the step before).",
+    "actions": [
+      {
+        "action": "select_all"
+      },
+      {
+        "action": "hide_selection"
+      },
+      {
+        "action": "show_all"
+      }
+    ],
+    "expected_json": "show_all_reveals_and_selects_what_it_showed_expected.json"
+  }
+]

@@ -1,7 +1,9 @@
 //! THE MENU'S MODEL-PURE VERBS, ONE TABLE FOR EVERY ROUTE.
 //!
-//! Nine Edit / Object menu actions are `log` stubs in `actions.yaml`: their
-//! behaviour is the menu's own, in every app. The reference routes them
+//! Six Edit / Object menu actions are `log` stubs in `actions.yaml`: their
+//! behaviour is the menu's own, in every app. (`unlock_all`, `hide_selection`
+//! and `show_all` left this table 2026-10-25: their YAML is `doc.op`, the op
+//! layer by name, so every route runs the declared action.) The reference routes them
 //! through `_MENU_NATIVE_HANDLERS`, Swift through `MenuActions`. Here the web
 //! menu (`menu_bar`), the action corpus (`recorder::replay`) and the engine's
 //! menu dispatch (`ffi::jas_dispatch_action`, flask STATUS §242: Select All
@@ -16,9 +18,8 @@ use crate::document::model::Model;
 use crate::tools::tool::PASTE_OFFSET;
 
 /// The actions [`run`] handles, in the reference's order.
-pub const VERBS: [&str; 9] = [
-    "select_all", "group", "ungroup", "ungroup_all", "lock", "unlock_all",
-    "hide_selection", "show_all", "make_instance",
+pub const VERBS: [&str; 6] = [
+    "select_all", "group", "ungroup", "ungroup_all", "lock", "make_instance",
 ];
 
 /// Run `action` on `model` if it is one of [`VERBS`]; `false` (nothing run)
@@ -31,9 +32,6 @@ pub fn run(action: &str, model: &mut Model) -> bool {
         "ungroup" => model.with_txn(|m| Controller::ungroup_selection(m)),
         "ungroup_all" => model.with_txn(|m| Controller::ungroup_all(m)),
         "lock" => model.with_txn(|m| Controller::lock_selection(m)),
-        "unlock_all" => model.with_txn(|m| Controller::unlock_all(m)),
-        "hide_selection" => model.with_txn(|m| Controller::hide_selection(m)),
-        "show_all" => model.with_txn(|m| Controller::show_all(m)),
         "make_instance" => make_instance(model),
         _ => return false,
     }
@@ -156,7 +154,9 @@ mod tests {
             let mut model = Model::new(Document::default(), None);
             assert!(run(verb, &mut model), "{verb} is listed and run handles it");
         }
-        for other in ["copy", "paste", "undo", "hide", "select_all ", ""] {
+        // The three whose YAML is `doc.op` run from the declared action, never here.
+        for other in ["copy", "paste", "undo", "hide", "select_all ", "", "unlock_all",
+                      "hide_selection", "show_all"] {
             let mut model = Model::new(Document::default(), None);
             assert!(!run(other, &mut model), "{other:?} is not a menu verb");
         }

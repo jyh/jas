@@ -519,6 +519,15 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.set_artboard_field(id_val.value, field, value)
         return None
 
+    # doc.op: { op: <name>, ...literal fields } — one journaled op by name,
+    # through the op layer every port has (the model verbs: unlock_all,
+    # show_all). Applied to the store's document (StateStore.apply_op).
+    if "doc.op" in effect:
+        spec = effect["doc.op"]
+        if isinstance(spec, dict) and isinstance(spec.get("op"), str):
+            store.apply_op(dict(spec))
+        return None
+
     # doc.delete_at: path_expr — PHASE3 §5.5
     # Deletes the element at the given path. Returns the deleted
     # element (native form) for binding via `as:`.

@@ -4937,6 +4937,12 @@ private func runScriptMenuStep(_ itemId: String, model: Model) -> Bool {
     }
     guard let entry = find(WorkspaceData.load()?.menubar()),
           let action = entry["action"] as? String else { return false }
+    // The verbs whose YAML is `doc.op` run the declared action, as the live
+    // menu (``JasCommands``) and the engine's menu door do.
+    if MenuActions.yamlVerbs.contains(action) {
+        LayersPanel.dispatchYamlAction(action, model: model)
+        return true
+    }
     return MenuActions.run(action, model)
 }
 
@@ -5921,9 +5927,6 @@ private let menuNativeHandlers: [String: (Model) -> Void] = [
     "ungroup": MenuActions.ungroupSelection,
     "ungroup_all": MenuActions.ungroupAll,
     "lock": MenuActions.lockSelection,
-    "unlock_all": MenuActions.unlockAll,
-    "hide_selection": MenuActions.hideSelection,
-    "show_all": MenuActions.showAll,
     "make_instance": MenuActions.makeInstance,
 ]
 

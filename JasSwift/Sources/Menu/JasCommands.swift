@@ -330,6 +330,8 @@ public struct JasCommands: Commands {
         // Rust `menu_native::run`), shared with the level-1 script runner.
         case _ where MenuActions.verbs.contains(action):
             if let model = model { MenuActions.run(action, model) }
+        case _ where MenuActions.yamlVerbs.contains(action):
+            if let model = model { LayersPanel.dispatchYamlAction(action, model: model) }
         case "promote_to_concept":
             // CONCEPTS.md §10 — the fitter / promote. New menu route to the
             // existing ConceptsPanel intercept (was only reachable from the

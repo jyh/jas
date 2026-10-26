@@ -310,8 +310,11 @@
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "unlock_all"
+          "doc.op": {
+            "op": "unlock_all"
+          }
         }
       ]
     },
@@ -321,8 +324,11 @@
       "tier": 3,
       "enabled_when": "active_document.has_selection",
       "effects": [
+        "snapshot",
         {
-          "log": "hide_selection"
+          "doc.op": {
+            "op": "hide_selection"
+          }
         }
       ]
     },
@@ -332,8 +338,11 @@
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
       "effects": [
+        "snapshot",
         {
-          "log": "show_all"
+          "doc.op": {
+            "op": "show_all"
+          }
         }
       ]
     },

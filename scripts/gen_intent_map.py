@@ -155,6 +155,12 @@ VERB_TABLE = {
         "journals": "always", "op": "delete_selection",
         "evidence": ["renderer.rs:3508-3513", "op_apply.rs:1564"],
     },
+    "doc.op": {
+        # One journaled op BY NAME: the op is the call site's own `op` field
+        # (`doc.op: { op: unlock_all }`), so the row names no single op.
+        "journals": "always", "op": "(the call site's op)",
+        "evidence": ["effects.rs:2898", "op_apply.rs:2004"],
+    },
     "doc.insert_after": {
         "journals": "always", "op": "insert_after",
         "evidence": ["renderer.rs:3545-3564", "op_apply.rs:1571"],
