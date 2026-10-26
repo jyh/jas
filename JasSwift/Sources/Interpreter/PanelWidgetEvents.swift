@@ -366,41 +366,28 @@ func dispatchPanelAction(
             }
         }
         return
-    case "place_instance":
-        // Its YAML says what it does (`doc.place_instance`), through the
-        // dispatcher that holds the `doc.*` handlers.
+    case "place_instance", "new_symbol":
+        // Their YAML says what they do (`doc.place_instance`,
+        // `doc.new_symbol`), through the dispatcher that holds the `doc.*`
+        // handlers.
         LayersPanel.dispatchYamlAction(name, model: model)
         return
-    case "new_symbol", "delete_symbol_action":
-        // Symbols panel footer buttons. Native intercept: mint ids by
-        // the value-in-op rule and call the shared symbol Controller
-        // ops (the YAML actions are `log` stubs). Mirrors the Rust
-        // `dispatch_action` symbol arms; the reference-aware delete
-        // confirm is a synchronous native modal. The panel's
-        // `selected_symbol` is already pinned in the store as the
-        // active panel, so SymbolsPanel reads / writes it directly.
-        SymbolsPanel.dispatchSymbolAction(name, model: model)
+    case "delete_symbol_action":
+        // Symbols panel footer button: its YAML, with the confirm presented
+        // as the Mac's NSAlert (``SymbolsPanel/runDeleteSymbol(_:confirm:)``).
+        SymbolsPanel.runDeleteSymbol(model)
         return
-    case "place_concept_instance", "set_concept_param":
+    case "place_concept_instance", "set_concept_param", "apply_concept_operation":
         // Their YAML says what they do (`doc.place_concept_instance`,
-        // `doc.set_concept_param`), through the dispatcher that holds the
-        // `doc.*` handlers; the field's `params` ride as `param.*`.
+        // `doc.set_concept_param`, `doc.apply_concept_operation`), through the
+        // dispatcher that holds the `doc.*` handlers; the widget's `params`
+        // ride as `param.*`.
         LayersPanel.dispatchYamlAction(name, model: model, params: params)
         return
     case "promote_to_concept":
         // Its YAML says what it does (`doc.promote_to_concept`), through the
         // dispatcher that holds the `doc.*` handlers.
         LayersPanel.dispatchYamlAction(name, model: model)
-        return
-    case "apply_concept_operation":
-        // Concepts panel Slice 3 (CONCEPTS.md §9): native intercept (the YAML
-        // action is a `log` stub). The operation id arrives as `params.op_id`;
-        // resolve its `set:` expressions over the single selected Generated
-        // instance's current params and bake the result into the op.
-        // Mirrors the Rust `apply_concept_operation` arm.
-        if let opId = params["op_id"] as? String {
-            ConceptsPanel.applyOperation(model: model, opId: opId)
-        }
         return
     default:
         break

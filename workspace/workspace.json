@@ -6159,12 +6159,28 @@
       ]
     },
     "new_symbol": {
-      "description": "Promote the single selected canvas element to a master (SYMBOLS.md \u00a77 Make Symbol). The selected element moves off-canvas into the master store and an instance of it is left in its place, so the canvas looks unchanged. Enabled only when exactly one whole canvas element is selected. A fresh master id and instance id are minted by the initiator (value-in-op) and carried in the operation; never minted inside the shared core. Single undo op.\n",
+      "description": "Promote the single selected canvas element to a master (SYMBOLS.md \u00a77 Make Symbol). The selected element moves off-canvas into the master store and an instance of it is left in its place, so the canvas looks unchanged. Enabled only when exactly one whole canvas element is selected. A fresh master id and instance id are minted by the initiator (value-in-op) and carried in the operation; never minted inside the shared core. An element that already has an id keeps it as the master's id, so the master is known only after the operation: the effect returns it, and the Symbols panel then selects it, so Place Instance and Delete target it at once. Single undo op. Unless exactly one whole element is selected, nothing happens.\n",
       "category": "symbols",
       "enabled_when": "active_document.selection_count == 1",
       "effects": [
+        "snapshot",
         {
-          "log": "new_symbol"
+          "doc.new_symbol": {},
+          "as": "master"
+        },
+        {
+          "if": {
+            "condition": "master != null",
+            "then": [
+              {
+                "set_panel_state": {
+                  "panel": "symbols",
+                  "key": "selected_symbol",
+                  "value": "master"
+                }
+              }
+            ]
+          }
         }
       ]
     },
@@ -6195,22 +6211,61 @@
       ]
     },
     "delete_symbol_action": {
-      "description": "Delete the panel-selected master from the master store (SYMBOLS.md \u00a77 Delete Symbol). Reference-aware: when the master still has live instances (usage count > 0) a confirmation warning first reports how many instances will be left empty; confirming deletes the master. With no instances it deletes silently. The master's instances are never touched \u2014 they become recoverable via undo. Enabled only when a master is panel-selected. Single undo op.\n",
+      "description": "Delete the panel-selected master from the master store (SYMBOLS.md \u00a77 Delete Symbol). Reference-aware: when the master still has live instances (its count in active_document.symbol_usage is above 0), nothing is deleted yet and the delete_symbol_orphan_confirm dialog opens with that count and the master's id; its Delete button (delete_symbol_orphan_confirm_ok) deletes that master and Cancel changes nothing. With no instances the master is deleted at once and the panel selection clears. The master's instances are never touched: they stay in place, resolving to nothing, and undo brings the master back. A selected id that names no master deletes nothing. Enabled only when a master is panel-selected. Single undo op.\n",
       "category": "symbols",
       "enabled_when": "panel.selected_symbol != null",
       "effects": [
         {
-          "log": "delete_symbol_action"
+          "if": {
+            "condition": "active_document.symbol_usage[panel.selected_symbol] > 0",
+            "then": [
+              {
+                "open_dialog": {
+                  "id": "delete_symbol_orphan_confirm",
+                  "params": {
+                    "count": "active_document.symbol_usage[panel.selected_symbol]",
+                    "master": "panel.selected_symbol"
+                  }
+                }
+              }
+            ],
+            "else": [
+              "snapshot",
+              {
+                "doc.delete_symbol": {
+                  "master": "panel.selected_symbol"
+                }
+              },
+              {
+                "set_panel_state": {
+                  "panel": "symbols",
+                  "key": "selected_symbol",
+                  "value": "null"
+                }
+              }
+            ]
+          }
         }
       ]
     },
     "delete_symbol_orphan_confirm_ok": {
-      "description": "Confirm the reference-aware Symbols-panel delete from the delete_symbol_orphan_confirm dialog. The panel Delete entry point opens that dialog only when the panel-selected master still has live instances; clicking Delete here commits the deletion. A DISTINCT action id from delete_symbol_action so the native warn intercept does not re-fire. The native arm snapshots and removes the master; the orphaned instances resolve to nothing until undone. Cancel uses dismiss_dialog (no snapshot, no delete).\n",
+      "description": "Confirm the reference-aware Symbols-panel delete from the delete_symbol_orphan_confirm dialog. delete_symbol_action opens that dialog only when the panel-selected master still has live instances, and passes the master's id; clicking Delete here deletes THAT master (`param.master`, which the dialog's Delete button passes from the dialog's own `master` param: the one the user was asked about), clears the Symbols panel's selection and closes the dialog, as one undo step. A DISTINCT action id from delete_symbol_action so the question is not asked again. The orphaned instances stay in place, resolving to nothing until undone. Cancel uses dismiss_dialog (no snapshot, no delete).\n",
       "category": "dialog",
       "effects": [
+        "snapshot",
         {
-          "log": "delete_symbol_orphan_confirm_ok"
-        }
+          "doc.delete_symbol": {
+            "master": "param.master"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "symbols",
+            "key": "selected_symbol",
+            "value": "null"
+          }
+        },
+        "close_dialog"
       ]
     },
     "concepts_panel_select": {
@@ -6266,7 +6321,7 @@
       ]
     },
     "apply_concept_operation": {
-      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). A `log` stub like the other concept mutators \u2014 each app's native arm finds the single selected `Generated`, looks the operation up in the registry, evaluates its `set:` expressions over the instance's current params bound under `param`, and bakes the resulting param changes into one journaled op (value-in-op); the geometry re-derives from the generator at the next render. Single undo op.\n",
+      "description": "Apply a named concept operation to the selected generated instance (CONCEPTS.md \u00a79). Dispatched by a Concepts-panel operation button: `op_id` names one of the concept's declared operations (e.g. `add_tooth`). The one selected element must be a generated instance; the operation is looked up in its concept's `operations`, and each of its `set:` expressions is evaluated over the instance's CURRENT params, bound under `param` (so `remove_side`'s `max(param.sides - 1, 3)` clamps against the sides the instance has now). Every expression that gives a number becomes a param change, and the changes are merged into the instance's params; one that does not give a number is skipped. The geometry re-derives from the generator at the next render. With an unknown operation, no number, or unless exactly one generated instance is selected, nothing happens. Single undo op.\n",
       "category": "concepts",
       "params": {
         "op_id": {
@@ -6274,8 +6329,11 @@
         }
       },
       "effects": [
+        "snapshot",
         {
-          "log": "apply_concept_operation"
+          "doc.apply_concept_operation": {
+            "op_id": "param.op_id"
+          }
         }
       ]
     },
@@ -9182,6 +9240,7 @@
         "selection_has_brushed_stroke": false,
         "selection_is_single_brushed_stroke": false,
         "selection_orphan_count": 0,
+        "symbol_usage": {},
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
         "element_tree": null,
@@ -9278,6 +9337,10 @@
         "selection_orphan_count": {
           "type": "int",
           "description": "How many live references (instances) deleting the canvas selection would leave pointing at a deleted target: the references whose target is in the selection, or below a selected container, and which are not themselves deleted (REFERENCE_GRAPH.md). 0 when nothing is selected. delete_selection asks before a delete that strands one.\n"
+        },
+        "symbol_usage": {
+          "type": "object",
+          "description": "Every symbol master's id mapped to how many live references (instances) target it (SYMBOLS.md \u00a78): its reverse-dependency count in the dependency index, 0 for a master no instance uses. Every master in the store is present, so `symbol_usage[id] > 0` reads a number for any master that exists. Empty when there are no masters. delete_symbol_action asks before it empties an instance.\n"
         },
         "artboards_count": {
           "type": "number",
@@ -30379,6 +30442,9 @@
       "params": {
         "count": {
           "type": "number"
+        },
+        "master": {
+          "type": "string"
         }
       },
       "content": {
@@ -30410,7 +30476,10 @@
                 "type": "button",
                 "label": "Delete",
                 "variant": "primary",
-                "action": "delete_symbol_orphan_confirm_ok"
+                "action": "delete_symbol_orphan_confirm_ok",
+                "params": {
+                  "master": "param.master"
+                }
               }
             ]
           }

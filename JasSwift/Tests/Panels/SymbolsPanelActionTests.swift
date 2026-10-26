@@ -47,7 +47,11 @@ import Testing
     let doc = Document(layers: [Layer(children: [rect])],
                        selection: [ElementSelection.all([0, 0])])
     let model = Model(document: doc)
-    SymbolsPanel.dispatchSymbolAction("new_symbol", model: model)
+    // The panel's scope exists on every production route (the dock renders
+    // the panel; `panelDispatch` seeds it), and a `set_panel_state` to a
+    // missing scope is dropped in every port, the reference included.
+    model.stateStore.initPanel("symbols_panel_content", defaults: [:])
+    LayersPanel.dispatchYamlAction("new_symbol", model: model)
     // The master now lives off-canvas, an instance sits in its place.
     #expect(model.document.symbols.count == 1)
     if case .live(.reference) = model.document.layers[0].children[0] {
@@ -55,7 +59,9 @@ import Testing
     } else {
         Issue.record("expected an instance in place of the promoted element")
     }
-    // The new master is panel-selected (target of Place / Delete).
+    // The new master is panel-selected (target of Place / Delete), by the
+    // YAML's `as: master` + `set_panel_state`.
+    #expect(SymbolsPanel.selectedSymbol(model) == model.document.symbols.first?.id)
     #expect(SymbolsPanel.selectedSymbol(model) != nil)
     // Undo restores the original (single snapshot).
     model.undo()
@@ -66,7 +72,7 @@ import Testing
     // Empty selection: no-op.
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
     let model = Model(document: Document(layers: [Layer(children: [rect])]))
-    SymbolsPanel.dispatchSymbolAction("new_symbol", model: model)
+    LayersPanel.dispatchYamlAction("new_symbol", model: model)
     #expect(model.document.symbols.isEmpty)
     #expect(SymbolsPanel.selectedSymbol(model) == nil)
 }
@@ -105,9 +111,57 @@ import Testing
     let model = Model(document: doc)
     model.stateStore.initPanel("symbols_panel_content", defaults: [:])
     model.stateStore.setPanel("symbols_panel_content", "selected_symbol", "M1")
-    // No instances → usage 0 → no confirm modal, deletes inline.
-    SymbolsPanel.dispatchSymbolAction("delete_symbol_action", model: model)
+    // No instances → usage 0 → the YAML deletes inline; nothing is asked.
+    var asked = false
+    SymbolsPanel.runDeleteSymbol(model, confirm: { _ in asked = true; return true })
+    #expect(!asked, "no instance: no confirm")
     #expect(model.document.symbols.isEmpty)
     // Panel selection cleared after delete.
     #expect(SymbolsPanel.selectedSymbol(model) == nil)
+    model.undo()
+    #expect(model.document.symbols.count == 1, "ONE undo")
+}
+
+// MARK: - delete_symbol_action (instances → the confirm, then its OK's YAML)
+
+// A master with two live instances: the YAML leaves the confirm open with the
+// count, which the Mac presents as its NSAlert; Cancel changes nothing, and
+// Delete runs the OK's YAML with the dialog's `master`, deleting exactly it
+// (the other master stays), clearing the panel selection, ONE undo.
+@Test func deleteSymbolWithInstancesAsksAndTheOkDeletesThatMaster() {
+    let m1 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "M1"))
+    let m2 = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "M2"))
+    let refs: [Element] = ["i1", "i2"].map { .live(.reference(ReferenceElem(target: ElementRef("M1"), name: nil, id: $0))) }
+    let model = Model(document: Document(layers: [Layer(children: refs)], symbols: [m1, m2]))
+    model.stateStore.initPanel("symbols_panel_content", defaults: [:])
+    model.stateStore.setPanel("symbols_panel_content", "selected_symbol", "M1")
+    let ids = { model.document.symbols.compactMap(\.id) }
+
+    var counts: [Int] = []
+    SymbolsPanel.runDeleteSymbol(model, confirm: { counts.append($0); return false })
+    #expect(counts == [2], "asked once, naming the two instances")
+    #expect(ids() == ["M1", "M2"], "Cancel: nothing")
+    #expect(model.stateStore.getDialogId() == nil, "the store's dialog is closed")
+
+    SymbolsPanel.runDeleteSymbol(model, confirm: { _ in true })
+    #expect(ids() == ["M2"], "Delete deletes the master it asked about")
+    #expect(model.document.layers[0].children.count == 2, "the instances stay")
+    #expect(SymbolsPanel.selectedSymbol(model) == nil)
+    model.undo()
+    #expect(ids() == ["M1", "M2"], "ONE undo")
+}
+
+// The Symbols panel menu's New Symbol, through the production route
+// (`panelDispatch`, which seeds the panel's scope first): the YAML runs and
+// the master is panel-selected, on a bare Model with no scope seeded by hand.
+@Test func newSymbolFromThePanelMenuSelectsTheMaster() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "r1"))
+    let model = Model(document: Document(layers: [Layer(children: [rect])],
+                                         selection: [ElementSelection.all([0, 0])]))
+    var layout = WorkspaceLayout.defaultLayout()
+    panelDispatch(.symbols, cmd: "new_symbol",
+                  addr: PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0),
+                  layout: &layout, model: model)
+    #expect(model.document.symbols.first?.id == "r1", "an element keeps its own id as the master's")
+    #expect(SymbolsPanel.selectedSymbol(model) == "r1", "and the panel selects it")
 }

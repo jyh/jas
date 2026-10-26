@@ -278,6 +278,17 @@ fn run_effects_into<'h>(
                         .map(|v| (as_name.to_string(), v)),
                     _ => None,
                 };
+                // `doc.new_symbol` binds a value that exists only AFTER it runs
+                // (the master id), so with an `as:` name it runs here.
+                if let (true, Some(as_name), Some(m)) = (map.contains_key("doc.new_symbol"),
+                        map.get("as").and_then(|v| v.as_str()), model.as_deref_mut()) {
+                    let master = crate::interpreter::symbols_host::run_new_symbol(m);
+                    if let Some(c) = ctx.to_mut().as_object_mut() {
+                        c.insert(as_name.to_string(), master.map_or(serde_json::Value::Null, serde_json::Value::String));
+                    }
+                    report_writes(store, model.as_deref_mut(), host.as_deref_mut());
+                    continue;
+                }
                 run_one(map, &ctx, store, model.as_deref_mut(), actions, dialogs,
                         host.as_deref_mut(), report);
                 if let Some((as_name, v)) = bound {
@@ -2981,11 +2992,49 @@ fn run_doc_effect(
         // `symbols_host::promote_to_concept_ops` builds for the one selected
         // shape a fitter matches, under the action's `snapshot`. The
         // reference's `StateStore.promote_to_concept` the same.
+        // doc.new_symbol: {}: Make Symbol, `symbols_host::run_new_symbol`. The
+        // batch loop runs it when an `as:` name binds its master, which
+        // exists only after the op; this arm is the unbound case.
+        "doc.new_symbol" => {
+            let _ = crate::interpreter::symbols_host::run_new_symbol(model);
+        }
         "doc.promote_to_concept" => {
             for op in crate::interpreter::symbols_host::promote_to_concept_ops(model.document()).unwrap_or_default() {
                 let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
+        // doc.delete_symbol: { master: <expr> }: Delete Symbol, the op
+        // `symbols_host::delete_symbol_ops` builds for the master the
+        // expression names, under the action's `snapshot`. The reference's
+        // `StateStore.delete_symbol`.
+        "doc.delete_symbol" => match spec.get("master").and_then(|v| v.as_str()) {
+            Some(master_expr) => {
+                if let Value::Str(master) = eval_expr(master_expr, store, ctx) {
+                    for op in crate::interpreter::symbols_host::delete_symbol_ops(model.document(), &master)
+                        .unwrap_or_default()
+                    {
+                        let _ = crate::document::op_apply::op_apply(model, &op);
+                    }
+                }
+            }
+            None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.delete_symbol:{spec}"))),
+        },
+        // doc.apply_concept_operation: { op_id: <expr> }: a Concepts-panel
+        // operation button, the op `symbols_host::apply_concept_operation_ops`
+        // resolves for the one selected generated instance, under the action's
+        // `snapshot`. The reference's `StateStore.apply_concept_operation`.
+        "doc.apply_concept_operation" => match spec.get("op_id").and_then(|v| v.as_str()) {
+            Some(op_id_expr) => {
+                if let Value::Str(op_id) = eval_expr(op_id_expr, store, ctx) {
+                    for op in crate::interpreter::symbols_host::apply_concept_operation_ops(model.document(), &op_id)
+                        .unwrap_or_default()
+                    {
+                        let _ = crate::document::op_apply::op_apply(model, &op);
+                    }
+                }
+            }
+            None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.apply_concept_operation:{spec}"))),
+        },
         // doc.set_concept_param: { name: <expr>, value: <expr> }: a Concepts-panel
         // parameter field's commit, the op `symbols_host::set_concept_param_ops`
         // builds for the one selected generated instance, under the action's
@@ -15379,9 +15428,11 @@ mod tests {
 
     #[test]
     fn real_stub_actions_report_as_not_done() {
-        // A log-only body: the purest successful no-op.
-        assert_eq!(report_of_real_action("new_symbol"),
-                   vec![Unhandled::Logged("new_symbol".into())]);
+        // A log-only body: the purest successful no-op. (`new_symbol` was the
+        // example until 2026-10-26, when it became `doc.new_symbol`; any
+        // `log`-only action serves, and this one moves when it leaves too.)
+        assert_eq!(report_of_real_action("layers_nav_down"),
+                   vec![Unhandled::Logged("layers_nav_down".into())]);
         // A log BESIDE a handled effect is still a stub for the real work.
         // (`save` on an untitled document dispatches `save_as`, a log too.)
         assert_eq!(report_of_real_action("save_and_close"),

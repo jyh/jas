@@ -1,19 +1,21 @@
-//! W2b-17 (fork F-J): the Symbols and Concepts panels' native verbs, web-free.
+//! W2b-17 (fork F-J): the Symbols and Concepts panels' verbs, web-free.
 //!
-//! Their YAML actions are `log` stubs: the verbs mint ids by the value-in-op
-//! rule and call the shared Controller / `op_apply` ops, which the effects
-//! runner cannot express. The web's `dispatch_action` and the engine's
-//! `EngineHost` both call [`run`], so there is ONE implementation.
-//!
-//! The panel selection is a PARAMETER, not a slot: the web passes its
-//! `AppState` fields, and the engine passes the store's `symbols.selected_symbol`
-//! and `concepts.selected_concept`, which is where the YAML's own
-//! `set_panel_state` writes them and where Swift reads them.
+//! Until 2026-10-26 their YAML actions were `log` stubs and the verbs ran
+//! here, through a `run` the web's `dispatch_action` and the engine's
+//! `EngineHost` both called. Each now runs its YAML, and this module builds
+//! the value-in-op ops those `doc.*` effects apply (minting ids where a verb
+//! needs them): `doc.new_symbol` ([`run_new_symbol`]), `doc.place_instance`
+//! ([`place_instance_ops`]), `doc.place_concept_instance`
+//! ([`place_concept_instance_ops`]), `doc.set_concept_param`
+//! ([`set_concept_param_ops`]), `doc.promote_to_concept`
+//! ([`promote_to_concept_ops`]), `doc.apply_concept_operation`
+//! ([`apply_concept_operation_ops`]) and `doc.delete_symbol`
+//! ([`delete_symbol_ops`]). The panel selections are the YAML's to read and
+//! write (`panel.selected_symbol`, `set_panel_state`).
 
 use serde_json::{json, Map, Value};
 
 use crate::document::artboard::{generate_element_id, mint_unique_ids};
-use crate::document::controller::Controller;
 use crate::document::document::SelectionKind;
 use crate::document::model::Model;
 use crate::geometry::element::{Element, Transform};
@@ -22,70 +24,14 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::expr_types::Value as EVal;
 use crate::interpreter::workspace::Workspace;
 
-/// The four action names this module hosts. Since 2026-10-26 four verbs that
-/// were hosted here run their YAML instead: `place_instance`
-/// (`doc.place_instance`, [`place_instance_ops`]), `place_concept_instance`
-/// (`doc.place_concept_instance`, [`place_concept_instance_ops`]),
-/// `set_concept_param` (`doc.set_concept_param`, [`set_concept_param_ops`])
-/// and `promote_to_concept` (`doc.promote_to_concept`,
-/// [`promote_to_concept_ops`]).
-pub const ACTIONS: [&str; 4] = [
-    "new_symbol", "delete_symbol_action", "delete_symbol_orphan_confirm_ok",
-    "apply_concept_operation",
-];
-
-/// What a hosted verb asks its caller to do besides the document change it
-/// already made.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Outcome {
-    /// Nothing further (including a verb that found nothing to do).
-    Done,
-    /// The Symbols panel's selection becomes this (`None` clears it).
-    SelectSymbol(Option<String>),
-    /// Open the named confirm dialog with these params; the document is
-    /// unchanged. The engine opens it in its store (the dialog door).
-    Dialog { id: String, params: Value },
-    /// Close the open dialog (the confirm's OK already ran). When it deleted
-    /// the master, the Symbols panel's selection is cleared as well.
-    CloseDialog { cleared_selection: bool },
-}
-
-/// Run the hosted verb `action`, or `None` when it is not one of [`ACTIONS`].
-pub fn run(
-    model: &mut Model,
-    action: &str,
-    params: &Value,
-    selected_symbol: Option<&str>,
-) -> Option<Outcome> {
-    Some(match action {
-        "new_symbol" => new_symbol(model),
-        "delete_symbol_action" => {
-            let Some(master) = selected_symbol else { return Some(Outcome::Done) };
-            let usage = crate::document::dependency_index::dependency_index(model.document())
-                .rdeps.get(master).map(|v| v.len()).unwrap_or(0);
-            if usage > 0 {
-                // Reference-aware: warn first, mutate nothing.
-                return Some(Outcome::Dialog {
-                    id: "delete_symbol_orphan_confirm".into(),
-                    params: json!({"count": usage}),
-                });
-            }
-            model.with_txn(|m| Controller::delete_symbol(m, master));
-            Outcome::SelectSymbol(None)
-        }
-        "delete_symbol_orphan_confirm_ok" => {
-            let Some(master) = selected_symbol else {
-                return Some(Outcome::CloseDialog { cleared_selection: false });
-            };
-            model.with_txn(|m| Controller::delete_symbol(m, master));
-            Outcome::CloseDialog { cleared_selection: true }
-        }
-        "apply_concept_operation" => {
-            apply_concept_operation(model, params);
-            Outcome::Done
-        }
-        _ => return None,
-    })
+/// The one op the Symbols panel's Delete Symbol applies (`doc.delete_symbol`
+/// in actions.yaml, SYMBOLS.md §7), or `None` unless `master` names a master
+/// in the store: `delete_symbol` of that id. Its instances are left in place,
+/// resolving to nothing. Whether to ask first is the YAML's
+/// (`active_document.symbol_usage`). The reference's `delete_symbol_ops`.
+pub fn delete_symbol_ops(doc: &crate::document::document::Document, master: &str) -> Option<Vec<Value>> {
+    doc.symbols.iter().any(|e| e.common().id.as_deref() == Some(master))
+        .then(|| vec![json!({"op": "delete_symbol", "master_id": master})])
 }
 
 /// The one value-in-op op the Symbols panel's Place Instance applies
@@ -98,38 +44,41 @@ pub fn place_instance_ops(doc: &crate::document::document::Document, master: &st
     Some(vec![json!({"op": "place_instance", "master_id": master, "ref_id": ids[0]})])
 }
 
-/// Mint `count` collision-free element ids against every id already in the
-/// document, through THE ONE MINT LOOP.
-fn mint(model: &Model, count: usize) -> Option<Vec<String>> {
-    let mut existing = model.document().element_ids();
-    mint_unique_ids(count, &mut existing, &mut || generate_element_id(None))
-}
-
-/// The path of the single selected element, if exactly one is selected.
-fn single_path(model: &Model) -> Option<Vec<usize>> {
-    let sel = &model.document().selection;
-    (sel.len() == 1).then(|| sel[0].path.clone())
-}
-
-/// Promote the single selected whole element to a master (SYMBOLS.md §7), and
-/// select the new master so Place and Delete target it at once.
-fn new_symbol(model: &mut Model) -> Outcome {
-    let sel = &model.document().selection;
-    let [es] = sel.as_slice() else { return Outcome::Done };
+/// The one value-in-op op Make Symbol applies (`doc.new_symbol` in
+/// actions.yaml, SYMBOLS.md §7), or `None` unless exactly ONE element is
+/// wholly selected, or the mint fails: `make_symbol` of its path with a minted
+/// master id and reference id. The reference's `new_symbol_ops`.
+pub fn new_symbol_ops(doc: &crate::document::document::Document) -> Option<Vec<Value>> {
+    let [es] = doc.selection.as_slice() else { return None };
     if es.kind != SelectionKind::All {
-        return Outcome::Done;
+        return None;
     }
-    let path = es.path.clone();
-    let Some(ids) = mint(model, 2) else { return Outcome::Done };
-    let (master_id, ref_id) = (ids[0].clone(), ids[1].clone());
-    model.with_txn(|m| Controller::make_symbol(m, &path, &master_id, &ref_id));
-    // make_symbol keeps an existing id as the master key; resolve which id
-    // actually became the master from the path's instance target.
-    let resolved = match model.document().get_element(&path) {
-        Some(Element::Live(LiveVariant::Reference(r))) => r.target.0.clone(),
-        _ => master_id,
-    };
-    Outcome::SelectSymbol(Some(resolved))
+    let mut existing = doc.element_ids();
+    let ids = mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))?;
+    Some(vec![json!({"op": "make_symbol", "path": es.path, "master_id": ids[0], "ref_id": ids[1]})])
+}
+
+/// The master a Make Symbol at `path` made, read AFTER the op: make_symbol
+/// keeps an element's own id as the master key, so the minted id is not
+/// always the master. The target of the reference now at `path`, else `None`.
+/// The reference's `new_symbol_master`.
+pub fn new_symbol_master(doc: &crate::document::document::Document, path: &[usize]) -> Option<String> {
+    match doc.get_element(&path.to_vec()) {
+        Some(Element::Live(LiveVariant::Reference(r))) => Some(r.target.0.clone()),
+        _ => None,
+    }
+}
+
+/// Run Make Symbol on `model` (`doc.new_symbol`): its op, then the master it
+/// made, for an `as:` name (`None` when nothing ran). Both Rust runners call it.
+pub fn run_new_symbol(model: &mut Model) -> Option<String> {
+    let ops = new_symbol_ops(model.document())?;
+    let path: Vec<usize> = ops[0]["path"].as_array()?.iter()
+        .filter_map(|v| v.as_u64().map(|n| n as usize)).collect();
+    for op in &ops {
+        let _ = crate::document::op_apply::op_apply(model, op);
+    }
+    new_symbol_master(model.document(), &path)
 }
 
 /// A concept's declared default params (`params: [{name, default}]`) as a
@@ -205,15 +154,19 @@ pub fn set_concept_param_ops(doc: &crate::document::document::Document, name: &s
     Some(vec![json!({"op": "set_concept_param", "path": es.path, "name": name, "value": value})])
 }
 
-/// Apply a named concept operation to the single selected generated instance
-/// (CONCEPTS.md §9), resolving its `set:` expressions over the instance's
-/// current params at production time and baking the `changes` into the op.
-fn apply_concept_operation(model: &mut Model, params: &Value) {
-    let Some(op_id) = params.get("op_id").and_then(Value::as_str) else { return };
-    let Some(path) = single_path(model) else { return };
-    let Some(Element::Live(LiveVariant::Generated(ge))) = model.document().get_element(&path).cloned()
-    else {
-        return;
+/// The one value-in-op op a Concepts-panel operation button applies
+/// (`doc.apply_concept_operation` in actions.yaml, CONCEPTS.md §9), or `None`
+/// unless exactly one generated instance is selected and its concept declares
+/// the operation `op_id` whose `set:` expressions, evaluated over the
+/// instance's CURRENT params (bound under `param`), give at least one number:
+/// `apply_concept_operation` of its path with those numbers as `changes`. An
+/// expression that is not a string or not a number is skipped. The
+/// reference's `apply_concept_operation_ops`.
+pub fn apply_concept_operation_ops(doc: &crate::document::document::Document, op_id: &str) -> Option<Vec<Value>> {
+    let [es] = doc.selection.as_slice() else { return None };
+    let path = es.path.clone();
+    let Some(Element::Live(LiveVariant::Generated(ge))) = doc.get_element(&path).cloned() else {
+        return None;
     };
     let changes = Workspace::load().and_then(|w| w.concept(&ge.concept_id).cloned()).and_then(|c| {
         let operation = c.get("operations")?.as_array()?.iter()
@@ -230,17 +183,13 @@ fn apply_concept_operation(model: &mut Model, params: &Value) {
         }
         Some(changes)
     });
-    let Some(changes) = changes.filter(|c| !c.is_empty()) else { return };
-    let op = json!({
+    let changes = changes.filter(|c| !c.is_empty())?;
+    Some(vec![json!({
         "op": "apply_concept_operation",
         "path": path,
         "op_id": op_id,
         "changes": Value::Object(changes),
-    });
-    model.with_txn(|m| {
-        m.name_txn("apply_concept_operation");
-        let _ = crate::document::op_apply::op_apply(m, &op);
-    });
+    })])
 }
 
 /// Promote the single selected polygon or polyline to a generated concept

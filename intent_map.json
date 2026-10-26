@@ -44,8 +44,10 @@
       ]
     },
     "apply_concept_operation": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.apply_concept_operation"
+      ]
     },
     "artboard_options_confirm": {
       "class": "journaling",
@@ -267,12 +269,16 @@
       "doc_verbs": []
     },
     "delete_symbol_action": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_symbol"
+      ]
     },
     "delete_symbol_orphan_confirm_ok": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_symbol"
+      ]
     },
     "delete_workspace": {
       "class": "ui-state",
@@ -525,8 +531,10 @@
       "doc_verbs": []
     },
     "new_symbol": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.new_symbol"
+      ]
     },
     "noop": {
       "class": "ui-state",
@@ -1180,17 +1188,20 @@
   "scope_note": "ACTION seam (dispatch_action) ONLY. 45 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
   "summary": {
     "action_seam_doc_verbs": [
+      "doc.apply_concept_operation",
       "doc.clone_at",
       "doc.create_artboard",
       "doc.create_layer",
       "doc.delete_artboard_by_id",
       "doc.delete_at",
+      "doc.delete_symbol",
       "doc.duplicate_artboard",
       "doc.insert_after",
       "doc.insert_at",
       "doc.make_instance",
       "doc.move_artboards_down",
       "doc.move_artboards_up",
+      "doc.new_symbol",
       "doc.op",
       "doc.place_concept_instance",
       "doc.place_instance",
@@ -1226,11 +1237,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 41,
+      "journaling": 45,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 190,
+      "ui-state": 186,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1280,24 +1291,27 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 41,
+    "journaling_actions": 45,
     "native_intercepts": [
       "export_to_pdf"
     ],
     "total_actions": 244,
     "verb_table": {
       "always": [
+        "doc.apply_concept_operation",
         "doc.copy_selection",
         "doc.create_artboard",
         "doc.delete_artboard_by_id",
         "doc.delete_at",
         "doc.delete_selection",
+        "doc.delete_symbol",
         "doc.duplicate_artboard",
         "doc.insert_after",
         "doc.insert_at",
         "doc.make_instance",
         "doc.move_artboards_down",
         "doc.move_artboards_up",
+        "doc.new_symbol",
         "doc.op",
         "doc.place_concept_instance",
         "doc.place_instance",

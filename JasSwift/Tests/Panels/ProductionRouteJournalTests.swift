@@ -830,7 +830,7 @@ private func makeModelWithTwoArtboards() -> Model {
     // (2) Apply `add_side` via the REAL production handler. Its `set:` expr
     // (`param.sides + 1`) is RESOLVED here over the current params (sides=6) to
     // `{sides: 7}` and baked into the op (value-in-op).
-    ConceptsPanel.applyOperation(model: model, opId: "add_side")
+    LayersPanel.dispatchYamlAction("apply_concept_operation", model: model, params: ["op_id": "add_side"])
 
     #expect(model.journal.count == before + 2,
             "apply_concept_operation commits a second transaction")

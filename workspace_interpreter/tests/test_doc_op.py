@@ -258,14 +258,14 @@ def test_selection_orphan_count_counts_references_a_delete_would_strand(select, 
     assert store._active_document_view()["selection_orphan_count"] == count
 
 
-def _run_yaml_action_with_dialogs(store: StateStore, name: str) -> None:
+def _run_yaml_action_with_dialogs(store: StateStore, name: str, ctx: dict | None = None) -> None:
     import yaml
     root = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
     with open(os.path.join(root, "actions.yaml"), encoding="utf-8") as f:
         effects = yaml.safe_load(f)["actions"][name]["effects"]
     with open(os.path.join(root, "workspace.json"), encoding="utf-8") as f:
         dialogs = json.load(f)["dialogs"]
-    run_effects(effects, {}, store, dialogs=dialogs)
+    run_effects(effects, ctx or {}, store, dialogs=dialogs)
 
 
 def test_delete_selection_from_actions_yaml_deletes_when_nothing_would_dangle():
@@ -427,3 +427,163 @@ def test_promote_to_concept_from_actions_yaml_replaces_a_fitted_shape():
                                ((square, square), [(0, 0), (0, 1)]), ((square,), [])):
         store, before = run(*children, selected=selected)
         assert json.dumps(store._document, sort_keys=True) == before, f"{children} {selected}: nothing"
+
+
+def test_new_symbol_from_actions_yaml_promotes_and_panel_selects_the_master():
+    """`actions.yaml` new_symbol (SYMBOLS.md §7 Make Symbol): the ONE wholly
+    selected element becomes a master and a reference to it stays in its
+    place, and the Symbols panel selects the master. The master's id is the
+    element's own when it has one (make_symbol keeps it) and a minted one
+    otherwise, so the id the panel selects is read AFTER the op: the YAML
+    binds it (`as: master`) and writes it with `set_panel_state`. Two selected,
+    or none: nothing."""
+    effects = _action_effects("new_symbol")
+
+    def run(*children, selected):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),),
+                       selection=frozenset(ElementSelection.all(p) for p in selected))
+        store = _store(doc)
+        store.init_panel("symbols_panel_content", {"selected_symbol": None})
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {}, store)
+        return store, before
+
+    for elem, kept in ((_rect(id="r1"), "r1"), (_rect(), None)):
+        store, _ = run(elem, selected=[(0, 0)])
+        after = _doc_of(store)
+        assert len(after.symbols) == 1, "one master"
+        master = after.symbols[0].id
+        assert master and (kept is None or master == kept), (master, kept)
+        ref = after.layers[0].children[0]
+        assert type(ref).__name__ == "ReferenceElem" and ref.target == master
+        assert store.get_panel_state("symbols_panel_content")["selected_symbol"] == master, \
+            "the panel selects the master"
+
+    for children, selected in (((_rect(), _rect()), [(0, 0), (0, 1)]), ((_rect(),), [])):
+        store, before = run(*children, selected=selected)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{selected}: nothing"
+        assert store.get_panel_state("symbols_panel_content")["selected_symbol"] is None
+
+    # A PARTIAL selection (some control points) is not a whole element.
+    doc = Document(layers=(Layer(name="L", children=(_rect(),)),),
+                   selection=frozenset({ElementSelection.partial((0, 0), [0])}))
+    store = _store(doc)
+    before = json.dumps(store._document, sort_keys=True)
+    run_effects(effects, {}, store)
+    assert json.dumps(store._document, sort_keys=True) == before, "a partial selection: nothing"
+
+
+def test_apply_concept_operation_from_actions_yaml_resolves_the_operation():
+    """`actions.yaml` apply_concept_operation (CONCEPTS.md §9): the operation
+    `param.op_id` of the ONE selected generated instance's concept is looked
+    up, its `set:` expressions are evaluated over the instance's CURRENT
+    params (bound under `param`), and the numbers are merged into its params.
+    An unknown operation, no selection, two selected, or a selection that is
+    not a generated instance: nothing."""
+    from geometry.element import GeneratedElem
+    gen = GeneratedElem(concept_id="regular_polygon", params={"sides": 5, "radius": 40}, id="g1")
+    base = Document(layers=(Layer(name="L", children=(gen, _rect(id="r1"))),))
+    sel = lambda *paths: replace(base, selection=frozenset(ElementSelection.all(p) for p in paths))
+    effects = _action_effects("apply_concept_operation")
+
+    for op_id, want in (("add_side", 6), ("remove_side", 4)):
+        store = _store(sel((0, 0)))
+        run_effects(effects, {"param": {"op_id": op_id}}, store)
+        got = _doc_of(store).layers[0].children[0].params
+        assert got["sides"] == want and got["radius"] == 40, f"{op_id}: {got}"
+
+    # The expression reads the CURRENT params: remove_side clamps at 3.
+    tri = replace(gen, params={"sides": 3, "radius": 40})
+    store = _store(replace(base, layers=(Layer(name="L", children=(tri,)),),
+                           selection=frozenset({ElementSelection.all((0, 0))})))
+    run_effects(effects, {"param": {"op_id": "remove_side"}}, store)
+    assert _doc_of(store).layers[0].children[0].params["sides"] == 3
+
+    for doc, op_id in ((sel((0, 0)), "no_such_operation"), (sel((0, 0)), None), (base, "add_side"),
+                       (sel((0, 0), (0, 1)), "add_side"), (sel((0, 1)), "add_side")):
+        store = _store(doc)
+        before = json.dumps(store._document, sort_keys=True)
+        run_effects(effects, {"param": {"op_id": op_id}}, store)
+        assert json.dumps(store._document, sort_keys=True) == before, f"{op_id!r}: nothing"
+
+
+def _symbols_store(instances: int) -> StateStore:
+    """Two masters, `m1` with `instances` live references and `m2` with none."""
+    from geometry.element import ReferenceElem
+    refs = tuple(ReferenceElem(target="m1", id=f"i{k}") for k in range(instances))
+    doc = replace(Document(layers=(Layer(name="L", children=(_rect(),) + refs),)),
+                  symbols=(_rect(id="m1"), _rect(id="m2")))
+    store = _store(doc)
+    store.init_panel("symbols_panel_content", {"selected_symbol": "m1"})
+    return store
+
+
+@pytest.mark.parametrize("instances", [0, 1, 2])
+def test_symbol_usage_counts_every_masters_live_instances(instances):
+    """`active_document.symbol_usage` (runtime_contexts.yaml): every master's
+    id -> how many live references target it, 0 for an unused master, so
+    `symbol_usage[id] > 0` never reads null for a master that exists."""
+    view = _symbols_store(instances)._active_document_view()
+    assert view["symbol_usage"] == {"m1": instances, "m2": 0}
+
+
+def test_symbol_usage_is_empty_without_masters():
+    assert _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))._active_document_view()[
+        "symbol_usage"] == {}
+
+
+def _symbol_ids(store: StateStore) -> list:
+    return [m.id for m in _doc_of(store).symbols]
+
+
+def test_delete_symbol_action_from_actions_yaml_deletes_an_unused_master():
+    """`actions.yaml` delete_symbol_action (SYMBOLS.md §7): a panel-selected
+    master with no live instance is deleted at once and the panel selection
+    clears; no dialog opens."""
+    store = _symbols_store(0)
+    _run_yaml_action_with_dialogs(store, "delete_symbol_action",
+                                  {"panel": {"selected_symbol": "m1"}})
+    assert _symbol_ids(store) == ["m2"]
+    assert store.get_panel_state("symbols_panel_content")["selected_symbol"] is None
+    assert store.get_dialog_id() is None
+
+
+def test_delete_symbol_action_asks_before_emptying_instances_and_the_ok_deletes():
+    """A master with live instances is NOT deleted: the confirm opens with the
+    count and the master. Its OK deletes the master it was asked about
+    (`dialog.master`), clears the panel selection and closes; the instances
+    stay in place, resolving to nothing."""
+    store = _symbols_store(2)
+    before = json.dumps(store._document, sort_keys=True)
+    _run_yaml_action_with_dialogs(store, "delete_symbol_action",
+                                  {"panel": {"selected_symbol": "m1"}})
+    assert json.dumps(store._document, sort_keys=True) == before, "nothing is deleted before the answer"
+    assert store.get_dialog_id() == "delete_symbol_orphan_confirm"
+    assert {k: (store.get_dialog_params() or {}).get(k) for k in ("count", "master")} == {"count": 2, "master": "m1"}
+
+    # The dialog's Delete button passes its params, evaluated over the
+    # dialog's own params, as the OK's `param`.
+    from workspace_interpreter.expr import evaluate
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
+    with open(os.path.join(root, "workspace.json"), encoding="utf-8") as f:
+        dialog = json.load(f)["dialogs"]["delete_symbol_orphan_confirm"]
+    button = next(c for c in dialog["content"]["children"][1]["children"]
+                  if c.get("action") == "delete_symbol_orphan_confirm_ok")
+    button_params = {k: evaluate(v, {"param": store.get_dialog_params()}).value
+                     for k, v in button["params"].items()}
+    assert button_params == {"master": "m1"}
+    _run_yaml_action_with_dialogs(store, "delete_symbol_orphan_confirm_ok", {"param": button_params})
+    assert _symbol_ids(store) == ["m2"]
+    assert [type(c).__name__ for c in _doc_of(store).layers[0].children] == \
+        ["Rect", "ReferenceElem", "ReferenceElem"], "the instances stay"
+    assert store.get_panel_state("symbols_panel_content")["selected_symbol"] is None
+    assert store.get_dialog_id() is None
+
+
+def test_delete_symbol_without_a_master_does_nothing():
+    for panel in ({"selected_symbol": None}, {"selected_symbol": "no_such_master"}):
+        store = _symbols_store(1)
+        before = json.dumps(store._document, sort_keys=True)
+        _run_yaml_action_with_dialogs(store, "delete_symbol_action", {"panel": panel})
+        assert json.dumps(store._document, sort_keys=True) == before, f"{panel}: nothing"
+        assert store.get_dialog_id() is None

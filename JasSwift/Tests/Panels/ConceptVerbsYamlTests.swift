@@ -111,3 +111,36 @@ private func points(_ model: Model) -> Double? {
     square.undo()
     #expect(square.document.layers == squareBefore.layers, "ONE undo")
 }
+
+// A Concepts-panel operation button runs its YAML
+// (`doc.apply_concept_operation` with `param.op_id`): `add_side` on the
+// selected regular_polygon writes sides + 1, ONE undo; `remove_side` reads the
+// CURRENT params and clamps at 3; an unknown operation, or nothing selected:
+// nothing.
+@Test func applyConceptOperationFromTheButtonRunsTheYaml() {
+    func sides(_ model: Model) -> Double? {
+        guard case .live(.generated(let g)) = model.document.layers[0].children.first else { return nil }
+        return (g.params["sides"] as? NSNumber)?.doubleValue
+    }
+    let model = emptyModel()
+    selectConcept(model, "regular_polygon")
+    LayersPanel.dispatchYamlAction("place_concept_instance", model: model)
+    let placed = sides(model)
+    #expect(placed != nil, "the control: a placed, selected instance")
+    let apply = { (op: String) in
+        dispatchPanelAction("apply_concept_operation", params: ["op_id": op], actions: nil,
+                            ctx: [:], store: model.stateStore, model: model, onDialogOpened: nil)
+    }
+    apply("add_side")
+    #expect(sides(model) == placed.map { $0 + 1 })
+    apply("no_such_operation")
+    #expect(sides(model) == placed.map { $0 + 1 }, "an unknown operation: nothing")
+    model.undo()
+    #expect(sides(model) == placed, "ONE undo")
+    for _ in 0..<8 { apply("remove_side") }
+    #expect(sides(model) == 3, "remove_side clamps at 3 against the current params")
+    model.setDocumentUnbracketed(Document(layers: model.document.layers, selectedLayer: 0, selection: []),
+                                 intent: .testOnly)
+    apply("add_side")
+    #expect(sides(model) == 3, "nothing selected: nothing")
+}

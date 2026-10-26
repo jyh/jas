@@ -60,19 +60,7 @@ public enum LayersPanel {
                                            artboardsPanelSelection: [String] = [],
                                            params: [String: Any] = [:],
                                            onCloseDialog: (() -> Void)? = nil) {
-        // Native intercept for the Symbols-panel mutating verbs (SYMBOLS.md §7).
-        // Their YAML actions are `log` stubs — the real work lives in each app's
-        // native arm so every app mints identical value-in-op ids — so route
-        // them to ``SymbolsPanel/dispatchSymbolAction`` here, BEFORE the generic
-        // effect runner, exactly as the panel-body footer dispatcher
-        // (``YamlPanelBodyView/dispatchYamlAction``) and Rust's
-        // `renderer::dispatch_action` symbol arms do. dispatchSymbolAction mints
-        // master-then-ref via the no-arg `generateElementId()` (the seeded test
-        // minter) and self-brackets one undo step via the Controller mutator.
         switch actionName {
-        case "new_symbol", "delete_symbol_action":
-            SymbolsPanel.dispatchSymbolAction(actionName, model: model)
-            return
         // `concepts_panel_select` is normally the generic `set_panel_state`
         // effect, but that effect is a no-op on an UNINITIALIZED panel scope
         // (the store's optional-chaining write), so route it through
@@ -560,6 +548,16 @@ public enum LayersPanel {
         // doc.place_instance: { master: <expr> }: the Symbols panel's Place
         // Instance, the value-in-op op ``SymbolsPanel/placeInstanceOps`` mints
         // for the master the expression names. Rust's `doc.place_instance`.
+        // doc.new_symbol: {}: Make Symbol, the op ``SymbolsPanel/newSymbolOps``
+        // mints; returns the master it made (read after the op) for `as:`,
+        // which the YAML then panel-selects. Rust's `doc.new_symbol`.
+        let docNewSymbolHandler: PlatformEffect = { _, _, _ in
+            guard let ops = SymbolsPanel.newSymbolOps(model.document),
+                  let path = ops[0]["path"] as? [Int] else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return SymbolsPanel.newSymbolMaster(model.document, path: path)
+        }
+
         let docPlaceInstanceHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any], let expr = spec["master"] as? String,
                   case .string(let master) = evaluate(expr, context: callCtx), !master.isEmpty,
@@ -590,6 +588,31 @@ public enum LayersPanel {
                   case .string(let name) = evaluate(nameExpr, context: callCtx),
                   let ops = ConceptsPanel.setConceptParamOps(
                       model.document, name: name, value: evaluate(valueExpr, context: callCtx))
+            else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
+        // doc.delete_symbol: { master: <expr> }: Delete Symbol, the op
+        // ``SymbolsPanel/deleteSymbolOps`` builds for the master the
+        // expression names. Rust's `doc.delete_symbol`.
+        let docDeleteSymbolHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let masterExpr = spec["master"] as? String,
+                  case .string(let master) = evaluate(masterExpr, context: callCtx),
+                  let ops = SymbolsPanel.deleteSymbolOps(model.document, master: master)
+            else { return nil }
+            for op in ops { opApply(model, controller, op) }
+            return nil
+        }
+
+        // doc.apply_concept_operation: { op_id: <expr> }: a Concepts-panel
+        // operation button, the op ``ConceptsPanel/applyConceptOperationOps``
+        // resolves for the one selected generated instance. Rust's
+        // `doc.apply_concept_operation`.
+        let docApplyConceptOperationHandler: PlatformEffect = { value, callCtx, _ in
+            guard let spec = value as? [String: Any], let opIdExpr = spec["op_id"] as? String,
+                  case .string(let opId) = evaluate(opIdExpr, context: callCtx),
+                  let ops = ConceptsPanel.applyConceptOperationOps(model.document, opId: opId)
             else { return nil }
             for op in ops { opApply(model, controller, op) }
             return nil
@@ -889,9 +912,12 @@ public enum LayersPanel {
             "doc.op": docOpHandler,
             "doc.make_instance": docMakeInstanceHandler,
             "doc.place_instance": docPlaceInstanceHandler,
+            "doc.new_symbol": docNewSymbolHandler,
             "doc.place_concept_instance": docPlaceConceptInstanceHandler,
             "doc.set_concept_param": docSetConceptParamHandler,
             "doc.promote_to_concept": docPromoteToConceptHandler,
+            "doc.apply_concept_operation": docApplyConceptOperationHandler,
+            "doc.delete_symbol": docDeleteSymbolHandler,
             "doc.copy_selection_to_clipboard": docCopySelectionToClipboardHandler,
             "make_compound_shape": makeCompoundShapeHandler,
             "geometry.export_pdf": geometryExportPdfHandler,

@@ -227,6 +227,34 @@ def _mint_ids(doc: Document, count: int, mint: Callable[[], str]) -> list[str] |
     return ids
 
 
+def new_symbol_ops(doc: Document, mint: Callable[[], str] | None = None) -> list[dict] | None:
+    """The one value-in-op op Make Symbol applies (SYMBOLS.md §7), or None (a
+    no-op) unless exactly ONE element is wholly selected, or the mint fails:
+    ``make_symbol`` of its path with a minted master id and reference id (an
+    element that has an id keeps it as the master's: :func:`new_symbol_master`
+    reads which). Rust ``symbols_host::new_symbol_ops``."""
+    from document.artboard import generate_element_id
+    sel = list(doc.selection)
+    if len(sel) != 1 or not isinstance(sel[0].kind, _SelectionAll):
+        return None
+    ids = _mint_ids(doc, 2, mint or generate_element_id)
+    if ids is None:
+        return None
+    return [{"op": "make_symbol", "path": list(sel[0].path), "master_id": ids[0], "ref_id": ids[1]}]
+
+
+def new_symbol_master(doc: Document, path) -> str | None:
+    """The master a Make Symbol at ``path`` made, read from the document
+    AFTER the op: the target of the reference now at ``path``, else None.
+    Rust ``symbols_host::new_symbol_master``."""
+    from geometry.element import ReferenceElem
+    try:
+        elem = doc.get_element(tuple(path))
+    except (ValueError, IndexError, KeyError):
+        return None
+    return elem.target if isinstance(elem, ReferenceElem) else None
+
+
 def place_instance_ops(doc: Document, master_id: str | None,
                        mint: Callable[[], str] | None = None) -> list[dict] | None:
     """The one value-in-op op the Symbols panel's Place Instance applies, or
@@ -283,6 +311,55 @@ def promote_to_concept_ops(doc: Document, registry: dict) -> list[dict] | None:
         return [{"op": "promote_to_concept", "path": list(path), "concept_id": concept_id,
                  "params": dict(zip(names, nums[:k])), "transform": [t.a, t.b, t.c, t.d, t.e, t.f]}]
     return None
+
+
+def delete_symbol_ops(doc: Document, master) -> list[dict] | None:
+    """The one op the Symbols panel's Delete Symbol applies (SYMBOLS.md §7),
+    or None (a no-op) unless ``master`` names a master in the store:
+    ``delete_symbol`` of that id. Its instances are left in place, resolving
+    to nothing. Rust ``symbols_host::delete_symbol_ops``, Swift
+    ``SymbolsPanel.deleteSymbolOps``."""
+    if not isinstance(master, str) or not any(m.id == master for m in doc.symbols):
+        return None
+    return [{"op": "delete_symbol", "master_id": master}]
+
+
+def apply_concept_operation_ops(doc: Document, op_id, concept: dict | None) -> list[dict] | None:
+    """The one value-in-op op a Concepts-panel operation button applies
+    (CONCEPTS.md §9), or None (a no-op) unless exactly one generated instance
+    is selected, ``concept`` is its concept, and that concept declares an
+    operation ``op_id`` whose ``set:`` expressions, evaluated over the
+    instance's CURRENT params (bound under ``param``), give at least one
+    number: ``apply_concept_operation`` of its path with those numbers as
+    ``changes``. An expression that is not a string, or does not evaluate to a
+    number, is skipped. Rust ``symbols_host::apply_concept_operation_ops``,
+    Swift ``ConceptsPanel.applyConceptOperationOps``."""
+    from geometry.element import GeneratedElem
+    from workspace_interpreter.expr import evaluate
+    from workspace_interpreter.expr_types import ValueType
+    if not isinstance(op_id, str) or len(doc.selection) != 1 or not isinstance(concept, dict):
+        return None
+    path = next(iter(doc.selection)).path
+    try:
+        elem = doc.get_element(path)
+    except (ValueError, IndexError, KeyError):
+        return None
+    if not isinstance(elem, GeneratedElem):
+        return None
+    operation = next((o for o in concept.get("operations") or () if isinstance(o, dict) and o.get("id") == op_id), None)
+    sets = operation.get("set") if operation else None
+    if not isinstance(sets, dict):
+        return None
+    ctx = {"param": dict(elem.params)}
+    changes = {}
+    for name, src in sets.items():
+        if isinstance(src, str):
+            r = evaluate(src, ctx)
+            if r.type == ValueType.NUMBER:
+                changes[name] = r.value
+    if not changes:
+        return None
+    return [{"op": "apply_concept_operation", "path": list(path), "op_id": op_id, "changes": changes}]
 
 
 def concept_default_params(concept: dict | None) -> dict:

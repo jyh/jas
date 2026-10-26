@@ -213,6 +213,26 @@ mod tests {
 /// document had values. `layers_sel`, `artboards_sel` and `artboards_anchor`
 /// are the Layers and Artboards panels' selections, which each caller holds in
 /// its own place.
+/// `active_document.symbol_usage` (runtime_contexts.yaml): every master's id
+/// mapped to how many live references target it (its `rdeps` length), 0 for
+/// an unused one, so `symbol_usage[id] > 0` reads a number for any master.
+/// `delete_symbol_action` asks before it empties an instance. The one
+/// definition every Rust view calls; the reference's `_symbol_usage`.
+pub fn symbol_usage(doc: &crate::document::document::Document) -> serde_json::Value {
+    if doc.symbols.is_empty() {
+        return serde_json::json!({});
+    }
+    let rdeps = crate::document::dependency_index::dependency_index(doc).rdeps;
+    let m: serde_json::Map<String, serde_json::Value> = doc.symbols.iter()
+        .filter_map(|e| e.common().id.clone())
+        .map(|id| {
+            let n = rdeps.get(&id).map_or(0, Vec::len);
+            (id, n.into())
+        })
+        .collect();
+    serde_json::Value::Object(m)
+}
+
 /// `active_document.selection_orphan_count` (runtime_contexts.yaml): how many
 /// live references deleting the canvas selection would leave pointing at a
 /// deleted target. `delete_selection` in actions.yaml asks before a delete
@@ -437,6 +457,7 @@ pub fn active_document_view(
         m.insert("selection_has_brushed_stroke".to_string(), has_brushed_stroke.into());
         m.insert("selection_is_single_brushed_stroke".to_string(), single_brushed_stroke.into());
         m.insert("selection_orphan_count".to_string(), selection_orphan_count(doc).into());
+        m.insert("symbol_usage".to_string(), symbol_usage(doc));
         m.insert("symbols".to_string(), symbols_json);
         // Concepts panel Slice 2: attached here too (macro recursion ceiling).
         m.insert("selected_concept".to_string(), selected_concept);

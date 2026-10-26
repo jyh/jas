@@ -36,6 +36,8 @@ public func buildActiveDocumentView(
             "selection_is_single_brushed_stroke": false,
             // Nothing is selected, so a delete strands nothing.
             "selection_orphan_count": 0,
+            // No document: no masters to count.
+            "symbol_usage": [String: Any](),
             "has_selection": false,
             "selection_count": 0,
             "element_selection": [] as [Any],
@@ -212,6 +214,9 @@ public func buildActiveDocumentView(
         // (`runtime_contexts.yaml`); `delete_selection` asks before one.
         "selection_orphan_count": m.document.selection.isEmpty ? 0
             : DependencyIndex.orphanedReferences(m.document, m.document.selection.map(\.path)).count,
+        // Every master's live instance count (`runtime_contexts.yaml`);
+        // `delete_symbol_action` asks before it empties an instance.
+        "symbol_usage": symbolUsage(m.document),
         "element_selection": elementSelection,
         // The per-document recent colours, the one writable document list
         // (`runtime_contexts.yaml`), which Color and Swatches both read.
@@ -508,4 +513,19 @@ func layerFacts(_ layers: [Layer]) -> (visible: Bool, preview: Bool, unlocked: B
     (layers.contains { $0.visibility != .invisible },
      layers.contains { $0.visibility == .preview },
      layers.contains { !$0.locked })
+}
+
+/// `active_document.symbol_usage` (`runtime_contexts.yaml`): every master's id
+/// mapped to how many live references target it, 0 for an unused one, so
+/// `symbol_usage[id] > 0` reads a number for any master. Empty with no
+/// masters. Rust `document_views::symbol_usage`.
+func symbolUsage(_ doc: Document) -> [String: Any] {
+    if doc.symbols.isEmpty { return [:] }
+    let rdeps = DependencyIndex.build(doc).rdeps
+    var out: [String: Any] = [:]
+    for master in doc.symbols {
+        guard let id = master.id else { continue }
+        out[id] = rdeps[id]?.count ?? 0
+    }
+    return out
 }

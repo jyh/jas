@@ -852,6 +852,61 @@ class StateStore:
         doc = test_json_to_document(json.dumps(self._document))
         for op in promote_to_concept_ops(doc, concepts(ws)) or []:
             self.apply_op(op)
+    def new_symbol(self):
+        """Make Symbol on the store's document: the op
+        ``document.controller.new_symbol_ops`` mints, applied through the op
+        layer; returns the master it made (read after the op), or None."""
+        if self._document is None:
+            return None
+        import json
+        from document.controller import new_symbol_ops, new_symbol_master
+        from geometry.test_json import test_json_to_document
+        ops = new_symbol_ops(test_json_to_document(json.dumps(self._document)))
+        if not ops:
+            return None
+        for op in ops:
+            self.apply_op(op)
+        return new_symbol_master(test_json_to_document(json.dumps(self._document)), ops[0]["path"])
+
+    def delete_symbol(self, master) -> None:
+        """Delete Symbol on the store's document: the op
+        ``document.controller.delete_symbol_ops`` builds, applied through the
+        op layer. Nothing unless ``master`` names a master."""
+        if self._document is None:
+            return
+        import json
+        from document.controller import delete_symbol_ops
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        for op in delete_symbol_ops(doc, master) or []:
+            self.apply_op(op)
+
+    def apply_concept_operation(self, op_id) -> None:
+        """A Concepts-panel operation button on the store's document: the op
+        ``document.controller.apply_concept_operation_ops`` builds for the one
+        selected generated instance against its concept in the bundled
+        workspace, applied through the op layer. Nothing unless it builds one."""
+        if self._document is None:
+            return
+        import json
+        import os
+        from document.controller import apply_concept_operation_ops
+        from geometry.element import GeneratedElem
+        from geometry.test_json import test_json_to_document
+        from workspace_interpreter.loader import concept, load_workspace
+        doc = test_json_to_document(json.dumps(self._document))
+        if len(doc.selection) != 1:
+            return
+        try:
+            elem = doc.get_element(next(iter(doc.selection)).path)
+        except (ValueError, IndexError, KeyError):
+            return
+        if not isinstance(elem, GeneratedElem):
+            return
+        ws = load_workspace(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "workspace"))
+        for op in apply_concept_operation_ops(doc, op_id, concept(ws, elem.concept_id)) or []:
+            self.apply_op(op)
 
     def set_concept_param(self, name, value) -> None:
         """A Concepts-panel parameter field's commit on the store's document:
@@ -1238,6 +1293,9 @@ class StateStore:
         # at a deleted target (REFERENCE_GRAPH.md): delete_selection asks
         # before it strands one. Bridged through test JSON, as apply_op is.
         brush_facts["selection_orphan_count"] = self._selection_orphan_count(canvas_sel)
+        # Every master's live instance count (SYMBOLS.md §8): Delete Symbol
+        # asks before it empties one.
+        brush_facts["symbol_usage"] = self._symbol_usage()
         # Artboard-view computation (works whether document is None or not)
         if self._document is None:
             raw_artboards: list = []
@@ -1423,6 +1481,18 @@ class StateStore:
         from geometry.test_json import test_json_to_document
         doc = test_json_to_document(json.dumps(self._document))
         return len(orphaned_references(doc, [list(p) for p in canvas_sel]))
+
+    def _symbol_usage(self) -> dict:
+        # A store document with no masters has nothing to count, so only one
+        # that holds one is bridged (as _selection_orphan_count does).
+        if self._document is None or not self._document.get("symbols"):
+            return {}
+        import json
+        from document.dependency_index import dependency_index
+        from geometry.test_json import test_json_to_document
+        doc = test_json_to_document(json.dumps(self._document))
+        rdeps = dependency_index(doc).rdeps
+        return {m.id: len(rdeps.get(m.id, ())) for m in doc.symbols if m.id}
 
     def _canvas_selection_paths(self) -> list[tuple[int, ...]]:
         """Extract canvas selection from the document as a list of path

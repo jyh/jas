@@ -25,6 +25,7 @@ runtime_contexts:
       selection_has_brushed_stroke: false
       selection_is_single_brushed_stroke: false
       selection_orphan_count: 0
+      symbol_usage: {}
       artboards_count: 0
       artboards_panel_selection_ids: []
       element_tree: null
@@ -145,6 +146,15 @@ runtime_contexts:
           target is in the selection, or below a selected container, and which
           are not themselves deleted (REFERENCE_GRAPH.md). 0 when nothing is
           selected. delete_selection asks before a delete that strands one.
+      symbol_usage:
+        type: object
+        description: >
+          Every symbol master's id mapped to how many live references
+          (instances) target it (SYMBOLS.md §8): its reverse-dependency count
+          in the dependency index, 0 for a master no instance uses. Every
+          master in the store is present, so `symbol_usage[id] > 0` reads a
+          number for any master that exists. Empty when there are no masters.
+          delete_symbol_action asks before it empties an instance.
       # Artboards-panel rollups (ARTBOARDS.md § Artboard data model). Built by
       # every port's active-document view since the artboards work landed and
       # read by artboards.yaml's menu, context menu and keyboard rows; declared

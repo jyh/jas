@@ -2,10 +2,11 @@ import Foundation
 
 /// The Concepts panel (CONCEPTS.md §6). The `concepts_panel_select` action is
 /// generic (`set_panel_state` writes `selected_concept` into the shared store).
-/// `place_concept_instance` and `set_concept_param` run their YAML
-/// (`doc.place_concept_instance`, `doc.set_concept_param`); the ops those
-/// effects apply are built here, as Rust's `symbols_host` builds them.
-/// `promote_to_concept` and `apply_concept_operation` are still native arms.
+/// `place_concept_instance`, `set_concept_param`, `promote_to_concept` and
+/// `apply_concept_operation` run their YAML (`doc.place_concept_instance`,
+/// `doc.set_concept_param`, `doc.promote_to_concept`,
+/// `doc.apply_concept_operation`); the ops those effects apply are built here,
+/// as Rust's `symbols_host` builds them.
 public enum ConceptsPanel {
     /// The panel's menu, from concepts.yaml's `menu:` block.
     public static func menuItems() -> [PanelMenuItem] {
@@ -122,28 +123,25 @@ public enum ConceptsPanel {
         return [["op": "set_concept_param", "path": path, "name": name, "value": v]]
     }
 
-    /// Native intercept for `apply_concept_operation` (CONCEPTS.md §9): apply a
-    /// named concept operation to the single selected Generated instance. The
-    /// operation's effect is RESOLVED here, at production time — look the
-    /// operation up in the registry by `opId`, evaluate its `set:` expressions
-    /// with the instance's CURRENT params bound under `param`, and bake the
-    /// resulting `changes` map into the op (value-in-op). Routed through
-    /// `opApply` inside the one-undo `withTxn`/`nameTxn` bracket; replay merges
-    /// `changes` and never re-evaluates. Mirrors the Rust `apply_concept_operation`
-    /// dispatch arm. No-op unless exactly one Generated element is selected and
-    /// the resolved changes are non-empty.
-    public static func applyOperation(model: Model, opId: String) {
-        let doc = model.document
-        guard doc.selection.count == 1, let sel = doc.selection.first else { return }
+    /// The one value-in-op op a Concepts-panel operation button applies
+    /// (`doc.apply_concept_operation` in actions.yaml, CONCEPTS.md §9), or nil
+    /// unless exactly one Generated instance is selected and its concept
+    /// declares the operation `opId` whose `set:` expressions, evaluated over
+    /// the instance's CURRENT params (bound under `param`), give at least one
+    /// number: `apply_concept_operation` of its path with those numbers as
+    /// `changes`. Replay merges `changes` and never re-evaluates. Rust
+    /// `symbols_host::apply_concept_operation_ops`.
+    static func applyConceptOperationOps(_ doc: Document, opId: String) -> [[String: Any]]? {
+        guard doc.selection.count == 1, let sel = doc.selection.first else { return nil }
         let path = sel.path
-        guard case .live(.generated(let gen)) = doc.tryGetElement(path) else { return }
+        guard case .live(.generated(let gen)) = doc.tryGetElement(path) else { return nil }
 
         // Look up the concept + operation, then resolve its `set:` expressions
         // over the instance's current params → the concrete `changes` map.
         guard let concept = WorkspaceData.load()?.concept(gen.conceptId),
               let ops = concept["operations"] as? [[String: Any]],
               let operation = ops.first(where: { ($0["id"] as? String) == opId }),
-              let set = operation["set"] as? [String: Any] else { return }
+              let set = operation["set"] as? [String: Any] else { return nil }
 
         let ctx: [String: Any] = ["param": gen.params]
         var changes: [String: Any] = [:]
@@ -153,18 +151,13 @@ public enum ConceptsPanel {
                 changes[name] = n
             }
         }
-        guard !changes.isEmpty else { return }
-
-        let op: [String: Any] = [
+        guard !changes.isEmpty else { return nil }
+        return [[
             "op": "apply_concept_operation",
             "path": path,
             "op_id": opId,
             "changes": changes,
-        ]
-        model.withTxn {
-            model.nameTxn("apply_concept_operation")
-            opApply(model, Controller(model: model), op)
-        }
+        ]]
     }
 
     /// The one op Object > Promote to Concept applies
