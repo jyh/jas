@@ -232,3 +232,55 @@ def test_make_instance_from_actions_yaml_leaves_an_offset_reference_selected():
     before = json.dumps(store._document, sort_keys=True)
     _run_yaml_action(store, "make_instance")
     assert json.dumps(store._document, sort_keys=True) == before, "two selected: nothing"
+
+
+def _referenced_rect_store(select: tuple) -> StateStore:
+    """A rect, an unrelated rect, and a live reference to the first (built by the
+    real make_instance action), with `select` as the canvas selection."""
+    doc = _two_rects(_rect(), Rect(x=20, y=0, width=10, height=10))
+    doc = replace(doc, selection=frozenset({ElementSelection.all((0, 0))}))
+    store = _store(doc)
+    _run_yaml_action(store, "make_instance")
+    made = _doc_of(store)
+    assert type(made.layers[0].children[2]).__name__ == "ReferenceElem"
+    store = _store(replace(made, selection=frozenset(ElementSelection.all(p) for p in select)))
+    return store
+
+
+@pytest.mark.parametrize("select, count", [
+    ((), 0),                      # nothing selected
+    (((0, 1),), 0),               # an unreferenced rect
+    (((0, 0),), 1),               # the referenced rect: its reference would dangle
+    (((0, 0), (0, 2)), 0),        # the target AND its reference: nothing is left to dangle
+], ids=["none", "unreferenced", "referenced", "target-and-reference"])
+def test_selection_orphan_count_counts_references_a_delete_would_strand(select, count):
+    store = _referenced_rect_store(select)
+    assert store._active_document_view()["selection_orphan_count"] == count
+
+
+def _run_yaml_action_with_dialogs(store: StateStore, name: str) -> None:
+    import yaml
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
+    with open(os.path.join(root, "actions.yaml"), encoding="utf-8") as f:
+        effects = yaml.safe_load(f)["actions"][name]["effects"]
+    with open(os.path.join(root, "workspace.json"), encoding="utf-8") as f:
+        dialogs = json.load(f)["dialogs"]
+    run_effects(effects, {}, store, dialogs=dialogs)
+
+
+def test_delete_selection_from_actions_yaml_deletes_when_nothing_would_dangle():
+    store = _referenced_rect_store(((0, 1),))
+    _run_yaml_action_with_dialogs(store, "delete_selection")
+    after = _doc_of(store)
+    assert [type(c).__name__ for c in after.layers[0].children] == ["Rect", "ReferenceElem"]
+    assert after.selection == frozenset()
+    assert store.get_dialog_id() is None
+
+
+def test_delete_selection_from_actions_yaml_asks_before_stranding_a_reference():
+    store = _referenced_rect_store(((0, 0),))
+    before = json.dumps(store._document, sort_keys=True)
+    _run_yaml_action_with_dialogs(store, "delete_selection")
+    assert json.dumps(store._document, sort_keys=True) == before, "nothing is deleted before the answer"
+    assert store.get_dialog_id() == "delete_orphan_confirm"
+    assert (store.get_dialog_params() or {}).get("count") == 1

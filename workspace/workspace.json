@@ -227,13 +227,33 @@
       ]
     },
     "delete_selection": {
-      "description": "Delete the selected objects from the canvas. The deletion is recorded on the undo stack. After deletion, the selection becomes empty.\n",
+      "description": "Delete the selected objects from the canvas, as one undo step; the selection becomes empty. The delete is reference-aware (warn, then orphan): when deleting the selection would leave one or more live instances pointing at a deleted target, nothing is deleted yet and the delete_orphan_confirm dialog opens with that count; its Delete button (delete_orphan_confirm_ok) commits the same delete and Cancel changes nothing. A selection that holds a target and every reference to it strands nothing, so it deletes at once. Every Delete route runs this: Edit > Delete, the Delete and Backspace keys, and a tool that dispatches delete_selection.\n",
       "category": "edit",
       "tier": 3,
       "enabled_when": "active_document.has_selection",
       "effects": [
         {
-          "log": "delete_selection"
+          "if": {
+            "condition": "active_document.selection_orphan_count > 0",
+            "then": [
+              {
+                "open_dialog": {
+                  "id": "delete_orphan_confirm",
+                  "params": {
+                    "count": "active_document.selection_orphan_count"
+                  }
+                }
+              }
+            ],
+            "else": [
+              "snapshot",
+              {
+                "doc.op": {
+                  "op": "delete_selection"
+                }
+              }
+            ]
+          }
         }
       ]
     },
@@ -9147,6 +9167,7 @@
         "layers_panel_selection_has_group": false,
         "selection_has_brushed_stroke": false,
         "selection_is_single_brushed_stroke": false,
+        "selection_orphan_count": 0,
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
         "element_tree": null,
@@ -9227,6 +9248,10 @@
         "selection_is_single_brushed_stroke": {
           "type": "bool",
           "description": "True when exactly one element is canvas-selected and it carries a non-empty stroke_brush. Brush Options for Selection edits that one stroke's per-instance overrides, so a selection that also holds other elements does not qualify.\n"
+        },
+        "selection_orphan_count": {
+          "type": "int",
+          "description": "How many live references (instances) deleting the canvas selection would leave pointing at a deleted target: the references whose target is in the selection, or below a selected container, and which are not themselves deleted (REFERENCE_GRAPH.md). 0 when nothing is selected. delete_selection asks before a delete that strands one.\n"
         },
         "artboards_count": {
           "type": "number",

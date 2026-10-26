@@ -201,12 +201,14 @@
       "doc_verbs": []
     },
     "cut": {
-      "class": "ui-state",
+      "class": "journaling",
       "dispatches": [
         "copy",
         "delete_selection"
       ],
-      "doc_verbs": []
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "cut_orphan_confirm_ok": {
       "class": "ui-state",
@@ -255,8 +257,10 @@
       "doc_verbs": []
     },
     "delete_selection": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "delete_swatch": {
       "class": "ui-state",
@@ -1210,11 +1214,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 35,
+      "journaling": 37,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 196,
+      "ui-state": 194,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1264,7 +1268,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 35,
+    "journaling_actions": 37,
     "native_intercepts": [
       "export_to_pdf"
     ],

@@ -213,6 +213,18 @@ mod tests {
 /// document had values. `layers_sel`, `artboards_sel` and `artboards_anchor`
 /// are the Layers and Artboards panels' selections, which each caller holds in
 /// its own place.
+/// `active_document.selection_orphan_count` (runtime_contexts.yaml): how many
+/// live references deleting the canvas selection would leave pointing at a
+/// deleted target. `delete_selection` in actions.yaml asks before a delete
+/// that strands one. The one definition every Rust view calls.
+pub fn selection_orphan_count(doc: &crate::document::document::Document) -> usize {
+    let paths: Vec<Vec<usize>> = doc.selection.iter().map(|es| es.path.clone()).collect();
+    if paths.is_empty() {
+        return 0;
+    }
+    crate::document::dependency_index::orphaned_references(doc, &paths).len()
+}
+
 pub fn active_document_view(
     model: &crate::document::model::Model,
     layers_sel: &[Vec<usize>],
@@ -421,6 +433,7 @@ pub fn active_document_view(
     if let serde_json::Value::Object(m) = &mut view {
         m.insert("selection_has_brushed_stroke".to_string(), has_brushed_stroke.into());
         m.insert("selection_is_single_brushed_stroke".to_string(), single_brushed_stroke.into());
+        m.insert("selection_orphan_count".to_string(), selection_orphan_count(doc).into());
         m.insert("symbols".to_string(), symbols_json);
         // Concepts panel Slice 2: attached here too (macro recursion ceiling).
         m.insert("selected_concept".to_string(), selected_concept);

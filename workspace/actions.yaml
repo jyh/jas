@@ -391,13 +391,29 @@ actions:
       - doc.op: { op: select_all }
   delete_selection:
     description: >
-      Delete the selected objects from the canvas. The deletion is recorded
-      on the undo stack. After deletion, the selection becomes empty.
+      Delete the selected objects from the canvas, as one undo step; the
+      selection becomes empty. The delete is reference-aware (warn, then
+      orphan): when deleting the selection would leave one or more live
+      instances pointing at a deleted target, nothing is deleted yet and the
+      delete_orphan_confirm dialog opens with that count; its Delete button
+      (delete_orphan_confirm_ok) commits the same delete and Cancel changes
+      nothing. A selection that holds a target and every reference to it
+      strands nothing, so it deletes at once. Every Delete route runs this:
+      Edit > Delete, the Delete and Backspace keys, and a tool that
+      dispatches delete_selection.
     category: edit
     tier: 3
     enabled_when: "active_document.has_selection"
     effects:
-      - log: "delete_selection"
+      - if:
+          condition: "active_document.selection_orphan_count > 0"
+          then:
+            - open_dialog:
+                id: delete_orphan_confirm
+                params: { count: "active_document.selection_orphan_count" }
+          else:
+            - snapshot
+            - doc.op: { op: delete_selection }
   nudge_selection:
     description: >
       Move the selected objects by a small fixed step from the keyboard.

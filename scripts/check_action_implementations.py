@@ -162,7 +162,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # `group_selection`, `ungroup_selection`, `ungroup_all` in all three op layers).
 # 42 the same day: `make_instance` (`doc.make_instance`, which mints its two ids
 # and applies create_reference + move_selection); every native table is gone.
-MIN_LOG_ONLY = 42
+# 41 on 2026-10-26: `delete_selection` (reference-aware: it asks through
+# `active_document.selection_orphan_count`, else `doc.op: {op: delete_selection}`).
+MIN_LOG_ONLY = 41
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 

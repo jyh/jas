@@ -15,7 +15,7 @@ use crate::painter::overlay_ctx::OverlayCtx;
 
 use crate::document::model::Model;
 use crate::interpreter::doc_primitives;
-use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
+use crate::interpreter::effects::{run_effects_hosted, EffectHost};
 use crate::interpreter::state_store::StateStore;
 use crate::tools::tool::{CanvasTool, KeyMods};
 
@@ -277,11 +277,18 @@ impl YamlTool {
     /// those references resolve to Null → 0.0, so the very first
     /// pan/zoom drag jumps from offset 0 instead of the current
     /// view position.
+    ///
+    /// `selection_orphan_count` is the reference-aware delete's question: a
+    /// tool that dispatches `delete_selection` (the Artboard tool's Delete)
+    /// runs its YAML here, and without the count the condition reads null and
+    /// the delete would strand a live reference without asking.
     fn active_document_payload(model: &Model) -> serde_json::Value {
         serde_json::json!({
             "view_offset_x": model.view_offset_x,
             "view_offset_y": model.view_offset_y,
             "zoom_level":    model.zoom_level,
+            "selection_orphan_count":
+                crate::interpreter::document_views::selection_orphan_count(model.document()),
         })
     }
 
@@ -348,11 +355,11 @@ impl YamlTool {
     }
 }
 
-/// The host a YAML tool's handlers run under. It claims the actions a tool
-/// dispatches whose YAML body is the menu's `log`, so they RUN rather than
-/// log: `delete_selection` (the Artboard tool's Delete falls through to it).
-/// A dialog it opens lands in the tool's store, where the host's
-/// `take_opened_dialog` takes it. Every effect key is declined, as before.
+/// The host a YAML tool's handlers run under. It declines every effect key and
+/// claims no action: a dispatched action runs its YAML (`delete_selection`,
+/// which the Artboard tool's Delete falls through to, asks through
+/// `active_document.selection_orphan_count`). A dialog that YAML opens lands in
+/// the tool's store, where the host's `take_opened_dialog` takes it.
 struct ToolHost;
 
 impl EffectHost for ToolHost {
@@ -361,10 +368,6 @@ impl EffectHost for ToolHost {
         false
     }
 
-    fn run_action(&mut self, action: &str, _params: &serde_json::Value, store: &mut StateStore,
-                  model: Option<&mut Model>) -> Option<Option<Unhandled>> {
-        (action == "delete_selection").then(|| crate::workspace::menu_native::run_delete_selection(store, model))
-    }
 }
 
 /// App-level `state.*` keys bridged into a tool's self-contained store
@@ -7006,6 +7009,34 @@ mod tests {
         // same press is on the interior and the drag MOVES A.
         tool.set_document_facts(&serde_json::json!({ "artboards_panel_selection_ids": [] }));
         assert_eq!(drag(&mut tool), (50.0, 30.0, 200.0, 200.0), "no selection: the corner press moves A");
+    }
+
+    /// The Artboard tool's Delete with no artboard panel-selected falls through
+    /// to `delete_selection` (ARTBOARD_TOOL.md §Delete), the reference-aware
+    /// delete: a delete that would strand a live reference opens
+    /// `delete_orphan_confirm` (taken from the tool's store by the host) and
+    /// deletes nothing; otherwise it deletes.
+    #[test]
+    fn artboard_delete_falls_through_to_the_reference_aware_delete() {
+        use crate::document::controller::Controller;
+        use crate::document::test_fixture::{model_with, rect};
+        let mut tool = artboard_yaml_tool().expect("the artboard tool is in the workspace");
+        let mut model = model_with(vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 10.0, 10.0)], &[0]);
+        crate::workspace::menu_native::make_instance(&mut model);
+        Controller::select_element(&mut model, &vec![0, 0]);
+        tool.activate(&mut model);
+        tool.set_document_facts(&serde_json::json!({ "artboards_panel_selection_ids": [] }));
+        let before = model.document().layers[0].children().unwrap().len();
+        tool.on_key(&mut model, "Delete");
+        assert_eq!(model.document().layers[0].children().unwrap().len(), before, "nothing deleted yet");
+        let (id, params) = tool.take_opened_dialog().expect("the orphan confirm opens");
+        assert_eq!(id, "delete_orphan_confirm");
+        assert_eq!(params.get("count"), Some(&serde_json::json!(1)));
+
+        Controller::select_element(&mut model, &vec![0, 1]);
+        tool.on_key(&mut model, "Delete");
+        assert_eq!(model.document().layers[0].children().unwrap().len(), before - 1, "no orphan: deleted");
+        assert!(tool.take_opened_dialog().is_none(), "and nothing asked");
     }
 
     #[test]

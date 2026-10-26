@@ -369,6 +369,8 @@ pub fn document_facts(model: &Model) -> Map<String, Value> {
         crate::interpreter::document_views::brushed_stroke_facts(model.document());
     m.insert("selection_has_brushed_stroke".into(), has_brushed.into());
     m.insert("selection_is_single_brushed_stroke".into(), single_brushed.into());
+    m.insert("selection_orphan_count".into(),
+             crate::interpreter::document_views::selection_orphan_count(model.document()).into());
     // The per-document recent colours (`active_document.recent_colors`), which
     // `set_active_color` pushes onto the model and Color and Swatches read.
     m.insert("recent_colors".into(), serde_json::json!(model.recent_colors));
@@ -922,6 +924,24 @@ mod tests {
         assert!(crate::interpreter::boolean_host::run(
             &mut m, "boolean_union_compound", &BooleanOptions::default()));
         assert_eq!(read(&m), Value::Bool(true), "a compound shape is selected");
+    }
+
+    /// The engine's scope answers the reference-aware delete's question from
+    /// the ONE definition the web view also calls (`document_views`).
+    #[test]
+    fn the_engine_scope_answers_the_selection_orphan_count() {
+        use crate::document::controller::Controller;
+        use crate::document::test_fixture::{model_with, rect};
+        let read = |m: &Model| {
+            engine_scope(&PanelState::default(), &StateStore::new(), m, "layers_panel_content")
+                ["active_document"]["selection_orphan_count"].clone()
+        };
+        let mut m = model_with(vec![rect(0.0, 0.0, 10.0, 10.0), rect(20.0, 0.0, 10.0, 10.0)], &[0]);
+        crate::workspace::menu_native::make_instance(&mut m);
+        Controller::select_element(&mut m, &vec![0, 1]);
+        assert_eq!(read(&m), Value::from(0), "an unreferenced rect");
+        Controller::select_element(&mut m, &vec![0, 0]);
+        assert_eq!(read(&m), Value::from(1), "the referenced rect");
     }
 
     /// W2b-18. The engine's scope answers the Brushes panel's two gates from

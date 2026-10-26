@@ -231,9 +231,8 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   and NAMED: the host records the selection's payload in
 ///   [`EngineHost::clipboard_write`] and the reply carries it for the shell
 ///   to write to the system clipboard.
-/// * `delete_selection` is claimed and RUN by the Delete key's law
-///   (`menu_native::delete_selection`): an orphan opens
-///   `delete_orphan_confirm`; its own YAML is the menu's `log`.
+/// * `delete_selection` is not claimed: its YAML runs (an orphan, read from
+///   `active_document.selection_orphan_count`, opens `delete_orphan_confirm`).
 ///
 /// Everything else is declined, so the runner reports it.
 #[derive(Default)]
@@ -339,13 +338,6 @@ impl EffectHost for EngineHost {
                 }
             }
             return None;
-        }
-        // `delete_selection` by action (a tool's YAML dispatches it; its own
-        // body is the menu's `log`): the Delete key's reference-aware law. An
-        // orphan opens `delete_orphan_confirm` through the dialog door with
-        // its `count`, as the web's Delete does, and deletes nothing.
-        if action == "delete_selection" {
-            return Some(crate::workspace::menu_native::run_delete_selection(store, model));
         }
         if action == "save_all_then_close" {
             self.save_all_then_close = true;
