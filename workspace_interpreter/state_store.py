@@ -140,6 +140,33 @@ def _holds_reference(node) -> bool:
     return False
 
 
+def _layer_facts(layers) -> dict:
+    """The Layers menu's three toggle-all facts over the document's top-level
+    layers (`runtime_contexts.yaml`): any layer not invisible, any layer in
+    preview, any layer unlocked; all false with no layers. A layer is read in
+    either form the store holds: the op bridge's test JSON (``type: layer``,
+    ``visibility``/``locked`` at top level) or the native form (``kind:
+    Layer``, under ``common``). Mirrors Rust ``document_views::layer_facts``
+    and Swift ``layerFacts``."""
+    vis, locked = [], []
+    for elem in layers or ():
+        if not isinstance(elem, dict):
+            continue
+        if elem.get("type") == "layer":
+            props = elem
+        elif elem.get("kind") == "Layer":
+            props = elem.get("common") or {}
+        else:
+            continue
+        vis.append(props.get("visibility", "preview"))
+        locked.append(bool(props.get("locked", False)))
+    return {
+        "any_layer_visible": any(v != "invisible" for v in vis),
+        "any_layer_preview": any(v == "preview" for v in vis),
+        "any_layer_unlocked": any(not l for l in locked),
+    }
+
+
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
@@ -1263,6 +1290,7 @@ class StateStore:
                 # No document: no item is a container and none is a group.
                 "layers_panel_selection_is_container": False,
                 "layers_panel_selection_has_group": False,
+                **_layer_facts([]),
                 "has_selection": has_selection,
                 "selection_count": selection_count,
                 "element_selection": element_selection,
@@ -1352,6 +1380,7 @@ class StateStore:
             "layers_panel_selection_count": sel_count,
             "layers_panel_selection_is_container": layers_panel_selection_is_container,
             "layers_panel_selection_has_group": layers_panel_selection_has_group,
+            **_layer_facts(layers),
             "has_selection": has_selection,
             "selection_count": selection_count,
             "element_selection": element_selection,

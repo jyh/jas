@@ -19,6 +19,9 @@ runtime_contexts:
       layers_panel_selection_count: 0
       layers_panel_selection_is_container: false
       layers_panel_selection_has_group: false
+      any_layer_visible: false
+      any_layer_preview: false
+      any_layer_unlocked: false
       selection_has_brushed_stroke: false
       selection_is_single_brushed_stroke: false
       selection_orphan_count: 0
@@ -104,6 +107,19 @@ runtime_contexts:
       layers_panel_selection_has_group:
         type: bool
         description: "True when at least one selected layer item is a group"
+      # The Layers menu's three toggle-all labels (layers.yaml) say what the
+      # action will do to THIS document. Until 2026-10-26 no port built these
+      # three, so each app resolved the labels with a native table and the
+      # Windows flyout showed the raw template (STATUS-jas item 24).
+      any_layer_visible:
+        type: bool
+        description: "True when at least one top-level layer is not invisible (Hide All Layers, else Show All Layers); false with no layers"
+      any_layer_preview:
+        type: bool
+        description: "True when at least one top-level layer is in preview (Outline All Layers, else Preview All Layers); false with no layers"
+      any_layer_unlocked:
+        type: bool
+        description: "True when at least one top-level layer is unlocked (Lock All Layers, else Unlock All Layers); false with no layers"
       # Canvas-selection brush rollups (BRUSHES.md § Bottom toolbar), read by
       # brushes.yaml's Remove Brush Stroke and Brush Options for Selection
       # gates. Until W2b-18 those gates read two bare names that no port built,

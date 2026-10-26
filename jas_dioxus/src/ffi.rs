@@ -2114,7 +2114,12 @@ pub unsafe extern "C" fn jas_panel_menu(
                 serde_json::json!({
                     "index": i,
                     "kind": "item",
-                    "label": o.get("label").cloned().unwrap_or(serde_json::Value::Null),
+                    // The walk's label: its `{{expr}}` regions evaluated in the
+                    // panel's engine scope (a raw template reached the Windows
+                    // flyout until 2026-10-26, flask §564 finding J).
+                    "label": st.map_or_else(
+                        || o.get("label").cloned().unwrap_or(serde_json::Value::Null),
+                        |r| r["label"].clone()),
                     "action": o.get("action").cloned().unwrap_or(serde_json::Value::Null),
                     "enabled": st.map_or(serde_json::Value::Bool(true), |r| r["enabled"].clone()),
                     "checked": st.map_or(serde_json::Value::Null, |r| r["checked"].clone()),
@@ -6162,6 +6167,31 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&raw).unwrap().as_array().unwrap().clone()
         };
         (rows, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    /// STATUS-jas item 24 (flask §564 finding J). A panel-menu label that is a
+    /// `{{…}}` template arrives RESOLVED: the Layers menu's toggle-all rows say
+    /// what they will do to this document. Until 2026-10-26 the raw template
+    /// reached the Windows flyout. The menu is read again after Hide All
+    /// Layers, so a label stuck in either direction reds.
+    #[test]
+    fn a_panel_menu_label_template_arrives_resolved() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let label = |e: *mut JasEngine, action: &str| {
+            let (rows, err) = panel_menu(e, "layers_panel_content");
+            rows.iter().find(|r| r["action"] == action).map(|r| r["label"].clone())
+                .unwrap_or_else(|| panic!("no {action} row: {err}"))
+        };
+        assert_eq!(label(e, "toggle_all_layers_visibility"), "Hide All Layers");
+        assert_eq!(label(e, "toggle_all_layers_lock"), "Lock All Layers");
+        let req = r#"{"panel":"layers_panel_content","action":"toggle_all_layers_visibility"}"#;
+        let _reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
+        let err = take(unsafe { jas_last_error_json(e) });
+        assert!(!err.contains("Unknown"), "hide all: {err}");
+        assert_eq!(label(e, "toggle_all_layers_visibility"), "Show All Layers", "every layer is hidden now");
+        assert_eq!(label(e, "toggle_all_layers_lock"), "Lock All Layers", "the control: nothing was locked");
+        unsafe { jas_engine_free(e) };
     }
 
     #[test]

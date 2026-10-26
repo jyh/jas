@@ -1920,6 +1920,10 @@ pub(crate) fn build_active_document_view(
             // so no item is a container and none is a group.
             m.insert("layers_panel_selection_is_container".to_string(), serde_json::Value::Bool(false));
             m.insert("layers_panel_selection_has_group".to_string(), serde_json::Value::Bool(false));
+            // The Layers menu's toggle-all facts: no layers, all false.
+            for (k, v) in super::document_views::layer_facts(&[]) {
+                m.insert(k.to_string(), serde_json::Value::Bool(v));
+            }
             // The Brushes panel's two gates (W2b-18): nothing is selected.
             m.insert("selection_has_brushed_stroke".to_string(), serde_json::Value::Bool(false));
             m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
@@ -13564,6 +13568,28 @@ mod tests {
         st.tabs[st.active_tab].model.set_document_for_test(doc);
         set(&mut st, serde_json::json!(11));
         assert_eq!(points(&st).as_f64(), Some(7.0), "nothing selected: nothing");
+    }
+
+    /// STATUS-jas item 24. The web's Layers menu labels resolve from the
+    /// YAML's `{{if …}}` templates over the `active_document.any_layer_*`
+    /// facts, in the menu's own context (no native table): "Hide All Layers"
+    /// on a visible document, "Show All Layers" once every layer is hidden.
+    #[test]
+    fn the_layers_menu_labels_resolve_from_their_templates_on_the_web() {
+        use crate::panels::panel_menu::{menu_items_from_yaml, panel_menu_ctx, PanelMenuItem};
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let label = |st: &AppState, cmd: &str| {
+            let items = menu_items_from_yaml("layers_panel_content");
+            let raw = items.iter().find(|i| i.command() == Some(cmd)).and_then(PanelMenuItem::label)
+                .unwrap_or_else(|| panic!("no {cmd} row")).to_string();
+            assert!(raw.contains("{{"), "the control: the YAML label is a template: {raw}");
+            super::super::expr::eval_text(&raw, &panel_menu_ctx("layers_panel_content", st))
+        };
+        assert_eq!(label(&st, "toggle_all_layers_visibility"), "Hide All Layers");
+        assert_eq!(label(&st, "toggle_all_layers_lock"), "Lock All Layers");
+        let _ = dispatch_action("toggle_all_layers_visibility", &serde_json::Map::new(), &mut st);
+        assert_eq!(label(&st, "toggle_all_layers_visibility"), "Show All Layers", "every layer is hidden");
+        assert_eq!(label(&st, "toggle_all_layers_outline"), "Preview All Layers", "none is in preview");
     }
 
     #[test]
