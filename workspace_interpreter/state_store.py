@@ -1198,8 +1198,15 @@ class StateStore:
     def set_artboard_options_field(self, field: str, value) -> bool:
         """Write value to ``document.artboard_options[field]``. Used
         by the dialog's Global section (fade_region_outside_artboard,
-        update_while_dragging). Returns True on success."""
+        update_while_dragging). Returns True on success. The op layer's law
+        (``op_apply.apply_set_artboard_options_field``): only those two
+        fields, and only a bool. Written here rather than through the op layer
+        because test JSON does not carry ``artboard_options``, so the store
+        holds them beside its Model (item 34)."""
         if self._document is None:
+            return False
+        if field not in ("fade_region_outside_artboard", "update_while_dragging") \
+                or not isinstance(value, bool):
             return False
         options = self._document.setdefault("artboard_options", {})
         if not isinstance(options, dict):
