@@ -231,6 +231,33 @@ def _element_tree(document: dict | None, selected: list) -> list[dict]:
     return rows
 
 
+def tree_visible_rows(rows: list[dict], collapsed: list, panel_selection: list,
+                      renaming) -> list[dict]:
+    """The Layers tree's ROWS TO DRAW (STATUS-jas item 38 step 1b, flask
+    §591): `element_tree`'s rows resolved against the `tree_view` widget's
+    binds, in the core, so a materializer draws them verbatim. A row under a
+    collapsed CONTAINER is hidden; the container keeps its row. Each row gains
+    `collapsed` (true only on a container), `panel_selected` and `renaming`
+    (exact path matches). The binds are PATHS, as both ports key them; a leaf
+    or a path no row has in `collapsed` is inert. Rows arrive depth first, so
+    a parent is seen before its children."""
+    folded = {tuple(p) for p in collapsed}
+    psel = {tuple(p) for p in panel_selection}
+    ren = tuple(renaming) if renaming is not None else None
+    hidden_under: list[tuple] = []
+    out: list[dict] = []
+    for row in rows:
+        path = tuple(row["path"])
+        if any(path[:len(h)] == h for h in hidden_under):
+            continue
+        is_folded = bool(row["is_container"]) and path in folded
+        if is_folded:
+            hidden_under.append(path)
+        out.append({**row, "collapsed": is_folded, "panel_selected": path in psel,
+                    "renaming": path == ren})
+    return out
+
+
 def _native_view(elem):
     """An element of the store's document as the YAML reads it, in the native
     form (``kind``, props under ``common``), from either form the store holds:

@@ -175,6 +175,27 @@ mod tests {
             assert_eq!(element_tree(&doc), case["expected"], "{}", case["name"]);
         }
     }
+
+    /// Step 1b: the rows to draw, resolved from `element_tree` and the
+    /// widget's binds (the fixture's `visible_cases`, flask §591).
+    #[test]
+    fn tree_visible_rows_match_the_shared_fixture() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["visible_cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        let paths = |v: &Value| -> Vec<Vec<usize>> {
+            serde_json::from_value(v.clone()).unwrap()
+        };
+        for case in cases {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            let b = &case["binds"];
+            let renaming: Option<Vec<usize>> = serde_json::from_value(b["renaming"].clone()).unwrap();
+            let got = tree_visible_rows(&element_tree(&doc), &paths(&b["collapsed"]),
+                &paths(&b["panel_selection"]), renaming.as_deref());
+            assert_eq!(got, case["expected"], "{}", case["name"]);
+        }
+    }
     use crate::document::test_fixture::{brushed_path as path, model_with, rect};
 
     const B: Option<&str> = Some("default_brushes/flat_10");
@@ -340,6 +361,44 @@ pub fn element_tree(doc: &Document) -> Value {
     let top: Vec<&Element> = doc.layers.iter().collect();
     walk(&top, &[], 0, &doc.selected_paths(), &mut rows);
     Value::Array(rows)
+}
+
+/// The Layers tree's ROWS TO DRAW (STATUS-jas item 38 step 1b, flask §591):
+/// `element_tree`'s rows resolved against the `tree_view` widget's binds, in
+/// the core, so a materializer draws them verbatim. A row under a collapsed
+/// CONTAINER is hidden; the container keeps its row. Each row gains
+/// `collapsed` (true only on a container), `panel_selected` and `renaming`
+/// (exact path matches). The binds are PATHS, as both ports key them; a leaf
+/// or a path no row has in `collapsed` is inert. Mirrors the reference's
+/// `tree_visible_rows`; the shared fixture is `element_tree.json`'s
+/// `visible_cases`.
+pub fn tree_visible_rows(
+    rows: &Value,
+    collapsed: &[Vec<usize>],
+    panel_selection: &[Vec<usize>],
+    renaming: Option<&[usize]>,
+) -> Value {
+    let mut hidden_under: Vec<Vec<usize>> = Vec::new();
+    let mut out = Vec::new();
+    for row in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+        let path: Vec<usize> = row["path"].as_array().map(|p| {
+            p.iter().filter_map(|i| i.as_u64().map(|i| i as usize)).collect()
+        }).unwrap_or_default();
+        if hidden_under.iter().any(|h| path.starts_with(h)) {
+            continue;
+        }
+        let folded = row["is_container"].as_bool().unwrap_or(false)
+            && collapsed.contains(&path);
+        let mut r = row.clone();
+        r["collapsed"] = Value::Bool(folded);
+        r["panel_selected"] = Value::Bool(panel_selection.contains(&path));
+        r["renaming"] = Value::Bool(renaming == Some(path.as_slice()));
+        if folded {
+            hidden_under.push(path);
+        }
+        out.push(r);
+    }
+    Value::Array(out)
 }
 
 pub fn active_document_view(

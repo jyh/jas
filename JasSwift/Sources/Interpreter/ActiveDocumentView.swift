@@ -92,6 +92,37 @@ public func elementTree(_ doc: Document) -> [[String: Any]] {
     return rows
 }
 
+/// The Layers tree's ROWS TO DRAW (STATUS-jas item 38 step 1b, flask §591):
+/// `element_tree`'s rows resolved against the `tree_view` widget's binds, in
+/// the core, so a materializer draws them verbatim. A row under a collapsed
+/// CONTAINER is hidden; the container keeps its row. Each row gains
+/// `collapsed` (true only on a container), `panel_selected` and `renaming`
+/// (exact path matches). The binds are PATHS, as both ports key them; a leaf
+/// or a path no row has in `collapsed` is inert. Mirrors the reference's
+/// `tree_visible_rows`; the shared fixture is `element_tree.json`'s
+/// `visible_cases`.
+public func treeVisibleRows(
+    _ rows: [[String: Any]],
+    collapsed: [[Int]],
+    panelSelection: [[Int]],
+    renaming: [Int]?
+) -> [[String: Any]] {
+    var hiddenUnder: [[Int]] = []
+    var out: [[String: Any]] = []
+    for row in rows {
+        let path = row["path"] as? [Int] ?? []
+        if hiddenUnder.contains(where: { path.starts(with: $0) }) { continue }
+        let folded = (row["is_container"] as? Bool ?? false) && collapsed.contains(path)
+        var r = row
+        r["collapsed"] = folded
+        r["panel_selected"] = panelSelection.contains(path)
+        r["renaming"] = renaming == path
+        if folded { hiddenUnder.append(path) }
+        out.append(r)
+    }
+    return out
+}
+
 public func buildActiveDocumentView(
     model: Model?,
     layersPanelSelection: [[Int]] = [],
