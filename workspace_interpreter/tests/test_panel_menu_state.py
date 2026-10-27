@@ -310,14 +310,11 @@ def test_every_panel_menu_predicate_reads_a_namespace_an_app_can_build(
 def _doc_with_a_rect_and_a_group():
     """A layer holding a rect at (0, 0) and a group at (0, 1): a layer is a
     container and not a group; a group is both; a rect is neither."""
-    return {"layers": [{
-        "kind": "Layer", "name": "L0",
-        "children": [
-            {"kind": "Rect", "x": 0, "y": 0, "width": 10, "height": 10},
-            {"kind": "Group", "children": [
-                {"kind": "Rect", "x": 20, "y": 0, "width": 10, "height": 10}]},
-        ],
-    }]}
+    from workspace_interpreter.tests.store_docs import Group, Layer, Rect, store_doc
+    return store_doc(Layer(name="L0", children=(
+        Rect(x=0, y=0, width=10, height=10),
+        Group(children=(Rect(x=20, y=0, width=10, height=10),)),
+    )))
 
 
 @pytest.mark.parametrize("selection,is_container,has_group", [

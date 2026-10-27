@@ -7,18 +7,14 @@ initial_panel_state:
     - { __path__: [2] }
 initial_doc:
   layers:
-    - kind: Layer
-      name: "A"
-      common: { visibility: preview, locked: false }
-    - kind: Layer
-      name: "B"
-      common: { visibility: preview, locked: false }
-    - kind: Layer
-      name: "C"
-      common: { visibility: preview, locked: false }
+    - {children: [], locked: false, name: "A", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "B", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "C", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_doc:
   layers:
-    - kind: Layer
-      name: "B"
-      common: { visibility: preview, locked: false }
+    - {children: [], locked: false, name: "B", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_snapshots: 1

@@ -29,6 +29,8 @@ import yaml
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.tests.store_docs import (
+    Color, Group, Layer, LineTo, MoveTo, Path, Rect, Stroke, store_doc)
 
 _WS = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
 
@@ -42,28 +44,19 @@ ACTIONS = _yaml("actions.yaml")["actions"]
 BRUSHES = _yaml("panels", "brushes.yaml")
 
 
-def _path(x: float, brush: str | None) -> dict:
-    return {
-        "kind": "Path",
-        "d": [{"MoveTo": {"x": x, "y": 0.0}}, {"LineTo": {"x": x + 50.0, "y": 40.0}}],
-        "stroke": {"color": "#000000", "width": 2.0},
-        "stroke_brush": brush,
-    }
+def _path(x: float, brush: str | None) -> Path:
+    return Path(d=(MoveTo(x, 0.0), LineTo(x + 50.0, 40.0)),
+                stroke=Stroke(color=Color.from_hex("#000000"), width=2.0),
+                stroke_brush=brush)
 
 
-def _rect() -> dict:
-    return {"kind": "Rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0}
+def _rect() -> Rect:
+    return Rect(x=0.0, y=0.0, width=10.0, height=10.0)
 
 
 def _store(children: list, selection: list) -> StateStore:
-    return StateStore(document={
-        "layers": [{
-            "kind": "Layer", "name": "L",
-            "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
-            "children": children,
-        }],
-        "selection": selection,
-    })
+    return StateStore(document=store_doc(Layer(name="L", children=tuple(children)),
+                                         selected=selection))
 
 
 BRUSHED = "default_brushes/flat_10"
@@ -301,7 +294,7 @@ class TestSortBrushesByName:
 
 
 def _group(children: list) -> dict:
-    return {"kind": "Group", "children": children}
+    return Group(children=tuple(children))
 
 
 def _unused_store(children: list, selected: list[str]) -> StateStore:

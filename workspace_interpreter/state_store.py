@@ -146,6 +146,19 @@ _BRIDGED_COMMON = ("locked", "name", "id", "opacity", "transform", "visibility")
 _BRIDGED_KIND = {"layer": "Layer", "group": "Group"}
 
 
+def _op_layer_on_path() -> None:
+    """Put the op layer's import root (``jas/``, beside the frozen Python app:
+    ``document.model``, ``geometry.test_json``) on ``sys.path``. The store
+    reaches it from every op and every ``snapshot`` (item 34), so it must not
+    depend on some other module having put it there first: a test file run on
+    its own raised ``ModuleNotFoundError: document``."""
+    import os
+    import sys
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "jas"))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
 def _native_view(elem):
     """An element of the store's document as the YAML reads it, in the native
     form (``kind``, props under ``common``), from either form the store holds:
@@ -266,11 +279,14 @@ class StateStore:
         # "artboard_options": {...}}. Real apps use a native Model; tests
         # use plain dicts.
         self._document: dict | None = document
-        # The paste run (`actions.yaml` paste: 24, 48, 72 for one payload) is
-        # on the op layer's Document and test JSON does not carry it, so it is
-        # kept HERE across the bridge (`apply_op`), the way the apps keep it on
-        # the one Model their document lives in.
-        self._paste_run: tuple[str, int] | None = None
+        # The ONE op-layer Model this document lives in across ops, as the
+        # apps keep theirs (STATUS-jas item 34): built at the first op, so its
+        # undo history, journal and paste run (which test JSON does not carry)
+        # last as long as the store. ``_model_view`` is the dict as last
+        # rendered from or synced into it; ``_held_model`` syncs any edit the
+        # dict took since (a YAML write between ops) as one undoable step.
+        self._model = None
+        self._model_view: str | None = None
         # What a `doc.copy_selection_to_clipboard` copied: the selected paths
         # IN SELECTION ORDER, or None until a copy of a non-empty selection.
         # The reference names WHAT is copied; the BYTES are the apps' (see
@@ -289,6 +305,11 @@ class StateStore:
                 logging.getLogger("workspace_interpreter").info(
                     "Document had no artboards; inserted default."
                 )
+            # The Document's own top-level fields, so the dict always decodes
+            # into the held Model (item 34): a store built from a partial dict
+            # (artboards only, say) takes the empty Document's values.
+            for key, empty in (("layers", []), ("selected_layer", 0), ("selection", [])):
+                self._document.setdefault(key, empty)
         self._snapshots: list[dict] = []
 
     # ── Global state ─────────────────────────────────────────
@@ -760,6 +781,7 @@ class StateStore:
         No-op when there is no document."""
         if self._document is not None:
             self._snapshots.append(copy.deepcopy(self._document))
+            self.apply_op({"op": "snapshot"})
 
     def snapshots(self) -> list[dict]:
         """Return the snapshots list (for tests / inspection)."""
@@ -793,47 +815,38 @@ class StateStore:
         return copy.deepcopy(elem)
 
     def insert_after(self, path: tuple[int, ...], element) -> bool:
-        """Insert element at index path[-1]+1 under the parent of path."""
+        """Insert element at index path[-1]+1 under the parent of path, by the
+        op layer's ``insert_after`` (item 34: one law, not a dict copy of it).
+        True when the document changed."""
         if self._document is None or len(path) == 0:
             return False
-        if len(path) == 1:
-            layers = self._document.get("layers")
-            if not isinstance(layers, list):
-                return False
-            insert_idx = min(path[0] + 1, len(layers))
-            layers.insert(insert_idx, element)
-            return True
-        parent = self.get_element(path[:-1])
-        if parent is None or not isinstance(parent, dict):
-            return False
-        children = parent.setdefault("children", [])
-        if not isinstance(children, list):
-            return False
-        insert_idx = min(path[-1] + 1, len(children))
-        children.insert(insert_idx, element)
-        return True
+        return self._op_changed({"op": "insert_after", "path": list(path),
+                                 "element": self._as_element(element)})
 
     def insert_at(self, parent_path: tuple[int, ...], index: int, element) -> bool:
-        """Insert element at parent_path[index]."""
+        """Insert element at parent_path[index], by the op layer's
+        ``insert_at``. True when the document changed."""
         if self._document is None:
             return False
-        if len(parent_path) == 0:
-            # Parent is the document root; insert into top-level layers
-            layers = self._document.setdefault("layers", [])
-            if not isinstance(layers, list):
-                return False
-            index = max(0, min(index, len(layers)))
-            layers.insert(index, element)
-            return True
-        parent = self.get_element(parent_path)
-        if parent is None or not isinstance(parent, dict):
-            return False
-        children = parent.setdefault("children", [])
-        if not isinstance(children, list):
-            return False
-        index = max(0, min(index, len(children)))
-        children.insert(index, element)
-        return True
+        return self._op_changed({"op": "insert_at", "parent_path": list(parent_path),
+                                 "index": index, "element": self._as_element(element)})
+
+    def _as_element(self, element):
+        """An element the store holds (test JSON) as the op layer's Element,
+        which its insert ops take verbatim; None when it does not parse."""
+        self._held_model()
+        from geometry.test_json import parse_element_json
+        try:
+            return parse_element_json(element)
+        except Exception:
+            return None
+
+    def _op_changed(self, op: dict) -> bool:
+        """Apply ``op`` and answer whether the document changed (``apply_op``
+        replaces the dict only then)."""
+        before = self._document
+        self.apply_op(op)
+        return self._document is not before
 
     def make_instance(self, offset: float) -> None:
         """Object > Make Instance on the store's document: the two ops
@@ -1004,30 +1017,51 @@ class StateStore:
 
         The op layer is ``document.op_apply`` (beside the frozen Python app,
         the same import root ``effects.py`` uses for ``geometry.element``), so
-        the reference's meaning of an op IS that layer's. The document is a
-        dict here, so it is bridged through canonical test JSON, and the keys
-        the bridge does not produce (``artboard_options``) are carried across
-        untouched. An op name the layer does not know changes nothing.
+        the reference's meaning of an op IS that layer's. It runs on the
+        store's ONE held Model (``_held_model``), so ``undo``/``redo`` walk the
+        store's history and the paste run lasts; the dict is re-rendered from
+        it through canonical test JSON, and the keys the bridge does not
+        produce (``artboard_options``) are carried across untouched. An op name
+        the layer does not know changes nothing. The layer keeps a transaction
+        open between ops (a ``snapshot`` op commits it and opens the next), so
+        ops with no snapshot between them are one undo step.
         """
         if self._document is None:
             return
         import json
-        from document.model import Model
+        model = self._held_model()
         from document.op_apply import op_apply
-        from geometry.test_json import document_to_test_json, test_json_to_document
-        from dataclasses import replace
-        doc = replace(test_json_to_document(json.dumps(self._document)),
-                      paste_run=self._paste_run)
-        model = Model(document=doc)
+        from geometry.test_json import document_to_test_json
+        doc = model.document
         op_apply(model, op)
         if model.document is doc:
             return
-        self._paste_run = model.document.paste_run
         new = json.loads(document_to_test_json(model.document))
         for k, v in self._document.items():
             if k not in new:
                 new[k] = v
         self._document = new
+        self._model_view = json.dumps(new, sort_keys=True)
+
+    def _held_model(self):
+        """The store's one op-layer Model, its document synced to the dict: built
+        from the dict at the first op; afterwards, if the dict changed since it
+        was last rendered from the Model (a YAML write between ops), the change
+        enters as ONE undoable step (``edit_document``), keeping the paste run,
+        which test JSON does not carry."""
+        import json
+        from dataclasses import replace
+        _op_layer_on_path()
+        from document.model import Model
+        from geometry.test_json import test_json_to_document
+        view = json.dumps(self._document, sort_keys=True)
+        if self._model is None:
+            self._model = Model(document=test_json_to_document(json.dumps(self._document)))
+        elif view != self._model_view:
+            self._model.edit_document(replace(test_json_to_document(json.dumps(self._document)),
+                                              paste_run=self._model.document.paste_run))
+        self._model_view = view
+        return self._model
 
     def copy_selection_to_clipboard(self) -> None:
         """Edit > Copy (and Cut's orphan OK): record WHAT is copied, the
@@ -1053,30 +1087,14 @@ class StateStore:
             self.copied_paths = paths
 
     def delete_element_at(self, path: tuple[int, ...]):
-        """Delete the element at path. Returns the deleted element, or None."""
+        """Delete the element at path, by the op layer's ``delete_at``. Returns
+        the deleted element, or None."""
         if self._document is None or len(path) == 0:
             return None
-        layers = self._document.get("layers")
-        if not isinstance(layers, list):
+        elem = self.get_element(path)
+        if elem is None or not self._op_changed({"op": "delete_at", "path": list(path)}):
             return None
-        if len(path) == 1:
-            idx = path[0]
-            if idx < 0 or idx >= len(layers):
-                return None
-            return layers.pop(idx)
-        # Nested: walk to parent, then pop child
-        parent = self.get_element(path[:-1])
-        if parent is None or not isinstance(parent, dict):
-            return None
-        children = parent.get("children")
-        if not isinstance(children, list):
-            return None
-        last = path[-1]
-        if last < 0 or last >= len(children):
-            return None
-        return children.pop(last)
-
-    # ── Artboards ────────────────────────────────────────────
+        return elem
 
     def create_artboard(self, overrides: dict | None = None) -> dict | None:
         """Append a new artboard to ``document.artboards``.
@@ -1087,8 +1105,10 @@ class StateStore:
         overrides. Field overrides map 1:1 onto artboard fields (``x``,
         ``y``, ``width``, ``height``, ``fill``, display toggles).
 
-        Returns the new artboard dict (live reference inside the
-        document), or None when there is no document."""
+        The append is the op layer's ``create_artboard`` (the id and the name
+        are minted here: the op takes them verbatim). Returns the new artboard
+        dict (live inside the document until the next op), or None when there
+        is no document."""
         if self._document is None:
             return None
         artboards = self._document.setdefault("artboards", [])
@@ -1113,8 +1133,10 @@ class StateStore:
                 continue
             if k in artboard:
                 artboard[k] = v
-        artboards.append(artboard)
-        return artboard
+        if not self._op_changed({"op": "create_artboard", "id": aid,
+                                 "fields": {k: v for k, v in artboard.items() if k != "id"}}):
+            return None
+        return self.find_artboard_by_id(aid)
 
     def find_artboard_by_id(self, artboard_id: str) -> dict | None:
         """Return the live artboard dict with this id, or None."""
@@ -1129,19 +1151,14 @@ class StateStore:
         return None
 
     def delete_artboard_by_id(self, artboard_id: str) -> dict | None:
-        """Remove the artboard with this id from the list. Returns
-        the deleted dict, or None if not found. Callers enforce the
-        at-least-one-artboard invariant (via enabled_when predicates
-        in the panel yaml)."""
-        if self._document is None:
+        """Remove the artboard with this id, by the op layer's
+        ``delete_artboard_by_id``. Returns the deleted dict, or None if not
+        found. Callers enforce the at-least-one-artboard invariant (via
+        enabled_when predicates in the panel yaml)."""
+        found = self.find_artboard_by_id(artboard_id) if self._document is not None else None
+        if found is None or not self._op_changed({"op": "delete_artboard_by_id", "id": artboard_id}):
             return None
-        artboards = self._document.get("artboards")
-        if not isinstance(artboards, list):
-            return None
-        for i, a in enumerate(artboards):
-            if isinstance(a, dict) and a.get("id") == artboard_id:
-                return artboards.pop(i)
-        return None
+        return found
 
     def set_artboard_field(self, artboard_id: str, field: str, value) -> bool:
         """Write value to the named field of the artboard with this id.
@@ -1155,8 +1172,15 @@ class StateStore:
     def set_artboard_options_field(self, field: str, value) -> bool:
         """Write value to ``document.artboard_options[field]``. Used
         by the dialog's Global section (fade_region_outside_artboard,
-        update_while_dragging). Returns True on success."""
+        update_while_dragging). Returns True on success. The op layer's law
+        (``op_apply.apply_set_artboard_options_field``): only those two
+        fields, and only a bool. Written here rather than through the op layer
+        because test JSON does not carry ``artboard_options``, so the store
+        holds them beside its Model (item 34)."""
         if self._document is None:
+            return False
+        if field not in ("fade_region_outside_artboard", "update_while_dragging") \
+                or not isinstance(value, bool):
             return False
         options = self._document.setdefault("artboard_options", {})
         if not isinstance(options, dict):
@@ -1165,63 +1189,19 @@ class StateStore:
         return True
 
     def move_artboards_up(self, selected_ids: list) -> bool:
-        """Apply the swap-with-neighbor-skipping-selected rule for
-        Move Up (ARTBOARDS.md §Reordering). Iterate top-to-bottom;
-        each selected row swaps with the row above it, skipping rows
-        whose upper neighbor is itself selected or which are already
-        at position 1. Returns True if any swap occurred."""
+        """Each selected artboard swaps with the one above it, unless that one
+        is also selected or it is already at the top: the op layer's
+        ``move_artboards_up``. True if any swap occurred."""
         if self._document is None:
             return False
-        artboards = self._document.get("artboards")
-        if not isinstance(artboards, list):
-            return False
-        selected_set = {s for s in selected_ids if isinstance(s, str)}
-        changed = False
-        for i in range(len(artboards)):
-            elem = artboards[i]
-            if not isinstance(elem, dict):
-                continue
-            if elem.get("id") not in selected_set:
-                continue
-            if i == 0:
-                continue
-            above = artboards[i - 1]
-            if not isinstance(above, dict):
-                continue
-            if above.get("id") in selected_set:
-                continue
-            artboards[i - 1], artboards[i] = artboards[i], artboards[i - 1]
-            changed = True
-        return changed
+        return self._op_changed({"op": "move_artboards_up", "ids": list(selected_ids)})
 
     def move_artboards_down(self, selected_ids: list) -> bool:
-        """Symmetric to Move Up. Iterate bottom-to-top; each selected
-        row swaps with the row below it, skipping rows whose lower
-        neighbor is itself selected or which are already at the
-        bottom. Returns True if any swap occurred."""
+        """Symmetric to Move Up: the op layer's ``move_artboards_down``. True
+        if any swap occurred."""
         if self._document is None:
             return False
-        artboards = self._document.get("artboards")
-        if not isinstance(artboards, list):
-            return False
-        selected_set = {s for s in selected_ids if isinstance(s, str)}
-        changed = False
-        for i in range(len(artboards) - 1, -1, -1):
-            elem = artboards[i]
-            if not isinstance(elem, dict):
-                continue
-            if elem.get("id") not in selected_set:
-                continue
-            if i == len(artboards) - 1:
-                continue
-            below = artboards[i + 1]
-            if not isinstance(below, dict):
-                continue
-            if below.get("id") in selected_set:
-                continue
-            artboards[i], artboards[i + 1] = artboards[i + 1], artboards[i]
-            changed = True
-        return changed
+        return self._op_changed({"op": "move_artboards_down", "ids": list(selected_ids)})
 
     def duplicate_artboard(
         self, artboard_id: str, offset_x: float = 20, offset_y: float = 20
@@ -1251,13 +1231,11 @@ class StateStore:
                 break
         if aid is None:
             return None
-        dup = copy.deepcopy(source)
-        dup["id"] = aid
-        dup["name"] = next_artboard_name(artboards)
-        dup["x"] = dup.get("x", 0) + offset_x
-        dup["y"] = dup.get("y", 0) + offset_y
-        artboards.append(dup)
-        return dup
+        if not self._op_changed({"op": "duplicate_artboard", "id": artboard_id, "new_id": aid,
+                                 "name": next_artboard_name(artboards),
+                                 "offset_x": offset_x, "offset_y": offset_y}):
+            return None
+        return self.find_artboard_by_id(aid)
 
     def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
         """Write value to the element at path under dotted_field.
@@ -1286,41 +1264,19 @@ class StateStore:
         Rect→Polygon corner-drag promotion: applying a brush to a Line upgrades
         it to a Path rather than silently no-op'ing. Identity is preserved (the
         SAME dict object stays at ``path`` in its parent's children), and the
-        stroke / common / gradient / width-profile fields carry across
+        stroke / identity (name, id) / gradient / width-profile fields carry across
         untouched. A Line has no fill, so no fill is synthesised; a Polyline's
         fill carries whole. A degenerate Polyline (< 2 points) is left as-is.
 
         Returns True when a promotion happened, False otherwise (already a Path,
-        or not promotable). See BRUSHES.md §Stroke styling interaction.
+        or not promotable). See BRUSHES.md §Stroke styling interaction. The
+        element is in the store's one form, test JSON (item 34), so there is
+        no native branch.
         """
         elem = self.get_element(path)
         if not isinstance(elem, dict):
             return False
-        if "type" in elem and "kind" not in elem:
-            return _promote_bridged_for_brush(elem)
-        kind = elem.get("kind")
-        if kind == "Line":
-            x1 = elem.pop("x1", 0.0)
-            y1 = elem.pop("y1", 0.0)
-            x2 = elem.pop("x2", 0.0)
-            y2 = elem.pop("y2", 0.0)
-            elem["kind"] = "Path"
-            elem["d"] = [
-                {"MoveTo": {"x": x1, "y": y1}},
-                {"LineTo": {"x": x2, "y": y2}},
-            ]
-            return True
-        if kind == "Polyline":
-            pts = elem.get("points")
-            if isinstance(pts, list) and len(pts) >= 2:
-                d = [{"MoveTo": {"x": pts[0][0], "y": pts[0][1]}}]
-                for p in pts[1:]:
-                    d.append({"LineTo": {"x": p[0], "y": p[1]}})
-                elem.pop("points", None)
-                elem["kind"] = "Path"
-                elem["d"] = d
-                return True
-        return False
+        return _promote_bridged_for_brush(elem)
 
     # ── Context for expression evaluation ────────────────────
 
@@ -1406,6 +1362,10 @@ class StateStore:
         # Every master's live instance count (SYMBOLS.md §8): Delete Symbol
         # asks before it empties one.
         brush_facts["symbol_usage"] = self._symbol_usage()
+        # Edit > Undo / Redo's gates (runtime_contexts.yaml): the held Model's
+        # history, as the apps read their Model's. No op yet, no history.
+        brush_facts["can_undo"] = self._model is not None and self._model.can_undo
+        brush_facts["can_redo"] = self._model is not None and self._model.can_redo
         # Artboard-view computation (works whether document is None or not)
         if self._document is None:
             raw_artboards: list = []

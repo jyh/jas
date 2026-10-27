@@ -779,13 +779,26 @@ def _pasted_xs(store: StateStore) -> list[float]:
 
 
 def test_the_paste_run_survives_across_store_ops():
-    """The store bridges each op through a fresh Model; the run (on the
-    document) must cross the bridge, or a second paste lands on the first:
+    """The run (on the op layer's document, which test JSON does not carry)
+    must last across the store's ops, or a second paste lands on the first:
     the one outcome the offset exists to prevent (actions.yaml paste)."""
     store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
     for _ in range(3):
         store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
     assert _pasted_xs(store) == [24.0, 48.0, 72.0]
+
+
+def test_the_paste_run_survives_a_dict_write_between_pastes():
+    """A YAML write to the store's dict between two pastes (here a layer
+    rename) enters the held Model as a new document; the run must come with
+    it, as an app's run lives on its Model and only a paste moves it (Rust
+    `paste_run_apply`)."""
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
+    run_effects([{"doc.set": {"path": "path(0)", "fields": {"name": "'Renamed'"}}}], {}, store)
+    assert _doc_of(store).layers[0].name == "Renamed", "the control: the write landed"
+    store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
+    assert _pasted_xs(store) == [24.0, 48.0]
 
 
 def _run_yaml_action_with_params(store: StateStore, name: str, params: dict) -> None:
@@ -923,3 +936,71 @@ def test_a_brush_promotes_an_open_polyline_on_a_bridged_store_carrying_its_fill(
     assert elem["type"] == "path" and elem["fill"] == fill and "points" not in elem
     assert [c["cmd"] for c in elem["d"]] == ["M", "L", "L"]
     assert type(_doc_of(store).layers[0].children[0]).__name__ == "Path"
+
+
+@pytest.mark.parametrize("action", ["new_layer", "new_group", "collect_in_new_layer"])
+def test_a_container_made_after_an_op_leaves_the_store_parseable(action):
+    """Item 34: the YAML's container factories (`doc.create_layer`,
+    `doc.wrap_in_group`, `doc.wrap_in_layer`) made NATIVE elements; on a store
+    that had run an op they left it holding two forms, and its next op raised
+    `KeyError: 'type'`. The made container is in the store's one form, so the
+    next op parses and keeps it."""
+    store = _store(Document(layers=(Layer(name="Layer 1"), Layer(name="Layer 2"))))
+    store.init_panel("layers", {"layers_panel_selection": [{"__path__": [0]}]})
+    store.set_active_panel("layers")
+    store.apply_op({"op": "unlock_all"})
+    n = len(store.document()["layers"])
+    _run_yaml_action(store, action)
+    assert store.document()["layers"] != _store(
+        Document(layers=(Layer(name="Layer 1"), Layer(name="Layer 2")))).document()["layers"], \
+        "the control: the action changed the document"
+    store.apply_op({"op": "unlock_all"})
+    assert len(_doc_of(store).layers) == {"new_layer": n + 1, "new_group": n, "collect_in_new_layer": n}[action]
+
+
+def test_undo_and_redo_walk_the_stores_history():
+    """Item 34 step 2 (and item 36's reference half): the store holds ONE op-layer
+    `Model` across ops, so the op layer's `undo`/`redo` have a history. Before,
+    every op ran on a fresh Model and `undo` was a silent no-op."""
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    store.apply_op({"op": "unlock_all"})
+    assert _doc_of(store).layers[0].locked is False, "the control: the op ran"
+    store.apply_op({"op": "undo"})
+    assert _doc_of(store).layers[0].locked is True
+    store.apply_op({"op": "redo"})
+    assert _doc_of(store).layers[0].locked is False
+
+
+def test_an_action_that_writes_the_dict_is_one_undo_step():
+    """An action that opens with `snapshot` (as 76 in actions.yaml do) and then
+    writes the store's dict (here `doc.set`) is ONE undoable step of the held
+    Model: the snapshot checkpoints the Model, as an app's action opens its
+    transaction, and the dict write enters it when the next op runs. Without
+    the checkpoint the write would join the previous op's step."""
+    from geometry.element import Visibility
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    store.apply_op({"op": "unlock_all"})
+    run_effects([{"snapshot": None},
+                 {"doc.set": {"path": "path(0)", "fields": {"common.visibility": "'invisible'"}}}],
+                {}, store)
+    assert _doc_of(store).layers[0].visibility == Visibility.INVISIBLE, "the control: the edit landed"
+    store.apply_op({"op": "undo"})
+    after = _doc_of(store).layers[0]
+    assert (after.visibility, after.locked) == (Visibility.PREVIEW, False)
+    store.apply_op({"op": "undo"})
+    assert _doc_of(store).layers[0].locked is True
+
+
+def test_the_history_facts_follow_the_held_model():
+    """`active_document.can_undo` / `can_redo` (runtime_contexts.yaml; the
+    gates of Edit > Undo / Redo) read the store's held Model, as Rust's
+    `panel_scope` and Swift's `JasCommands` read theirs. Before any op the
+    store has no history."""
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    facts = lambda: tuple(store.eval_context()["active_document"][k] for k in ("can_undo", "can_redo"))
+    assert facts() == (False, False)
+    store.apply_op({"op": "unlock_all"})
+    assert facts() == (True, False)
+    store.apply_op({"op": "undo"})
+    assert _doc_of(store).layers[0].locked is True, "the control: the undo ran"
+    assert facts()[1] is True

@@ -10,6 +10,8 @@ from workspace_interpreter.state_store import StateStore
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.expr_types import Value, ValueType
+from workspace_interpreter.tests.store_docs import Group, Layer, store_doc
+from workspace_interpreter.tests.store_docs import Visibility as V
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -290,22 +292,22 @@ class TestPathType:
 
 
 def _make_doc(layers):
-    """Build a minimal document tree. Layers is a list of dicts like
-    {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}}."""
-    return {"layers": layers}
+    """A store document holding ``layers`` (dataclass Layers or Groups), in the
+    store's one form (``store_docs.store_doc``)."""
+    return store_doc(*layers)
 
 
 class TestSnapshotEffect:
     def test_snapshot_captures_tree(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            Layer(name='A', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects([{"snapshot": None}], {}, store)
         assert len(store.snapshots()) == 1
         # Mutating the live tree doesn't affect the snapshot
-        doc["layers"][0]["common"]["visibility"] = "invisible"
-        assert store.snapshots()[0]["layers"][0]["common"]["visibility"] == "visible"
+        doc["layers"][0]["visibility"] = "invisible"
+        assert store.snapshots()[0]["layers"][0]["visibility"] == "preview"
 
     def test_snapshot_noop_when_no_document(self):
         store = StateStore()
@@ -323,8 +325,8 @@ class TestAsReturnBinding:
 
     def test_doc_delete_at_returns_deleted_element(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
-            {"kind": "Layer", "name": "B", "common": {"visibility": "visible"}},
+            Layer(name='A', visibility=V.PREVIEW),
+            Layer(name='B', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -332,8 +334,8 @@ class TestAsReturnBinding:
             {"set": {"deleted_name": "removed.name"}},
         ], {}, store, diagnostics=[])
         # Layer B shifted to index 0, A removed
-        assert len(doc["layers"]) == 1
-        assert doc["layers"][0]["name"] == "B"
+        assert len(store.document()["layers"]) == 1
+        assert store.document()["layers"][0]["name"] == "B"
         assert store.get("deleted_name") == "A"
 
 
@@ -342,22 +344,22 @@ class TestDocDeleteAtEffect:
 
     def test_delete_top_level_layer(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
-            {"kind": "Layer", "name": "C"},
+            Layer(name='A'),
+            Layer(name='B'),
+            Layer(name='C'),
         ])
         store = StateStore(document=doc)
         run_effects([{"doc.delete_at": "path(1)"}], {}, store, diagnostics=[])
-        names = [l["name"] for l in doc["layers"]]
+        names = [l["name"] for l in store.document()["layers"]]
         assert names == ["A", "C"]
 
     def test_delete_reverse_order_via_foreach(self):
         """Deleting [0,1,2] in reverse order keeps indices valid."""
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
-            {"kind": "Layer", "name": "C"},
-            {"kind": "Layer", "name": "D"},
+            Layer(name='A'),
+            Layer(name='B'),
+            Layer(name='C'),
+            Layer(name='D'),
         ])
         store = StateStore(document=doc)
         # Use an explicit reverse-sorted path list
@@ -365,20 +367,20 @@ class TestDocDeleteAtEffect:
             {"foreach": {"source": "[path(2), path(0)]", "as": "p"},
              "do": [{"doc.delete_at": "p"}]},
         ], {}, store, diagnostics=[])
-        names = [l["name"] for l in doc["layers"]]
+        names = [l["name"] for l in store.document()["layers"]]
         assert names == ["B", "D"]
 
     def test_delete_invalid_path_is_noop(self):
-        doc = _make_doc([{"kind": "Layer", "name": "A"}])
+        doc = _make_doc([Layer(name='A')])
         store = StateStore(document=doc)
         run_effects([{"doc.delete_at": "path(5)"}], {}, store, diagnostics=[])
-        assert len(doc["layers"]) == 1
+        assert len(store.document()["layers"]) == 1
 
 
 class TestDocCloneAtEffect:
     def test_clone_at_returns_copy(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            Layer(name='A', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -386,14 +388,14 @@ class TestDocCloneAtEffect:
             {"set": {"cloned_name": "clone.name"}},
         ], {}, store, diagnostics=[])
         # Original layer untouched
-        assert len(doc["layers"]) == 1
-        assert doc["layers"][0]["name"] == "A"
+        assert len(store.document()["layers"]) == 1
+        assert store.document()["layers"][0]["name"] == "A"
         assert store.get("cloned_name") == "A"
 
     def test_clone_is_deep_copy(self):
         """Inserting the clone and mutating it does not affect the original."""
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            Layer(name='A', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -403,43 +405,43 @@ class TestDocCloneAtEffect:
                          "fields": {"common.visibility": "'invisible'"}}},
         ], {}, store, diagnostics=[])
         # Inserted clone at idx 1; mutated that; original at idx 0 untouched
-        assert doc["layers"][0]["common"]["visibility"] == "visible"
-        assert doc["layers"][1]["common"]["visibility"] == "invisible"
+        assert store.document()["layers"][0]["visibility"] == "preview"
+        assert store.document()["layers"][1]["visibility"] == "invisible"
 
 
 class TestDocInsertAfterEffect:
     def test_insert_after_top_level(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "C"},
+            Layer(name='A'),
+            Layer(name='C'),
         ])
         store = StateStore(document=doc)
-        new_layer = {"kind": "Layer", "name": "B"}
+        new_layer = store_doc(Layer(name='B'))["layers"][0]
         run_effects([
             {"doc.insert_after": {"path": "path(0)", "element": new_layer}},
         ], {}, store, diagnostics=[])
-        names = [l["name"] for l in doc["layers"]]
+        names = [l["name"] for l in store.document()["layers"]]
         assert names == ["A", "B", "C"]
 
     def test_duplicate_via_clone_and_insert_after(self):
         """End-to-end: duplicate layer 0 at position 1."""
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "preview"}},
-            {"kind": "Layer", "name": "B"},
+            Layer(name='A', visibility=V.PREVIEW),
+            Layer(name='B'),
         ])
         store = StateStore(document=doc)
         run_effects([
             {"doc.clone_at": "path(0)", "as": "clone"},
             {"doc.insert_after": {"path": "path(0)", "element": "clone"}},
         ], {}, store, diagnostics=[])
-        names = [l["name"] for l in doc["layers"]]
+        names = [l["name"] for l in store.document()["layers"]]
         assert names == ["A", "A", "B"]
 
 
 class TestDocSetEffect:
     def test_doc_set_writes_dotted_field(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible", "locked": False}},
+            Layer(name='A', visibility=V.PREVIEW, locked=False),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -448,14 +450,14 @@ class TestDocSetEffect:
                 "fields": {"common.visibility": "'invisible'"},
             }},
         ], {}, store)
-        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        assert store.document()["layers"][0]["visibility"] == "invisible"
         # Sibling fields untouched
-        assert doc["layers"][0]["common"]["locked"] is False
-        assert doc["layers"][0]["name"] == "A"
+        assert store.document()["layers"][0]["locked"] is False
+        assert store.document()["layers"][0]["name"] == "A"
 
     def test_doc_set_multiple_fields(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible", "locked": False}},
+            Layer(name='A', visibility=V.PREVIEW, locked=False),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -468,13 +470,13 @@ class TestDocSetEffect:
                 },
             }},
         ], {}, store)
-        assert doc["layers"][0]["common"]["visibility"] == "outline"
-        assert doc["layers"][0]["common"]["locked"] is True
-        assert doc["layers"][0]["name"] == "Renamed"
+        assert store.document()["layers"][0]["visibility"] == "outline"
+        assert store.document()["layers"][0]["locked"] is True
+        assert store.document()["layers"][0]["name"] == "Renamed"
 
     def test_doc_set_creates_nested_dict_if_missing(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},   # no common dict
+            Layer(name='A'),   # no common dict
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -483,11 +485,11 @@ class TestDocSetEffect:
                 "fields": {"common.visibility": "'invisible'"},
             }},
         ], {}, store)
-        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        assert store.document()["layers"][0]["visibility"] == "invisible"
 
     def test_doc_set_invalid_path_is_noop(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
+            Layer(name='A', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -496,7 +498,7 @@ class TestDocSetEffect:
                 "fields": {"common.visibility": "'invisible'"},
             }},
         ], {}, store)
-        assert doc["layers"][0]["common"]["visibility"] == "visible"
+        assert store.document()["layers"][0]["visibility"] == "preview"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -509,9 +511,9 @@ class TestDocWrapInGroupEffect:
 
     def test_wrap_two_adjacent_top_level_layers(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
-            {"kind": "Layer", "name": "C"},
+            Layer(name='A'),
+            Layer(name='B'),
+            Layer(name='C'),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -523,20 +525,20 @@ class TestDocWrapInGroupEffect:
             }},
         ], {}, store, diagnostics=[])
         # After: new Group at index 0 containing {A, B}, then C
-        assert len(doc["layers"]) == 2
-        assert doc["layers"][0]["kind"] == "Group"
-        group = doc["layers"][0]
+        assert len(store.document()["layers"]) == 2
+        assert store.document()["layers"][0]["type"] == "group"
+        group = store.document()["layers"][0]
         assert len(group["children"]) == 2
         assert group["children"][0]["name"] == "A"
         assert group["children"][1]["name"] == "B"
-        assert doc["layers"][1]["name"] == "C"
+        assert store.document()["layers"][1]["name"] == "C"
 
     def test_wrap_preserves_order_of_selection_paths(self):
         """Children appear in the source document's order, not selection order."""
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
-            {"kind": "Layer", "name": "C"},
+            Layer(name='A'),
+            Layer(name='B'),
+            Layer(name='C'),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -547,12 +549,12 @@ class TestDocWrapInGroupEffect:
                 ],
             }},
         ], {}, store, diagnostics=[])
-        assert len(doc["layers"]) == 2
-        group = doc["layers"][0]
+        assert len(store.document()["layers"]) == 2
+        group = store.document()["layers"][0]
         # Children in document order: A, C
         assert [c["name"] for c in group["children"]] == ["A", "C"]
         # Middle layer B remains
-        assert doc["layers"][1]["name"] == "B"
+        assert store.document()["layers"][1]["name"] == "B"
 
 
 class TestNewGroupAction:
@@ -569,9 +571,9 @@ class TestNewGroupAction:
         os = _os
         effects = self._load_action("new_group")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
-            {"kind": "Layer", "name": "C"},
+            Layer(name='A'),
+            Layer(name='B'),
+            Layer(name='C'),
         ])
         store = StateStore(document=doc)
         store.init_panel("layers", {
@@ -583,10 +585,10 @@ class TestNewGroupAction:
         store.set_active_panel("layers")
         run_effects(effects, {}, store, diagnostics=[])
         # Expect: Group(A,C) at index 0, B at index 1
-        assert len(doc["layers"]) == 2
-        assert doc["layers"][0]["kind"] == "Group"
-        assert [c["name"] for c in doc["layers"][0]["children"]] == ["A", "C"]
-        assert doc["layers"][1]["name"] == "B"
+        assert len(store.document()["layers"]) == 2
+        assert store.document()["layers"][0]["type"] == "group"
+        assert [c["name"] for c in store.document()["layers"][0]["children"]] == ["A", "C"]
+        assert store.document()["layers"][1]["name"] == "B"
 
 
 class TestDocWrapInLayerEffect:
@@ -597,8 +599,8 @@ class TestDocWrapInLayerEffect:
 
     def test_wrap_in_layer_appends_at_end(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
+            Layer(name='A'),
+            Layer(name='B'),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -608,17 +610,17 @@ class TestDocWrapInLayerEffect:
             }},
         ], {}, store, diagnostics=[])
         # After: single Layer 'Collected' at the end, containing A + B
-        assert len(doc["layers"]) == 1
-        assert doc["layers"][0]["kind"] == "Layer"
-        assert doc["layers"][0]["name"] == "Collected"
-        children = doc["layers"][0]["children"]
+        assert len(store.document()["layers"]) == 1
+        assert store.document()["layers"][0]["type"] == "layer"
+        assert store.document()["layers"][0]["name"] == "Collected"
+        children = store.document()["layers"][0]["children"]
         assert [c["name"] for c in children] == ["A", "B"]
 
     def test_wrap_in_layer_partial_selection_goes_to_end(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Layer", "name": "B"},
-            {"kind": "Layer", "name": "C"},
+            Layer(name='A'),
+            Layer(name='B'),
+            Layer(name='C'),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -628,10 +630,10 @@ class TestDocWrapInLayerEffect:
             }},
         ], {}, store, diagnostics=[])
         # After: B at idx 0, Collected(A,C) at idx 1 (appended at end)
-        assert len(doc["layers"]) == 2
-        assert doc["layers"][0]["name"] == "B"
-        assert doc["layers"][1]["name"] == "Collected"
-        assert [c["name"] for c in doc["layers"][1]["children"]] == ["A", "C"]
+        assert len(store.document()["layers"]) == 2
+        assert store.document()["layers"][0]["name"] == "B"
+        assert store.document()["layers"][1]["name"] == "Collected"
+        assert [c["name"] for c in store.document()["layers"][1]["children"]] == ["A", "C"]
 
 
 class TestCollectInNewLayerAction:
@@ -648,9 +650,9 @@ class TestCollectInNewLayerAction:
         os = _os
         effects = self._load_action("collect_in_new_layer")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Layer 1"},
-            {"kind": "Layer", "name": "Layer 2"},
-            {"kind": "Layer", "name": "Layer 3"},
+            Layer(name='Layer 1'),
+            Layer(name='Layer 2'),
+            Layer(name='Layer 3'),
         ])
         store = StateStore(document=doc)
         store.init_panel("layers", {
@@ -663,10 +665,10 @@ class TestCollectInNewLayerAction:
         run_effects(effects, {}, store, diagnostics=[])
         # After: Layer 2 at idx 0 (survivor), new auto-named Layer 4 at
         # end containing Layer 1 + Layer 3 in document order.
-        assert len(doc["layers"]) == 2
-        assert doc["layers"][0]["name"] == "Layer 2"
-        new_layer = doc["layers"][1]
-        assert new_layer["kind"] == "Layer"
+        assert len(store.document()["layers"]) == 2
+        assert store.document()["layers"][0]["name"] == "Layer 2"
+        new_layer = store.document()["layers"][1]
+        assert new_layer["type"] == "layer"
         assert new_layer["name"] == "Layer 4"
         assert [c["name"] for c in new_layer["children"]] == ["Layer 1", "Layer 3"]
 
@@ -676,40 +678,37 @@ class TestDocUnpackGroupAtEffect:
 
     def test_unpack_top_level_group(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Group", "name": "G", "children": [
-                {"kind": "Layer", "name": "child1"},
-                {"kind": "Layer", "name": "child2"},
-            ]},
-            {"kind": "Layer", "name": "B"},
+            Layer(name='A'),
+            Group(name='G', children=(Layer(name='child1'), Layer(name='child2'), )),
+            Layer(name='B'),
         ])
         store = StateStore(document=doc)
         run_effects([
             {"doc.unpack_group_at": "path(1)"},
         ], {}, store, diagnostics=[])
         # After: A, child1, child2, B
-        assert len(doc["layers"]) == 4
-        assert [l["name"] for l in doc["layers"]] == ["A", "child1", "child2", "B"]
+        assert len(store.document()["layers"]) == 4
+        assert [l["name"] for l in store.document()["layers"]] == ["A", "child1", "child2", "B"]
 
     def test_unpack_non_group_is_noop(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
+            Layer(name='A'),
         ])
         store = StateStore(document=doc)
         run_effects([{"doc.unpack_group_at": "path(0)"}], {}, store, diagnostics=[])
         # Layer is not a Group — noop (or deleted? spec says noop)
-        assert len(doc["layers"]) == 1
-        assert doc["layers"][0]["name"] == "A"
+        assert len(store.document()["layers"]) == 1
+        assert store.document()["layers"][0]["name"] == "A"
 
     def test_unpack_empty_group_just_removes_it(self):
         doc = _make_doc([
-            {"kind": "Group", "name": "G", "children": []},
-            {"kind": "Layer", "name": "B"},
+            Group(name='G', children=()),
+            Layer(name='B'),
         ])
         store = StateStore(document=doc)
         run_effects([{"doc.unpack_group_at": "path(0)"}], {}, store, diagnostics=[])
-        assert len(doc["layers"]) == 1
-        assert doc["layers"][0]["name"] == "B"
+        assert len(store.document()["layers"]) == 1
+        assert store.document()["layers"][0]["name"] == "B"
 
 
 class TestFlattenArtworkAction:
@@ -726,12 +725,9 @@ class TestFlattenArtworkAction:
         os = _os
         effects = self._load_action("flatten_artwork")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Group", "name": "G", "children": [
-                {"kind": "Layer", "name": "c1"},
-                {"kind": "Layer", "name": "c2"},
-            ]},
-            {"kind": "Layer", "name": "B"},
+            Layer(name='A'),
+            Group(name='G', children=(Layer(name='c1'), Layer(name='c2'), )),
+            Layer(name='B'),
         ])
         store = StateStore(document=doc)
         store.init_panel("layers", {
@@ -739,7 +735,7 @@ class TestFlattenArtworkAction:
         })
         store.set_active_panel("layers")
         run_effects(effects, {}, store, diagnostics=[])
-        assert [l["name"] for l in doc["layers"]] == ["A", "c1", "c2", "B"]
+        assert [l["name"] for l in store.document()["layers"]] == ["A", "c1", "c2", "B"]
 
 
 class TestEnterIsolationModeAction:
@@ -829,7 +825,7 @@ class TestDocCreateLayerEffect:
 
     def test_create_layer_then_insert_at(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "preview"}},
+            Layer(name='A', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects([
@@ -837,9 +833,9 @@ class TestDocCreateLayerEffect:
             {"doc.insert_at": {"parent_path": "path()",
                                 "index": "1", "element": "new_layer"}},
         ], {}, store, diagnostics=[])
-        assert len(doc["layers"]) == 2
-        assert doc["layers"][1]["name"] == "Layer 2"
-        assert doc["layers"][1]["kind"] == "Layer"
+        assert len(store.document()["layers"]) == 2
+        assert store.document()["layers"][1]["name"] == "Layer 2"
+        assert store.document()["layers"][1]["type"] == "layer"
 
     def test_create_layer_default_fields(self):
         doc = _make_doc([])
@@ -849,11 +845,11 @@ class TestDocCreateLayerEffect:
             {"doc.insert_at": {"parent_path": "path()",
                                 "index": "0", "element": "l"}},
         ], {}, store, diagnostics=[])
-        layer = doc["layers"][0]
-        assert layer["kind"] == "Layer"
+        layer = store.document()["layers"][0]
+        assert layer["type"] == "layer"
         assert layer["name"] == "Solo"
-        assert layer.get("common", {}).get("visibility") == "preview"
-        assert layer.get("common", {}).get("locked") is False
+        assert layer["visibility"] == "preview"
+        assert layer["locked"] is False
         assert layer.get("children") == []
 
 
@@ -873,15 +869,15 @@ class TestNewLayerAction:
         os = _os
         effects = self._load_action("new_layer")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Layer 1"},
+            Layer(name='Layer 1'),
         ])
         store = StateStore(document=doc)
         store.init_panel("layers", {"layers_panel_selection": []})
         store.set_active_panel("layers")
         run_effects(effects, {}, store, diagnostics=[])
-        assert len(doc["layers"]) == 2
+        assert len(store.document()["layers"]) == 2
         # Auto-generated name skips "Layer 1"
-        assert doc["layers"][1]["name"] == "Layer 2"
+        assert store.document()["layers"][1]["name"] == "Layer 2"
 
     def test_new_layer_with_selection_inserts_above(self):
         import os as _os
@@ -889,9 +885,9 @@ class TestNewLayerAction:
         os = _os
         effects = self._load_action("new_layer")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Layer 1"},
-            {"kind": "Layer", "name": "Layer 2"},
-            {"kind": "Layer", "name": "Layer 3"},
+            Layer(name='Layer 1'),
+            Layer(name='Layer 2'),
+            Layer(name='Layer 3'),
         ])
         store = StateStore(document=doc)
         # Select layer at index 1 (middle)
@@ -900,12 +896,12 @@ class TestNewLayerAction:
         })
         store.set_active_panel("layers")
         run_effects(effects, {}, store, diagnostics=[])
-        assert len(doc["layers"]) == 4
+        assert len(store.document()["layers"]) == 4
         # Insert at index 1+1 = 2
         # Names taken: {Layer 1, Layer 2, Layer 3}, next unused: Layer 4
-        assert doc["layers"][2]["name"] == "Layer 4"
+        assert store.document()["layers"][2]["name"] == "Layer 4"
         # Old Layer 3 shifted to index 3
-        assert doc["layers"][3]["name"] == "Layer 3"
+        assert store.document()["layers"][3]["name"] == "Layer 3"
 
 
 class TestLayerOptionsConfirmAction:
@@ -929,8 +925,7 @@ class TestLayerOptionsConfirmAction:
         os = _os
         effects = self._load_action("layer_options_confirm")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Old",
-             "common": {"visibility": "preview", "locked": False}},
+            Layer(name='Old', visibility=V.PREVIEW, locked=False),
         ])
         store = StateStore(document=doc)
         ctx = {"param": {
@@ -941,10 +936,10 @@ class TestLayerOptionsConfirmAction:
             "preview": False,       # show=true, preview=false → outline
         }}
         run_effects(effects, ctx, store, diagnostics=[])
-        layer = doc["layers"][0]
+        layer = store.document()["layers"][0]
         assert layer["name"] == "Renamed"
-        assert layer["common"]["locked"] is True
-        assert layer["common"]["visibility"] == "outline"
+        assert layer["locked"] is True
+        assert layer["visibility"] == "outline"
 
     def test_edit_mode_show_false_maps_to_invisible(self):
         import os as _os
@@ -952,8 +947,7 @@ class TestLayerOptionsConfirmAction:
         os = _os
         effects = self._load_action("layer_options_confirm")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "A",
-             "common": {"visibility": "preview", "locked": False}},
+            Layer(name='A', visibility=V.PREVIEW, locked=False),
         ])
         store = StateStore(document=doc)
         ctx = {"param": {
@@ -964,7 +958,7 @@ class TestLayerOptionsConfirmAction:
             "preview": True,
         }}
         run_effects(effects, ctx, store, diagnostics=[])
-        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        assert store.document()["layers"][0]["visibility"] == "invisible"
 
     def test_create_mode_appends_new_layer(self):
         import os as _os
@@ -972,7 +966,7 @@ class TestLayerOptionsConfirmAction:
         os = _os
         effects = self._load_action("layer_options_confirm")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Existing"},
+            Layer(name='Existing'),
         ])
         store = StateStore(document=doc)
         store.init_panel("layers", {"layers_panel_selection": []})
@@ -985,12 +979,12 @@ class TestLayerOptionsConfirmAction:
             "preview": True,
         }}
         run_effects(effects, ctx, store, diagnostics=[])
-        assert len(doc["layers"]) == 2
+        assert len(store.document()["layers"]) == 2
         # Appended at the end since nothing was selected
-        new_layer = doc["layers"][1]
+        new_layer = store.document()["layers"][1]
         assert new_layer["name"] == "Brand New"
-        assert new_layer["common"]["visibility"] == "preview"
-        assert new_layer["common"]["locked"] is False
+        assert new_layer["visibility"] == "preview"
+        assert new_layer["locked"] is False
 
     def test_create_mode_inserts_above_selection(self):
         import os as _os
@@ -998,9 +992,9 @@ class TestLayerOptionsConfirmAction:
         os = _os
         effects = self._load_action("layer_options_confirm")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Layer 1"},
-            {"kind": "Layer", "name": "Layer 2"},
-            {"kind": "Layer", "name": "Layer 3"},
+            Layer(name='Layer 1'),
+            Layer(name='Layer 2'),
+            Layer(name='Layer 3'),
         ])
         store = StateStore(document=doc)
         # Select layer at index 1 — new layer inserts at index 2.
@@ -1016,12 +1010,12 @@ class TestLayerOptionsConfirmAction:
             "preview": False,
         }}
         run_effects(effects, ctx, store, diagnostics=[])
-        assert len(doc["layers"]) == 4
-        assert doc["layers"][2]["name"] == "Inserted"
-        assert doc["layers"][2]["common"]["locked"] is True
-        assert doc["layers"][2]["common"]["visibility"] == "outline"
+        assert len(store.document()["layers"]) == 4
+        assert store.document()["layers"][2]["name"] == "Inserted"
+        assert store.document()["layers"][2]["locked"] is True
+        assert store.document()["layers"][2]["visibility"] == "outline"
         # Old index-2 layer shifted to index 3
-        assert doc["layers"][3]["name"] == "Layer 3"
+        assert store.document()["layers"][3]["name"] == "Layer 3"
 
 
 class TestElementAtFunction:
@@ -1034,8 +1028,7 @@ class TestElementAtFunction:
 
     def test_top_level_layer_returns_element(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A",
-             "common": {"visibility": "preview", "locked": False}},
+            Layer(name='A', visibility=V.PREVIEW, locked=False),
         ])
         store = StateStore(document=doc)
         ctx = store.eval_context()
@@ -1043,14 +1036,14 @@ class TestElementAtFunction:
         assert r.value == "A"
 
     def test_invalid_index_returns_null(self):
-        doc = _make_doc([{"kind": "Layer", "name": "A"}])
+        doc = _make_doc([Layer(name='A')])
         store = StateStore(document=doc)
         ctx = store.eval_context()
         r = evaluate("element_at(path(5))", ctx)
         assert r.value is None
 
     def test_non_path_arg_returns_null(self):
-        doc = _make_doc([{"kind": "Layer", "name": "A"}])
+        doc = _make_doc([Layer(name='A')])
         store = StateStore(document=doc)
         ctx = store.eval_context()
         r = evaluate("element_at('oops')", ctx)
@@ -1058,9 +1051,7 @@ class TestElementAtFunction:
 
     def test_nested_path_walks_children(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "parent", "children": [
-                {"kind": "Layer", "name": "nested"},
-            ]},
+            Layer(name='parent', children=(Layer(name='nested'), )),
         ])
         store = StateStore(document=doc)
         ctx = store.eval_context()
@@ -1069,8 +1060,7 @@ class TestElementAtFunction:
 
     def test_reads_common_fields(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A",
-             "common": {"visibility": "invisible", "locked": True}},
+            Layer(name='A', visibility=V.INVISIBLE, locked=True),
         ])
         store = StateStore(document=doc)
         ctx = store.eval_context()
@@ -1101,8 +1091,7 @@ class TestOpenLayerOptionsAction:
         os = _os
         effects = self._load_action("open_layer_options")["effects"]
         doc = _make_doc([
-            {"kind": "Layer", "name": "Target",
-             "common": {"visibility": "outline", "locked": True}},
+            Layer(name='Target', visibility=V.OUTLINE, locked=True),
         ])
         # Load dialog definitions so open_dialog can resolve the id.
         import yaml as yl
@@ -1145,9 +1134,9 @@ class TestOpenLayerOptionsAction:
 class TestActiveDocumentRollups:
     def test_top_level_layers(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
-            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
-            {"kind": "Group", "name": "G"},   # not a Layer — excluded
+            Layer(name='A', visibility=V.PREVIEW),
+            Layer(name='B', visibility=V.INVISIBLE),
+            Group(name='G'),   # not a Layer — excluded
         ])
         store = StateStore(document=doc)
         ctx = store.eval_context()
@@ -1159,9 +1148,9 @@ class TestActiveDocumentRollups:
 
     def test_top_level_layer_paths(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A"},
-            {"kind": "Group", "name": "G"},
-            {"kind": "Layer", "name": "B"},
+            Layer(name='A'),
+            Group(name='G'),
+            Layer(name='B'),
         ])
         store = StateStore(document=doc)
         # Paths: A is at index 0, B is at index 2
@@ -1174,14 +1163,14 @@ class TestActiveDocumentRollups:
     def test_any_on_top_level_layers(self):
         """Integration: HOF over top_level_layers reads live fields."""
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
-            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+            Layer(name='A', visibility=V.PREVIEW),
+            Layer(name='B', visibility=V.INVISIBLE),
         ])
         store = StateStore(document=doc)
         ctx = store.eval_context()
         r = evaluate(
             "any(active_document.top_level_layers, "
-            "fun l -> l.common.visibility == 'visible')",
+            "fun l -> l.common.visibility == 'preview')",
             ctx,
         )
         assert r.value is True
@@ -1208,33 +1197,33 @@ class TestToggleAllLayersVisibility:
 
     def test_toggle_when_any_visible_all_become_invisible(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
-            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+            Layer(name='A', visibility=V.PREVIEW),
+            Layer(name='B', visibility=V.INVISIBLE),
         ])
         store = StateStore(document=doc)
         run_effects(self.EFFECTS, {}, store)
-        assert doc["layers"][0]["common"]["visibility"] == "invisible"
-        assert doc["layers"][1]["common"]["visibility"] == "invisible"
+        assert store.document()["layers"][0]["visibility"] == "invisible"
+        assert store.document()["layers"][1]["visibility"] == "invisible"
         assert len(store.snapshots()) == 1
 
     def test_toggle_when_all_invisible_all_become_preview(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "invisible"}},
-            {"kind": "Layer", "name": "B", "common": {"visibility": "invisible"}},
+            Layer(name='A', visibility=V.INVISIBLE),
+            Layer(name='B', visibility=V.INVISIBLE),
         ])
         store = StateStore(document=doc)
         run_effects(self.EFFECTS, {}, store)
-        assert doc["layers"][0]["common"]["visibility"] == "preview"
-        assert doc["layers"][1]["common"]["visibility"] == "preview"
+        assert store.document()["layers"][0]["visibility"] == "preview"
+        assert store.document()["layers"][1]["visibility"] == "preview"
 
     def test_toggle_skips_non_layer_elements(self):
         doc = _make_doc([
-            {"kind": "Layer", "name": "A", "common": {"visibility": "visible"}},
-            {"kind": "Group", "name": "G", "common": {"visibility": "visible"}},
+            Layer(name='A', visibility=V.PREVIEW),
+            Group(name='G', visibility=V.PREVIEW),
         ])
         store = StateStore(document=doc)
         run_effects(self.EFFECTS, {}, store)
         # Layer toggled
-        assert doc["layers"][0]["common"]["visibility"] == "invisible"
+        assert store.document()["layers"][0]["visibility"] == "invisible"
         # Group was not in top_level_layer_paths, left alone
-        assert doc["layers"][1]["common"]["visibility"] == "visible"
+        assert store.document()["layers"][1]["visibility"] == "preview"
