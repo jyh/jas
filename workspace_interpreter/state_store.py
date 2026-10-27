@@ -246,6 +246,12 @@ class StateStore:
         # kept HERE across the bridge (`apply_op`), the way the apps keep it on
         # the one Model their document lives in.
         self._paste_run: tuple[str, int] | None = None
+        # What a `doc.copy_selection_to_clipboard` copied: the selected paths
+        # IN SELECTION ORDER, or None until a copy of a non-empty selection.
+        # The reference names WHAT is copied; the BYTES are the apps' (see
+        # copy_selection_to_clipboard), as the engine names its payload and
+        # leaves the system clipboard to the shell.
+        self.copied_paths: list[tuple[int, ...]] | None = None
         # Random-like rng (has .choices()) used for artboard id generation.
         # ensure_artboards_invariant expects a zero-arg callable, so wrap.
         self._artboard_id_rng = artboard_id_generator
@@ -997,6 +1003,29 @@ class StateStore:
             if k not in new:
                 new[k] = v
         self._document = new
+
+    def copy_selection_to_clipboard(self) -> None:
+        """Edit > Copy (and Cut's orphan OK): record WHAT is copied, the
+        selected paths that resolve, IN SELECTION ORDER (the store's own
+        ``selection`` list; the op layer's selection is a set and its test
+        JSON sorts by path). Nothing selected records nothing; a copy edits
+        nothing.
+
+        ⛔ NOT THE BYTES, and deliberately: the payload is SVG whose viewBox
+        is the copied elements' bounds, and the reference's SVG writer
+        measures text with Qt font metrics (``geometry.element`` Text.bounds),
+        which ABORTS the process without a running application. The bytes are
+        pinned where they are produced, byte for byte across the apps
+        (``test_fixtures/clipboard/copy_payload.json``)."""
+        if self._document is None:
+            return
+        paths = []
+        for es in self._document.get("selection") or []:
+            path = es.get("path") if isinstance(es, dict) else None
+            if isinstance(path, list) and self.get_element(tuple(path)) is not None:
+                paths.append(tuple(path))
+        if paths:
+            self.copied_paths = paths
 
     def delete_element_at(self, path: tuple[int, ...]):
         """Delete the element at path. Returns the deleted element, or None."""

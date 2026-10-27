@@ -684,14 +684,13 @@ public enum LayersPanel {
         // no journal): write the current selection's SVG to the system
         // pasteboard, mirroring the menu Cut copy-half. Paired with
         // doc.delete_selection in cut_orphan_confirm_ok.
-        let docCopySelectionToClipboardHandler: PlatformEffect = { _, _, _ in
-            let doc = model.document
-            let elements = doc.selection.map { doc.getElement($0.path) }
-            guard !elements.isEmpty else { return nil }
-            let svg = documentToSvg(Document(layers: [Layer(children: elements)]))
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(svg, forType: .string)
+        // ONE payload body (``EditClipboard/copySelection(_:pasteboard:)``),
+        // not a second copy of it. The pasteboard is the system one unless the
+        // caller names another (``EditClipboard/copy(model:pasteboard:)``).
+        let docCopySelectionToClipboardHandler: PlatformEffect = { _, callCtx, _ in
+            let name = (callCtx["param"] as? [String: Any])?["pasteboard"] as? String
+            let pasteboard = name.map { NSPasteboard(name: NSPasteboard.Name(rawValue: $0)) } ?? .general
+            EditClipboard.copySelection(model, pasteboard: pasteboard)
             return nil
         }
 

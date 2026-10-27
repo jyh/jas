@@ -178,9 +178,7 @@
       "tier": 3,
       "enabled_when": "active_document.has_selection",
       "effects": [
-        {
-          "log": "copy: selection to clipboard"
-        }
+        "doc.copy_selection_to_clipboard"
       ]
     },
     "paste": {

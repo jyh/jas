@@ -834,3 +834,42 @@ def test_only_paste_preserving_layers_brings_a_named_layer_across(name, layers):
     store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
     _run_yaml_action_with_params(store, name, {"clipboard": sky})
     assert sorted(l.name for l in _doc_of(store).layers) == sorted(layers)
+
+
+# ── Clipboard M′ (d): copy runs its YAML (`doc.copy_selection_to_clipboard`) ──
+
+def _copy_cases():
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures")
+    with open(os.path.join(root, "clipboard", "copy_payload.json"), encoding="utf-8") as f:
+        return root, json.load(f)
+
+
+def _store_on_svg(root: str, name: str, select: list) -> StateStore:
+    from geometry.svg import svg_to_document
+    with open(os.path.join(root, "svg", name), encoding="utf-8") as f:
+        doc = svg_to_document(f.read())
+    d = json.loads(document_to_test_json(doc))
+    # The selection in the case's own ORDER (the bridge sorts it by path).
+    d["selection"] = [{"kind": "all", "path": list(p)} for p in select]
+    return StateStore(document=d)
+
+
+def test_copy_from_actions_yaml_records_the_selection_in_selection_order():
+    """`actions.yaml` copy runs `doc.copy_selection_to_clipboard`. The
+    reference records WHAT is copied, the selected paths IN SELECTION ORDER
+    (the order the shared corpus pins, `test_fixtures/clipboard/
+    copy_payload.json`); the BYTES are pinned by the apps' runners of that
+    same corpus (see `StateStore.copy_selection_to_clipboard` for why).
+    Nothing selected records nothing, and a copy edits nothing."""
+    root, cases = _copy_cases()
+    assert len(cases) >= 3
+    assert any(len(c["select"]) > 1 and c["select"] != sorted(c["select"]) for c in cases), \
+        "the control: some case's selection order is not path order"
+    for case in cases:
+        store = _store_on_svg(root, case["setup_svg"], case["select"])
+        before = json.dumps(store._document, sort_keys=True)
+        _run_yaml_action(store, "copy")
+        want = [tuple(p) for p in case["select"]] or None
+        assert store.copied_paths == want, case["name"]
+        assert (store.copied_paths is None) == (case["expected_svg"] is None), case["name"]
+        assert json.dumps(store._document, sort_keys=True) == before, case["name"]

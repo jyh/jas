@@ -83,6 +83,16 @@ public enum EditClipboard {
                                 offset: offset, preserveLayers: preserveLayers)
     }
 
+    /// THE COPY ROUTE: Edit > Copy and the canvas context menu's Copy run the
+    /// action's YAML (`doc.copy_selection_to_clipboard`), whose handler writes
+    /// ``selectionPayload(_:)`` through ``copySelection(_:pasteboard:)``. The
+    /// pasteboard is named in the action's params so a test can use a private
+    /// one, as ``pasteClipboard(_:offset:pasteboard:preserveLayers:)`` allows.
+    static func copy(model: Model, pasteboard: NSPasteboard = .general) {
+        LayersPanel.dispatchYamlAction("copy", model: model,
+                                       params: ["pasteboard": pasteboard.name.rawValue])
+    }
+
     /// THE PASTE ROUTE: Paste, Paste in Place and Paste Preserving Layers, from
     /// the menubar and the canvas context menu. The pasteboard read goes to the
     /// action's YAML as its `clipboard` param (null when unreadable), and

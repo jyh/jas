@@ -1348,8 +1348,8 @@ fn colour_value_commit(
 /// One clipboard verb, as the web menu runs it (`menu_bar.rs`), with the
 /// system clipboard on the far side of the reply:
 ///
-/// * Copy names the selection's payload (`selection_clipboard_svg`, the web's
-///   and Swift's bytes) and edits nothing.
+/// * Copy is not run here: its YAML is (`doc.copy_selection_to_clipboard`,
+///   which [`EngineHost`] claims and names as `clipboard_write`).
 /// * Cut names the payload and deletes the selection as ONE undo step
 ///   (`journal_delete_selection`, `cut_selection`), unless deleting would
 ///   ORPHAN a live instance: then it opens `cut_orphan_confirm` with its
@@ -1368,10 +1368,7 @@ fn run_clipboard_verb(engine: &JasEngine, verb: crate::workspace::menu_native::C
     use crate::workspace::menu_native::ClipVerb;
     let still = Ran { doc_changed: false, state_changed: false };
     match verb {
-        ClipVerb::Copy => {
-            let payload = engine.with_document(crate::document::op_apply::selection_clipboard_svg);
-            (still, Named { clipboard_write: payload, ..Named::default() })
-        }
+        ClipVerb::Copy => unreachable!("a copy runs its YAML (`doc.copy_selection_to_clipboard`)"),
         ClipVerb::Cut => {
             let mut store = engine.store.borrow_mut();
             let mut model = engine.model.borrow_mut();
@@ -1748,7 +1745,10 @@ pub unsafe extern "C" fn jas_dispatch_action(
     };
     let (ran, named) = if let Some(ran) = session {
         (Ok(ran), Named::default())
-    } else if let Some(verb) = clip_verb.filter(|_| !is_paste) {
+    // Copy runs its YAML too (`doc.copy_selection_to_clipboard`, which
+    // [`EngineHost`] claims and NAMES as `clipboard_write`); only Cut stays
+    // here, because its YAML would open the DELETE confirm.
+    } else if let Some(verb) = clip_verb.filter(|v| *v == crate::workspace::menu_native::ClipVerb::Cut) {
         let (ran, named) = run_clipboard_verb(engine, verb, req.get("clipboard"));
         (Ok(ran), named)
     } else if let Some(ran) = revert {
