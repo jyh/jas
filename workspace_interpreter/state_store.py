@@ -1264,41 +1264,19 @@ class StateStore:
         Rect→Polygon corner-drag promotion: applying a brush to a Line upgrades
         it to a Path rather than silently no-op'ing. Identity is preserved (the
         SAME dict object stays at ``path`` in its parent's children), and the
-        stroke / common / gradient / width-profile fields carry across
+        stroke / identity (name, id) / gradient / width-profile fields carry across
         untouched. A Line has no fill, so no fill is synthesised; a Polyline's
         fill carries whole. A degenerate Polyline (< 2 points) is left as-is.
 
         Returns True when a promotion happened, False otherwise (already a Path,
-        or not promotable). See BRUSHES.md §Stroke styling interaction.
+        or not promotable). See BRUSHES.md §Stroke styling interaction. The
+        element is in the store's one form, test JSON (item 34), so there is
+        no native branch.
         """
         elem = self.get_element(path)
         if not isinstance(elem, dict):
             return False
-        if "type" in elem and "kind" not in elem:
-            return _promote_bridged_for_brush(elem)
-        kind = elem.get("kind")
-        if kind == "Line":
-            x1 = elem.pop("x1", 0.0)
-            y1 = elem.pop("y1", 0.0)
-            x2 = elem.pop("x2", 0.0)
-            y2 = elem.pop("y2", 0.0)
-            elem["kind"] = "Path"
-            elem["d"] = [
-                {"MoveTo": {"x": x1, "y": y1}},
-                {"LineTo": {"x": x2, "y": y2}},
-            ]
-            return True
-        if kind == "Polyline":
-            pts = elem.get("points")
-            if isinstance(pts, list) and len(pts) >= 2:
-                d = [{"MoveTo": {"x": pts[0][0], "y": pts[0][1]}}]
-                for p in pts[1:]:
-                    d.append({"LineTo": {"x": p[0], "y": p[1]}})
-                elem.pop("points", None)
-                elem["kind"] = "Path"
-                elem["d"] = d
-                return True
-        return False
+        return _promote_bridged_for_brush(elem)
 
     # ── Context for expression evaluation ────────────────────
 

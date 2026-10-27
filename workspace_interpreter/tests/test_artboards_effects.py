@@ -563,6 +563,14 @@ class TestStoreArtboardHelpers:
         assert dup["y"] == 220
         assert len(s.document()["artboards"]) == 2
 
+    def test_duplicate_offsets_each_axis_by_its_own_offset(self):
+        # Unequal offsets: the default 20/20 cannot tell x's from y's.
+        s = self._store(["aaa"])
+        s.find_artboard_by_id("aaa")["x"] = 100
+        s.find_artboard_by_id("aaa")["y"] = 200
+        dup = s.duplicate_artboard("aaa", offset_x=10, offset_y=30)
+        assert (dup["x"], dup["y"]) == (110, 230)
+
     def test_duplicate_missing_returns_none(self):
         s = self._store(["aaa"])
         assert s.duplicate_artboard("zzz") is None
