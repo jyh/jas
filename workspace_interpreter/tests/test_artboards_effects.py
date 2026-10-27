@@ -1481,3 +1481,28 @@ class TestDeleteArtboardFromDialog:
         })
         assert [a["id"] for a in store.document()["artboards"]] == ["bbb"]
         assert store.get_dialog_id() is None
+
+
+class TestArtboardOptionsFieldLaw:
+    """The store's options write follows the op layer's law
+    (``op_apply.apply_set_artboard_options_field``): only the two
+    document-global fields, and only a bool. The store wrote any key and any
+    value (item 34's differential, 2026-10-27)."""
+
+    @pytest.mark.parametrize("field,value", [
+        ("bogus", True),
+        ("fade_region_outside_artboard", 1),
+        ("update_while_dragging", "false"),
+    ])
+    def test_refuses_what_the_op_layer_refuses(self, field, value):
+        store = StateStore(document={})
+        before = dict(store.document()["artboard_options"])
+        assert store.set_artboard_options_field(field, value) is False
+        assert store.document()["artboard_options"] == before
+
+    @pytest.mark.parametrize("field", ["fade_region_outside_artboard", "update_while_dragging"])
+    def test_writes_a_bool_to_either_field(self, field):
+        store = StateStore(document={})
+        flipped = not store.document()["artboard_options"][field]
+        assert store.set_artboard_options_field(field, flipped) is True
+        assert store.document()["artboard_options"][field] is flipped
