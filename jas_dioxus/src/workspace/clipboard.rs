@@ -32,7 +32,6 @@ use wasm_bindgen::JsCast;
 use super::app_state::{AppState, TabState};
 use crate::document::document::Document;
 use crate::document::model::Model;
-use crate::document::op_apply::apply_paste_clipboard_text;
 use crate::geometry::element::{CommonProps, LayerElem, Element as GeoElement};
 use crate::geometry::svg::{document_to_svg, svg_to_document};
 use crate::geometry::tspan::Tspan;
@@ -466,8 +465,7 @@ pub(crate) fn clipboard_write(text: String) {
 pub(crate) fn clipboard_read_and_paste(
     app: Rc<RefCell<AppState>>,
     mut revision: Signal<u64>,
-    offset: f64,
-    preserve_layers: bool,
+    action: &'static str,
 ) {
     wasm_bindgen_futures::spawn_local(async move {
         let clipboard_text = async {
@@ -500,32 +498,15 @@ pub(crate) fn clipboard_read_and_paste(
                     }
             }
 
-        let Some(tab) = st.tab_mut() else { return; };
-
-        // THE WHOLE DECISION, in one call. `apply_paste_clipboard_text` takes
-        // the clipboard payload EXACTLY as read — `None` for an unreadable
-        // clipboard, `Some("")` for an empty one — and either edits the document
-        // or answers `false`.
-        //
-        // `apply_paste_clipboard_text`, NOT the pure `paste_clipboard_text_into`
-        // it wraps: the CUMULATIVE-OFFSET RUN (`actions.yaml` §paste, "Repeated
-        // pastes stack with cumulative offsets") lives in the Model-level
-        // wrapper, so calling the pure body here would leave the corpus green
-        // while production pasted every copy on the same spot. That is the exact
-        // decoy the `paste` op verb was built to rule out, one layer up.
-        //
-        // One paste = one undo step (OP_LOG.md Increment 1): the wrapper writes
-        // through `edit_document`, which self-brackets — begin captures the
-        // pre-paste document AND the pre-paste run, commit clears redo — exactly
-        // as the explicit bracket here used to.
-        if !apply_paste_clipboard_text(
-            &mut tab.model,
-            clipboard_text.as_deref(),
-            offset,
-            preserve_layers,
-        ) {
-            return;
-        }
+        // The paste itself is the ACTION's YAML (`doc.paste`): the read goes
+        // in as `param.clipboard` EXACTLY as read (null for an unreadable
+        // clipboard, "" for an empty one), and the op layer's one paste law
+        // (the run, the SVG-or-text rule, the lock, one undo step) does the
+        // rest. The offsets are the YAML's, so no web site carries one.
+        let mut params = serde_json::Map::new();
+        params.insert("clipboard".into(),
+            clipboard_text.map_or(serde_json::Value::Null, serde_json::Value::String));
+        let _ = crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
         drop(st);
         revision += 1;
     });

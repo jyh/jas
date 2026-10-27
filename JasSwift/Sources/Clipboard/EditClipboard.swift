@@ -83,6 +83,17 @@ public enum EditClipboard {
                                 offset: offset, preserveLayers: preserveLayers)
     }
 
+    /// THE PASTE ROUTE: Paste, Paste in Place and Paste Preserving Layers, from
+    /// the menubar and the canvas context menu. The pasteboard read goes to the
+    /// action's YAML as its `clipboard` param (null when unreadable), and
+    /// `doc.paste` there holds the offset and the layer choice, as the engine's
+    /// door and the web do. A paste into an open text session never gets here:
+    /// the type tool takes Cmd+V itself.
+    static func paste(action: String, model: Model, pasteboard: NSPasteboard = .general) {
+        let clipboard: Any = pasteboard.string(forType: .string) ?? NSNull()
+        LayersPanel.dispatchYamlAction(action, model: model, params: ["clipboard": clipboard])
+    }
+
     /// R3 — "Paste, preserving layers": the SEPARATE, EXPLICIT command.
     ///
     /// Same 24pt offset as plain Paste; it differs in layer TARGETING only. A

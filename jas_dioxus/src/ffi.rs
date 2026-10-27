@@ -1357,13 +1357,9 @@ fn colour_value_commit(
 ///   `doc.copy_selection_to_clipboard`, which [`EngineHost`] names). The
 ///   YAML `cut` is NOT run: it would write the payload, then open the DELETE
 ///   confirm.
-/// * A paste hands `clipboard` (`null`: unreadable) to
-///   `apply_paste_clipboard_text`, the paste law every port calls: the run,
-///   the locked-layer refusal, the SVG-or-text rule, one undo step. Nothing to
-///   paste changes nothing. The web first offers the text to an open TEXT
-///   SESSION (`tool.paste_text`); the engine hosts no type tool
-///   (`sync_tool_to_state` refuses `type`), so no session can be open here,
-///   and that branch lands with the type tool and its own test.
+/// * A paste is not run here: its YAML is (`doc.paste`, the action's
+///   `param.clipboard`), after [`paste_into_session`] has offered the text to
+///   an open text session.
 ///
 /// [`EngineHost`]: crate::panel_behavior::EngineHost
 fn run_clipboard_verb(engine: &JasEngine, verb: crate::workspace::menu_native::ClipVerb,
@@ -1398,25 +1394,23 @@ fn run_clipboard_verb(engine: &JasEngine, verb: crate::workspace::menu_native::C
             (Ran { doc_changed: true, state_changed: false },
              Named { clipboard_write: Some(payload), ..Named::default() })
         }
-        ClipVerb::Paste { offset, preserve_layers } => {
-            let text = clipboard.and_then(serde_json::Value::as_str);
-            // A tool editing text takes the clipboard's TEXT at its caret
-            // (the web's `paste_clipboard`, before the element paste), so a
-            // paste into a session adds no element.
-            if let Some(text) = text.filter(|t| !t.is_empty()) {
-                let mut slot = engine.tool_slot();
-                if let Some((_, tool)) = slot.as_mut().filter(|(_, t)| t.is_editing()) {
-                    if engine.with_model_mut(|m| tool.paste_text(m, text)) {
-                        return (Ran { doc_changed: true, state_changed: false }, Named::default());
-                    }
-                }
-            }
-            let pasted = engine.with_model_mut(|m| {
-                crate::document::op_apply::apply_paste_clipboard_text(m, text, offset, preserve_layers)
-            });
-            (Ran { doc_changed: pasted, state_changed: false }, Named::default())
-        }
+        ClipVerb::Paste => unreachable!("a paste runs its YAML: paste_into_session, then the action"),
     }
+}
+
+/// A paste's HOST half: a tool editing text takes the clipboard's TEXT at its
+/// caret (the web's `paste_clipboard`, before the element paste), so a paste
+/// into a session adds no element. `None` when no session took it; the paste
+/// then runs its action's YAML (`doc.paste`, fed `param.clipboard`), where
+/// the offset and the law live.
+fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
+    -> Option<crate::panel_behavior::Ran>
+{
+    let text = clipboard.and_then(serde_json::Value::as_str).filter(|t| !t.is_empty())?;
+    let mut slot = engine.tool_slot();
+    let (_, tool) = slot.as_mut().filter(|(_, t)| t.is_editing())?;
+    engine.with_model_mut(|m| tool.paste_text(m, text))
+        .then_some(crate::panel_behavior::Ran { doc_changed: true, state_changed: false })
 }
 
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
@@ -1709,7 +1703,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // BEFORE anything runs; the shell resends it with `"clipboard": <text> |
     // null` (null: unreadable).
     let clip_verb = panel.is_none().then(|| crate::workspace::menu_native::clipboard_verb(action)).flatten();
-    if matches!(clip_verb, Some(crate::workspace::menu_native::ClipVerb::Paste { .. }))
+    if matches!(clip_verb, Some(crate::workspace::menu_native::ClipVerb::Paste))
         && req.get("clipboard").is_none()
     {
         set_panel_event_error(engine, "NeedsClipboard", action);
@@ -1742,7 +1736,19 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // File > Revert (finding 12 of the 10-20 sitting): a `log` stub in
     // `actions.yaml`, and its bytes are the engine's, so the engine runs it.
     let revert = (panel.is_none() && action == "revert").then(|| engine.revert());
-    let (ran, named) = if let Some(verb) = clip_verb {
+    // A paste's clipboard read is its action's VALUE param (`null`:
+    // unreadable): the YAML's `doc.paste` hands it to the paste law.
+    let is_paste = matches!(clip_verb, Some(crate::workspace::menu_native::ClipVerb::Paste));
+    let session = if is_paste { paste_into_session(engine, req.get("clipboard")) } else { None };
+    let paste_params = is_paste.then(|| serde_json::json!({
+        "clipboard": req.get("clipboard").cloned().unwrap_or(serde_json::Value::Null)}));
+    let (params, params_are_values) = match &paste_params {
+        Some(p) => (Some(p), true),
+        None => (params, item.is_none()),
+    };
+    let (ran, named) = if let Some(ran) = session {
+        (Ok(ran), Named::default())
+    } else if let Some(verb) = clip_verb.filter(|_| !is_paste) {
         let (ran, named) = run_clipboard_verb(engine, verb, req.get("clipboard"));
         (Ok(ran), named)
     } else if let Some(ran) = revert {
@@ -1752,7 +1758,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
         let mut model = engine.model.borrow_mut();
         let mut host = crate::panel_behavior::EngineHost::default();
         let ran = crate::panel_behavior::run_action(
-            panel, action, params, item.is_none(), &scope, &mut store, &mut model, ws.actions(),
+            panel, action, params, params_are_values, &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
             &mut host);
         (ran, Named::of(host))

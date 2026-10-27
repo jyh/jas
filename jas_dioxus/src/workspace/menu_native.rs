@@ -12,19 +12,19 @@
 //! inside a `Controller` method (see `generate_element_id`'s contract).
 
 use crate::document::model::Model;
-use crate::tools::tool::PASTE_OFFSET;
 
-/// One Edit menu clipboard verb, as every route runs it. The offsets live
-/// HERE: Paste and Paste, Preserving Layers land [`PASTE_OFFSET`] down and
-/// right (the paste run stacks from there); Paste in Place lands at 0.
+/// One Edit menu clipboard verb, as every route runs it. A paste carries no
+/// offset here: each paste runs its action's YAML (`doc.paste`), which holds
+/// the offsets (24, 0, 24) and the layer choice, fed the clipboard read.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClipVerb {
     /// Copy the selection's payload (`op_apply::selection_clipboard_svg`).
     Copy,
     /// Copy, then the reference-aware delete (one undo step), or ask first.
     Cut,
-    /// Paste the clipboard text through `op_apply::apply_paste_clipboard_text`.
-    Paste { offset: f64, preserve_layers: bool },
+    /// Paste, Paste in Place, Paste Preserving Layers: the clipboard read
+    /// goes to the action's YAML as `param.clipboard`.
+    Paste,
 }
 
 /// The clipboard actions, in menu order: what [`clipboard_verb`] knows.
@@ -37,9 +37,7 @@ pub fn clipboard_verb(action: &str) -> Option<ClipVerb> {
     Some(match action {
         "copy" => ClipVerb::Copy,
         "cut" => ClipVerb::Cut,
-        "paste" => ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: false },
-        "paste_in_place" => ClipVerb::Paste { offset: 0.0, preserve_layers: false },
-        "paste_preserving_layers" => ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: true },
+        "paste" | "paste_in_place" | "paste_preserving_layers" => ClipVerb::Paste,
         _ => return None,
     })
 }
@@ -76,7 +74,7 @@ pub fn make_instance_ops(doc: &crate::document::document::Document, offset: f64)
 /// offset): the tests' setup step for a document holding a reference.
 #[cfg(test)]
 pub fn make_instance(model: &mut Model) {
-    let Some(ops) = make_instance_ops(model.document(), PASTE_OFFSET) else { return };
+    let Some(ops) = make_instance_ops(model.document(), crate::tools::tool::PASTE_OFFSET) else { return };
     model.with_txn(|m| {
         for op in &ops {
             let _ = crate::document::op_apply::op_apply(m, op);
@@ -89,20 +87,27 @@ mod tests {
     use super::*;
     use crate::document::document::Document;
 
-    /// The web app's paste sites take their offsets from [`clipboard_verb`],
-    /// the table the engine's menu and key routes read, so the three apps
-    /// cannot drift on a paste offset. Neither site names `PASTE_OFFSET`
-    /// itself (the bank's §1 item 4, 2026-10-17).
+    /// Every paste route RUNS ITS ACTION'S YAML (`doc.paste`, fed the
+    /// clipboard read as `param.clipboard`), so the offsets live in
+    /// `actions.yaml` alone (item 8 clipboard M′, 2026-10-26). No route calls
+    /// the paste law itself, and none names `PASTE_OFFSET`; the law's one
+    /// caller is the op layer (`op_apply`'s `"paste"`), which the effect uses.
     #[test]
-    fn the_web_paste_sites_read_the_clipboard_table() {
+    fn no_paste_route_calls_the_paste_law_or_names_an_offset() {
         let sites = [("menu_bar.rs", include_str!("menu_bar.rs")),
-                     ("keyboard.rs", include_str!("keyboard.rs"))];
+                     ("keyboard.rs", include_str!("keyboard.rs")),
+                     ("clipboard.rs", include_str!("clipboard.rs")),
+                     ("ffi.rs", include_str!("../ffi.rs"))];
         for (name, src) in sites {
-            let code: String = src.lines()
+            // Production code only: the test module of each file may drive
+            // the law directly as a setup step.
+            let prod = src.split("#[cfg(test)]\nmod tests").next().unwrap();
+            let code: String = prod.lines()
                 .filter(|l| !l.trim_start().starts_with("//"))
                 .collect::<Vec<_>>().join("\n");
-            assert!(!code.contains("PASTE_OFFSET"), "{name} names PASTE_OFFSET; read clipboard_verb");
-            assert!(code.contains("clipboard_verb("), "{name} does not read clipboard_verb");
+            assert!(!code.contains("PASTE_OFFSET"), "{name} names PASTE_OFFSET; the YAML carries it");
+            assert!(!code.contains("apply_paste_clipboard_text("),
+                "{name} calls the paste law; run the action's YAML (`doc.paste`)");
         }
     }
 
@@ -115,8 +120,8 @@ mod tests {
         for other in ["select_all", "undo", "copy ", "paste_text", ""] {
             assert_eq!(clipboard_verb(other), None, "{other:?}");
         }
-        assert_eq!(clipboard_verb("paste"), Some(ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: false }));
-        assert_eq!(clipboard_verb("paste_in_place"), Some(ClipVerb::Paste { offset: 0.0, preserve_layers: false }));
-        assert_eq!(clipboard_verb("paste_preserving_layers"), Some(ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: true }));
+        for paste in ["paste", "paste_in_place", "paste_preserving_layers"] {
+            assert_eq!(clipboard_verb(paste), Some(ClipVerb::Paste), "{paste}");
+        }
     }
 }
