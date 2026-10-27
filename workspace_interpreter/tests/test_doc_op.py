@@ -923,3 +923,23 @@ def test_a_brush_promotes_an_open_polyline_on_a_bridged_store_carrying_its_fill(
     assert elem["type"] == "path" and elem["fill"] == fill and "points" not in elem
     assert [c["cmd"] for c in elem["d"]] == ["M", "L", "L"]
     assert type(_doc_of(store).layers[0].children[0]).__name__ == "Path"
+
+
+@pytest.mark.parametrize("action", ["new_layer", "new_group", "collect_in_new_layer"])
+def test_a_container_made_after_an_op_leaves_the_store_parseable(action):
+    """Item 34: the YAML's container factories (`doc.create_layer`,
+    `doc.wrap_in_group`, `doc.wrap_in_layer`) made NATIVE elements; on a store
+    that had run an op they left it holding two forms, and its next op raised
+    `KeyError: 'type'`. The made container is in the store's one form, so the
+    next op parses and keeps it."""
+    store = _store(Document(layers=(Layer(name="Layer 1"), Layer(name="Layer 2"))))
+    store.init_panel("layers", {"layers_panel_selection": [{"__path__": [0]}]})
+    store.set_active_panel("layers")
+    store.apply_op({"op": "unlock_all"})
+    n = len(store.document()["layers"])
+    _run_yaml_action(store, action)
+    assert store.document()["layers"] != _store(
+        Document(layers=(Layer(name="Layer 1"), Layer(name="Layer 2")))).document()["layers"], \
+        "the control: the action changed the document"
+    store.apply_op({"op": "unlock_all"})
+    assert len(_doc_of(store).layers) == {"new_layer": n + 1, "new_group": n, "collect_in_new_layer": n}[action]
