@@ -943,3 +943,33 @@ def test_a_container_made_after_an_op_leaves_the_store_parseable(action):
         "the control: the action changed the document"
     store.apply_op({"op": "unlock_all"})
     assert len(_doc_of(store).layers) == {"new_layer": n + 1, "new_group": n, "collect_in_new_layer": n}[action]
+
+
+def test_undo_and_redo_walk_the_stores_history():
+    """Item 34 step 2 (and item 36's reference half): the store holds ONE op-layer
+    `Model` across ops, so the op layer's `undo`/`redo` have a history. Before,
+    every op ran on a fresh Model and `undo` was a silent no-op."""
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    store.apply_op({"op": "unlock_all"})
+    assert _doc_of(store).layers[0].locked is False, "the control: the op ran"
+    store.apply_op({"op": "undo"})
+    assert _doc_of(store).layers[0].locked is True
+    store.apply_op({"op": "redo"})
+    assert _doc_of(store).layers[0].locked is False
+
+
+def test_a_dict_edit_since_the_last_op_is_one_undo_step():
+    """A YAML effect that writes the store's dict (here `doc.set`) between ops
+    enters the held Model as ONE undoable step when the next op runs, so `undo`
+    takes it back rather than skipping it."""
+    from geometry.element import Visibility
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    store.apply_op({"op": "unlock_all"})
+    run_effects([{"doc.set": {"path": "path(0)", "fields": {"common.visibility": "'invisible'"}}}],
+                {}, store)
+    assert _doc_of(store).layers[0].visibility == Visibility.INVISIBLE, "the control: the edit landed"
+    store.apply_op({"op": "undo"})
+    after = _doc_of(store).layers[0]
+    assert (after.visibility, after.locked) == (Visibility.PREVIEW, False)
+    store.apply_op({"op": "undo"})
+    assert _doc_of(store).layers[0].locked is True
