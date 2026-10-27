@@ -4141,7 +4141,7 @@ class CanvasNSView: NSView {
 
     @objc private func contextCopy(_ sender: Any?) {
         guard let model = controller?.model else { return }
-        EditClipboard.copySelection(model)
+        EditClipboard.copy(model: model)
     }
 
     @objc private func contextPaste(_ sender: Any?) {

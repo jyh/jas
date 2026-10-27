@@ -82,6 +82,28 @@ import Foundation
         }
     }
 
+    /// Copy runs its YAML: the shared payload (``EditClipboard/selectionPayload(_:)``)
+    /// lands on the pasteboard; nothing selected leaves the pasteboard alone,
+    /// and a copy edits nothing.
+    @Test func copyRunsItsYamlOntoThePasteboard() {
+        let rect = Element.rect(Rect(x: 3, y: 4, width: 10, height: 10, name: nil, id: "r-1"))
+        let m = Model(document: Document(layers: [Layer(name: "L", children: [rect])],
+                                         selectedLayer: 0, selection: [ElementSelection.all([0, 0])]))
+        let pb = Self.pasteboard("untouched")
+        let before = m.document
+        EditClipboard.copy(model: m, pasteboard: pb)
+        #expect(pb.string(forType: .string) == EditClipboard.selectionPayload(m.document))
+        #expect(pb.string(forType: .string) != "untouched", "the control: the copy wrote")
+        #expect(m.document == before, "a copy edits nothing")
+        #expect(!m.canUndo)
+
+        let none = Model(document: Document(layers: [Layer(name: "L", children: [rect])],
+                                             selectedLayer: 0, selection: []))
+        let pb2 = Self.pasteboard("untouched")
+        EditClipboard.copy(model: none, pasteboard: pb2)
+        #expect(pb2.string(forType: .string) == "untouched", "nothing selected writes nothing")
+    }
+
     /// No production route calls the paste law, or names an offset: each runs
     /// its action (the menubar's three verbs, the canvas context menu).
     @Test func noPasteRouteCallsTheLawOrNamesAnOffset() throws {
@@ -96,6 +118,8 @@ import Foundation
             #expect(!code.contains("applyPasteClipboardText("), "\(rel) calls the paste law")
             #expect(!code.contains("pasteOffset"), "\(rel) names pasteOffset; the YAML carries it")
             #expect(code.contains("EditClipboard.paste(action:"), "\(rel) has no paste route (control)")
+            #expect(!code.contains("EditClipboard.copySelection("), "\(rel) copies around the YAML")
+            #expect(code.contains("EditClipboard.copy(model:"), "\(rel) has no copy route (control)")
         }
     }
 }

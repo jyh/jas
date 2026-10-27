@@ -176,7 +176,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # (`doc.paste`, fed the shell's clipboard read as `param.clipboard`; item 8 M′).
 # 29 the same evening: `noop` (the Print dialog's two disabled placeholders)
 # declares an EMPTY effect list: it does nothing on purpose.
-MIN_LOG_ONLY = 29
+# 28 the same evening: `copy` (`doc.copy_selection_to_clipboard`, the payload
+# the shell writes; item 8 M′ step (d)).
+MIN_LOG_ONLY = 28
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
