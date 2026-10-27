@@ -989,3 +989,18 @@ def test_an_action_that_writes_the_dict_is_one_undo_step():
     assert (after.visibility, after.locked) == (Visibility.PREVIEW, False)
     store.apply_op({"op": "undo"})
     assert _doc_of(store).layers[0].locked is True
+
+
+def test_the_history_facts_follow_the_held_model():
+    """`active_document.can_undo` / `can_redo` (runtime_contexts.yaml; the
+    gates of Edit > Undo / Redo) read the store's held Model, as Rust's
+    `panel_scope` and Swift's `JasCommands` read theirs. Before any op the
+    store has no history."""
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    facts = lambda: tuple(store.eval_context()["active_document"][k] for k in ("can_undo", "can_redo"))
+    assert facts() == (False, False)
+    store.apply_op({"op": "unlock_all"})
+    assert facts() == (True, False)
+    store.apply_op({"op": "undo"})
+    assert _doc_of(store).layers[0].locked is True, "the control: the undo ran"
+    assert facts()[1] is True
