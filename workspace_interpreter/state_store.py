@@ -1449,6 +1449,10 @@ class StateStore:
         # Every master's live instance count (SYMBOLS.md §8): Delete Symbol
         # asks before it empties one.
         brush_facts["symbol_usage"] = self._symbol_usage()
+        # Edit > Undo / Redo's gates (runtime_contexts.yaml): the held Model's
+        # history, as the apps read their Model's. No op yet, no history.
+        brush_facts["can_undo"] = self._model is not None and self._model.can_undo
+        brush_facts["can_redo"] = self._model is not None and self._model.can_redo
         # Artboard-view computation (works whether document is None or not)
         if self._document is None:
             raw_artboards: list = []
