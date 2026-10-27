@@ -884,3 +884,42 @@ def test_copy_from_actions_yaml_records_the_selection_in_selection_order():
         assert store.copied_paths == want, case["name"]
         assert (store.copied_paths is None) == (case["expected_svg"] is None), case["name"]
         assert json.dumps(store._document, sort_keys=True) == before, case["name"]
+def test_a_brush_promotes_a_line_on_a_bridged_store():
+    """Item 34: after ANY op the store holds the op bridge's test JSON
+    (`type: line`, not `kind: Line`). Applying a brush to a Line must still
+    promote it to a geometry-identical Path (LINEPROMOTE), in the bridged
+    shape, so the next op can parse it and the brush survives the bridge."""
+    from geometry.element import Line
+    doc = Document(layers=(Layer(name="L", children=(Line(x1=10, y1=10, x2=100, y2=60),)),))
+    doc = replace(doc, selection=frozenset({ElementSelection.all((0, 0))}))
+    store = _store(doc)
+    store.apply_op({"op": "unlock_all"})  # any op: the store is now bridged
+    assert store.get_element((0, 0))["type"] == "line", "the control: the store is bridged"
+    run_effects([{"doc.set_attr_on_selection": {
+        "attr": "stroke_brush", "value": 'param.library + "/" + param.brush_slug'}}],
+        {"param": {"library": "default_brushes", "brush_slug": "flat_10"}}, store)
+    elem = store.get_element((0, 0))
+    assert elem["type"] == "path"
+    assert elem["d"] == [{"cmd": "M", "x": 10.0, "y": 10.0}, {"cmd": "L", "x": 100.0, "y": 60.0}]
+    assert "x1" not in elem and "y2" not in elem
+    assert elem["stroke_brush"] == "default_brushes/flat_10"
+    after = _doc_of(store)  # the bridge still parses it
+    assert type(after.layers[0].children[0]).__name__ == "Path"
+    assert after.layers[0].children[0].stroke_brush == "default_brushes/flat_10"
+
+
+def test_a_brush_promotes_an_open_polyline_on_a_bridged_store_carrying_its_fill():
+    from geometry.element import Polyline, Fill, Color
+    poly = Polyline(points=((0, 0), (10, 5), (20, 0)), fill=Fill(color=Color.from_hex("#ff0000")))
+    doc = Document(layers=(Layer(name="L", children=(poly,)),))
+    doc = replace(doc, selection=frozenset({ElementSelection.all((0, 0))}))
+    store = _store(doc)
+    store.apply_op({"op": "unlock_all"})
+    fill = store.get_element((0, 0))["fill"]
+    assert store.get_element((0, 0))["type"] == "polyline" and fill is not None, "the control"
+    run_effects([{"doc.set_attr_on_selection": {"attr": "stroke_brush", "value": '"default_brushes/flat_10"'}}],
+                {}, store)
+    elem = store.get_element((0, 0))
+    assert elem["type"] == "path" and elem["fill"] == fill and "points" not in elem
+    assert [c["cmd"] for c in elem["d"]] == ["M", "L", "L"]
+    assert type(_doc_of(store).layers[0].children[0]).__name__ == "Path"
