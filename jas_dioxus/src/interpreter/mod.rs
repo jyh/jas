@@ -11,6 +11,7 @@ pub mod expr_parser;
 pub mod expr_eval;
 pub mod expr;
 pub mod state_store;
+pub mod preferences;
 pub mod effects;
 pub mod doc_primitives;
 pub mod hit_law;

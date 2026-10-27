@@ -1771,9 +1771,7 @@ fn build_appstate_ctx(
     // preferences.viewport.zoom_step resolve against the workspace
     // YAML defaults. Used by the View actions (zoom_in, fit_*, etc.)
     // and the Zoom tool's gesture handlers.
-    let prefs = crate::interpreter::workspace::Workspace::load()
-        .and_then(|ws| ws.data().get("preferences").cloned())
-        .unwrap_or(serde_json::Value::Null);
+    let prefs = crate::interpreter::preferences::current();
     ctx.insert("preferences".to_string(), prefs);
     // The data namespace, from this app's homes for it, as the reference's
     // and the engine's action contexts carry it: Swatch Options reads the
