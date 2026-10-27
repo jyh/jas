@@ -1,0 +1,174 @@
+{
+  "_comment": [
+    "STATUS-jas item 38 step 1: active_document.element_tree, the DOCUMENT's rows for the Layers tree_view.",
+    "Order: REVERSE z (topmost first), depth-first. element_selected: at or under a selected path.",
+    "name is the element's own name ('' when unnamed; the row template supplies <type_label>).",
+    "type is the test-JSON type; type_label is the display label (an equal-radius ellipse is a Circle).",
+    "NOT in this first cut, by design: collapse, panel selection, renaming, filters and isolation (the",
+    "tree_view widget applies those from its own binds, layers.yaml lp_tree), colours, thumbnails.",
+    "The documents are written by the reference codec; the expected rows are authored."
+  ],
+  "cases": [
+    {
+      "name": "nested_groups_selected_group_invisible_locked_top_layer",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Front",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "invisible",
+          "locked": true,
+          "is_container": true,
+          "element_selected": false
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true
+        },
+        {
+          "path": [
+            0,
+            1,
+            0
+          ],
+          "depth": 2,
+          "id": null,
+          "name": "",
+          "type": "ellipse",
+          "type_label": "Circle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": true
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false
+        }
+      ]
+    },
+    {
+      "name": "no_layers",
+      "document": {
+        "layers": [],
+        "selected_layer": 0,
+        "selection": []
+      },
+      "expected": []
+    }
+  ]
+}
