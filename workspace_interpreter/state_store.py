@@ -7,6 +7,7 @@ to the subscribe mechanism.
 
 from __future__ import annotations
 import copy
+import functools
 import logging
 from typing import Callable
 
@@ -157,6 +158,22 @@ def _op_layer_on_path() -> None:
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "jas"))
     if root not in sys.path:
         sys.path.insert(0, root)
+
+
+@functools.lru_cache(maxsize=1)
+def _bundled_preferences():
+    """The bundled workspace's ``preferences`` (``workspace/preferences.yaml``,
+    compiled into ``workspace.json``), which both active ports put into their
+    expression contexts from the bundle (Rust ``Workspace::load()``, Swift
+    ``ws.data``); None when there is no bundle, as Rust's null."""
+    import json
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "workspace", "workspace.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("preferences")
+    except (OSError, ValueError):
+        return None
 
 
 def _native_view(elem):
@@ -1299,6 +1316,9 @@ class StateStore:
         # write. Until 2026-10-15 no port's context carried it, so Brush
         # Options' edit-mode inits were null everywhere.
         ctx["data"] = self._data
+        # `preferences.*` (zoom_in's zoom_step, the Brushes menu's persistent
+        # check), from the bundle as both ports read it.
+        ctx["preferences"] = _bundled_preferences()
         if self._dialog_id is not None:
             # Evaluate any get: lambdas in dialog props so derived
             # keys (e.g. color_picker's h = hsb_h(color)) appear in

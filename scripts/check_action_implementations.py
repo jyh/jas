@@ -515,13 +515,15 @@ def self_test() -> int:
         # and redo became `doc.op` effects and left the log-only set.
         "open_file": "native_both",
         # verified: neither port contains the string at all (0 files in
-        # jas_dioxus/src and JasSwift/Sources, 2026-10-25, with
-        # `convert_to_artboards` found in jas_dioxus/src as the control).
-        # This anchor was `toggle_artboard_orientation` until 2026-10-15,
-        # `toggle_artboard_chain_link` until 2026-10-24 and
-        # `set_artboard_fill_preset` until 2026-10-25; each became effects in
-        # actions.yaml and left the log-only set.
-        "scroll_to_selected": "dead_both",
+        # jas_dioxus/src and JasSwift/Sources, 2026-10-27, with
+        # `convert_to_artboards` found in jas_dioxus/src as the control), and
+        # the feature (Left Arrow in the Layers tree) is in neither port's tree
+        # code either. This anchor was `toggle_artboard_orientation` until
+        # 2026-10-15, `toggle_artboard_chain_link` until 2026-10-24,
+        # `set_artboard_fill_preset` until 2026-10-25 (each became effects in
+        # actions.yaml) and `scroll_to_selected` until 2026-10-27 (declared
+        # bypassed: both ports run it as render behaviour).
+        "layers_nav_left": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any
