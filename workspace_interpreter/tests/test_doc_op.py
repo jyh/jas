@@ -779,13 +779,26 @@ def _pasted_xs(store: StateStore) -> list[float]:
 
 
 def test_the_paste_run_survives_across_store_ops():
-    """The store bridges each op through a fresh Model; the run (on the
-    document) must cross the bridge, or a second paste lands on the first:
+    """The run (on the op layer's document, which test JSON does not carry)
+    must last across the store's ops, or a second paste lands on the first:
     the one outcome the offset exists to prevent (actions.yaml paste)."""
     store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
     for _ in range(3):
         store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
     assert _pasted_xs(store) == [24.0, 48.0, 72.0]
+
+
+def test_the_paste_run_survives_a_dict_write_between_pastes():
+    """A YAML write to the store's dict between two pastes (here a layer
+    rename) enters the held Model as a new document; the run must come with
+    it, as an app's run lives on its Model and only a paste moves it (Rust
+    `paste_run_apply`)."""
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
+    run_effects([{"doc.set": {"path": "path(0)", "fields": {"name": "'Renamed'"}}}], {}, store)
+    assert _doc_of(store).layers[0].name == "Renamed", "the control: the write landed"
+    store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
+    assert _pasted_xs(store) == [24.0, 48.0]
 
 
 def _run_yaml_action_with_params(store: StateStore, name: str, params: dict) -> None:

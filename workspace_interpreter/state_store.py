@@ -1026,10 +1026,14 @@ class StateStore:
 
         The op layer is ``document.op_apply`` (beside the frozen Python app,
         the same import root ``effects.py`` uses for ``geometry.element``), so
-        the reference's meaning of an op IS that layer's. The document is a
-        dict here, so it is bridged through canonical test JSON, and the keys
-        the bridge does not produce (``artboard_options``) are carried across
-        untouched. An op name the layer does not know changes nothing.
+        the reference's meaning of an op IS that layer's. It runs on the
+        store's ONE held Model (``_held_model``), so ``undo``/``redo`` walk the
+        store's history and the paste run lasts; the dict is re-rendered from
+        it through canonical test JSON, and the keys the bridge does not
+        produce (``artboard_options``) are carried across untouched. An op name
+        the layer does not know changes nothing. The layer keeps a transaction
+        open between ops (a ``snapshot`` op commits it and opens the next), so
+        ops with no snapshot between them are one undo step.
         """
         if self._document is None:
             return
