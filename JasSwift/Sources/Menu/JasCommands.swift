@@ -317,15 +317,12 @@ public struct JasCommands: Commands {
             cutSelection()
         case "copy":
             copySelection()
-        case "paste":
-            // R2: plain Paste FLATTENS into the active layer.
-            pasteClipboard(offset: pasteOffset)
-        case "paste_in_place":
-            pasteClipboard(offset: 0.0)
-        // R3 (LAYER_STRUCTURE.md): the separate, explicit command. Menu-only by
-        // design — see workspace/shortcuts.yaml for why it takes no chord.
-        case "paste_preserving_layers":
-            pasteClipboard(offset: pasteOffset, preserveLayers: true)
+        // Each runs its action's YAML (`doc.paste`), which holds the offset and
+        // the layer choice. R2: plain Paste FLATTENS into the active layer; R3
+        // (LAYER_STRUCTURE.md), the separate, explicit command, is menu-only by
+        // design (see workspace/shortcuts.yaml for why it takes no chord).
+        case "paste", "paste_in_place", "paste_preserving_layers":
+            if let model = model { EditClipboard.paste(action: action, model: model) }
         // The Edit / Object model verbs run their declared action (`doc.op`,
         // or `doc.make_instance`), as the engine's door and the web menu do.
         case _ where MenuActions.yamlVerbs.contains(action):
@@ -615,12 +612,6 @@ public struct JasCommands: Commands {
             let errAlert = NSAlert(error: error)
             errAlert.runModal()
         }
-    }
-
-    private func pasteClipboard(offset: Double, preserveLayers: Bool = false) {
-        guard let model = model else { return }
-        // Shared with the canvas context menu — see ``EditClipboard``.
-        EditClipboard.pasteClipboard(model, offset: offset, preserveLayers: preserveLayers)
     }
 
     /// The reference-aware delete every Swift Delete route runs (the canvas's

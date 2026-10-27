@@ -164,18 +164,17 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
-                // The offsets and the layer targeting are the clipboard table
-                // the engine's menu and key routes read (`menu_native`). R2:
+                // Each runs its action's YAML (`doc.paste`), which holds the
+                // offset and the layer targeting, as the engine's routes do. R2:
                 // plain Paste FLATTENS into the active layer; R3: Paste
                 // Preserving Layers differs in layer TARGETING only.
                 "paste" | "paste_in_place" | "paste_preserving_layers" => {
-                    if let Some(super::menu_native::ClipVerb::Paste { offset, preserve_layers }) =
-                        super::menu_native::clipboard_verb(cmd)
-                    {
-                        clipboard_read_and_paste(
-                            app_for_menu.clone(), revision_for_menu, offset, preserve_layers,
-                        );
-                    }
+                    let action: &'static str = match cmd {
+                        "paste" => "paste",
+                        "paste_in_place" => "paste_in_place",
+                        _ => "paste_preserving_layers",
+                    };
+                    clipboard_read_and_paste(app_for_menu.clone(), revision_for_menu, action);
                 }
                 // The menu's model verbs, as the web keyboard runs them
                 // ([`run_model_verb`]): each runs its declared action.
@@ -1087,6 +1086,30 @@ mod tests {
         st.tab_mut().unwrap().model.undo();
         assert_eq!(count(&st), 2, "ONE undo removes it");
         assert_eq!(st.tabs[st.active_tab].model.can_undo(), steps_before, "it was one step");
+    }
+
+    /// The web's paste sites hand the clipboard read to `dispatch_action` as
+    /// the action's `clipboard` param (`clipboard_read_and_paste`); the YAML's
+    /// `doc.paste` lands it: the run stacks, Paste in Place lands at 0 and
+    /// stays outside the run, and a failed read pastes nothing.
+    #[test]
+    fn the_web_paste_dispatch_runs_the_yaml_on_the_clipboard_param() {
+        let mut st = state_on(include_str!("../../../test_fixtures/svg/two_rects.svg"));
+        let n0 = st.tabs[st.active_tab].model.document().layers[0].children().unwrap().len();
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10"/></svg>"##;
+        for action in ["paste", "paste_in_place", "paste"] {
+            let mut params = serde_json::Map::new();
+            params.insert("clipboard".into(), serde_json::Value::String(svg.into()));
+            crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("clipboard".into(), serde_json::Value::Null);
+        crate::interpreter::renderer::dispatch_action("paste", &params, &mut st);
+        let kids = st.tabs[st.active_tab].model.document().layers[0].children().unwrap().to_vec();
+        let xs: Vec<f64> = kids[n0..].iter()
+            .map(|e| match &**e { crate::geometry::element::Element::Rect(r) => r.x, o => panic!("{o:?}") })
+            .collect();
+        assert_eq!(xs, vec![24.0, 0.0, 48.0]);
     }
 
     #[test]
