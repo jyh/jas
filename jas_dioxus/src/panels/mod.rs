@@ -637,6 +637,7 @@ mod tests {
             opacity_panel: crate::workspace::app_state::OpacityPanelState::default(),
             swatches_panel: crate::workspace::app_state::SwatchesPanelState::default(),
             layers_renaming: None,
+            layers_rename_draft: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,
