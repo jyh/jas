@@ -612,16 +612,22 @@
       "doc_verbs": []
     },
     "paste": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.paste"
+      ]
     },
     "paste_in_place": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.paste"
+      ]
     },
     "paste_preserving_layers": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.paste"
+      ]
     },
     "place_concept_instance": {
       "class": "journaling",
@@ -1208,6 +1214,7 @@
       "doc.move_artboards_up",
       "doc.new_symbol",
       "doc.op",
+      "doc.paste",
       "doc.place_concept_instance",
       "doc.place_instance",
       "doc.preview.clear",
@@ -1243,11 +1250,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 47,
+      "journaling": 50,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 184,
+      "ui-state": 181,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1297,7 +1304,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 47,
+    "journaling_actions": 50,
     "native_intercepts": [
       "export_to_pdf"
     ],
@@ -1320,6 +1327,7 @@
         "doc.move_artboards_up",
         "doc.new_symbol",
         "doc.op",
+        "doc.paste",
         "doc.place_concept_instance",
         "doc.place_instance",
         "doc.promote_to_concept",
