@@ -6110,7 +6110,10 @@
       "category": "brushes",
       "effects": [
         {
-          "log": "toggle_brush_library_persistent"
+          "preferences.toggle_member": {
+            "key": "brushes.persistent_libraries",
+            "value": "panel.selected_library"
+          }
         }
       ]
     },

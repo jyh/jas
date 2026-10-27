@@ -304,6 +304,10 @@ class StateStore:
         # dict took since (a YAML write between ops) as one undoable step.
         self._model = None
         self._model_view: str | None = None
+        # The user's preference OVERRIDES (dotted key -> value) over the
+        # bundle's defaults (STATUS-jas item 37); the apps persist theirs in
+        # their AppConfig record.
+        self._preference_overrides: dict[str, object] = {}
         # What a `doc.copy_selection_to_clipboard` copied: the selected paths
         # IN SELECTION ORDER, or None until a copy of a non-empty selection.
         # The reference names WHAT is copied; the BYTES are the apps' (see
@@ -788,6 +792,41 @@ class StateStore:
             callback(key, value)
 
     # ── Document (Phase 3) ───────────────────────────────────
+
+    def preferences(self):
+        """The bundle's preferences with the user's overrides applied (a copy:
+        the bundle is never written)."""
+        base = _bundled_preferences()
+        if base is None or not self._preference_overrides:
+            return base
+        prefs = copy.deepcopy(base)
+        for key, value in self._preference_overrides.items():
+            node = prefs
+            *parents, leaf = key.split(".")
+            for p in parents:
+                node = node.setdefault(p, {})
+            node[leaf] = copy.deepcopy(value)
+        return prefs
+
+    def toggle_preference_member(self, key: str, value) -> bool:
+        """Add ``value`` to the LIST preference at ``key`` when absent, remove
+        it when present, as an override; an override equal to the bundle's
+        default is dropped. Refuses (False) a key the bundle does not declare
+        as a list."""
+        node = _bundled_preferences()
+        for p in key.split("."):
+            node = node.get(p) if isinstance(node, dict) else None
+        if not isinstance(node, list):
+            return False
+        current = self.preferences()
+        for p in key.split("."):
+            current = current[p]
+        new = [v for v in current if v != value] if value in current else current + [value]
+        if new == node:
+            self._preference_overrides.pop(key, None)
+        else:
+            self._preference_overrides[key] = new
+        return True
 
     def document(self) -> dict | None:
         """Return the live document tree, or None."""
@@ -1318,7 +1357,7 @@ class StateStore:
         ctx["data"] = self._data
         # `preferences.*` (zoom_in's zoom_step, the Brushes menu's persistent
         # check), from the bundle as both ports read it.
-        ctx["preferences"] = _bundled_preferences()
+        ctx["preferences"] = self.preferences()
         if self._dialog_id is not None:
             # Evaluate any get: lambdas in dialog props so derived
             # keys (e.g. color_picker's h = hsb_h(color)) appear in
