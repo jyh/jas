@@ -43,6 +43,18 @@ public enum Preferences {
         return prefs
     }
 
+    /// `state.brushes_open_libraries` at startup (state.yaml; STATUS-jas item
+    /// 37): one open, expanded section per slug of
+    /// `preferences.brushes.persistent_libraries`, in order, or the declared
+    /// fallback when the list is empty. Mirrors the reference's
+    /// `open_libraries_at_launch`; shared fixture
+    /// `test_fixtures/preferences/open_libraries_at_launch.json`.
+    public static func openLibrariesAtLaunch(_ slugs: Any?) -> [[String: Any]] {
+        var ids = (slugs as? [Any] ?? []).compactMap { $0 as? String }
+        if ids.isEmpty { ids = ["default_brushes"] }
+        return ids.map { ["id": $0, "collapsed": false] }
+    }
+
     /// Add `value` to the LIST preference at `key` when absent, remove it when
     /// present, as an override; an override equal to the bundle's default is
     /// dropped. Refuses (false) a key the bundle does not declare as a list.

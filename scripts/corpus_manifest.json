@@ -550,6 +550,23 @@
         "swift": "path literal in Tests/CrossLanguageTests.swift (checkShiftConstrain)"
       },
       "notes": "PROPERTY corpus, and the first family of its kind here -- it is NOT a golden set. Per the ruled doctrine ('the checker is the law; the corpus is its witnesses; the generative lane is its growing confidence') each file carries WITNESSES for a predicate rather than expected outputs. shift_constrain_square.json holds 11 hand-searched vectors per tool for the Shift-constrain invariant (rx == ry / width == height, BIT-EXACT, at any zoom and pan); the checker also runs 384 FRESH vectors per run from a nanosecond seed, replayable via JAS_PROPERTY_SEED. Two witnesses are deliberately NON-discriminating and labelled so -- they are the shape of the hand smoke test that passed while DYADICSIDE was broken at every zoom but 100%. Both runners carry a `dyadicside_mutant` reproducing the pre-fix arithmetic and assert every witness's `discriminating` flag against it each run, and the generative lane REFUSES a run in which fewer than 20 of 384 fresh vectors could catch that bug -- so this corpus cannot decay into asserting nothing, which is the failure mode that looks exactly like success."
+    },
+    "test_fixtures/preferences": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "reference",
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "None needed: each runner compares its open_libraries_at_launch with the authored list, and a second arm per runner reads its state defaults after an override.",
+      "claim_style": {
+        "reference": "path reference (preferences/open_libraries_at_launch.json)",
+        "rust": "path reference (preferences/open_libraries_at_launch.json, include_str!)",
+        "swift": "path reference (preferences/open_libraries_at_launch.json)"
+      },
+      "notes": "STATUS-jas item 37, launch half: state.brushes_open_libraries initialised at startup from preferences.brushes.persistent_libraries (state.yaml)."
     }
   },
   "known_gaps": [],

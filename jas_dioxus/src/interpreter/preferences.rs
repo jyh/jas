@@ -69,6 +69,22 @@ pub fn toggle_member(key: &str, value: &Value) -> bool {
     true
 }
 
+/// `state.brushes_open_libraries` at startup (state.yaml; STATUS-jas item
+/// 37): one open, expanded section per slug of
+/// `preferences.brushes.persistent_libraries`, in order, or the declared
+/// fallback when the list is empty. Mirrors the reference's
+/// `open_libraries_at_launch`; shared fixture
+/// `test_fixtures/preferences/open_libraries_at_launch.json`.
+pub fn open_libraries_at_launch(slugs: &Value) -> Value {
+    let mut slugs: Vec<&str> = slugs.as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    if slugs.is_empty() {
+        slugs.push("default_brushes");
+    }
+    Value::Array(slugs.into_iter()
+        .map(|s| serde_json::json!({"id": s, "collapsed": false})).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,6 +110,33 @@ mod tests {
         crate::interpreter::effects::run_effects(&effects, &ctx, &mut store, None, None, None, None);
         assert_eq!(list(&current()), bundled, "toggled off: the override is dropped");
         assert_eq!(list(&super::bundled()), bundled, "the bundle is never written");
+    }
+
+    /// The launch half (state.yaml: `brushes_open_libraries` is initialised
+    /// at startup from the preference), against the shared fixture.
+    #[test]
+    fn open_libraries_at_launch_matches_the_shared_fixture() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "preferences/open_libraries_at_launch.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        for case in cases {
+            assert_eq!(open_libraries_at_launch(&case["persistent_libraries"]), case["expected"], "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn the_state_defaults_open_the_current_preferences_libraries() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        let open = |ws: &crate::interpreter::workspace::Workspace| ws.state_defaults()["brushes_open_libraries"].clone();
+        assert_eq!(open(&ws), serde_json::json!([{"id": "default_brushes", "collapsed": false}]), "the bundle");
+        let lib = serde_json::json!("a_library_not_in_the_bundle");
+        assert!(toggle_member("brushes.persistent_libraries", &lib));
+        let got = open(&ws);
+        assert!(toggle_member("brushes.persistent_libraries", &lib), "restore");
+        assert_eq!(got, serde_json::json!([
+            {"id": "default_brushes", "collapsed": false},
+            {"id": "a_library_not_in_the_bundle", "collapsed": false}]), "the override is read");
     }
 
     #[test]
