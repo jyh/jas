@@ -253,6 +253,9 @@ pub(crate) struct AppState {
     pub(crate) swatches_panel: SwatchesPanelState,
     /// Element path currently being renamed in the layers panel, or None.
     pub(crate) layers_renaming: Option<Vec<usize>>,
+    /// What the rename input holds since the user last typed (its `oninput`),
+    /// or None when nothing was typed; `commit_layer_rename` takes it.
+    pub(crate) layers_rename_draft: Option<String>,
     /// Collapsed element paths in the layers panel. Elements not in this
     /// set are expanded (open) by default.
     pub(crate) layers_collapsed: std::collections::HashSet<Vec<usize>>,
@@ -679,6 +682,7 @@ impl AppState {
             opacity_panel: OpacityPanelState::default(),
             swatches_panel: SwatchesPanelState::default(),
             layers_renaming: None,
+            layers_rename_draft: None,
             layers_collapsed: std::collections::HashSet::new(),
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,

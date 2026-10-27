@@ -517,6 +517,29 @@ pub(crate) fn apply_deferred_dialog_effects(
 }
 
 /// `dispatch_action` with no panel scope: the app scope alone.
+/// Commit a Layers-row rename (LYR-073, LYR-091): what the input holds (its
+/// draft from `oninput`, or `initial` when nothing was typed) becomes the
+/// element's `common.name` (empty clears it) as ONE undo step, and rename mode
+/// ends. Only while `path` is still the row being renamed, so a blur after an
+/// Enter commits nothing twice. ONE path for every target: the non-wasm build
+/// used to read no value and exit without committing.
+pub(crate) fn commit_layer_rename(st: &mut crate::workspace::app_state::AppState, path: &[usize], initial: &str) {
+    if st.layers_renaming.as_deref() != Some(path) {
+        return;
+    }
+    let val = st.layers_rename_draft.take().unwrap_or_else(|| initial.to_string());
+    if let Some(tab) = st.tab_mut() {
+        tab.model.begin_txn();
+        let mut doc = tab.model.document().clone();
+        if let Some(elem) = doc.get_element_mut(&path.to_vec()) {
+            elem.common_mut().name = if val.is_empty() { None } else { Some(val) };
+        }
+        tab.model.set_document(doc);
+        tab.model.commit_txn();
+    }
+    st.layers_renaming = None;
+}
+
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     dispatch_action_in(action, params, None, st)
 }
@@ -8829,7 +8852,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         row.path.iter().map(|i| i.to_string())
                                             .collect::<Vec<_>>().join("_"),
                                     );
-                                    let input_id_for_blur = input_id.clone();
+                                    let confirm_initial = initial_name.clone();
+                                    let blur_initial = initial_name.clone();
                                     rsx! {
                                         input {
                                             id: "{input_id}",
@@ -8837,114 +8861,45 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             value: "{initial_name}",
                                             style: "flex:1;font-size:11px;background:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border:1px solid var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
                                             autofocus: true,
+                                            // The draft, on every target: the commit reads it
+                                            // rather than the DOM, which a non-wasm build cannot.
+                                            oninput: {
+                                                let a = confirm_app.clone();
+                                                move |evt: Event<FormData>| {
+                                                    a.borrow_mut().layers_rename_draft = Some(evt.value());
+                                                }
+                                            },
                                             onkeydown: move |evt: Event<KeyboardData>| {
                                                 let key = evt.data().key();
                                                 if key == dioxus::prelude::Key::Enter {
-                                                    // Read value from DOM and commit rename
-                                                    #[cfg(target_arch = "wasm32")]
-                                                    {
-                                                        let p = confirm_path.clone();
-                                                        let a = confirm_app.clone();
-                                                        if let Some(el) = web_sys::window()
-                                                            .and_then(|w| w.document())
-                                                            .and_then(|d| d.active_element())
-                                                        {
-                                                            let val = el.get_attribute("value").unwrap_or_default();
-                                                            let val_inner: String = js_sys::Reflect::get(&el, &"value".into())
-                                                                .ok()
-                                                                .and_then(|v| v.as_string())
-                                                                .unwrap_or(val);
-                                                            spawn(async move {
-                                                                let mut st = a.borrow_mut();
-                                                                if let Some(tab) = st.tab_mut() {
-                                                                    tab.model.begin_txn();
-                                                                    let mut doc = tab.model.document().clone();
-                                                                    if let Some(elem) = doc.get_element_mut(&p) {
-                                                                        // Write to common.name for any
-                                                                        // element type (LYR-091); Layers
-                                                                        // also keep LayerElem.name in
-                                                                        // sync for back-compat.
-                                                                        elem.common_mut().name = if val_inner.is_empty() {
-                                                                            None
-                                                                        } else {
-                                                                            Some(val_inner.clone())
-                                                                        };
-                                                                        // Layer.name is now backed by
-                                                                        // common.name (LYR-091 merge);
-                                                                        // the assignment above already
-                                                                        // covers Layer along with every
-                                                                        // other element type.
-                                                                        let _ = val_inner;
-                                                                    }
-                                                                    tab.model.set_document(doc);
-                                                                    tab.model.commit_txn();
-                                                                }
-                                                                st.layers_renaming = None;
-                                                                confirm_rev += 1;
-                                                            });
-                                                        }
-                                                    }
-                                                    #[cfg(not(target_arch = "wasm32"))]
-                                                    {
-                                                        let a = confirm_app.clone();
-                                                        spawn(async move {
-                                                            a.borrow_mut().layers_renaming = None;
-                                                            confirm_rev += 1;
-                                                        });
-                                                    }
+                                                    let p = confirm_path.clone();
+                                                    let a = confirm_app.clone();
+                                                    let initial = confirm_initial.clone();
+                                                    spawn(async move {
+                                                        commit_layer_rename(&mut a.borrow_mut(), &p, &initial);
+                                                        confirm_rev += 1;
+                                                    });
                                                 } else if key == dioxus::prelude::Key::Escape {
                                                     let a = cancel_app.clone();
                                                     spawn(async move {
-                                                        a.borrow_mut().layers_renaming = None;
+                                                        let mut st = a.borrow_mut();
+                                                        st.layers_renaming = None;
+                                                        st.layers_rename_draft = None;
                                                         cancel_rev += 1;
                                                     });
                                                 }
                                             },
-                                            // Blur (focus loss) commits like Enter, per LYR-073.
-                                            // Read value from the input by id since
-                                            // active_element on blur is whatever the user
-                                            // just clicked, not the input.
+                                            // Blur (focus loss) commits like Enter, per LYR-073,
+                                            // through the same helper (it commits only while this
+                                            // row is still the one being renamed).
                                             onblur: move |_: Event<FocusData>| {
-                                                #[cfg(target_arch = "wasm32")]
-                                                {
-                                                    let p = blur_path.clone();
-                                                    let a = blur_app.clone();
-                                                    let id = input_id_for_blur.clone();
-                                                    let val_inner: String = web_sys::window()
-                                                        .and_then(|w| w.document())
-                                                        .and_then(|d| d.get_element_by_id(&id))
-                                                        .and_then(|el| {
-                                                            js_sys::Reflect::get(&el, &"value".into())
-                                                                .ok()
-                                                                .and_then(|v| v.as_string())
-                                                        })
-                                                        .unwrap_or_default();
-                                                    spawn(async move {
-                                                        let mut st = a.borrow_mut();
-                                                        if st.layers_renaming.as_ref() == Some(&p) {
-                                                            if let Some(tab) = st.tab_mut() {
-                                                                tab.model.begin_txn();
-                                                                let mut doc = tab.model.document().clone();
-                                                                if let Some(elem) = doc.get_element_mut(&p) {
-                                                                    elem.common_mut().name = if val_inner.is_empty() {
-                                                                        None
-                                                                    } else {
-                                                                        Some(val_inner.clone())
-                                                                    };
-                                                                    // Layer.name backed by common.name
-                                                                    // (LYR-091); covered above.
-                                                                    let _ = val_inner;
-                                                                }
-                                                                tab.model.set_document(doc);
-                                                                tab.model.commit_txn();
-                                                            }
-                                                            st.layers_renaming = None;
-                                                            blur_rev += 1;
-                                                        }
-                                                    });
-                                                }
-                                                #[cfg(not(target_arch = "wasm32"))]
-                                                { let _ = (&blur_path, &blur_app, &input_id_for_blur); }
+                                                let p = blur_path.clone();
+                                                let a = blur_app.clone();
+                                                let initial = blur_initial.clone();
+                                                spawn(async move {
+                                                    commit_layer_rename(&mut a.borrow_mut(), &p, &initial);
+                                                    blur_rev += 1;
+                                                });
                                             },
                                         }
                                     }
@@ -14991,6 +14946,39 @@ mod tests {
                    Some("ff0000".to_string()),
                    "the same tiers the panel displays, so Invert operates on \
                     the colour the user can SEE");
+    }
+
+    // The Layers-row rename commits on EVERY target (it used to exit without
+    // committing on non-wasm builds, which could not read the DOM): the input's
+    // draft, or the initial name when nothing was typed; empty clears the name.
+    #[test]
+    fn a_layer_rename_commits_its_draft_as_one_undo_step() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let name = |st: &AppState| st.tab().unwrap().model.document().layers[0].common().name.clone();
+        let before = name(&st);
+        // Not the row being renamed: nothing.
+        st.layers_rename_draft = Some("Other".into());
+        commit_layer_rename(&mut st, &[0], "Initial");
+        assert_eq!(name(&st), before, "no rename in progress: nothing commits");
+        st.layers_renaming = Some(vec![0]);
+        st.layers_rename_draft = Some("Renamed".into());
+        commit_layer_rename(&mut st, &[0], "Initial");
+        assert_eq!(name(&st).as_deref(), Some("Renamed"));
+        assert!(st.layers_renaming.is_none() && st.layers_rename_draft.is_none(), "rename mode ends");
+        st.tab_mut().unwrap().model.undo();
+        assert_eq!(name(&st), before, "one undo step");
+        st.layers_renaming = Some(vec![0]);
+        commit_layer_rename(&mut st, &[0], "Initial");
+        assert_eq!(name(&st).as_deref(), Some("Initial"), "nothing typed: the initial name");
+        st.layers_renaming = Some(vec![0]);
+        st.layers_rename_draft = Some(String::new());
+        commit_layer_rename(&mut st, &[0], "Initial");
+        assert_eq!(name(&st), None, "empty clears the name");
     }
 
     // STATUS-jas item 36: Edit > Undo / Redo run their actions' YAML
