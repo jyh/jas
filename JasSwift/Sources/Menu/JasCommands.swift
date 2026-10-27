@@ -679,8 +679,8 @@ public struct JasCommands: Commands {
 
     private func copySelection() {
         guard let model = model else { return }
-        // Shared with the canvas context menu — see ``EditClipboard``.
-        EditClipboard.copySelection(model)
+        // As the canvas context menu: the action's YAML (``EditClipboard/copy(model:pasteboard:)``).
+        EditClipboard.copy(model: model)
     }
 }
 

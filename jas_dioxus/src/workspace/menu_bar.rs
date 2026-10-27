@@ -154,14 +154,12 @@ pub(crate) fn MenuBarView(
                         );
                     }
                 }
+                // Its YAML (`doc.copy_selection_to_clipboard`) writes the
+                // selection's payload to the SYSTEM clipboard, the only one.
                 "copy" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if st.tab().is_none() { return; }
-                        // The SYSTEM clipboard is the only clipboard (D4/D5 —
-                        // see `TabState`).
-                        if let Some(svg) = selection_to_svg(st) {
-                            clipboard_write(svg);
-                        }
+                        let _ = crate::interpreter::renderer::dispatch_action(
+                            "copy", &serde_json::Map::new(), st);
                     }));
                 }
                 // Each runs its action's YAML (`doc.paste`), which holds the

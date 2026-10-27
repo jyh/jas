@@ -175,8 +175,10 @@ actions:
     category: edit
     tier: 3
     enabled_when: "active_document.has_selection"
+    # The payload is engine law; writing it to the system clipboard is the
+    # shell's (the engine names it as `clipboard_write`).
     effects:
-      - log: "copy: selection to clipboard"
+      - doc.copy_selection_to_clipboard
   paste:
     description: >
       Paste objects from the clipboard into the active document, offset 24

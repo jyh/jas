@@ -537,6 +537,13 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.make_instance(float(spec["offset"]))
         return None
 
+    # doc.copy_selection_to_clipboard — Edit > Copy (and Cut's orphan OK): the
+    # selection's payload, recorded for the shell's system clipboard
+    # (StateStore.copy_selection_to_clipboard). Edits nothing.
+    if "doc.copy_selection_to_clipboard" in effect:
+        store.copy_selection_to_clipboard()
+        return None
+
     # doc.paste: { text: <expr>, offset: <number>, preserve_layers: <bool> } —
     # the paste actions: the clipboard text the expression names (the shell's
     # read, `param.clipboard`; null when the read failed) through the op

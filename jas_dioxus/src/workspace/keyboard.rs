@@ -313,15 +313,12 @@ pub(crate) fn make_keydown_handler(
             }
             Key::Character(ref c) if (c == "c" || c == "C") && cmd => {
                 evt.prevent_default();
+                // As the menu runs it: the action's YAML
+                // (`doc.copy_selection_to_clipboard`) writes the selection's
+                // payload to the SYSTEM clipboard, the only clipboard (D4/D5).
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    if st.tab().is_none() { return; }
-                    // The SYSTEM clipboard is the only clipboard (D4/D5,
-                    // ratified 2026-07-28). This site used to also snapshot the
-                    // selection into `TabState.clipboard`; see `TabState` for
-                    // why that buffer is gone.
-                    if let Some(svg) = selection_to_svg(st) {
-                        clipboard_write(svg);
-                    }
+                    let _ = crate::interpreter::renderer::dispatch_action(
+                        "copy", &serde_json::Map::new(), st);
                 }));
             }
             Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
