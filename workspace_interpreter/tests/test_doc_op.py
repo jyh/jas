@@ -834,6 +834,17 @@ def test_only_paste_preserving_layers_brings_a_named_layer_across(name, layers):
     store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
     _run_yaml_action_with_params(store, name, {"clipboard": sky})
     assert sorted(l.name for l in _doc_of(store).layers) == sorted(layers)
+def test_noop_does_nothing_by_declaration_and_is_never_enabled():
+    """`noop` backs the Print dialog's disabled Page Setup... and Setup...
+    buttons. It does nothing on purpose, so its YAML says so with an EMPTY
+    effect list rather than a `log` stub (item 8 class D), and it is never
+    enabled."""
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        spec = yaml.safe_load(f)["actions"]["noop"]
+    assert spec["effects"] == []
+    assert spec["enabled_when"] == "false"
 
 
 # ── Clipboard M′ (d): copy runs its YAML (`doc.copy_selection_to_clipboard`) ──
