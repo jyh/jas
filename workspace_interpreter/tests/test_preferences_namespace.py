@@ -73,6 +73,9 @@ def test_the_persistent_toggle_writes_an_override_and_the_check_follows():
     run_effects(actions["toggle_brush_library_persistent"]["effects"], {}, store, actions=actions)
     assert checked() is True
     assert store.eval_context()["preferences"]["brushes"]["persistent_libraries"] == bundled + [lib]
+    from workspace_interpreter.state_store import _bundled_preferences
+    assert _bundled_preferences()["brushes"]["persistent_libraries"] == bundled, \
+        "the cached bundle is not written either"
     run_effects(actions["toggle_brush_library_persistent"]["effects"], {}, store, actions=actions)
     assert checked() is False
     assert store.eval_context()["preferences"]["brushes"]["persistent_libraries"] == bundled
