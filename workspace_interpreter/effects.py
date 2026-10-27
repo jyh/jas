@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 from workspace_interpreter.expr import evaluate
-from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.state_store import StateStore, _native_view
 from workspace_interpreter.stroke_law import DASH_DEFAULT
 
 
@@ -242,6 +242,25 @@ def _colour_hex(colour) -> str | None:
     return f"{to(r):02x}{to(g):02x}{to(b):02x}"
 
 
+def _new_container(kind: str, name: str | None, children: list) -> dict:
+    """A new Layer (``kind`` "layer") or Group holding ``children``, in the
+    form the store holds its document: the op bridge's test JSON, written by
+    the op layer's own codec rather than typed here. The children are already
+    in that form (clones of the store's own elements). A native-form element
+    inserted into a store that has run an op left it holding two forms, and its
+    next op raised (STATUS-jas item 34)."""
+    import json
+    from document.document import Document
+    from geometry.element import Group, Layer
+    from geometry.test_json import document_to_test_json
+    inner = Layer(name=name) if kind == "layer" else Group()
+    doc = Document(layers=(inner,) if kind == "layer" else (Layer(children=(inner,)),))
+    top = json.loads(document_to_test_json(doc))["layers"][0]
+    elem = top if kind == "layer" else top["children"][0]
+    elem["children"] = children
+    return elem
+
+
 def _document_colours(document: dict | None) -> set[str]:
     """Every fill and stroke colour of every element of the document, at any
     depth (layers and groups nest through ``children``), as ``_colour_hex``
@@ -376,17 +395,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         eval_ctx = store.eval_context(ctx)
         name_val = evaluate(str(name_expr), eval_ctx)
         name = name_val.value if name_val.type == ValueType.STRING else "Layer"
-        layer = {
-            "kind": "Layer",
-            "name": name,
-            "children": [],
-            "common": {
-                "visibility": "preview",
-                "locked": False,
-                "opacity": 1.0,
-            },
-        }
-        return None, layer
+        return None, _new_container("layer", name, [])
 
     # doc.create_artboard: { [field]: expr, ... } — ARTBOARDS.md §Menu — New Artboard
     # Factory-and-insert: mints a fresh 8-char base36 id, picks the
@@ -744,15 +753,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         for p in reversed(sorted_paths):
             store.delete_element_at(p)
         # Construct the group element
-        group = {
-            "kind": "Group",
-            "children": children,
-            "common": {
-                "visibility": "preview",
-                "locked": False,
-                "opacity": 1.0,
-            },
-        }
+        group = _new_container("group", None, children)
         # Insert at the topmost-source position under the shared parent
         store.insert_at(insert_path_parent, insert_index, group)
         return None
@@ -772,7 +773,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             return None
         # Fetch the element to check it's a Group
         elem = store.get_element(path)
-        if not isinstance(elem, dict) or elem.get("kind") != "Group":
+        if not isinstance(elem, dict) or _native_view(elem).get("kind") != "Group":
             return None
         children = elem.get("children", [])
         # Remove the group at path
@@ -832,16 +833,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         # Delete in reverse (keeps indices valid during deletion)
         for p in reversed(sorted_paths):
             store.delete_element_at(p)
-        new_layer = {
-            "kind": "Layer",
-            "name": name,
-            "children": children,
-            "common": {
-                "visibility": "preview",
-                "locked": False,
-                "opacity": 1.0,
-            },
-        }
+        new_layer = _new_container("layer", name, children)
         # Append at end — collect_in_new_layer semantics: "above all
         # existing layers" = highest index (visually topmost).
         if store.document() is not None:
