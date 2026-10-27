@@ -9285,7 +9285,7 @@
         "symbol_usage": {},
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
-        "element_tree": null,
+        "element_tree": [],
         "element_selection": [],
         "recent_colors": []
       },
@@ -9394,9 +9394,9 @@
           "description": "Ids of the artboards selected in the Artboards panel, in selection order. Empty when nothing is selected there.\n"
         },
         "element_tree": {
-          "type": "object",
-          "nullable": true,
-          "description": "Hierarchical tree of document elements for panel rendering (tree_view source)"
+          "type": "list",
+          "item_type": "object",
+          "description": "The document's rows for the Layers panel's tree_view (lp_tree's source): topmost first (reverse z), depth first, one row per element with {path, depth, id, name ('' when unnamed), type (the test-JSON type), type_label, visibility, locked, is_container, element_selected (at or under a selected path)}. Collapse, panel selection, renaming, filters and isolation are the widget's own binds, not row fields. Shared fixture: test_fixtures/layers/element_tree.json.\n"
         },
         "element_selection": {
           "type": "list",

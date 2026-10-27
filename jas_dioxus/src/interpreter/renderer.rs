@@ -14971,7 +14971,7 @@ mod tests {
     // order, depth, display name, container-ness and selection.
     #[test]
     fn the_web_tree_walker_agrees_with_the_element_tree_fixture() {
-        let raw = include_str!("../../../test_fixtures/layers/element_tree.json");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
         let fx: serde_json::Value = serde_json::from_str(raw).unwrap();
         let mut compared = 0;
         for case in fx["cases"].as_array().unwrap() {

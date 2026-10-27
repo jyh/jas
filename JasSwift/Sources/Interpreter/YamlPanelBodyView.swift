@@ -3581,33 +3581,7 @@ private let layerColors = [
     "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
 ]
 
-private func elementTypeLabel(_ elem: Element) -> String {
-    switch elem {
-    case .line: return "Line"
-    case .rect: return "Rectangle"
-    // DERIVED, so the auto-generated label agrees with the type token rather
-    // than contradicting it: a round ellipse reads `<Circle>`. This does NOT
-    // re-couple the two axes JYH separated -- the label is still just a label,
-    // a user-given name still wins, and the filter still reads the ELEMENT.
-    // They agree because both are computed from the same fact.
-    case .ellipse(let e): return e.rx == e.ry ? "Circle" : "Ellipse"
-    case .polyline: return "Polyline"
-    case .polygon: return "Polygon"
-    case .path: return "Path"
-    case .text: return "Text"
-    case .textPath: return "Text Path"
-    case .group: return "Group"
-    case .layer: return "Layer"
-    case .live(let v):
-        switch v {
-        case .compoundShape: return "Compound Shape"
-        case .reference: return "Reference"
-        case .recorded: return "Recorded"
-        case .generated: return "Generated"
-        case .transformed: return "Transformed"
-        }
-    }
-}
+private func elementTypeLabel(_ elem: Element) -> String { treeTypeLabel(elem) }
 
 /// The Layers-panel row label: the artist's own name when the element has
 /// one, else a `<Type>` bracket placeholder.

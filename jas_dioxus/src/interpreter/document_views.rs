@@ -166,7 +166,7 @@ mod tests {
     /// reference reads it (STATUS-jas item 38 step 1).
     #[test]
     fn element_tree_rows_match_the_shared_fixture() {
-        let raw = include_str!("../../../test_fixtures/layers/element_tree.json");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
         let fx: Value = serde_json::from_str(raw).unwrap();
         let cases = fx["cases"].as_array().unwrap();
         assert!(cases.len() >= 2, "the fixture is not vacuous");
