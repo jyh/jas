@@ -309,10 +309,6 @@ public struct JasCommands: Commands {
             // handler existed before — the menu had no Quit item).
             NSApplication.shared.terminate(nil)
         // Edit
-        case "undo":
-            model?.undo()
-        case "redo":
-            model?.redo()
         case "cut":
             cutSelection()
         case "copy":

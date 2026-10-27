@@ -3695,10 +3695,11 @@ class CanvasNSView: NSView {
         let hasCmd = event.modifierFlags.contains(.command)
         let hasShift = event.modifierFlags.contains(.shift)
         if hasCmd && chars.lowercased() == "z" {
-            if hasShift {
-                controller?.model.redo()
-            } else {
-                controller?.model.undo()
+            // The action's YAML (`doc.op: {op: undo|redo}`), as the menu runs
+            // it (STATUS-jas item 36).
+            if let model = controller?.model {
+                LayersPanel.dispatchYamlAction(hasShift ? "redo" : "undo", model: model)
+                needsDisplay = true
             }
             return
         }

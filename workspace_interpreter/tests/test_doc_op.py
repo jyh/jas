@@ -1004,3 +1004,15 @@ def test_the_history_facts_follow_the_held_model():
     store.apply_op({"op": "undo"})
     assert _doc_of(store).layers[0].locked is True, "the control: the undo ran"
     assert facts()[1] is True
+
+
+def test_the_undo_and_redo_actions_run_their_yaml():
+    """Edit > Undo / Redo's YAML (`doc.op: {op: undo|redo}`, STATUS-jas item 36)
+    over the store's held Model."""
+    store = _store(Document(layers=(Layer(name="L", locked=True),)))
+    store.apply_op({"op": "unlock_all"})
+    assert _doc_of(store).layers[0].locked is False, "the control: the op ran"
+    _run_yaml_action(store, "undo")
+    assert _doc_of(store).layers[0].locked is True
+    _run_yaml_action(store, "redo")
+    assert _doc_of(store).layers[0].locked is False
