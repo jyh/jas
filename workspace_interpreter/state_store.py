@@ -146,6 +146,19 @@ _BRIDGED_COMMON = ("locked", "name", "id", "opacity", "transform", "visibility")
 _BRIDGED_KIND = {"layer": "Layer", "group": "Group"}
 
 
+def _op_layer_on_path() -> None:
+    """Put the op layer's import root (``jas/``, beside the frozen Python app:
+    ``document.model``, ``geometry.test_json``) on ``sys.path``. The store
+    reaches it from every op and every ``snapshot`` (item 34), so it must not
+    depend on some other module having put it there first: a test file run on
+    its own raised ``ModuleNotFoundError: document``."""
+    import os
+    import sys
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "jas"))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
 def _native_view(elem):
     """An element of the store's document as the YAML reads it, in the native
     form (``kind``, props under ``common``), from either form the store holds:
@@ -266,11 +279,14 @@ class StateStore:
         # "artboard_options": {...}}. Real apps use a native Model; tests
         # use plain dicts.
         self._document: dict | None = document
-        # The paste run (`actions.yaml` paste: 24, 48, 72 for one payload) is
-        # on the op layer's Document and test JSON does not carry it, so it is
-        # kept HERE across the bridge (`apply_op`), the way the apps keep it on
-        # the one Model their document lives in.
-        self._paste_run: tuple[str, int] | None = None
+        # The ONE op-layer Model this document lives in across ops, as the
+        # apps keep theirs (STATUS-jas item 34): built at the first op, so its
+        # undo history, journal and paste run (which test JSON does not carry)
+        # last as long as the store. ``_model_view`` is the dict as last
+        # rendered from or synced into it; ``_held_model`` syncs any edit the
+        # dict took since (a YAML write between ops) as one undoable step.
+        self._model = None
+        self._model_view: str | None = None
         # What a `doc.copy_selection_to_clipboard` copied: the selected paths
         # IN SELECTION ORDER, or None until a copy of a non-empty selection.
         # The reference names WHAT is copied; the BYTES are the apps' (see
@@ -289,6 +305,11 @@ class StateStore:
                 logging.getLogger("workspace_interpreter").info(
                     "Document had no artboards; inserted default."
                 )
+            # The Document's own top-level fields, so the dict always decodes
+            # into the held Model (item 34): a store built from a partial dict
+            # (artboards only, say) takes the empty Document's values.
+            for key, empty in (("layers", []), ("selected_layer", 0), ("selection", [])):
+                self._document.setdefault(key, empty)
         self._snapshots: list[dict] = []
 
     # ── Global state ─────────────────────────────────────────
@@ -760,6 +781,7 @@ class StateStore:
         No-op when there is no document."""
         if self._document is not None:
             self._snapshots.append(copy.deepcopy(self._document))
+            self.apply_op({"op": "snapshot"})
 
     def snapshots(self) -> list[dict]:
         """Return the snapshots list (for tests / inspection)."""
@@ -1012,22 +1034,39 @@ class StateStore:
         if self._document is None:
             return
         import json
-        from document.model import Model
+        model = self._held_model()
         from document.op_apply import op_apply
-        from geometry.test_json import document_to_test_json, test_json_to_document
-        from dataclasses import replace
-        doc = replace(test_json_to_document(json.dumps(self._document)),
-                      paste_run=self._paste_run)
-        model = Model(document=doc)
+        from geometry.test_json import document_to_test_json
+        doc = model.document
         op_apply(model, op)
         if model.document is doc:
             return
-        self._paste_run = model.document.paste_run
         new = json.loads(document_to_test_json(model.document))
         for k, v in self._document.items():
             if k not in new:
                 new[k] = v
         self._document = new
+        self._model_view = json.dumps(new, sort_keys=True)
+
+    def _held_model(self):
+        """The store's one op-layer Model, its document synced to the dict: built
+        from the dict at the first op; afterwards, if the dict changed since it
+        was last rendered from the Model (a YAML write between ops), the change
+        enters as ONE undoable step (``edit_document``), keeping the paste run,
+        which test JSON does not carry."""
+        import json
+        from dataclasses import replace
+        _op_layer_on_path()
+        from document.model import Model
+        from geometry.test_json import test_json_to_document
+        view = json.dumps(self._document, sort_keys=True)
+        if self._model is None:
+            self._model = Model(document=test_json_to_document(json.dumps(self._document)))
+        elif view != self._model_view:
+            self._model.edit_document(replace(test_json_to_document(json.dumps(self._document)),
+                                              paste_run=self._model.document.paste_run))
+        self._model_view = view
+        return self._model
 
     def copy_selection_to_clipboard(self) -> None:
         """Edit > Copy (and Cut's orphan OK): record WHAT is copied, the

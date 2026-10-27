@@ -486,7 +486,11 @@ class TestDefaultSeededFixture:
         )
         observed = self._normalize(dict(store.document()))
         expected = self._normalize(dict(fixture_data))
-        assert observed == expected
+        # The fixture is the artboard invariant's insertion; the store also
+        # completes an empty Document's own fields (item 34), and nothing else.
+        assert {k: observed[k] for k in expected if k in observed} == expected
+        assert {k: v for k, v in observed.items() if k not in expected} == {
+            "layers": [], "selected_layer": 0, "selection": []}
 
     def test_fixture_is_stable(self, fixture_data):
         """Structural sanity: fixture must have exactly one artboard

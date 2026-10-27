@@ -958,14 +958,17 @@ def test_undo_and_redo_walk_the_stores_history():
     assert _doc_of(store).layers[0].locked is False
 
 
-def test_a_dict_edit_since_the_last_op_is_one_undo_step():
-    """A YAML effect that writes the store's dict (here `doc.set`) between ops
-    enters the held Model as ONE undoable step when the next op runs, so `undo`
-    takes it back rather than skipping it."""
+def test_an_action_that_writes_the_dict_is_one_undo_step():
+    """An action that opens with `snapshot` (as 76 in actions.yaml do) and then
+    writes the store's dict (here `doc.set`) is ONE undoable step of the held
+    Model: the snapshot checkpoints the Model, as an app's action opens its
+    transaction, and the dict write enters it when the next op runs. Without
+    the checkpoint the write would join the previous op's step."""
     from geometry.element import Visibility
     store = _store(Document(layers=(Layer(name="L", locked=True),)))
     store.apply_op({"op": "unlock_all"})
-    run_effects([{"doc.set": {"path": "path(0)", "fields": {"common.visibility": "'invisible'"}}}],
+    run_effects([{"snapshot": None},
+                 {"doc.set": {"path": "path(0)", "fields": {"common.visibility": "'invisible'"}}}],
                 {}, store)
     assert _doc_of(store).layers[0].visibility == Visibility.INVISIBLE, "the control: the edit landed"
     store.apply_op({"op": "undo"})
