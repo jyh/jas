@@ -3315,14 +3315,46 @@ actions:
           value: "param.anchor"
 
   convert_to_artboards:
-    description: "Phase-1 deferred. Grayed with 'Coming soon' tooltip."
+    description: >
+      Turn selected artwork into artboards. NOT BUILT YET: it is deferred
+      by the artboards specification, so the Artboards panel menu shows
+      it greyed out with the tooltip "Coming soon", it is never enabled,
+      and its effect is only a log line marking it unbuilt.
+
+      What it will do when built. It acts on the canvas SELECTION, not on
+      the artboards selected in the panel. For each selected top-level
+      object that has a non-zero size and does not sit inside a locked
+      layer or group, it creates an artboard exactly covering that
+      object's visible bounding box, and deletes the object. The new
+      artboards are added at the end of the artboard list, lowest-stacked
+      object first, so the object lowest in the layer order gets the
+      lowest new artboard number. Afterwards nothing is selected on the
+      canvas, and the new artboards are the ones selected in the panel.
     category: artboards
     enabled_when: "false"
     effects:
       - log: "convert_to_artboards (deferred)"
 
   rearrange_artboards:
-    description: "Phase-1 deferred. Grayed with 'Coming soon' tooltip."
+    description: >
+      Open the Rearrange All Artboards dialog. NOT BUILT YET: the dialog is
+      deferred by the artboards specification, so the Artboards panel
+      menu's "Rearrange..." item and the panel's Rearrange footer button
+      are greyed out with the tooltip "Coming soon", this action is never
+      enabled, and its effect is only a log line marking it unbuilt.
+
+      What it will do when built. It opens a dialog that lays every
+      artboard out again on a grid, in the order the artboards panel
+      lists them: the first goes top-left (top-right when the direction
+      is right-to-left). The dialog chooses one of four layouts (a grid
+      filled row by row, which is the default; a grid filled column by
+      column; one horizontal row; one vertical column), a number of
+      columns for the two grid layouts (by default the square root of
+      the artboard count, rounded up), a direction (left-to-right by
+      default, or mirrored), one spacing in points used both across and
+      down (20 by default), and whether the artwork on each artboard
+      moves with it (on by default). It will be enabled only when the
+      document has at least two artboards.
     category: artboards
     enabled_when: "false"
     effects:
@@ -3699,13 +3731,16 @@ actions:
 
   noop:
     description: >
-      Disabled-button stub. Used by Phase-1B Print dialog footer
-      buttons (Page Setup..., Setup...) that are placeholders until
-      OS-driver hookup lands.
+      Does nothing, on purpose. It backs the Print dialog's Page Setup...
+      and Setup... footer buttons, which stand for the operating system's
+      page-setup and printer-setup dialogs. Those dialogs are not built
+      yet, so both buttons are shown greyed out and can never be pressed:
+      this action is never enabled, and if it were run it would change
+      nothing at all. Its effect list is empty because there is nothing
+      for it to do, not because its behaviour lives somewhere else.
     category: document
     enabled_when: "false"
-    effects:
-      - log: "noop"
+    effects: []
 
   # ─── Brushes panel ───────────────────────────────────────
   # Action stubs for the Brushes panel and its menu. Phase 1
