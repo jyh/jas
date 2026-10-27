@@ -180,7 +180,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # the shell writes; item 8 M′ step (d)).
 # 26 on 2026-10-27: `undo` and `redo` (`doc.op: {op: undo|redo}`, STATUS-jas
 # item 36).
-MIN_LOG_ONLY = 26
+# 25 the same day: `toggle_brush_library_persistent`
+# (`preferences.toggle_member`, STATUS-jas item 37).
+MIN_LOG_ONLY = 25
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
