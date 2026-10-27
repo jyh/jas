@@ -2,18 +2,14 @@ description: "toggle_all_layers_visibility: all invisible → all preview"
 action: toggle_all_layers_visibility
 initial_doc:
   layers:
-    - kind: Layer
-      name: "A"
-      common: { visibility: invisible, locked: false }
-    - kind: Layer
-      name: "B"
-      common: { visibility: invisible, locked: false }
+    - {children: [], locked: false, name: "A", opacity: 1.0, transform: null, type: "layer", visibility: "invisible"}
+    - {children: [], locked: false, name: "B", opacity: 1.0, transform: null, type: "layer", visibility: "invisible"}
+  selected_layer: 0
+  selection: []
 expected_doc:
   layers:
-    - kind: Layer
-      name: "A"
-      common: { visibility: preview, locked: false }
-    - kind: Layer
-      name: "B"
-      common: { visibility: preview, locked: false }
+    - {children: [], locked: false, name: "A", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "B", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_snapshots: 1

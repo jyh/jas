@@ -6,34 +6,17 @@ initial_panel_state:
     - { __path__: [1] }
 initial_doc:
   layers:
-    - kind: Layer
-      name: "Layer 1"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
-    - kind: Layer
-      name: "Layer 2"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
-    - kind: Layer
-      name: "Layer 3"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
+    - {children: [], locked: false, name: "Layer 1", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "Layer 2", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "Layer 3", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_doc:
   layers:
-    - kind: Layer
-      name: "Layer 1"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
-    - kind: Layer
-      name: "Layer 2"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
-    - kind: Layer
-      name: "Layer 4"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
-    - kind: Layer
-      name: "Layer 3"
-      common: { visibility: preview, locked: false, opacity: 1.0 }
-      children: []
+    - {children: [], locked: false, name: "Layer 1", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "Layer 2", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "Layer 4", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: false, name: "Layer 3", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_snapshots: 1

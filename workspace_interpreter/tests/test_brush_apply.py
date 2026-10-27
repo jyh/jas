@@ -20,31 +20,17 @@ import os
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.loader import load_workspace
 from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.tests.store_docs import (
+    Color, Fill, Layer, Line, LineTo, MoveTo, Path, Polyline, Stroke, store_doc)
 
 
-def _doc_with_selected_path() -> dict:
+def _doc_with_selected_path(brush: str | None = None) -> dict:
     """A one-layer document holding a single stroked Path, selected."""
-    return {
-        "layers": [
-            {
-                "kind": "Layer",
-                "name": "L",
-                "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
-                "children": [
-                    {
-                        "kind": "Path",
-                        "d": [
-                            {"MoveTo": {"x": 10.0, "y": 10.0}},
-                            {"LineTo": {"x": 100.0, "y": 60.0}},
-                        ],
-                        "stroke": {"color": "#000000", "width": 2.0},
-                        "stroke_brush": None,
-                    }
-                ],
-            }
-        ],
-        "selection": [[0, 0]],
-    }
+    return store_doc(Layer(name="L", children=(
+        Path(d=(MoveTo(10.0, 10.0), LineTo(100.0, 60.0)),
+             stroke=Stroke(color=Color.from_hex("#000000"), width=2.0),
+             stroke_brush=brush),
+    )), selected=[[0, 0]])
 
 
 class TestBrushApplyValueForm:
@@ -68,9 +54,7 @@ class TestBrushApplyValueForm:
     def test_set_attr_on_selection_null_result_clears(self):
         # A null/empty resolved value CLEARS the attribute (writes None),
         # mirroring the active ports' empty-string => clear rule.
-        doc = _doc_with_selected_path()
-        doc["layers"][0]["children"][0]["stroke_brush"] = "default_brushes/flat_10"
-        store = StateStore(document=doc)
+        store = StateStore(document=_doc_with_selected_path("default_brushes/flat_10"))
         run_effects(
             [{"doc.set_attr_on_selection": {"attr": "stroke_brush", "value": "null"}}],
             {}, store,
@@ -89,47 +73,21 @@ class TestBrushApplyValueForm:
 
 def _doc_with_selected_line() -> dict:
     """A one-layer document holding a single stroked Line, selected."""
-    return {
-        "layers": [
-            {
-                "kind": "Layer",
-                "name": "L",
-                "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
-                "children": [
-                    {
-                        "kind": "Line",
-                        "x1": 10.0, "y1": 10.0, "x2": 100.0, "y2": 60.0,
-                        "stroke": {"color": "#000000", "width": 2.0},
-                        "common": {"name": "my line", "id": "line-7"},
-                    }
-                ],
-            }
-        ],
-        "selection": [[0, 0]],
-    }
+    return store_doc(Layer(name="L", children=(
+        Line(x1=10.0, y1=10.0, x2=100.0, y2=60.0,
+             stroke=Stroke(color=Color.from_hex("#000000"), width=2.0),
+             name="my line", id="line-7"),
+    )), selected=[[0, 0]])
 
 
 def _doc_with_selected_polyline() -> dict:
     """A one-layer document holding a single filled+stroked Polyline, selected."""
-    return {
-        "layers": [
-            {
-                "kind": "Layer",
-                "name": "L",
-                "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
-                "children": [
-                    {
-                        "kind": "Polyline",
-                        "points": [[0.0, 0.0], [10.0, 5.0], [20.0, 0.0]],
-                        "fill": {"color": "#ff0000"},
-                        "stroke": {"color": "#000000", "width": 2.0},
-                        "common": {"id": "poly-1"},
-                    }
-                ],
-            }
-        ],
-        "selection": [[0, 0]],
-    }
+    return store_doc(Layer(name="L", children=(
+        Polyline(points=((0.0, 0.0), (10.0, 5.0), (20.0, 0.0)),
+                 fill=Fill(color=Color.from_hex("#ff0000")),
+                 stroke=Stroke(color=Color.from_hex("#000000"), width=2.0),
+                 id="poly-1"),
+    )), selected=[[0, 0]])
 
 
 class TestBrushApplyPromotesLine:
@@ -139,6 +97,7 @@ class TestBrushApplyPromotesLine:
 
     def test_line_promotes_to_path_and_carries_brush(self):
         store = StateStore(document=_doc_with_selected_line())
+        before = dict(store.get_element((0, 0)))
         run_effects(
             [{"doc.set_attr_on_selection": {
                 "attr": "stroke_brush",
@@ -149,36 +108,39 @@ class TestBrushApplyPromotesLine:
         )
         elem = store.get_element((0, 0))
         # Type upgraded Line -> Path, geometry identical (MoveTo + LineTo).
-        assert elem["kind"] == "Path"
+        assert elem["type"] == "path"
         assert elem["d"] == [
-            {"MoveTo": {"x": 10.0, "y": 10.0}},
-            {"LineTo": {"x": 100.0, "y": 60.0}},
+            {"cmd": "M", "x": 10.0, "y": 10.0},
+            {"cmd": "L", "x": 100.0, "y": 60.0},
         ]
         # The brush landed; the line-only endpoint fields are gone.
         assert elem["stroke_brush"] == "default_brushes/flat_10"
         assert "x1" not in elem and "y2" not in elem
-        # Stroke + identity (common) carried WHOLE.
-        assert elem["stroke"] == {"color": "#000000", "width": 2.0}
-        assert elem["common"] == {"name": "my line", "id": "line-7"}
+        # Stroke + identity carried WHOLE.
+        assert before["stroke"] is not None
+        assert elem["stroke"] == before["stroke"]
+        assert (elem["name"], elem["id"]) == ("my line", "line-7")
 
     def test_polyline_promotes_carrying_fill(self):
         store = StateStore(document=_doc_with_selected_polyline())
+        before = dict(store.get_element((0, 0)))
         run_effects(
             [{"doc.set_attr_on_selection": {
                 "attr": "stroke_brush", "value": "'default_brushes/flat_10'"}}],
             {}, store,
         )
         elem = store.get_element((0, 0))
-        assert elem["kind"] == "Path"
+        assert elem["type"] == "path"
         assert elem["d"] == [
-            {"MoveTo": {"x": 0.0, "y": 0.0}},
-            {"LineTo": {"x": 10.0, "y": 5.0}},
-            {"LineTo": {"x": 20.0, "y": 0.0}},
+            {"cmd": "M", "x": 0.0, "y": 0.0},
+            {"cmd": "L", "x": 10.0, "y": 5.0},
+            {"cmd": "L", "x": 20.0, "y": 0.0},
         ]
         assert elem["stroke_brush"] == "default_brushes/flat_10"
         # A Polyline's fill carries across (unlike a Line, which has none).
-        assert elem["fill"] == {"color": "#ff0000"}
-        assert elem["common"] == {"id": "poly-1"}
+        assert before["fill"] is not None
+        assert elem["fill"] == before["fill"]
+        assert elem["id"] == "poly-1"
 
     def test_clearing_a_brush_never_promotes_a_line(self):
         # A null/empty resolved value is NOT a brush application — a Line stays
@@ -189,7 +151,7 @@ class TestBrushApplyPromotesLine:
             {}, store,
         )
         elem = store.get_element((0, 0))
-        assert elem["kind"] == "Line"
+        assert elem["type"] == "line"
         assert elem["stroke_brush"] is None
         assert elem["x1"] == 10.0
 

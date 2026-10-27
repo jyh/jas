@@ -18,6 +18,7 @@ import yaml
 
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.tests.store_docs import Color, Fill, Group, Layer, Rect, Stroke, store_doc
 
 _WS = os.path.join(os.path.dirname(__file__), "..", "..", "workspace")
 
@@ -30,23 +31,13 @@ def _sw(name, color="#000000"):
 
 
 def _rect(fill=None, stroke=None):
-    el = {"kind": "Rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0}
-    if fill is not None:
-        el["fill"] = {"color": fill}
-    if stroke is not None:
-        el["stroke"] = {"color": stroke, "width": 1.0}
-    return el
+    return Rect(x=0.0, y=0.0, width=10.0, height=10.0,
+                fill=None if fill is None else Fill(color=Color.from_hex(fill)),
+                stroke=None if stroke is None else Stroke(color=Color.from_hex(stroke), width=1.0))
 
 
 def _store(swatches, selected, children=(), library="lib_a"):
-    store = StateStore(document={
-        "layers": [{
-            "kind": "Layer", "name": "L",
-            "common": {"visibility": "preview", "locked": False, "opacity": 1.0},
-            "children": list(children),
-        }],
-        "selection": [],
-    })
+    store = StateStore(document=store_doc(Layer(name="L", children=tuple(children))))
     store.set_data({"swatch_libraries": {
         "lib_a": {"name": "A", "swatches": swatches},
         "lib_b": {"name": "B", "swatches": [_sw("Other", "#123456")]},
@@ -184,7 +175,7 @@ class TestSelectAllUnusedSwatches:
         assert _sel(store) == [1]
 
     def test_use_inside_a_group_counts(self):
-        group = {"kind": "Group", "children": [_rect(fill="#00ff00")]}
+        group = Group(children=(_rect(fill="#00ff00"),))
         store = _store([dict(s) for s in ABC], [], children=[group])
         _run(store, "select_all_unused_swatches")
         assert _sel(store) == [0, 2]

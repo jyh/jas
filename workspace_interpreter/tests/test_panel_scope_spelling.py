@@ -32,6 +32,7 @@ import os
 
 from workspace_interpreter.effects import run_effects
 from workspace_interpreter.state_store import StateStore, panel_content_id
+from workspace_interpreter.tests.store_docs import Layer, store_doc
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -74,7 +75,7 @@ def test_active_panel_spelled_short_reads_the_content_scope():
     ``layers_panel_content`` are the same panel: the expression context's
     ``panel`` namespace and the active-document view's layers-panel rollups
     both read it."""
-    store = StateStore(document={"layers": [{"kind": "Layer", "name": "L0", "children": []}]})
+    store = StateStore(document=store_doc(Layer(name="L0")))
     store.init_panel("layers_panel_content", {
         "layers_panel_selection": [{"__path__": [0]}],
         "isolation_stack": [],
@@ -86,7 +87,7 @@ def test_active_panel_spelled_short_reads_the_content_scope():
     assert ctx["active_document"]["layers_panel_selection_is_container"] is True
     assert store.get_active_panel_id() == "layers_panel_content"
     # The other way round too: initialised short, activated by the content id.
-    store2 = StateStore(document={"layers": [{"kind": "Layer", "name": "L0", "children": []}]})
+    store2 = StateStore(document=store_doc(Layer(name="L0")))
     store2.init_panel("layers", {"layers_panel_selection": [{"__path__": [0]}]})
     store2.set_active_panel("layers_panel_content")
     assert store2.eval_context()["active_document"]["layers_panel_selection_count"] == 1

@@ -2,18 +2,14 @@ description: "toggle_all_layers_lock: at least one unlocked → all locked"
 action: toggle_all_layers_lock
 initial_doc:
   layers:
-    - kind: Layer
-      name: "A"
-      common: { visibility: visible, locked: false }
-    - kind: Layer
-      name: "B"
-      common: { visibility: visible, locked: true }
+    - {children: [], locked: false, name: "A", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: true, name: "B", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_doc:
   layers:
-    - kind: Layer
-      name: "A"
-      common: { visibility: visible, locked: true }
-    - kind: Layer
-      name: "B"
-      common: { visibility: visible, locked: true }
+    - {children: [], locked: true, name: "A", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+    - {children: [], locked: true, name: "B", opacity: 1.0, transform: null, type: "layer", visibility: "preview"}
+  selected_layer: 0
+  selection: []
 expected_snapshots: 1
