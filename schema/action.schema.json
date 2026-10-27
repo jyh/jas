@@ -270,6 +270,7 @@
             "maximize": {},
             "open_dialog": {},
             "pop": {},
+            "preferences.toggle_member": {},
             "release_compound_shape": {},
             "release_transform": {},
             "remove_child": {},

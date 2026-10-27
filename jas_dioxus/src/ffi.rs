@@ -1497,15 +1497,24 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
     if mask & MOD_CMD != 0 {
         let km = crate::tools::tool::KeyMods { shift: mask & MOD_SHIFT != 0, ctrl: true,
                                                alt: mask & MOD_ALT != 0, meta: false };
-        if let crate::workspace::resolve_key::KeyRoute::Clipboard(action) =
-            crate::workspace::resolve_key::route_key(name, km, |_| false)
-        {
-            let mut req = serde_json::json!({"action": action});
-            if let Some(clip) = clipboard {
-                req["clipboard"] = clip.clone();
+        match crate::workspace::resolve_key::route_key(name, km, |_| false) {
+            crate::workspace::resolve_key::KeyRoute::Clipboard(action) => {
+                let mut req = serde_json::json!({"action": action});
+                if let Some(clip) = clipboard {
+                    req["clipboard"] = clip.clone();
+                }
+                let req = req.to_string();
+                return unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) };
             }
-            let req = req.to_string();
-            return unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) };
+            // Undo / Redo run their actions' YAML (`doc.op`), as the menu
+            // does (STATUS-jas item 36).
+            route @ (crate::workspace::resolve_key::KeyRoute::Undo
+            | crate::workspace::resolve_key::KeyRoute::Redo) => {
+                let action = if route == crate::workspace::resolve_key::KeyRoute::Redo { "redo" } else { "undo" };
+                let req = serde_json::json!({"action": action}).to_string();
+                return unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) };
+            }
+            _ => {}
         }
     }
     if matches!(code, KEY_DELETE | KEY_BACKSPACE) && mask & MOD_CMD == 0 {
@@ -5874,9 +5883,8 @@ mod tests {
             "open_file -> Logged:open_file: show native file dialog",
             "save -> Logged:save_as: show native save dialog",
             "save_as -> Logged:save_as: show native save dialog",
-            // Undo and redo: the shell sends them as ops (`{"op":"undo"}`).
-            "redo -> Logged:redo",
-            "undo -> Logged:undo",
+            // Undo and redo left this list on 2026-10-27: they run their YAML
+            // (`doc.op: {op: undo|redo}`, STATUS-jas item 36).
             // Dialogs open in the engine now (the dialog door, 2026-10-14), so
             // `open_document_setup`, `open_print_dialog`, `save_appearance_as`
             // and `save_workspace_as` left this list.

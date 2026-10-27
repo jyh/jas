@@ -304,7 +304,7 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     for (k, v) in layoutHeldPanelState(contentId, layout: layout) { panel[k] = v }
     for (k, v) in modelHeldPanelState(contentId, model: model) { panel[k] = v }
     var ctx: [String: Any] = ["panel": panel]
-    ctx["preferences"] = ws?.data["preferences"] ?? [:]
+    ctx["preferences"] = Preferences.current() ?? [:]
     if let ws = ws {
         ctx["state"] = buildLiveStateMap(ws: ws, model: model)
     } else {

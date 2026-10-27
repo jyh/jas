@@ -143,8 +143,9 @@ actions:
     category: edit
     tier: 3
     enabled_when: "active_document.can_undo"
+    # The op layer's history (every runner's Model): STATUS-jas item 36.
     effects:
-      - log: "undo"
+      - doc.op: { op: undo }
   redo:
     description: >
       Redo the last undone operation. Pops the most recent entry from the
@@ -154,8 +155,9 @@ actions:
     category: edit
     tier: 3
     enabled_when: "active_document.can_redo"
+    # The op layer's history (every runner's Model): STATUS-jas item 36.
     effects:
-      - log: "redo"
+      - doc.op: { op: redo }
   cut:
     description: >
       Copy the selected objects to the clipboard as SVG markup, then delete
@@ -4324,7 +4326,9 @@ actions:
       libraries auto-open on app launch.
     category: brushes
     effects:
-      - log: "toggle_brush_library_persistent"
+      - preferences.toggle_member:
+          key: brushes.persistent_libraries
+          value: panel.selected_library
 
   save_brush_library:
     description: >

@@ -449,6 +449,13 @@ def reachable_sites(name, direct, _seen=None):
     return sites
 
 
+# The ops a `doc.op` call site may name that move the history cursor rather
+# than edit: never journaled (op_apply.rs, the match on `"snapshot"` /
+# `"undo"` / `"redo"`: "NOT primitive ops, so they are never journaled").
+# Edit > Undo / Redo name them since 2026-10-27 (STATUS-jas item 36).
+HISTORY_OPS = ("snapshot", "undo", "redo")
+
+
 def journal_param_of(spec):
     """The literal `journal` param at a param-gated call site (bundle values
     are always literals, so static classification suffices)."""
@@ -477,6 +484,8 @@ def classify_action(name, direct):
     journaling = False
     for v, spec in sites:
         row = VERB_TABLE[v]
+        if v == "doc.op" and isinstance(spec, dict) and spec.get("op") in HISTORY_OPS:
+            continue
         if row["journals"] == "always":
             journaling = True
         elif row["journals"] == "param-gated":

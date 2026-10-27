@@ -178,7 +178,11 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # declares an EMPTY effect list: it does nothing on purpose.
 # 28 the same evening: `copy` (`doc.copy_selection_to_clipboard`, the payload
 # the shell writes; item 8 M′ step (d)).
-MIN_LOG_ONLY = 28
+# 26 on 2026-10-27: `undo` and `redo` (`doc.op: {op: undo|redo}`, STATUS-jas
+# item 36).
+# 25 the same day: `toggle_brush_library_persistent`
+# (`preferences.toggle_member`, STATUS-jas item 37).
+MIN_LOG_ONLY = 25
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
@@ -507,16 +511,21 @@ def self_test() -> int:
         failures.append("  c: only a non-empty string declares")
 
     anchors = {
-        # verified by hand: menu_bar.rs:67 real body / JasCommands "undo"
-        "undo": "native_both",
+        # verified by hand 2026-10-27: menu_bar.rs:44 (`"open"`, mapped from
+        # `open_file` at :906) calls open_file_dialog / JasCommands.swift:293
+        # calls openFile(). This anchor was `undo` until 2026-10-27, when undo
+        # and redo became `doc.op` effects and left the log-only set.
+        "open_file": "native_both",
         # verified: neither port contains the string at all (0 files in
-        # jas_dioxus/src and JasSwift/Sources, 2026-10-25, with
-        # `convert_to_artboards` found in jas_dioxus/src as the control).
-        # This anchor was `toggle_artboard_orientation` until 2026-10-15,
-        # `toggle_artboard_chain_link` until 2026-10-24 and
-        # `set_artboard_fill_preset` until 2026-10-25; each became effects in
-        # actions.yaml and left the log-only set.
-        "scroll_to_selected": "dead_both",
+        # jas_dioxus/src and JasSwift/Sources, 2026-10-27, with
+        # `convert_to_artboards` found in jas_dioxus/src as the control), and
+        # the feature (Left Arrow in the Layers tree) is in neither port's tree
+        # code either. This anchor was `toggle_artboard_orientation` until
+        # 2026-10-15, `toggle_artboard_chain_link` until 2026-10-24,
+        # `set_artboard_fill_preset` until 2026-10-25 (each became effects in
+        # actions.yaml) and `scroll_to_selected` until 2026-10-27 (declared
+        # bypassed: both ports run it as render behaviour).
+        "layers_nav_left": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any

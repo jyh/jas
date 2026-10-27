@@ -643,6 +643,17 @@ fn run_one<'h>(
     // keys (no leading `state.`/`panel.`/`tool.`) continue to write
     // to the global state map — preserves existing call-site
     // behavior from before the tool-state scope was introduced.
+    // STATUS-jas item 37: toggle `value` (an expression) in the LIST
+    // preference at `key` (a literal dotted path), as a user override.
+    if let Some(serde_json::Value::Object(args)) = effect.get("preferences.toggle_member") {
+        let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        let value = resolve_value_or_expr(args.get("value"), store, ctx);
+        if !key.is_empty() && !value.is_null() {
+            crate::interpreter::preferences::toggle_member(key, &value);
+        }
+        return;
+    }
+
     if let Some(serde_json::Value::Object(pairs)) = effect.get("set") {
         for (key, expr) in pairs {
             // A string is an expression; any other value is a bare YAML
@@ -3678,11 +3689,8 @@ pub(crate) fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64
     if let Some(v) = viewport_pref_override(key) {
         return v;
     }
-    use crate::interpreter::workspace::Workspace;
-    let Some(ws) = Workspace::load() else { return default; };
-    ws.data()
-        .get("preferences")
-        .and_then(|p| p.get("viewport"))
+    crate::interpreter::preferences::current()
+        .get("viewport")
         .and_then(|v| v.get(key))
         .and_then(|n| n.as_f64())
         .unwrap_or(default)

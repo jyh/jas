@@ -407,9 +407,7 @@ pub fn panel_menu_ctx(
     for (k, v) in live_panel_state(content_id, st) {
         panel.insert(k, v);
     }
-    let preferences = crate::interpreter::workspace::Workspace::load()
-        .and_then(|ws| ws.data().get("preferences").cloned())
-        .unwrap_or(J::Null);
+    let preferences = crate::interpreter::preferences::current();
     let state = crate::workspace::dock_panel::build_live_state_map(st);
     let active_document = crate::interpreter::renderer::build_active_document_view(st);
     let mut ctx = serde_json::Map::new();

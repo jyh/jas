@@ -482,6 +482,20 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.move_artboards_down(val.value)
         return None
 
+    # preferences.toggle_member: { key, value } — STATUS-jas item 37
+    # Toggles `value` (an expression) in the LIST preference at `key` (a
+    # literal dotted path), as a user override over the bundle's default.
+    if "preferences.toggle_member" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["preferences.toggle_member"]
+        if not isinstance(spec, dict) or not isinstance(spec.get("key"), str):
+            return None
+        value_result = evaluate(str(spec.get("value")), store.eval_context(ctx))
+        if value_result.type in (ValueType.NULL, ValueType.CLOSURE):
+            return None
+        store.toggle_preference_member(spec["key"], value_result.value)
+        return None
+
     # doc.set_artboard_options_field: { field, value }
     # — ARTBOARDS.md §Artboard Options Dialogue — Global section
     # Writes a document-wide artboard option

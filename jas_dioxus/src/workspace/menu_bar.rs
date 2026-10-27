@@ -76,22 +76,18 @@ pub(crate) fn MenuBarView(
                     crate::interpreter::renderer::apply_deferred_dialog_effects(
                         &effects, &app_for_menu, &mut sig);
                 }
-                "undo" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
+                // Each runs its action's YAML (`doc.op: {op: undo|redo}`;
+                // STATUS-jas item 36).
+                "undo" | "redo" => {
+                    let action: &'static str = if cmd == "redo" { "redo" } else { "undo" };
+                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        if let Some(tab) = st.tab() {
                             // Recorder: history nav segments an open
                             // gesture case (pre-nav doc is the oracle).
                             crate::recorder::hooks::history_nav(&tab.model);
-                            tab.model.undo();
                         }
-                    }));
-                }
-                "redo" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            crate::recorder::hooks::history_nav(&tab.model);
-                            tab.model.redo();
-                        }
+                        let _ = crate::interpreter::renderer::dispatch_action(
+                            action, &serde_json::Map::new(), st);
                     }));
                 }
                 "cut" => {
