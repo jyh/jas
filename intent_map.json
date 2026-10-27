@@ -683,8 +683,10 @@
       "doc_verbs": []
     },
     "redo": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "doc-direct",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "release_compound_shape": {
       "class": "ui-state",
@@ -1153,8 +1155,10 @@
       "doc_verbs": []
     },
     "undo": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "doc-direct",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "ungroup": {
       "class": "journaling",
@@ -1249,12 +1253,12 @@
       "doc.zoom.set"
     ],
     "by_class": {
-      "doc-direct": 3,
+      "doc-direct": 5,
       "journaling": 50,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 181,
+      "ui-state": 179,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
