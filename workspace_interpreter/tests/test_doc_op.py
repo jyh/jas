@@ -767,6 +767,73 @@ def test_set_fill_type_solid_from_actions_yaml_demotes_a_gradient():
     assert demote_to_solid_ops(one(bare), True) == [{"op": "demote_to_solid", "fill_on_top": True}]
 
 
+# ── Clipboard M′: the paste actions run their YAML (design row 2026-10-26) ──
+
+_PASTE_SVG = ('<svg xmlns="http://www.w3.org/2000/svg">'
+              '<rect x="0" y="0" width="10" height="10" fill="#f00"/></svg>')
+
+
+def _pasted_xs(store: StateStore) -> list[float]:
+    """The x of every Rect after the setup rect, in z order."""
+    return [c.x for c in _doc_of(store).layers[0].children[1:]]
+
+
+def test_the_paste_run_survives_across_store_ops():
+    """The store bridges each op through a fresh Model; the run (on the
+    document) must cross the bridge, or a second paste lands on the first:
+    the one outcome the offset exists to prevent (actions.yaml paste)."""
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    for _ in range(3):
+        store.apply_op({"op": "paste", "text": _PASTE_SVG, "offset": 24})
+    assert _pasted_xs(store) == [24.0, 48.0, 72.0]
+
+
+def _run_yaml_action_with_params(store: StateStore, name: str, params: dict) -> None:
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        effects = yaml.safe_load(f)["actions"][name]["effects"]
+    run_effects(effects, {"param": params}, store)
+
+
+@pytest.mark.parametrize("name,xs", [
+    ("paste", [24.0, 48.0]),
+    ("paste_preserving_layers", [24.0, 48.0]),
+    ("paste_in_place", [0.0, 0.0]),
+])
+def test_the_paste_actions_run_their_yaml_on_the_clipboard_param(name, xs):
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    for _ in range(2):
+        _run_yaml_action_with_params(store, name, {"clipboard": _PASTE_SVG})
+    assert _pasted_xs(store) == xs
+
+
+@pytest.mark.parametrize("clip", [None, ""])
+def test_a_paste_of_nothing_changes_nothing(clip):
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    before = json.dumps(store._document, sort_keys=True)
+    _run_yaml_action_with_params(store, "paste", {"clipboard": clip})
+    assert json.dumps(store._document, sort_keys=True) == before
+
+
+def test_paste_in_place_neither_advances_nor_restarts_the_run():
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    for name in ("paste", "paste_in_place", "paste"):
+        _run_yaml_action_with_params(store, name, {"clipboard": _PASTE_SVG})
+    assert _pasted_xs(store) == [24.0, 0.0, 48.0]
+
+
+@pytest.mark.parametrize("name,layers", [
+    ("paste", ["L"]),
+    ("paste_preserving_layers", ["L", "Sky"]),
+])
+def test_only_paste_preserving_layers_brings_a_named_layer_across(name, layers):
+    sky = ('<svg xmlns="http://www.w3.org/2000/svg"><g inkscape:groupmode="layer" '
+           'inkscape:label="Sky" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">'
+           '<rect x="0" y="0" width="10" height="10"/></g></svg>')
+    store = _store(Document(layers=(Layer(name="L", children=(_rect(),)),)))
+    _run_yaml_action_with_params(store, name, {"clipboard": sky})
+    assert sorted(l.name for l in _doc_of(store).layers) == sorted(layers)
 def test_noop_does_nothing_by_declaration_and_is_never_enabled():
     """`noop` backs the Print dialog's disabled Page Setup... and Setup...
     buttons. It does nothing on purpose, so its YAML says so with an EMPTY

@@ -164,6 +164,14 @@ VERB_TABLE = {
         "journals": "always", "op": "create_reference + move_selection",
         "evidence": ["effects.rs `\"doc.make_instance\" =>`", "op_apply.rs `\"create_reference\" =>`"],
     },
+    "doc.paste": {
+        # The three paste actions: the shell's clipboard read (`param.clipboard`)
+        # through the op layer's one paste law (the run, SVG-or-text, the lock).
+        "journals": "always", "op": "paste",
+        "evidence": ["effects.rs `\"doc.paste\" =>`", "op_apply.rs `\"paste\" =>`"],
+        "note": ("an empty or unreadable clipboard journals nothing: the law "
+                 "self-brackets through edit_document only when it pastes"),
+    },
     "doc.place_instance": {
         # The Symbols panel's Place Instance: one value-in-op op whose id the
         # effect mints first (symbols_host::place_instance_ops), through op_apply.

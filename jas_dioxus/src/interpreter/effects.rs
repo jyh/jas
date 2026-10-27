@@ -2946,6 +2946,32 @@ fn run_doc_effect(
                 None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.make_instance:{spec}"))),
             }
         }
+        // doc.paste: { text: <expr>, offset, preserve_layers }: the three paste
+        // actions. `text` names the shell's clipboard read (`param.clipboard`;
+        // null when the read failed), handed to the op layer's `paste` op: the
+        // run (`offset` is its base step), the SVG-or-text rule and the
+        // locked-layer refusal are that one law, which self-brackets, so a
+        // paste of nothing journals nothing. The reference's `doc.paste` the same.
+        "doc.paste" => {
+            match spec.get("offset").and_then(|v| v.as_f64()) {
+                Some(offset) => {
+                    let text = match spec.get("text").and_then(|v| v.as_str()) {
+                        Some(expr) => match eval_expr(expr, store, ctx) {
+                            Value::Str(t) => serde_json::Value::String(t),
+                            _ => serde_json::Value::Null,
+                        },
+                        None => serde_json::Value::Null,
+                    };
+                    let preserve = spec.get("preserve_layers").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let op = serde_json::json!({"op": "paste", "text": text, "offset": offset,
+                                                "preserve_layers": preserve});
+                    if crate::document::op_apply::op_apply(model, &op).is_err() {
+                        report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.paste:{spec}")));
+                    }
+                }
+                None => report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.paste:{spec}"))),
+            }
+        }
         // doc.place_instance: { master: <expr> }: the Symbols panel's Place
         // Instance, the value-in-op op `symbols_host::place_instance_ops` mints
         // for the master the expression names (`panel.selected_symbol`), under
@@ -8470,6 +8496,74 @@ mod tests {
         assert_eq!(model.generation(), generation, "an unknown op changes nothing");
         assert!(report.unhandled.iter().any(|u| matches!(u, Unhandled::UnknownDocEffect(d) if d.contains("zz_no_such_op"))),
             "and is reported: {:?}", report.unhandled);
+    }
+
+    // ── Clipboard M′: `doc.paste`, as the three paste actions run it ──
+
+    const PASTE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="10" height="10" fill="#f00"/></svg>"##;
+
+    /// Run the SHIPPED paste action `name` on `clipboard` (the shell's read).
+    fn run_paste_action(name: &str, clipboard: serde_json::Value, model: &mut Model) -> EffectsReport {
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let effects = ws.data()["actions"][name]["effects"].as_array().cloned().unwrap();
+        let mut store = StateStore::new();
+        run_effects(&effects, &serde_json::json!({"param": {"clipboard": clipboard}}),
+            &mut store, Some(model), None, None, None)
+    }
+
+    /// The x of every top-level element past the two seeded rects.
+    fn pasted_xs(model: &Model) -> Vec<f64> {
+        model.document().layers[0].children().unwrap()[2..].iter()
+            .map(|e| match &**e { Element::Rect(r) => r.x, other => panic!("pasted a non-rect: {other:?}") })
+            .collect()
+    }
+
+    /// Each paste action runs its YAML: `doc.paste` hands `param.clipboard` to
+    /// the op layer's one paste law, so the run stacks (24, 48), Paste in
+    /// Place lands at 0 and stays outside the run, and each paste is one undo.
+    #[test]
+    fn the_paste_actions_run_their_yaml_on_the_clipboard_param() {
+        for (name, xs) in [("paste", vec![24.0, 48.0]), ("paste_preserving_layers", vec![24.0, 48.0]),
+                           ("paste_in_place", vec![0.0, 0.0])] {
+            let mut model = make_model_two_rects();
+            for _ in 0..2 {
+                let report = run_paste_action(name, serde_json::json!(PASTE_SVG), &mut model);
+                assert!(report.unhandled.is_empty(), "{name}: {:?}", report.unhandled);
+            }
+            assert_eq!(pasted_xs(&model), xs, "{name}");
+            model.undo();
+            assert_eq!(pasted_xs(&model).len(), 1, "{name}: one paste is one undo step");
+        }
+        let mut model = make_model_two_rects();
+        for name in ["paste", "paste_in_place", "paste"] {
+            run_paste_action(name, serde_json::json!(PASTE_SVG), &mut model);
+        }
+        assert_eq!(pasted_xs(&model), vec![24.0, 0.0, 48.0], "in place neither advances nor restarts the run");
+    }
+
+    /// A failed read (null) and an empty clipboard paste nothing and record no
+    /// undo step.
+    #[test]
+    fn a_paste_of_nothing_changes_nothing() {
+        for clip in [serde_json::Value::Null, serde_json::json!("")] {
+            let mut model = make_model_two_rects();
+            let generation = model.generation();
+            let report = run_paste_action("paste", clip.clone(), &mut model);
+            assert!(report.unhandled.is_empty(), "{clip}: {:?}", report.unhandled);
+            assert_eq!(model.generation(), generation, "{clip}");
+            assert!(!model.can_undo(), "{clip}: no undo step");
+        }
+    }
+
+    /// Only the preserving paste brings a fragment's named layer across.
+    #[test]
+    fn only_paste_preserving_layers_brings_a_named_layer_across() {
+        let sky = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"><g inkscape:groupmode="layer" inkscape:label="Sky"><rect x="0" y="0" width="10" height="10"/></g></svg>"##;
+        for (name, layers) in [("paste", 1), ("paste_preserving_layers", 2)] {
+            let mut model = make_model_two_rects();
+            run_paste_action(name, serde_json::json!(sky), &mut model);
+            assert_eq!(model.document().layers.len(), layers, "{name}");
+        }
     }
 
     // ── Scope-routed `set:` targets ────────────────────────────────

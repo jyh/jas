@@ -537,6 +537,20 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.make_instance(float(spec["offset"]))
         return None
 
+    # doc.paste: { text: <expr>, offset: <number>, preserve_layers: <bool> } —
+    # the paste actions: the clipboard text the expression names (the shell's
+    # read, `param.clipboard`; null when the read failed) through the op
+    # layer's one paste law, as the `paste` op (the run, the SVG-or-text rule,
+    # the locked-layer refusal). `offset` is the run's base step.
+    if "doc.paste" in effect:
+        spec = effect["doc.paste"]
+        if isinstance(spec, dict) and isinstance(spec.get("offset"), (int, float)):
+            text = evaluate(str(spec.get("text", "")), store.eval_context(ctx)).value
+            store.apply_op({"op": "paste", "text": text if isinstance(text, str) else None,
+                            "offset": float(spec["offset"]),
+                            "preserve_layers": spec.get("preserve_layers") is True})
+        return None
+
     # doc.place_instance: { master: <expr> } — the Symbols panel's Place
     # Instance: a minted by-id reference to the master the expression names
     # (`panel.selected_symbol`), appended and selected. StateStore.place_instance.

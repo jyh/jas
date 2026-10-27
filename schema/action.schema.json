@@ -176,6 +176,15 @@
               "required": ["offset"],
               "properties": { "offset": { "type": "number" } }
             },
+            "doc.paste": {
+              "type": "object",
+              "required": ["text", "offset"],
+              "properties": {
+                "text": { "type": "string" },
+                "offset": { "type": "number" },
+                "preserve_layers": { "type": "boolean" }
+              }
+            },
             "doc.place_instance": {
               "type": "object",
               "required": ["master"],
