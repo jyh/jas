@@ -7354,34 +7354,7 @@ fn tree_icon_svg(icon_name: &str) -> String {
 }
 
 fn tree_type_label(elem: &GeoElement) -> &'static str {
-    match elem {
-        GeoElement::Line(_) => "Line",
-        GeoElement::Rect(_) => "Rectangle",
-        // DERIVED, so the auto-generated label agrees with the type token
-        // rather than contradicting it: a round ellipse reads `<Circle>`.
-        //
-        // This does NOT re-couple the two axes JYH separated on 2026-07-30.
-        // The label is still just a label -- a user-given name still wins, and
-        // the filter still reads the ELEMENT, never this string. They agree
-        // here because they are computed from the same fact, not because one
-        // is derived from the other.
-        GeoElement::Ellipse(e) if e.rx == e.ry => "Circle",
-        GeoElement::Ellipse(_) => "Ellipse",
-        GeoElement::Polyline(_) => "Polyline",
-        GeoElement::Polygon(_) => "Polygon",
-        GeoElement::Path(_) => "Path",
-        GeoElement::Text(_) => "Text",
-        GeoElement::TextPath(_) => "Text Path",
-        GeoElement::Group(_) => "Group",
-        GeoElement::Layer(_) => "Layer",
-        GeoElement::Live(v) => match v {
-            crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
-            crate::geometry::live::LiveVariant::Reference(_) => "Reference",
-            crate::geometry::live::LiveVariant::Recorded(_) => "Recorded",
-            crate::geometry::live::LiveVariant::Generated(_) => "Generated",
-            crate::geometry::live::LiveVariant::Transformed(_) => "Transformed",
-        },
-    }
+    crate::interpreter::document_views::tree_type_label(elem)
 }
 
 // The Layers type filter lives in `algorithms::layers_filter` -- a PURE
@@ -14991,6 +14964,35 @@ mod tests {
                    Some("ff0000".to_string()),
                    "the same tiers the panel displays, so Invert operates on \
                     the colour the user can SEE");
+    }
+
+    // The independent witness for the shared `element_tree` fixture: the web
+    // tree's own walker (older than the fixture) agrees on every row's path,
+    // order, depth, display name, container-ness and selection.
+    #[test]
+    fn the_web_tree_walker_agrees_with_the_element_tree_fixture() {
+        let raw = include_str!("../../../test_fixtures/layers/element_tree.json");
+        let fx: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let mut compared = 0;
+        for case in fx["cases"].as_array().unwrap() {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            let rows = tree_flatten_layers(&doc.layers, &doc.selected_paths().into_iter().collect(),
+                                           &TreeHashSet::default(), &[], &None);
+            let want = case["expected"].as_array().unwrap();
+            assert_eq!(rows.len(), want.len(), "{}", case["name"]);
+            for (r, w) in rows.iter().zip(want) {
+                let path: Vec<usize> = serde_json::from_value(w["path"].clone()).unwrap();
+                assert_eq!(r.path, path, "{}", case["name"]);
+                assert_eq!(r.depth as u64, w["depth"].as_u64().unwrap());
+                let name = w["name"].as_str().unwrap();
+                let shown = if name.is_empty() { format!("<{}>", w["type_label"].as_str().unwrap()) } else { name.to_string() };
+                assert_eq!(r.display_name, shown);
+                assert_eq!(r.is_container, w["is_container"].as_bool().unwrap());
+                assert_eq!(r.is_selected, w["element_selected"].as_bool().unwrap(), "{:?}", r.path);
+                compared += 1;
+            }
+        }
+        assert!(compared >= 5, "rows compared: {compared}");
     }
 
     // STATUS-jas item 36: Edit > Undo / Redo run their actions' YAML

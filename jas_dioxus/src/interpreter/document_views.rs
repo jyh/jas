@@ -161,6 +161,20 @@ pub fn concept_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shared fixture (`test_fixtures/layers/element_tree.json`), as the
+    /// reference reads it (STATUS-jas item 38 step 1).
+    #[test]
+    fn element_tree_rows_match_the_shared_fixture() {
+        let raw = include_str!("../../../test_fixtures/layers/element_tree.json");
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["cases"].as_array().unwrap();
+        assert!(cases.len() >= 2, "the fixture is not vacuous");
+        for case in cases {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            assert_eq!(element_tree(&doc), case["expected"], "{}", case["name"]);
+        }
+    }
     use crate::document::test_fixture::{brushed_path as path, model_with, rect};
 
     const B: Option<&str> = Some("default_brushes/flat_10");
@@ -243,6 +257,89 @@ pub fn selection_orphan_count(doc: &crate::document::document::Document) -> usiz
         return 0;
     }
     crate::document::dependency_index::orphaned_references(doc, &paths).len()
+}
+
+/// The Layers tree's display label for an element (the renderer's tree and
+/// `element_tree` share it).
+pub fn tree_type_label(elem: &Element) -> &'static str {
+    match elem {
+        Element::Line(_) => "Line",
+        Element::Rect(_) => "Rectangle",
+        Element::Ellipse(e) if e.rx == e.ry => "Circle",
+        Element::Ellipse(_) => "Ellipse",
+        Element::Polyline(_) => "Polyline",
+        Element::Polygon(_) => "Polygon",
+        Element::Path(_) => "Path",
+        Element::Text(_) => "Text",
+        Element::TextPath(_) => "Text Path",
+        Element::Group(_) => "Group",
+        Element::Layer(_) => "Layer",
+        Element::Live(v) => match v {
+            LiveVariant::CompoundShape(_) => "Compound Shape",
+            LiveVariant::Reference(_) => "Reference",
+            LiveVariant::Recorded(_) => "Recorded",
+            LiveVariant::Generated(_) => "Generated",
+            LiveVariant::Transformed(_) => "Transformed",
+        },
+    }
+}
+
+/// An element's test-JSON `type`, which the row template compares
+/// (`node.type == 'layer'`).
+fn tree_type_name(elem: &Element) -> &'static str {
+    match elem {
+        Element::Line(_) => "line",
+        Element::Rect(_) => "rect",
+        Element::Ellipse(_) => "ellipse",
+        Element::Polyline(_) => "polyline",
+        Element::Polygon(_) => "polygon",
+        Element::Path(_) => "path",
+        Element::Text(_) => "text",
+        Element::TextPath(_) => "text_path",
+        Element::Group(_) => "group",
+        Element::Layer(_) => "layer",
+        Element::Live(_) => "live",
+    }
+}
+
+/// `active_document.element_tree` (STATUS-jas item 38): the document's rows
+/// for the Layers panel's `tree_view`, topmost first (REVERSE z) and depth
+/// first, as the web tree walks it (`renderer::tree_flatten_layers`). A row is
+/// selected when its path is at or under a selected path. Collapse, panel
+/// selection, renaming, filters and isolation are the widget's own binds
+/// (`layers.yaml` `lp_tree`), not rows' fields. The shared fixture is
+/// `test_fixtures/layers/element_tree.json`.
+pub fn element_tree(doc: &Document) -> Value {
+    use crate::geometry::element::Visibility;
+    fn walk(children: &[&Element], prefix: &[usize], depth: usize,
+            selected: &std::collections::HashSet<Vec<usize>>, rows: &mut Vec<Value>) {
+        for (i, elem) in children.iter().enumerate().rev() {
+            let mut path = prefix.to_vec();
+            path.push(i);
+            let c = elem.common();
+            let visibility = match c.visibility {
+                Visibility::Invisible => "invisible",
+                Visibility::Outline => "outline",
+                Visibility::Preview => "preview",
+            };
+            rows.push(json!({
+                "path": path, "depth": depth, "id": c.id.clone(),
+                "name": c.name.clone().unwrap_or_default(),
+                "type": tree_type_name(elem), "type_label": tree_type_label(elem),
+                "visibility": visibility, "locked": c.locked,
+                "is_container": elem.is_group_or_layer(),
+                "element_selected": crate::document::controller::path_is_selected_or_under(selected, &path),
+            }));
+            if let Some(kids) = elem.children() {
+                let kids: Vec<&Element> = kids.iter().map(|k| &**k).collect();
+                walk(&kids, &path, depth + 1, selected, rows);
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    let top: Vec<&Element> = doc.layers.iter().collect();
+    walk(&top, &[], 0, &doc.selected_paths(), &mut rows);
+    Value::Array(rows)
 }
 
 pub fn active_document_view(
@@ -439,6 +536,9 @@ pub fn active_document_view(
         "view_offset_x": model.view_offset_x,
         "view_offset_y": model.view_offset_y,
     });
+    // The Layers tree's rows (STATUS-jas item 38), outside the macro: one more
+    // key there exceeds `json!`'s recursion limit.
+    view["element_tree"] = element_tree(&doc);
     // Inserted outside the json! literal to keep the macro under the
     // recursion limit (the tab-branch object is at the ceiling too).
     if let serde_json::Value::Object(m) = &mut view {
