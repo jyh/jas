@@ -7,8 +7,9 @@ import Foundation
 /// `toggle_preference_member`.
 ///
 /// One store per process, behind a lock: the readers include
-/// ``readPrefNumber(_:default:)``, which has no model. Persisting the overrides
-/// across launches is the launch half of item 37, not built here.
+/// ``readPrefNumber(_:default:)``, which has no model. The app saves them
+/// across launches through ``onChange`` and imports them with
+/// ``importOverrides(_:)`` before any canvas reads state (`JasApp.init`).
 public enum Preferences {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var overrides: [String: Any] = [:]
@@ -30,6 +31,31 @@ public enum Preferences {
             out[String(head)] = setting(out[String(head)] as? [String: Any] ?? [:], parts.dropFirst(), value)
         }
         return out
+    }
+
+    /// The app's storage key for ``exportOverrides()`` (UserDefaults), beside
+    /// `AppConfig.storageKey`.
+    public static let storageKey = "jas_preference_overrides"
+
+    /// The app's save, called with ``exportOverrides()`` after every write
+    /// (the app installs a UserDefaults write; nothing installed, nothing
+    /// saved, which is what a test sees).
+    nonisolated(unsafe) public static var onChange: ((String) -> Void)?
+
+    /// The overrides as JSON (dotted key -> value), the form the app saves.
+    public static func exportOverrides() -> String {
+        lock.lock(); let o = overrides; lock.unlock()
+        guard let data = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+
+    /// Replace the overrides with a saved set, at launch. An unreadable save
+    /// loads as no overrides (the bundle), never a crash.
+    public static func importOverrides(_ json: String?) {
+        let loaded = json.flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any] ?? [:]
+        lock.lock(); overrides = loaded; lock.unlock()
     }
 
     /// The bundle's preferences with the overrides applied; nil when there is
@@ -64,12 +90,15 @@ public enum Preferences {
               let now = at(current(), key) as? [Any] else { return false }
         let same = { (a: Any) in (a as AnyObject).isEqual(value) }
         let next: [Any] = now.contains(where: same) ? now.filter { !same($0) } : now + [value]
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         if (next as NSArray).isEqual(to: defaults) {
             overrides.removeValue(forKey: key)
         } else {
             overrides[key] = next
         }
+        lock.unlock()
+        // Outside the lock: the save reads the overrides back.
+        onChange?(exportOverrides())
         return true
     }
 }

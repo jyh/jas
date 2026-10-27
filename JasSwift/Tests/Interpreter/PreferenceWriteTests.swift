@@ -59,6 +59,27 @@ import Foundation
         #expect(open().allSatisfy { ($0["collapsed"] as? Bool) == false })
     }
 
+    /// Persistence across launches: every write hands the overrides to the
+    /// app's hook, and a launch imports what was saved.
+    @Test func theOverridesRoundTripThroughTheAppsStorage() {
+        var saved: [String] = []
+        Preferences.onChange = { saved.append($0) }
+        defer { Preferences.onChange = nil; Preferences.importOverrides("{}") }
+        let lib = "a_library_saved_across_launches_swift"
+        #expect(Preferences.toggleMember("brushes.persistent_libraries", lib))
+        let json = saved.last
+        #expect(json != nil, "the toggle saved")
+        Preferences.onChange = nil
+        Preferences.importOverrides("{}")
+        #expect(!Self.list(Preferences.current()).contains(lib), "the control: a fresh launch without the save")
+        Preferences.importOverrides(json)
+        #expect(Self.list(Preferences.current()).contains(lib), "the save restores the override")
+        Preferences.importOverrides("garbage{{{")
+        #expect(Self.list(Preferences.current()) == Self.list(WorkspaceData.load()?.data["preferences"] as? [String: Any]),
+                "an unreadable save is the bundle, not a crash")
+        #expect(Preferences.exportOverrides() == "{}")
+    }
+
     @Test func theToggleRefusesAKeyThatIsNotABundledList() {
         #expect(!Preferences.toggleMember("viewport.zoom_step", 2))
         #expect(!Preferences.toggleMember("brushes.no_such_list", "x"))

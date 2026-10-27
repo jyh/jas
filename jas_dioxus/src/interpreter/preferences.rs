@@ -4,8 +4,9 @@
 //! `StateStore.preferences` / `toggle_preference_member`.
 //!
 //! The overrides are per thread: the app's UI thread (web and desktop) and the
-//! engine each run on one, and a test thread sees only its own. Persisting
-//! them across launches is the launch half of item 37, not built here.
+//! engine each run on one, and a test thread sees only its own. The web app
+//! saves them across launches through `set_persist_hook` and imports them with
+//! `load_overrides_json` before anything reads state (`AppState::new`).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -14,6 +15,26 @@ use serde_json::Value;
 
 thread_local! {
     static OVERRIDES: RefCell<BTreeMap<String, Value>> = RefCell::new(BTreeMap::new());
+    static PERSIST: RefCell<Option<fn(&str)>> = const { RefCell::new(None) };
+}
+
+/// This thread's overrides as JSON (dotted key -> value), the form an app
+/// saves across launches.
+pub fn overrides_json() -> String {
+    OVERRIDES.with(|o| serde_json::to_string(&*o.borrow()).unwrap_or_else(|_| "{}".into()))
+}
+
+/// Replace this thread's overrides with a saved set, at launch. An unreadable
+/// save loads as no overrides (the bundle), never a crash.
+pub fn load_overrides_json(json: &str) {
+    let loaded: BTreeMap<String, Value> = serde_json::from_str(json).unwrap_or_default();
+    OVERRIDES.with(|o| *o.borrow_mut() = loaded);
+}
+
+/// The app's save, called with `overrides_json()` after every write (the web
+/// app installs a localStorage write; nothing installed, nothing saved).
+pub fn set_persist_hook(hook: Option<fn(&str)>) {
+    PERSIST.with(|p| *p.borrow_mut() = hook);
 }
 
 fn bundled() -> Value {
@@ -66,6 +87,9 @@ pub fn toggle_member(key: &str, value: &Value) -> bool {
             o.insert(key.to_string(), Value::Array(next));
         }
     });
+    if let Some(save) = PERSIST.with(|p| *p.borrow()) {
+        save(&overrides_json());
+    }
     true
 }
 
@@ -137,6 +161,31 @@ mod tests {
         assert_eq!(got, serde_json::json!([
             {"id": "default_brushes", "collapsed": false},
             {"id": "a_library_not_in_the_bundle", "collapsed": false}]), "the override is read");
+    }
+
+    thread_local! {
+        static SAVED: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    }
+    fn save_hook(json: &str) {
+        SAVED.with(|s| s.borrow_mut().push(json.to_string()));
+    }
+
+    /// Persistence across launches: every write hands the overrides to the
+    /// app's hook, and a launch imports what was saved.
+    #[test]
+    fn the_overrides_round_trip_through_the_apps_storage() {
+        set_persist_hook(Some(save_hook));
+        let lib = serde_json::json!("a_library_saved_across_launches");
+        assert!(toggle_member("brushes.persistent_libraries", &lib));
+        let saved = SAVED.with(|s| s.borrow().last().cloned()).expect("the toggle saved");
+        set_persist_hook(None);
+        load_overrides_json("{}");
+        assert!(!list(&current()).contains(&lib), "the control: a fresh launch without the save");
+        load_overrides_json(&saved);
+        assert!(list(&current()).contains(&lib), "the save restores the override");
+        load_overrides_json("garbage{{{");
+        assert_eq!(list(&current()), list(&bundled()), "an unreadable save is the bundle, not a crash");
+        assert_eq!(overrides_json(), "{}");
     }
 
     #[test]
