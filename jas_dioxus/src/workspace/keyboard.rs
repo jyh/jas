@@ -293,23 +293,18 @@ pub(crate) fn make_keydown_handler(
             // --- Modifier shortcuts ---
             Key::Character(ref c) if (c == "z" || c == "Z") && cmd => {
                 evt.prevent_default();
-                if mods.shift() {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            // Recorder: history nav segments an open
-                            // gesture case (pre-nav doc is the oracle).
-                            crate::recorder::hooks::history_nav(&tab.model);
-                            tab.model.redo();
-                        }
-                    }));
-                } else {
-                    (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            crate::recorder::hooks::history_nav(&tab.model);
-                            tab.model.undo();
-                        }
-                    }));
-                }
+                // The action's YAML (`doc.op: {op: undo|redo}`), as the menu
+                // runs it (STATUS-jas item 36).
+                let action: &'static str = if mods.shift() { "redo" } else { "undo" };
+                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    if let Some(tab) = st.tab() {
+                        // Recorder: history nav segments an open
+                        // gesture case (pre-nav doc is the oracle).
+                        crate::recorder::hooks::history_nav(&tab.model);
+                    }
+                    let _ = crate::interpreter::renderer::dispatch_action(
+                        action, &serde_json::Map::new(), st);
+                }));
             }
             Key::Character(ref c) if (c == "c" || c == "C") && cmd => {
                 evt.prevent_default();

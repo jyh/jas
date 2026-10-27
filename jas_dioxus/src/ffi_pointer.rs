@@ -450,8 +450,9 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
             }
             if handled { JasStatus::Ok } else { JasStatus::UnknownVerb }
         }
-        KeyRoute::Undo => { engine.with_model_mut(|m| m.undo()); JasStatus::Ok }
-        KeyRoute::Redo => { engine.with_model_mut(|m| m.redo()); JasStatus::Ok }
+        // Undo / Redo are ACTIONS (`doc.op`): `ffi::dispatch_key` runs them
+        // through `jas_dispatch_action` before calling here (item 36).
+        KeyRoute::Undo | KeyRoute::Redo => JasStatus::UnknownVerb,
         KeyRoute::SelectTool(id) => match selectable_index(&id) {
             Some(index) => unsafe { jas_set_tool(e, index) },
             None => JasStatus::UnknownVerb,
@@ -1423,6 +1424,16 @@ mod tests {
     /// resolves through `shortcuts.yaml` in the core like a tool letter does.
     /// Ctrl+Z undoes a drag that moved the rect, back to the document byte for
     /// byte; Ctrl+Shift+Z redoes it, back to the moved document byte for byte.
+    /// A Ctrl chord through the shell's key door (`jas_dispatch_action` with
+    /// `{"key", "mods"}`), the path a shell takes.
+    fn chord(e: *mut JasEngine, key: &str, shift: bool) {
+        let req = serde_json::json!({"key": key, "mods": {"ctrl": true, "shift": shift}}).to_string();
+        unsafe {
+            let r = crate::ffi::jas_dispatch_action(e, req.as_ptr(), req.len());
+            crate::ffi::jas_free(r);
+        }
+    }
+
     #[test]
     fn ctrl_z_undoes_a_move_and_ctrl_shift_z_redoes_it() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -1448,9 +1459,11 @@ mod tests {
         let moved = doc(e);
         assert_ne!(moved, before, "the control: the drag moved the rect");
         unsafe {
-            assert_eq!(jas_key_event(e, 'z' as u32, MOD_CMD), JasStatus::Ok);
+            // Through the shell's key door: Undo / Redo run their actions'
+            // YAML there (`doc.op`, STATUS-jas item 36), not in this function.
+            chord(e, "z", false);
             assert_eq!(doc(e), before, "Ctrl+Z restores the document");
-            assert_eq!(jas_key_event(e, 'Z' as u32, MOD_CMD | MOD_SHIFT), JasStatus::Ok);
+            chord(e, "Z", true);
             assert_eq!(doc(e), moved, "Ctrl+Shift+Z restores the move");
             // A chord the table binds to something the engine does not do yet is
             // NOT handled, and changes nothing.
@@ -1530,7 +1543,7 @@ mod tests {
                 assert_ne!(doc(e), before, "{name}: the rect is gone");
                 assert!(!doc(e).contains("\"rect\""), "{name}: no rect remains: {}", doc(e));
                 assert_eq!(crate::ffi::jas_document_modified(e), 1, "{name}: an edit");
-                assert_eq!(jas_key_event(e, 'z' as u32, MOD_CMD), JasStatus::Ok);
+                chord(e, "z", false);
                 assert!(doc(e).contains("\"rect\""), "{name}: Ctrl+Z brings the rect back");
                 jas_engine_free(e);
             }

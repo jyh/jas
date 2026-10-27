@@ -171,7 +171,7 @@ public enum LayersPanel {
             // other 8 are prose or the unrelated
             // `active_document.print_preferences`. So the blast radius of this
             // line is exactly the View menu.
-            "preferences": ws.data["preferences"] ?? NSNull(),
+            "preferences": Preferences.current() ?? NSNull(),
         ]
 
         runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,

@@ -3709,8 +3709,7 @@ private func evalNumber(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> D
 /// jas_dioxus/src/interpreter/effects.rs.
 internal func readPrefNumber(_ key: String, default defaultValue: Double) -> Double {
     if let overridden = ViewportPrefOverride.values[key] { return overridden }
-    guard let ws = WorkspaceData.load() else { return defaultValue }
-    if let prefs = ws.data["preferences"] as? [String: Any],
+    if let prefs = Preferences.current(),
        let viewport = prefs["viewport"] as? [String: Any],
        let n = viewport[key] as? NSNumber {
         return n.doubleValue

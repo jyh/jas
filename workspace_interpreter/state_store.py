@@ -7,6 +7,7 @@ to the subscribe mechanism.
 
 from __future__ import annotations
 import copy
+import functools
 import logging
 from typing import Callable
 
@@ -159,6 +160,22 @@ def _op_layer_on_path() -> None:
         sys.path.insert(0, root)
 
 
+@functools.lru_cache(maxsize=1)
+def _bundled_preferences():
+    """The bundled workspace's ``preferences`` (``workspace/preferences.yaml``,
+    compiled into ``workspace.json``), which both active ports put into their
+    expression contexts from the bundle (Rust ``Workspace::load()``, Swift
+    ``ws.data``); None when there is no bundle, as Rust's null."""
+    import json
+    import os
+    path = os.path.join(os.path.dirname(__file__), "..", "workspace", "workspace.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("preferences")
+    except (OSError, ValueError):
+        return None
+
+
 def _native_view(elem):
     """An element of the store's document as the YAML reads it, in the native
     form (``kind``, props under ``common``), from either form the store holds:
@@ -287,6 +304,10 @@ class StateStore:
         # dict took since (a YAML write between ops) as one undoable step.
         self._model = None
         self._model_view: str | None = None
+        # The user's preference OVERRIDES (dotted key -> value) over the
+        # bundle's defaults (STATUS-jas item 37); the apps persist theirs in
+        # their AppConfig record.
+        self._preference_overrides: dict[str, object] = {}
         # What a `doc.copy_selection_to_clipboard` copied: the selected paths
         # IN SELECTION ORDER, or None until a copy of a non-empty selection.
         # The reference names WHAT is copied; the BYTES are the apps' (see
@@ -771,6 +792,41 @@ class StateStore:
             callback(key, value)
 
     # ── Document (Phase 3) ───────────────────────────────────
+
+    def preferences(self):
+        """The bundle's preferences with the user's overrides applied (a copy:
+        the bundle is never written)."""
+        base = _bundled_preferences()
+        if base is None or not self._preference_overrides:
+            return base
+        prefs = copy.deepcopy(base)
+        for key, value in self._preference_overrides.items():
+            node = prefs
+            *parents, leaf = key.split(".")
+            for p in parents:
+                node = node.setdefault(p, {})
+            node[leaf] = copy.deepcopy(value)
+        return prefs
+
+    def toggle_preference_member(self, key: str, value) -> bool:
+        """Add ``value`` to the LIST preference at ``key`` when absent, remove
+        it when present, as an override; an override equal to the bundle's
+        default is dropped. Refuses (False) a key the bundle does not declare
+        as a list."""
+        node = _bundled_preferences()
+        for p in key.split("."):
+            node = node.get(p) if isinstance(node, dict) else None
+        if not isinstance(node, list):
+            return False
+        current = self.preferences()
+        for p in key.split("."):
+            current = current[p]
+        new = [v for v in current if v != value] if value in current else current + [value]
+        if new == node:
+            self._preference_overrides.pop(key, None)
+        else:
+            self._preference_overrides[key] = new
+        return True
 
     def document(self) -> dict | None:
         """Return the live document tree, or None."""
@@ -1299,6 +1355,9 @@ class StateStore:
         # write. Until 2026-10-15 no port's context carried it, so Brush
         # Options' edit-mode inits were null everywhere.
         ctx["data"] = self._data
+        # `preferences.*` (zoom_in's zoom_step, the Brushes menu's persistent
+        # check), from the bundle as both ports read it.
+        ctx["preferences"] = self.preferences()
         if self._dialog_id is not None:
             # Evaluate any get: lambdas in dialog props so derived
             # keys (e.g. color_picker's h = hsb_h(color)) appear in

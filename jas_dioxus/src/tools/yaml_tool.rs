@@ -312,10 +312,7 @@ impl YamlTool {
         // here is cheap (Workspace::load() hits a OnceLock cache).
         let workspace = crate::interpreter::workspace::Workspace::load();
         let actions = workspace.as_ref().map(|ws| ws.actions());
-        let preferences = workspace
-            .as_ref()
-            .and_then(|ws| ws.data().get("preferences").cloned())
-            .unwrap_or(serde_json::Value::Null);
+        let preferences = crate::interpreter::preferences::current();
         let mut active_document = Self::active_document_payload(model);
         if let Some(o) = active_document.as_object_mut() {
             o.extend(self.document_facts.clone());

@@ -130,7 +130,7 @@ ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
 # name, which the port's view supplies. The lint holds the YAML to this set.
 EVENT_ROOTS = frozenset({
     "event", "state", "panel", "tool", "dialog", "param", "active_document",
-    "data",
+    "data", "preferences",
 })
 
 # ── Refusals ───────────────────────────────────────────────────

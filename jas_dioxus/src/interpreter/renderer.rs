@@ -1794,9 +1794,7 @@ fn build_appstate_ctx(
     // preferences.viewport.zoom_step resolve against the workspace
     // YAML defaults. Used by the View actions (zoom_in, fit_*, etc.)
     // and the Zoom tool's gesture handlers.
-    let prefs = crate::interpreter::workspace::Workspace::load()
-        .and_then(|ws| ws.data().get("preferences").cloned())
-        .unwrap_or(serde_json::Value::Null);
+    let prefs = crate::interpreter::preferences::current();
     ctx.insert("preferences".to_string(), prefs);
     // The data namespace, from this app's homes for it, as the reference's
     // and the engine's action contexts carry it: Swatch Options reads the
@@ -14981,6 +14979,32 @@ mod tests {
         st.layers_rename_draft = Some(String::new());
         commit_layer_rename(&mut st, &[0], "Initial");
         assert_eq!(name(&st), None, "empty clears the name");
+    }
+
+    // STATUS-jas item 36: Edit > Undo / Redo run their actions' YAML
+    // (`doc.op: {op: undo|redo}`), as the menu, the keyboard and the engine's
+    // key door now do, rather than a native `model.undo()` per route.
+    #[test]
+    fn undo_and_redo_run_their_yaml() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let before = st.tab().unwrap().model.document().layers.len();
+        {
+            let m = &mut st.tab_mut().unwrap().model;
+            let mut doc = m.document().clone();
+            doc.layers.push(doc.layers[0].clone());
+            m.edit_document(doc);
+        }
+        assert_eq!(st.tab().unwrap().model.document().layers.len(), before + 1,
+                   "the control: the edit landed");
+        dispatch_action("undo", &serde_json::Map::new(), &mut st);
+        assert_eq!(st.tab().unwrap().model.document().layers.len(), before, "undo ran");
+        dispatch_action("redo", &serde_json::Map::new(), &mut st);
+        assert_eq!(st.tab().unwrap().model.document().layers.len(), before + 1, "redo ran");
     }
 
     // …and the tier is a seed, not a floor: the YAML None route clears BOTH

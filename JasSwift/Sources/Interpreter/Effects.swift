@@ -320,6 +320,16 @@ private func runOne(
     model: Model? = nil,
     diagnostics: inout [Diagnostic]
 ) {
+    // STATUS-jas item 37: toggle `value` (an expression) in the LIST
+    // preference at `key` (a literal dotted path), as a user override.
+    if let args = effect["preferences.toggle_member"] as? [String: Any] {
+        if let key = args["key"] as? String, !key.isEmpty,
+           let value = valueToAny(evalExpr(args["value"], store: store, ctx: ctx)),
+           !(value is NSNull) {
+            Preferences.toggleMember(key, value)
+        }
+        return
+    }
     // set: { key: expr, ... }
     //
     // YAML authors target state scopes via dotted paths with optional

@@ -353,7 +353,7 @@ final class YamlTool: CanvasTool {
         // cached, so this is cheap per-dispatch.
         let ws = WorkspaceData.load()
         let actions = ws?.actions()
-        let preferences = ws?.data["preferences"] ?? NSNull()
+        let preferences: Any = Preferences.current() ?? NSNull()
         var activeDocument: [String: Any] = [
             "view_offset_x": model.viewOffsetX,
             "view_offset_y": model.viewOffsetY,
