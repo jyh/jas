@@ -160,6 +160,31 @@ def _native_view(elem):
     return view
 
 
+def _promote_bridged_for_brush(elem: dict) -> bool:
+    """``StateStore.promote_element_for_brush`` on an element in the op
+    bridge's test-JSON shape (``type: line``, ``d`` as ``{cmd, x, y}``), which
+    the store holds after ANY op (item 34). The same promotion as the native
+    branch: a Line, or an open Polyline of two or more points, becomes a
+    geometry-identical Path in place; everything else is left as it is."""
+    kind = elem.get("type")
+    if kind == "line":
+        d = [{"cmd": "M", "x": float(elem.pop("x1", 0.0)), "y": float(elem.pop("y1", 0.0))},
+             {"cmd": "L", "x": float(elem.pop("x2", 0.0)), "y": float(elem.pop("y2", 0.0))}]
+    elif kind == "polyline":
+        pts = elem.get("points")
+        if not (isinstance(pts, list) and len(pts) >= 2):
+            return False
+        elem.pop("points")
+        d = [{"cmd": "M" if i == 0 else "L", "x": float(p[0]), "y": float(p[1])}
+             for i, p in enumerate(pts)]
+    else:
+        return False
+    elem["type"] = "path"
+    elem["d"] = d
+    elem.setdefault("fill", None)
+    return True
+
+
 def _layer_facts(layers) -> dict:
     """The Layers menu's three toggle-all facts over the document's top-level
     layers (`runtime_contexts.yaml`): any layer not invisible, any layer in
@@ -1242,6 +1267,8 @@ class StateStore:
         elem = self.get_element(path)
         if not isinstance(elem, dict):
             return False
+        if "type" in elem and "kind" not in elem:
+            return _promote_bridged_for_brush(elem)
         kind = elem.get("kind")
         if kind == "Line":
             x1 = elem.pop("x1", 0.0)
