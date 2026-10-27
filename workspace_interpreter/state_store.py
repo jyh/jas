@@ -815,47 +815,38 @@ class StateStore:
         return copy.deepcopy(elem)
 
     def insert_after(self, path: tuple[int, ...], element) -> bool:
-        """Insert element at index path[-1]+1 under the parent of path."""
+        """Insert element at index path[-1]+1 under the parent of path, by the
+        op layer's ``insert_after`` (item 34: one law, not a dict copy of it).
+        True when the document changed."""
         if self._document is None or len(path) == 0:
             return False
-        if len(path) == 1:
-            layers = self._document.get("layers")
-            if not isinstance(layers, list):
-                return False
-            insert_idx = min(path[0] + 1, len(layers))
-            layers.insert(insert_idx, element)
-            return True
-        parent = self.get_element(path[:-1])
-        if parent is None or not isinstance(parent, dict):
-            return False
-        children = parent.setdefault("children", [])
-        if not isinstance(children, list):
-            return False
-        insert_idx = min(path[-1] + 1, len(children))
-        children.insert(insert_idx, element)
-        return True
+        return self._op_changed({"op": "insert_after", "path": list(path),
+                                 "element": self._as_element(element)})
 
     def insert_at(self, parent_path: tuple[int, ...], index: int, element) -> bool:
-        """Insert element at parent_path[index]."""
+        """Insert element at parent_path[index], by the op layer's
+        ``insert_at``. True when the document changed."""
         if self._document is None:
             return False
-        if len(parent_path) == 0:
-            # Parent is the document root; insert into top-level layers
-            layers = self._document.setdefault("layers", [])
-            if not isinstance(layers, list):
-                return False
-            index = max(0, min(index, len(layers)))
-            layers.insert(index, element)
-            return True
-        parent = self.get_element(parent_path)
-        if parent is None or not isinstance(parent, dict):
-            return False
-        children = parent.setdefault("children", [])
-        if not isinstance(children, list):
-            return False
-        index = max(0, min(index, len(children)))
-        children.insert(index, element)
-        return True
+        return self._op_changed({"op": "insert_at", "parent_path": list(parent_path),
+                                 "index": index, "element": self._as_element(element)})
+
+    def _as_element(self, element):
+        """An element the store holds (test JSON) as the op layer's Element,
+        which its insert ops take verbatim; None when it does not parse."""
+        self._held_model()
+        from geometry.test_json import parse_element_json
+        try:
+            return parse_element_json(element)
+        except Exception:
+            return None
+
+    def _op_changed(self, op: dict) -> bool:
+        """Apply ``op`` and answer whether the document changed (``apply_op``
+        replaces the dict only then)."""
+        before = self._document
+        self.apply_op(op)
+        return self._document is not before
 
     def make_instance(self, offset: float) -> None:
         """Object > Make Instance on the store's document: the two ops
@@ -1096,30 +1087,14 @@ class StateStore:
             self.copied_paths = paths
 
     def delete_element_at(self, path: tuple[int, ...]):
-        """Delete the element at path. Returns the deleted element, or None."""
+        """Delete the element at path, by the op layer's ``delete_at``. Returns
+        the deleted element, or None."""
         if self._document is None or len(path) == 0:
             return None
-        layers = self._document.get("layers")
-        if not isinstance(layers, list):
+        elem = self.get_element(path)
+        if elem is None or not self._op_changed({"op": "delete_at", "path": list(path)}):
             return None
-        if len(path) == 1:
-            idx = path[0]
-            if idx < 0 or idx >= len(layers):
-                return None
-            return layers.pop(idx)
-        # Nested: walk to parent, then pop child
-        parent = self.get_element(path[:-1])
-        if parent is None or not isinstance(parent, dict):
-            return None
-        children = parent.get("children")
-        if not isinstance(children, list):
-            return None
-        last = path[-1]
-        if last < 0 or last >= len(children):
-            return None
-        return children.pop(last)
-
-    # ── Artboards ────────────────────────────────────────────
+        return elem
 
     def create_artboard(self, overrides: dict | None = None) -> dict | None:
         """Append a new artboard to ``document.artboards``.
@@ -1130,8 +1105,10 @@ class StateStore:
         overrides. Field overrides map 1:1 onto artboard fields (``x``,
         ``y``, ``width``, ``height``, ``fill``, display toggles).
 
-        Returns the new artboard dict (live reference inside the
-        document), or None when there is no document."""
+        The append is the op layer's ``create_artboard`` (the id and the name
+        are minted here: the op takes them verbatim). Returns the new artboard
+        dict (live inside the document until the next op), or None when there
+        is no document."""
         if self._document is None:
             return None
         artboards = self._document.setdefault("artboards", [])
@@ -1156,8 +1133,10 @@ class StateStore:
                 continue
             if k in artboard:
                 artboard[k] = v
-        artboards.append(artboard)
-        return artboard
+        if not self._op_changed({"op": "create_artboard", "id": aid,
+                                 "fields": {k: v for k, v in artboard.items() if k != "id"}}):
+            return None
+        return self.find_artboard_by_id(aid)
 
     def find_artboard_by_id(self, artboard_id: str) -> dict | None:
         """Return the live artboard dict with this id, or None."""
@@ -1172,19 +1151,14 @@ class StateStore:
         return None
 
     def delete_artboard_by_id(self, artboard_id: str) -> dict | None:
-        """Remove the artboard with this id from the list. Returns
-        the deleted dict, or None if not found. Callers enforce the
-        at-least-one-artboard invariant (via enabled_when predicates
-        in the panel yaml)."""
-        if self._document is None:
+        """Remove the artboard with this id, by the op layer's
+        ``delete_artboard_by_id``. Returns the deleted dict, or None if not
+        found. Callers enforce the at-least-one-artboard invariant (via
+        enabled_when predicates in the panel yaml)."""
+        found = self.find_artboard_by_id(artboard_id) if self._document is not None else None
+        if found is None or not self._op_changed({"op": "delete_artboard_by_id", "id": artboard_id}):
             return None
-        artboards = self._document.get("artboards")
-        if not isinstance(artboards, list):
-            return None
-        for i, a in enumerate(artboards):
-            if isinstance(a, dict) and a.get("id") == artboard_id:
-                return artboards.pop(i)
-        return None
+        return found
 
     def set_artboard_field(self, artboard_id: str, field: str, value) -> bool:
         """Write value to the named field of the artboard with this id.
@@ -1215,63 +1189,19 @@ class StateStore:
         return True
 
     def move_artboards_up(self, selected_ids: list) -> bool:
-        """Apply the swap-with-neighbor-skipping-selected rule for
-        Move Up (ARTBOARDS.md §Reordering). Iterate top-to-bottom;
-        each selected row swaps with the row above it, skipping rows
-        whose upper neighbor is itself selected or which are already
-        at position 1. Returns True if any swap occurred."""
+        """Each selected artboard swaps with the one above it, unless that one
+        is also selected or it is already at the top: the op layer's
+        ``move_artboards_up``. True if any swap occurred."""
         if self._document is None:
             return False
-        artboards = self._document.get("artboards")
-        if not isinstance(artboards, list):
-            return False
-        selected_set = {s for s in selected_ids if isinstance(s, str)}
-        changed = False
-        for i in range(len(artboards)):
-            elem = artboards[i]
-            if not isinstance(elem, dict):
-                continue
-            if elem.get("id") not in selected_set:
-                continue
-            if i == 0:
-                continue
-            above = artboards[i - 1]
-            if not isinstance(above, dict):
-                continue
-            if above.get("id") in selected_set:
-                continue
-            artboards[i - 1], artboards[i] = artboards[i], artboards[i - 1]
-            changed = True
-        return changed
+        return self._op_changed({"op": "move_artboards_up", "ids": list(selected_ids)})
 
     def move_artboards_down(self, selected_ids: list) -> bool:
-        """Symmetric to Move Up. Iterate bottom-to-top; each selected
-        row swaps with the row below it, skipping rows whose lower
-        neighbor is itself selected or which are already at the
-        bottom. Returns True if any swap occurred."""
+        """Symmetric to Move Up: the op layer's ``move_artboards_down``. True
+        if any swap occurred."""
         if self._document is None:
             return False
-        artboards = self._document.get("artboards")
-        if not isinstance(artboards, list):
-            return False
-        selected_set = {s for s in selected_ids if isinstance(s, str)}
-        changed = False
-        for i in range(len(artboards) - 1, -1, -1):
-            elem = artboards[i]
-            if not isinstance(elem, dict):
-                continue
-            if elem.get("id") not in selected_set:
-                continue
-            if i == len(artboards) - 1:
-                continue
-            below = artboards[i + 1]
-            if not isinstance(below, dict):
-                continue
-            if below.get("id") in selected_set:
-                continue
-            artboards[i], artboards[i + 1] = artboards[i + 1], artboards[i]
-            changed = True
-        return changed
+        return self._op_changed({"op": "move_artboards_down", "ids": list(selected_ids)})
 
     def duplicate_artboard(
         self, artboard_id: str, offset_x: float = 20, offset_y: float = 20
@@ -1301,13 +1231,11 @@ class StateStore:
                 break
         if aid is None:
             return None
-        dup = copy.deepcopy(source)
-        dup["id"] = aid
-        dup["name"] = next_artboard_name(artboards)
-        dup["x"] = dup.get("x", 0) + offset_x
-        dup["y"] = dup.get("y", 0) + offset_y
-        artboards.append(dup)
-        return dup
+        if not self._op_changed({"op": "duplicate_artboard", "id": artboard_id, "new_id": aid,
+                                 "name": next_artboard_name(artboards),
+                                 "offset_x": offset_x, "offset_y": offset_y}):
+            return None
+        return self.find_artboard_by_id(aid)
 
     def set_element_field(self, path: tuple[int, ...], dotted_field: str, value) -> bool:
         """Write value to the element at path under dotted_field.
