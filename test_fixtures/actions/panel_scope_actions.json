@@ -545,5 +545,56 @@
     "renaming_element": null
    }
   }
+ },
+ {
+  "_doc": "A click on a Layers row (STATUS-jas item 38 step 3c): the row becomes the whole panel selection, stored as a path. The document's element selection does not change.",
+  "name": "layers_panel_select_selects_the_row",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    0
+   ]
+  ],
+  "actions": [
+   {
+    "action": "layers_panel_select",
+    "params": {
+     "path": [
+      1,
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "layers_panel_select_selects_the_row_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "layers_panel_selection": [
+     {
+      "__path__": [
+       1,
+       0
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "A click on a row's select square: the row's element becomes the whole element selection.",
+  "name": "layers_element_select_selects_the_element",
+  "setup_svg": "multi_layer.svg",
+  "actions": [
+   {
+    "action": "layers_element_select",
+    "params": {
+     "path": [
+      1,
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "layers_element_select_selects_the_element_expected.json"
  }
 ]

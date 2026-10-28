@@ -1046,5 +1046,77 @@
     "expr": "\"\" + 5",
     "expected": "5",
     "type": "string"
+  },
+  {
+    "expr": "as_path(state.a) == path(1, 0)",
+    "state": {
+      "a": [
+        1,
+        0
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "\"\" + as_path(state.a)",
+    "state": {
+      "a": [
+        1,
+        0
+      ]
+    },
+    "expected": "1.0",
+    "type": "string"
+  },
+  {
+    "expr": "\"\" + as_path(state.m)",
+    "state": {
+      "m": {
+        "__path__": [
+          2,
+          3
+        ]
+      }
+    },
+    "expected": "2.3",
+    "type": "string"
+  },
+  {
+    "expr": "as_path(state.e) == path()",
+    "state": {
+      "e": []
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "as_path(state.neg) == null",
+    "state": {
+      "neg": [
+        1,
+        -1
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "as_path(state.frac) == null",
+    "state": {
+      "frac": [
+        1.5
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "as_path(state.s) == null",
+    "state": {
+      "s": "1.0"
+    },
+    "expected": true,
+    "type": "bool"
   }
 ]

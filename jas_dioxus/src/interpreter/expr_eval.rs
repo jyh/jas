@@ -688,6 +688,22 @@ fn eval_func(
             Value::Path(idx)
         }
 
+        // A list of child indices, or a path marker, as a PATH value; null for
+        // anything else (STATUS-jas item 38 step 3c: an effect writing paths
+        // from a row's `node.path`, which is a list). The reference's `as_path`.
+        "as_path" => {
+            if args.len() != 1 { return Value::Null; }
+            let index = |i: &serde_json::Value| {
+                i.as_f64().filter(|n| *n >= 0.0 && n.fract() == 0.0).map(|n| n as usize)
+            };
+            match eval_inner(&args[0], ctx, scope, store_cb) {
+                Value::Path(p) => Value::Path(p),
+                Value::List(items) => items.iter().map(index).collect::<Option<Vec<_>>>()
+                    .map_or(Value::Null, Value::Path),
+                _ => Value::Null,
+            }
+        }
+
         "path_child" => {
             if args.len() != 2 { return Value::Null; }
             let p = eval_inner(&args[0], ctx, scope, store_cb);

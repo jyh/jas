@@ -4092,6 +4092,58 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// STATUS-jas item 38 step 3c (flask §610 (2), jas §612): a Layers row is
+    /// a plan entry that answers its own events, as an Artboards row does, so
+    /// a shell can give it a hit surface. Until 3c its behaviours sat on the
+    /// `tree_view` node, which is layout-only, and every row read `events: []`.
+    #[test]
+    fn a_layers_row_answers_its_click_double_click_and_drags() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+        let rows: Vec<serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["type"] == "container" && r["values"].get("bind.opacity").is_some())
+            .map(|r| r["events"].clone()).collect();
+        assert_eq!(rows, [serde_json::json!(["click", "double_click", "drag_start", "drag_move", "drag_end"])],
+                   "the one row's container, declared order: {plan}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// STATUS-jas item 38 step 3c, the gesture chain flask drives on the box
+    /// (§610 (2)): a click on the row panel-selects it, and then a
+    /// double-click on its name puts it in rename mode, which
+    /// `rename_element`'s `enabled_when` (one panel-selected row) allowed only
+    /// once the click could select.
+    #[test]
+    fn a_layers_row_click_then_a_name_double_click_starts_a_rename() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        let entry = |id: &str, key: Option<&str>| {
+            let plan: serde_json::Value =
+                serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+            ["chrome", "containers", "leaves"].iter()
+                .filter_map(|k| plan[*k].as_array()).flatten()
+                .find(|r| r["id"] == id && key.map_or(true, |k| r["values"].get(k).is_some()))
+                .cloned().unwrap_or_else(|| panic!("no {id} in {plan}"))
+        };
+        let row = entry("", Some("bind.opacity"));
+        let (reply, err) = behave(e, "layers_panel_content",
+                                  &format!(r#"{{"path":{},"event":"click"}}"#, row["path"]));
+        assert!(!reply.is_empty(), "the row click refused: {err}");
+        let sel = unsafe { e.as_ref() }.unwrap().store.borrow()
+            .get_panel("layers_panel_content", "layers_panel_selection").clone();
+        assert_eq!(sel, serde_json::json!([{"__path__": [0]}]), "the row is panel-selected");
+
+        let name = entry("lp_name", None);
+        let (reply, err) = behave(e, "layers_panel_content",
+                                  &format!(r#"{{"path":{},"event":"double_click"}}"#, name["path"]));
+        assert!(!reply.is_empty(), "the name double-click refused: {err}");
+        assert_eq!(entry("lp_name_edit", None)["values"]["bind.visible"], "true", "rename mode");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// STATUS-jas item 40, the Layers row: with the default document's one
     /// layer in rename mode, Enter in `lp_name_edit` names THAT layer and ends
     /// rename mode, and the blur that follows runs nothing. Rename mode is

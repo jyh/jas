@@ -2012,7 +2012,12 @@ actions:
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
-      - log: "layers_panel_select"
+      # A plain click (STATUS-jas item 38 step 3c): the row becomes the whole
+      # panel selection, stored as paths. Shift and Command are a later step.
+      - set_panel_state:
+          panel: layers
+          key: layers_panel_selection
+          value: "[as_path(param.path)]"
 
   layers_element_select:
     description: >
@@ -2028,7 +2033,10 @@ actions:
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
-      - log: "layers_element_select"
+      # A plain click (STATUS-jas item 38 step 3c): the row's element becomes
+      # the whole element selection, through the op layer's `select_element`
+      # (a selection, not an edit: no snapshot). Shift and Command are a later step.
+      - doc.op: { op: select_element, path: "param.path" }
 
   layers_select_all:
     description: >

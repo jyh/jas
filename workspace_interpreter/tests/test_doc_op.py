@@ -1049,3 +1049,21 @@ def test_the_undo_and_redo_actions_run_their_yaml():
     assert _doc_of(store).layers[0].locked is True
     _run_yaml_action(store, "redo")
     assert _doc_of(store).layers[0].locked is False
+
+
+def test_the_layers_row_selects_from_actions_yaml():
+    """STATUS-jas item 38 step 3c: a plain click on a Layers row makes that row
+    the whole panel selection, stored as a path (`[as_path(param.path)]`); a
+    click on its select square makes its element the whole element selection.
+    The action corpus's `layers_panel_select_selects_the_row` and
+    `layers_element_select_selects_the_element` (Rust and Swift)."""
+    doc = Document(layers=(Layer(name="L", children=(_rect(), _rect())),))
+    store = _store(doc)
+    store.init_panel("layers_panel_content", {"layers_panel_selection": [{"__path__": [0]}]})
+    run_effects(_action_effects("layers_panel_select"), {"param": {"path": [0, 1]}}, store)
+    sel = store.get_panel("layers_panel_content", "layers_panel_selection")
+    assert sel == [{"__path__": [0, 1]}], sel
+    assert _doc_of(store).selection == frozenset(), "panel selection is not element selection"
+
+    run_effects(_action_effects("layers_element_select"), {"param": {"path": [0, 1]}}, store)
+    assert {es.path for es in _doc_of(store).selection} == {(0, 1)}

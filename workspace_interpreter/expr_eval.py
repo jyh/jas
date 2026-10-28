@@ -412,6 +412,29 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             indices.append(int(v.value))
         return Value.path(tuple(indices))
 
+    if name == "as_path":
+        # A list of child indices, or a path marker, as a PATH value; null for
+        # anything else (STATUS-jas item 38 step 3c: an effect writing paths
+        # from a row's `node.path`, which is a list).
+        if len(node.args) != 1:
+            return Value.null()
+        v = eval_node(node.args[0], ctx)
+        if v.type == ValueType.PATH:
+            return v
+        items = v.value
+        if v.type == ValueType.STRING and isinstance(items, dict):
+            items = items.get("__path__") if len(items) == 1 else None
+        elif v.type != ValueType.LIST:
+            items = None
+        if not isinstance(items, (list, tuple)):
+            return Value.null()
+        out = []
+        for i in items:
+            if isinstance(i, bool) or not isinstance(i, (int, float)) or i < 0 or i != int(i):
+                return Value.null()
+            out.append(int(i))
+        return Value.path(tuple(out))
+
     if name == "path_child":
         if len(node.args) != 2:
             return Value.null()

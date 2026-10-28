@@ -934,3 +934,47 @@ tests:
     expected: "5"
     type: string
     note: "integer-valued: no trailing .0"
+
+  # as_path: a list of child indices (or a path marker) as a PATH value, for an
+  # effect that writes paths from a row's `node.path` (STATUS-jas item 38 step 3c)
+  - expr: "as_path(state.a) == path(1, 0)"
+    state: {a: [1, 0]}
+    expected: true
+    type: bool
+    note: "a list of indices is that path"
+
+  - expr: '"" + as_path(state.a)'
+    state: {a: [1, 0]}
+    expected: "1.0"
+    type: string
+    note: "and coerces to text as a path does (dot-joined), not as a list"
+
+  - expr: '"" + as_path(state.m)'
+    state: {m: {"__path__": [2, 3]}}
+    expected: "2.3"
+    type: string
+    note: "a path marker is the path it names"
+
+  - expr: "as_path(state.e) == path()"
+    state: {e: []}
+    expected: true
+    type: bool
+    note: "the empty list is the root path"
+
+  - expr: "as_path(state.neg) == null"
+    state: {neg: [1, -1]}
+    expected: true
+    type: bool
+    note: "a negative index is not a path"
+
+  - expr: "as_path(state.frac) == null"
+    state: {frac: [1.5]}
+    expected: true
+    type: bool
+    note: "nor is a fraction"
+
+  - expr: "as_path(state.s) == null"
+    state: {s: "1.0"}
+    expected: true
+    type: bool
+    note: "nor is a string"

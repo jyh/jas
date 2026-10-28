@@ -2194,7 +2194,11 @@
       },
       "effects": [
         {
-          "log": "layers_panel_select"
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "layers_panel_selection",
+            "value": "[as_path(param.path)]"
+          }
         }
       ]
     },
@@ -2210,7 +2214,10 @@
       },
       "effects": [
         {
-          "log": "layers_element_select"
+          "doc.op": {
+            "op": "select_element",
+            "path": "param.path"
+          }
         }
       ]
     },
@@ -17149,6 +17156,39 @@
                 "background": "if node.panel_selected then '{{theme.colors.selection}}' else 'transparent'",
                 "opacity": "if node.search_ancestor_only then 0.5 else 1.0"
               },
+              "behavior": [
+                {
+                  "event": "click",
+                  "description": "Panel-select on click (spacer, twirl-gap, preview, name areas)",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path"
+                  }
+                },
+                {
+                  "event": "double_click",
+                  "condition": "node.is_container and event.target_id != 'lp_name'",
+                  "action": "enter_isolation_mode",
+                  "params": {
+                    "container_id": "node.id"
+                  }
+                },
+                {
+                  "event": "drag_start",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path"
+                  }
+                },
+                {
+                  "event": "drag_move",
+                  "description": "Show drop indicator; auto-expand after 500ms hover on collapsed container"
+                },
+                {
+                  "event": "drag_end",
+                  "description": "Validate constraints and reparent/reorder elements"
+                }
+              ],
               "children": [
                 {
                   "type": "spacer",
@@ -17326,39 +17366,6 @@
                 }
               ]
             },
-            "behavior": [
-              {
-                "event": "click",
-                "description": "Panel-select on click (spacer, twirl-gap, preview, name areas)",
-                "action": "layers_panel_select",
-                "params": {
-                  "path": "node.path"
-                }
-              },
-              {
-                "event": "double_click",
-                "condition": "node.is_container and event.target_id != 'lp_name'",
-                "action": "enter_isolation_mode",
-                "params": {
-                  "container_id": "node.id"
-                }
-              },
-              {
-                "event": "drag_start",
-                "action": "layers_panel_select",
-                "params": {
-                  "path": "node.path"
-                }
-              },
-              {
-                "event": "drag_move",
-                "description": "Show drop indicator; auto-expand after 500ms hover on collapsed container"
-              },
-              {
-                "event": "drag_end",
-                "description": "Validate constraints and reparent/reorder elements"
-              }
-            ],
             "context_menu": [
               {
                 "label": "Options for Layer...",

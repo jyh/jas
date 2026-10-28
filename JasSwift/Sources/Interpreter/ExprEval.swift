@@ -1243,6 +1243,25 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         }
         return .path(indices)
 
+    // A list of child indices, or a path marker, as a PATH value; null for
+    // anything else (STATUS-jas item 38 step 3c: an effect writing paths from a
+    // row's `node.path`, which is a list). The reference's `as_path`.
+    case "as_path":
+        guard args.count == 1 else { return .null }
+        switch evalNode(args[0], ctx) {
+        case .path(let p): return .path(p)
+        case .list(let items):
+            var out: [Int] = []
+            for item in items {
+                // A JSON bool bridges to an NSNumber too: the CF type tells them apart.
+                guard let num = item.value as? NSNumber, CFGetTypeID(num) != CFBooleanGetTypeID(),
+                      num.doubleValue >= 0, let i = intIfIntegral(num.doubleValue) else { return .null }
+                out.append(i)
+            }
+            return .path(out)
+        default: return .null
+        }
+
     case "path_child":
         guard args.count == 2 else { return .null }
         let p = evalNode(args[0], ctx)
