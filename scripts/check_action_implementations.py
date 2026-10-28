@@ -194,7 +194,11 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # later step, and both native trees still run their own handlers.
 # 16 on 2026-10-28: `toggle_panel` runs its YAML (`layout: {op: toggle_panel}`,
 # the shared layout-op runtime; the engine runs it on the dock it holds).
-MIN_LOG_ONLY = 16
+# 12 the same day: `layers_nav_up/down/left/right` (item 8 class L) run their
+# YAML: a move dispatches `layers_panel_select`, a twirl is a `list_toggle` on
+# `collapsed_paths` (panel_scope_actions.json). No port routes the tree's
+# arrow keys to them yet; that is a later step.
+MIN_LOG_ONLY = 12
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
@@ -529,16 +533,18 @@ def self_test() -> int:
         # calls openFile(). This anchor was `undo` until 2026-10-27, when undo
         # and redo became `doc.op` effects and left the log-only set.
         "open_file": "native_both",
-        # verified: neither port contains the string at all (0 files in
-        # jas_dioxus/src and JasSwift/Sources, 2026-10-27, with
-        # `convert_to_artboards` found in jas_dioxus/src as the control), and
-        # the feature (Left Arrow in the Layers tree) is in neither port's tree
-        # code either. This anchor was `toggle_artboard_orientation` until
+        # The dead_both anchor: an action neither port names at all. This
+        # anchor was `toggle_artboard_orientation` until
         # 2026-10-15, `toggle_artboard_chain_link` until 2026-10-24,
         # `set_artboard_fill_preset` until 2026-10-25 (each became effects in
-        # actions.yaml) and `scroll_to_selected` until 2026-10-27 (declared
-        # bypassed: both ports run it as render behaviour).
-        "layers_nav_left": "dead_both",
+        # actions.yaml), `scroll_to_selected` until 2026-10-27 (declared
+        # bypassed: both ports run it as render behaviour) and
+        # `layers_nav_left` until 2026-10-28 (it runs its YAML now). Verified
+        # 2026-10-28: `save_brush_library` is in neither port (0 files in
+        # jas_dioxus/src and JasSwift/Sources, with `convert_to_artboards`
+        # found in jas_dioxus/src as the control), and neither port's Brushes
+        # code saves a library.
+        "save_brush_library": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any

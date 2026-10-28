@@ -788,5 +788,163 @@
         "layers_panel_selection": []
       }
     }
+  },
+  {
+    "_doc": "Down arrow on a Layers row (layers_nav_down): the next visible row becomes the whole panel selection, through layers_panel_select, so its layer becomes the target layer. Visible rows, top first: [1], [1,0], [0], [0,0]. [1] -> [1,0], layer 1.",
+    "name": "layers_nav_down_moves_to_the_next_row",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "layers_nav_down", "params": {}}
+    ],
+    "expected_json": "layers_panel_select_selects_the_row_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
+    }
+  },
+  {
+    "_doc": "Down arrow on the last visible row ([0,0] of [1], [1,0], [0], [0,0]) changes nothing: the selection stays, the target layer stays 0.",
+    "name": "layers_nav_down_at_the_last_row_is_a_no_op",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[0, 0]],
+    "actions": [
+      {"action": "layers_nav_down", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}]}
+    }
+  },
+  {
+    "_doc": "Up arrow (layers_nav_up): the previous visible row becomes the selection. [0] -> [1,0] of [1], [1,0], [0], [0,0], layer 1.",
+    "name": "layers_nav_up_moves_to_the_previous_row",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[0]],
+    "actions": [
+      {"action": "layers_nav_up", "params": {}}
+    ],
+    "expected_json": "layers_panel_select_selects_the_row_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
+    }
+  },
+  {
+    "_doc": "Up arrow on the first visible row ([1] of [1], [1,0], [0], [0,0]) changes nothing.",
+    "name": "layers_nav_up_at_the_first_row_is_a_no_op",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "layers_nav_up", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}]}
+    }
+  },
+  {
+    "_doc": "With several rows selected, the focus is the LAST selected one: [[0,0],[1]] focuses [1], the first row, so Up is a no-op and the selection is kept whole.",
+    "name": "layers_nav_up_follows_the_last_selected_row",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[0, 0], [1]],
+    "actions": [
+      {"action": "layers_nav_up", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}, {"__path__": [1]}]}
+    }
+  },
+  {
+    "_doc": "Right arrow on a collapsed container (layers_nav_right) expands it; the selection does not move.",
+    "name": "layers_nav_right_expands_a_collapsed_container",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "toggle_element_twirl", "params": {"path": [1]}},
+      {"action": "layers_nav_right", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
+    }
+  },
+  {
+    "_doc": "Right arrow on an expanded container moves the selection to its first child: [1] -> [1,0], layer 1.",
+    "name": "layers_nav_right_enters_an_expanded_container",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "layers_nav_right", "params": {}}
+    ],
+    "expected_json": "layers_panel_select_selects_the_row_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}], "collapsed_paths": []}
+    }
+  },
+  {
+    "_doc": "Right arrow on a leaf ([1,0]) changes nothing.",
+    "name": "layers_nav_right_on_a_leaf_is_a_no_op",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1, 0]],
+    "actions": [
+      {"action": "layers_nav_right", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}], "collapsed_paths": []}
+    }
+  },
+  {
+    "_doc": "Left arrow on an expanded container (layers_nav_left) collapses it; the selection does not move.",
+    "name": "layers_nav_left_collapses_an_expanded_container",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "layers_nav_left", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": [[1]]}
+    }
+  },
+  {
+    "_doc": "Left arrow on a leaf moves the selection to its parent: [1,0] -> [1], layer 1.",
+    "name": "layers_nav_left_moves_a_leaf_to_its_parent",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1, 0]],
+    "actions": [
+      {"action": "layers_nav_left", "params": {}}
+    ],
+    "expected_json": "layers_panel_select_selects_the_row_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
+    }
+  },
+  {
+    "_doc": "Left arrow on a collapsed TOP-LEVEL layer: it has no parent, so nothing changes.",
+    "name": "layers_nav_left_on_a_collapsed_top_level_layer_is_a_no_op",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "toggle_element_twirl", "params": {"path": [1]}},
+      {"action": "layers_nav_left", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": [[1]]}
+    }
+  },
+  {
+    "_doc": "Right arrow on an EXPANDED container with no children: there is no first child, so nothing changes. Rows, top first: [1] (the empty Foreground), [0], [0,0]; the row after [1] is [0], a sibling, not a child.",
+    "name": "layers_nav_right_on_an_empty_container_is_a_no_op",
+    "setup_svg": "two_layers_top_empty.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "layers_nav_right", "params": {}}
+    ],
+    "expected_json": "layers_nav_right_on_an_empty_container_is_a_no_op_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
+    }
   }
 ]

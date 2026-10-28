@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 5 |
-| `journaling` | 55 |
+| `journaling` | 59 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 174 |
+| `ui-state` | 170 |
 | `view` | 6 |
 | **total** | **245** |
 
 (The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (55)
+## Journaling actions (59)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -77,6 +77,10 @@ come additively from `native_intercepts`.)
 | `hide_selection` | `doc.op` |
 | `layer_options_confirm` | `doc.create_layer`, `doc.insert_at`, `doc.set` |
 | `layers_element_select` | `doc.op` |
+| `layers_nav_down` | `doc.op` -> dispatches `layers_panel_select` |
+| `layers_nav_left` | `doc.op` -> dispatches `layers_panel_select` |
+| `layers_nav_right` | `doc.op` -> dispatches `layers_panel_select` |
+| `layers_nav_up` | `doc.op` -> dispatches `layers_panel_select` |
 | `layers_panel_select` | `doc.op` |
 | `lock` | `doc.op` |
 | `make_instance` | `doc.make_instance` |
@@ -146,7 +150,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (174)
+## UI-state actions (170)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -166,8 +170,7 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `distribute_top`, `distribute_vertical_center`, `distribute_vertical_spacing`, `document_setup_toggle_bleed_uniform`,
 `duplicate_brush`, `duplicate_swatch`, `enter_isolation_mode`, `exit_isolation_mode`,
 `exit_isolation_to_level`, `expand_compound_shape`, `expand_dock`, `eyedropper_tool_options_confirm`,
-`eyedropper_tool_options_reset`, `flip_stroke_profile`, `invert_active_color`, `layers_nav_down`,
-`layers_nav_left`, `layers_nav_right`, `layers_nav_up`, `layers_select_all`,
+`eyedropper_tool_options_reset`, `flip_stroke_profile`, `invert_active_color`, `layers_select_all`,
 `make_compound_shape`, `maximize_canvas`, `new_document`, `new_swatch`,
 `noop`, `open_artboard_options`, `open_boolean_options`, `open_brush_libraries_menu`,
 `open_brush_options`, `open_color_picker`, `open_document_setup`, `open_file`,
