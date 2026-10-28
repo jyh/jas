@@ -56,5 +56,56 @@
       {"op": "clamp_floating_docks", "viewport_w": 0.0, "viewport_h": 0.0}
     ],
     "expected_json": "pane_clamp_tiny.json"
+  },
+  {
+    "name": "hide_toolbar",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "hide_pane", "kind": "toolbar"}
+    ],
+    "expected_json": "pane_hide_toolbar.json"
+  },
+  {
+    "name": "toggle_pane_hides_a_visible_pane",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_pane", "kind": "toolbar"}
+    ],
+    "expected_json": "pane_hide_toolbar.json"
+  },
+  {
+    "name": "toggle_pane_twice_shows_it_again",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_pane", "kind": "dock"},
+      {"op": "toggle_pane", "kind": "dock"}
+    ],
+    "expected_json": "pane_hide_show.json"
+  },
+  {
+    "name": "set_canvas_maximized_true_maximizes",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "set_canvas_maximized", "value": true}
+    ],
+    "expected_json": "pane_maximize.json"
+  },
+  {
+    "name": "set_canvas_maximized_true_twice_stays_maximized",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "set_canvas_maximized", "value": true},
+      {"op": "set_canvas_maximized", "value": true}
+    ],
+    "expected_json": "pane_maximize.json"
+  },
+  {
+    "name": "set_canvas_maximized_false_after_maximize_restores",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_canvas_maximized"},
+      {"op": "set_canvas_maximized", "value": false}
+    ],
+    "expected_json": "pane_hide_show.json"
   }
 ]

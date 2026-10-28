@@ -6692,6 +6692,34 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The two verbs the YAML window actions need (#735) reach the engine's
+    /// door exactly as the pane verbs already there do. The engine holds a DOCK
+    /// layout and NO pane layout, so every pane verb (`hide_pane` before #735,
+    /// `toggle_pane` and `set_canvas_maximized` after) is ACCEPTED AND CHANGES
+    /// NOTHING: the "no pane layout" arm of `layout_apply` returns true before
+    /// any field is read. That is the silent skip this door exists to refuse,
+    /// and it is pinned here as it stands so a change to it is a decision
+    /// (design step 4), never an accident. The control op changes the layout.
+    #[test]
+    fn pane_verbs_are_accepted_no_ops_at_the_engine_door() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let held = layout_load(e, "Default");
+        assert!(json(&held).get("pane_layout").is_none(), "the engine holds no pane layout: {held}");
+        for op in [
+            r#"{"op":"hide_pane","kind":"toolbar"}"#,
+            r#"{"op":"toggle_pane","kind":"toolbar"}"#,
+            r#"{"op":"toggle_pane"}"#,
+            r#"{"op":"set_canvas_maximized","value":true}"#,
+            r#"{"op":"set_canvas_maximized"}"#,
+        ] {
+            assert_eq!(layout_op(e, op), held, "{op} is accepted and changes nothing");
+        }
+        assert_ne!(layout_op(e, r#"{"op":"toggle_group_collapsed","dock_id":0,"group_idx":0}"#), held,
+                   "the control op changes the layout");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Every refusal is the empty span, names its class, and leaves the held
     /// layout byte-identical; the control op between them DOES change it, so an
     /// entry that refused everything could not pass.

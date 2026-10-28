@@ -210,30 +210,18 @@ pub(crate) fn MenuBarView(
                 // Window menu: pane visibility
                 "toggle_pane_toolbar" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let visible = st.workspace_layout.pane_layout.as_ref()
-                            .map(|pl| pl.is_pane_visible(super::workspace::PaneKind::Toolbar));
-                        if let Some(visible) = visible {
-                            let op = if visible {
-                                crate::workspace::layout_apply::op_hide_pane(super::workspace::PaneKind::Toolbar)
-                            } else {
-                                crate::workspace::layout_apply::op_show_pane(super::workspace::PaneKind::Toolbar)
-                            };
-                            crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout, &op);
-                        }
+                        crate::workspace::layout_apply::layout_apply(
+                            &mut st.workspace_layout,
+                            &crate::workspace::layout_apply::op_toggle_pane(super::workspace::PaneKind::Toolbar),
+                        );
                     }));
                 }
                 "toggle_pane_dock" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        let visible = st.workspace_layout.pane_layout.as_ref()
-                            .map(|pl| pl.is_pane_visible(super::workspace::PaneKind::Dock));
-                        if let Some(visible) = visible {
-                            let op = if visible {
-                                crate::workspace::layout_apply::op_hide_pane(super::workspace::PaneKind::Dock)
-                            } else {
-                                crate::workspace::layout_apply::op_show_pane(super::workspace::PaneKind::Dock)
-                            };
-                            crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout, &op);
-                        }
+                        crate::workspace::layout_apply::layout_apply(
+                            &mut st.workspace_layout,
+                            &crate::workspace::layout_apply::op_toggle_pane(super::workspace::PaneKind::Dock),
+                        );
                     }));
                 }
                 // Window menu: panel visibility. All 16 dock panels route

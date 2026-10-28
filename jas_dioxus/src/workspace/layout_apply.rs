@@ -217,6 +217,11 @@ pub fn op_show_pane(kind: PaneKind) -> serde_json::Value {
     serde_json::json!({ "op": "show_pane", "kind": pane_kind_str(kind) })
 }
 
+/// `{op:"toggle_pane", kind}`: hide the pane if visible, else show it.
+pub fn op_toggle_pane(kind: PaneKind) -> serde_json::Value {
+    serde_json::json!({ "op": "toggle_pane", "kind": pane_kind_str(kind) })
+}
+
 /// `{op:"bring_pane_to_front", pane_id}`.
 pub fn op_bring_pane_to_front(id: PaneId) -> serde_json::Value {
     serde_json::json!({ "op": "bring_pane_to_front", "pane_id": id.0 })
@@ -423,6 +428,31 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
             };
             pl.toggle_canvas_maximized();
         }
+        // The YAML's `set_canvas_maximized` (maximize_canvas / restore_canvas):
+        // idempotent, unlike the toggle, so a second Maximize stays maximized.
+        "set_canvas_maximized" => {
+            let pl = match layout.pane_layout.as_mut() {
+                Some(pl) => pl,
+                None => return true, // no pane layout: nothing to act on
+            };
+            match op["value"].as_bool() {
+                Some(b) => pl.canvas_maximized = b,
+                None => return false, // required field missing: skip
+            }
+        }
+        // The Window menu's Toolbar / Panels item: hide the pane if it is
+        // visible, else show it (the rule both native menu routes applied).
+        "toggle_pane" => {
+            let pl = match layout.pane_layout.as_mut() {
+                Some(pl) => pl,
+                None => return true, // no pane layout: nothing to act on
+            };
+            let kind = match op["kind"].as_str() {
+                Some(s) => parse_pane_kind(s),
+                None => return false, // required field missing: skip
+            };
+            if pl.is_pane_visible(kind) { pl.hide_pane(kind) } else { pl.show_pane(kind) }
+        }
         "resize_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
@@ -478,6 +508,21 @@ mod tests {
 
     fn edges(l: &WorkspaceLayout) -> Vec<DockEdge> {
         l.anchored.iter().map(|(e, _)| *e).collect()
+    }
+
+    /// The Window menu's Toolbar item dispatches `op_toggle_pane`: once hides
+    /// the visible toolbar, twice shows it again. Pins the builder's spelling
+    /// against the dispatcher, which skips an unknown verb silently.
+    #[test]
+    fn op_toggle_pane_hides_then_shows() {
+        let mut l = WorkspaceLayout::default_layout();
+        l.ensure_pane_layout(1200.0, 800.0);
+        let visible = |l: &WorkspaceLayout| l.pane_layout.as_ref().unwrap().is_pane_visible(PaneKind::Toolbar);
+        assert!(visible(&l));
+        assert!(layout_apply_checked(&mut l, &op_toggle_pane(PaneKind::Toolbar)), "the verb is known");
+        assert!(!visible(&l), "one toggle hides the toolbar");
+        layout_apply(&mut l, &op_toggle_pane(PaneKind::Toolbar));
+        assert!(visible(&l), "a second toggle shows it again");
     }
 
     /// A detach carrying the viewport snaps the new dock to the edge it was
