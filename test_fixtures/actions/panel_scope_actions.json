@@ -547,7 +547,7 @@
   }
  },
  {
-  "_doc": "A click on a Layers row (STATUS-jas item 38 step 3c): the row becomes the whole panel selection, stored as a path. The document's element selection does not change.",
+  "_doc": "A click on a Layers row (STATUS-jas item 38 step 3c): the row becomes the whole panel selection, stored as a path. The document's element selection does not change; its target layer (selected_layer) becomes the row's layer, 1 (STATUS-jas 38 (iii)).",
   "name": "layers_panel_select_selects_the_row",
   "setup_svg": "multi_layer.svg",
   "layers_panel_selection": [
@@ -771,6 +771,21 @@
     "expected_panel_scope": {
       "layers_panel_content": {
         "layers_panel_selection": [{"__path__": [1]}, {"__path__": [1, 0]}, {"__path__": [0]}]
+      }
+    }
+  },
+  {
+    "_doc": "Toggling the only selected row out leaves the selection empty, and the target layer stays where the click put it (the web reads the LAST entry and does nothing when there is none).",
+    "name": "layers_panel_toggle_to_empty_keeps_the_target_layer",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {"action": "layers_panel_select", "params": {"path": [1, 0]}},
+      {"action": "layers_panel_select", "params": {"path": [1, 0], "modifier": "toggle"}}
+    ],
+    "expected_json": "layers_panel_select_selects_the_row_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {
+        "layers_panel_selection": []
       }
     }
   }

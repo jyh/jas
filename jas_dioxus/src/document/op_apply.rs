@@ -1879,7 +1879,7 @@ fn is_selection_only_verb(name: &str) -> bool {
     matches!(
         name,
         "select_rect" | "select_by_ids" | "select_element" | "select_path" | "select_all"
-            | "add_to_selection"
+            | "add_to_selection" | "set_target_layer"
     )
 }
 
@@ -2149,6 +2149,22 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
                 vec![crate::document::document::ElementSelection::all(path)],
             );
             targets = controller::selection_to_ids(model.document());
+        }
+        // The document's TARGET layer, where a new element lands (STATUS-jas
+        // item 38 (iii)): the top-level index of `path`, the layer a Layers row
+        // belongs to. Selection-class, so a row click costs no undo step, as
+        // the web's has since 05-01. An empty path or an absent layer is
+        // MissingTarget.
+        "set_target_layer" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let Some(&layer) = path.first().filter(|&&i| i < model.document().layers.len()) else {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            };
+            let mut doc = model.document().clone();
+            doc.selected_layer = layer;
+            model.set_document_unbracketed(doc, crate::document::model::NonUndoableIntent::ActiveLayer);
         }
         // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28):
         // it selects TOP-LEVEL objects, a group counting as ONE. Before this

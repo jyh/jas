@@ -1170,6 +1170,7 @@ private func transformedCanonicalDocument() -> Document {
 @Test func operationLayersRowOps() throws {
     try runOperationFixture("layers_row_ops.json")
     try runOperationFixture("select_path.json")
+    try runOperationFixture("set_target_layer.json")
 }
 
 /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md §13.

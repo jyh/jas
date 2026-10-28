@@ -433,6 +433,11 @@
         "string"
       ]
     },
+    "set_target_layer": {
+      "path": [
+        "array"
+      ]
+    },
     "shear_transform": {
       "angle": [
         "number"
@@ -680,6 +685,9 @@
     "set_print_preferences_field": {
       "field": "witnessed",
       "value": "witnessed"
+    },
+    "set_target_layer": {
+      "path": "witnessed"
     },
     "shear_transform": {
       "angle": "witnessed",

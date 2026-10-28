@@ -95,6 +95,11 @@ func advanceNextUntitledPast(_ filenames: [String]) {
 public enum NonUndoableIntent {
     /// The new document differs from the old ONLY in selection state.
     case selection
+    /// The new document differs from the old ONLY in `selectedLayer`, the
+    /// target layer a Layers row click sets (`set_target_layer`, STATUS-jas
+    /// item 38 (iii)): a click must not cost an undo step. Mirrors Rust
+    /// `NonUndoableIntent::ActiveLayer`.
+    case activeLayer
     /// Dialog-preview re-apply off the captured preview snapshot; the
     /// CONFIRM path journals separately.
     case previewReapply
