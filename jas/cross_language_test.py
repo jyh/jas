@@ -916,6 +916,10 @@ class CrossLanguageTest(absltest.TestCase):
         # on lock. Needs the `toggle_element_lock` verb.
         self._run_operation_fixture("lock_toggle_no_materialization.json")
 
+    def test_operation_layers_row_ops(self):
+        # STATUS-jas item 38 step 2: the Layers row's eye and rename ops.
+        self._run_operation_fixture("layers_row_ops.json")
+
     def test_operation_lock_selection_no_materialization(self):
         # Object > Lock writes the target's own flag (LOCKMAT), a locked
         # group's member is not selectable, and Unlock All keeps the

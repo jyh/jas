@@ -36,6 +36,36 @@
     "type": "bool"
   },
   {
+    "expr": "state.a == state.b",
+    "state": {
+      "a": [
+        0,
+        1
+      ],
+      "b": [
+        0,
+        1
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "state.a == state.c",
+    "state": {
+      "a": [
+        0,
+        1
+      ],
+      "c": [
+        0,
+        2
+      ]
+    },
+    "expected": false,
+    "type": "bool"
+  },
+  {
     "expr": "state.count > 0",
     "state": {
       "count": 3

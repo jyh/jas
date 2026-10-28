@@ -161,6 +161,136 @@ pub fn concept_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shared fixture (`test_fixtures/layers/element_tree.json`), as the
+    /// reference reads it (STATUS-jas item 38 step 1).
+    #[test]
+    fn element_tree_rows_match_the_shared_fixture() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["cases"].as_array().unwrap();
+        assert!(cases.len() >= 2, "the fixture is not vacuous");
+        for case in cases {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            assert_eq!(element_tree(&doc), case["expected"], "{}", case["name"]);
+        }
+    }
+
+    /// `lp_tree`'s row template keys its binds by PATH (item 38 step 3). flask
+    /// §602 measured every row showing its rename box when they compared
+    /// `node.id` (null on every row) with a null `panel.renaming_element`.
+    /// Twin of the reference's `test_layers_row_template.py`.
+    #[test]
+    fn the_layers_row_template_reads_paths() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        fn find<'a>(v: &'a Value, id: &str) -> Option<&'a Value> {
+            if v.get("id").and_then(Value::as_str) == Some(id) { return Some(v); }
+            match v {
+                Value::Object(m) => m.values().find_map(|c| find(c, id)),
+                Value::Array(a) => a.iter().find_map(|c| find(c, id)),
+                _ => None,
+            }
+        }
+        let tree = find(&ws.data()["panels"]["layers_panel_content"], "lp_tree").expect("lp_tree").clone();
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let rows = fx["cases"][0]["expected"].clone();
+        let widget = |id: &str| tree["do"]["children"].as_array().unwrap().iter()
+            .find(|c| c["id"] == id).unwrap_or_else(|| panic!("{id}")).clone();
+        let visible = |ctx: &Value, id: &str| -> Vec<bool> {
+            let src = tree["foreach"]["source"].as_str().unwrap();
+            let crate::interpreter::expr_types::Value::List(expanded) = crate::interpreter::expr::eval(src, ctx) else {
+                panic!("the foreach source is not a list");
+            };
+            let expr = widget(id)["bind"]["visible"].as_str().unwrap().to_string();
+            expanded.iter().map(|r| {
+                let mut c = ctx.clone();
+                c["node"] = r.clone();
+                crate::interpreter::expr::eval(&expr, &c).to_bool()
+            }).collect()
+        };
+        let ctx = |renaming: Value, collapsed: Value| json!({
+            "active_document": {"element_tree": rows},
+            "panel": {"layers_panel_selection": [], "isolation_stack": [],
+                      "collapsed_paths": collapsed, "renaming_element": renaming},
+        });
+        let n = rows.as_array().unwrap().len();
+        let idle = ctx(Value::Null, json!([]));
+        assert_eq!(visible(&idle, "lp_name"), vec![true; n], "every name shows");
+        assert_eq!(visible(&idle, "lp_name_edit"), vec![false; n], "no rename box");
+        let renaming = ctx(rows[2]["path"].clone(), json!([]));
+        assert_eq!(visible(&renaming, "lp_name_edit").iter().filter(|b| **b).count(), 1);
+        let collapsed = ctx(Value::Null, json!([[0, 1]]));
+        assert_eq!(visible(&collapsed, "lp_name").len(), n - 1, "the collapsed group hides its child");
+    }
+
+    /// flask §603: the render plan sent the expanded `lp_tree` as a leaf of type
+    /// `tree_view` as well as its rows, so the shell drew a placeholder behind
+    /// them. An expanded tree is layout-only, like any foreach container.
+    #[test]
+    fn the_expanded_tree_is_not_also_drawn_as_a_leaf() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let ctx = json!({
+            "active_document": {"element_tree": fx["cases"][0]["expected"]},
+            "panel": {"layers_panel_selection": [], "isolation_stack": [],
+                      "collapsed_paths": [], "renaming_element": null},
+        });
+        let plan = crate::interpreter::panel_layout::render_plan(
+            &ws.data()["panels"]["layers_panel_content"], 228, 600, &ctx);
+        let kinds: Vec<&str> = plan.leaves.iter().filter_map(|l| l.node["type"].as_str()).collect();
+        assert!(!kinds.contains(&"tree_view"), "{kinds:?}");
+        assert!(kinds.iter().filter(|k| **k == "icon_button").count() >= 10, "the control: the rows' leaves");
+    }
+
+    /// The same cases through the expression language: `layers.yaml`
+    /// `lp_tree`'s foreach source calls `tree_visible_rows`, and the panel
+    /// selection arrives as path markers (STATUS-jas item 38).
+    #[test]
+    fn tree_visible_rows_through_the_evaluator() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["visible_cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        for case in cases {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            let b = &case["binds"];
+            let psel: Vec<Value> = b["panel_selection"].as_array().unwrap().iter()
+                .map(|p| json!({"__path__": p})).collect();
+            let ctx = json!({
+                "active_document": {"element_tree": element_tree(&doc)},
+                "panel": {"layers_panel_selection": psel},
+                "collapsed": b["collapsed"], "renaming": b["renaming"],
+            });
+            let got = crate::interpreter::expr::eval(
+                "tree_visible_rows(active_document.element_tree, collapsed, panel.layers_panel_selection, renaming)",
+                &ctx);
+            assert_eq!(got, crate::interpreter::expr_types::Value::List(
+                case["expected"].as_array().unwrap().clone()), "{}", case["name"]);
+        }
+    }
+
+    /// Step 1b: the rows to draw, resolved from `element_tree` and the
+    /// widget's binds (the fixture's `visible_cases`, flask §591).
+    #[test]
+    fn tree_visible_rows_match_the_shared_fixture() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["visible_cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        let paths = |v: &Value| -> Vec<Vec<usize>> {
+            serde_json::from_value(v.clone()).unwrap()
+        };
+        for case in cases {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            let b = &case["binds"];
+            let renaming: Option<Vec<usize>> = serde_json::from_value(b["renaming"].clone()).unwrap();
+            let got = tree_visible_rows(&element_tree(&doc), &paths(&b["collapsed"]),
+                &paths(&b["panel_selection"]), renaming.as_deref());
+            assert_eq!(got, case["expected"], "{}", case["name"]);
+        }
+    }
     use crate::document::test_fixture::{brushed_path as path, model_with, rect};
 
     const B: Option<&str> = Some("default_brushes/flat_10");
@@ -243,6 +373,127 @@ pub fn selection_orphan_count(doc: &crate::document::document::Document) -> usiz
         return 0;
     }
     crate::document::dependency_index::orphaned_references(doc, &paths).len()
+}
+
+/// The Layers tree's display label for an element (the renderer's tree and
+/// `element_tree` share it).
+pub fn tree_type_label(elem: &Element) -> &'static str {
+    match elem {
+        Element::Line(_) => "Line",
+        Element::Rect(_) => "Rectangle",
+        Element::Ellipse(e) if e.rx == e.ry => "Circle",
+        Element::Ellipse(_) => "Ellipse",
+        Element::Polyline(_) => "Polyline",
+        Element::Polygon(_) => "Polygon",
+        Element::Path(_) => "Path",
+        Element::Text(_) => "Text",
+        Element::TextPath(_) => "Text Path",
+        Element::Group(_) => "Group",
+        Element::Layer(_) => "Layer",
+        Element::Live(v) => match v {
+            LiveVariant::CompoundShape(_) => "Compound Shape",
+            LiveVariant::Reference(_) => "Reference",
+            LiveVariant::Recorded(_) => "Recorded",
+            LiveVariant::Generated(_) => "Generated",
+            LiveVariant::Transformed(_) => "Transformed",
+        },
+    }
+}
+
+/// An element's test-JSON `type`, which the row template compares
+/// (`node.type == 'layer'`).
+fn tree_type_name(elem: &Element) -> &'static str {
+    match elem {
+        Element::Line(_) => "line",
+        Element::Rect(_) => "rect",
+        Element::Ellipse(_) => "ellipse",
+        Element::Polyline(_) => "polyline",
+        Element::Polygon(_) => "polygon",
+        Element::Path(_) => "path",
+        Element::Text(_) => "text",
+        Element::TextPath(_) => "text_path",
+        Element::Group(_) => "group",
+        Element::Layer(_) => "layer",
+        Element::Live(_) => "live",
+    }
+}
+
+/// `active_document.element_tree` (STATUS-jas item 38): the document's rows
+/// for the Layers panel's `tree_view`, topmost first (REVERSE z) and depth
+/// first, as the web tree walks it (`renderer::tree_flatten_layers`). A row is
+/// selected when its path is at or under a selected path. Collapse, panel
+/// selection, renaming, filters and isolation are the widget's own binds
+/// (`layers.yaml` `lp_tree`), not rows' fields. The shared fixture is
+/// `test_fixtures/layers/element_tree.json`.
+pub fn element_tree(doc: &Document) -> Value {
+    use crate::geometry::element::Visibility;
+    fn walk(children: &[&Element], prefix: &[usize], depth: usize,
+            selected: &std::collections::HashSet<Vec<usize>>, rows: &mut Vec<Value>) {
+        for (i, elem) in children.iter().enumerate().rev() {
+            let mut path = prefix.to_vec();
+            path.push(i);
+            let c = elem.common();
+            let visibility = match c.visibility {
+                Visibility::Invisible => "invisible",
+                Visibility::Outline => "outline",
+                Visibility::Preview => "preview",
+            };
+            rows.push(json!({
+                "path": path, "depth": depth, "id": c.id.clone(),
+                "name": c.name.clone().unwrap_or_default(),
+                "type": tree_type_name(elem), "type_label": tree_type_label(elem),
+                "visibility": visibility, "locked": c.locked,
+                "is_container": elem.is_group_or_layer(),
+                "element_selected": crate::document::controller::path_is_selected_or_under(selected, &path),
+            }));
+            if let Some(kids) = elem.children() {
+                let kids: Vec<&Element> = kids.iter().map(|k| &**k).collect();
+                walk(&kids, &path, depth + 1, selected, rows);
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    let top: Vec<&Element> = doc.layers.iter().collect();
+    walk(&top, &[], 0, &doc.selected_paths(), &mut rows);
+    Value::Array(rows)
+}
+
+/// The Layers tree's ROWS TO DRAW (STATUS-jas item 38 step 1b, flask §591):
+/// `element_tree`'s rows resolved against the `tree_view` widget's binds, in
+/// the core, so a materializer draws them verbatim. A row under a collapsed
+/// CONTAINER is hidden; the container keeps its row. Each row gains
+/// `collapsed` (true only on a container), `panel_selected` and `renaming`
+/// (exact path matches). The binds are PATHS, as both ports key them; a leaf
+/// or a path no row has in `collapsed` is inert. Mirrors the reference's
+/// `tree_visible_rows`; the shared fixture is `element_tree.json`'s
+/// `visible_cases`.
+pub fn tree_visible_rows(
+    rows: &Value,
+    collapsed: &[Vec<usize>],
+    panel_selection: &[Vec<usize>],
+    renaming: Option<&[usize]>,
+) -> Value {
+    let mut hidden_under: Vec<Vec<usize>> = Vec::new();
+    let mut out = Vec::new();
+    for row in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
+        let path: Vec<usize> = row["path"].as_array().map(|p| {
+            p.iter().filter_map(|i| i.as_u64().map(|i| i as usize)).collect()
+        }).unwrap_or_default();
+        if hidden_under.iter().any(|h| path.starts_with(h)) {
+            continue;
+        }
+        let folded = row["is_container"].as_bool().unwrap_or(false)
+            && collapsed.contains(&path);
+        let mut r = row.clone();
+        r["collapsed"] = Value::Bool(folded);
+        r["panel_selected"] = Value::Bool(panel_selection.contains(&path));
+        r["renaming"] = Value::Bool(renaming == Some(path.as_slice()));
+        if folded {
+            hidden_under.push(path);
+        }
+        out.push(r);
+    }
+    Value::Array(out)
 }
 
 pub fn active_document_view(
@@ -439,6 +690,9 @@ pub fn active_document_view(
         "view_offset_x": model.view_offset_x,
         "view_offset_y": model.view_offset_y,
     });
+    // The Layers tree's rows (STATUS-jas item 38), outside the macro: one more
+    // key there exceeds `json!`'s recursion limit.
+    view["element_tree"] = element_tree(&doc);
     // Inserted outside the json! literal to keep the macro under the
     // recursion limit (the tab-branch object is at the ceiling too).
     if let serde_json::Value::Object(m) = &mut view {

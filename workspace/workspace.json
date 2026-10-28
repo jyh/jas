@@ -2044,8 +2044,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "effects": [
@@ -2059,8 +2060,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "effects": [
@@ -2074,8 +2076,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "effects": [
@@ -2089,8 +2092,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "effects": [
@@ -2171,8 +2175,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "effects": [
@@ -2186,8 +2191,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "effects": [
@@ -2251,8 +2257,9 @@
       "category": "layers",
       "tier": 3,
       "params": {
-        "element_id": {
-          "type": "string"
+        "path": {
+          "type": "path",
+          "description": "The row's element path (child indices; STATUS-jas item 38)."
         }
       },
       "enabled_when": "active_document.layers_panel_selection_count == 1",
@@ -9285,7 +9292,7 @@
         "symbol_usage": {},
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
-        "element_tree": null,
+        "element_tree": [],
         "element_selection": [],
         "recent_colors": []
       },
@@ -9394,9 +9401,9 @@
           "description": "Ids of the artboards selected in the Artboards panel, in selection order. Empty when nothing is selected there.\n"
         },
         "element_tree": {
-          "type": "object",
-          "nullable": true,
-          "description": "Hierarchical tree of document elements for panel rendering (tree_view source)"
+          "type": "list",
+          "item_type": "object",
+          "description": "The document's rows for the Layers panel's tree_view (lp_tree's source): topmost first (reverse z), depth first, one row per element with {path, depth, id, name ('' when unnamed), type (the test-JSON type), type_label, visibility, locked, is_container, element_selected (at or under a selected path)}. Collapse, panel selection, renaming, filters and isolation are the widget's own binds, not row fields. Shared fixture: test_fixtures/layers/element_tree.json.\n"
         },
         "element_selection": {
           "type": "list",
@@ -16716,17 +16723,19 @@
           "default": [],
           "description": "Stack of isolation contexts; each entry has container_id and saved_visibility map"
         },
-        "twirl_states": {
-          "type": "object",
-          "default": {},
+        "collapsed_paths": {
+          "type": "list",
+          "item_type": "path",
+          "default": [],
           "persist": true,
-          "description": "Map of element_id to bool (true=expanded). Persists across sessions. Missing entries default to true (expanded)."
+          "description": "The paths (lists of child indices) of the collapsed containers in the tree; a container not listed is expanded. Persists across sessions. Keyed by PATH, not element id, because ids are optional (STATUS-jas item 38; this replaces the id-keyed `twirl_states` map, which no expression could index by path). A path names a POSITION, not an element: inserting, deleting or reordering a sibling above an entry moves it onto another element, as both native trees behave.\n"
         },
         "renaming_element": {
-          "type": "string",
+          "type": "list",
+          "item_type": "number",
           "default": null,
           "nullable": true,
-          "description": "ID of the element currently being renamed inline, or null"
+          "description": "The path of the element being renamed inline, or null. A path, not an element id (ids are optional; STATUS-jas item 38), with the same position caveat as collapsed_paths.\n"
         },
         "drag_active": {
           "type": "bool",
@@ -17049,7 +17058,7 @@
             "id": "lp_tree",
             "type": "tree_view",
             "summary": "Element hierarchy",
-            "description": "Recursive tree of document elements. Each row is rendered from row_template with node.* variables in scope. Supports drag-and-drop reordering, inline rename, keyboard navigation, and context menus. See the panel-level description for full behavioral specification.\n",
+            "description": "Recursive tree of document elements. Each row is rendered from the `do` template with node.* variables in scope, once per row of the foreach source: the visible rows the core resolves from element_tree and the widget's binds (tree_visible_rows; a row under a collapsed container is hidden; panel.collapsed_paths and panel.renaming_element are paths, as the row actions' params are). Supports drag-and-drop reordering, inline rename, keyboard navigation, and context menus. See the panel-level description for full behavioral specification.\n",
             "style": {
               "flex": 1,
               "overflow_y": "auto"
@@ -17061,11 +17070,15 @@
               "search_query": "panel.search_query",
               "type_filter": "panel.type_filter",
               "isolation_root": "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1].container_id else null",
-              "twirl_states": "panel.twirl_states",
+              "collapsed_paths": "panel.collapsed_paths",
               "renaming_element": "panel.renaming_element",
               "drag_active": "panel.drag_active"
             },
-            "row_template": {
+            "foreach": {
+              "source": "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)",
+              "as": "node"
+            },
+            "do": {
               "type": "container",
               "layout": "row",
               "style": {
@@ -17099,7 +17112,7 @@
                       "condition": "not event.alt",
                       "action": "cycle_element_visibility",
                       "params": {
-                        "element_id": "node.id"
+                        "path": "node.path"
                       }
                     },
                     {
@@ -17107,7 +17120,7 @@
                       "condition": "event.alt",
                       "action": "solo_element_visibility",
                       "params": {
-                        "element_id": "node.id"
+                        "path": "node.path"
                       }
                     }
                   ]
@@ -17125,7 +17138,7 @@
                       "event": "click",
                       "action": "toggle_element_lock",
                       "params": {
-                        "element_id": "node.id"
+                        "path": "node.path"
                       }
                     }
                   ]
@@ -17133,7 +17146,7 @@
                 {
                   "id": "lp_twirl",
                   "type": "icon_button",
-                  "icon": "{{if panel.twirl_states[node.id] != false then 'twirl_open' else 'twirl_closed'}}",
+                  "icon": "{{if any(panel.collapsed_paths, fun p -> p == node.path) then 'twirl_closed' else 'twirl_open'}}",
                   "summary": "Expand/Collapse",
                   "style": {
                     "size": 16
@@ -17146,7 +17159,7 @@
                       "event": "click",
                       "action": "toggle_element_twirl",
                       "params": {
-                        "element_id": "node.id"
+                        "path": "node.path"
                       }
                     }
                   ]
@@ -17185,14 +17198,14 @@
                     "white_space": "nowrap"
                   },
                   "bind": {
-                    "visible": "panel.renaming_element != node.id"
+                    "visible": "panel.renaming_element != node.path"
                   },
                   "behavior": [
                     {
                       "event": "double_click",
                       "action": "rename_element",
                       "params": {
-                        "element_id": "node.id"
+                        "path": "node.path"
                       }
                     }
                   ]
@@ -17205,7 +17218,7 @@
                     "font_size": 11
                   },
                   "bind": {
-                    "visible": "panel.renaming_element == node.id",
+                    "visible": "panel.renaming_element == node.path",
                     "value": "node.name"
                   },
                   "behavior": [
@@ -17239,7 +17252,7 @@
                       "event": "click",
                       "action": "layers_element_select",
                       "params": {
-                        "element_id": "node.id"
+                        "path": "node.path"
                       }
                     }
                   ]
@@ -17252,7 +17265,7 @@
                 "description": "Panel-select on click (spacer, twirl-gap, preview, name areas)",
                 "action": "layers_panel_select",
                 "params": {
-                  "element_id": "node.id"
+                  "path": "node.path"
                 }
               },
               {
@@ -17267,7 +17280,7 @@
                 "event": "drag_start",
                 "action": "layers_panel_select",
                 "params": {
-                  "element_id": "node.id"
+                  "path": "node.path"
                 }
               },
               {

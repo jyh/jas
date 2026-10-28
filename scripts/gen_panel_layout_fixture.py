@@ -98,6 +98,16 @@ _CONCEPTS_CTX = {
 
 # layers uses a ROW foreach (isolation-stack breadcrumb); gradient a WRAP foreach
 # (gradient tile grid — the tiles have no bindings, so only the count matters).
+# The Layers tree_view expands its `do` once per row of
+# `tree_visible_rows(active_document.element_tree, ...)` (STATUS-jas item 38):
+# the rows are the element-tree fixture's first case, read from that file
+# rather than typed here, and one panel-selected group marks its row.
+def _element_tree_rows() -> list:
+    path = os.path.join(ROOT, "test_fixtures", "layers/element_tree.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["cases"][0]["expected"]
+
+
 _LAYERS_CTX = {
     "panel": {
         "isolation_stack": [
@@ -105,7 +115,9 @@ _LAYERS_CTX = {
             {"container_name": "Group A"},
             {"container_name": "Path 3"},
         ],
+        "layers_panel_selection": [{"__path__": [0, 1]}],
     },
+    "active_document": {"element_tree": _element_tree_rows()},
 }
 
 _GRADIENT_CTX = {
@@ -321,7 +333,7 @@ _BV_SWATCHES_MULTI = {
 # the ones that can evaluate to a list are selected_swatches, selected_brushes,
 # type_filter, panel_selection and element_selection -- all flat -- plus the
 # gradient panel's `stops`, a flat list of OBJECTS, which is excluded for the
-# same key-order reason `element_tree` and `twirl_states` are).  The recursion
+# same key-order reason `element_tree` is).  The recursion
 # is nevertheless implemented and documented in all three ports, so this scope
 # feeds `panel.selected_swatches` a list of lists purely to pin it: an inner
 # multi-element list, an EMPTY inner list (which must render as `[]`, not as
@@ -350,9 +362,10 @@ _BV_SWATCHES_NESTED = {
 # is the one element arm no other vector reaches: `type` "path" occurs zero
 # times in the 225 rows of the four seeds above.
 #
-# `element_tree` and `twirl_states` are left null on purpose -- both are OBJECT
-# bindings, and an object's JSON key order is a known cross-port divergence
-# (census row #50), which `bind_values`' own module docs say no vector may bind
+# `element_tree` is left null on purpose -- it is an OBJECT-list binding (the
+# Layers tree's `twirl_states` map was one too, until item 38 made it the
+# `collapsed_paths` list), and an object's JSON key order is a known cross-port
+# divergence (census row #50), which `bind_values`' own module docs say no vector may bind
 # until that row closes.  A null there also keeps the tree's row foreach from
 # expanding, so the vector stays 12 rows wide and is about the list forms.
 _BV_LAYERS_LISTS = {
@@ -361,7 +374,7 @@ _BV_LAYERS_LISTS = {
         "layers_panel_selection": ["el_a", "el_b", "el_c"],
         "type_filter": ["path", "text"],
         "isolation_stack": [],
-        "twirl_states": None,
+        "collapsed_paths": [],
         "renaming_element": None,
         "drag_active": False,
         "search_query": "",

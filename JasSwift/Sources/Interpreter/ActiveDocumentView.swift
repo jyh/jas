@@ -14,6 +14,115 @@ import Foundation
 /// computed fields like `new_layer_insert_index` and
 /// `layers_panel_selection_count` see live panel state. Pass `[]`
 /// from callers that don't have layers-panel context.
+/// The Layers tree's display label for an element (the panel's tree and
+/// `element_tree` share it). A round ellipse reads `Circle`.
+func treeTypeLabel(_ elem: Element) -> String {
+    switch elem {
+    case .line: return "Line"
+    case .rect: return "Rectangle"
+    case .ellipse(let e): return e.rx == e.ry ? "Circle" : "Ellipse"
+    case .polyline: return "Polyline"
+    case .polygon: return "Polygon"
+    case .path: return "Path"
+    case .text: return "Text"
+    case .textPath: return "Text Path"
+    case .group: return "Group"
+    case .layer: return "Layer"
+    case .live(let v):
+        switch v {
+        case .compoundShape: return "Compound Shape"
+        case .reference: return "Reference"
+        case .recorded: return "Recorded"
+        case .generated: return "Generated"
+        case .transformed: return "Transformed"
+        }
+    }
+}
+
+/// An element's test-JSON `type`, which the row template compares.
+private func treeTypeName(_ elem: Element) -> String {
+    switch elem {
+    case .line: return "line"
+    case .rect: return "rect"
+    case .ellipse: return "ellipse"
+    case .polyline: return "polyline"
+    case .polygon: return "polygon"
+    case .path: return "path"
+    case .text: return "text"
+    case .textPath: return "text_path"
+    case .group: return "group"
+    case .layer: return "layer"
+    case .live: return "live"
+    }
+}
+
+/// `active_document.element_tree` (STATUS-jas item 38): the document's rows
+/// for the Layers panel's `tree_view`, topmost first (REVERSE z) and depth
+/// first. A row is selected when its path is at or under a selected path.
+/// Collapse, panel selection, renaming, filters and isolation are the widget's
+/// own binds. Mirrors Rust `document_views::element_tree`; the shared fixture
+/// is `test_fixtures/layers/element_tree.json`.
+public func elementTree(_ doc: Document) -> [[String: Any]] {
+    var rows: [[String: Any]] = []
+    let selected = doc.selectedPaths
+    func walk(_ children: [Element], _ prefix: [Int], _ depth: Int) {
+        for i in children.indices.reversed() {
+            let elem = children[i]
+            let path = prefix + [i]
+            let vis: String = {
+                switch elem.visibility {
+                case .invisible: return "invisible"
+                case .outline: return "outline"
+                case .preview: return "preview"
+                }
+            }()
+            var kids: [Element]? = nil
+            if case .group(let g) = elem { kids = g.children }
+            if case .layer(let l) = elem { kids = l.children }
+            rows.append([
+                "path": path, "depth": depth, "id": elem.id as Any? ?? NSNull(),
+                "name": elem.name ?? "", "type": treeTypeName(elem), "type_label": treeTypeLabel(elem),
+                "visibility": vis, "locked": elem.isLocked, "is_container": kids != nil,
+                "element_selected": pathIsSelectedOrUnder(selected, path),
+            ])
+            if let kids { walk(kids, path, depth + 1) }
+        }
+    }
+    walk(doc.layers.map { Element.layer($0) }, [], 0)
+    return rows
+}
+
+/// The Layers tree's ROWS TO DRAW (STATUS-jas item 38 step 1b, flask §591):
+/// `element_tree`'s rows resolved against the `tree_view` widget's binds, in
+/// the core, so a materializer draws them verbatim. A row under a collapsed
+/// CONTAINER is hidden; the container keeps its row. Each row gains
+/// `collapsed` (true only on a container), `panel_selected` and `renaming`
+/// (exact path matches). The binds are PATHS, as both ports key them; a leaf
+/// or a path no row has in `collapsed` is inert. Mirrors the reference's
+/// `tree_visible_rows`; the shared fixture is `element_tree.json`'s
+/// `visible_cases`.
+public func treeVisibleRows(
+    _ rows: [[String: Any]],
+    collapsed: [[Int]],
+    panelSelection: [[Int]],
+    renaming: [Int]?
+) -> [[String: Any]] {
+    var hiddenUnder: [[Int]] = []
+    var out: [[String: Any]] = []
+    for row in rows {
+        let path = row["path"] as? [Int] ?? []
+        if hiddenUnder.contains(where: { path.starts(with: $0) }) { continue }
+        let folded = (row["is_container"] as? Bool ?? false) && collapsed.contains(path)
+        var r = row
+        r["collapsed"] = folded
+        r["panel_selected"] = panelSelection.contains(path)
+        r["renaming"] = renaming == path
+        if folded { hiddenUnder.append(path) }
+        out.append(r)
+    }
+    return out
+}
+
 public func buildActiveDocumentView(
     model: Model?,
     layersPanelSelection: [[Int]] = [],
@@ -22,6 +131,7 @@ public func buildActiveDocumentView(
     guard let m = model else {
         return [
             "top_level_layers": [] as [Any],
+            "element_tree": [] as [Any],
             "top_level_layer_paths": [] as [Any],
             "next_layer_name": "Layer 1",
             "new_layer_insert_index": 0,
@@ -198,6 +308,7 @@ public func buildActiveDocumentView(
     }.count
     return [
         "top_level_layers": topLevelLayers,
+        "element_tree": elementTree(m.document),
         "top_level_layer_paths": topLevelLayerPaths,
         "next_layer_name": nextLayerName,
         "new_layer_insert_index": newLayerInsertIndex,

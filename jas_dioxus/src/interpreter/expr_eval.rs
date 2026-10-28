@@ -701,6 +701,38 @@ fn eval_func(
             }
         }
 
+        "tree_visible_rows" => {
+            // The Layers tree's rows to draw (STATUS-jas item 38): `layers.yaml`
+            // `lp_tree`'s foreach source. Paths arrive as lists or path markers.
+            if args.len() != 4 { return Value::Null; }
+            let vals: Vec<Value> = args.iter().map(|a| eval_inner(a, ctx, scope, store_cb)).collect();
+            fn json_path(v: &serde_json::Value) -> Option<Vec<usize>> {
+                let v = v.get("__path__").unwrap_or(v);
+                v.as_array()?.iter().map(|i| i.as_u64().map(|i| i as usize)).collect()
+            }
+            fn as_path(v: &Value) -> Option<Vec<usize>> {
+                match v {
+                    Value::Path(p) => Some(p.clone()),
+                    Value::List(l) => json_path(&serde_json::Value::Array(l.clone())),
+                    _ => None,
+                }
+            }
+            fn paths(v: &Value) -> Vec<Vec<usize>> {
+                match v {
+                    Value::List(l) => l.iter().filter_map(json_path).collect(),
+                    _ => Vec::new(),
+                }
+            }
+            let Value::List(rows) = &vals[0] else { return Value::Null };
+            let out = crate::interpreter::document_views::tree_visible_rows(
+                &serde_json::Value::Array(rows.clone()), &paths(&vals[1]), &paths(&vals[2]),
+                as_path(&vals[3]).as_deref());
+            match out {
+                serde_json::Value::Array(a) => Value::List(a),
+                _ => Value::Null,
+            }
+        }
+
         "path_from_id" => {
             if args.len() != 1 { return Value::Null; }
             let s = eval_inner(&args[0], ctx, scope, store_cb);

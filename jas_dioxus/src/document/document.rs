@@ -534,6 +534,47 @@ impl Document {
         new_doc
     }
 
+    /// The Layers eye button (STATUS-jas item 38): the element at `path`'s OWN
+    /// visibility advances one step, Preview -> Outline -> Invisible ->
+    /// Preview; nothing is written onto its descendants. An element that
+    /// becomes Invisible leaves the selection with its descendants. A path
+    /// naming no element returns the document unchanged. Mirrors the
+    /// reference's `cycling_element_visibility` and the Swift
+    /// `cyclingElementVisibility(at:)`.
+    pub fn cycling_element_visibility(&self, path: &ElementPath) -> Self {
+        use crate::geometry::element::Visibility;
+        let Some(elem) = self.get_element(path) else {
+            return self.clone();
+        };
+        let next = match elem.visibility() {
+            Visibility::Preview => Visibility::Outline,
+            Visibility::Outline => Visibility::Invisible,
+            Visibility::Invisible => Visibility::Preview,
+        };
+        let mut new_doc = self.clone();
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            elem.common_mut().visibility = next;
+        }
+        if next == Visibility::Invisible {
+            new_doc
+                .selection
+                .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));
+        }
+        new_doc
+    }
+
+    /// The Layers rename commit (STATUS-jas item 38): the element at `path` is
+    /// named `name`; an empty name clears it, so the row shows its type label.
+    /// A path naming no element returns the document unchanged. Mirrors the
+    /// reference's `naming_element` and the Swift `namingElement(at:_:)`.
+    pub fn naming_element(&self, path: &ElementPath, name: &str) -> Self {
+        let mut new_doc = self.clone();
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            elem.common_mut().name = if name.is_empty() { None } else { Some(name.to_string()) };
+        }
+        new_doc
+    }
+
     /// Return a new Document with the element at path replaced.
     pub fn replace_element(&self, path: &ElementPath, new_elem: Element) -> Self {
         let mut doc = self.clone();

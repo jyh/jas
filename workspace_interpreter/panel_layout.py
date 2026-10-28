@@ -94,6 +94,16 @@ _LAYOUT_CONTAINER_TYPES = frozenset({
 })
 
 
+def _is_layout_only(node: dict) -> bool:
+    """A layout-only node, which the render plan never sends as a leaf: the
+    container types, and a `tree_view` laid out as its foreach expansion
+    (STATUS-jas item 38; flask §603 measured the shell drawing a `tree_view`
+    placeholder behind the rows when this test read the type alone)."""
+    if node.get("type") == "tree_view":
+        return _is_container(node)
+    return node.get("type") in _LAYOUT_CONTAINER_TYPES
+
+
 def _has_chrome(node: dict) -> bool:
     """A layout-only container still worth drawing — it carries a border /
     background (static or a `bind.background`, e.g. a selected-row highlight)."""
@@ -132,7 +142,7 @@ def render_plan(panel_node: dict, avail_w: int, avail_h: int = 0,
             "node": node,
             "ctx": it.get("ctx") or {},
         }
-        if node.get("type") in _LAYOUT_CONTAINER_TYPES:
+        if _is_layout_only(node):
             if _has_chrome(node):
                 chrome.append(entry)
         else:
@@ -148,6 +158,11 @@ def _style(node: dict) -> dict:
 
 
 def _is_container(node: dict) -> bool:
+    # A `tree_view` that declares a `foreach` + `do` (the Layers tree,
+    # STATUS-jas item 38) is laid out as its expansion, like any foreach
+    # container; one without them stays a fixed leaf.
+    if node.get("type") == "tree_view":
+        return isinstance(node.get("foreach"), dict) and bool(node.get("do"))
     return node.get("type") in _CONTAINER_TYPES
 
 
@@ -225,6 +240,17 @@ def _resolve_dim(v: Any, avail: int) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def _dim(v: Any, ctx: dict) -> Any:
+    """A style dimension as written, with a template (``"{{node.depth * 16}}"``,
+    the Layers row's indent, STATUS-jas item 38) evaluated in the node's scope
+    first, as a bound text is; ``_resolve_dim`` then reads the number. A
+    template that does not yield a number resolves to None, as any unparsable
+    dimension does."""
+    if isinstance(v, str) and "{{" in v:
+        return evaluate_text(v, ctx)
+    return v
 
 
 def _parse_padding(v: Any) -> tuple[int, int, int, int]:
@@ -312,10 +338,10 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
     size = _size(node)
     if size is not None:
         w = size
-    rw = _resolve_dim(st.get("width"), avail_w)
+    rw = _resolve_dim(_dim(st.get("width"), ctx), avail_w)
     if rw is not None:
         w = rw
-    rmw = _resolve_dim(st.get("min_width"), avail_w)
+    rmw = _resolve_dim(_dim(st.get("min_width"), ctx), avail_w)
     if rmw is not None:
         w = max(w, rmw)
     return w
@@ -391,7 +417,7 @@ def _natural_w(node: dict, ctx: dict) -> int:
     st = _style(node)
     # B.5: a declared width is the container's natural width. A percentage has
     # nothing to resolve against here and is ignored, as a leaf's is.
-    declared = _resolve_dim(st.get("width"), -1)
+    declared = _resolve_dim(_dim(st.get("width"), ctx), -1)
     if declared is not None:
         return declared
     _pt, pr, _pb, pl = _parse_padding(st.get("padding"))
@@ -434,7 +460,7 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
     if _is_container(node) or node.get("type") == "disclosure":
         # B.5: a container's declared width is honoured as its height is (B.4),
         # clamped to the width it is given; its children are laid out in it.
-        declared = _resolve_dim(st.get("width"), avail_w)
+        declared = _resolve_dim(_dim(st.get("width"), ctx), avail_w)
         if declared is not None:
             avail_w = min(declared, avail_w) if avail_w > 0 else declared
     inner_w = avail_w - pl - pr

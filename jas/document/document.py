@@ -279,6 +279,42 @@ class Document:
                 es for es in new_doc.selection if tuple(es.path[:n]) != tuple(path)))
         return new_doc
 
+    def cycling_element_visibility(self, path: ElementPath) -> "Document":
+        """Return a document with the element at ``path``'s OWN visibility
+        advanced one step of the Layers eye cycle, preview -> outline ->
+        invisible -> preview (STATUS-jas item 38). Nothing is written onto its
+        descendants. An element that becomes invisible leaves the selection
+        with its descendants. A path naming no element returns the document
+        unchanged. Mirrors the Rust ``Document::cycling_element_visibility``
+        and the Swift ``cyclingElementVisibility(at:)``."""
+        from dataclasses import replace as _replace
+        from geometry.element import Visibility
+        try:
+            elem = self.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+            return self
+        nxt = {Visibility.PREVIEW: Visibility.OUTLINE, Visibility.OUTLINE: Visibility.INVISIBLE,
+               Visibility.INVISIBLE: Visibility.PREVIEW}[elem.visibility]
+        new_doc = self.replace_element(path, _replace(elem, visibility=nxt))
+        if nxt == Visibility.INVISIBLE:
+            n = len(path)
+            new_doc = _replace(new_doc, selection=frozenset(
+                es for es in new_doc.selection if tuple(es.path[:n]) != tuple(path)))
+        return new_doc
+
+    def naming_element(self, path: ElementPath, name: str) -> "Document":
+        """Return a document with the element at ``path`` named ``name`` (the
+        Layers rename commit, STATUS-jas item 38); an empty name clears it, so
+        the row shows its type label. A path naming no element returns the
+        document unchanged. Mirrors the Rust ``Document::naming_element`` and
+        the Swift ``namingElement(at:_:)``."""
+        from dataclasses import replace as _replace
+        try:
+            elem = self.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+            return self
+        return self.replace_element(path, _replace(elem, name=name or None))
+
     def active_layer_locked(self) -> bool:
         """True when the ACTIVE layer is locked, the lock read down the path.
         A document with NO layers is not locked: paste's own empty-document

@@ -11021,6 +11021,92 @@
             {
               "container_name": "Path 3"
             }
+          ],
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "active_document": {
+          "element_tree": [
+            {
+              "path": [
+                1
+              ],
+              "depth": 0,
+              "id": null,
+              "name": "Front",
+              "type": "layer",
+              "type_label": "Layer",
+              "visibility": "invisible",
+              "locked": true,
+              "is_container": true,
+              "element_selected": false
+            },
+            {
+              "path": [
+                0
+              ],
+              "depth": 0,
+              "id": null,
+              "name": "Back",
+              "type": "layer",
+              "type_label": "Layer",
+              "visibility": "preview",
+              "locked": false,
+              "is_container": true,
+              "element_selected": false
+            },
+            {
+              "path": [
+                0,
+                1
+              ],
+              "depth": 1,
+              "id": null,
+              "name": "G",
+              "type": "group",
+              "type_label": "Group",
+              "visibility": "preview",
+              "locked": false,
+              "is_container": true,
+              "element_selected": true
+            },
+            {
+              "path": [
+                0,
+                1,
+                0
+              ],
+              "depth": 2,
+              "id": null,
+              "name": "",
+              "type": "ellipse",
+              "type_label": "Circle",
+              "visibility": "preview",
+              "locked": false,
+              "is_container": false,
+              "element_selected": true
+            },
+            {
+              "path": [
+                0,
+                0
+              ],
+              "depth": 1,
+              "id": null,
+              "name": "",
+              "type": "rect",
+              "type_label": "Rectangle",
+              "visibility": "preview",
+              "locked": false,
+              "is_container": false,
+              "element_selected": false
+            }
           ]
         }
       }
@@ -11352,6 +11438,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
+          "collapsed_paths",
           "drag_active",
           "element_selection",
           "isolation_root",
@@ -11359,12 +11446,981 @@
           "renaming_element",
           "search_query",
           "source",
-          "twirl_states",
           "type_filter"
         ],
         "style": [
           "flex",
           "overflow_y"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "background",
+          "opacity"
+        ],
+        "style": [
+          "alignment",
+          "gap",
+          "height",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          1
+        ],
+        "type": "icon_button",
+        "id": "lp_eye",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          2
+        ],
+        "type": "icon_button",
+        "id": "lp_lock",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          3
+        ],
+        "type": "icon_button",
+        "id": "lp_twirl",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          4
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          5
+        ],
+        "type": "element_preview",
+        "id": "lp_preview",
+        "kind": "element_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "element_id"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          6
+        ],
+        "type": "text",
+        "id": "lp_name",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size",
+          "overflow",
+          "text_overflow",
+          "white_space"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          7
+        ],
+        "type": "text_input",
+        "id": "lp_name_edit",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "value",
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          8
+        ],
+        "type": "container",
+        "id": "lp_select",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "background",
+          "border",
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "background",
+          "opacity"
+        ],
+        "style": [
+          "alignment",
+          "gap",
+          "height",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          0
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          1
+        ],
+        "type": "icon_button",
+        "id": "lp_eye",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          2
+        ],
+        "type": "icon_button",
+        "id": "lp_lock",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          3
+        ],
+        "type": "icon_button",
+        "id": "lp_twirl",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          4
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          5
+        ],
+        "type": "element_preview",
+        "id": "lp_preview",
+        "kind": "element_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "element_id"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          6
+        ],
+        "type": "text",
+        "id": "lp_name",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size",
+          "overflow",
+          "text_overflow",
+          "white_space"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          7
+        ],
+        "type": "text_input",
+        "id": "lp_name_edit",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "value",
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1,
+          8
+        ],
+        "type": "container",
+        "id": "lp_select",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "background",
+          "border",
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "background",
+          "opacity"
+        ],
+        "style": [
+          "alignment",
+          "gap",
+          "height",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          0
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          1
+        ],
+        "type": "icon_button",
+        "id": "lp_eye",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          2
+        ],
+        "type": "icon_button",
+        "id": "lp_lock",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          3
+        ],
+        "type": "icon_button",
+        "id": "lp_twirl",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          4
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          5
+        ],
+        "type": "element_preview",
+        "id": "lp_preview",
+        "kind": "element_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "element_id"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          6
+        ],
+        "type": "text",
+        "id": "lp_name",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size",
+          "overflow",
+          "text_overflow",
+          "white_space"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          7
+        ],
+        "type": "text_input",
+        "id": "lp_name_edit",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "value",
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          8
+        ],
+        "type": "container",
+        "id": "lp_select",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "background",
+          "border",
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "background",
+          "opacity"
+        ],
+        "style": [
+          "alignment",
+          "gap",
+          "height",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          0
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          1
+        ],
+        "type": "icon_button",
+        "id": "lp_eye",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          2
+        ],
+        "type": "icon_button",
+        "id": "lp_lock",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          3
+        ],
+        "type": "icon_button",
+        "id": "lp_twirl",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          4
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          5
+        ],
+        "type": "element_preview",
+        "id": "lp_preview",
+        "kind": "element_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "element_id"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          6
+        ],
+        "type": "text",
+        "id": "lp_name",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size",
+          "overflow",
+          "text_overflow",
+          "white_space"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          7
+        ],
+        "type": "text_input",
+        "id": "lp_name_edit",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "value",
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3,
+          8
+        ],
+        "type": "container",
+        "id": "lp_select",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "background",
+          "border",
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "background",
+          "opacity"
+        ],
+        "style": [
+          "alignment",
+          "gap",
+          "height",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          0
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          1
+        ],
+        "type": "icon_button",
+        "id": "lp_eye",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          2
+        ],
+        "type": "icon_button",
+        "id": "lp_lock",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          3
+        ],
+        "type": "icon_button",
+        "id": "lp_twirl",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          4
+        ],
+        "type": "spacer",
+        "id": "",
+        "kind": "spacer",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          5
+        ],
+        "type": "element_preview",
+        "id": "lp_preview",
+        "kind": "element_preview",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "element_id"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          6
+        ],
+        "type": "text",
+        "id": "lp_name",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size",
+          "overflow",
+          "text_overflow",
+          "white_space"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          7
+        ],
+        "type": "text_input",
+        "id": "lp_name_edit",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "value",
+          "visible"
+        ],
+        "style": [
+          "flex",
+          "font_size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          4,
+          8
+        ],
+        "type": "container",
+        "id": "lp_select",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "background",
+          "border",
+          "height",
+          "width"
         ]
       }
     ]

@@ -223,6 +223,23 @@
       },
       "notes": "The copy payload (Edit > Copy): the bytes every app puts on the system clipboard. Rust writes the goldens and matches them byte for byte; Swift matches their content and carries byte equality as a known issue until the SVG writers agree."
     },
+    "test_fixtures/layers": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "reference",
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "None needed: each runner computes active_document.element_tree from the case's document and compares it with the authored rows; Rust's older web-tree walker is a second, independent witness. visible_cases (step 1b): each runner resolves those rows against the case's binds with its tree_visible_rows and compares the rows to draw; no second witness yet (the ports' native trees do not read it).",
+      "claim_style": {
+        "reference": "path reference (layers/element_tree.json)",
+        "rust": "path reference (layers/element_tree.json, include_str!)",
+        "swift": "path reference (layers/element_tree.json)"
+      },
+      "notes": "STATUS-jas item 38 step 1: the Layers tree's document rows (reverse z, depth first, at-or-under selection), the input to the Windows tree_view materializer. Step 1b adds visible_cases: the rows to draw, resolved in the core from those rows and the widget's binds (collapsed, panel_selection, renaming, all paths)."
+    },
     "test_fixtures/input_scripts": {
       "kind": "fixtures",
       "required_consumers": [

@@ -2051,6 +2051,19 @@ public func opApply(
             return .missingTarget(id: String(describing: path))
         }
         model.editDocument(model.document.togglingElementLock(at: path))
+    // The Layers row's eye and rename commit (STATUS-jas item 38), through the
+    // pure `Document.cyclingElementVisibility` / `namingElement`. Mirrors
+    // Rust's arm.
+    case "cycle_element_visibility", "set_element_name":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        if name == "cycle_element_visibility" {
+            model.editDocument(model.document.cyclingElementVisibility(at: path))
+        } else {
+            model.editDocument(model.document.namingElement(at: path, op["name"] as? String ?? ""))
+        }
     case "lock_selection":
         controller.lockSelection()
     case "unlock_all":

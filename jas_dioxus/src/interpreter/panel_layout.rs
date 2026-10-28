@@ -80,6 +80,17 @@ pub struct RenderPlan {
 const LAYOUT_CONTAINER_TYPES: [&str; 6] =
     ["container", "row", "col", "grid", "panel", "disclosure"];
 
+/// A layout-only node, which the render plan never sends as a leaf: the
+/// container types, and a `tree_view` laid out as its foreach expansion
+/// (STATUS-jas item 38; flask §603 measured the shell drawing a `tree_view`
+/// placeholder behind the rows when this test read the type alone).
+fn is_layout_only(n: &Value) -> bool {
+    if node_type(n) == "tree_view" {
+        return is_container(n);
+    }
+    LAYOUT_CONTAINER_TYPES.contains(&node_type(n))
+}
+
 /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into a
 /// JSON array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
 ///
@@ -159,7 +170,7 @@ pub fn render_plan_with_omitted(
             node: it.node,
             ctx: it.ctx,
         };
-        if LAYOUT_CONTAINER_TYPES.contains(&node_type(&leaf.node)) {
+        if is_layout_only(&leaf.node) {
             // Layout-only container: draw it (behind the leaves) only if it
             // carries a border/background; otherwise it produces no widget.
             if has_chrome(&leaf.node) {
@@ -217,6 +228,12 @@ fn grid_cols(n: &Value) -> i64 {
 }
 
 fn is_container(n: &Value) -> bool {
+    // A `tree_view` that declares a `foreach` + `do` (the Layers tree,
+    // STATUS-jas item 38) is laid out as its expansion, like any foreach
+    // container; one without them stays a fixed leaf.
+    if node_type(n) == "tree_view" {
+        return st_foreach(n).is_some() && n.get("do").map_or(false, |v| !v.is_null());
+    }
     CONTAINER_TYPES.contains(&node_type(n))
 }
 
@@ -337,6 +354,18 @@ fn kind_fallback_w(kind: &str) -> i64 {
 /// Resolve a style dimension to integer px, or None to ignore. Numbers truncate
 /// toward zero; `"N%"` is `(avail*N)/100` (ignored when avail <= 0); a bare numeric
 /// string is that int; anything else (`"auto"`, junk) is ignored.
+/// A style dimension as written, with a template (`"{{node.depth * 16}}"`, the
+/// Layers row's indent, STATUS-jas item 38) evaluated in the node's scope first,
+/// as a bound text is; `resolve_dim` then reads the number. A template that does
+/// not yield a number resolves to None, as any unparsable dimension does.
+fn dim(v: Option<&Value>, ctx: &Value) -> Value {
+    match v {
+        Some(Value::String(s)) if s.contains("{{") => Value::String(eval_text(s, ctx)),
+        Some(v) => v.clone(),
+        None => Value::Null,
+    }
+}
+
 fn resolve_dim(v: &Value, avail: i64) -> Option<i64> {
     if v.is_null() {
         return None;
@@ -470,10 +499,10 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
             _ => 0,
         }
     };
-    if let Some(x) = resolve_dim(st.get("width").unwrap_or(&Value::Null), avail_w) {
+    if let Some(x) = resolve_dim(&dim(st.get("width"), ctx), avail_w) {
         w = x;
     }
-    if let Some(m) = resolve_dim(st.get("min_width").unwrap_or(&Value::Null), avail_w) {
+    if let Some(m) = resolve_dim(&dim(st.get("min_width"), ctx), avail_w) {
         w = w.max(m);
     }
     (w, h)
@@ -553,7 +582,7 @@ fn natural_w(n: &Value, ctx: &Value) -> i64 {
     let st = style(n);
     // B.5: a declared width is the container's natural width. A percentage has
     // nothing to resolve against here and is ignored, as a leaf's is.
-    if let Some(declared) = resolve_dim(st.get("width").unwrap_or(&Value::Null), -1) {
+    if let Some(declared) = resolve_dim(&dim(st.get("width"), ctx), -1) {
         return declared;
     }
     let (_pt, pr, _pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
@@ -618,7 +647,7 @@ fn measure(
     // clamped to the width it is given; its children are laid out in it.
     let mut avail_w = avail_w;
     if is_container(n) || node_type(n) == "disclosure" {
-        if let Some(declared) = resolve_dim(st.get("width").unwrap_or(&Value::Null), avail_w) {
+        if let Some(declared) = resolve_dim(&dim(st.get("width"), ctx), avail_w) {
             avail_w = if avail_w > 0 { declared.min(avail_w) } else { declared };
         }
     }

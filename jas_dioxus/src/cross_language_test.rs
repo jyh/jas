@@ -5740,6 +5740,13 @@ pub(crate) mod tests {
         run_operation_fixture("operations/lock_toggle_no_materialization.json");
     }
 
+    /// STATUS-jas item 38 step 2: the Layers row's eye and rename ops, through
+    /// `Document::cycling_element_visibility` / `naming_element`.
+    #[test]
+    fn operation_layers_row_ops() {
+        run_operation_fixture("operations/layers_row_ops.json");
+    }
+
     /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md
     /// §13. The sibling of the family above, and the half of the repeal that
     /// was left behind: §13 repaired the Layers-panel path

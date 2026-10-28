@@ -74,7 +74,8 @@
               "enum",
               "bool",
               "color",
-              "state_ref"
+              "state_ref",
+              "path"
             ]
           },
           "values": {

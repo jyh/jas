@@ -668,7 +668,7 @@ recommended for every element.
 | `separator` | Visual divider line | `orientation`: `horizontal` or `vertical` |
 | `spacer` | Flexible empty space | `size`: number (optional, else flex) |
 | `image` | Static image | `src` |
-| `tree_view` | Recursive data-driven tree with drag-and-drop | `bind.source`, `row_template`, `context_menu`, `keyboard` |
+| `tree_view` | Recursive data-driven tree with drag-and-drop | `bind.source`, `foreach` + `do` (or `row_template`), `context_menu`, `keyboard` |
 | `element_preview` | Rasterized thumbnail of a document element | `bind.element_id` |
 
 Any string not in this table is treated as an **opaque custom widget** —
@@ -878,10 +878,12 @@ bind:
   search_query: <expression>       # filter string
   type_filter: <expression>        # active type filter list
   isolation_root: <expression>     # root container ID for isolation mode
-  twirl_states: <expression>       # map of element_id to expanded bool
-  renaming_element: <expression>   # element ID being renamed, or null
+  collapsed_paths: <expression>    # list of the collapsed containers' paths
+  renaming_element: <expression>   # path of the element being renamed, or null
   drag_active: <expression>        # whether a drag is in progress
-row_template: <element>            # per-row element spec (see node.* below)
+foreach: {source: <expression>, as: node}  # the rows: tree_visible_rows(...) (see below)
+do: <element>                      # per-row element spec (see node.* below)
+row_template: <element>            # the older name for `do`; read only by jas_flask
 behavior: <list of behavior>       # row-level events
 context_menu: <list of menu_item>  # right-click menu
 keyboard: <list of key_binding>    # keyboard shortcuts when focused
@@ -889,7 +891,13 @@ keyboard: <list of key_binding>    # keyboard shortcuts when focused
 
 ### `node.*` — Row Template Scope Variables
 
-Within `row_template`, `behavior`, and `context_menu`, the following
+A `tree_view` that declares `foreach` + `do` is laid out by the panel plan as
+that foreach's expansion: one `do` per row of
+`tree_visible_rows(rows, collapsed, panel_selection, renaming)`, which hides
+the rows under a collapsed container and marks `collapsed`, `panel_selected`
+and `renaming` (paths; `test_fixtures/layers/element_tree.json`).
+
+Within `do` (or `row_template`), `behavior`, and `context_menu`, the following
 variables are available for the current row's tree node:
 
 | Variable | Type | Description |

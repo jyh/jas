@@ -176,6 +176,88 @@ def _bundled_preferences():
         return None
 
 
+# The Layers tree's display label per element (Rust `tree_type_label`): the
+# test-JSON `type`, and for a live element its `kind`.
+_TREE_TYPE_LABELS = {
+    "line": "Line", "rect": "Rectangle", "circle": "Circle", "ellipse": "Ellipse",
+    "polyline": "Polyline", "polygon": "Polygon", "path": "Path", "text": "Text",
+    "text_path": "Text Path", "group": "Group", "layer": "Layer",
+}
+_TREE_LIVE_LABELS = {
+    "compound_shape": "Compound Shape", "reference": "Reference", "recorded": "Recorded",
+    "generated": "Generated", "transformed": "Transformed",
+}
+
+
+def _tree_type_label(elem: dict) -> str:
+    t = elem.get("type")
+    if t == "ellipse" and elem.get("rx") == elem.get("ry"):
+        return "Circle"
+    if t == "live":
+        return _TREE_LIVE_LABELS.get(elem.get("kind"), "Live")
+    return _TREE_TYPE_LABELS.get(t, str(t))
+
+
+def _element_tree(document: dict | None, selected: list) -> list[dict]:
+    """`active_document.element_tree` (STATUS-jas item 38): the document's rows
+    for the Layers panel's `tree_view`, topmost first (REVERSE z) and depth
+    first, as both ports' trees walk it (Rust `tree_flatten_layers`, Swift
+    `TreeViewContent.flatten`). A row is selected when its path is at or under
+    a selected path. Collapse, panel selection, renaming, filters and isolation
+    are the widget's own binds (`layers.yaml` `lp_tree`), not rows' fields."""
+    rows: list[dict] = []
+    sel = [tuple(p) for p in selected]
+
+    def walk(children, prefix, depth):
+        for i in reversed(range(len(children))):
+            elem = children[i]
+            if not isinstance(elem, dict):
+                continue
+            path = prefix + (i,)
+            kids = elem.get("children")
+            rows.append({
+                "path": list(path), "depth": depth, "id": elem.get("id"),
+                "name": elem.get("name") or "", "type": elem.get("type"),
+                "type_label": _tree_type_label(elem),
+                "visibility": elem.get("visibility", "preview"),
+                "locked": bool(elem.get("locked", False)),
+                "is_container": elem.get("type") in ("layer", "group"),
+                "element_selected": any(path[:len(p)] == p for p in sel),
+            })
+            if isinstance(kids, list):
+                walk(kids, path, depth + 1)
+
+    walk((document or {}).get("layers") or [], (), 0)
+    return rows
+
+
+def tree_visible_rows(rows: list[dict], collapsed: list, panel_selection: list,
+                      renaming) -> list[dict]:
+    """The Layers tree's ROWS TO DRAW (STATUS-jas item 38 step 1b, flask
+    §591): `element_tree`'s rows resolved against the `tree_view` widget's
+    binds, in the core, so a materializer draws them verbatim. A row under a
+    collapsed CONTAINER is hidden; the container keeps its row. Each row gains
+    `collapsed` (true only on a container), `panel_selected` and `renaming`
+    (exact path matches). The binds are PATHS, as both ports key them; a leaf
+    or a path no row has in `collapsed` is inert. Rows arrive depth first, so
+    a parent is seen before its children."""
+    folded = {tuple(p) for p in collapsed}
+    psel = {tuple(p) for p in panel_selection}
+    ren = tuple(renaming) if renaming is not None else None
+    hidden_under: list[tuple] = []
+    out: list[dict] = []
+    for row in rows:
+        path = tuple(row["path"])
+        if any(path[:len(h)] == h for h in hidden_under):
+            continue
+        is_folded = bool(row["is_container"]) and path in folded
+        if is_folded:
+            hidden_under.append(path)
+        out.append({**row, "collapsed": is_folded, "panel_selected": path in psel,
+                    "renaming": path == ren})
+    return out
+
+
 def open_libraries_at_launch(slugs) -> list[dict]:
     """`state.brushes_open_libraries` at startup (state.yaml; STATUS-jas
     item 37): one open, expanded section per slug of
@@ -1437,6 +1519,8 @@ class StateStore:
         # Every master's live instance count (SYMBOLS.md §8): Delete Symbol
         # asks before it empties one.
         brush_facts["symbol_usage"] = self._symbol_usage()
+        # The Layers tree's rows (STATUS-jas item 38 step 1).
+        brush_facts["element_tree"] = _element_tree(self._document, canvas_sel)
         # Edit > Undo / Redo's gates (runtime_contexts.yaml): the held Model's
         # history, as the apps read their Model's. No op yet, no history.
         brush_facts["can_undo"] = self._model is not None and self._model.can_undo

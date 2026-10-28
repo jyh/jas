@@ -344,6 +344,16 @@ public struct Document: Equatable {
         return doc
     }
 
+    /// The Layers rename commit (STATUS-jas item 38): the element at `path` is
+    /// named `name`; an empty name clears it, so the row shows its type label.
+    /// A path naming no element returns the document unchanged. Mirrors Rust
+    /// `Document::naming_element` and the reference's `naming_element`.
+    public func namingElement(at path: ElementPath, _ name: String) -> Document {
+        guard let e = tryGetElement(path) else { return self }
+        // `withName` already reads an empty name as no name, for every kind.
+        return replaceElement(path, with: e.withName(name))
+    }
+
     /// Layers LOCK-button behaviour — the twin of
     /// ``cyclingElementVisibility(at:)``, which the eye button has had
     /// factored out (and testable) all along while the lock button's

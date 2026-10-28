@@ -417,21 +417,6 @@ pub(crate) use crate::interpreter::paragraph_host::{
 /// through to the YAML actions catalog for open_dialog, dispatch, etc.
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
-/// Advance a visibility state one step in the Layers eye-button cycle:
-/// Preview -> Outline -> Invisible -> Preview. Pure; shared by the tree_view
-/// eye onclick. Mirrors the Swift `cycleVisibility`, OCaml, and Python
-/// `_cycle_visibility` cycle order.
-pub(crate) fn cycle_visibility(
-    v: crate::geometry::element::Visibility,
-) -> crate::geometry::element::Visibility {
-    use crate::geometry::element::Visibility;
-    match v {
-        Visibility::Preview => Visibility::Outline,
-        Visibility::Outline => Visibility::Invisible,
-        Visibility::Invisible => Visibility::Preview,
-    }
-}
-
 /// Element-level behavior of the Layers tree eye button (regular click):
 /// cycle the visibility of the element at `path` and, when it becomes
 /// Invisible, drop it (and its descendants) from the selection. Pure —
@@ -440,20 +425,8 @@ pub(crate) fn cycle_element_visibility_at(
     doc: &crate::document::document::Document,
     path: &crate::document::document::ElementPath,
 ) -> crate::document::document::Document {
-    use crate::geometry::element::Visibility;
-    let Some(elem) = doc.get_element(path) else {
-        return doc.clone();
-    };
-    let new_vis = cycle_visibility(elem.visibility());
-    let mut new_elem = elem.clone();
-    new_elem.common_mut().visibility = new_vis;
-    let mut new_doc = doc.replace_element(path, new_elem);
-    if new_vis == Visibility::Invisible {
-        new_doc
-            .selection
-            .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));
-    }
-    new_doc
+    // The op layer's `cycle_element_visibility` runs the same function.
+    doc.cycling_element_visibility(path)
 }
 
 /// Fill `ctx.panel` with the keys of a panel's `scope` that it LACKS. A key the
@@ -7328,8 +7301,8 @@ struct TreeRow {
     /// `layers.yaml` has declared this convention since April -- "ancestor
     /// nodes of matching elements are shown to preserve tree context but are
     /// DIMMED" -- with a `node.search_ancestor_only` variable in SCHEMA.md and
-    /// an `opacity` bind in `row_template`. No port implemented it, and none
-    /// ever could: `row_template` is read by NO port, since both draw tree rows
+    /// an `opacity` bind in `lp_tree`'s row template (`do`). No port implemented
+    /// it, and none could: no native tree reads the template, since both draw tree rows
     /// natively. The bind has never executed anywhere.
     ancestor_only: bool,
 
@@ -7377,34 +7350,7 @@ fn tree_icon_svg(icon_name: &str) -> String {
 }
 
 fn tree_type_label(elem: &GeoElement) -> &'static str {
-    match elem {
-        GeoElement::Line(_) => "Line",
-        GeoElement::Rect(_) => "Rectangle",
-        // DERIVED, so the auto-generated label agrees with the type token
-        // rather than contradicting it: a round ellipse reads `<Circle>`.
-        //
-        // This does NOT re-couple the two axes JYH separated on 2026-07-30.
-        // The label is still just a label -- a user-given name still wins, and
-        // the filter still reads the ELEMENT, never this string. They agree
-        // here because they are computed from the same fact, not because one
-        // is derived from the other.
-        GeoElement::Ellipse(e) if e.rx == e.ry => "Circle",
-        GeoElement::Ellipse(_) => "Ellipse",
-        GeoElement::Polyline(_) => "Polyline",
-        GeoElement::Polygon(_) => "Polygon",
-        GeoElement::Path(_) => "Path",
-        GeoElement::Text(_) => "Text",
-        GeoElement::TextPath(_) => "Text Path",
-        GeoElement::Group(_) => "Group",
-        GeoElement::Layer(_) => "Layer",
-        GeoElement::Live(v) => match v {
-            crate::geometry::live::LiveVariant::CompoundShape(_) => "Compound Shape",
-            crate::geometry::live::LiveVariant::Reference(_) => "Reference",
-            crate::geometry::live::LiveVariant::Recorded(_) => "Recorded",
-            crate::geometry::live::LiveVariant::Generated(_) => "Generated",
-            crate::geometry::live::LiveVariant::Transformed(_) => "Transformed",
-        },
-    }
+    crate::interpreter::document_views::tree_type_label(elem)
 }
 
 // The Layers type filter lives in `algorithms::layers_filter` -- a PURE
@@ -8125,8 +8071,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     // layers.yaml has declared since April ("ancestor nodes ...
                     // are shown to preserve tree context but are DIMMED",
                     // `opacity: if node.search_ancestor_only then 0.5 else 1.0`).
-                    // That bind has never executed in any port, because
-                    // `row_template` is read by none of them.
+                    // That bind has never executed in any port: the native
+                    // trees do not read `lp_tree`'s row template (`do`), and the
+                    // plan's expansion (item 38) binds no search state yet.
                     let row_opacity = if row.ancestor_only { "0.5" } else { "1.0" };
                     let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color};opacity:{row_opacity}");
                     let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };
@@ -13253,13 +13200,9 @@ mod tests {
     }
 
     // ── Layers eye-button visibility cycle (LYR) ──────────────────
-    #[test]
-    fn cycle_visibility_advances_preview_outline_invisible_preview() {
-        use crate::geometry::element::Visibility;
-        assert_eq!(cycle_visibility(Visibility::Preview), Visibility::Outline);
-        assert_eq!(cycle_visibility(Visibility::Outline), Visibility::Invisible);
-        assert_eq!(cycle_visibility(Visibility::Invisible), Visibility::Preview);
-    }
+    // The cycle's three transitions are pinned by the shared op fixture
+    // `test_fixtures/operations/layers_row_ops.json` (item 38), through
+    // `Document::cycling_element_visibility`, which the eye button calls.
 
     #[test]
     fn cycle_element_visibility_at_cycles_and_deselects_on_invisible() {
@@ -14946,6 +14889,35 @@ mod tests {
                    Some("ff0000".to_string()),
                    "the same tiers the panel displays, so Invert operates on \
                     the colour the user can SEE");
+    }
+
+    // The independent witness for the shared `element_tree` fixture: the web
+    // tree's own walker (older than the fixture) agrees on every row's path,
+    // order, depth, display name, container-ness and selection.
+    #[test]
+    fn the_web_tree_walker_agrees_with_the_element_tree_fixture() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let mut compared = 0;
+        for case in fx["cases"].as_array().unwrap() {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            let rows = tree_flatten_layers(&doc.layers, &doc.selected_paths().into_iter().collect(),
+                                           &TreeHashSet::default(), &[], &None);
+            let want = case["expected"].as_array().unwrap();
+            assert_eq!(rows.len(), want.len(), "{}", case["name"]);
+            for (r, w) in rows.iter().zip(want) {
+                let path: Vec<usize> = serde_json::from_value(w["path"].clone()).unwrap();
+                assert_eq!(r.path, path, "{}", case["name"]);
+                assert_eq!(r.depth as u64, w["depth"].as_u64().unwrap());
+                let name = w["name"].as_str().unwrap();
+                let shown = if name.is_empty() { format!("<{}>", w["type_label"].as_str().unwrap()) } else { name.to_string() };
+                assert_eq!(r.display_name, shown);
+                assert_eq!(r.is_container, w["is_container"].as_bool().unwrap());
+                assert_eq!(r.is_selected, w["element_selected"].as_bool().unwrap(), "{:?}", r.path);
+                compared += 1;
+            }
+        }
+        assert!(compared >= 5, "rows compared: {compared}");
     }
 
     // The Layers-row rename commits on EVERY target (it used to exit without

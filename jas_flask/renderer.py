@@ -1238,7 +1238,8 @@ def _render_tree_view(el, theme, state):
     and keyboard bindings.  JavaScript (initTreeViews) populates it with
     rows from either a live data source or sample data.
     """
-    row_tpl = el.get("row_template", {})
+    # `do` is the row template's name since item 38 (the plan expands it).
+    row_tpl = el.get("do") or el.get("row_template", {})
     ctx_menu = el.get("context_menu", [])
     keyboard = el.get("keyboard", [])
     bind = el.get("bind", {})

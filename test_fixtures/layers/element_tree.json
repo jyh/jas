@@ -1,0 +1,839 @@
+{
+  "_comment": [
+    "STATUS-jas item 38 step 1: active_document.element_tree, the DOCUMENT's rows for the Layers tree_view.",
+    "Order: REVERSE z (topmost first), depth-first. element_selected: at or under a selected path.",
+    "name is the element's own name ('' when unnamed; the row template supplies <type_label>).",
+    "type is the test-JSON type; type_label is the display label (an equal-radius ellipse is a Circle).",
+    "NOT in this first cut, by design: collapse, panel selection, renaming, filters and isolation (the",
+    "tree_view widget applies those from its own binds, layers.yaml lp_tree), colours, thumbnails.",
+    "The documents are written by the reference codec; the expected rows are authored.",
+    "visible_cases (item 38 step 1b): the ROWS TO DRAW, resolved in the core from element_tree and the widget's binds: binds.collapsed (paths), binds.panel_selection (paths), binds.renaming (a path or null). A row under a collapsed CONTAINER is hidden; collapsed is true only on a container; panel_selected and renaming are exact path matches. Expected rows are case 0's authored rows plus the three marks."
+  ],
+  "cases": [
+    {
+      "name": "nested_groups_selected_group_invisible_locked_top_layer",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Front",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "invisible",
+          "locked": true,
+          "is_container": true,
+          "element_selected": false
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true
+        },
+        {
+          "path": [
+            0,
+            1,
+            0
+          ],
+          "depth": 2,
+          "id": null,
+          "name": "",
+          "type": "ellipse",
+          "type_label": "Circle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": true
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false
+        }
+      ]
+    },
+    {
+      "name": "no_layers",
+      "document": {
+        "layers": [],
+        "selected_layer": 0,
+        "selection": []
+      },
+      "expected": []
+    }
+  ],
+  "visible_cases": [
+    {
+      "name": "nothing_collapsed_is_every_row_and_a_panel_selected_group_marks_only_itself",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "binds": {
+        "collapsed": [],
+        "panel_selection": [
+          [
+            0,
+            1
+          ]
+        ],
+        "renaming": null
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Front",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "invisible",
+          "locked": true,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true,
+          "collapsed": false,
+          "panel_selected": true,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            1,
+            0
+          ],
+          "depth": 2,
+          "id": null,
+          "name": "",
+          "type": "ellipse",
+          "type_label": "Circle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": true,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        }
+      ]
+    },
+    {
+      "name": "a_collapsed_group_keeps_its_row_and_hides_its_children",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "binds": {
+        "collapsed": [
+          [
+            0,
+            1
+          ]
+        ],
+        "panel_selection": [
+          [
+            1
+          ],
+          [
+            0,
+            1
+          ]
+        ],
+        "renaming": [
+          0,
+          0
+        ]
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Front",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "invisible",
+          "locked": true,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": true,
+          "renaming": false
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true,
+          "collapsed": true,
+          "panel_selected": true,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": true
+        }
+      ]
+    },
+    {
+      "name": "a_collapsed_layer_hides_every_descendant_and_a_hidden_row_carries_no_mark",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "binds": {
+        "collapsed": [
+          [
+            0
+          ]
+        ],
+        "panel_selection": [
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "renaming": [
+          0,
+          1,
+          0
+        ]
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Front",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "invisible",
+          "locked": true,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": true,
+          "panel_selected": false,
+          "renaming": false
+        }
+      ]
+    },
+    {
+      "name": "a_leaf_or_a_stale_path_in_collapsed_is_inert",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "binds": {
+        "collapsed": [
+          [
+            0,
+            0
+          ],
+          [
+            5
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "panel_selection": [],
+        "renaming": null
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Front",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "invisible",
+          "locked": true,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            1,
+            0
+          ],
+          "depth": 2,
+          "id": null,
+          "name": "",
+          "type": "ellipse",
+          "type_label": "Circle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": true,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false,
+          "collapsed": false,
+          "panel_selected": false,
+          "renaming": false
+        }
+      ]
+    }
+  ]
+}

@@ -32,6 +32,18 @@ tests:
     type: bool
     note: "color vs string — different types"
 
+  - expr: "state.a == state.b"
+    state: {a: [0, 1], b: [0, 1]}
+    expected: true
+    type: bool
+    note: "lists compare by value (item 38: the Layers row template compares path lists); Swift read every pair of lists as unequal"
+
+  - expr: "state.a == state.c"
+    state: {a: [0, 1], c: [0, 2]}
+    expected: false
+    type: bool
+    note: "the control: lists that differ in one element"
+
   # Numeric comparison
   - expr: "state.count > 0"
     state: { count: 3 }
