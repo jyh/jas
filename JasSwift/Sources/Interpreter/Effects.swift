@@ -647,7 +647,9 @@ private func runOne(
         return
     }
 
-    // list_toggle: { target, value, panel? }: set membership (the Layers type
+    // list_toggle: { target, value, panel?, key?, insert? }: with `key`,
+    // membership is `item[key] == value` over a list of objects (Brushes'
+    // open_libraries). Without it: set membership (the Layers type
     // filter, the Layers twirl's collapsed_paths). `panel.<key>` on the named
     // panel when `panel` is given (as set_panel_state), else the active one,
     // as the reference's arm.
@@ -657,7 +659,8 @@ private func runOne(
         if parts.count == 2, parts[0] == "panel",
            let panel = (lt["panel"] as? String) ?? store.getActivePanelId() {
             let value = evalExpr(lt["value"], store: store, ctx: ctx)
-            store.listToggle(panel, parts[1], valueToAny(value) ?? NSNull())
+            store.listToggle(panel, parts[1], valueToAny(value) ?? NSNull(),
+                             keyField: lt["key"] as? String, insert: lt["insert"] as? [String: Any])
         }
         return
     }
@@ -3465,6 +3468,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     let toolEffects = buildYamlToolEffects(model: model)
     for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
                 "brush.append", "brush.update", "brush.sort_by_name", "brush.select_unused",
+                "brush.save_library",
                 "swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
                 "swatch.select_unused", "swatch.add_used_colors", "swatch.store"] {
         guard let handler = toolEffects[key] else {

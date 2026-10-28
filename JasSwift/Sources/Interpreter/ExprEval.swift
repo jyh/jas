@@ -1355,6 +1355,20 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         return Value.fromJson(cur)
 
     // reverse: list -> list
+    // keys: map -> list of strings, sorted by Unicode code point (no locale
+    // collation; the reference's `sorted`). A dict reaches here as its JSON
+    // text, the same convention dot access reads (`evalDotAccess`). A non-map
+    // gives []. Feeds the Open Brush Library submenu's `items_from`.
+    case "keys":
+        guard args.count == 1,
+              case .string(let s) = evalNode(args[0], ctx),
+              let data = s.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return .list([])
+        }
+        return .list(obj.keys.sorted { Array($0.unicodeScalars.map(\.value)).lexicographicallyPrecedes(
+            $1.unicodeScalars.map(\.value)) }.map { AnyJSON($0) })
+
     case "reverse":
         guard args.count == 1 else { return .null }
         let v = evalNode(args[0], ctx)

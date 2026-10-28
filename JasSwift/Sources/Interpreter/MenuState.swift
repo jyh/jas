@@ -92,6 +92,43 @@ public enum MenuState {
         public let checked: Bool
     }
 
+    /// One row of a declared dynamic submenu (`items_from`).
+    public struct ItemsFromRow {
+        public let label: String?
+        public let action: String
+        public let params: [String: Any]
+        public let enabled: Bool
+        public let checked: Bool?
+    }
+
+    /// A dynamic submenu's rows from its declared `items_from` (the generic
+    /// form of the two functions below; the 2026-10-28 jas brush-library
+    /// design, A.2). `source` is evaluated against `ctx`; each element is bound
+    /// to `as` in a copy of `ctx`; `label` is a `{{}}` template, every `params`
+    /// value an expression, `enabled` true without `enabled_when`, `checked`
+    /// nil without `checked_when`. A source that is not a list gives no rows.
+    /// Mirrors the reference's `items_from_entries`.
+    public static func itemsFromEntries(_ spec: [String: Any], _ ctx: [String: Any]) -> [ItemsFromRow] {
+        guard case .list(let elements) = evaluate((spec["source"] as? String) ?? "null", context: ctx) else {
+            return []
+        }
+        let name = (spec["as"] as? String) ?? "item"
+        let item = (spec["item"] as? [String: Any]) ?? [:]
+        let params = (item["params"] as? [String: Any]) ?? [:]
+        return elements.map { element in
+            var bound = ctx
+            bound[name] = element.value
+            return ItemsFromRow(
+                label: (item["label"] as? String).map { evaluateText($0, context: bound) },
+                action: (item["action"] as? String) ?? "",
+                params: params.mapValues { v in
+                    (v as? String).map { storedValue(evaluate($0, context: bound)) ?? NSNull() } ?? v
+                },
+                enabled: (item["enabled_when"] as? String).map { evalBool($0, bound) } ?? true,
+                checked: (item["checked_when"] as? String).map { evalBool($0, bound) })
+        }
+    }
+
     /// The Workspace submenu's layout entries: every saved layout but the
     /// default one (``workspaceLayoutName``, reached by Reset to Default), in
     /// saved order, labelled by its name, the active one checked. Mirrors the

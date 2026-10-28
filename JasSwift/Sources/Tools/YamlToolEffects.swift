@@ -339,6 +339,39 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // brush.save_library — { library, name }: Save Brush Library's confirm
+    // (the 2026-10-28 jas brush-library design, B.2; the reference's arm in
+    // effects.py). Slug: ASCII letters lower-cased, ASCII letters and digits
+    // kept, every other run one `_`, ends trimmed, `library` if empty. The
+    // source's own slug saves IN PLACE; another existing slug takes the first
+    // free `_2`, `_3`, … . A NEW library opens expanded and becomes the
+    // selected library. One `{kind, slug, manifest}` request goes on
+    // `store.pendingWrites` for the host. An empty name or a missing source
+    // is a no-op.
+    effects["brush.save_library"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        let name = evalStringValue(args["name"], store: store, ctx: ctx)
+        guard !libId.isEmpty, !name.isEmpty,
+              let libs = store.getDataPath("brush_libraries") as? [String: Any],
+              var saved = libs[libId] as? [String: Any] else { return nil }
+        var slug = brushLibrarySlug(name)
+        if slug != libId, libs[slug] != nil {
+            var n = 2
+            while libs["\(slug)_\(n)"] != nil { n += 1 }
+            slug = "\(slug)_\(n)"
+        }
+        saved["name"] = name
+        store.setDataPath("brush_libraries.\(slug)", saved)
+        if slug != libId {
+            store.listToggle("brushes", "open_libraries", slug, keyField: "id", insert: ["collapsed": false])
+            store.setPanel("brushes", "selected_library", slug)
+        }
+        store.pendingWrites.append(["kind": "brush_library", "slug": slug, "manifest": saved])
+        syncCanvasBrushes(store: store)
+        return nil
+    }
+
     // brush.select_unused — { library }: replace the panel's brush selection
     // with every slug of that library, in library order, that no element in
     // the document carries as `strokeBrush == "<library>/<slug>"` (at any
@@ -4016,6 +4049,27 @@ private func brushUpdateInLibrary(store: StateStore, libId: String, slug: String
 
 /// Push the current data.brush_libraries through to the canvas
 /// renderer's brush registry so the next paint sees the updates.
+/// Save Brush Library's slug (`brush.save_library`): ASCII-only lower-casing
+/// (never `lowercased()`, which is Unicode-wide: the Kelvin sign becomes "k"),
+/// ASCII letters and digits kept, every other run one `_`, ends trimmed,
+/// `library` when nothing is left. The reference's `_brush_library_slug`.
+func brushLibrarySlug(_ name: String) -> String {
+    var out = ""
+    var pendingSep = false
+    for u in name.unicodeScalars {
+        var v = u.value
+        if v >= 65 && v <= 90 { v += 32 }
+        if (v >= 97 && v <= 122) || (v >= 48 && v <= 57) {
+            if pendingSep && !out.isEmpty { out.append("_") }
+            pendingSep = false
+            out.unicodeScalars.append(Unicode.Scalar(v)!)
+        } else {
+            pendingSep = true
+        }
+    }
+    return out.isEmpty ? "library" : out
+}
+
 private func syncCanvasBrushes(store: StateStore) {
     let libs = (store.getDataPath("brush_libraries") as? [String: Any]) ?? [:]
     setCanvasBrushLibraries(libs)

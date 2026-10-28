@@ -37,6 +37,7 @@ booleans from it.
 from __future__ import annotations
 
 from .expr import evaluate, evaluate_text
+from .expr_types import ValueType
 
 
 def _eval_bool(expr: str, ctx: dict) -> bool:
@@ -117,3 +118,36 @@ def appearance_entries(appearances: list[dict], active: str | None) -> list[dict
     current = active if active is not None else DEFAULT_APPEARANCE_NAME
     return [{"name": a["name"], "label": a["label"], "checked": a["name"] == current}
             for a in appearances]
+
+
+def items_from_entries(spec: dict, ctx: dict) -> list[dict]:
+    """A dynamic submenu's rows from its declared ``items_from`` (the generic
+    form of the two functions above; the 2026-10-28 jas brush-library design,
+    A.2). ``source`` is evaluated against ``ctx``; for each element, bound to
+    ``as`` in a COPY of ``ctx``, the row is ``{label, action, params, enabled,
+    checked}``: ``label`` a ``{{}}`` template, every ``params`` value an
+    expression, ``enabled`` True without ``enabled_when``, ``checked`` None
+    without ``checked_when``, ``action`` verbatim. A source that is not a list
+    gives no rows."""
+    if not isinstance(spec, dict):
+        return []
+    src = evaluate(str(spec.get("source", "null")), ctx)
+    if src.type != ValueType.LIST:
+        return []
+    name = spec.get("as") or "item"
+    item = spec.get("item") if isinstance(spec.get("item"), dict) else {}
+    rows = []
+    for element in src.value:
+        bound = {**ctx, name: element}
+        label = item.get("label")
+        ew, cw = item.get("enabled_when"), item.get("checked_when")
+        params = item.get("params") if isinstance(item.get("params"), dict) else {}
+        rows.append({
+            "label": evaluate_text(label, bound) if isinstance(label, str) else None,
+            "action": item.get("action", ""),
+            "params": {k: (evaluate(v, bound).value if isinstance(v, str) else v)
+                       for k, v in params.items()},
+            "enabled": _eval_bool(ew, bound) if ew else True,
+            "checked": _eval_bool(cw, bound) if cw else None,
+        })
+    return rows
