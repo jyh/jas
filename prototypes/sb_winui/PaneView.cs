@@ -82,6 +82,10 @@ public sealed partial class MainWindow
 
         /// <summary>The drawn controls, by plan path.</summary>
         private readonly Dictionary<string, FrameworkElement> _paneControls = new();
+        /// <summary>jas §612/§630: the hit surfaces by plan path, so a panel
+        /// selection's highlight is applied in place (a selection change
+        /// re-plans without moving any rect, so it does not rebuild).</summary>
+        private readonly Dictionary<string, Border> _paneSurfaces = new();
 
         /// <summary>Icon loads still outstanding for the build numbered `_paneBuild`.</summary>
         private int _paneIconsPending;
@@ -203,6 +207,13 @@ public sealed partial class MainWindow
             if (rebuilt) { BuildPane(leaves, icons, height, boxes, hits); }
             _paneSignature = signature;
 
+            // jas §630: each surface's paint is the plan's `bind.background`
+            // NOW (a panel-selected row's highlight), applied every tick.
+            foreach (var hit in hits)
+            {
+                if (_paneSurfaces.TryGetValue(hit.Path, out var face)) { face.Background = SurfaceBrush(hit.Background); }
+            }
+
             // §1.2: a dropdown's flyout is built at every OPEN from the newest
             // plan's items, so a check the core moved is never shown stale and a
             // moved check need not rebuild the pane.
@@ -280,6 +291,7 @@ public sealed partial class MainWindow
         {
             _paneBuild++;
             _paneControls.Clear();
+            _paneSurfaces.Clear();
             _paneIconsPending = 0;
             _paneIconsSvg = 0;
             _paneIconsText = 0;
@@ -323,8 +335,9 @@ public sealed partial class MainWindow
                 {
                     Width = hit.W,
                     Height = hit.H,
-                    Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                    Background = SurfaceBrush(hit.Background),
                 };
+                _paneSurfaces[hit.Path] = surface;
                 if (hit.Id.Length > 0) { Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(surface, hit.Id); }
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(surface, "surface " + hit.Path);
                 var (hitId, hitPath) = (hit.Id, hit.Path);
@@ -1562,6 +1575,16 @@ public sealed partial class MainWindow
         /// control was built from. A press is `click` with no value; a commit is
         /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
         /// </summary>
+        /// <summary>
+        /// jas §630: a surface's brush from its `bind.background`. A colour the
+        /// core sent paints; anything else is TRANSPARENT, never null: a null
+        /// background would also stop the surface taking the press.
+        /// </summary>
+        private static Microsoft.UI.Xaml.Media.SolidColorBrush SurfaceBrush(string? background) =>
+            PanelWire.SurfaceFill(background) is { } c
+                ? new(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
+                : new(Microsoft.UI.Colors.Transparent);
+
         private void SendPane(string widget, string eventName, string? value, string? path = null,
                               Dictionary<string, object>? gesture = null, string? key = null)
         {

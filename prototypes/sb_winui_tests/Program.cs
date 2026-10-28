@@ -386,7 +386,7 @@ static class Program
         const string HitPlan = """
             {"height": 60,
              "chrome": [
-               {"path": [3, 0], "rect": {"x": 0, "y": 0, "w": 200, "h": 24}, "type": "container", "id": "", "values": {}, "events": ["click", "double_click"]},
+               {"path": [3, 0], "rect": {"x": 0, "y": 0, "w": 200, "h": 24}, "type": "container", "id": "", "values": {"bind.background": "#cde3f7"}, "events": ["click", "double_click"]},
                {"path": [3, 1], "rect": {"x": 0, "y": 24, "w": 200, "h": 24}, "type": "container", "id": "", "values": {}, "events": []}],
              "leaves": [
                {"path": [3, 0, 2], "rect": {"x": 40, "y": 0, "w": 60, "h": 24}, "type": "text", "id": "lp_name", "values": {}, "events": ["double_click"]}],
@@ -403,6 +403,19 @@ static class Program
             "180,0,20x24", hits is { Count: 2 } ? $"{hits[1].X},{hits[1].Y},{hits[1].W}x{hits[1].H}" : "(none)");
         Eq("§612: a surface keeps its id and events",
             "lp_select:click", hits is { Count: 2 } ? $"{hits[1].Id}:{string.Join(",", hits[1].Events)}" : "(none)");
+        // jas §630/(B): a surface carries the plan's `bind.background` (a
+        // panel-selected row's highlight), and only a `#rrggbb` paints;
+        // `transparent`, a missing key, or anything else paints nothing.
+        Eq("§630: a surface carries its bind.background",
+            "#cde3f7", hits is { Count: 2 } ? hits[0].Background ?? "(null)" : "(none)");
+        Eq("§630: a surface with no bind.background carries none",
+            "(null)", hits is { Count: 2 } ? hits[1].Background ?? "(null)" : "(none)");
+        Check("§630: a selected row's colour paints",
+            PanelWire.SurfaceFill("#cde3f7") is (0xCD, 0xE3, 0xF7), "");
+        Check("§630: 'transparent' paints nothing",
+            PanelWire.SurfaceFill("transparent") is null, "");
+        Check("§630: an unresolved template paints nothing, never a guess",
+            PanelWire.SurfaceFill("{{theme.colors.selection}}") is null, "");
         Check("§612: a leaf is never a surface (it is its own control)",
             hits is not null && hits.All(h => h.Id != "lp_name"), "");
         Check("§612: an unparseable plan reads null, never 'no surfaces'",

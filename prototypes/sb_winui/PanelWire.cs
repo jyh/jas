@@ -745,7 +745,17 @@ internal static class PanelWire
     /// row, the Layers select square), by path; drawn as a transparent surface
     /// beneath its children, so a child's own control wins the press.
     /// </summary>
-    internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events);
+    internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events,
+                                  string? Background = null);
+
+    /// <summary>
+    /// jas §630: a surface's paint, from its `bind.background`: a `#rrggbb`
+    /// paints (a panel-selected row's highlight); `transparent`, an absent key
+    /// or anything else paints nothing. Never a guess: an unresolved template
+    /// is withheld by the plan and would not arrive, and if it did it is not a
+    /// colour.
+    /// </summary>
+    internal static (byte R, byte G, byte B)? SurfaceFill(string? background) => SwatchColor(background);
 
     /// <summary>
     /// jas §612: the plan's layout containers (`chrome` and `containers`, in plan
@@ -779,7 +789,10 @@ internal static class PanelWire
                         e.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
                         r.GetProperty("x").GetDouble(), r.GetProperty("y").GetDouble(),
                         r.GetProperty("w").GetDouble(), r.GetProperty("h").GetDouble(),
-                        events));
+                        events,
+                        e.TryGetProperty("values", out var vs) && vs.ValueKind == System.Text.Json.JsonValueKind.Object
+                            && vs.TryGetProperty("bind.background", out var bg) && bg.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? bg.GetString() : null));
                 }
             }
             return boxes;
