@@ -5864,6 +5864,10 @@ private let actionFixtures = [
     // never republished, so the Color panel's guards kept reading the old
     // colour). See ``assertActionPanelState``.
     "fill_stroke_none.json",
+    // The Gradient button, held to the op layer's own goldens.
+    "fill_type_actions.json",
+    // The Symbols orphan dialog's Delete, held to new_symbol's golden.
+    "symbol_delete_actions.json",
     "state_actions.json",
     // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
     // `set_fill_type_solid` on a stroke-only SELECTION must read that
@@ -6041,9 +6045,14 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
     // Optional Layers-panel selection, published where the live panel publishes
     // it (`YamlPanelBodyView`'s mirror into `layers_panel_content`). No verb
     // sets it: the native row click does. Mirrors Rust `run_action_case`.
+    // The row click it stands in for also makes Layers the active panel
+    // (the live panel pins it before running effects), so an unscoped
+    // `set_panel_state` in the action writes the Layers panel, as it does
+    // in the app. Without it the selection was never cleared here.
     if let rows = tc["layers_panel_selection"] as? [[Any]] {
         let paths: [[String: Any]] = rows.map { ["__path__": $0.map { ($0 as! NSNumber).intValue }] }
         model.stateStore.setPanel("layers_panel_content", "layers_panel_selection", paths)
+        model.stateStore.setActivePanel("layers_panel_content")
     }
 
     // Install the deterministic id source for the dispatch below: a per-char
