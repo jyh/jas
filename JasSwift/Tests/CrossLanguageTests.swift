@@ -7448,3 +7448,35 @@ private func wireUnhex(_ s: String) -> Data {
     #expect(exponentCases >= 6,
             "corpus must carry exponent-boundary values; found \(exponentCases)")
 }
+
+// MARK: - Panel-key resolution (test_fixtures/panel_keys/)
+//
+// STATUS-jas item 8 class L step 2: a chord on a focused panel resolves against
+// that panel's `keyboard:` rows, found at any depth, to {action, params} or null.
+// The reference and Rust run the same file. Compared through `keyCanonValue`, so
+// a path param's `__path__` marker and an evaluated number compare as JSON.
+@Test func panelKeyCorpus() {
+    guard let corpus = try? JSONSerialization.jsonObject(
+            with: Data(readFixture("panel_keys/panel_key_resolution.json").utf8)) as? [String: Any],
+          let cases = corpus["cases"] as? [[String: Any]],
+          let ws = WorkspaceData.load(),
+          let panels = ws.data["panels"] as? [String: Any] else {
+        Issue.record("panel_key_resolution.json or the bundle failed to load")
+        return
+    }
+    #expect(cases.count >= 20, "positive control: only \(cases.count) cases")
+    var resolved = 0
+    for c in cases {
+        let name = c["name"] as? String ?? "?"
+        let panel: Any = c["panel_spec"] ?? panels[c["panel"] as? String ?? ""] ?? [String: Any]()
+        let ch = c["chord"] as? [String: Any] ?? [:]
+        let flag = { (k: String) in ch[k] as? Bool ?? false }
+        let chord = KeyChord(key: ch["key"] as? String ?? "", ctrl: flag("ctrl"), shift: flag("shift"),
+                             alt: flag("alt"), meta: flag("meta"))
+        let got: Any = resolvePanelKey(panel, chord: chord, context: c["ctx"] as? [String: Any] ?? [:])
+            .map { ["action": $0.action, "params": $0.params] as [String: Any] } ?? NSNull()
+        if !(got is NSNull) { resolved += 1 }
+        #expect(keyCanonValue(got) == keyCanonValue(c["expected"] ?? NSNull()), "case \(name)")
+    }
+    #expect(resolved >= 10, "positive control: only \(resolved) cases resolved to an action")
+}

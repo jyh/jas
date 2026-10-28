@@ -12247,7 +12247,7 @@
           "enabled_when": "active_document.artboards_panel_selection_ids.length == 1"
         },
         {
-          "key": "Meta+A",
+          "key": "Ctrl+A",
           "action": "artboards_select_all"
         },
         {
@@ -17668,7 +17668,7 @@
                 "enabled_when": "panel.layers_panel_selection.length == 1"
               },
               {
-                "key": "Meta+A",
+                "key": "Ctrl+A",
                 "action": "layers_select_all"
               },
               {

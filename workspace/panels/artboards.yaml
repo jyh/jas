@@ -428,6 +428,6 @@ keyboard:
   - { key: "Backspace",    action: delete_artboards }
   - { key: "F2",           action: rename_artboard, params: { artboard_id: "active_document.artboards_panel_selection_ids[0]" }, enabled_when: "active_document.artboards_panel_selection_ids.length == 1" }
   - { key: "Enter",        action: rename_artboard, params: { artboard_id: "active_document.artboards_panel_selection_ids[0]" }, enabled_when: "active_document.artboards_panel_selection_ids.length == 1" }
-  - { key: "Meta+A",       action: artboards_select_all }
+  - { key: "Ctrl+A",       action: artboards_select_all }
   - { key: "Alt+ArrowUp",  action: move_artboard_up }
   - { key: "Alt+ArrowDown", action: move_artboard_down }

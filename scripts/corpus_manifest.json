@@ -300,6 +300,23 @@
       },
       "notes": "The op_apply corpus — the journal/undo spine's byte gate. 60+ of these files exist ONLY as data references (expected_json / expected_journal_json inside the driver fixtures); the transitive pass claims them. Port symmetry here is the gate's founding case: the Swift registration set lacked tspan_ops.json until S4 forced the remediation."
     },
+    "test_fixtures/panel_keys": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "panel-key resolution is a lookup over a panel's own rows; the law would restate it",
+      "claim_style": {
+        "rust": "data reference (resolve_key.rs panel_key_tests)",
+        "swift": "data reference (panelKeyCorpus)",
+        "reference": "path segments (test_panel_keys.py)"
+      },
+      "notes": "The panel-key resolution corpus (STATUS-jas item 8 class L step 2): a chord resolves against one panel's keyboard: rows, at any depth, to {action, params} or null. Expectations are inline; no goldens."
+    },
     "test_fixtures/paragraph_apply": {
       "kind": "fixtures",
       "required_consumers": [
