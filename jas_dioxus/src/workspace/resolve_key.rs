@@ -126,6 +126,63 @@ pub fn resolve_key_in(chord: &KeyChord, shortcuts: &[Value]) -> Option<ResolvedC
     None
 }
 
+/// Every `keyboard:` row under `node`, at any depth, in document order: the
+/// panel's own (artboards.yaml) and any element's (layers.yaml puts its rows
+/// on the tree_view).
+fn panel_keyboard_rows<'a>(node: &'a Value, out: &mut Vec<&'a Value>) {
+    match node {
+        Value::Object(m) => {
+            if let Some(rows) = m.get("keyboard").and_then(|v| v.as_array()) {
+                out.extend(rows.iter());
+            }
+            for (k, v) in m {
+                if k != "keyboard" {
+                    panel_keyboard_rows(v, out);
+                }
+            }
+        }
+        Value::Array(a) => a.iter().for_each(|v| panel_keyboard_rows(v, out)),
+        _ => {}
+    }
+}
+
+/// Resolve a chord on a focused panel (`test_fixtures/panel_keys/`, STATUS-jas
+/// item 8 class L step 2). The first of the panel's `keyboard:` rows whose key
+/// parses to `chord` and whose `enabled_when` (if any) holds in `ctx` wins; its
+/// action may be a `{{...}}` template, and its string params are expressions,
+/// with a `dispatch` effect's bare-identifier rule. `None` when no row matches.
+/// Pure, and not web-gated, so the engine's door resolves by the same law.
+pub fn resolve_panel_key(panel: &Value, chord: &KeyChord, ctx: &Value) -> Option<ResolvedCommand> {
+    use crate::interpreter::{effects::dispatch_param_value, expr};
+    let mut rows = Vec::new();
+    panel_keyboard_rows(panel, &mut rows);
+    for row in rows {
+        let Some(key) = row.get("key").and_then(|k| k.as_str()) else { continue };
+        if parse_shortcut(key).as_ref() != Some(chord) {
+            continue;
+        }
+        if let Some(cond) = row.get("enabled_when").and_then(|c| c.as_str()) {
+            if !cond.is_empty() && !expr::eval(cond, ctx).to_bool() {
+                continue;
+            }
+        }
+        let Some(action) = row.get("action").and_then(|a| a.as_str()).filter(|a| !a.is_empty()) else {
+            continue;
+        };
+        let action = if action.contains("{{") { expr::eval_text(action, ctx) } else { action.to_string() };
+        let mut params = Map::new();
+        for (k, v) in row.get("params").and_then(|p| p.as_object()).into_iter().flatten() {
+            let val = match v.as_str() {
+                Some(e) => dispatch_param_value(e, &expr::eval(e, ctx)),
+                None => v.clone(),
+            };
+            params.insert(k.clone(), val);
+        }
+        return Some(ResolvedCommand { action, params });
+    }
+    None
+}
+
 /// What one key press does, decided in ONE place (the engine's key order, and
 /// the level-1 input-script runner's: docs/TESTING.md section 6). The callers
 /// carry out the decision on their own model; the ORDER lives here only, so a
@@ -358,5 +415,46 @@ mod route_key_tests {
         // (`Tab` was this arm's long token until it became a caret key.)
         assert_eq!(route_key("PageUp", m(false, false), free), KeyRoute::BadKey);
         assert_eq!(route_key("", m(false, false), free), KeyRoute::BadKey);
+    }
+}
+
+/// The panel-key corpus (`test_fixtures/panel_keys/panel_key_resolution.json`,
+/// STATUS-jas item 8 class L step 2): the reference and Swift run the same
+/// file. Not web-gated, so the engine's door resolves by the same law.
+#[cfg(test)]
+mod panel_key_tests {
+    use super::{resolve_panel_key, KeyChord, ResolvedCommand};
+
+    #[test]
+    fn panel_key_corpus() {
+        // Relative to the crate root, as `cross_language_test::read_fixture` reads.
+        let path = format!("../test_fixtures/{}", "panel_keys/panel_key_resolution.json");
+        let corpus: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")),
+        ).expect("json");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let cases = corpus["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 20, "positive control: only {} cases", cases.len());
+        let mut resolved = 0;
+        for case in cases {
+            let name = case["name"].as_str().unwrap_or("?");
+            let panel = case.get("panel_spec").cloned().unwrap_or_else(|| {
+                ws.data()["panels"][case["panel"].as_str().expect("panel")].clone()
+            });
+            let c = &case["chord"];
+            let flag = |k: &str| c.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let chord = KeyChord::new(c["key"].as_str().expect("key"),
+                                      flag("ctrl"), flag("shift"), flag("alt"), flag("meta"));
+            let got = resolve_panel_key(&panel, &chord, &case["ctx"])
+                .map(|ResolvedCommand { action, params }| {
+                    serde_json::json!({"action": action, "params": params})
+                })
+                .unwrap_or(serde_json::Value::Null);
+            if !got.is_null() {
+                resolved += 1;
+            }
+            assert_eq!(got, case["expected"], "case {name}");
+        }
+        assert!(resolved >= 10, "positive control: only {resolved} cases resolved to an action");
     }
 }

@@ -1,0 +1,505 @@
+{
+  "_doc": "Panel-key RESOLUTION corpus (STATUS-jas item 8 class L, step 2). A case resolves a normalized key chord {key, ctrl, shift, alt, meta} (a missing modifier is false; a single letter is matched upper-cased) against the `keyboard:` rows of one panel in the compiled bundle, found at ANY depth (layers.yaml's are on its tree_view, artboards.yaml's on the panel). Rows are tried in order; a row matches when its key string parses to the same chord AND its `enabled_when`, if any, is true in `ctx`. The action may be a {{...}} template, evaluated in `ctx`. String params are expressions evaluated in `ctx` (a bare identifier that reads null is its own name, as a `dispatch` effect's are). `expected` is {action, params}, or null when no row matches. Modifiers use the shortcuts.yaml vocabulary: Ctrl is the platform command key (the Mac binding maps Command to it), so a Meta row is never written. A case may give `panel_spec` (an inline panel) instead of `panel`: no shipped panel binds one chord twice, so the ORDER law (first enabled row wins; a disabled row falls through) is witnessed only by synthetic rows.",
+  "cases": [
+    {
+      "name": "arrow_up_is_layers_nav_up",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "ArrowUp"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "layers_nav_up",
+        "params": {}
+      }
+    },
+    {
+      "name": "arrow_down_is_layers_nav_down",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "ArrowDown"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "layers_nav_down",
+        "params": {}
+      }
+    },
+    {
+      "name": "arrow_right_is_layers_nav_right",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "ArrowRight"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "layers_nav_right",
+        "params": {}
+      }
+    },
+    {
+      "name": "arrow_left_is_layers_nav_left",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "ArrowLeft"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "layers_nav_left",
+        "params": {}
+      }
+    },
+    {
+      "name": "shift_arrow_up_is_unbound",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "ArrowUp",
+        "shift": true
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "delete_is_delete_layer_selection",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Delete"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "delete_layer_selection",
+        "params": {}
+      }
+    },
+    {
+      "name": "backspace_is_delete_layer_selection",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Backspace"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "delete_layer_selection",
+        "params": {}
+      }
+    },
+    {
+      "name": "f2_renames_the_first_selected_row",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "F2"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            },
+            {
+              "__path__": [
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "rename_element",
+        "params": {
+          "element_id": {
+            "__path__": [
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "enter_renames_one_selected_row",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Enter"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "rename_element",
+        "params": {
+          "element_id": {
+            "__path__": [
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "enter_with_two_rows_is_disabled",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Enter"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            },
+            {
+              "__path__": [
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "escape_while_renaming_cancels",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Escape"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": {
+            "__path__": [
+              1,
+              0
+            ]
+          },
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "cancel_rename",
+        "params": {}
+      }
+    },
+    {
+      "name": "escape_otherwise_exits_isolation",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Escape"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "exit_isolation_mode",
+        "params": {}
+      }
+    },
+    {
+      "name": "ctrl_a_selects_every_layer_row",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "A",
+        "ctrl": true
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "layers_select_all",
+        "params": {}
+      }
+    },
+    {
+      "name": "meta_a_is_unbound",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "A",
+        "meta": true
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "lowercase_letter_is_canonical",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "a",
+        "ctrl": true
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": {
+        "action": "layers_select_all",
+        "params": {}
+      }
+    },
+    {
+      "name": "an_unbound_key_resolves_to_nothing",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "X"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "artboards_rows_are_the_panels_own",
+      "panel": "artboards_panel_content",
+      "chord": {
+        "key": "A",
+        "ctrl": true
+      },
+      "ctx": {
+        "panel": {
+          "artboards_panel_selection": []
+        }
+      },
+      "expected": {
+        "action": "artboards_select_all",
+        "params": {}
+      }
+    },
+    {
+      "name": "a_panel_with_no_rows_resolves_to_nothing",
+      "panel": "color_panel_content",
+      "chord": {
+        "key": "ArrowUp"
+      },
+      "ctx": {
+        "panel": {}
+      },
+      "expected": null
+    },
+    {
+      "name": "the_first_matching_row_wins",
+      "panel_spec": {
+        "keyboard": [
+          {
+            "key": "F2",
+            "action": "first_row"
+          },
+          {
+            "key": "F2",
+            "action": "second_row"
+          }
+        ]
+      },
+      "chord": {
+        "key": "F2"
+      },
+      "ctx": {
+        "panel": {}
+      },
+      "expected": {
+        "action": "first_row",
+        "params": {}
+      }
+    },
+    {
+      "name": "a_disabled_row_falls_through_to_the_next",
+      "panel_spec": {
+        "keyboard": [
+          {
+            "key": "F2",
+            "action": "first_row",
+            "enabled_when": "false"
+          },
+          {
+            "key": "F2",
+            "action": "second_row"
+          }
+        ]
+      },
+      "chord": {
+        "key": "F2"
+      },
+      "ctx": {
+        "panel": {}
+      },
+      "expected": {
+        "action": "second_row",
+        "params": {}
+      }
+    }
+  ]
+}

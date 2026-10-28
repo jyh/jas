@@ -279,6 +279,11 @@ func isBareIdentifier(_ s: String) -> Bool {
     !s.isEmpty && s.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
 }
 
+/// A value as the store and a dispatch hold it (a path is the `__path__`
+/// marker), for callers outside this file: the panel-key resolver
+/// (`resolvePanelKey`). Rust's `value_to_json`.
+func storedValue(_ v: Value) -> Any? { valueToAny(v) }
+
 private func valueToAny(_ v: Value) -> Any? {
     switch v {
     case .null: return nil
