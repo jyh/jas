@@ -348,14 +348,9 @@ public struct JasCommands: Commands {
             guard let ws = workspace,
                   let paneId = params["pane"] as? String,
                   let kind = paneKindForId(paneId) else { return }
-            // OP_LOG 3d-2: resolve live visibility against the pane layout,
-            // then dispatch hide/show through the shared layout-op runtime
-            // (only when a pane layout exists, matching the prior `panesMut`
-            // guard). Byte-identical to the prior `paneToggle` body.
-            if let visibleNow = ws.workspaceLayout.panes()?.isPaneVisible(kind) {
-                let op = visibleNow ? opHidePane(kind) : opShowPane(kind)
-                layoutApply(&ws.workspaceLayout, op)
-            }
+            // The shared `toggle_pane` op decides hide vs show from the live
+            // pane layout (a no-op when there is none, as `panesMut` is).
+            layoutApply(&ws.workspaceLayout, opTogglePane(kind))
             ws.workspaceLayout.saveIfNeeded()
         case "toggle_panel":
             guard let ws = workspace,

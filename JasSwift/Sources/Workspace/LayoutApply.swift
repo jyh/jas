@@ -167,6 +167,11 @@ public func opShowPane(_ kind: PaneKind) -> [String: Any] {
     ["op": "show_pane", "kind": layoutPaneKindStr(kind)]
 }
 
+/// `{op:"toggle_pane", kind}`: hide the pane if visible, else show it.
+public func opTogglePane(_ kind: PaneKind) -> [String: Any] {
+    ["op": "toggle_pane", "kind": layoutPaneKindStr(kind)]
+}
+
 /// `{op:"bring_pane_to_front", pane_id}`.
 public func opBringPaneToFront(_ id: PaneId) -> [String: Any] {
     ["op": "bring_pane_to_front", "pane_id": id.value]
@@ -391,6 +396,23 @@ public func layoutApply(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
     case "toggle_canvas_maximized":
         layout.panesMut { pl in
             pl.toggleCanvasMaximized()
+        }
+
+    // The YAML's `set_canvas_maximized` (maximize_canvas / restore_canvas):
+    // idempotent, unlike the toggle, so a second Maximize stays maximized.
+    case "set_canvas_maximized":
+        guard let b = boolOf(op, "value") else { return } // required field missing: skip
+        layout.panesMut { pl in
+            pl.canvasMaximized = b
+        }
+
+    // The Window menu's Toolbar / Panels item: hide the pane if it is
+    // visible, else show it (the rule both native menu routes applied).
+    case "toggle_pane":
+        guard let s = stringOf(op, "kind") else { return } // required field missing: skip
+        let kind = layoutParsePaneKind(s)
+        layout.panesMut { pl in
+            if pl.isPaneVisible(kind) { pl.hidePane(kind) } else { pl.showPane(kind) }
         }
 
     case "resize_pane":

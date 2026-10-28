@@ -1268,3 +1268,19 @@ private func testLayout() -> WorkspaceLayout {
     c.registerLayout("Custom")
     #expect(c.savedLayouts.count == 2)
 }
+
+// MARK: - toggle_pane op (the Window menu's Toolbar / Panels item)
+
+/// The Window menu dispatches `opTogglePane`: once hides the visible toolbar,
+/// twice shows it again. Pins the builder's spelling against `layoutApply`,
+/// which skips an unknown verb silently. Mirror of Rust's
+/// `op_toggle_pane_hides_then_shows`.
+@Test func opTogglePaneHidesThenShows() {
+    var l = WorkspaceLayout.defaultLayout()
+    l.ensurePaneLayout(viewportW: 1200, viewportH: 800)
+    #expect(l.panes()!.isPaneVisible(.toolbar))
+    layoutApply(&l, opTogglePane(.toolbar))
+    #expect(!l.panes()!.isPaneVisible(.toolbar), "one toggle hides the toolbar")
+    layoutApply(&l, opTogglePane(.toolbar))
+    #expect(l.panes()!.isPaneVisible(.toolbar), "a second toggle shows it again")
+}
