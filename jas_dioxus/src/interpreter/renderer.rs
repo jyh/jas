@@ -7657,6 +7657,22 @@ fn schedule_focus_rename_input(_path: &[usize]) {}
 /// an interactive row with visibility, lock, twirl-down, preview, name,
 /// and selection indicator. Clicking the eye cycles visibility; clicking
 /// the lock toggles lock state.
+/// A key on the focused Layers tree, through layers.yaml's `keyboard:` rows
+/// (STATUS-jas item 8 class L, step 2b): the chord resolves in the action
+/// scope (`resolve_panel_key`) and the row's action is dispatched. `None` when
+/// no row binds the chord, so the caller keeps its own default. The returned
+/// effects are the dispatch's deferred ones (a Delete's orphan dialog).
+pub(crate) fn layers_tree_key(
+    st: &mut crate::workspace::app_state::AppState,
+    chord: &crate::workspace::resolve_key::KeyChord,
+) -> Option<Vec<serde_json::Value>> {
+    let ws = crate::interpreter::workspace::Workspace::load()?;
+    let panel = ws.data().get("panels")?.get("layers_panel_content")?;
+    let ctx = build_appstate_ctx(&serde_json::Map::new(), st);
+    let cmd = crate::workspace::resolve_key::resolve_panel_key(panel, chord, &ctx)?;
+    Some(dispatch_action(&cmd.action, &cmd.params, st))
+}
+
 fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let style = build_style(el, ctx);
@@ -7863,135 +7879,22 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         if skip_panel_shortcuts {
             return;
         }
-        match key {
-            dioxus::prelude::Key::Delete | dioxus::prelude::Key::Backspace => {
-                spawn(async move {
-                    let deferred = {
-                        let mut st = a.borrow_mut();
-                        let params = serde_json::Map::new();
-                        dispatch_action("delete_layer_selection", &params, &mut st)
-                    };
-                    // If deleting the panel selection would orphan live
-                    // instances, the intercept returns a deferred open_dialog
-                    // for delete_layer_orphan_confirm; open it (mirrors the
-                    // panel context-menu deferred-effect handling). When the
-                    // delete ran inline (no orphan), `deferred` is empty.
-                    for eff in deferred {
-                        if let Some(od) = eff.get("open_dialog") {
-                            let dlg_id = od
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let raw_params = od
-                                .get("params")
-                                .and_then(|p| p.as_object())
-                                .cloned()
-                                .unwrap_or_default();
-                            let (live_state, outer_scope) = {
-                                let st = a.borrow();
-                                (
-                                    crate::workspace::dock_panel::build_live_state_map(&st),
-                                    build_dialog_outer_scope(&st),
-                                )
-                            };
-                            super::dialog_view::open_dialog_over(
-                                &mut kb_dialog_signal,
-                                &dlg_id,
-                                &raw_params,
-                                &live_state,
-                                &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
-                        }
-                    }
-                    kb_rev += 1;
-                });
+        // Escape cancels a row drag in progress first (LYR-131): the drag is
+        // the host's own gesture state, which no YAML row can see.
+        if matches!(key, dioxus::prelude::Key::Escape) {
+            let mut st = kb_app.borrow_mut();
+            if st.layers_drag_source.is_some() || st.layers_drag_target.is_some() {
+                st.layers_drag_source = None;
+                st.layers_drag_target = None;
+                drop(st);
+                kb_rev += 1;
+                return;
             }
-            dioxus::prelude::Key::ArrowDown | dioxus::prelude::Key::ArrowUp => {
-                // Move panel selection to the next / previous visible row
-                // in display order (mirrors tree_flatten_layers' rev-order
-                // traversal so the visual top-to-bottom matches).
-                let dir_down = matches!(key, dioxus::prelude::Key::ArrowDown);
-                spawn(async move {
-                    let mut st = a.borrow_mut();
-                    fn collect_visible(
-                        elem: &crate::geometry::element::Element,
-                        path: &[usize],
-                        collapsed: &std::collections::HashSet<Vec<usize>>,
-                        out: &mut Vec<Vec<usize>>,
-                    ) {
-                        if let Some(children) = elem.children() {
-                            for (i, child) in children.iter().enumerate().rev() {
-                                let mut cp = path.to_vec();
-                                cp.push(i);
-                                out.push(cp.clone());
-                                if !collapsed.contains(&cp) {
-                                    collect_visible(child, &cp, collapsed, out);
-                                }
-                            }
-                        }
-                    }
-                    let visible: Vec<Vec<usize>> = {
-                        let collapsed = st.layers_collapsed.clone();
-                        let mut out = Vec::new();
-                        if let Some(tab) = st.tab() {
-                            let doc = tab.model.document();
-                            for (li, layer) in doc.layers.iter().enumerate().rev() {
-                                let p = vec![li];
-                                out.push(p.clone());
-                                if !collapsed.contains(&p) {
-                                    collect_visible(layer, &p, &collapsed, &mut out);
-                                }
-                            }
-                        }
-                        out
-                    };
-                    if visible.is_empty() {
-                        return;
-                    }
-                    let cur_idx = st.layers_panel_selection.last()
-                        .and_then(|p| visible.iter().position(|v| v == p));
-                    let next_idx = match (cur_idx, dir_down) {
-                        (Some(i), true) => (i + 1).min(visible.len() - 1),
-                        (Some(i), false) => i.saturating_sub(1),
-                        (None, true) => 0,
-                        (None, false) => visible.len() - 1,
-                    };
-                    st.layers_panel_selection = vec![visible[next_idx].clone()];
-                    kb_rev += 1;
-                });
-            }
-            dioxus::prelude::Key::Escape => {
-                // Priority: cancel an in-progress drag first (LYR-131);
-                // else pop one isolation level (LYR-186); else no-op.
-                spawn(async move {
-                    let mut st = a.borrow_mut();
-                    let drag_active = st.layers_drag_source.is_some()
-                        || st.layers_drag_target.is_some();
-                    if drag_active {
-                        st.layers_drag_source = None;
-                        st.layers_drag_target = None;
-                    } else if let Some(s) = st.isolation_stack_mut() {
-                        s.pop();
-                    }
-                    kb_rev += 1;
-                });
-            }
-            dioxus::prelude::Key::F2 => {
-                // F2 starts inline rename on the active row. Without a
-                // separate focus concept, "active" is the last panel-
-                // selected row. Any element type is renameable now
-                // that common.name backs the data.
-                spawn(async move {
-                    let mut st = a.borrow_mut();
-                    let target = st.layers_panel_selection.last().cloned();
-                    if let Some(path) = target {
-                        st.layers_renaming = Some(path.clone());
-                        kb_rev += 1;
-                        schedule_focus_rename_input(&path);
-                    }
-                });
-            }
-            dioxus::prelude::Key::Character(c) if c == "a" || c == "A" => {
+        }
+        // Ctrl/Command+A stays native: `layers_select_all` is still a `log`
+        // stub, declared bypassed (check_action_implementations).
+        if let dioxus::prelude::Key::Character(c) = &key {
+            if c == "a" || c == "A" {
                 if evt.data().modifiers().meta() || evt.data().modifiers().ctrl() {
                     spawn(async move {
                         let mut st = a.borrow_mut();
@@ -8024,10 +7927,47 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         }
                         kb_rev += 1;
                     });
+                    return;
                 }
             }
-            _ => {}
         }
+        // Every other key runs layers.yaml's `keyboard:` rows (STATUS-jas item 8
+        // class L, step 2b): the arrows, Delete/Backspace, F2, Enter, Escape.
+        // The Mac's Command is the vocabulary's Ctrl. A key no row binds does
+        // nothing here, as before.
+        let name = match &key {
+            dioxus::prelude::Key::ArrowUp => "ArrowUp".to_string(),
+            dioxus::prelude::Key::ArrowDown => "ArrowDown".to_string(),
+            dioxus::prelude::Key::ArrowLeft => "ArrowLeft".to_string(),
+            dioxus::prelude::Key::ArrowRight => "ArrowRight".to_string(),
+            dioxus::prelude::Key::Delete => "Delete".to_string(),
+            dioxus::prelude::Key::Backspace => "Backspace".to_string(),
+            dioxus::prelude::Key::Enter => "Enter".to_string(),
+            dioxus::prelude::Key::Escape => "Escape".to_string(),
+            dioxus::prelude::Key::F2 => "F2".to_string(),
+            dioxus::prelude::Key::Character(c) => c.clone(),
+            _ => return,
+        };
+        let mods = evt.data().modifiers();
+        let chord = crate::workspace::resolve_key::KeyChord::new(
+            &name, mods.ctrl() || mods.meta(), mods.shift(), mods.alt(), false);
+        spawn(async move {
+            let deferred = {
+                let mut st = a.borrow_mut();
+                layers_tree_key(&mut st, &chord)
+            };
+            let Some(deferred) = deferred else { return };
+            // A Delete that would orphan live instances defers its confirm
+            // dialog (delete_layer_orphan_confirm); open it now the borrow is
+            // released, as the panel context menu does.
+            apply_deferred_dialog_effects(&deferred, &a, &mut kb_dialog_signal);
+            // F2 / Enter started a rename: focus its input.
+            let renaming = a.borrow().layers_renaming.clone();
+            if let Some(path) = renaming {
+                schedule_focus_rename_input(&path);
+            }
+            kb_rev += 1;
+        });
     };
 
     rsx! {
@@ -15458,5 +15398,74 @@ mod tests {
         crate::interpreter::dialog_view::nest_over(&mut lone, parent, Some("fill"));
         assert!(lone.parent.is_none());
         assert!(crate::interpreter::dialog_view::return_to_parent(lone, None).is_none());
+    }
+}
+
+/// The web Layers tree's keys run the panel's `keyboard:` rows (STATUS-jas
+/// item 8 class L, step 2b): `layers_tree_key` resolves a chord against
+/// layers.yaml's rows and dispatches the result, so the tree's native key arms
+/// are no longer a second copy of the YAML.
+#[cfg(test)]
+mod layers_tree_key_tests {
+    use super::layers_tree_key;
+    use crate::workspace::app_state::{AppState, TabState};
+    use crate::workspace::resolve_key::KeyChord;
+
+    /// multi_layer.svg: rows, top first, [1] [1,0] [0] [0,0].
+    fn two_layers() -> AppState {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let svg = std::fs::read_to_string("../test_fixtures/svg/multi_layer.svg").expect("fixture");
+        let doc = crate::geometry::svg::svg_to_document(&svg);
+        assert_eq!(doc.layers.len(), 2, "positive control: two layers");
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        st
+    }
+
+    fn key(name: &str) -> KeyChord { KeyChord::new(name, false, false, false, false) }
+
+    #[test]
+    fn down_moves_the_selection_and_the_target_layer() {
+        let mut st = two_layers();
+        st.layers_panel_selection = vec![vec![1]];
+        assert!(layers_tree_key(&mut st, &key("ArrowDown")).is_some(), "a row resolved");
+        assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
+        assert_eq!(st.tab().unwrap().model.document().selected_layer, 1);
+    }
+
+    #[test]
+    fn up_with_nothing_selected_selects_the_last_row() {
+        let mut st = two_layers();
+        st.layers_panel_selection.clear();
+        assert!(layers_tree_key(&mut st, &key("ArrowUp")).is_some());
+        assert_eq!(st.layers_panel_selection, vec![vec![0, 0]]);
+    }
+
+    #[test]
+    fn f2_starts_the_rename_of_the_one_selected_row() {
+        let mut st = two_layers();
+        st.layers_panel_selection = vec![vec![1, 0]];
+        assert!(layers_tree_key(&mut st, &key("F2")).is_some());
+        assert_eq!(st.layers_renaming, Some(vec![1, 0]));
+    }
+
+    #[test]
+    fn escape_pops_one_isolation_level() {
+        let mut st = two_layers();
+        st.layers_panel_selection = vec![vec![1]];
+        st.isolation_stack_mut().expect("a tab").push(vec![1]);
+        assert!(layers_tree_key(&mut st, &key("Escape")).is_some());
+        assert!(st.isolation_stack().is_empty());
+    }
+
+    #[test]
+    fn an_unbound_key_is_left_to_the_host() {
+        let mut st = two_layers();
+        st.layers_panel_selection = vec![vec![1]];
+        assert!(layers_tree_key(&mut st, &key("X")).is_none());
+        assert_eq!(st.layers_panel_selection, vec![vec![1]], "nothing moved");
     }
 }
