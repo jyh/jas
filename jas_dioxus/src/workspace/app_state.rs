@@ -619,6 +619,7 @@ impl AppState {
     }
 
     pub(crate) fn new() -> Self {
+        Self::load_preference_overrides();
         let app_config = Self::load_app_config();
         let workspace_layout = Self::load_or_migrate_workspace(&app_config);
         // Hydrate runtime BooleanPanelState from the persisted layout
@@ -717,6 +718,27 @@ impl AppState {
             }
         }
         super::workspace::AppConfig::default()
+    }
+
+    /// The user's preference overrides (STATUS-jas item 37), saved across
+    /// launches in localStorage beside the app config. Imported first, before
+    /// anything reads state: `brushes_open_libraries` is initialised from them.
+    /// The desktop build saves no app config, and none of these either.
+    fn load_preference_overrides() {
+        #[cfg(target_arch = "wasm32")]
+        {
+            const KEY: &str = "jas_preference_overrides";
+            let storage = || web_sys::window().and_then(|w| w.local_storage().ok()?);
+            if let Some(json) = storage().and_then(|s| s.get_item(KEY).ok()?) {
+                crate::interpreter::preferences::load_overrides_json(&json);
+            }
+            fn save(json: &str) {
+                if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok()?) {
+                    let _ = s.set_item(KEY, json);
+                }
+            }
+            crate::interpreter::preferences::set_persist_hook(Some(save));
+        }
     }
 
     /// Save app config to localStorage.

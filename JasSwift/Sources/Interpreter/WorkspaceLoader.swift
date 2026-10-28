@@ -197,6 +197,12 @@ class WorkspaceData {
                 defaults[key] = defn
             }
         }
+        // Launch state read from the preferences (state.yaml: "initialised at
+        // startup from preferences.brushes.persistent_libraries").
+        if defaults["brushes_open_libraries"] != nil {
+            let brushes = Preferences.current()?["brushes"] as? [String: Any]
+            defaults["brushes_open_libraries"] = Preferences.openLibrariesAtLaunch(brushes?["persistent_libraries"])
+        }
         return defaults
     }
 

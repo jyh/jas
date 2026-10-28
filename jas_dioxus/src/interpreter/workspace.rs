@@ -98,6 +98,13 @@ impl Workspace {
                 defaults.insert(key.clone(), default_val);
             }
         }
+        // Launch state read from the preferences (state.yaml: "initialised at
+        // startup from preferences.brushes.persistent_libraries").
+        if let Some(v) = defaults.get_mut("brushes_open_libraries") {
+            let prefs = crate::interpreter::preferences::current();
+            *v = crate::interpreter::preferences::open_libraries_at_launch(
+                &prefs["brushes"]["persistent_libraries"]);
+        }
         defaults
     }
 

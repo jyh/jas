@@ -176,6 +176,16 @@ def _bundled_preferences():
         return None
 
 
+def open_libraries_at_launch(slugs) -> list[dict]:
+    """`state.brushes_open_libraries` at startup (state.yaml; STATUS-jas
+    item 37): one open, expanded section per slug of
+    `preferences.brushes.persistent_libraries`, in order, or the declared
+    fallback when the list is empty. Shared fixture:
+    `test_fixtures/preferences/open_libraries_at_launch.json`."""
+    slugs = [s for s in (slugs or []) if isinstance(s, str)]
+    return [{"id": s, "collapsed": False} for s in (slugs or ["default_brushes"])]
+
+
 def _native_view(elem):
     """An element of the store's document as the YAML reads it, in the native
     form (``kind``, props under ``common``), from either form the store holds:
@@ -240,7 +250,7 @@ class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
     def __init__(self, defaults: dict | None = None, document: dict | None = None,
-                 artboard_id_generator=None):
+                 artboard_id_generator=None, preference_overrides: dict | None = None):
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
@@ -307,7 +317,13 @@ class StateStore:
         # The user's preference OVERRIDES (dotted key -> value) over the
         # bundle's defaults (STATUS-jas item 37); the apps persist theirs in
         # their AppConfig record.
-        self._preference_overrides: dict[str, object] = {}
+        self._preference_overrides: dict[str, object] = dict(preference_overrides or {})
+        # Launch state read from the preferences (state.yaml): the persisted
+        # overrides above are what a launch reads.
+        if "brushes_open_libraries" in self._state:
+            prefs = self.preferences() or {}
+            self._state["brushes_open_libraries"] = open_libraries_at_launch(
+                (prefs.get("brushes") or {}).get("persistent_libraries"))
         # What a `doc.copy_selection_to_clipboard` copied: the selected paths
         # IN SELECTION ORDER, or None until a copy of a non-empty selection.
         # The reference names WHAT is copied; the BYTES are the apps' (see
