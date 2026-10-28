@@ -594,20 +594,18 @@ private func testLayout() -> WorkspaceLayout {
 }
 
 @Test func toggleGradientAndConceptsShowThenHide() {
-    // The two halves the JasCommands toggle_panel arm calls, for the panels
-    // that were unreachable: SHOW (showPanelInLastGroup) then HIDE (closePanel
-    // at the summoned address). Empty group auto-removed on hide.
+    // The op the JasCommands toggle_panel arm calls (`opTogglePanel`, the
+    // action's YAML `layout:` effect), for the panels that were unreachable:
+    // the first toggle SHOWS (appended to the last group), the second HIDES
+    // (the emptied group, if any, auto-removed). The arm itself is a private
+    // SwiftUI Commands method with no harness; its one line is this op.
     for kind: PanelKind in [.gradient, .concepts] {
         var l = testLayout()
-        let id = rightDockId(l)
         #expect(!l.isPanelVisible(kind))
-        l.showPanelInLastGroup(kind)
-        #expect(l.isPanelVisible(kind))
-        // Locate + close it (mirrors findPanel + opClosePanel in the arm).
-        let g = l.dock(id)!.groups.firstIndex { $0.panels.contains(kind) }!
-        let p = l.dock(id)!.groups[g].panels.firstIndex(of: kind)!
-        l.closePanel(pa(id.value, g, p))
-        #expect(!l.isPanelVisible(kind), "\(kind) hidden after toggle-off")
+        layoutApply(&l, opTogglePanel(kind))
+        #expect(l.panelOnScreen(kind), "\(kind) shown by the first toggle")
+        layoutApply(&l, opTogglePanel(kind))
+        #expect(!l.isPanelVisible(kind), "\(kind) hidden by the second")
     }
 }
 

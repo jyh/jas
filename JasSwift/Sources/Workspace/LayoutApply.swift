@@ -126,6 +126,11 @@ public func opShowPanel(_ kind: PanelKind) -> [String: Any] {
     ["op": "show_panel", "kind": layoutPanelKindStr(kind)]
 }
 
+/// `{op:"toggle_panel", kind}`: close the panel if on screen, else reveal it.
+public func opTogglePanel(_ kind: PanelKind) -> [String: Any] {
+    ["op": "toggle_panel", "kind": layoutPanelKindStr(kind)]
+}
+
 /// `{op:"toggle_group_collapsed", dock_id, group_idx}`.
 public func opToggleGroupCollapsed(_ addr: GroupAddr) -> [String: Any] {
     ["op": "toggle_group_collapsed",
@@ -301,6 +306,20 @@ public func layoutApply(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
         guard let s = stringOf(op, "kind") else { return } // required field missing: skip
         layout.showPanel(layoutParsePanelKind(s))
 
+    // Window > <panel>: hide the panel if it is ON SCREEN (close_panel), else
+    // reveal it (raise a background tab, or append it to the last group of the
+    // main dock). Routed on `panelOnScreen`, NOT on group membership: a
+    // background tab is a member drawn nowhere, and closing it deleted the
+    // panel the artist asked to see.
+    case "toggle_panel":
+        guard let s = stringOf(op, "kind") else { return } // required field missing: skip
+        let kind = layoutParsePanelKind(s)
+        if layout.panelOnScreen(kind) {
+            if let addr = layoutFindPanel(layout, kind) { layout.closePanel(addr) }
+        } else {
+            layout.revealPanel(kind)
+        }
+
     case "reorder_panel":
         layout.reorderPanel(
             GroupAddr(
@@ -456,4 +475,24 @@ public func layoutApply(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
     default:
         break
     }
+}
+
+/// The first group (anchored docks, then floating) holding `kind`, as Rust's
+/// `clipboard::find_panel` searches.
+func layoutFindPanel(_ layout: WorkspaceLayout, _ kind: PanelKind) -> PanelAddr? {
+    for (_, dock) in layout.anchored {
+        for (gi, group) in dock.groups.enumerated() {
+            if let pi = group.panels.firstIndex(of: kind) {
+                return PanelAddr(group: GroupAddr(dockId: dock.id, groupIdx: gi), panelIdx: pi)
+            }
+        }
+    }
+    for fd in layout.floating {
+        for (gi, group) in fd.dock.groups.enumerated() {
+            if let pi = group.panels.firstIndex(of: kind) {
+                return PanelAddr(group: GroupAddr(dockId: fd.dock.id, groupIdx: gi), panelIdx: pi)
+            }
+        }
+    }
+    return nil
 }

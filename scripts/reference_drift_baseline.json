@@ -66,7 +66,10 @@
   "test_workspace_panel_ops :: Workspace operation test 'detach_panel_near_the_bottom_edge_snaps' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'set_floating_position' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'show_panel_raises_a_background_tab' failed: canonical JSON mismatch": 1,
-  "test_workspace_panel_ops :: Workspace operation test 'snap_to_edge_left' failed: canonical JSON mismatch": 1
+  "test_workspace_panel_ops :: Workspace operation test 'snap_to_edge_left' failed: canonical JSON mismatch": 1,
+  "test_workspace_panel_ops :: Workspace operation test 'toggle_panel_hides_an_on_screen_panel' failed: canonical JSON mismatch": 1,
+  "test_workspace_panel_ops :: Workspace operation test 'toggle_panel_raises_a_background_tab' failed: canonical JSON mismatch": 1,
+  "test_workspace_panel_ops :: Workspace operation test 'toggle_panel_shows_a_panel_in_no_group' failed: canonical JSON mismatch": 1
  },
  "zero_assert_methods": []
 }

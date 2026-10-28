@@ -505,10 +505,13 @@ struct JasBytes jas_menu_structure(void);
  * * the **engine** supplies `active_document.{has_selection, selection_count,
  *   can_undo, can_redo, is_modified}` and **WINS** on them — a shell that could
  *   assert `can_undo` would be holding document state, which is **BL1**;
+ * * once a layout is loaded ([`jas_layout_load`]) the engine also supplies
+ *   `panes.*` from the pane layout it holds, and **WINS** on it: the Window
+ *   menu's Toolbar / Panels run on that layout, so their checkmarks read it;
  * * the **shell** supplies everything else (`state.tab_count`,
  *   `active_document.has_filename`, `workspace.has_saved_layout`, `panels.*`,
- *   `panes.*`) — tabs, filenames and chrome visibility are session facts and
- *   have never been the engine's.
+ *   and `panes.*` before a layout load) — tabs, filenames and the rest of the
+ *   chrome are session facts and are not the engine's.
  *
  * A NULL or empty ctx is therefore **not** "empty scope": it is "the shell
  * supplies nothing", and every session predicate falls to the evaluator's own
@@ -734,8 +737,9 @@ struct JasBytes jas_layout_apply(struct JasEngine *e, const uint8_t *op, uintptr
  * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
  * "remove_tab": <index> | null, "close_window": <bool>,
  * "save_all_then_close": <bool>, "clipboard_write": <text> | null,
- * "export_pdf": <file name> | null}` ([`act_reply`]; `clipboard_write` is
- * [`jas_dispatch_action`]'s, and `export_pdf` is the Print button's).
+ * "export_pdf": <file name> | null, "layout": <layout> | null}` ([`act_reply`];
+ * `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
+ * is the Print button's).
  * `close_window` names a window close the shell must do (the engine owns no
  * window): `quit` with nothing edited, or Save Changes' Don't Save.
  * `save_all_then_close` (Save Changes' Save All) names "save every modified
