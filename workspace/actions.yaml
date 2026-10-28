@@ -2098,14 +2098,14 @@ actions:
     description: >
       Move the panel-selection focus to the previous visible row in
       the layers panel. If at the first row, no-op. The focus is the
-      last panel-selected row; with no row selected the key does
-      nothing. A move selects the new row alone, exactly as a plain
-      click on it does, so its layer becomes the target layer.
+      last panel-selected row; with no row selected, Up selects the
+      last visible row. A move selects the new row alone, exactly as a
+      plain click on it does, so its layer becomes the target layer.
     category: layers
     tier: 3
     effects:
       # STATUS-jas item 8 class L. The focus is the LAST panel-selected row
-      # (jas_flask's tree rule); with nothing selected the key does nothing.
+      # (jas_flask's and the web tree's rule).
       # Rows are the visible rows, top first, as the tree draws them.
       - let:
           nav_rows: "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
@@ -2114,23 +2114,29 @@ actions:
       - let:
           nav_before: "if nav_focus != null and nav_rows.length > 0 then tree_row_range(nav_rows, nav_rows[0].path, nav_focus) else []"
       # A move is a plain row click, so the target layer follows it.
+      # With nothing selected, Up selects the last row.
       - if:
-          condition: "nav_before.length > 1"
+          condition: "nav_focus == null and nav_rows.length > 0"
           then:
-            - dispatch: { action: layers_panel_select, params: { path: "nav_before[nav_before.length - 2]" } }
+            - dispatch: { action: layers_panel_select, params: { path: "nav_rows[nav_rows.length - 1].path" } }
+          else:
+            - if:
+                condition: "nav_before.length > 1"
+                then:
+                  - dispatch: { action: layers_panel_select, params: { path: "nav_before[nav_before.length - 2]" } }
 
   layers_nav_down:
     description: >
       Move the panel-selection focus to the next visible row in the
       layers panel. If at the last row, no-op. The focus is the last
-      panel-selected row; with no row selected the key does nothing. A
-      move selects the new row alone, exactly as a plain click on it
-      does, so its layer becomes the target layer.
+      panel-selected row; with no row selected, Down selects the first
+      visible row. A move selects the new row alone, exactly as a
+      plain click on it does, so its layer becomes the target layer.
     category: layers
     tier: 3
     effects:
       # STATUS-jas item 8 class L. The focus is the LAST panel-selected row
-      # (jas_flask's tree rule); with nothing selected the key does nothing.
+      # (jas_flask's and the web tree's rule).
       # Rows are the visible rows, top first, as the tree draws them.
       - let:
           nav_rows: "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
@@ -2139,10 +2145,17 @@ actions:
       - let:
           nav_after: "if nav_focus != null and nav_rows.length > 0 then tree_row_range(nav_rows, nav_focus, nav_rows[nav_rows.length - 1].path) else []"
       # A move is a plain row click, so the target layer follows it.
+      # With nothing selected, Down selects the first row (the web tree's
+      # rule, and an outline view's).
       - if:
-          condition: "nav_after.length > 1"
+          condition: "nav_focus == null and nav_rows.length > 0"
           then:
-            - dispatch: { action: layers_panel_select, params: { path: "nav_after[1]" } }
+            - dispatch: { action: layers_panel_select, params: { path: "nav_rows[0].path" } }
+          else:
+            - if:
+                condition: "nav_after.length > 1"
+                then:
+                  - dispatch: { action: layers_panel_select, params: { path: "nav_after[1]" } }
 
   layers_nav_right:
     description: >
@@ -2157,7 +2170,7 @@ actions:
     tier: 3
     effects:
       # STATUS-jas item 8 class L. The focus is the LAST panel-selected row
-      # (jas_flask's tree rule); with nothing selected the key does nothing.
+      # (jas_flask's and the web tree's rule).
       # Rows are the visible rows, top first, as the tree draws them.
       - let:
           nav_rows: "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
@@ -2195,7 +2208,7 @@ actions:
     tier: 3
     effects:
       # STATUS-jas item 8 class L. The focus is the LAST panel-selected row
-      # (jas_flask's tree rule); with nothing selected the key does nothing.
+      # (jas_flask's and the web tree's rule).
       # Rows are the visible rows, top first, as the tree draws them.
       - let:
           nav_rows: "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
