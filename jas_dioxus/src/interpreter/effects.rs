@@ -920,16 +920,21 @@ fn run_one<'h>(
         return;
     }
 
-    // list_toggle: { target, value } — set membership (the Layers type
-    // filter). Same target law as list_push: `panel.<key>` on the active panel.
+    // list_toggle: { target, value, panel? } — set membership (the Layers
+    // type filter, the Layers twirl's collapsed_paths). `panel.<key>` on the
+    // named panel when `panel` is given, as set_panel_state, else the active.
     if let Some(serde_json::Value::Object(lt)) = effect.get("list_toggle") {
         let target = lt.get("target").and_then(|v| v.as_str()).unwrap_or("");
         let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
         let value = eval_expr(value_expr, store, ctx);
         let parts: Vec<&str> = target.splitn(2, '.').collect();
         if parts.len() == 2 && parts[0] == "panel" {
-            if let Some(active) = store.active_panel_id().map(|s| s.to_string()) {
-                store.list_toggle(&active, parts[1], value_to_json(&value));
+            let panel = match lt.get("panel").and_then(|v| v.as_str()) {
+                Some(named) => Some(named.to_string()),
+                None => store.active_panel_id().map(|s| s.to_string()),
+            };
+            if let Some(panel) = panel {
+                store.list_toggle(&panel, parts[1], value_to_json(&value));
             }
         }
         return;
@@ -2934,9 +2939,11 @@ fn run_doc_effect(
             let _ = crate::document::op_apply::op_apply(
                 model, &serde_json::json!({ "op": "delete_selection" }));
         }
-        // doc.op: { op: <name>, ...literal fields }: one journaled op by name,
+        // doc.op: { op: <name>, ...fields }: one journaled op by name,
         // the model verbs' route (unlock_all, show_all) to the layer the menu's
-        // native table reaches too. The reference's `StateStore.apply_op`
+        // native table reaches too. Every field but `op` is an expression in
+        // the action's scope (`doc_op_args`), so a row action names its row
+        // (`path: param.path`, STATUS-jas item 38). The reference's `StateStore.apply_op`
         // applies the same op through `document.op_apply`. An op the layer
         // refuses is reported, so a misspelt name is never silent.
         // doc.make_instance: { offset }: Object > Make Instance, the two
@@ -3121,9 +3128,12 @@ fn run_doc_effect(
             }
         }
         "doc.op" => {
-            let refused = match spec.get("op").and_then(|v| v.as_str()) {
-                Some(_) => crate::document::op_apply::op_apply(model, spec).is_err(),
-                None => true,
+            let refused = match (spec.get("op").and_then(|v| v.as_str()), spec.as_object()) {
+                (Some(_), Some(fields)) => {
+                    let op = doc_op_args(fields, store, ctx);
+                    crate::document::op_apply::op_apply(model, &op).is_err()
+                }
+                _ => true,
             };
             if refused {
                 report.unhandled.push(Unhandled::UnknownDocEffect(format!("doc.op:{spec}")));
@@ -3136,6 +3146,30 @@ fn run_doc_effect(
             report.unhandled.push(Unhandled::UnknownDocEffect(name.to_string()));
         }
     }
+}
+
+/// A `doc.op` spec as the op layer reads it: `op` verbatim, every other
+/// string field evaluated as an expression in the action's scope, and other
+/// values verbatim. A path value is passed as its index list, the op layer's
+/// path form (`op_apply::parse_path`), not the store's `__path__` marker. The
+/// reference's `effects.py` `doc.op` arm and Swift's `docOpArgs` are the same.
+fn doc_op_args(
+    fields: &serde_json::Map<String, serde_json::Value>,
+    store: &StateStore,
+    ctx: &serde_json::Value,
+) -> serde_json::Value {
+    let mut op = serde_json::Map::new();
+    for (k, v) in fields {
+        let arg = match v {
+            serde_json::Value::String(e) if k != "op" => match eval_expr(e, store, ctx) {
+                Value::Path(indices) => serde_json::json!(indices),
+                value => value_to_json(&value),
+            },
+            _ => v.clone(),
+        };
+        op.insert(k.clone(), arg);
+    }
+    serde_json::Value::Object(op)
 }
 
 /// Evaluate a `dx`/`dy`/`x1`/… argument that may be a number literal,
@@ -8504,6 +8538,36 @@ mod tests {
         assert_eq!(model.generation(), generation, "an unknown op changes nothing");
         assert!(report.unhandled.iter().any(|u| matches!(u, Unhandled::UnknownDocEffect(d) if d.contains("zz_no_such_op"))),
             "and is reported: {:?}", report.unhandled);
+    }
+
+    /// `doc.op` evaluates every field but `op` in the action's scope
+    /// (STATUS-jas item 38 step 3b): a PATH value (here the store's
+    /// `__path__` marker) reaches the op layer as its index list, a list as
+    /// itself, a string expression as its string; `op` stays verbatim, and a
+    /// non-string field is passed as written.
+    #[test]
+    fn doc_op_evaluates_its_fields_in_the_action_scope() {
+        let mut store = StateStore::new();
+        let mut model = make_model_two_rects();
+        let ctx = serde_json::json!({
+            "row": { "__path__": [0, 1] },
+            "param": { "path": [0, 0], "name": "Sun" }
+        });
+        run_effects(&[serde_json::json!({"doc.op": {"op": "toggle_element_lock", "path": "row"}})],
+            &ctx, &mut store, Some(&mut model), None, None, None);
+        assert!(model.document().get_element(&vec![0, 1]).unwrap().locked(), "a path value names the row");
+        assert!(!model.document().get_element(&vec![0, 0]).unwrap().locked(), "and only that row");
+
+        run_effects(&[serde_json::json!({"doc.op": {"op": "set_element_name", "path": "param.path", "name": "param.name"}})],
+            &ctx, &mut store, Some(&mut model), None, None, None);
+        assert_eq!(model.document().get_element(&vec![0, 0]).unwrap().common().name.as_deref(), Some("Sun"),
+            "a list param and a string param are evaluated");
+
+        let report = run_effects(&[serde_json::json!({"doc.op": {"op": "cycle_element_visibility", "path": [0, 1]}})],
+            &ctx, &mut store, Some(&mut model), None, None, None);
+        assert!(report.unhandled.is_empty(), "a literal path is passed as written: {:?}", report.unhandled);
+        assert_eq!(model.document().get_element(&vec![0, 1]).unwrap().visibility(),
+            crate::geometry::element::Visibility::Outline);
     }
 
     // ── Clipboard M′: `doc.paste`, as the three paste actions run it ──

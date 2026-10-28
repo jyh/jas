@@ -628,14 +628,17 @@ private func runOne(
         return
     }
 
-    // list_toggle: { target, value }: set membership (the Layers type
-    // filter). `panel.<key>` on the active panel, as the reference's arm.
+    // list_toggle: { target, value, panel? }: set membership (the Layers type
+    // filter, the Layers twirl's collapsed_paths). `panel.<key>` on the named
+    // panel when `panel` is given (as set_panel_state), else the active one,
+    // as the reference's arm.
     if let lt = effect["list_toggle"] as? [String: Any] {
         let target = lt["target"] as? String ?? ""
         let parts = target.split(separator: ".", maxSplits: 1).map(String.init)
-        if parts.count == 2, parts[0] == "panel", let active = store.getActivePanelId() {
+        if parts.count == 2, parts[0] == "panel",
+           let panel = (lt["panel"] as? String) ?? store.getActivePanelId() {
             let value = evalExpr(lt["value"], store: store, ctx: ctx)
-            store.listToggle(active, parts[1], valueToAny(value) ?? NSNull())
+            store.listToggle(panel, parts[1], valueToAny(value) ?? NSNull())
         }
         return
     }

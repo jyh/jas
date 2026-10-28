@@ -191,8 +191,10 @@
       ]
     },
     "confirm_rename": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "convert_to_artboards": {
       "class": "ui-state",
@@ -217,8 +219,10 @@
       "doc_verbs": []
     },
     "cycle_element_visibility": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "delete_artboard_from_dialog": {
       "class": "journaling",
@@ -1119,8 +1123,10 @@
       "doc_verbs": []
     },
     "toggle_element_lock": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "toggle_element_twirl": {
       "class": "ui-state",
@@ -1254,11 +1260,11 @@
     ],
     "by_class": {
       "doc-direct": 5,
-      "journaling": 50,
+      "journaling": 53,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 179,
+      "ui-state": 176,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1308,7 +1314,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 50,
+    "journaling_actions": 53,
     "native_intercepts": [
       "export_to_pdf"
     ],

@@ -106,6 +106,7 @@ use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
     self, BOOLEAN_KINDS, CHECK_KINDS, CHOOSE_EVENTS, COMMIT_EVENTS, INPUT_KINDS, ITEM_KINDS,
     OPTION_KINDS, PICK_EVENTS, PRESS_EVENTS, STOPS_EVENTS, STOPS_GESTURES, STOPS_KINDS,
+    TEXT_ENTRY_EVENTS,
 };
 pub use crate::panel_scope::COLOUR_PANEL;
 
@@ -155,6 +156,9 @@ pub struct UserEvent {
     /// exactly as the shell sent it: `None` when absent. The engine parses it;
     /// the shell never does.
     pub value: Option<Value>,
+    /// A `keydown`'s key name (`Enter`, `Escape`, a character), as the shell
+    /// sent it: `None` when absent (WIDGET_EVENTS.md, "Typing in a text field").
+    pub key: Option<String>,
 }
 
 /// Read the shell's event JSON. `event` defaults to `click`, as a behavior's
@@ -189,6 +193,7 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
         modifiers: json!({"alt": flag("alt"), "shift": flag("shift"),
                           "meta": flag("meta"), "ctrl": flag("ctrl")}),
         value: obj.get("value").cloned(),
+        key: obj.get("key").and_then(Value::as_str).map(str::to_string),
     })
 }
 
@@ -703,9 +708,33 @@ fn run_widget_behavior_in(
         return stops_gesture(panel_id, node, ev, scope, store, model, actions, dialogs, host);
     }
 
+    // WIDGET_EVENTS.md, "Typing in a text field": a `text_input`'s `input`,
+    // `keydown` and `blur` carry `event.value` (the text) and, on `keydown`
+    // only, `event.key`. Without its text, or a keydown without its key, the
+    // event is refused before anything runs. Every other event reads the
+    // modifiers alone.
+    let text_entry = kind == "text_input" && TEXT_ENTRY_EVENTS.contains(&ev.event.as_str());
+    let event = if text_entry {
+        let text = match &ev.value {
+            Some(Value::String(t)) => t.clone(),
+            _ => return Err(Refusal::new("MissingValue", ev.widget.clone())),
+        };
+        let mut event = value_event(ev, Value::String(text));
+        if ev.event == "keydown" {
+            let Some(key) = &ev.key else {
+                return Err(Refusal::new("MissingValue", ev.widget.clone()));
+            };
+            if let Some(m) = event.as_object_mut() {
+                m.insert("key".into(), Value::String(key.clone()));
+            }
+        }
+        event
+    } else {
+        ev.modifiers.clone()
+    };
     let mut cond_scope = scope.clone();
     if let Some(m) = cond_scope.as_object_mut() {
-        m.insert("event".into(), ev.modifiers.clone());
+        m.insert("event".into(), event.clone());
     }
     let mut batch: Vec<Value> = vec![];
     let mut chosen = 0usize;
@@ -756,8 +785,7 @@ fn run_widget_behavior_in(
     if chosen == 0 {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(panel_id, &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs,
-              host)
+    run_batch(panel_id, &batch, event, scope, store, model, actions, dialogs, host)
 }
 
 /// Pre-flight `batch` on copies, then run it for real (module doc, steps 4
@@ -1583,6 +1611,47 @@ mod tests {
                             &synthetic_actions(), &json!({}), host)
     }
 
+    /// WIDGET_EVENTS.md, "Typing in a text field" (STATUS-jas item 40): a
+    /// `text_input`'s `keydown` carries `event.key` and `event.value` (the
+    /// text), `blur` and `input` carry `event.value` and no key; only the
+    /// event's own behaviors run; a keydown with no key or any of the three
+    /// with no text is `MissingValue`. The reference's `TestTextEntry`.
+    #[test]
+    fn a_text_field_carries_its_key_and_its_text() {
+        let spec = json!({"content": {"type": "container", "id": "root", "children": [
+            {"id": "f", "type": "text_input", "bind": {"value": "panel.name"}, "behavior": [
+                {"event": "keydown", "condition": "event.key == 'Enter'",
+                 "effects": [{"set": {"confirmed": "event.value"}}]},
+                {"event": "keydown", "condition": "event.key == 'Escape'",
+                 "effects": [{"set": {"cancelled": "true"}}]},
+                {"event": "blur", "effects": [{"set": {"blurred": "event.value", "blur_key": "event.key"}}]},
+                {"event": "input", "effects": [{"set": {"typed": "event.value"}}]},
+            ]}]}});
+        let go = |ev: Value, store: &mut StateStore| {
+            let ev = parse_event(&ev).unwrap();
+            run_widget_behavior("zz_panel", &spec, &ev, &json!({"state": {}, "panel": {}}),
+                                store, &mut Model::default(), &json!({}), &json!({}),
+                                &mut EngineHost::default())
+        };
+        let mut store = StateStore::new();
+        assert!(go(json!({"widget": "f", "event": "keydown", "key": "Enter", "value": "Sun"}), &mut store).is_ok());
+        assert_eq!((store.get("confirmed"), store.get("cancelled")), (&json!("Sun"), &Value::Null));
+        assert!(go(json!({"widget": "f", "event": "keydown", "key": "Escape", "value": "x"}), &mut store).is_ok());
+        assert_eq!(store.get("cancelled"), &json!(true));
+        assert!(go(json!({"widget": "f", "event": "blur", "key": "Enter", "value": "Sun"}), &mut store).is_ok());
+        assert_eq!((store.get("blurred"), store.get("blur_key")), (&json!("Sun"), &Value::Null),
+                   "a key rides on keydown only");
+        assert!(go(json!({"widget": "f", "event": "input", "value": "S"}), &mut store).is_ok());
+        assert_eq!(store.get("typed"), &json!("S"));
+
+        let class = |ev: Value| go(ev, &mut StateStore::new()).err().map(|r| r.class);
+        assert_eq!(class(json!({"widget": "f", "event": "keydown", "value": "x"})), Some("MissingValue"),
+                   "a keydown names its key");
+        assert_eq!(class(json!({"widget": "f", "event": "blur"})), Some("MissingValue"));
+        assert_eq!(class(json!({"widget": "f", "event": "keydown", "key": "n", "value": "Su"})),
+                   Some("EmptyBehavior"), "another key runs nothing");
+    }
+
     /// WIDGET_EVENTS.md, "Clicking a button": a declared `click` behavior IS
     /// the click, so a node-level `action` never runs beside it, even when
     /// every behavior's condition is false (the reference's `click`; the web
@@ -2100,11 +2169,17 @@ mod tests {
         let node = json!({"type": "text_input", "id": "t", "bind": {"value": "panel.q"},
             "behavior": [{"event": "input", "effects": [
                 {"set_panel_state": {"key": "typed", "value": "true"}}]}]});
-        // `input` keeps the click path: its own behavior runs, nothing is parsed.
-        let (r, store) = door(node.clone(), json!({"widget": "t", "event": "input"}),
+        // `input` runs its own behavior and writes no bind; it carries the
+        // field's text (WIDGET_EVENTS.md, "Typing in a text field"), and
+        // without it the event is refused (until 2026-10-27 it ran textless).
+        let (r, store) = door(node.clone(), json!({"widget": "t", "event": "input", "value": "a"}),
                               json!({"q": "", "typed": false}));
         assert!(r.is_ok(), "{r:?}");
         assert_eq!(store.get_panel(PROBE, "typed"), &json!(true));
+        assert_eq!(store.get_panel(PROBE, "q"), &json!(""), "no bind write");
+        let (r, _) = door(node.clone(), json!({"widget": "t", "event": "input"}),
+                          json!({"q": "", "typed": false}));
+        assert_eq!(r.err().map(|e| e.class), Some("MissingValue"));
         // A commit writes the bind and does not run the `input` behavior.
         let (r, store) = door(node, json!({"widget": "t", "event": "commit", "value": "abc"}),
                               json!({"q": "", "typed": false}));

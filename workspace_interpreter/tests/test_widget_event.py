@@ -1356,3 +1356,83 @@ def test_a_color_bar_refuses_anything_but_two_numbers(text):
 def test_a_color_bar_is_an_input_kind_with_the_sliders_events():
     assert "color_bar" in we.INPUT_KINDS
     assert we.ALLOWED_EVENTS["color_bar"] == we.ALLOWED_EVENTS["slider"] == ("commit", "change")
+
+
+# ── Text entry: input, keydown, blur on a text_input (STATUS-jas item 40) ──
+
+
+class TestTextEntry:
+    """What `input`, `keydown` and `blur` carry (design
+    2026-10-27-jas-DESIGN-text-entry-events): `event.value` is the field's
+    text (for `keydown`, the text before the key acts), `event.key` the key's
+    name on `keydown` only, plus the four modifiers. None writes a bind."""
+
+    PID = "t_panel"
+
+    def _field(self):
+        return {"type": "text_input", "bind": {"value": "panel.name"},
+                "behavior": [
+                    {"event": "keydown", "condition": "event.key == 'Enter'",
+                     "effects": [{"set": {"confirmed": "event.value"}}]},
+                    {"event": "keydown", "condition": "event.key == 'Escape'",
+                     "effects": [{"set": {"cancelled": "true"}}]},
+                    {"event": "blur", "effects": [{"set": {"blurred": "event.value"}}]},
+                    {"event": "input", "effects": [{"set": {"typed": "event.value"}}]},
+                    {"event": "commit", "effects": [{"set": {"never": "1"}}]},
+                ]}
+
+    def test_enter_carries_the_key_and_the_text(self):
+        store = _panel_store(self.PID, {"name": "Old"})
+        r = we.text_entry(self._field(), "keydown", store, panel=None, text="Sun", key="Enter")
+        assert r == we.EventResult("committed", value="Sun", behaviors_run=1)
+        assert (store.get("confirmed"), store.get("cancelled")) == ("Sun", None)
+        assert store.get_panel(self.PID, "name") == "Old", "no bind write"
+        assert store.get("never") is None, "a key is not a commit"
+
+    def test_escape_runs_only_the_escape_behavior(self):
+        store = _panel_store(self.PID, {"name": "Old"})
+        r = we.text_entry(self._field(), "keydown", store, panel=None, text="Sun", key="Escape")
+        assert r.behaviors_run == 1
+        assert (store.get("confirmed"), store.get("cancelled")) == (None, True)
+
+    def test_another_key_runs_nothing(self):
+        store = _panel_store(self.PID, {})
+        r = we.text_entry(self._field(), "keydown", store, panel=None, text="Su", key="n")
+        assert r == we.EventResult("inert", value="Su")
+
+    def test_blur_and_input_carry_the_text_and_no_key(self):
+        store = _panel_store(self.PID, {})
+        w = self._field()
+        w["behavior"].append({"event": "blur", "effects": [{"set": {"blur_key": "event.key"}}]})
+        assert we.text_entry(w, "blur", store, panel=None, text="Sun", key="Enter").behaviors_run == 2
+        assert (store.get("blurred"), store.get("blur_key")) == ("Sun", None), \
+            "a key is carried on keydown only"
+        assert we.text_entry(w, "input", store, panel=None, text="S").behaviors_run == 1
+        assert store.get("typed") == "S"
+
+    def test_modifiers_ride_on_the_event(self):
+        store = _panel_store(self.PID, {})
+        w = {"type": "text_input", "behavior": [
+            {"event": "keydown", "effects": [{"set": {"s": "event.shift", "c": "event.ctrl"}}]}]}
+        we.text_entry(w, "keydown", store, panel=None, text="", key="Tab", modifiers={"shift": True})
+        assert (store.get("s"), store.get("c")) == (True, False)
+
+    def test_refusals(self):
+        store = _panel_store(self.PID, {"off": True})
+        assert we.text_entry({"type": "number_input"}, "keydown", store, panel=None,
+                             text="1", key="Enter").reason == we.WRONG_KIND
+        assert we.text_entry(self._field(), "commit", store, panel=None,
+                             text="x").reason == we.WRONG_EVENT
+        assert we.text_entry(self._field(), "keydown", store, panel=None,
+                             text="x", key=None).reason == we.MISSING_VALUE, "a keydown names its key"
+        assert we.text_entry(self._field(), "blur", store, panel=None,
+                             text=None).reason == we.MISSING_VALUE
+        off = dict(self._field(), bind={"disabled": "panel.off"})
+        assert we.text_entry(off, "blur", store, panel=None, text="x").reason == we.DISABLED
+
+    def test_scope_names_ride_beside_event(self):
+        store = _panel_store(self.PID, {})
+        w = {"type": "text_input", "behavior": [
+            {"event": "blur", "effects": [{"set": {"p": "node.path"}}]}]}
+        we.text_entry(w, "blur", store, panel=None, text="x", scope={"node": {"path": [1, 0]}})
+        assert store.get("p") == [1, 0]

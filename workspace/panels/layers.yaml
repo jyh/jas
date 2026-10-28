@@ -695,15 +695,21 @@ content:
             bind:
               visible: "panel.renaming_element == node.path"
               value: "node.name"
+            # event.value is the field's text (WIDGET_EVENTS.md, "Typing in
+            # a text field"). A blur after Enter or Escape finds the row no
+            # longer renaming and does nothing.
             behavior:
               - event: keydown
                 condition: "event.key == 'Enter'"
                 action: confirm_rename
+                params: { path: "node.path", name: "event.value" }
               - event: keydown
                 condition: "event.key == 'Escape'"
                 action: cancel_rename
               - event: blur
+                condition: "panel.renaming_element == node.path"
                 action: confirm_rename
+                params: { path: "node.path", name: "event.value" }
 
           # Select square (element selection indicator)
           - id: lp_select

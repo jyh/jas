@@ -20,6 +20,24 @@ private func opLiteral(_ v: Value) -> Any? {
     }
 }
 
+/// A `doc.op` spec as `opApply` reads it: `op` verbatim, every other string
+/// field evaluated as an expression in the action's scope, other values
+/// verbatim. A path or a list passes as its index array (`opApply`'s path
+/// form, never the store's `__path__` marker); a null as `NSNull`. Rust
+/// `doc_op_args` and the reference's `doc.op` arm are the same.
+private func docOpArgs(_ spec: [String: Any], context: [String: Any]) -> [String: Any] {
+    var op: [String: Any] = [:]
+    for (k, v) in spec {
+        guard k != "op", let expr = v as? String else { op[k] = v; continue }
+        switch evaluate(expr, context: context) {
+        case .path(let p): op[k] = p
+        case .list(let l): op[k] = l.map { $0.value }
+        case let value: op[k] = opLiteral(value) ?? NSNull()
+        }
+    }
+    return op
+}
+
 public enum LayersPanel {
     /// Source of truth is workspace/panels/layers.yaml's `menu:` block
     /// (review #15); the generic reader builds the items from the bundle.
@@ -528,9 +546,11 @@ public enum LayersPanel {
             return nil
         }
 
-        // doc.op: { op: <name>, ...literal fields }: one journaled op by name,
+        // doc.op: { op: <name>, ...fields }: one journaled op by name,
         // the model verbs' route (unlock_all, show_all, hide_selection) to the
-        // op layer the menu's `MenuActions` reaches too. The engine's
+        // op layer the menu's `MenuActions` reaches too. Every field but `op`
+        // is an expression in the action's scope (`docOpArgs`), so a row
+        // action names its row (`path: param.path`, STATUS-jas item 38). The engine's
         // `run_doc_effect` and the reference's `StateStore.apply_op` apply the
         // same op. A spec with no `op` name runs nothing.
         // doc.make_instance: { offset }: Object > Make Instance, the two
@@ -665,9 +685,9 @@ public enum LayersPanel {
             return nil
         }
 
-        let docOpHandler: PlatformEffect = { value, _, _ in
+        let docOpHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
-            opApply(model, controller, spec)
+            opApply(model, controller, docOpArgs(spec, context: callCtx))
             return nil
         }
 

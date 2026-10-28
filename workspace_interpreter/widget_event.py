@@ -574,6 +574,42 @@ def click(widget: dict, event: str, store: StateStore, *, panel: dict | None,
     return EventResult("committed", behaviors_run=ran)
 
 
+def text_entry(widget: dict, event: str, store: StateStore, *,
+               panel: dict | None, text: str | None, key: str | None = None,
+               modifiers: dict | None = None, scope: dict | None = None,
+               **run_kwargs) -> EventResult:
+    """Deliver a text-entry event (``input``, ``keydown``, ``blur``) to a
+    ``text_input`` (WIDGET_EVENTS.md §Typing in a text field).
+
+    ``event.value`` is ``text``, the field's text (for ``keydown``, the text
+    BEFORE the key acts). ``event.key`` is the key's name (``Enter``,
+    ``Escape``, a printable character) on ``keydown`` only; a ``keydown``
+    without one is refused. The four modifiers ride beside them. ``scope``
+    adds names beside ``event`` (a template row's ``node``). Only the
+    behaviors declared for THIS event run; none of these is a commit, and no
+    bind is written. Refuse a wrong kind, an event outside the three, a
+    missing text and a disabled widget.
+    """
+    del panel  # no bind write: accepted for the procedures' common signature
+    if widget.get("type") != "text_input":
+        return EventResult("refused", reason=WRONG_KIND)
+    if event not in TEXT_ENTRY_EVENTS:
+        return EventResult("refused", reason=WRONG_EVENT)
+    if text is None or (event == "keydown" and not isinstance(key, str)):
+        return EventResult("refused", reason=MISSING_VALUE)
+    if _is_disabled(widget, store):
+        return EventResult("refused", reason=DISABLED)
+    ev = {k: bool((modifiers or {}).get(k, False)) for k in CLICK_MODIFIERS}
+    ev["value"] = text
+    if event == "keydown":
+        ev["key"] = key
+    ran = _run_behaviors(_declared(widget, (event,)), text, store, run_kwargs,
+                         scope=scope, event=ev)
+    _settle(store, run_kwargs)
+    return EventResult("committed" if ran else "inert", value=text,
+                       behaviors_run=ran)
+
+
 def _as_text(v) -> str | None:
     """A bound value as the text an option ``id`` is compared with: a
     string as itself, a whole number without its ``.0``, a bool as

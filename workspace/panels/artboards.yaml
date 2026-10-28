@@ -287,15 +287,21 @@ content:
             bind:
               visible: "panel.renaming_artboard == ab.id"
               value: "ab.name"
+            # event.value is the field's text (WIDGET_EVENTS.md, "Typing in
+            # a text field"). A blur after Enter or Escape finds the row no
+            # longer renaming and does nothing.
             behavior:
               - event: keydown
                 condition: "event.key == 'Enter'"
                 action: confirm_artboard_rename
+                params: { artboard_id: "ab.id", new_name: "event.value" }
               - event: keydown
                 condition: "event.key == 'Escape'"
                 action: cancel_artboard_rename
               - event: blur
+                condition: "panel.renaming_artboard == ab.id"
                 action: confirm_artboard_rename
+                params: { artboard_id: "ab.id", new_name: "event.value" }
 
           # ARTBOARD_OPTIONS_BUTTON (col-1): opens the Dialogue
           - id: ap_options

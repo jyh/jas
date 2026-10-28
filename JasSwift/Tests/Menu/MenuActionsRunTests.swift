@@ -95,3 +95,25 @@ import Testing
             "the unlocked rect and the group as one; nothing locked")
     #expect(!model.canUndo, "selecting is not an edit")
 }
+
+// `doc.op` evaluates every field but `op` in the action's scope (STATUS-jas
+// item 38 step 3b): a PATH value (the `__path__` marker) reaches the op layer as
+// its index list, list and string params as themselves; each row verb is ONE
+// undo step. Rust and the reference `doc_op_evaluates_its_fields_in_the_action_scope`.
+@Test func docOpEvaluatesItsFieldsInTheActionScope() {
+    let model = Model()
+    let r = { (x: Double) in Element.rect(Rect(x: x, y: 0, width: 10, height: 10)) }
+    model.setDocumentForTest(Document(layers: [Layer(name: "L", children: [r(0), r(20)])],
+                                      selectedLayer: 0, selection: []))
+    LayersPanel.dispatchYamlAction("toggle_element_lock", model: model,
+                                   params: ["path": ["__path__": [0, 1]]])
+    let kids = { model.document.layers[0].children }
+    #expect(kids().map(\.isLocked) == [false, true], "a path value names the row")
+
+    LayersPanel.dispatchYamlAction("confirm_rename", model: model,
+                                   params: ["path": [0, 0], "name": "Sun"])
+    #expect(kids()[0].name == "Sun", "a list param and a string param are evaluated")
+    model.undo()
+    #expect(kids()[0].name == nil, "the rename is one undo step")
+    #expect(kids()[1].isLocked, "and only the rename")
+}
