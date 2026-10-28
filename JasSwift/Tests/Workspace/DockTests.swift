@@ -609,6 +609,21 @@ private func testLayout() -> WorkspaceLayout {
     }
 }
 
+@Test func toggleColorReopenKeepsTheMode() {
+    // COLOR.md §Color modes: the mode is panel-local state kept for the
+    // session; a reopen re-populates the channel values, never the mode.
+    // Mirror of the Rust toggle_panel_color_reopen_keeps_the_mode. Driven
+    // from a non-default mode, so a reset to the HSB default reds.
+    var l = testLayout()
+    #expect(l.panelOnScreen(.color))
+    l.colorPanelMode = .cmyk
+    layoutApply(&l, opTogglePanel(.color))
+    #expect(!l.panelOnScreen(.color), "closed by the first toggle")
+    layoutApply(&l, opTogglePanel(.color))
+    #expect(l.panelOnScreen(.color), "reopened by the second")
+    #expect(l.colorPanelMode == .cmyk)
+}
+
 @Test func panelKindStrRoundTripsGradientAndConcepts() {
     // The op round-trip must stay lossless now that the enum has 16 kinds.
     for kind: PanelKind in [.gradient, .concepts] {
