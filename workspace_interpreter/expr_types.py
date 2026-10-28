@@ -1,6 +1,8 @@
 """Value types for the expression language."""
 
 from __future__ import annotations
+
+import json
 import math
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -166,6 +168,12 @@ class Value:
         if self.type == ValueType.NUMBER:
             return number_to_canonical_string(self.value)
         if self.type == ValueType.STRING:
+            # A dict rides as STRING (from_python) so property access can
+            # drill in; as text it is its JSON, compact with sorted keys, which
+            # is Rust's serde form and Swift's `.sortedKeys` (census row #50).
+            if isinstance(self.value, dict):
+                return json.dumps(self.value, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=False)
             return self.value
         if self.type == ValueType.COLOR:
             return self.value

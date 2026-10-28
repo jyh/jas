@@ -29,6 +29,9 @@ enum Value: Equatable {
     }
 
     /// Convert a JSON value (Any?) to a typed Value.
+    /// How an object becomes text (census row #50): see `fromJson`.
+    static let objectTextOptions: JSONSerialization.WritingOptions = [.sortedKeys, .withoutEscapingSlashes]
+
     static func fromJson(_ v: Any?) -> Value {
         guard let v = v else { return .null }
 
@@ -85,7 +88,7 @@ enum Value: Equatable {
                         idx.append(num.intValue)
                     } else {
                         // Invalid path element; fall through to JSON-string path
-                        if let data = try? JSONSerialization.data(withJSONObject: dict),
+                        if let data = try? JSONSerialization.data(withJSONObject: dict, options: objectTextOptions),
                            let str = String(data: data, encoding: .utf8) {
                             return .string(str)
                         }
@@ -94,8 +97,11 @@ enum Value: Equatable {
                 }
                 return .path(idx)
             }
-            // Keep as JSON string for property access
-            if let data = try? JSONSerialization.data(withJSONObject: dict),
+            // Keep as JSON string for property access: compact, keys sorted,
+            // `/` unescaped, which is Rust's serde form and the reference's
+            // `Value.to_string` (census row #50; unsorted, the order changed
+            // from run to run of one binary).
+            if let data = try? JSONSerialization.data(withJSONObject: dict, options: objectTextOptions),
                let str = String(data: data, encoding: .utf8) {
                 return .string(str)
             }
