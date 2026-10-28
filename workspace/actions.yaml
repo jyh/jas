@@ -2050,9 +2050,11 @@ actions:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       # A plain click (STATUS-jas item 38 step 3c): the row's element becomes
-      # the whole element selection, through the op layer's `select_element`
-      # (a selection, not an edit: no snapshot). Shift and Command are a later step.
-      - doc.op: { op: select_element, path: "param.path" }
+      # the whole element selection, through the op layer's `select_path`
+      # (a selection, not an edit: no snapshot). Not `select_element`, which
+      # lifts a grouped child to its group as a canvas click does; both native
+      # trees' squares select the element itself. Shift and Command are a later step.
+      - doc.op: { op: select_path, path: "param.path" }
 
   layers_select_all:
     description: >

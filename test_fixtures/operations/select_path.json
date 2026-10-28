@@ -1,0 +1,45 @@
+[
+ {
+  "_doc": [
+   "STATUS-jas item 38: select_path {path} makes the selection exactly [all(path)], the Layers select square's",
+   "direct selection (the jas seat's design row for the select square). Unlike",
+   "select_element it never lifts a grouped child to its group. Selection-only, non-undoable. The expected",
+   "documents are group_nested.svg unchanged (unpack_group_at_missing_path_noop_expected.json) with only",
+   "`selection` edited."
+  ],
+  "name": "select_path_keeps_a_grouped_child",
+  "setup_svg": "group_nested.svg",
+  "ops": [{"op": "select_path", "path": [0, 0, 1]}],
+  "expected_json": "select_path_grouped_child_expected.json"
+ },
+ {
+  "name": "select_element_lifts_the_same_child_to_its_group",
+  "setup_svg": "group_nested.svg",
+  "ops": [{"op": "select_element", "path": [0, 0, 1]}],
+  "expected_json": "select_path_group_expected.json"
+ },
+ {
+  "name": "select_path_on_a_group_selects_the_group",
+  "setup_svg": "group_nested.svg",
+  "ops": [{"op": "select_path", "path": [0, 0]}],
+  "expected_json": "select_path_group_expected.json"
+ },
+ {
+  "name": "select_path_replaces_the_selection",
+  "setup_svg": "group_nested.svg",
+  "ops": [{"op": "select_all"}, {"op": "select_path", "path": [0, 0, 1]}],
+  "expected_json": "select_path_grouped_child_expected.json"
+ },
+ {
+  "name": "select_path_on_an_absent_path_is_missing_target",
+  "setup_svg": "group_nested.svg",
+  "ops": [{"op": "select_path", "path": [0, 5], "expected_error": "MissingTarget"}],
+  "expected_json": "unpack_group_at_missing_path_noop_expected.json"
+ },
+ {
+  "name": "select_element_on_an_absent_path_is_missing_target",
+  "setup_svg": "group_nested.svg",
+  "ops": [{"op": "select_element", "path": [0, 5], "expected_error": "MissingTarget"}],
+  "expected_json": "unpack_group_at_missing_path_noop_expected.json"
+ }
+]

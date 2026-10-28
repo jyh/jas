@@ -743,5 +743,19 @@
     ]
    }
   }
- }
+ },
+  {
+    "_doc": "The square of a GROUPED child selects that child, not its group (both native trees; STATUS-flask §619/§623). The expected document is the op golden select_path_grouped_child_expected.json.",
+    "name": "layers_element_select_keeps_a_grouped_child",
+    "setup_svg": "group_nested.svg",
+    "actions": [
+      {
+        "action": "layers_element_select",
+        "params": {
+          "path": [0, 0, 1]
+        }
+      }
+    ],
+    "expected_json": "layers_element_select_keeps_a_grouped_child_expected.json"
+  }
 ]
