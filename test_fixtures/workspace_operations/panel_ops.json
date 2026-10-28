@@ -291,5 +291,38 @@
    }
   ],
   "expected_json": "panel_clamp_floating_tiny.json"
+ },
+ {
+  "name": "toggle_panel_hides_an_on_screen_panel",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "toggle_panel",
+    "kind": "color"
+   }
+  ],
+  "expected_json": "panel_toggle_hides_color.json"
+ },
+ {
+  "name": "toggle_panel_raises_a_background_tab",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "toggle_panel",
+    "kind": "layers"
+   }
+  ],
+  "expected_json": "panel_show_background_tab.json"
+ },
+ {
+  "name": "toggle_panel_shows_a_panel_in_no_group",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "toggle_panel",
+    "kind": "gradient"
+   }
+  ],
+  "expected_json": "panel_toggle_shows_gradient.json"
  }
 ]

@@ -4403,6 +4403,36 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Window > <panel> after a layout load: `toggle_panel`'s `layout:` effect
+    /// runs on the dock the engine holds, and the act reply's `layout` is that
+    /// dock, so the shell redraws it as it does after a dock verb. Color is on
+    /// screen in the Default layout and closes; a second click brings it back
+    /// (appended to the last group, active).
+    #[test]
+    fn dispatch_toggle_panel_moves_the_engines_dock() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let loaded = json(&layout_load(e, "Default"));
+        let panels = |l: &serde_json::Value| -> Vec<String> {
+            l["anchored"][0]["groups"].as_array().unwrap().iter()
+                .flat_map(|g| g["panels"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()))
+                .collect()
+        };
+        assert!(panels(&loaded).contains(&"color_panel_content".to_string()), "{loaded}");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_color"}"#);
+        assert_eq!(err, "", "it ran: {reply}");
+        let closed = json(&reply)["layout"].clone();
+        assert!(!panels(&closed).contains(&"color_panel_content".to_string()), "Color closed: {closed}");
+        assert_eq!(closed.to_string(), take(unsafe { jas_layout_state(e) }), "the engine holds what it answered");
+        assert_eq!(closed["panes"], loaded["panes"], "a dock verb leaves the panes alone");
+        let (reply, _) = dispatch(e, r#"{"menu_item":"menu_color"}"#);
+        let back = json(&reply)["layout"].clone();
+        let last = back["anchored"][0]["groups"].as_array().unwrap().last().unwrap().clone();
+        assert_eq!(last["panels"].as_array().unwrap().last().unwrap(), "color_panel_content", "{back}");
+        assert_eq!(last["panels"][last["active"].as_u64().unwrap() as usize], "color_panel_content", "and active");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The Window menu's Toolbar / Panels checkmarks (`checked_when:
     /// panes.<id>`) read the ENGINE's pane layout once it holds one, and the
     /// engine wins over a `panes` the shell sends, as it does on the document
@@ -6279,11 +6309,13 @@ mod tests {
             "reset_workspace -> UnknownEffect:reset_layout",
             "revert_workspace -> UnknownEffect:revert_layout",
             "tile_panes -> UnknownEffect:tile",
-            // Window > Toolbar / Panels: the pane layout, which the engine
-            // does not hold (2026-10-28, design step 3).
+            // Window > Toolbar / Panels and Window > <panel>: `layout:`
+            // effects, refused by name because this census loads no layout
+            // (after `jas_layout_load` they run:
+            // `dispatch_toggle_pane_moves_the_engines_pane_layout`,
+            // `dispatch_toggle_panel_moves_the_engines_dock`).
             "toggle_pane -> UnknownEffect:layout",
-            // The dock: the shell shows and hides its own panels.
-            "toggle_panel -> Logged:toggle_panel (native): {{param.panel}}",
+            "toggle_panel -> UnknownEffect:layout",
         ];
         let mut expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
         expected.sort();

@@ -47,5 +47,50 @@
   ],
   "expected_json": "open_print_dialog_expected.json",
   "expected_layout": "pane_maximize.json"
+ },
+ {
+  "name": "toggle_panel_hides_an_on_screen_panel",
+  "setup_svg": "rect_with_stroke.svg",
+  "setup_layout": "workspace_default.json",
+  "actions": [
+   {
+    "action": "toggle_panel",
+    "params": {
+     "panel": "color"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_layout": "panel_toggle_hides_color.json"
+ },
+ {
+  "name": "toggle_panel_raises_a_background_tab",
+  "setup_svg": "rect_with_stroke.svg",
+  "setup_layout": "workspace_default.json",
+  "actions": [
+   {
+    "action": "toggle_panel",
+    "params": {
+     "panel": "layers"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_layout": "panel_show_background_tab.json"
+ },
+ {
+  "name": "toggle_panel_shows_a_panel_in_no_group",
+  "setup_svg": "rect_with_stroke.svg",
+  "setup_layout": "workspace_default.json",
+  "actions": [
+   {
+    "action": "toggle_panel",
+    "params": {
+     "panel": "gradient"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_layout": "panel_toggle_shows_gradient.json"
  }
 ]
