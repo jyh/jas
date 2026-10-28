@@ -290,7 +290,13 @@ private func valueToAny(_ v: Value) -> Any? {
         return n
     case .string(let s): return s
     case .color(let c): return c
-    case .list(let l): return l.map { $0.value }
+    // A list literal can hold evaluated values (`[as_path(param.path)]`): a
+    // path element becomes the `__path__` marker the store holds, as the other
+    // runners' `value_to_json` writes it (STATUS-jas item 38 step 3c).
+    case .list(let l): return l.map { e -> Any in
+        if case .path(let p)? = e.value as? Value { return ["__path__": p] }
+        return e.value
+    }
     case .path(let p): return ["__path__": p]
     case .closure: return v  // keep as Value for closure dispatch
     }

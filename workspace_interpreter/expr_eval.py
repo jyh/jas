@@ -11,6 +11,26 @@ from workspace_interpreter.expr_parser import (
 from workspace_interpreter import color_util
 
 
+def _index_path(v: Value):
+    """A PATH value, a list of non-negative integers, or a ``__path__`` marker
+    as a tuple of indices; ``None`` for anything else (``as_path``)."""
+    if v.type == ValueType.PATH:
+        return tuple(v.value)
+    items = v.value
+    if v.type == ValueType.STRING and isinstance(items, dict):
+        items = items.get("__path__") if len(items) == 1 else None
+    elif v.type != ValueType.LIST:
+        items = None
+    if not isinstance(items, (list, tuple)):
+        return None
+    out = []
+    for i in items:
+        if isinstance(i, bool) or not isinstance(i, (int, float)) or i < 0 or i != int(i):
+            return None
+        out.append(int(i))
+    return tuple(out)
+
+
 def eval_node(node, ctx: dict) -> Value:
     """Evaluate an AST node against a context dict of namespaces.
 
@@ -411,6 +431,33 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
                 return Value.null()
             indices.append(int(v.value))
         return Value.path(tuple(indices))
+
+    if name == "as_path":
+        # A list of child indices, or a path marker, as a PATH value; null for
+        # anything else (STATUS-jas item 38 step 3c: an effect writing paths
+        # from a row's `node.path`, which is a list).
+        if len(node.args) != 1:
+            return Value.null()
+        p = _index_path(eval_node(node.args[0], ctx))
+        return Value.null() if p is None else Value.path(p)
+
+    if name == "tree_row_range":
+        # The rows' paths from one row to another, inclusive, in row order, as
+        # path markers; [] when either end is not a row (STATUS-jas item 38
+        # step 3c: a Shift-click on a Layers row). An end is a path, a list or
+        # a marker, as `as_path` reads one.
+        if len(node.args) != 3:
+            return Value.null()
+        rows = eval_node(node.args[0], ctx)
+        if rows.type != ValueType.LIST:
+            return Value.null()
+        paths = [_index_path(Value.from_python(r.get("path"))) if isinstance(r, dict) else None
+                 for r in rows.value]
+        ends = [_index_path(eval_node(a, ctx)) for a in node.args[1:]]
+        if None in ends or ends[0] not in paths or ends[1] not in paths:
+            return Value.list_([])
+        lo, hi = sorted((paths.index(ends[0]), paths.index(ends[1])))
+        return Value.list_([{"__path__": list(p)} for p in paths[lo:hi + 1]])
 
     if name == "path_child":
         if len(node.args) != 2:
