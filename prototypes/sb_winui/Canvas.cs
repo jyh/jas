@@ -1090,6 +1090,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         ApplyCloseWindow(reply, $"item=quit action=quit {head}");
         ApplyClipboardWrite(reply, $"item=quit action=quit {head}");
+        ApplyExportPdf(reply, $"item=quit action=quit {head}");
         ApplySaveAllThenClose(reply, $"item=quit action=quit {head}");
     }
 
@@ -1153,6 +1154,7 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyRemoveTab(reply, head);
         ApplyCloseWindow(reply, head);
         ApplyClipboardWrite(reply, head);
+        ApplyExportPdf(reply, head);
         ApplySaveAllThenClose(reply, head);
         _report($"KEY RAN {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog={DialogWire.Named(reply) ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
@@ -1195,6 +1197,31 @@ internal sealed unsafe class Canvas : IDisposable
             }
         });
     }
+
+    /// <summary>
+    /// jas §637 (#733): a reply that names `export_pdf: <file name>` (Print >
+    /// Print) asks for the document's PDF to be saved under that suggested
+    /// name. The bytes are the engine's (`jas_document_pdf`, on this thread);
+    /// where they go is the UI's (<see cref="ExportPdfReady"/>). A span that is
+    /// not a PDF is reported and never handed on. Read beside
+    /// <see cref="ApplyClipboardWrite"/> on every act reply.
+    /// </summary>
+    private void ApplyExportPdf(string reply, string head)
+    {
+        var name = ActWire.ExportPdf(reply);
+        if (name is null) { return; }
+        var bytes = JasCore.TakeBytes(JasCore.jas_document_pdf(_engine));
+        if (!ActWire.IsPdf(bytes))
+        {
+            _report($"RUSTFAIL PDF EXPORT NOT A PDF {head} name={PanelWire.RowValue(name)} bytes={bytes.Length} {Tids()}");
+            return;
+        }
+        _report($"PDF EXPORT named {head} name={PanelWire.RowValue(name)} bytes={bytes.Length} {Tids()}");
+        PostToUi(() => ExportPdfReady?.Invoke(name, bytes));
+    }
+
+    /// <summary>jas §637: a PDF the engine named is ready to save (its suggested name, its bytes). Raised on the UI thread.</summary>
+    internal Action<string, byte[]>? ExportPdfReady { get; set; }
 
     /// <summary>
     /// jas §364: a paste refused with `NeedsClipboard` has run nothing. Read the
@@ -1437,6 +1464,7 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyRemoveTab(reply, head);
         ApplyCloseWindow(reply, head);
         ApplyClipboardWrite(reply, head);
+        ApplyExportPdf(reply, head);
         ApplySaveAllThenClose(reply, head);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
@@ -5012,6 +5040,7 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyRemoveTab(reply, runHead);
             ApplyCloseWindow(reply, runHead);
             ApplyClipboardWrite(reply, runHead);
+            ApplyExportPdf(reply, runHead);
             ApplySaveAllThenClose(reply, runHead);
         }
         catch (Exception ex)
@@ -5071,6 +5100,7 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
             ApplyClipboardWrite(reply, head);
+            ApplyExportPdf(reply, head);
             ApplySaveAllThenClose(reply, head);
         }
         catch (Exception ex)
@@ -5291,6 +5321,7 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
             ApplyClipboardWrite(reply, head);
+            ApplyExportPdf(reply, head);
             ApplySaveAllThenClose(reply, head);
         }
         catch (Exception ex)
