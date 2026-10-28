@@ -112,6 +112,24 @@ public enum LayersPanel {
         // three-verb blast radius.
         let params = mergeDeclaredParamDefaults(params, actionDef: actionDef)
 
+        let ctx = actionContext(model: model, ws: ws, panelSelection: panelSelection,
+                                artboardsPanelSelection: artboardsPanelSelection, params: params)
+
+        runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
+                              model: model, actions: actions,
+                              dialogs: ws.data["dialogs"] as? [String: Any],
+                              onCloseDialog: onCloseDialog,
+                              onLayoutOp: onLayoutOp)
+    }
+
+    /// The evaluation context a Layers YAML action runs in: the active
+    /// document view, the `panel` dict (selections, isolation stack, the tree's
+    /// binds), `param`, `state` and `preferences`. Shared by
+    /// ``dispatchYamlAction`` and ``treeKey``, so a key resolves in the scope its
+    /// action then runs in (Rust's `build_appstate_ctx`).
+    static func actionContext(model: Model, ws: WorkspaceData,
+                              panelSelection: [[Int]], artboardsPanelSelection: [String],
+                              params: [String: Any]) -> [String: Any] {
         // The Artboards panel's selection: the caller's, or else the panel
         // scope's own -- what `ArtboardsPanel.dispatch` reads and passes. This
         // used to default to `[]`, so every OTHER caller (`ViewActions`, the
@@ -199,12 +217,24 @@ public enum LayersPanel {
             // line is exactly the View menu.
             "preferences": Preferences.current() ?? NSNull(),
         ]
+        return ctx
+    }
 
-        runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
-                              model: model, actions: actions,
-                              dialogs: ws.data["dialogs"] as? [String: Any],
-                              onCloseDialog: onCloseDialog,
-                              onLayoutOp: onLayoutOp)
+    /// A key on the focused Layers tree, through layers.yaml's `keyboard:` rows
+    /// (STATUS-jas item 8 class L, step 2b): the chord resolves in the action
+    /// context (``resolvePanelKey``) and the row's action is dispatched. false
+    /// when no row binds the chord, so the caller lets the key pass. Mirrors Rust
+    /// `layers_tree_key`.
+    @discardableResult
+    public static func treeKey(_ chord: KeyChord, model: Model,
+                               onCloseDialog: (() -> Void)? = nil) -> Bool {
+        guard let ws = WorkspaceData.load(),
+              let panel = (ws.data["panels"] as? [String: Any])?["layers_panel_content"] else { return false }
+        let ctx = actionContext(model: model, ws: ws, panelSelection: [],
+                                artboardsPanelSelection: [], params: [:])
+        guard let cmd = resolvePanelKey(panel, chord: chord, context: ctx) else { return false }
+        dispatchYamlAction(cmd.action, model: model, params: cmd.params, onCloseDialog: onCloseDialog)
+        return true
     }
 
     /// Build the LayersPanel platform-effect registry and run `effects` through
