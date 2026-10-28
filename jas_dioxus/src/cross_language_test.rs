@@ -3013,6 +3013,8 @@ pub(crate) mod tests {
         "place_concept_instance.json",
         // set_concept_param, held to place_concept_instance's golden.
         "concept_param_actions.json",
+        // promote_to_concept, held to the fitter corpus's answer.
+        "promote_concept_actions.json",
         // Object / Edit menu model-pure verbs (select_all, group, ungroup,
         // ungroup_all, lock, hide_selection, make_instance). These are
         // bespoke-native: their actions.yaml entries are `log` stubs (the

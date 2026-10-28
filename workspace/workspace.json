@@ -11749,7 +11749,7 @@
                 "alignment": "center"
               },
               "bind": {
-                "background": "if mem(ab.id, active_document.artboards_panel_selection_ids) then '{{theme.colors.selection}}' else 'transparent'"
+                "background": "if mem(ab.id, active_document.artboards_panel_selection_ids) then theme.colors.selection else 'transparent'"
               },
               "behavior": [
                 {
@@ -15826,7 +15826,7 @@
                     "alignment": "center"
                   },
                   "bind": {
-                    "background": "if concept.id == panel.selected_concept then '{{theme.colors.selection}}' else 'transparent'"
+                    "background": "if concept.id == panel.selected_concept then theme.colors.selection else 'transparent'"
                   },
                   "children": [
                     {
@@ -17202,7 +17202,7 @@
                 "alignment": "center"
               },
               "bind": {
-                "background": "if node.panel_selected then '{{theme.colors.selection}}' else 'transparent'",
+                "background": "if node.panel_selected then theme.colors.selection else 'transparent'",
                 "opacity": "if node.search_ancestor_only then 0.5 else 1.0"
               },
               "behavior": [
@@ -21749,7 +21749,7 @@
                 "alignment": "center"
               },
               "bind": {
-                "background": "if sym.id == panel.selected_symbol then '{{theme.colors.selection}}' else 'transparent'"
+                "background": "if sym.id == panel.selected_symbol then theme.colors.selection else 'transparent'"
               },
               "children": [
                 {
