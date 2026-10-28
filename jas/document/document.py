@@ -282,12 +282,10 @@ class Document:
     def cycling_element_visibility(self, path: ElementPath) -> "Document":
         """Return a document with the element at ``path``'s OWN visibility
         advanced one step of the Layers eye cycle, preview -> outline ->
-        invisible -> preview (STATUS-jas item 38). Nothing is written onto its
-        descendants. An element that becomes invisible leaves the selection
-        with its descendants. A path naming no element returns the document
-        unchanged. Mirrors the Rust ``Document::cycling_element_visibility``
+        invisible -> preview (STATUS-jas item 38), through
+        ``setting_element_visibility``. A path naming no element returns the
+        document unchanged. Mirrors the Rust ``Document::cycling_element_visibility``
         and the Swift ``cyclingElementVisibility(at:)``."""
-        from dataclasses import replace as _replace
         from geometry.element import Visibility
         try:
             elem = self.get_element(path)
@@ -295,8 +293,24 @@ class Document:
             return self
         nxt = {Visibility.PREVIEW: Visibility.OUTLINE, Visibility.OUTLINE: Visibility.INVISIBLE,
                Visibility.INVISIBLE: Visibility.PREVIEW}[elem.visibility]
-        new_doc = self.replace_element(path, _replace(elem, visibility=nxt))
-        if nxt == Visibility.INVISIBLE:
+        return self.setting_element_visibility(path, nxt)
+
+    def setting_element_visibility(self, path: ElementPath, visibility) -> "Document":
+        """Return a document with the element at ``path``'s OWN visibility set
+        to ``visibility`` (the Layers solo, STATUS-jas item 8). Nothing is
+        written onto its descendants. An element that becomes invisible leaves
+        the selection with its descendants, as the eye cycle's does. A path
+        naming no element returns the document unchanged. Mirrors the Rust
+        ``Document::setting_element_visibility`` and the Swift
+        ``settingElementVisibility(at:_:)``."""
+        from dataclasses import replace as _replace
+        from geometry.element import Visibility
+        try:
+            elem = self.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+            return self
+        new_doc = self.replace_element(path, _replace(elem, visibility=visibility))
+        if visibility == Visibility.INVISIBLE:
             n = len(path)
             new_doc = _replace(new_doc, selection=frozenset(
                 es for es in new_doc.selection if tuple(es.path[:n]) != tuple(path)))

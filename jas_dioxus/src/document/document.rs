@@ -551,11 +551,29 @@ impl Document {
             Visibility::Outline => Visibility::Invisible,
             Visibility::Invisible => Visibility::Preview,
         };
+        self.setting_element_visibility(path, next)
+    }
+
+    /// The Layers solo's write (STATUS-jas item 8): the element at `path`'s OWN
+    /// visibility set to `visibility`; nothing is written onto its descendants.
+    /// An element that becomes invisible leaves the selection with its
+    /// descendants, as the eye cycle's does. A path naming no element returns
+    /// the document unchanged. Mirrors the reference's
+    /// `setting_element_visibility` and the Swift `settingElementVisibility(at:_:)`.
+    pub fn setting_element_visibility(
+        &self,
+        path: &ElementPath,
+        visibility: crate::geometry::element::Visibility,
+    ) -> Self {
+        use crate::geometry::element::Visibility;
+        if self.get_element(path).is_none() {
+            return self.clone();
+        }
         let mut new_doc = self.clone();
         if let Some(elem) = new_doc.get_element_mut(path) {
-            elem.common_mut().visibility = next;
+            elem.common_mut().visibility = visibility;
         }
-        if next == Visibility::Invisible {
+        if visibility == Visibility::Invisible {
             new_doc
                 .selection
                 .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));

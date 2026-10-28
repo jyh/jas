@@ -1572,6 +1572,20 @@ def op_apply(model: Model, op: dict) -> None:
             new_doc = doc.naming_element(path, new_name if isinstance(new_name, str) else "")
         if new_doc is not doc:
             model.edit_document(new_doc)
+    elif name == "set_element_visibility":
+        # The Layers solo's write (STATUS-jas item 8): one element's own
+        # visibility, by name ("preview" / "outline" / "invisible"). Mirrors
+        # op_apply.rs. A path naming no element, or an unknown name, is skipped.
+        from geometry.element import Visibility
+        path = parse_path(op.get("path"))
+        vis = {"preview": Visibility.PREVIEW, "outline": Visibility.OUTLINE,
+               "invisible": Visibility.INVISIBLE}.get(op.get("visibility"))
+        if not path or vis is None:
+            return
+        doc = model.document
+        new_doc = doc.setting_element_visibility(path, vis)
+        if new_doc is not doc:
+            model.edit_document(new_doc)
     elif name == "move_selection":
         ctrl.move_selection(num_field(op, "dx"), num_field(op, "dy"))
     elif name == "copy_selection":
