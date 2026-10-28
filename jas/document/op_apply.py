@@ -1532,6 +1532,21 @@ def op_apply(model: Model, op: dict) -> None:
         except (IndexError, KeyError, TypeError, AttributeError):
             return
         model.edit_document(model.document.toggling_element_lock(path))
+    elif name in ("cycle_element_visibility", "set_element_name"):
+        # The Layers row's eye and rename commit (STATUS-jas item 38), through
+        # the pure Document helpers. Mirrors op_apply.rs. A path naming no
+        # element is skipped, as toggle_element_lock's is.
+        path = parse_path(op.get("path"))
+        if not path:
+            return
+        doc = model.document
+        if name == "cycle_element_visibility":
+            new_doc = doc.cycling_element_visibility(path)
+        else:
+            new_name = op.get("name")
+            new_doc = doc.naming_element(path, new_name if isinstance(new_name, str) else "")
+        if new_doc is not doc:
+            model.edit_document(new_doc)
     elif name == "move_selection":
         ctrl.move_selection(num_field(op, "dx"), num_field(op, "dy"))
     elif name == "copy_selection":

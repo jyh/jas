@@ -78,6 +78,11 @@
         "array"
       ]
     },
+    "cycle_element_visibility": {
+      "path": [
+        "array"
+      ]
+    },
     "delete_artboard_by_id": {
       "id": [
         "string"
@@ -357,6 +362,14 @@
         "string"
       ]
     },
+    "set_element_name": {
+      "name": [
+        "string"
+      ],
+      "path": [
+        "array"
+      ]
+    },
     "set_graphics_field": {
       "field": [
         "string"
@@ -496,6 +509,9 @@
       "target_id": "witnessed",
       "target_path": "witnessed"
     },
+    "cycle_element_visibility": {
+      "path": "witnessed"
+    },
     "delete_artboard_by_id": {
       "id": "witnessed"
     },
@@ -627,6 +643,10 @@
     "set_document_setup_field": {
       "field": "witnessed",
       "value": "witnessed"
+    },
+    "set_element_name": {
+      "name": "witnessed",
+      "path": "witnessed"
     },
     "set_graphics_field": {
       "field": "witnessed",

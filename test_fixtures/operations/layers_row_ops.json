@@ -1,0 +1,81 @@
+[
+  {
+    "_doc": [
+      "STATUS-jas item 38 step 2: the two Layers-row ops the tree's row template needs and no op layer had.",
+      "cycle_element_visibility {path}: the eye button's cycle, preview -> outline -> invisible -> preview, on the",
+      "element at path only (a container's descendants inherit it when drawn; nothing is written onto them),",
+      "and an element that becomes invisible leaves the selection with its descendants.",
+      "set_element_name {path, name}: the rename commit; an empty name clears the name (the row then shows",
+      "<TypeLabel>). Both are one undoable transaction each, through Document.cycling_element_visibility and",
+      "Document.naming_element in all three op layers. Expected files are the reference's output, read against",
+      "the setup before commit; the no-op cases reuse lock_toggle_noop_expected.json (two_rects.svg unchanged)."
+    ],
+    "name": "cycling_a_leaf_once_makes_it_outline",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0, 1]}]}
+    ],
+    "expected_json": "layers_row_ops_leaf_outline_expected.json"
+  },
+  {
+    "_doc": "Three cycles return to preview: the cycle is a cycle, and the document is exactly the setup.",
+    "name": "cycling_three_times_is_a_round_trip",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0, 1]}]},
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0, 1]}]},
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0, 1]}]}
+    ],
+    "expected_json": "lock_toggle_noop_expected.json"
+  },
+  {
+    "_doc": "Cycling a LAYER writes the layer's own visibility and nothing onto its children; a selected child leaves the selection when the layer becomes invisible.",
+    "name": "a_layer_made_invisible_drops_its_selected_child",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "select", "ops": [{"op": "select_element", "path": [0, 0]}]},
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0]}]},
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0]}]}
+    ],
+    "expected_json": "layers_row_ops_layer_invisible_expected.json"
+  },
+  {
+    "_doc": "The control for the case above: an outline layer keeps its selected child.",
+    "name": "an_outline_layer_keeps_its_selected_child",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "select", "ops": [{"op": "select_element", "path": [0, 0]}]},
+      {"name": "cycle_element_visibility", "ops": [{"op": "cycle_element_visibility", "path": [0]}]}
+    ],
+    "expected_json": "layers_row_ops_layer_outline_selected_expected.json"
+  },
+  {
+    "name": "set_element_name_names_the_element",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "set_element_name", "ops": [{"op": "set_element_name", "path": [0, 0], "name": "Front"}]}
+    ],
+    "expected_json": "layers_row_ops_named_expected.json"
+  },
+  {
+    "_doc": "An empty name clears it: naming then clearing is the setup again.",
+    "name": "an_empty_name_clears_the_name",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "set_element_name", "ops": [{"op": "set_element_name", "path": [0, 0], "name": "Front"}]},
+      {"name": "set_element_name", "ops": [{"op": "set_element_name", "path": [0, 0], "name": ""}]}
+    ],
+    "expected_json": "lock_toggle_noop_expected.json"
+  },
+  {
+    "_doc": "Each op is its own undo step: undoing the second rename leaves the first.",
+    "name": "a_rename_is_one_undo_step",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "set_element_name", "ops": [{"op": "set_element_name", "path": [0, 0], "name": "Front"}]},
+      {"name": "set_element_name", "ops": [{"op": "set_element_name", "path": [0, 0], "name": "Back"}]}
+    ],
+    "history": ["undo"],
+    "expected_json": "layers_row_ops_named_expected.json"
+  }
+]
