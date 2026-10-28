@@ -2016,8 +2016,9 @@ actions:
       # STATUS-jas item 38 step 3c, stored as paths. none: the row becomes the
       # whole selection. toggle: the row goes in or out. shift: the visible rows
       # from the selection's LAST entry to this row, inclusive (the web's rule;
-      # with nothing selected it is a plain click). Not built: a collapsed
-      # group's descendants joining a range (design row, part 3 (ii)).
+      # with nothing selected it is a plain click). A collapsed group in the
+      # range brings its hidden descendants (tree_row_range's fourth argument,
+      # the full element tree), as the description says.
       - if:
           condition: "param.modifier == 'toggle'"
           then:
@@ -2032,7 +2033,7 @@ actions:
                            panel.collapsed_paths, panel.layers_panel_selection,
                            panel.renaming_element),
                          panel.layers_panel_selection[panel.layers_panel_selection.length - 1],
-                         param.path)
+                         param.path, active_document.element_tree)
                     else [as_path(param.path)]
 
   layers_element_select:
@@ -2050,9 +2051,11 @@ actions:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       # A plain click (STATUS-jas item 38 step 3c): the row's element becomes
-      # the whole element selection, through the op layer's `select_element`
-      # (a selection, not an edit: no snapshot). Shift and Command are a later step.
-      - doc.op: { op: select_element, path: "param.path" }
+      # the whole element selection, through the op layer's `select_path`
+      # (a selection, not an edit: no snapshot). Not `select_element`, which
+      # lifts a grouped child to its group as a canvas click does; both native
+      # trees' squares select the element itself. Shift and Command are a later step.
+      - doc.op: { op: select_path, path: "param.path" }
 
   layers_select_all:
     description: >

@@ -57,6 +57,7 @@
     "select_all": "selection",
     "select_by_ids": "selection",
     "select_element": "selection",
+    "select_path": "selection",
     "select_rect": "selection",
     "set_advanced_field": "edit",
     "set_artboard_field": "edit",
