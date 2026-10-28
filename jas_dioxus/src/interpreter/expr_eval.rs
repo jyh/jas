@@ -699,21 +699,34 @@ fn eval_func(
         // The rows' paths from one row to another, inclusive, in row order, as
         // path markers; [] when either end is not a row (STATUS-jas item 38
         // step 3c: a Shift-click on a Layers row). The reference's
-        // `tree_row_range`; an end is read as `as_path` reads one.
+        // `tree_row_range`; an end is read as `as_path` reads one. An optional
+        // fourth argument is the element tree's full row list: a row in the
+        // range marked `collapsed` then brings every row under it from that
+        // list, right after it, in its order.
         "tree_row_range" => {
-            if args.len() != 3 { return Value::Null; }
+            if args.len() != 3 && args.len() != 4 { return Value::Null; }
             let Value::List(rows) = eval_inner(&args[0], ctx, scope, store_cb) else { return Value::Null };
-            let paths: Vec<Option<Vec<usize>>> = rows.iter()
-                .map(|r| r.get("path").and_then(|p| index_path(&Value::from_json(p))))
-                .collect();
-            let ends: Vec<Option<Vec<usize>>> = args[1..].iter()
+            let path_of = |r: &serde_json::Value| r.get("path").and_then(|p| index_path(&Value::from_json(p)));
+            let paths: Vec<Option<Vec<usize>>> = rows.iter().map(path_of).collect();
+            let ends: Vec<Option<Vec<usize>>> = args[1..3].iter()
                 .map(|a| index_path(&eval_inner(a, ctx, scope, store_cb))).collect();
+            let every: Vec<Vec<usize>> = match args.get(3).map(|a| eval_inner(a, ctx, scope, store_cb)) {
+                Some(Value::List(full)) => full.iter().filter_map(path_of).collect(),
+                _ => vec![],
+            };
             let at = |e: &Option<Vec<usize>>| e.as_ref().and_then(|e| paths.iter().position(|p| p.as_ref() == Some(e)));
             match (at(&ends[0]), at(&ends[1])) {
                 (Some(a), Some(b)) => {
                     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-                    Value::List(paths[lo..=hi].iter().flatten()
-                        .map(|p| serde_json::json!({"__path__": p})).collect())
+                    let mut out: Vec<Vec<usize>> = vec![];
+                    for k in lo..=hi {
+                        let Some(p) = &paths[k] else { continue };
+                        out.push(p.clone());
+                        if rows[k].get("collapsed").and_then(|c| c.as_bool()) == Some(true) {
+                            out.extend(every.iter().filter(|q| q.len() > p.len() && q.starts_with(p)).cloned());
+                        }
+                    }
+                    Value::List(out.into_iter().map(|p| serde_json::json!({"__path__": p})).collect())
                 }
                 _ => Value::List(vec![]),
             }

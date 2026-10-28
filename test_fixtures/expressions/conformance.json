@@ -1254,5 +1254,353 @@
     },
     "expected": 0,
     "type": "number"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(0), path(1), state.all).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "collapsed": true
+        },
+        {
+          "path": [
+            1
+          ],
+          "collapsed": false
+        }
+      ],
+      "all": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": 5,
+    "type": "number"
+  },
+  {
+    "expr": "\"\" + as_path(tree_row_range(state.rows, path(1), path(0), state.all)[2])",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "collapsed": true
+        },
+        {
+          "path": [
+            1
+          ],
+          "collapsed": false
+        }
+      ],
+      "all": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": "0.0.0",
+    "type": "string"
+  },
+  {
+    "expr": "\"\" + as_path(tree_row_range(state.rows, path(0), path(1), state.all)[4])",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "collapsed": true
+        },
+        {
+          "path": [
+            1
+          ],
+          "collapsed": false
+        }
+      ],
+      "all": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": "1",
+    "type": "string"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(0), path(1)).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "collapsed": true
+        },
+        {
+          "path": [
+            1
+          ],
+          "collapsed": false
+        }
+      ],
+      "all": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": 2,
+    "type": "number"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(0), path(1), state.all).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "collapsed": false
+        },
+        {
+          "path": [
+            1
+          ],
+          "collapsed": false
+        }
+      ],
+      "all": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": 2,
+    "type": "number"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(1), path(1), state.all).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "collapsed": true
+        },
+        {
+          "path": [
+            1
+          ],
+          "collapsed": false
+        }
+      ],
+      "all": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "path": [
+            0,
+            1
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": 1,
+    "type": "number"
   }
 ]

@@ -1011,3 +1011,43 @@ tests:
     expected: 0
     type: number
     note: "an end that is not a row (a hidden or absent one) gives nothing"
+
+  # tree_row_range(rows, from, to, all): with a fourth argument, the element
+  # tree's full row list, a COLLAPSED row in the range brings every row under it
+  # from `all`, right after it, in `all`'s order (layers_panel_select: "selecting
+  # a collapsed group includes all its descendants").
+  - expr: "tree_row_range(state.rows, path(0), path(1), state.all).length"
+    state: {rows: [{path: [0], collapsed: true}, {path: [1], collapsed: false}], all: [{path: [0]}, {path: [0, 0]}, {path: [0, 0, 0]}, {path: [0, 1]}, {path: [1]}, {path: [1, 0]}]}
+    expected: 5
+    type: number
+    note: "the collapsed [0] brings [0,0], [0,0,0] and [0,1]; the open [1] brings nothing"
+
+  - expr: '"" + as_path(tree_row_range(state.rows, path(1), path(0), state.all)[2])'
+    state: {rows: [{path: [0], collapsed: true}, {path: [1], collapsed: false}], all: [{path: [0]}, {path: [0, 0]}, {path: [0, 0, 0]}, {path: [0, 1]}, {path: [1]}, {path: [1, 0]}]}
+    expected: "0.0.0"
+    type: string
+    note: "descendants follow their row in the full tree's order, depth first"
+
+  - expr: '"" + as_path(tree_row_range(state.rows, path(0), path(1), state.all)[4])'
+    state: {rows: [{path: [0], collapsed: true}, {path: [1], collapsed: false}], all: [{path: [0]}, {path: [0, 0]}, {path: [0, 0, 0]}, {path: [0, 1]}, {path: [1]}, {path: [1, 0]}]}
+    expected: "1"
+    type: string
+    note: "the next visible row comes after the collapsed row's descendants"
+
+  - expr: "tree_row_range(state.rows, path(0), path(1)).length"
+    state: {rows: [{path: [0], collapsed: true}, {path: [1], collapsed: false}], all: [{path: [0]}, {path: [0, 0]}, {path: [0, 0, 0]}, {path: [0, 1]}, {path: [1]}, {path: [1, 0]}]}
+    expected: 2
+    type: number
+    note: "without the fourth argument nothing is expanded"
+
+  - expr: "tree_row_range(state.rows, path(0), path(1), state.all).length"
+    state: {rows: [{path: [0], collapsed: false}, {path: [1], collapsed: false}], all: [{path: [0]}, {path: [0, 0]}, {path: [0, 0, 0]}, {path: [0, 1]}, {path: [1]}, {path: [1, 0]}]}
+    expected: 2
+    type: number
+    note: "an open row brings nothing: its children are rows already"
+
+  - expr: "tree_row_range(state.rows, path(1), path(1), state.all).length"
+    state: {rows: [{path: [0], collapsed: true}, {path: [1], collapsed: false}], all: [{path: [0]}, {path: [0, 0]}, {path: [0, 0, 0]}, {path: [0, 1]}, {path: [1]}, {path: [1, 0]}]}
+    expected: 1
+    type: number
+    note: "a range of one open row stays one row"
