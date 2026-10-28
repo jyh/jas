@@ -7328,8 +7328,8 @@ struct TreeRow {
     /// `layers.yaml` has declared this convention since April -- "ancestor
     /// nodes of matching elements are shown to preserve tree context but are
     /// DIMMED" -- with a `node.search_ancestor_only` variable in SCHEMA.md and
-    /// an `opacity` bind in `row_template`. No port implemented it, and none
-    /// ever could: `row_template` is read by NO port, since both draw tree rows
+    /// an `opacity` bind in `lp_tree`'s row template (`do`). No port implemented
+    /// it, and none could: no native tree reads the template, since both draw tree rows
     /// natively. The bind has never executed anywhere.
     ancestor_only: bool,
 
@@ -8098,8 +8098,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     // layers.yaml has declared since April ("ancestor nodes ...
                     // are shown to preserve tree context but are DIMMED",
                     // `opacity: if node.search_ancestor_only then 0.5 else 1.0`).
-                    // That bind has never executed in any port, because
-                    // `row_template` is read by none of them.
+                    // That bind has never executed in any port: the native
+                    // trees do not read `lp_tree`'s row template (`do`), and the
+                    // plan's expansion (item 38) binds no search state yet.
                     let row_opacity = if row.ancestor_only { "0.5" } else { "1.0" };
                     let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color};opacity:{row_opacity}");
                     let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };

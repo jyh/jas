@@ -3919,8 +3919,9 @@ struct FlatRow: Identifiable {
     /// render dimmed. Twin of jas_dioxus's `TreeRow::ancestor_only`.
     ///
     /// layers.yaml has declared the convention since April and no port ever
-    /// implemented it — the `opacity` bind lives in `row_template`, which NO
-    /// port reads, so it has never executed anywhere.
+    /// implemented it — the `opacity` bind lives in `lp_tree`'s row template
+    /// (`do`), which this native tree does not read. (Since item 38 the panel
+    /// plan expands it, but the first cut binds no search state.)
     var ancestorOnly: Bool = false
 }
 

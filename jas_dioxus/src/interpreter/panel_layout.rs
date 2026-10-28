@@ -217,6 +217,12 @@ fn grid_cols(n: &Value) -> i64 {
 }
 
 fn is_container(n: &Value) -> bool {
+    // A `tree_view` that declares a `foreach` + `do` (the Layers tree,
+    // STATUS-jas item 38) is laid out as its expansion, like any foreach
+    // container; one without them stays a fixed leaf.
+    if node_type(n) == "tree_view" {
+        return st_foreach(n).is_some() && n.get("do").map_or(false, |v| !v.is_null());
+    }
     CONTAINER_TYPES.contains(&node_type(n))
 }
 

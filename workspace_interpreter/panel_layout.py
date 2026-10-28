@@ -148,6 +148,11 @@ def _style(node: dict) -> dict:
 
 
 def _is_container(node: dict) -> bool:
+    # A `tree_view` that declares a `foreach` + `do` (the Layers tree,
+    # STATUS-jas item 38) is laid out as its expansion, like any foreach
+    # container; one without them stays a fixed leaf.
+    if node.get("type") == "tree_view":
+        return isinstance(node.get("foreach"), dict) and bool(node.get("do"))
     return node.get("type") in _CONTAINER_TYPES
 
 

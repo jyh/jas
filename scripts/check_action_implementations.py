@@ -43,8 +43,8 @@ four ways:
                   unbuilt actions AND actions whose feature works natively
                   behind a different entry point -- the Layers row controls
                   (eye / lock / twirl / rename / select) live in
-                  `lp_tree.row_template`, which NO port reads, because both
-                  draw tree rows natively; the action id is unreferenced while
+                  `lp_tree`'s row template (`do`), which no native port
+                  reads, because both draw tree rows natively; the action id is unreferenced while
                   the feature works. Separating the two needs per-action
                   tracing, which is what the ledger is for. Guessing function
                   names does not do it -- this gate's author tried and got one

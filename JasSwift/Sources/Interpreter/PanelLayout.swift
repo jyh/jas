@@ -238,7 +238,13 @@ public enum PanelLayout {
     }
 
     private static func isContainer(_ n: [String: Any]) -> Bool {
-        containerTypes.contains(nodeType(n))
+        // A `tree_view` that declares a `foreach` + `do` (the Layers tree,
+        // STATUS-jas item 38) is laid out as its expansion, like any foreach
+        // container; one without them stays a fixed leaf.
+        if nodeType(n) == "tree_view" {
+            return n["foreach"] is [String: Any] && n["do"] != nil && !(n["do"] is NSNull)
+        }
+        return containerTypes.contains(nodeType(n))
     }
 
     private static func resolvedLayout(_ n: [String: Any]) -> String {

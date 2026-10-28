@@ -98,6 +98,16 @@ _CONCEPTS_CTX = {
 
 # layers uses a ROW foreach (isolation-stack breadcrumb); gradient a WRAP foreach
 # (gradient tile grid — the tiles have no bindings, so only the count matters).
+# The Layers tree_view expands its `do` once per row of
+# `tree_visible_rows(active_document.element_tree, ...)` (STATUS-jas item 38):
+# the rows are the element-tree fixture's first case, read from that file
+# rather than typed here, and one panel-selected group marks its row.
+def _element_tree_rows() -> list:
+    path = os.path.join(ROOT, "test_fixtures", "layers/element_tree.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["cases"][0]["expected"]
+
+
 _LAYERS_CTX = {
     "panel": {
         "isolation_stack": [
@@ -105,7 +115,9 @@ _LAYERS_CTX = {
             {"container_name": "Group A"},
             {"container_name": "Path 3"},
         ],
+        "layers_panel_selection": [{"__path__": [0, 1]}],
     },
+    "active_document": {"element_tree": _element_tree_rows()},
 }
 
 _GRADIENT_CTX = {

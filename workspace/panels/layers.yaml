@@ -572,7 +572,12 @@ content:
       summary: "Element hierarchy"
       description: >
         Recursive tree of document elements. Each row is rendered from
-        row_template with node.* variables in scope. Supports
+        the `do` template with node.* variables in scope, once per row of
+        the foreach source: the visible rows the core resolves from
+        element_tree and the widget's binds (tree_visible_rows; a row under
+        a collapsed container is hidden). The first cut passes no collapsed
+        paths and no renaming path, because nothing writes that state yet
+        (STATUS-jas item 38 step 3). Supports
         drag-and-drop reordering, inline rename, keyboard navigation,
         and context menus. See the panel-level description for full
         behavioral specification.
@@ -588,7 +593,10 @@ content:
         renaming_element: "panel.renaming_element"
         drag_active: "panel.drag_active"
 
-      row_template:
+      foreach:
+        source: "tree_visible_rows(active_document.element_tree, [], panel.layers_panel_selection, null)"
+        as: node
+      do:
         type: container
         layout: row
         style: { height: 24, padding: "0 4", gap: 2, alignment: center }

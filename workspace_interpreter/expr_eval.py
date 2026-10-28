@@ -421,6 +421,28 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             return Value.null()
         return Value.path(p.value + (int(i.value),))
 
+    if name == "tree_visible_rows":
+        # The Layers tree's rows to draw (STATUS-jas item 38): `layers.yaml`
+        # `lp_tree`'s foreach source. Paths arrive as lists or path markers.
+        from workspace_interpreter.state_store import tree_visible_rows
+        if len(node.args) != 4:
+            return Value.null()
+        rows, collapsed, psel, ren = (eval_node(a, ctx) for a in node.args)
+
+        def as_path(v):
+            if isinstance(v, Value):
+                v = v.value
+            if isinstance(v, dict) and "__path__" in v:
+                v = v["__path__"]
+            return tuple(v) if isinstance(v, (list, tuple)) else None
+
+        def paths(v):
+            return [p for p in (as_path(x) for x in (v.value if v.type == ValueType.LIST else [])) if p is not None]
+
+        if rows.type != ValueType.LIST:
+            return Value.null()
+        return Value.list_(tree_visible_rows(rows.value, paths(collapsed), paths(psel), as_path(ren)))
+
     if name == "path_from_id":
         if len(node.args) != 1:
             return Value.null()

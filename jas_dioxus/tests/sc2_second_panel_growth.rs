@@ -75,11 +75,12 @@ fn records(panel: &str, ctx: &serde_json::Value) -> usize {
 }
 
 /// `active_document.element_tree` with `n` flat rows, shaped as the layers
-/// panel's `row_template` reads it (`node.*`).
+/// panel's row template reads it (`node.*`), each with its `path`.
 fn element_tree(n: usize) -> serde_json::Value {
     (0..n)
         .map(|i| {
             serde_json::json!({
+                "path": [i],
                 "id": format!("el{i}"),
                 "name": format!("Path {i}"),
                 "type": "path",
@@ -189,19 +190,17 @@ fn the_colour_panel_is_the_largest_and_layers_is_ten() {
     );
 }
 
-/// ⛔ **THE FLAG.** `layers` does not grow with the document *on this surface*.
+/// ✅ **THE FLAG, CLOSED (STATUS-jas item 38).** `layers` now grows with the
+/// document *on this surface*.
 ///
-/// Its rows are a `tree_view` + `row_template`, and neither `widget_tree` nor
-/// `bind_values` expands a `row_template` — both expand `foreach`/`do` and
-/// recurse `children`, and a `row_template` is neither. The tree is ONE record
-/// (`lp_tree`) at every document size.
-///
-/// So measuring `layers` "at two document sizes" satisfies gate ② with the
-/// widget count held CONSTANT: growth is 0 because nothing varied. That is a
-/// pass by construction, which is the defect flag 1 identified, arriving one
-/// level down.
+/// Until item 38 its rows were a `tree_view` + `row_template`, which neither
+/// `widget_tree` nor `bind_values` expands, so the tree was ONE record
+/// (`lp_tree`) at every document size and gate ② passed by construction. The
+/// tree now declares a standard `foreach` over `tree_visible_rows(...)` with
+/// the template as its `do`, so both expand it: the count moves with the
+/// document, which is the direction a measurement can fail in.
 #[test]
-fn layers_does_not_grow_with_the_document_on_this_surface() {
+fn layers_grows_with_the_document_on_this_surface() {
     let at = |n: usize| {
         records(
             "layers_panel_content",
@@ -213,10 +212,10 @@ fn layers_does_not_grow_with_the_document_on_this_surface() {
     };
     let small = at(8);
     let large = at(500);
-    assert_eq!(
-        small, large,
-        "if these ever differ, the interpreter learned to expand row_template \
-         and this flag is stale — re-read it before quoting it"
+    assert!(
+        large > small,
+        "layers {small} → {large} records from 8 to 500 elements: the tree's \
+         foreach did not expand on the widget-tree surface"
     );
 }
 

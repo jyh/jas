@@ -52,3 +52,19 @@ def test_tree_visible_rows(case):
     rows = store.eval_context()["active_document"]["element_tree"]
     b = case["binds"]
     assert tree_visible_rows(rows, b["collapsed"], b["panel_selection"], b["renaming"]) == case["expected"]
+
+
+@pytest.mark.parametrize("case", _visible_cases(), ids=lambda c: c["name"])
+def test_tree_visible_rows_through_the_evaluator(case):
+    """The plan's `foreach` source calls the resolve as an expression function
+    (`layers.yaml` `lp_tree`); the panel selection arrives as path markers,
+    as the panel scope publishes it."""
+    from workspace_interpreter.expr import evaluate
+    store = StateStore(document=json.loads(json.dumps(case["document"])))
+    b = case["binds"]
+    ctx = {"active_document": store.eval_context()["active_document"],
+           "panel": {"layers_panel_selection": [{"__path__": p} for p in b["panel_selection"]]},
+           "collapsed": b["collapsed"], "renaming": b["renaming"]}
+    got = evaluate("tree_visible_rows(active_document.element_tree, collapsed, "
+                   "panel.layers_panel_selection, renaming)", ctx)
+    assert got.value == case["expected"]

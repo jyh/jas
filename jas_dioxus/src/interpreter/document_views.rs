@@ -176,6 +176,33 @@ mod tests {
         }
     }
 
+    /// The same cases through the expression language: `layers.yaml`
+    /// `lp_tree`'s foreach source calls `tree_visible_rows`, and the panel
+    /// selection arrives as path markers (STATUS-jas item 38).
+    #[test]
+    fn tree_visible_rows_through_the_evaluator() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["visible_cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        for case in cases {
+            let doc = crate::geometry::test_json::test_json_to_document(&case["document"].to_string());
+            let b = &case["binds"];
+            let psel: Vec<Value> = b["panel_selection"].as_array().unwrap().iter()
+                .map(|p| json!({"__path__": p})).collect();
+            let ctx = json!({
+                "active_document": {"element_tree": element_tree(&doc)},
+                "panel": {"layers_panel_selection": psel},
+                "collapsed": b["collapsed"], "renaming": b["renaming"],
+            });
+            let got = crate::interpreter::expr::eval(
+                "tree_visible_rows(active_document.element_tree, collapsed, panel.layers_panel_selection, renaming)",
+                &ctx);
+            assert_eq!(got, crate::interpreter::expr_types::Value::List(
+                case["expected"].as_array().unwrap().clone()), "{}", case["name"]);
+        }
+    }
+
     /// Step 1b: the rows to draw, resolved from `element_tree` and the
     /// widget's binds (the fixture's `visible_cases`, flask §591).
     #[test]
