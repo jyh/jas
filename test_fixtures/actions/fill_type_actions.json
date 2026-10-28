@@ -1,0 +1,41 @@
+[
+ {
+  "_doc": "set_fill_type_gradient (the Gradient button): `snapshot` + `doc.promote_to_gradient` with `fill_on_top` read from state. The expected documents are copied byte-for-byte from the op-layer goldens (operations/promote_to_gradient_*_expected.json), so the action is held to the op's own pinned answer rather than to a runner's output.",
+  "name": "set_fill_type_gradient_promotes_the_fill",
+  "setup_svg": "gradient_promote_setup.svg",
+  "actions": [
+   {"action": "select_all", "params": {}},
+   {"action": "set_fill_type_gradient", "params": {}}
+  ],
+  "expected_json": "set_fill_type_gradient_fill_expected.json"
+ },
+ {
+  "name": "set_fill_type_gradient_twice_is_once",
+  "setup_svg": "gradient_promote_setup.svg",
+  "actions": [
+   {"action": "select_all", "params": {}},
+   {"action": "set_fill_type_gradient", "params": {}},
+   {"action": "set_fill_type_gradient", "params": {}}
+  ],
+  "expected_json": "set_fill_type_gradient_fill_expected.json"
+ },
+ {
+  "name": "set_fill_type_gradient_with_stroke_on_top_promotes_the_stroke",
+  "setup_svg": "gradient_promote_setup.svg",
+  "actions": [
+   {"action": "select_all", "params": {}},
+   {"action": "toggle_fill_on_top", "params": {}},
+   {"action": "set_fill_type_gradient", "params": {}}
+  ],
+  "expected_json": "set_fill_type_gradient_stroke_expected.json"
+ },
+ {
+  "name": "set_fill_type_gradient_with_nothing_selected_changes_nothing",
+  "_doc": "The op layer's unchanged golden with its selection emptied (one stated edit): nothing is selected, so nothing is promoted.",
+  "setup_svg": "gradient_promote_setup.svg",
+  "actions": [
+   {"action": "set_fill_type_gradient", "params": {}}
+  ],
+  "expected_json": "set_fill_type_gradient_nothing_selected_expected.json"
+ }
+]

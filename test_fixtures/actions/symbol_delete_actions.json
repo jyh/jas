@@ -1,0 +1,16 @@
+[
+ {
+  "_doc": "delete_symbol_orphan_confirm_ok (the orphan dialog's Delete): `snapshot`, `doc.delete_symbol` on `param.master`, the Symbols panel's selection cleared, `close_dialog`. The expected document is new_symbol_expected.json with its `symbols` store removed (one edit, round-trip checked; an empty store is omitted, as operations/delete_symbol.json shows). The instance stays in place, resolving to nothing.",
+  "name": "delete_symbol_orphan_confirm_ok_deletes_the_master_and_keeps_the_instance",
+  "setup_svg": "rect_basic.svg",
+  "selection": [[0, 0]],
+  "actions": [
+   {"action": "new_symbol", "params": {}},
+   {"action": "delete_symbol_orphan_confirm_ok", "params": {"master": "01234567"}}
+  ],
+  "expected_json": "delete_symbol_orphan_confirm_ok_expected.json",
+  "expected_panel_scope": {
+   "symbols_panel_content": {"selected_symbol": null}
+  }
+ }
+]
