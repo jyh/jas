@@ -1,0 +1,18 @@
+[
+ {
+  "_doc": "promote_to_concept on a regular square: concept_fitters/conformance.json pins these four points to [4, 10, 100, 20, 0] (sides, radius, cx, cy, angle) in SVG pixels. The importer converts pixels to points (x 0.75: 96 px/in -> 72 pt/in), so in document units the raw polygon becomes a generated regular_polygon {sides 4, radius 7.5} placed at translate(75, 15). The expected document is written from that fitter result and that conversion, not from a runner.",
+  "name": "promote_to_concept_turns_a_regular_square_into_a_regular_polygon",
+  "setup_svg": "regular_square_polygon.svg",
+  "actions": [
+   {
+    "action": "select_all",
+    "params": {}
+   },
+   {
+    "action": "promote_to_concept",
+    "params": {}
+   }
+  ],
+  "expected_json": "promote_to_concept_square_expected.json"
+ }
+]
