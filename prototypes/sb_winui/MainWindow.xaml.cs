@@ -903,6 +903,7 @@ public sealed partial class MainWindow : Window
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);
+        _canvas.ExportPdfReady = SaveExportedPdf;
         _canvas.CloseApproved = () =>
         {
             _closeApproved = true;
@@ -2752,6 +2753,46 @@ public sealed partial class MainWindow : Window
     }
 
     private string? _savePath = Environment.GetEnvironmentVariable("SB_SAVE_PATH");
+
+    /// <summary>
+    /// jas §637 (#733): save the PDF a Print reply named. The name is the
+    /// engine's SUGGESTION (<see cref="ActWire.PdfFileName"/> keeps it a file
+    /// name only); the bytes are the engine's. `SB_EXPORT_PDF_DIR` writes into
+    /// that folder without the picker, as `SB_SAVE_PATH` does for Save.
+    /// </summary>
+    private async void SaveExportedPdf(string suggested, byte[] bytes)
+    {
+        try
+        {
+            var name = ActWire.PdfFileName(suggested) ?? "document.pdf";
+            var dir = Environment.GetEnvironmentVariable("SB_EXPORT_PDF_DIR");
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                var path = System.IO.Path.Combine(dir, name);
+                System.IO.File.WriteAllBytes(path, bytes);
+                Report($"PDF SAVED save=KNOB name={PanelWire.RowValue(name)} bytes={bytes.Length}");
+                return;
+            }
+            var picker = new Windows.Storage.Pickers.FileSavePicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeChoices.Add("PDF", new List<string> { ".pdf" });
+            picker.SuggestedFileName = System.IO.Path.GetFileNameWithoutExtension(name);
+            var file = await picker.PickSaveFileAsync();
+            if (file is null)
+            {
+                Report("PDF SAVE CANCELLED save=PICKER");
+                return;
+            }
+            await Windows.Storage.FileIO.WriteBytesAsync(file, bytes);
+            Report($"PDF SAVED save=PICKER name={PanelWire.RowValue(file.Name)} bytes={bytes.Length}");
+        }
+        catch (Exception ex)
+        {
+            Report($"RUSTFAIL PDF SAVE {ex.GetType().Name}: {ex.Message} "
+                 + "— set SB_EXPORT_PDF_DIR to drive the same save without the picker");
+        }
+    }
 
     /// <summary>
     /// The document's dirty mark, folded into the TITLE VERDICT rather than

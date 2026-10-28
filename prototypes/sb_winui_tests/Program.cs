@@ -793,6 +793,29 @@ static class Program
             + ActWire.CloseWindow("""{"close_window":1}""").ToString());
         Eq("close_window: a refusal's empty reply keeps the window", "False", ActWire.CloseWindow("").ToString());
         Eq("close_window: unreadable bytes keep the window", "False", ActWire.CloseWindow("{").ToString());
+        // jas §637 (#733): every act reply carries `"export_pdf": <file name> | null`.
+        // A string asks the shell to save the document's PDF (`jas_document_pdf`)
+        // under that suggested name; anything else saves nothing.
+        Eq("export_pdf: Print's suggested name is read", "Untitled-1.pdf",
+            ActWire.ExportPdf("""{"changed":[],"export_pdf":"Untitled-1.pdf","doc_changed":false}""") ?? "(null)");
+        Eq("export_pdf: a null saves nothing", "(null)",
+            ActWire.ExportPdf("""{"changed":[],"export_pdf":null}""") ?? "(null)");
+        Eq("export_pdf: an older engine with no key saves nothing", "(null)",
+            ActWire.ExportPdf("""{"changed":[],"doc_changed":false}""") ?? "(null)");
+        Eq("export_pdf: a non-string or unreadable reply saves nothing", "(null)|(null)",
+            (ActWire.ExportPdf("""{"export_pdf":1}""") ?? "(null)") + "|" + (ActWire.ExportPdf("{not json") ?? "(null)"));
+        Check("export_pdf: bytes that open %PDF- are a PDF",
+            ActWire.IsPdf(System.Text.Encoding.ASCII.GetBytes("%PDF-1.4 %...")), "");
+        Check("export_pdf: empty or non-PDF bytes are not saved",
+            !ActWire.IsPdf(Array.Empty<byte>()) && !ActWire.IsPdf(System.Text.Encoding.ASCII.GetBytes("<svg/>")), "");
+        // The name is the ENGINE's suggestion, used as a FILE NAME only: a
+        // path in it must never steer the write out of the chosen folder.
+        Eq("export_pdf: a plain name is kept", "Untitled-1.pdf", ActWire.PdfFileName("Untitled-1.pdf") ?? "(null)");
+        Eq("export_pdf: a name with a directory part is refused", "(null)|(null)|(null)",
+            (ActWire.PdfFileName("../x.pdf") ?? "(null)") + "|" + (ActWire.PdfFileName(@"C:\t\x.pdf") ?? "(null)")
+            + "|" + (ActWire.PdfFileName("a/b.pdf") ?? "(null)"));
+        Eq("export_pdf: an empty name is refused", "(null)", ActWire.PdfFileName("") ?? "(null)");
+
         // jas §364 (plan § 5 slice 8): every act reply carries
         // `"clipboard_write": <text> | null`. A string goes on the system
         // clipboard UNCHANGED; anything else writes nothing.

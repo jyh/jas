@@ -463,6 +463,14 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_document_svg(IntPtr engine);
 
     /// <summary>
+    /// jas §637 (#733): the active document as PDF bytes, for the save a reply's
+    /// `export_pdf` names. BL2: a call for this engine, on the `jas-render`
+    /// thread; BL4: copy with <see cref="TakeBytes"/>, which frees.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_document_pdf(IntPtr engine);
+
+    /// <summary>
     /// The menubar's evaluated `enabled` / `checked` state: the canonical
     /// `menu_state` array, a flat pre-order `{path, action, enabled, checked}`
     /// per action item.
@@ -711,6 +719,25 @@ internal static unsafe class JasCore
         {
             if (b.Ptr == IntPtr.Zero || b.Len == 0) { return string.Empty; }
             return System.Text.Encoding.UTF8.GetString((byte*)b.Ptr, (int)b.Len);
+        }
+        finally
+        {
+            jas_free(b);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="TakeString"/>'s twin for binary spans (a PDF): the bytes are
+    /// copied as they are and the span freed, in a `finally`.
+    /// </summary>
+    internal static byte[] TakeBytes(JasBytes b)
+    {
+        try
+        {
+            if (b.Ptr == IntPtr.Zero || b.Len == 0) { return Array.Empty<byte>(); }
+            var copy = new byte[(int)b.Len];
+            System.Runtime.InteropServices.Marshal.Copy(b.Ptr, copy, 0, copy.Length);
+            return copy;
         }
         finally
         {

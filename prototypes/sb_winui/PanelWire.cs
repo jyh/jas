@@ -1589,6 +1589,52 @@ internal static class ActWire
     }
 
     /// <summary>
+    /// jas §637 (#733): `"export_pdf": <file name> | null`, in every act reply.
+    /// Print > Print names one: the shell saves the document's PDF
+    /// (`jas_document_pdf`) under that SUGGESTED name. Null when the reply names
+    /// none, an older engine sent no key, the value is not a string, or the
+    /// bytes are unreadable.
+    /// </summary>
+    internal static string? ExportPdf(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("export_pdf", out var t)
+                   && t.ValueKind == System.Text.Json.JsonValueKind.String
+                ? t.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// jas §637: whether bytes from `jas_document_pdf` are a PDF (they open
+    /// `%PDF-`). Anything else is never written to disk as one.
+    /// </summary>
+    internal static bool IsPdf(byte[] bytes) =>
+        bytes.Length >= 5 && bytes[0] == (byte)'%' && bytes[1] == (byte)'P' && bytes[2] == (byte)'D'
+        && bytes[3] == (byte)'F' && bytes[4] == (byte)'-';
+
+    /// <summary>
+    /// jas §637: the engine's suggested name, usable as a FILE NAME only, or
+    /// null. A name carrying any directory part (a separator, a drive, `..`) is
+    /// refused rather than trimmed: the suggestion must never steer a write
+    /// out of the folder a person (or `SB_EXPORT_PDF_DIR`) chose.
+    /// </summary>
+    internal static string? PdfFileName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) { return null; }
+        if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name == "." || name == "..") { return null; }
+        if (name.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0) { return null; }
+        return name;
+    }
+
+    /// <summary>
     /// A paste sent with no `clipboard` field is refused with nothing run, and
     /// the error channel reads `{"panel_event":"NeedsClipboard","detail":
     /// "<action>"}`. The action it names (empty when it names none), or null
