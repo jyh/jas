@@ -298,13 +298,21 @@ private func valueToAny(_ v: Value) -> Any? {
     // A list literal can hold evaluated values (`[as_path(param.path)]`): a
     // path element becomes the `__path__` marker the store holds, as the other
     // runners' `value_to_json` writes it (STATUS-jas item 38 step 3c).
-    case .list(let l): return l.map { e -> Any in
-        if case .path(let p)? = e.value as? Value { return ["__path__": p] }
-        return e.value
-    }
+    // At any depth: a list of [path, visibility] pairs (the Layers solo's
+    // `solo_saved`) held raw `Value.path`s one level down until 2026-10-28.
+    case .list(let l): return l.map { storableListElement($0.value) }
     case .path(let p): return ["__path__": p]
     case .closure: return v  // keep as Value for closure dispatch
     }
+}
+
+/// One element of an evaluated list, as the store holds it: an evaluated
+/// `Value` through ``valueToAny`` (a path becomes its marker), a nested list
+/// element by element, anything else as it is.
+private func storableListElement(_ x: Any) -> Any {
+    if let v = x as? Value { return valueToAny(v) ?? NSNull() }
+    if let arr = x as? [Any] { return arr.map(storableListElement) }
+    return x
 }
 
 /// Extract default values from a dialog state definition dict.

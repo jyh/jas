@@ -201,7 +201,10 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 11 the same day: `layers_select_all` runs its YAML (the visible rows, scoped
 # to an isolation); both trees' Ctrl/Command+A dispatch it through the
 # `keyboard:` rows, and both native select-all arms are gone.
-MIN_LOG_ONLY = 11
+# 10 the same day: `solo_element_visibility` runs its YAML (`set_element_visibility`
+# ops, the saved siblings in `solo_path`/`solo_saved`); both trees' Option-click on
+# the eye dispatches it, and both native solo arms are gone.
+MIN_LOG_ONLY = 10
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;

@@ -1057,8 +1057,10 @@
       "doc_verbs": []
     },
     "solo_element_visibility": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "solo_layers_type_filter": {
       "class": "ui-state",
@@ -1284,11 +1286,11 @@
     ],
     "by_class": {
       "doc-direct": 5,
-      "journaling": 59,
+      "journaling": 60,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 170,
+      "ui-state": 169,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1338,7 +1340,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 59,
+    "journaling_actions": 60,
     "native_intercepts": [
       "export_to_pdf"
     ],

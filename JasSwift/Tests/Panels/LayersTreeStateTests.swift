@@ -205,3 +205,32 @@ private func twoLayers() -> Model {
     #expect(LayersPanel.treeKey(KeyChord(key: "A", ctrl: true), model: model))
     #expect(layersPanelSelection(model: model) == [[1, 0]])
 }
+
+// MARK: - the eye
+
+// `LayersPanel.eyeClick` is the tree's eye button: Option-click runs
+// `solo_element_visibility`, a plain click `cycle_element_visibility` (which
+// also discards a pending solo). The tree's own `soloState` is gone.
+
+@Test func optionClickOnTheEyeSolosAndASecondOneRestores() {
+    let model = twoLayers()
+    LayersPanel.eyeClick(path: [1], option: true, model: model)
+    #expect(model.document.layers[0].visibility == .invisible, "the sibling layer is hidden")
+    #expect(model.document.layers[1].visibility == .preview)
+    #expect(model.stateStore.getPanel("layers_panel_content", "solo_path") is [String: Any])
+    LayersPanel.eyeClick(path: [1], option: true, model: model)
+    #expect(model.document.layers[0].visibility == .preview, "restored")
+    #expect(model.stateStore.getPanel("layers_panel_content", "solo_path") is NSNull)
+}
+
+@Test func aPlainEyeClickCyclesAndDiscardsTheSolo() {
+    let model = twoLayers()
+    LayersPanel.eyeClick(path: [1], option: true, model: model)
+    LayersPanel.eyeClick(path: [1], option: false, model: model)
+    #expect(model.document.layers[1].visibility == .outline, "the clicked layer cycled")
+    #expect(model.document.layers[0].visibility == .invisible, "the solo's hide stays")
+    #expect(model.stateStore.getPanel("layers_panel_content", "solo_path") is NSNull, "discarded")
+    LayersPanel.eyeClick(path: [1], option: true, model: model)
+    #expect(model.document.layers[0].visibility == .invisible,
+            "a new solo, not a restore: the sibling stays hidden")
+}

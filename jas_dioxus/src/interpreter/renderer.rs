@@ -413,22 +413,6 @@ pub(crate) use crate::interpreter::paragraph_host::{
     HyphenationDialogValues, JustificationDialogValues,
 };
 
-/// Dispatch a named action. Tries hardcoded handlers first, then falls
-/// through to the YAML actions catalog for open_dialog, dispatch, etc.
-/// Returns a list of deferred effects (open_dialog, close_dialog) that
-/// must be applied outside the AppState borrow.
-/// Element-level behavior of the Layers tree eye button (regular click):
-/// cycle the visibility of the element at `path` and, when it becomes
-/// Invisible, drop it (and its descendants) from the selection. Pure —
-/// returns a new Document. Mirrors the Python/OCaml/Swift eye handlers.
-pub(crate) fn cycle_element_visibility_at(
-    doc: &crate::document::document::Document,
-    path: &crate::document::document::ElementPath,
-) -> crate::document::document::Document {
-    // The op layer's `cycle_element_visibility` runs the same function.
-    doc.cycling_element_visibility(path)
-}
-
 /// Fill `ctx.panel` with the keys of a panel's `scope` that it LACKS. A key the
 /// app scope already defines is never overridden, so passing a scope can only
 /// turn a null read into a value: an action that resolves today resolves the
@@ -1757,7 +1741,18 @@ fn build_appstate_ctx(
     collapsed.sort();
     let collapsed: Vec<serde_json::Value> = collapsed.into_iter().map(marker).collect();
     let renaming = st.layers_renaming.as_ref().map(marker).unwrap_or(serde_json::Value::Null);
+    // The Layers solo's two keys (`solo_element_visibility`), which no typed
+    // slot holds: they live in the panel's generic store, where its
+    // `set_panel_state` writes land, so a second Option-click on the soloed
+    // row sees `panel.solo_path` and restores.
+    let layers_kv = st.panel_state.get("layers_panel_content");
+    let solo_path = layers_kv.and_then(|m| m.get("solo_path")).cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let solo_saved = layers_kv.and_then(|m| m.get("solo_saved")).cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
     let panel = serde_json::json!({
+        "solo_path": solo_path,
+        "solo_saved": solo_saved,
         "layers_panel_selection": sel_paths,
         "collapsed_paths": collapsed,
         "renaming_element": renaming,
@@ -8034,98 +8029,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         let a = eye_app.clone();
                         let alt = evt.data().modifiers().alt();
                         spawn(async move {
-                            use crate::geometry::element::Visibility;
-                            let mut st = a.borrow_mut();
-                            if alt {
-                                // Option-click: solo/unsolo among siblings
-                                let parent_prefix: Vec<usize> = p[..p.len()-1].to_vec();
-                                // Gather all sibling paths
-                                let sibling_paths: Vec<Vec<usize>> = if let Some(tab) = st.tab() {
-                                    let doc = tab.model.document();
-                                    if parent_prefix.is_empty() {
-                                        (0..doc.layers.len()).map(|i| vec![i]).collect()
-                                    } else if let Some(parent) = doc.get_element(&parent_prefix) {
-                                        if let Some(children) = parent.children() {
-                                            (0..children.len()).map(|i| {
-                                                let mut pp = parent_prefix.clone();
-                                                pp.push(i);
-                                                pp
-                                            }).collect()
-                                        } else { Vec::new() }
-                                    } else { Vec::new() }
-                                } else { Vec::new() };
-
-                                let is_already_soloed = matches!(
-                                    &st.layers_solo_state,
-                                    Some(s) if s.soloed_path == p
-                                );
-
-                                if is_already_soloed {
-                                    // Restore saved visibilities
-                                    let saved = st.layers_solo_state.as_ref().unwrap().saved.clone();
-                                    if let Some(tab) = st.tab_mut() {
-                                        tab.model.begin_txn();
-                                        let mut doc = tab.model.document().clone();
-                                        for (sp, vis) in &saved {
-                                            if let Some(elem) = doc.get_element_mut(sp) {
-                                                elem.common_mut().visibility = *vis;
-                                            }
-                                        }
-                                        tab.model.set_document(doc);
-                                        tab.model.commit_txn();
-                                    }
-                                    st.layers_solo_state = None;
-                                } else {
-                                    // Save current visibilities of siblings != p, then set them invisible
-                                    let mut saved = std::collections::HashMap::new();
-                                    let doc_read = st.tab().map(|t| t.model.document().clone());
-                                    if let Some(doc) = doc_read {
-                                        for sp in &sibling_paths {
-                                            if sp != &p {
-                                                if let Some(elem) = doc.get_element(sp) {
-                                                    saved.insert(sp.clone(), elem.visibility());
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if let Some(tab) = st.tab_mut() {
-                                        tab.model.begin_txn();
-                                        let mut doc = tab.model.document().clone();
-                                        // Ensure soloed element is visible
-                                        if let Some(elem) = doc.get_element_mut(&p) {
-                                            if elem.visibility() == Visibility::Invisible {
-                                                elem.common_mut().visibility = Visibility::Preview;
-                                            }
-                                        }
-                                        for sp in &sibling_paths {
-                                            if sp != &p {
-                                                if let Some(elem) = doc.get_element_mut(sp) {
-                                                    elem.common_mut().visibility = Visibility::Invisible;
-                                                }
-                                            }
-                                        }
-                                        tab.model.set_document(doc);
-                                        tab.model.commit_txn();
-                                    }
-                                    st.layers_solo_state = Some(crate::workspace::app_state::LayerSoloState {
-                                        soloed_path: p.clone(),
-                                        saved,
-                                    });
-                                }
-                            } else {
-                                // Regular click: cycle visibility
-                                // Clicking normally discards any pending solo restore state
-                                st.layers_solo_state = None;
-                                if let Some(tab) = st.tab_mut() {
-                                    tab.model.begin_txn();
-                                    let new_doc = cycle_element_visibility_at(
-                                        tab.model.document(),
-                                        &p,
-                                    );
-                                    tab.model.set_document(new_doc);
-                                    tab.model.commit_txn();
-                                }
-                            }
+                            // Both clicks run their YAML (STATUS-jas item 8): Option-click
+                            // is `solo_element_visibility` (the siblings' saved
+                            // visibilities live in the panel's `solo_path`/`solo_saved`),
+                            // and a plain click is `cycle_element_visibility`, which
+                            // also discards a pending solo.
+                            let action = if alt { "solo_element_visibility" } else { "cycle_element_visibility" };
+                            let mut params = serde_json::Map::new();
+                            params.insert("path".into(), serde_json::json!({"__path__": p}));
+                            let _ = dispatch_action(action, &params, &mut a.borrow_mut());
                             eye_rev += 1;
                         });
                     };
@@ -13133,29 +13045,10 @@ mod tests {
     }
 
     // ── Layers eye-button visibility cycle (LYR) ──────────────────
-    // The cycle's three transitions are pinned by the shared op fixture
-    // `test_fixtures/operations/layers_row_ops.json` (item 38), through
-    // `Document::cycling_element_visibility`, which the eye button calls.
-
-    #[test]
-    fn cycle_element_visibility_at_cycles_and_deselects_on_invisible() {
-        use crate::document::document::ElementSelection;
-        use crate::geometry::element::Visibility;
-        let st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
-        let mut doc = st.tabs[st.active_tab].model.document().clone();
-        doc.selection = vec![ElementSelection::all(vec![0usize])];
-        // Preview -> Outline; selection intact.
-        let d1 = cycle_element_visibility_at(&doc, &vec![0usize]);
-        assert_eq!(d1.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Outline);
-        assert_eq!(d1.selection.len(), 1);
-        // Outline -> Invisible; element dropped from selection.
-        let d2 = cycle_element_visibility_at(&d1, &vec![0usize]);
-        assert_eq!(d2.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Invisible);
-        assert!(d2.selection.is_empty());
-        // Invisible -> Preview.
-        let d3 = cycle_element_visibility_at(&d2, &vec![0usize]);
-        assert_eq!(d3.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Preview);
-    }
+    // The cycle's three transitions and its deselect-on-invisible law are
+    // pinned by the shared op fixture `test_fixtures/operations/layers_row_ops.json`
+    // (item 38) in all three op layers; the eye button dispatches
+    // `cycle_element_visibility`, which runs that op.
 
     /// The Concepts menu shows "Place Instance" and it reaches the native verb.
     /// Until 2026-09-26 the Concepts menu rendered no items in this app.

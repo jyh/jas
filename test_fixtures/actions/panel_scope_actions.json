@@ -1013,5 +1013,84 @@
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
     }
+  },
+  {
+    "_doc": "Option-click on [0,0]'s eye (solo_element_visibility): its sibling [0,1] is hidden and its visibility saved as a [path, visibility] pair; [0,0], already Preview, is untouched.",
+    "name": "solo_element_visibility_hides_the_sibling",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}}
+    ],
+    "expected_json": "solo_element_visibility_hides_the_sibling_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
+    }
+  },
+  {
+    "_doc": "A second Option-click on the same element restores every saved sibling and clears the solo: the document is back where it started.",
+    "name": "solo_element_visibility_twice_restores_the_siblings",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}},
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}}
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"solo_path": null, "solo_saved": []}
+    }
+  },
+  {
+    "_doc": "An Outline sibling comes back Outline, not Preview: the solo saved it exactly. [0,1] cycled to Outline, then solo and unsolo of [0,0].",
+    "name": "solo_element_visibility_restores_an_outline_sibling",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "cycle_element_visibility", "params": {"path": [0, 1]}},
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}},
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}}
+    ],
+    "expected_json": "solo_restores_an_outline_sibling_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"solo_path": null, "solo_saved": []}
+    }
+  },
+  {
+    "_doc": "A plain eye click between the two Option-clicks discards the solo (the description's manual change): [0,1] stays hidden, [0,0] cycles to Outline, and nothing is saved.",
+    "name": "an_eye_click_discards_a_pending_solo",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}},
+      {"action": "cycle_element_visibility", "params": {"path": [0, 0]}}
+    ],
+    "expected_json": "two_rects_first_outline_second_hidden_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"solo_path": null, "solo_saved": []}
+    }
+  },
+  {
+    "_doc": "Soloing a hidden element shows it: [0,0] cycled to Invisible, then soloed, is Preview again, and [0,1] is hidden.",
+    "name": "solo_element_visibility_shows_a_hidden_element",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "cycle_element_visibility", "params": {"path": [0, 0]}},
+      {"action": "cycle_element_visibility", "params": {"path": [0, 0]}},
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}}
+    ],
+    "expected_json": "solo_element_visibility_hides_the_sibling_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
+    }
+  },
+  {
+    "_doc": "Soloing an Outline element leaves it Outline (both native trees' rule); only the sibling is hidden.",
+    "name": "solo_element_visibility_keeps_an_outline_element_outline",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "cycle_element_visibility", "params": {"path": [0, 0]}},
+      {"action": "solo_element_visibility", "params": {"path": [0, 0]}}
+    ],
+    "expected_json": "two_rects_first_outline_second_hidden_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
+    }
   }
 ]
