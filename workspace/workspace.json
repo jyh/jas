@@ -11803,7 +11803,11 @@
                     {
                       "event": "keydown",
                       "condition": "event.key == 'Enter'",
-                      "action": "confirm_artboard_rename"
+                      "action": "confirm_artboard_rename",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "new_name": "event.value"
+                      }
                     },
                     {
                       "event": "keydown",
@@ -11812,7 +11816,12 @@
                     },
                     {
                       "event": "blur",
-                      "action": "confirm_artboard_rename"
+                      "condition": "panel.renaming_artboard == ab.id",
+                      "action": "confirm_artboard_rename",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "new_name": "event.value"
+                      }
                     }
                   ]
                 },
@@ -17274,7 +17283,11 @@
                     {
                       "event": "keydown",
                       "condition": "event.key == 'Enter'",
-                      "action": "confirm_rename"
+                      "action": "confirm_rename",
+                      "params": {
+                        "path": "node.path",
+                        "name": "event.value"
+                      }
                     },
                     {
                       "event": "keydown",
@@ -17283,7 +17296,12 @@
                     },
                     {
                       "event": "blur",
-                      "action": "confirm_rename"
+                      "condition": "panel.renaming_element == node.path",
+                      "action": "confirm_rename",
+                      "params": {
+                        "path": "node.path",
+                        "name": "event.value"
+                      }
                     }
                   ]
                 },

@@ -81,8 +81,7 @@ gradient_slider: commit
   synonyms on these kinds: both name "a value was committed".
 - **`text_input` has three more events: `input`, `blur` and `keydown`.**
   They are not commits. A commit never runs them. They carry search-as-
-  you-type and key handling, and this document does not define them
-  beyond naming them.
+  you-type and key handling (§Typing in a text field).
 - **Boolean kinds** are `toggle` and `checkbox`. `click` and `change` are
   synonyms on these kinds: both name "the widget was pressed".
 - **Item kinds** are `dropdown`. `toggle` is a plain pick of one declared
@@ -354,6 +353,39 @@ dispatch the same action and differ only in a literal `copy:`. A port that
 turned the YAML `false` into the text `False`, an unknown name, would copy
 on OK. The reference's `TestShippedRotateButtons` holds this.
 
+## Typing in a text field (`input`, `keydown`, `blur`)
+
+A `text_input` has three events besides its commit. None is a commit: a
+commit never runs them, and they write no bind. Each runs only the
+behaviors declared for itself, in declaration order.
+
+| event | when | `event.value` | `event.key` |
+|---|---|---|---|
+| `input` | the text changed (a keystroke, a paste) | the field's whole text after the change | absent |
+| `keydown` | a key was pressed in the field | the field's text BEFORE the key acts | the key's name |
+| `blur` | the field lost focus | the field's text | absent |
+
+1. **Refuse, and do nothing at all, when any of these holds:**
+   - the widget is not a `text_input` (`WrongKind`);
+   - the event is not one of the three (`WrongEvent`);
+   - there is no text, or a `keydown` names no key (`MissingValue`);
+   - the widget's `bind.disabled` expression is true (`Disabled`).
+2. **A key's name is the W3C `KeyboardEvent.key` value**: `Enter`,
+   `Escape`, `Tab`, `Backspace`, or the printable character itself. The
+   shipped behaviors compare against `Enter` and `Escape`.
+3. **`keydown` reads the text before the key acts**, because that is what
+   a key handler can know when it fires on every toolkit. Enter and Escape
+   do not change the text, so both readings agree for every shipped use.
+4. **The four modifiers ride beside them**, as on a click: `event.shift`,
+   `event.ctrl`, `event.meta`, `event.alt`.
+5. **A behavior in a template row reads its row** (`node`) beside `event`,
+   as a click in the row does.
+
+The two inline rename fields are the shipped users: the Layers row's
+`lp_name_edit` and the Artboards panel's rename field confirm on Enter and
+on blur, and cancel on Escape. The reference's procedure is
+`widget_event.text_entry`.
+
 ## What a behavior can read
 
 Every expression a behavior evaluates starts from one of these names.
@@ -533,16 +565,6 @@ module, none of them is a measured failure.
 - **The engine's value door** (`jas_panel_behavior` with a `value`) and
   the panel-write host. They implement this contract; they do not
   define it.
-- **What `input`, `blur` and `keydown` mean on `text_input`.** One open
-  item depends on it: the two inline rename fields (`lp_name_edit` in
-  `layers.yaml`, the Artboards rename field in `artboards.yaml`) raise
-  `confirm_rename` / `confirm_artboard_rename` on `keydown` (Enter) and
-  `blur`, and both actions take the typed name as a param (`name`,
-  `new_name`). Until `event.value` is defined on those events, neither
-  template can pass it: the native ports pass the name themselves, and a
-  dispatch with no name renames nothing (`confirm_rename`'s
-  `param.name != null` guard; corpus case
-  `confirm_rename_without_a_name_keeps_it`).
 - **Dialog OK / Cancel / preview.** A dialog widget's commit follows this
   contract. What the dialog does with its state afterwards is
   `transcripts/SCALE_TOOL.md` §Preview and the dialog's own YAML.

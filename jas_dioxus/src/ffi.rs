@@ -4048,6 +4048,94 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// STATUS-jas item 40: the Artboards rename field's Enter, sent as the
+    /// shell sends it (`keydown` with `key` and the field's text as `value`,
+    /// WIDGET_EVENTS.md "Typing in a text field"), renames THAT row's artboard
+    /// and ends rename mode; the blur that follows finds the row no longer
+    /// renaming and runs nothing; one undo restores the name.
+    #[test]
+    fn a_rename_fields_enter_renames_its_row_and_the_blur_after_it_does_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        let mut doc = crate::document::document::Document::default();
+        doc.artboards = (0..3).map(|i| {
+            let mut a = Artboard::default_with_id(format!("ab{i:04}"));
+            a.name = format!("Board {}", i + 1);
+            a
+        }).collect();
+        let e = engine_with(Model::new(doc, None));
+        let (reply, err) = dispatch(e, r#"{"action":"rename_artboard","params":{"artboard_id":"ab0001"}}"#);
+        assert!(!reply.is_empty(), "rename_artboard refused: {err}");
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "artboards_panel_content", 228, 600)).expect("plan JSON");
+        let edit: Vec<serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["id"] == "ap_name_edit" && r["values"]["bind.visible"] == "true")
+            .map(|r| r["path"].clone()).collect();
+        assert_eq!(edit, [serde_json::json!([0, 1, 2])], "only row 1 shows its field");
+        let names = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let m = en.model.borrow();
+            m.document().artboards.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+        };
+
+        let enter = format!(r#"{{"path":{},"event":"keydown","key":"Enter","value":"Poster"}}"#, edit[0]);
+        let (reply, err) = behave(e, "artboards_panel_content", &enter);
+        assert!(!reply.is_empty(), "Enter refused: {err}");
+        assert_eq!(names(e), ["Board 1", "Poster", "Board 3"]);
+        let blur = format!(r#"{{"path":{},"event":"blur","value":"Poster"}}"#, edit[0]);
+        let (reply, err) = behave(e, "artboards_panel_content", &blur);
+        assert_eq!(reply, "", "the blur after Enter runs nothing");
+        assert!(err.contains(r#""panel_event":"EmptyBehavior""#), "{err}");
+        let (_reply, err) = dispatch(e, r#"{"action":"undo"}"#);
+        assert_eq!(names(e), ["Board 1", "Board 2", "Board 3"], "one undo restores it: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// STATUS-jas item 40, the Layers row: with the default document's one
+    /// layer in rename mode, Enter in `lp_name_edit` names THAT layer and ends
+    /// rename mode, and the blur that follows runs nothing. Rename mode is
+    /// seeded in the store, because `rename_element`'s `enabled_when` needs a
+    /// panel selection and `layers_panel_select` is still a stub.
+    #[test]
+    fn the_layers_rename_fields_enter_names_its_row() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        let renaming = |e: *mut JasEngine| {
+            unsafe { e.as_ref() }.unwrap().store.borrow()
+                .get_panel("layers_panel_content", "renaming_element").clone()
+        };
+        // The first plan initialises the panel's state in the store; a write
+        // before it lands nowhere (`StateStore::set_panel` on an absent panel).
+        let _ = plan_of(e, "layers_panel_content", 228, 600);
+        unsafe { e.as_ref() }.unwrap().store.borrow_mut()
+            .set_panel("layers_panel_content", "renaming_element", serde_json::json!([0]));
+        assert_eq!(renaming(e), serde_json::json!([0]), "seeded");
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+        let edit: Vec<serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["id"] == "lp_name_edit" && r["values"]["bind.visible"] == "true")
+            .map(|r| r["path"].clone()).collect();
+        assert_eq!(edit.len(), 1, "the one renaming row shows its field: {plan}");
+        let name = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let m = en.model.borrow();
+            m.document().layers[0].common().name.clone()
+        };
+
+        let enter = format!(r#"{{"path":{},"event":"keydown","key":"Enter","value":"Sky"}}"#, edit[0]);
+        let (reply, err) = behave(e, "layers_panel_content", &enter);
+        assert!(!reply.is_empty(), "Enter refused: {err}");
+        assert_eq!(name(e).as_deref(), Some("Sky"));
+        assert_eq!(renaming(e), serde_json::Value::Null, "rename mode ends");
+        let blur = format!(r#"{{"path":{},"event":"blur","value":"Sky"}}"#, edit[0]);
+        let (reply, err) = behave(e, "layers_panel_content", &blur);
+        assert_eq!(reply, "", "the blur after Enter runs nothing");
+        assert!(err.contains(r#""panel_event":"EmptyBehavior""#), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// (reply, error channel) for one behavior crossing.
     fn behave(e: *mut JasEngine, panel: &str, event: &str) -> (String, String) {
         let reply = take(unsafe {
