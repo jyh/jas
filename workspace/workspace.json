@@ -2215,7 +2215,7 @@
                 "set_panel_state": {
                   "panel": "layers",
                   "key": "layers_panel_selection",
-                  "value": "if param.modifier == 'shift' and panel.layers_panel_selection.length > 0\n  then tree_row_range(tree_visible_rows(active_document.element_tree,\n         panel.collapsed_paths, panel.layers_panel_selection,\n         panel.renaming_element),\n       panel.layers_panel_selection[panel.layers_panel_selection.length - 1],\n       param.path)\n  else [as_path(param.path)]\n"
+                  "value": "if param.modifier == 'shift' and panel.layers_panel_selection.length > 0\n  then tree_row_range(tree_visible_rows(active_document.element_tree,\n         panel.collapsed_paths, panel.layers_panel_selection,\n         panel.renaming_element),\n       panel.layers_panel_selection[panel.layers_panel_selection.length - 1],\n       param.path, active_document.element_tree)\n  else [as_path(param.path)]\n"
                 }
               }
             ]

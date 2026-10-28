@@ -1253,18 +1253,34 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     // The rows' paths from one row to another, inclusive, in row order, as path
     // markers; [] when either end is not a row (STATUS-jas item 38 step 3c: a
     // Shift-click on a Layers row). The reference's `tree_row_range`; an end is
-    // read as `as_path` reads one.
+    // read as `as_path` reads one. An optional fourth argument is the element
+    // tree's full row list: a row in the range marked `collapsed` then brings
+    // every row under it from that list, right after it, in its order.
     case "tree_row_range":
-        guard args.count == 3, case .list(let rows) = evalNode(args[0], ctx) else { return .null }
-        let paths: [[Int]?] = rows.map { r in
+        guard args.count == 3 || args.count == 4,
+              case .list(let rows) = evalNode(args[0], ctx) else { return .null }
+        let pathOf: (AnyJSON) -> [Int]? = { r in
             (r.value as? [String: Any])?["path"].flatMap { indexPath(Value.fromJson($0)) }
         }
-        let ends = args[1...].map { indexPath(evalNode($0, ctx)) }
+        let paths: [[Int]?] = rows.map(pathOf)
+        // `args[1...2]` keeps its indices 1 and 2, so read it through an Array.
+        let ends = Array(args[1...2]).map { indexPath(evalNode($0, ctx)) }
         guard let from = ends[0], let to = ends[1],
               let a = paths.firstIndex(where: { $0 == from }),
               let b = paths.firstIndex(where: { $0 == to }) else { return .list([]) }
-        return .list(paths[min(a, b)...max(a, b)].compactMap { $0 }
-            .map { AnyJSON(["__path__": $0] as [String: Any]) })
+        var every: [[Int]] = []
+        if args.count == 4, case .list(let full) = evalNode(args[3], ctx) {
+            every = full.compactMap(pathOf)
+        }
+        var out: [[Int]] = []
+        for k in min(a, b)...max(a, b) {
+            guard let p = paths[k] else { continue }
+            out.append(p)
+            if (rows[k].value as? [String: Any])?["collapsed"] as? Bool == true {
+                out += every.filter { $0.count > p.count && Array($0.prefix(p.count)) == p }
+            }
+        }
+        return .list(out.map { AnyJSON(["__path__": $0] as [String: Any]) })
 
     case "path_child":
         guard args.count == 2 else { return .null }
