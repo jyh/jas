@@ -428,6 +428,23 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
             };
             pl.toggle_canvas_maximized();
         }
+        // The dock at an edge, collapsed to its icon strip or expanded
+        // (collapse_dock / expand_dock / toggle_dock_collapse). `set` is
+        // idempotent; `toggle` flips. No anchored dock there: nothing to act on.
+        "set_dock_collapsed" | "toggle_dock_collapsed" => {
+            let Some(edge) = op["edge"].as_str().and_then(parse_dock_edge) else {
+                return false; // required field missing or unknown: skip
+            };
+            let value = op["value"].as_bool();
+            if op["op"] == "set_dock_collapsed" && value.is_none() {
+                return false; // required field missing: skip
+            }
+            let Some(id) = layout.anchored_dock(edge).map(|d| d.id) else { return true };
+            let collapsed = layout.anchored_dock(edge).is_some_and(|d| d.collapsed);
+            if value.is_none_or(|v| v != collapsed) {
+                layout.toggle_dock_collapsed(id);
+            }
+        }
         // The YAML's `set_canvas_maximized` (maximize_canvas / restore_canvas):
         // idempotent, unlike the toggle, so a second Maximize stays maximized.
         "set_canvas_maximized" => {
