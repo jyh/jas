@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 5 |
-| `journaling` | 59 |
+| `journaling` | 60 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 170 |
+| `ui-state` | 169 |
 | `view` | 6 |
 | **total** | **245** |
 
 (The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (59)
+## Journaling actions (60)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -108,6 +108,7 @@ come additively from `native_intercepts`.)
 | `set_fill_type_solid` | `doc.demote_to_solid` |
 | `shear_options_confirm` | `doc.preview.clear`, `doc.preview.restore`, `doc.shear.apply` (`doc.shear.apply` journal:true) |
 | `show_all` | `doc.op` |
+| `solo_element_visibility` | `doc.op` |
 | `toggle_element_lock` | `doc.op` |
 | `ungroup` | `doc.op` |
 | `ungroup_all` | `doc.op` |
@@ -150,7 +151,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (170)
+## UI-state actions (169)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -190,13 +191,13 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `set_brush_view_mode`, `set_color_panel_mode`, `set_fill_none`, `set_layers_search`,
 `set_stroke_align`, `set_stroke_cap`, `set_stroke_join`, `set_stroke_none`,
 `set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`, `show_panel`,
-`solo_element_visibility`, `solo_layers_type_filter`, `sort_brushes_by_name`, `sort_swatches_by_name`,
-`swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`, `switch_appearance`,
-`switch_workspace`, `symbols_panel_select`, `tile_panes`, `toggle_artboard_chain_link`,
-`toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`, `toggle_canvas_maximize`,
-`toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_twirl`, `toggle_fill_on_top`,
-`toggle_hanging_punctuation`, `toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`,
-`toggle_panel`, `toggle_use_preview_bounds`
+`solo_layers_type_filter`, `sort_brushes_by_name`, `sort_swatches_by_name`, `swap_arrowheads`,
+`swap_fill_stroke`, `swatch_options_confirm`, `switch_appearance`, `switch_workspace`,
+`symbols_panel_select`, `tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`,
+`toggle_brush_category`, `toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`,
+`toggle_dock_collapse`, `toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`,
+`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`,
+`toggle_use_preview_bounds`
 
 ## Verb -> journaling evidence table
 
