@@ -23,5 +23,60 @@
    }
   ],
   "expected_json": "set_concept_param_sets_sides_expected.json"
+ },
+ {
+  "_doc": "apply_concept_operation remove_side on the placed hexagon: regular_polygon.yaml's `set: {sides: max(param.sides - 1, 3)}` gives 5, the same document as set_concept_param_sets_sides.",
+  "name": "apply_concept_operation_remove_side",
+  "setup_svg": "empty_layer.svg",
+  "actions": [
+   {
+    "action": "concepts_panel_select",
+    "params": {
+     "concept_id": "regular_polygon"
+    }
+   },
+   {
+    "action": "place_concept_instance",
+    "params": {}
+   },
+   {
+    "action": "apply_concept_operation",
+    "params": {
+     "op_id": "remove_side"
+    }
+   }
+  ],
+  "expected_json": "set_concept_param_sets_sides_expected.json"
+ },
+ {
+  "_doc": "remove_side clamps at the three-side minimum: from 3 it stays 3 (the placed golden with params.sides 6 -> 3, one edit, round-trip checked).",
+  "name": "apply_concept_operation_remove_side_clamps_at_three",
+  "setup_svg": "empty_layer.svg",
+  "actions": [
+   {
+    "action": "concepts_panel_select",
+    "params": {
+     "concept_id": "regular_polygon"
+    }
+   },
+   {
+    "action": "place_concept_instance",
+    "params": {}
+   },
+   {
+    "action": "set_concept_param",
+    "params": {
+     "name": "sides",
+     "value": 3
+    }
+   },
+   {
+    "action": "apply_concept_operation",
+    "params": {
+     "op_id": "remove_side"
+    }
+   }
+  ],
+  "expected_json": "apply_concept_operation_clamps_at_three_expected.json"
  }
 ]
