@@ -198,7 +198,10 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # YAML: a move dispatches `layers_panel_select`, a twirl is a `list_toggle` on
 # `collapsed_paths` (panel_scope_actions.json). No port routes the tree's
 # arrow keys to them yet; that is a later step.
-MIN_LOG_ONLY = 12
+# 11 the same day: `layers_select_all` runs its YAML (the visible rows, scoped
+# to an isolation); both trees' Ctrl/Command+A dispatch it through the
+# `keyboard:` rows, and both native select-all arms are gone.
+MIN_LOG_ONLY = 11
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;

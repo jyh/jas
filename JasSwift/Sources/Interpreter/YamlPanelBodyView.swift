@@ -4138,31 +4138,28 @@ struct TreeViewContent: View {
         .focusable()
         .focused($treeFocused)
         // layers.yaml's `keyboard:` rows (STATUS-jas item 8 class L, step 2b):
-        // the arrows, F2, Enter and Escape resolve and dispatch through
+        // the arrows, F2, Enter, Escape and ⌘A resolve and dispatch through
         // `LayersPanel.treeKey`, writing the store this view draws from. Not
         // while the rename field holds the keyboard (the web's input guard).
-        // Delete/Backspace and ⌘A stay in the monitor below: its Delete
-        // confirms orphaning a reference first, which `delete_layer_selection`
-        // does not, and `layers_select_all` is a `log` stub.
+        // Delete/Backspace stay in the monitor below: its Delete confirms
+        // orphaning a reference first, which `delete_layer_selection` does not.
         .modifier(LayersTreeKeys { chord in
             guard !renameFieldFocused else { return false }
             return LayersPanel.treeKey(chord, model: model)
         })
         .onAppear {
             // NSEvent local monitor to capture modifier keys during mouse events.
-            // Also handles Delete and Cmd-A when the tree is focused; Escape is
-            // layers.yaml's row now (`LayersTreeKeys` above), which cancels a
-            // rename or pops one isolation level exactly as this arm did.
+            // Also handles Delete when the tree is focused. Escape and Cmd-A are
+            // layers.yaml's rows now (`LayersTreeKeys` above): Escape cancels a
+            // rename or pops one isolation level exactly as this arm did, and
+            // Cmd-A selects the visible rows within the isolation, where this
+            // arm took every element path.
             NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown, .keyDown]) { evt in
                 modifierFlags = evt.modifierFlags
                 if evt.type == .keyDown && treeFocused {
                     if evt.keyCode == 51 || evt.keyCode == 117 {
                         // 51 = Delete (backspace), 117 = Forward Delete
                         performDeleteSelection()
-                        return nil
-                    } else if evt.keyCode == 0 && evt.modifierFlags.contains(.command) {
-                        // 0 = 'a' — Cmd-A selects all
-                        selectAll()
                         return nil
                     }
                 }
@@ -4311,23 +4308,6 @@ struct TreeViewContent: View {
             panelSelection: paths
         )
         panelSelection.removeAll()
-    }
-
-    private func selectAll() {
-        panelSelection.removeAll()
-        func collect(_ children: [Element], prefix: ElementPath) {
-            for (i, e) in children.enumerated() {
-                let p = prefix + [i]
-                panelSelection.insert(p)
-                switch e {
-                case .group(let g): collect(g.children, prefix: p)
-                case .layer(let l): collect(l.children, prefix: p)
-                default: break
-                }
-            }
-        }
-        let tops = model.document.layers.map { Element.layer($0) }
-        collect(tops, prefix: [])
     }
 
     /// Run `exit_isolation_to_level`, which keeps `level` levels of the
@@ -5186,8 +5166,8 @@ func gradientSliderKey(_ key: KeyEquivalent) -> String? {
 /// The Layers tree's key press as the chord `LayersPanel.treeKey` resolves, or
 /// nil for a key the tree hook leaves alone. The names are the `keyboard:`
 /// rows' tokens; ⌘ is `ctrl`, the command chord (`KeyMods.ctrl`'s rule).
-/// Delete/Backspace and ⌘A are NOT named: the tree's native monitor keeps them
-/// (see `TreeViewContent`).
+/// Delete/Backspace are NOT named: the tree's native monitor keeps them (see
+/// `TreeViewContent`).
 func layersTreeKeyChord(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyChord? {
     let name: String
     switch key {
@@ -5198,6 +5178,9 @@ func layersTreeKeyChord(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> Ke
     case .return: name = "Enter"
     case .escape: name = "Escape"
     case KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!)): name = "F2"
+    // ⌘A, the Ctrl+A row (`layers_select_all`). A plain letter is not the
+    // tree's: it passes on.
+    case "a" where modifiers.contains(.command): name = "A"
     default: return nil
     }
     return KeyChord(key: name, ctrl: modifiers.contains(.command),
