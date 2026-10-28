@@ -170,6 +170,11 @@ pub fn op_show_panel(kind: PanelKind) -> serde_json::Value {
     serde_json::json!({ "op": "show_panel", "kind": panel_kind_str(kind) })
 }
 
+/// `{op:"toggle_panel", kind}`: close the panel if on screen, else reveal it.
+pub fn op_toggle_panel(kind: PanelKind) -> serde_json::Value {
+    serde_json::json!({ "op": "toggle_panel", "kind": panel_kind_str(kind) })
+}
+
 /// `{op:"toggle_group_collapsed", dock_id, group_idx}`.
 pub fn op_toggle_group_collapsed(addr: GroupAddr) -> serde_json::Value {
     serde_json::json!({
@@ -318,6 +323,24 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
                 None => return false, // required field missing: skip
             };
             layout.show_panel(kind);
+        }
+        // Window > <panel>: hide the panel if it is ON SCREEN (close_panel),
+        // else reveal it (raise a background tab, or append it to the last
+        // group of the main dock). Routed on `panel_on_screen`, NOT on group
+        // membership: a background tab is a member drawn nowhere, and closing
+        // it deleted the panel the artist asked to see.
+        "toggle_panel" => {
+            let kind = match op["kind"].as_str() {
+                Some(s) => parse_panel_kind(s),
+                None => return false, // required field missing: skip
+            };
+            if layout.panel_on_screen(kind) {
+                if let Some(addr) = crate::workspace::clipboard::find_panel(layout, kind) {
+                    layout.close_panel(addr);
+                }
+            } else {
+                layout.reveal_panel(kind);
+            }
         }
         "reorder_panel" => {
             layout.reorder_panel(

@@ -370,7 +370,7 @@ public struct JasCommands: Commands {
             // to the close branch deleted the panel the artist was asking to
             // see (they saw nothing happen, then had to click twice).
             if ws.workspaceLayout.panelOnScreen(kind) {
-                if let addr = findPanel(ws.workspaceLayout, kind) {
+                if let addr = layoutFindPanel(ws.workspaceLayout, kind) {
                     layoutApply(&ws.workspaceLayout, opClosePanel(addr))
                 }
             } else {
@@ -472,24 +472,6 @@ public struct JasCommands: Commands {
                 }
             }
         }
-    }
-
-    private func findPanel(_ layout: WorkspaceLayout, _ kind: PanelKind) -> PanelAddr? {
-        for (_, dock) in layout.anchored {
-            for (gi, group) in dock.groups.enumerated() {
-                if let pi = group.panels.firstIndex(of: kind) {
-                    return PanelAddr(group: GroupAddr(dockId: dock.id, groupIdx: gi), panelIdx: pi)
-                }
-            }
-        }
-        for fd in layout.floating {
-            for (gi, group) in fd.dock.groups.enumerated() {
-                if let pi = group.panels.firstIndex(of: kind) {
-                    return PanelAddr(group: GroupAddr(dockId: fd.dock.id, groupIdx: gi), panelIdx: pi)
-                }
-            }
-        }
-        return nil
     }
 
     private func save() {
