@@ -337,6 +337,14 @@ pub(crate) fn run_action_case_deferred(
             .collect();
     }
 
+    // Optional pane/dock layout seed: the window verbs (toggle_pane, ...)
+    // act on `workspace_layout`, which `AppState::new` builds with no pane
+    // layout. The corpus names a golden (`setup_layout`) and the harness
+    // resolves it to its test-JSON here (`setup_layout_json`).
+    if let Some(l) = tc.get("setup_layout_json").and_then(|v| v.as_str()) {
+        st.workspace_layout = crate::workspace::test_json::test_json_to_workspace(l);
+    }
+
     for step in tc["actions"].as_array().unwrap() {
         let action = step["action"].as_str().unwrap();
         // Params are an object of resolved literals (mirrors the

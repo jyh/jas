@@ -3034,6 +3034,10 @@ pub(crate) mod tests {
         "fill_type_actions.json",
         // The Symbols orphan dialog's Delete, held to new_symbol's golden.
         "symbol_delete_actions.json",
+        // The YAML window verbs (design "the YAML window verbs run on the
+        // layout-op runtime"): each seeds a pane layout and pins the layout
+        // it leaves (`expected_layout`), held to goldens the layout ops made.
+        "window_actions.json",
         "state_actions.json",
         // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
         // `set_fill_type_solid` on a stroke-only SELECTION must read that
@@ -3123,7 +3127,28 @@ pub(crate) mod tests {
         tc: &serde_json::Value,
     ) -> (crate::workspace::app_state::AppState, Vec<serde_json::Value>) {
         let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-        crate::recorder::replay::run_action_case_deferred(tc, &setup_svg)
+        // `setup_layout` names a layout golden; the replay takes its JSON.
+        let mut tc = tc.clone();
+        if let Some(f) = tc.get("setup_layout").and_then(|v| v.as_str()).map(str::to_string) {
+            let layout = read_fixture(&format!("expected/{}", f));
+            tc["setup_layout_json"] = serde_json::Value::String(layout.trim().to_string());
+        }
+        crate::recorder::replay::run_action_case_deferred(&tc, &setup_svg)
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL: `expected_layout`, a `workspace_operations/` golden the
+    /// action's `workspace_layout` must equal. The window verbs move panes,
+    /// not the document, so the document golden alone would pass a no-op.
+    fn assert_action_layout(tc: &serde_json::Value, st: &crate::workspace::app_state::AppState) {
+        let Some(f) = tc.get("expected_layout").and_then(|v| v.as_str()) else { return };
+        let name = tc["name"].as_str().unwrap();
+        let expected = read_fixture(&format!("workspace_operations/{}", f));
+        let actual = crate::workspace::test_json::workspace_to_test_json(&st.workspace_layout);
+        if actual != expected.trim() {
+            eprintln!("=== EXPECTED LAYOUT ({}) ===\n{}\n=== ACTUAL ===\n{}", name, expected.trim(), actual);
+            panic!("Action test '{}': the layout it left is not {}", name, f);
+        }
     }
 
     #[cfg(feature = "web")]
@@ -3270,6 +3295,7 @@ pub(crate) mod tests {
         assert_action_panel_scope(tc, &st);
         assert_action_view(tc, &st);
         assert_action_dialog(tc, &st, &deferred);
+        assert_action_layout(tc, &st);
     }
 
     /// JSON equality with ONE number type, as JSON and the reference have it:

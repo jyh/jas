@@ -2286,6 +2286,24 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // layout: {op: <verb>, <field>: <expr>, ...} — one verb of the shared
+    // layout-op runtime (`layout_apply`), the one the workspace_operations
+    // corpus pins. `op` is the literal verb; every other string is an
+    // expression (`kind: param.pane`). The window verbs (toggle_pane, ...)
+    // name what the panes do through it.
+    if let Some(spec) = eff.get("layout").and_then(|v| v.as_object()) {
+        let mut op = serde_json::Map::new();
+        for (k, v) in spec {
+            let val = match v.as_str() {
+                Some(e) if k != "op" => super::effects::value_to_json(&super::expr::eval(e, &*eval_ctx)),
+                _ => v.clone(),
+            };
+            op.insert(k.clone(), val);
+        }
+        crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout, &serde_json::Value::Object(op));
+        return deferred;
+    }
+
     // snapshot — PHASE3 §5.2
     if eff.get("snapshot").is_some() {
         if let Some(tab) = st.tabs.get_mut(st.active_tab) {

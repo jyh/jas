@@ -262,6 +262,7 @@
             "geometry.export_pdf": {},
             "if": {},
             "increment": {},
+            "layout": {},
             "let": {},
             "list_push": {},
             "list_toggle": {},

@@ -77,7 +77,8 @@ public enum LayersPanel {
                                            panelSelection: [[Int]] = [],
                                            artboardsPanelSelection: [String] = [],
                                            params: [String: Any] = [:],
-                                           onCloseDialog: (() -> Void)? = nil) {
+                                           onCloseDialog: (() -> Void)? = nil,
+                                           onLayoutOp: (([String: Any]) -> Void)? = nil) {
         switch actionName {
         // `concepts_panel_select` is normally the generic `set_panel_state`
         // effect, but that effect is a no-op on an UNINITIALIZED panel scope
@@ -195,7 +196,8 @@ public enum LayersPanel {
         runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
                               model: model, actions: actions,
                               dialogs: ws.data["dialogs"] as? [String: Any],
-                              onCloseDialog: onCloseDialog)
+                              onCloseDialog: onCloseDialog,
+                              onLayoutOp: onLayoutOp)
     }
 
     /// Build the LayersPanel platform-effect registry and run `effects` through
@@ -207,7 +209,8 @@ public enum LayersPanel {
     private static func runLayersPanelEffects(
         _ effects: [Any], actionName: String, ctx: [String: Any],
         model: Model, actions: [String: Any]?, dialogs: [String: Any]?,
-        onCloseDialog: (() -> Void)?
+        onCloseDialog: (() -> Void)?,
+        onLayoutOp: (([String: Any]) -> Void)? = nil
     ) {
         // Platform handlers
         // OP_LOG.md Increment 1: the `snapshot` effect OPENS the undo
@@ -1075,6 +1078,26 @@ public enum LayersPanel {
         }
         if onCloseDialog != nil {
             platformEffects["close_dialog"] = closeDialogHandler
+        }
+        // `layout: {op: <verb>, <field>: <expr>, ...}`: one verb of the shared
+        // layout-op runtime (`layoutApply`), handed to the caller that holds a
+        // pane layout (the Model holds none). `op` is the literal verb; every
+        // other string is an expression (`kind: param.pane`). Mirrors Rust's
+        // `run_yaml_effect` `layout` arm.
+        if let onLayoutOp {
+            platformEffects["layout"] = { value, callCtx, _ in
+                guard let spec = value as? [String: Any] else { return nil }
+                var op: [String: Any] = [:]
+                for (k, v) in spec {
+                    if k != "op", let expr = v as? String {
+                        op[k] = evaluate(expr, context: callCtx).toAny() ?? NSNull()
+                    } else {
+                        op[k] = v
+                    }
+                }
+                onLayoutOp(op)
+                return nil
+            }
         }
 
         // Use the model's own StateStore so effects (open_dialog,
