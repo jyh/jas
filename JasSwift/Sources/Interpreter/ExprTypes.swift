@@ -173,6 +173,10 @@ enum Value: Equatable {
             return normalizeColor(a) == normalizeColor(b)
         case (.path(let a), .path(let b)):
             return a == b
+        // Lists compare by value, as the reference's and Rust's do. Until item
+        // 38 this case was missing, so every pair of lists read as unequal.
+        case (.list(let a), .list(let b)):
+            return a == b
         case (.closure, _), (_, .closure):
             return false  // closures are never equal
         default:

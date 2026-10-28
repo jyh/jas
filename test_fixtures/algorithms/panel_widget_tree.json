@@ -11438,6 +11438,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
+          "collapsed_paths",
           "drag_active",
           "element_selection",
           "isolation_root",
@@ -11445,7 +11446,6 @@
           "renaming_element",
           "search_query",
           "source",
-          "twirl_states",
           "type_filter"
         ],
         "style": [

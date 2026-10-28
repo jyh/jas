@@ -1314,6 +1314,19 @@ mod tests {
         assert!(withheld_total > 0, "vacuous: nothing was withheld on the real workspace");
     }
 
+    /// The declared node with `id` anywhere under `v` (the partition oracle's
+    /// own read of the spec).
+    fn spec_node_by_id<'a>(v: &'a Value, id: &str) -> Option<&'a Value> {
+        if v.get("id").and_then(Value::as_str) == Some(id) {
+            return Some(v);
+        }
+        match v {
+            Value::Object(m) => m.values().find_map(|c| spec_node_by_id(c, id)),
+            Value::Array(a) => a.iter().find_map(|c| spec_node_by_id(c, id)),
+            _ => None,
+        }
+    }
+
     /// ⭐ THE PARTITION, AGAINST A PREDICATE THAT DOES NOT COME FROM `render_plan`.
     ///
     /// Q1 takes its leaf and chrome lists FROM `render_plan`, so a defect in
@@ -1355,7 +1368,14 @@ mod tests {
                         let p = e["path"].to_string();
                         let rec = &wt[&p];
                         let t = rec["type"].as_str().unwrap_or("");
-                        if !LAYOUT_ONLY.contains(&t) {
+                        // A `tree_view` DECLARING `foreach` + `do` is laid out
+                        // as its expansion (item 38), read from the spec by id,
+                        // not from `render_plan`.
+                        let expanded_tree = t == "tree_view"
+                            && rec["id"].as_str().and_then(|id| spec_node_by_id(spec, id))
+                                .is_some_and(|n| n.get("foreach").is_some_and(Value::is_object)
+                                    && n.get("do").is_some_and(|d| !d.is_null()));
+                        if !LAYOUT_ONLY.contains(&t) && !expanded_tree {
                             leaves.push(p);
                         } else if ["border", "background", "bg"].iter().any(|k| has(&rec["style"], k))
                             || has(&rec["bind"], "background")

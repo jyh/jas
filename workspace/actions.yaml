@@ -1862,7 +1862,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       - log: "cycle_element_visibility"
 
@@ -1880,7 +1880,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       - log: "solo_element_visibility"
 
@@ -1902,7 +1902,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       - log: "toggle_element_lock"
 
@@ -1915,7 +1915,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       - log: "toggle_element_twirl"
 
@@ -2005,7 +2005,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       - log: "layers_panel_select"
 
@@ -2021,7 +2021,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
       - log: "layers_element_select"
 
@@ -2084,7 +2084,7 @@ actions:
     category: layers
     tier: 3
     params:
-      element_id: { type: string }
+      path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     enabled_when: "active_document.layers_panel_selection_count == 1"
     effects:
       - log: "rename_element"

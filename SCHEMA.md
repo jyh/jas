@@ -878,8 +878,8 @@ bind:
   search_query: <expression>       # filter string
   type_filter: <expression>        # active type filter list
   isolation_root: <expression>     # root container ID for isolation mode
-  twirl_states: <expression>       # map of element_id to expanded bool
-  renaming_element: <expression>   # element ID being renamed, or null
+  collapsed_paths: <expression>    # list of the collapsed containers' paths
+  renaming_element: <expression>   # path of the element being renamed, or null
   drag_active: <expression>        # whether a drag is in progress
 foreach: {source: <expression>, as: node}  # the rows: tree_visible_rows(...) (see below)
 do: <element>                      # per-row element spec (see node.* below)

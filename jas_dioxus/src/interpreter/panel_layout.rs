@@ -80,6 +80,17 @@ pub struct RenderPlan {
 const LAYOUT_CONTAINER_TYPES: [&str; 6] =
     ["container", "row", "col", "grid", "panel", "disclosure"];
 
+/// A layout-only node, which the render plan never sends as a leaf: the
+/// container types, and a `tree_view` laid out as its foreach expansion
+/// (STATUS-jas item 38; flask §603 measured the shell drawing a `tree_view`
+/// placeholder behind the rows when this test read the type alone).
+fn is_layout_only(n: &Value) -> bool {
+    if node_type(n) == "tree_view" {
+        return is_container(n);
+    }
+    LAYOUT_CONTAINER_TYPES.contains(&node_type(n))
+}
+
 /// Lay out a compiled panel node (`{"type":"panel","content":<root>}`) into a
 /// JSON array of `{"path":[..],"rect":{x,y,w,h}}`, pre-order, panel-relative.
 ///
@@ -159,7 +170,7 @@ pub fn render_plan_with_omitted(
             node: it.node,
             ctx: it.ctx,
         };
-        if LAYOUT_CONTAINER_TYPES.contains(&node_type(&leaf.node)) {
+        if is_layout_only(&leaf.node) {
             // Layout-only container: draw it (behind the leaves) only if it
             // carries a border/background; otherwise it produces no widget.
             if has_chrome(&leaf.node) {

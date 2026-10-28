@@ -326,17 +326,29 @@ state:
     default: []
     description: "Stack of isolation contexts; each entry has container_id and saved_visibility map"
 
-  twirl_states:
-    type: object
-    default: {}
+  collapsed_paths:
+    type: list
+    item_type: path
+    default: []
     persist: true
-    description: "Map of element_id to bool (true=expanded). Persists across sessions. Missing entries default to true (expanded)."
+    description: >
+      The paths (lists of child indices) of the collapsed containers in the
+      tree; a container not listed is expanded. Persists across sessions.
+      Keyed by PATH, not element id, because ids are optional (STATUS-jas
+      item 38; this replaces the id-keyed `twirl_states` map, which no
+      expression could index by path). A path names a POSITION, not an
+      element: inserting, deleting or reordering a sibling above an entry
+      moves it onto another element, as both native trees behave.
 
   renaming_element:
-    type: string
+    type: list
+    item_type: number
     default: null
     nullable: true
-    description: "ID of the element currently being renamed inline, or null"
+    description: >
+      The path of the element being renamed inline, or null. A path, not an
+      element id (ids are optional; STATUS-jas item 38), with the same
+      position caveat as collapsed_paths.
 
   drag_active:
     type: bool
@@ -575,9 +587,9 @@ content:
         the `do` template with node.* variables in scope, once per row of
         the foreach source: the visible rows the core resolves from
         element_tree and the widget's binds (tree_visible_rows; a row under
-        a collapsed container is hidden). The first cut passes no collapsed
-        paths and no renaming path, because nothing writes that state yet
-        (STATUS-jas item 38 step 3). Supports
+        a collapsed container is hidden; panel.collapsed_paths and
+        panel.renaming_element are paths, as the row actions' params are).
+        Supports
         drag-and-drop reordering, inline rename, keyboard navigation,
         and context menus. See the panel-level description for full
         behavioral specification.
@@ -589,12 +601,12 @@ content:
         search_query: "panel.search_query"
         type_filter: "panel.type_filter"
         isolation_root: "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1].container_id else null"
-        twirl_states: "panel.twirl_states"
+        collapsed_paths: "panel.collapsed_paths"
         renaming_element: "panel.renaming_element"
         drag_active: "panel.drag_active"
 
       foreach:
-        source: "tree_visible_rows(active_document.element_tree, [], panel.layers_panel_selection, null)"
+        source: "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
         as: node
       do:
         type: container
@@ -619,11 +631,11 @@ content:
               - event: click
                 condition: "not event.alt"
                 action: cycle_element_visibility
-                params: { element_id: "node.id" }
+                params: { path: "node.path" }
               - event: click
                 condition: "event.alt"
                 action: solo_element_visibility
-                params: { element_id: "node.id" }
+                params: { path: "node.path" }
 
           # Lock button
           - id: lp_lock
@@ -634,12 +646,12 @@ content:
             behavior:
               - event: click
                 action: toggle_element_lock
-                params: { element_id: "node.id" }
+                params: { path: "node.path" }
 
           # Twirl-down button (containers only) or alignment gap (leaves)
           - id: lp_twirl
             type: icon_button
-            icon: "{{if panel.twirl_states[node.id] != false then 'twirl_open' else 'twirl_closed'}}"
+            icon: "{{if any(panel.collapsed_paths, fun p -> p == node.path) then 'twirl_closed' else 'twirl_open'}}"
             summary: "Expand/Collapse"
             style: { size: 16 }
             bind:
@@ -647,7 +659,7 @@ content:
             behavior:
               - event: click
                 action: toggle_element_twirl
-                params: { element_id: "node.id" }
+                params: { path: "node.path" }
           - type: spacer
             style: { width: 16 }
             bind:
@@ -672,16 +684,16 @@ content:
             summary: "Element name"
             style: { flex: 1, font_size: 11, overflow: hidden, text_overflow: ellipsis, white_space: nowrap }
             bind:
-              visible: "panel.renaming_element != node.id"
+              visible: "panel.renaming_element != node.path"
             behavior:
               - event: double_click
                 action: rename_element
-                params: { element_id: "node.id" }
+                params: { path: "node.path" }
           - id: lp_name_edit
             type: text_input
             style: { flex: 1, font_size: 11 }
             bind:
-              visible: "panel.renaming_element == node.id"
+              visible: "panel.renaming_element == node.path"
               value: "node.name"
             behavior:
               - event: keydown
@@ -704,21 +716,21 @@ content:
             behavior:
               - event: click
                 action: layers_element_select
-                params: { element_id: "node.id" }
+                params: { path: "node.path" }
 
       # Row-level events (panel selection, isolation, drag)
       behavior:
         - event: click
           description: "Panel-select on click (spacer, twirl-gap, preview, name areas)"
           action: layers_panel_select
-          params: { element_id: "node.id" }
+          params: { path: "node.path" }
         - event: double_click
           condition: "node.is_container and event.target_id != 'lp_name'"
           action: enter_isolation_mode
           params: { container_id: "node.id" }
         - event: drag_start
           action: layers_panel_select
-          params: { element_id: "node.id" }
+          params: { path: "node.path" }
         - event: drag_move
           description: "Show drop indicator; auto-expand after 500ms hover on collapsed container"
         - event: drag_end

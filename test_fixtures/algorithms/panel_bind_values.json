@@ -3339,7 +3339,7 @@
             "text"
           ],
           "isolation_stack": [],
-          "twirl_states": null,
+          "collapsed_paths": [],
           "renaming_element": null,
           "drag_active": false,
           "search_query": ""
@@ -3415,6 +3415,15 @@
           3
         ],
         "id": "lp_tree",
+        "key": "bind.collapsed_paths",
+        "type": "list",
+        "value": "[]"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
         "key": "bind.drag_active",
         "type": "bool",
         "value": "false"
@@ -3470,15 +3479,6 @@
         ],
         "id": "lp_tree",
         "key": "bind.source",
-        "type": "null",
-        "value": ""
-      },
-      {
-        "path": [
-          3
-        ],
-        "id": "lp_tree",
-        "key": "bind.twirl_states",
         "type": "null",
         "value": ""
       },

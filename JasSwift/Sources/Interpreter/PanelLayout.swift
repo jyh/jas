@@ -82,6 +82,16 @@ public enum PanelLayout {
         "container", "row", "col", "grid", "panel", "disclosure",
     ]
 
+    /// A layout-only node, which the render plan never sends as a leaf: the
+    /// container types, and a `tree_view` laid out as its foreach expansion
+    /// (STATUS-jas item 38; flask §603 measured the shell drawing a
+    /// `tree_view` placeholder behind the rows when this test read the type
+    /// alone).
+    private static func isLayoutOnly(_ n: [String: Any]) -> Bool {
+        if nodeType(n) == "tree_view" { return isContainer(n) }
+        return layoutContainerTypes.contains(nodeType(n))
+    }
+
     /// A layout-only container still worth drawing — it carries a border /
     /// background (static `style.border` / `style.background` / `style.bg`, or a
     /// `bind.background`, e.g. a selected-row highlight). Mirrors
@@ -142,7 +152,7 @@ public enum PanelLayout {
         for it in items {
             let entry = RenderLeaf(x: it.x, y: it.y, w: it.w, h: it.h,
                                    node: it.node, ctx: it.ctx)
-            if layoutContainerTypes.contains(nodeType(it.node)) {
+            if isLayoutOnly(it.node) {
                 // Layout-only container: omitted unless it carries chrome
                 // (a border / background) worth drawing behind the leaves.
                 if hasChrome(it.node) { chrome.append(entry) }

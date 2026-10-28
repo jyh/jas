@@ -94,6 +94,16 @@ _LAYOUT_CONTAINER_TYPES = frozenset({
 })
 
 
+def _is_layout_only(node: dict) -> bool:
+    """A layout-only node, which the render plan never sends as a leaf: the
+    container types, and a `tree_view` laid out as its foreach expansion
+    (STATUS-jas item 38; flask §603 measured the shell drawing a `tree_view`
+    placeholder behind the rows when this test read the type alone)."""
+    if node.get("type") == "tree_view":
+        return _is_container(node)
+    return node.get("type") in _LAYOUT_CONTAINER_TYPES
+
+
 def _has_chrome(node: dict) -> bool:
     """A layout-only container still worth drawing — it carries a border /
     background (static or a `bind.background`, e.g. a selected-row highlight)."""
@@ -132,7 +142,7 @@ def render_plan(panel_node: dict, avail_w: int, avail_h: int = 0,
             "node": node,
             "ctx": it.get("ctx") or {},
         }
-        if node.get("type") in _LAYOUT_CONTAINER_TYPES:
+        if _is_layout_only(node):
             if _has_chrome(node):
                 chrome.append(entry)
         else:

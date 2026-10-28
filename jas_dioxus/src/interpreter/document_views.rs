@@ -176,6 +176,74 @@ mod tests {
         }
     }
 
+    /// `lp_tree`'s row template keys its binds by PATH (item 38 step 3). flask
+    /// §602 measured every row showing its rename box when they compared
+    /// `node.id` (null on every row) with a null `panel.renaming_element`.
+    /// Twin of the reference's `test_layers_row_template.py`.
+    #[test]
+    fn the_layers_row_template_reads_paths() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        fn find<'a>(v: &'a Value, id: &str) -> Option<&'a Value> {
+            if v.get("id").and_then(Value::as_str) == Some(id) { return Some(v); }
+            match v {
+                Value::Object(m) => m.values().find_map(|c| find(c, id)),
+                Value::Array(a) => a.iter().find_map(|c| find(c, id)),
+                _ => None,
+            }
+        }
+        let tree = find(&ws.data()["panels"]["layers_panel_content"], "lp_tree").expect("lp_tree").clone();
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let rows = fx["cases"][0]["expected"].clone();
+        let widget = |id: &str| tree["do"]["children"].as_array().unwrap().iter()
+            .find(|c| c["id"] == id).unwrap_or_else(|| panic!("{id}")).clone();
+        let visible = |ctx: &Value, id: &str| -> Vec<bool> {
+            let src = tree["foreach"]["source"].as_str().unwrap();
+            let crate::interpreter::expr_types::Value::List(expanded) = crate::interpreter::expr::eval(src, ctx) else {
+                panic!("the foreach source is not a list");
+            };
+            let expr = widget(id)["bind"]["visible"].as_str().unwrap().to_string();
+            expanded.iter().map(|r| {
+                let mut c = ctx.clone();
+                c["node"] = r.clone();
+                crate::interpreter::expr::eval(&expr, &c).to_bool()
+            }).collect()
+        };
+        let ctx = |renaming: Value, collapsed: Value| json!({
+            "active_document": {"element_tree": rows},
+            "panel": {"layers_panel_selection": [], "isolation_stack": [],
+                      "collapsed_paths": collapsed, "renaming_element": renaming},
+        });
+        let n = rows.as_array().unwrap().len();
+        let idle = ctx(Value::Null, json!([]));
+        assert_eq!(visible(&idle, "lp_name"), vec![true; n], "every name shows");
+        assert_eq!(visible(&idle, "lp_name_edit"), vec![false; n], "no rename box");
+        let renaming = ctx(rows[2]["path"].clone(), json!([]));
+        assert_eq!(visible(&renaming, "lp_name_edit").iter().filter(|b| **b).count(), 1);
+        let collapsed = ctx(Value::Null, json!([[0, 1]]));
+        assert_eq!(visible(&collapsed, "lp_name").len(), n - 1, "the collapsed group hides its child");
+    }
+
+    /// flask §603: the render plan sent the expanded `lp_tree` as a leaf of type
+    /// `tree_view` as well as its rows, so the shell drew a placeholder behind
+    /// them. An expanded tree is layout-only, like any foreach container.
+    #[test]
+    fn the_expanded_tree_is_not_also_drawn_as_a_leaf() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let ctx = json!({
+            "active_document": {"element_tree": fx["cases"][0]["expected"]},
+            "panel": {"layers_panel_selection": [], "isolation_stack": [],
+                      "collapsed_paths": [], "renaming_element": null},
+        });
+        let plan = crate::interpreter::panel_layout::render_plan(
+            &ws.data()["panels"]["layers_panel_content"], 228, 600, &ctx);
+        let kinds: Vec<&str> = plan.leaves.iter().filter_map(|l| l.node["type"].as_str()).collect();
+        assert!(!kinds.contains(&"tree_view"), "{kinds:?}");
+        assert!(kinds.iter().filter(|k| **k == "icon_button").count() >= 10, "the control: the rows' leaves");
+    }
+
     /// The same cases through the expression language: `layers.yaml`
     /// `lp_tree`'s foreach source calls `tree_visible_rows`, and the panel
     /// selection arrives as path markers (STATUS-jas item 38).
