@@ -497,6 +497,35 @@ private func ctxHasPath(_ ctx: [String: Any], _ path: String) -> Bool {
 /// The positive control is the read count: a scanner that matched nothing
 /// would pass an empty census. Mirrors the Rust
 /// `every_panel_menu_predicate_read_is_published_to_the_menu_context`.
+/// Every `keyboard:` row a panel declares, at ANY depth: the panel's own
+/// (artboards) and any element's (layers.yaml puts its ten on the tree_view,
+/// `lp_tree`). Until 2026-10-28 the census read only the panel's top level,
+/// so the Layers rows were never read. Mirrors the Rust `keyboard_rows`.
+private func keyboardRows(_ node: Any) -> [Any] {
+    var out: [Any] = []
+    if let m = node as? [String: Any] {
+        if let rows = m["keyboard"] as? [Any] { out.append(contentsOf: rows) }
+        for (k, v) in m where k != "keyboard" { out.append(contentsOf: keyboardRows(v)) }
+    } else if let a = node as? [Any] {
+        for v in a { out.append(contentsOf: keyboardRows(v)) }
+    }
+    return out
+}
+
+@Test func theCensusReadsAKeyboardOwnedByAnElement() {
+    guard let ws = WorkspaceData.load(),
+          let panels = ws.data["panels"] as? [String: Any],
+          let layers = panels["layers_panel_content"] as? [String: Any] else {
+        Issue.record("Failed to load the workspace bundle")
+        return
+    }
+    let rows = keyboardRows(layers).compactMap { $0 as? [String: Any] }
+    let f2 = rows.first { ($0["key"] as? String) == "F2" }
+    #expect((f2?["params"] as? [String: Any])?["element_id"] as? String == "panel.layers_panel_selection[0]")
+    #expect(rows.count >= 10, "positive control: only \(rows.count) Layers keyboard rows")
+    #expect(layers["keyboard"] == nil, "the rows are the tree_view's, not the panel's")
+}
+
 @Test func everyPanelMenuPredicateReadIsPublishedToTheMenuContext() {
     guard let ws = WorkspaceData.load(),
           let panels = ws.data["panels"] as? [String: Any] else {
@@ -518,8 +547,9 @@ private func ctxHasPath(_ ctx: [String: Any], _ path: String) -> Bool {
             }
         }
         // The keyboard rows evaluate against the same panel context; see the
-        // Rust twin for why they are here.
-        for entry in (panel["keyboard"] as? [Any]) ?? [] {
+        // Rust twin for why they are here. At ANY depth: layers.yaml puts its
+        // rows on the tree_view (`keyboardRows`).
+        for entry in keyboardRows(panel) {
             guard let obj = entry as? [String: Any] else { continue }
             if let expr = obj["enabled_when"] as? String { exprs.append(("keyboard enabled_when", expr)) }
             for (pname, pv) in (obj["params"] as? [String: Any]) ?? [:] {

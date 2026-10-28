@@ -938,6 +938,39 @@ mod tests {
     /// context, and layers.yaml's `panel.layers_panel_selection[0]` was a
     /// read of a key this port never published until this arm went red on
     /// it.
+    /// Every `keyboard:` row a panel declares, at ANY depth: the panel's own
+    /// (artboards) and any element's (layers.yaml puts its ten on the
+    /// tree_view, `lp_tree`). Until 2026-10-28 the census read only the
+    /// panel's top level, so the Layers rows it names were never read.
+    fn keyboard_rows<'a>(node: &'a serde_json::Value, out: &mut Vec<&'a serde_json::Value>) {
+        match node {
+            serde_json::Value::Object(m) => {
+                if let Some(rows) = m.get("keyboard").and_then(|v| v.as_array()) {
+                    out.extend(rows.iter());
+                }
+                for (k, v) in m {
+                    if k != "keyboard" {
+                        keyboard_rows(v, out);
+                    }
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|v| keyboard_rows(v, out)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn the_census_reads_a_keyboard_owned_by_an_element() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let layers = &ws.data()["panels"]["layers_panel_content"];
+        let mut rows = Vec::new();
+        keyboard_rows(layers, &mut rows);
+        let f2 = rows.iter().find(|r| r["key"] == "F2").expect("the Layers tree's F2 row");
+        assert_eq!(f2["params"]["element_id"], "panel.layers_panel_selection[0]");
+        assert!(rows.len() >= 10, "positive control: only {} Layers keyboard rows", rows.len());
+        assert!(layers.get("keyboard").is_none(), "the rows are the tree_view's, not the panel's");
+    }
+
     #[test]
     fn every_panel_menu_predicate_read_is_published_to_the_menu_context() {
         let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
@@ -956,7 +989,9 @@ mod tests {
                     }
                 }
             }
-            for e in panel.get("keyboard").and_then(|m| m.as_array()).into_iter().flatten() {
+            let mut key_rows: Vec<&serde_json::Value> = Vec::new();
+            keyboard_rows(panel, &mut key_rows);
+            for e in key_rows {
                 let Some(obj) = e.as_object() else { continue };
                 if let Some(expr) = obj.get("enabled_when").and_then(|v| v.as_str()) {
                     exprs.push(("keyboard enabled_when".to_string(), expr.to_string()));
