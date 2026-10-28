@@ -90,7 +90,7 @@ def test_the_preference_action_corpus_holds():
     import os
     from workspace_interpreter.effects import run_effects
     path = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
-                        "preference_actions", "toggle_brush_library_persistent.json")
+                        "preference_actions/toggle_brush_library_persistent.json")
     with open(path, encoding="utf-8") as f:
         cases = json.load(f)["cases"]
     assert len(cases) >= 4, "the fixture is not vacuous"

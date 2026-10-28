@@ -584,6 +584,23 @@
         "swift": "path reference (preferences/open_libraries_at_launch.json)"
       },
       "notes": "STATUS-jas item 37, launch half: state.brushes_open_libraries initialised at startup from preferences.brushes.persistent_libraries (state.yaml)."
+    },
+    "test_fixtures/preference_actions": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "reference",
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "None needed: each runner runs the case's actions through its own effects and compares the persistent list with the form the case names, derived from the bundle.",
+      "claim_style": {
+        "reference": "path reference (preference_actions/toggle_brush_library_persistent.json)",
+        "rust": "path reference (preference_actions/toggle_brush_library_persistent.json, include_str!)",
+        "swift": "path reference (preference_actions/toggle_brush_library_persistent.json)"
+      },
+      "notes": "STATUS-jas item 7: actions that write the user's preference overrides. Run inside each runner's preference suite (Swift's PreferenceWriteTests is .serialized), never the shared action corpus, because Swift's overrides are one process-wide store."
     }
   },
   "known_gaps": [],
