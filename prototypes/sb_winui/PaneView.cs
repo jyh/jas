@@ -1571,11 +1571,6 @@ public sealed partial class MainWindow
         private void OnPaneClick(string widget, string? path = null) => SendPane(widget, "click", null, path);
 
         /// <summary>
-        /// Send one act on a pane control to the core, addressed to the panel the
-        /// control was built from. A press is `click` with no value; a commit is
-        /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
-        /// </summary>
-        /// <summary>
         /// jas §630: a surface's brush from its `bind.background`. A colour the
         /// core sent paints; anything else is TRANSPARENT, never null: a null
         /// background would also stop the surface taking the press.
@@ -1585,6 +1580,11 @@ public sealed partial class MainWindow
                 ? new(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
                 : new(Microsoft.UI.Colors.Transparent);
 
+        /// <summary>
+        /// Send one act on a pane control to the core, addressed to the panel the
+        /// control was built from. A press is `click` with no value; a commit is
+        /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
+        /// </summary>
         private void SendPane(string widget, string eventName, string? value, string? path = null,
                               Dictionary<string, object>? gesture = null, string? key = null)
         {
