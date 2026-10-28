@@ -934,3 +934,80 @@ tests:
     expected: "5"
     type: string
     note: "integer-valued: no trailing .0"
+
+  # as_path: a list of child indices (or a path marker) as a PATH value, for an
+  # effect that writes paths from a row's `node.path` (STATUS-jas item 38 step 3c)
+  - expr: "as_path(state.a) == path(1, 0)"
+    state: {a: [1, 0]}
+    expected: true
+    type: bool
+    note: "a list of indices is that path"
+
+  - expr: '"" + as_path(state.a)'
+    state: {a: [1, 0]}
+    expected: "1.0"
+    type: string
+    note: "and coerces to text as a path does (dot-joined), not as a list"
+
+  - expr: '"" + as_path(state.m)'
+    state: {m: {"__path__": [2, 3]}}
+    expected: "2.3"
+    type: string
+    note: "a path marker is the path it names"
+
+  - expr: "as_path(state.e) == path()"
+    state: {e: []}
+    expected: true
+    type: bool
+    note: "the empty list is the root path"
+
+  - expr: "as_path(state.neg) == null"
+    state: {neg: [1, -1]}
+    expected: true
+    type: bool
+    note: "a negative index is not a path"
+
+  - expr: "as_path(state.frac) == null"
+    state: {frac: [1.5]}
+    expected: true
+    type: bool
+    note: "nor is a fraction"
+
+  - expr: "as_path(state.s) == null"
+    state: {s: "1.0"}
+    expected: true
+    type: bool
+    note: "nor is a string"
+
+  # tree_row_range(rows, from, to): the rows' paths from one row to another,
+  # inclusive, in row order, as path markers; [] when either end is not a row
+  # (STATUS-jas item 38 step 3c: a Shift-click on a Layers row)
+  - expr: "tree_row_range(state.rows, path(0), path(1, 0)).length"
+    state: {rows: [{path: [0]}, {path: [1]}, {path: [1, 0]}, {path: [2]}]}
+    expected: 3
+    type: number
+    note: "inclusive at both ends"
+
+  - expr: '"" + as_path(tree_row_range(state.rows, path(1, 0), path(0))[0])'
+    state: {rows: [{path: [0]}, {path: [1]}, {path: [1, 0]}, {path: [2]}]}
+    expected: "0"
+    type: string
+    note: "row order whichever end is clicked first"
+
+  - expr: '"" + as_path(tree_row_range(state.rows, state.from, state.to)[1])'
+    state: {rows: [{path: [0]}, {path: [1]}, {path: [1, 0]}, {path: [2]}], from: {"__path__": [2]}, to: [1]}
+    expected: "1.0"
+    type: string
+    note: "an end may be a marker or a list"
+
+  - expr: "tree_row_range(state.rows, path(0), path(0)).length"
+    state: {rows: [{path: [0]}, {path: [1]}]}
+    expected: 1
+    type: number
+    note: "one row is a range of one"
+
+  - expr: "tree_row_range(state.rows, path(0), path(5)).length"
+    state: {rows: [{path: [0]}, {path: [1]}]}
+    expected: 0
+    type: number
+    note: "an end that is not a row (a hidden or absent one) gives nothing"

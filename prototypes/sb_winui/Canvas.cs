@@ -359,6 +359,12 @@ internal sealed class PanelClickCmd : Cmd
     internal Dictionary<string, object>? Gesture;
 
     /// <summary>
+    /// jas item 40: a `keydown`'s key, as its W3C name (`PanelWire.KeyName`);
+    /// null for every other act.
+    /// </summary>
+    internal string? Key;
+
+    /// <summary>
     /// WHO clicked: `hand` for a person, `synth:&lt;step&gt;` for Q6's replay.
     /// It is on every row the click writes, so a row can never claim a
     /// provenance its caller did not give it.
@@ -5555,7 +5561,7 @@ internal sealed unsafe class Canvas : IDisposable
             ? PanelWire.GestureJson(click.Widget, click.Event, gesture,
                                     click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path)
             : PanelWire.EventJson(click.Widget, click.Event, click.Value,
-                                  click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path);
+                                  click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path, click.Key);
 
     /// <summary>
     /// The fields every click row opens with. `event=` and `value=` come AFTER

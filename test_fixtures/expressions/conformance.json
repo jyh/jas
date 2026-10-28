@@ -1046,5 +1046,213 @@
     "expr": "\"\" + 5",
     "expected": "5",
     "type": "string"
+  },
+  {
+    "expr": "as_path(state.a) == path(1, 0)",
+    "state": {
+      "a": [
+        1,
+        0
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "\"\" + as_path(state.a)",
+    "state": {
+      "a": [
+        1,
+        0
+      ]
+    },
+    "expected": "1.0",
+    "type": "string"
+  },
+  {
+    "expr": "\"\" + as_path(state.m)",
+    "state": {
+      "m": {
+        "__path__": [
+          2,
+          3
+        ]
+      }
+    },
+    "expected": "2.3",
+    "type": "string"
+  },
+  {
+    "expr": "as_path(state.e) == path()",
+    "state": {
+      "e": []
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "as_path(state.neg) == null",
+    "state": {
+      "neg": [
+        1,
+        -1
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "as_path(state.frac) == null",
+    "state": {
+      "frac": [
+        1.5
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "as_path(state.s) == null",
+    "state": {
+      "s": "1.0"
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(0), path(1, 0)).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        },
+        {
+          "path": [
+            2
+          ]
+        }
+      ]
+    },
+    "expected": 3,
+    "type": "number"
+  },
+  {
+    "expr": "\"\" + as_path(tree_row_range(state.rows, path(1, 0), path(0))[0])",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        },
+        {
+          "path": [
+            2
+          ]
+        }
+      ]
+    },
+    "expected": "0",
+    "type": "string"
+  },
+  {
+    "expr": "\"\" + as_path(tree_row_range(state.rows, state.from, state.to)[1])",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        },
+        {
+          "path": [
+            1,
+            0
+          ]
+        },
+        {
+          "path": [
+            2
+          ]
+        }
+      ],
+      "from": {
+        "__path__": [
+          2
+        ]
+      },
+      "to": [
+        1
+      ]
+    },
+    "expected": "1.0",
+    "type": "string"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(0), path(0)).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        }
+      ]
+    },
+    "expected": 1,
+    "type": "number"
+  },
+  {
+    "expr": "tree_row_range(state.rows, path(0), path(5)).length",
+    "state": {
+      "rows": [
+        {
+          "path": [
+            0
+          ]
+        },
+        {
+          "path": [
+            1
+          ]
+        }
+      ]
+    },
+    "expected": 0,
+    "type": "number"
   }
 ]

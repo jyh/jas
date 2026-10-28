@@ -181,6 +181,9 @@ public sealed partial class MainWindow
             // tabs) are drawn as boxes behind the leaves. Which one is active is a
             // build input, so a moved active tab rebuilds the pane.
             var boxes = PanelWire.ActiveBoxes(snap.PlanJson) ?? new List<PanelWire.ActiveBox>();
+            // jas §612: the layout containers that answer events (a row, a
+            // select square) get a hit surface beneath their children.
+            var hits = PanelWire.HitBoxes(snap.PlanJson) ?? new List<PanelWire.HitBox>();
 
             // The panel id is part of the signature: two panels with the same
             // leaves would otherwise keep controls that address the wrong panel.
@@ -193,10 +196,11 @@ public sealed partial class MainWindow
                 // and is applied in place.
                 + "|" + (l.Options?.Signature ?? "")
                 + "|" + (l.Track?.ToString() ?? "")))
-                + "\n" + string.Join("\n", boxes);
+                + "\n" + string.Join("\n", boxes)
+                + "\n" + string.Join("\n", hits.Select(h => $"{h.Path}|{h.Id}|{h.X},{h.Y},{h.W},{h.H}|{string.Join(",", h.Events)}"));
             var rebuilt = signature != _paneSignature;
             _paneDrawnPanel = snap.PanelId;
-            if (rebuilt) { BuildPane(leaves, icons, height, boxes); }
+            if (rebuilt) { BuildPane(leaves, icons, height, boxes, hits); }
             _paneSignature = signature;
 
             // §1.2: a dropdown's flyout is built at every OPEN from the newest
@@ -272,7 +276,7 @@ public sealed partial class MainWindow
         /// `[type]` placeholder and COUNTED, never dropped.
         /// </summary>
         private void BuildPane(List<PaneLeaf> leaves, Dictionary<string, (string Viewbox, string Svg)> icons, long height,
-                               List<PanelWire.ActiveBox> boxes)
+                               List<PanelWire.ActiveBox> boxes, List<PanelWire.HitBox> hits)
         {
             _paneBuild++;
             _paneControls.Clear();
@@ -309,6 +313,32 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(face, box.X);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(face, box.Y);
                 host.Children.Add(face);
+            }
+            // jas §612: a container that answers events gets a transparent hit
+            // surface, added BEFORE the leaves so a child's own control wins the
+            // press. It sends only what the plan says the node answers.
+            foreach (var hit in hits)
+            {
+                var surface = new Border
+                {
+                    Width = hit.W,
+                    Height = hit.H,
+                    Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                };
+                if (hit.Id.Length > 0) { Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(surface, hit.Id); }
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(surface, "surface " + hit.Path);
+                var (hitId, hitPath) = (hit.Id, hit.Path);
+                if (PanelWire.RoutesEvent(hit.Events, hitId, hitPath, "click"))
+                {
+                    surface.Tapped += (_, _) => OnPaneClick(hitId, hitPath);
+                }
+                if (PanelWire.RoutesEvent(hit.Events, hitId, hitPath, "double_click"))
+                {
+                    surface.DoubleTapped += (_, _) => SendPane(hitId, "double_click", null, hitPath);
+                }
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(surface, hit.X);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(surface, hit.Y);
+                host.Children.Add(surface);
             }
             // The toolbar's buttons sit at the TOP of its column, as every port
             // draws a toolbar. The dock keeps its placement (unchanged here).
@@ -356,6 +386,13 @@ public sealed partial class MainWindow
                             textClicks++;
                             var (textId, textPath) = (leaf.Id, leaf.Path);
                             label.Tapped += (_, _) => OnPaneClick(textId, textPath);
+                        }
+                        // jas §612: a text answering `double_click` (the Layers
+                        // name starts a rename) routes it, by the same rule.
+                        if (PanelWire.RoutesEvent(leaf.Events, leaf.Id, leaf.Path, "double_click"))
+                        {
+                            var (dblId, dblPath) = (leaf.Id, leaf.Path);
+                            label.DoubleTapped += (_, _) => SendPane(dblId, "double_click", null, dblPath);
                         }
                         el = label;
                         break;
@@ -620,7 +657,7 @@ public sealed partial class MainWindow
                  + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} gradients={gradients} "
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
-                 + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
+                 + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused} surfaces={hits.Count}");
             if (_paneIconsPending == 0) { ReportPaneIcons(); }
         }
 
@@ -1526,7 +1563,7 @@ public sealed partial class MainWindow
         /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
         /// </summary>
         private void SendPane(string widget, string eventName, string? value, string? path = null,
-                              Dictionary<string, object>? gesture = null)
+                              Dictionary<string, object>? gesture = null, string? key = null)
         {
             var act = new PanelClickCmd
             {
@@ -1537,6 +1574,7 @@ public sealed partial class MainWindow
                 Event = eventName,
                 Value = value,
                 Gesture = gesture,
+                Key = key,
                 Alt = IsKeyDown(Windows.System.VirtualKey.Menu),
                 Shift = IsKeyDown(Windows.System.VirtualKey.Shift),
                 Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
@@ -1589,14 +1627,29 @@ public sealed partial class MainWindow
             if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { return box; }
 
             var id = leaf.Id;
+            // jas item 40: a field whose node answers `keydown` / `blur` (the
+            // rename fields) sends those events and the template decides; every
+            // other field commits, as before. The plan's `events` says which.
+            var takesKeys = PanelWire.Answers(leaf.Events, "keydown");
+            var takesBlur = PanelWire.Answers(leaf.Events, "blur");
             box.KeyDown += (_, e) =>
             {
+                if (takesKeys)
+                {
+                    if (PanelWire.KeyName(e.Key.ToString()) is not { } name) { return; }
+                    e.Handled = true;
+                    // The text BEFORE the key acts: KeyDown runs before the box
+                    // applies it, and neither Enter nor Escape edits the text.
+                    SendPane(id, "keydown", box.Text, leaf.Path, key: name);
+                    return;
+                }
                 if (e.Key != Windows.System.VirtualKey.Enter) { return; }
                 e.Handled = true;
                 CommitBox(box, id, leaf.Path);
             };
             void Blur()
             {
+                if (takesBlur) { SendPane(id, "blur", box.Text, leaf.Path); return; }
                 if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id, leaf.Path); }
             }
             box.LostFocus += (_, _) => Blur();

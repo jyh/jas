@@ -4130,8 +4130,12 @@ struct TreeViewContent: View {
                 let defaults = WorkspaceData.load()?.panelStateDefaults("layers_panel_content") ?? [:]
                 store.initPanel("layers_panel_content", defaults: defaults)
             }
-            let paths = sel.map { Array($0) }
+            // As `__path__` markers, the form the YAML's own writes take
+            // (`[as_path(param.path)]`, `list_toggle`; STATUS-jas item 38 step
+            // 3c) and the form Rust stores, so a toggle compares like with like.
+            let paths: [[String: Any]] = sel.map { Array($0) }
                 .sorted(by: { $0.lexicographicallyPrecedes($1) })
+                .map { ["__path__": $0] }
             store.setPanel("layers_panel_content", "layers_panel_selection", paths)
             model.panelStateVersion &+= 1
         }

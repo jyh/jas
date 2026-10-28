@@ -2190,11 +2190,36 @@
         "path": {
           "type": "path",
           "description": "The row's element path (child indices; STATUS-jas item 38)."
+        },
+        "modifier": {
+          "type": "string",
+          "default": "none",
+          "description": "none | toggle (Command or Ctrl) | shift."
         }
       },
       "effects": [
         {
-          "log": "layers_panel_select"
+          "if": {
+            "condition": "param.modifier == 'toggle'",
+            "then": [
+              {
+                "list_toggle": {
+                  "target": "panel.layers_panel_selection",
+                  "value": "as_path(param.path)",
+                  "panel": "layers"
+                }
+              }
+            ],
+            "else": [
+              {
+                "set_panel_state": {
+                  "panel": "layers",
+                  "key": "layers_panel_selection",
+                  "value": "if param.modifier == 'shift' and panel.layers_panel_selection.length > 0\n  then tree_row_range(tree_visible_rows(active_document.element_tree,\n         panel.collapsed_paths, panel.layers_panel_selection,\n         panel.renaming_element),\n       panel.layers_panel_selection[panel.layers_panel_selection.length - 1],\n       param.path)\n  else [as_path(param.path)]\n"
+                }
+              }
+            ]
+          }
         }
       ]
     },
@@ -2210,7 +2235,10 @@
       },
       "effects": [
         {
-          "log": "layers_element_select"
+          "doc.op": {
+            "op": "select_element",
+            "path": "param.path"
+          }
         }
       ]
     },
@@ -17149,6 +17177,61 @@
                 "background": "if node.panel_selected then '{{theme.colors.selection}}' else 'transparent'",
                 "opacity": "if node.search_ancestor_only then 0.5 else 1.0"
               },
+              "behavior": [
+                {
+                  "event": "click",
+                  "description": "Panel-select on click (spacer, twirl-gap, preview, name areas)",
+                  "condition": "not (event.shift or event.meta or event.ctrl)",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path",
+                    "modifier": "none"
+                  }
+                },
+                {
+                  "event": "click",
+                  "description": "Command- or Ctrl-click toggles the row in or out",
+                  "condition": "(event.meta or event.ctrl) and not event.shift",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path",
+                    "modifier": "toggle"
+                  }
+                },
+                {
+                  "event": "click",
+                  "description": "Shift-click extends the selection from its last row to this one",
+                  "condition": "event.shift",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path",
+                    "modifier": "shift"
+                  }
+                },
+                {
+                  "event": "double_click",
+                  "condition": "node.is_container and event.target_id != 'lp_name'",
+                  "action": "enter_isolation_mode",
+                  "params": {
+                    "container_id": "node.id"
+                  }
+                },
+                {
+                  "event": "drag_start",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path"
+                  }
+                },
+                {
+                  "event": "drag_move",
+                  "description": "Show drop indicator; auto-expand after 500ms hover on collapsed container"
+                },
+                {
+                  "event": "drag_end",
+                  "description": "Validate constraints and reparent/reorder elements"
+                }
+              ],
               "children": [
                 {
                   "type": "spacer",
@@ -17235,9 +17318,9 @@
                   "id": "lp_preview",
                   "type": "element_preview",
                   "summary": "Element preview",
-                  "description": "32px square rasterized thumbnail of the element, scaled to fit on a white background. Outline/invisible elements are rendered as if in preview mode. Empty containers show blank.\n",
+                  "description": "24px square rasterized thumbnail of the element, scaled to fit on a white background, the height of the 24-high row (both native trees draw 24). Outline/invisible elements are rendered as if in preview mode. Empty containers show blank.\n",
                   "style": {
-                    "size": 32
+                    "size": 24
                   },
                   "bind": {
                     "element_id": "node.id"
@@ -17326,39 +17409,6 @@
                 }
               ]
             },
-            "behavior": [
-              {
-                "event": "click",
-                "description": "Panel-select on click (spacer, twirl-gap, preview, name areas)",
-                "action": "layers_panel_select",
-                "params": {
-                  "path": "node.path"
-                }
-              },
-              {
-                "event": "double_click",
-                "condition": "node.is_container and event.target_id != 'lp_name'",
-                "action": "enter_isolation_mode",
-                "params": {
-                  "container_id": "node.id"
-                }
-              },
-              {
-                "event": "drag_start",
-                "action": "layers_panel_select",
-                "params": {
-                  "path": "node.path"
-                }
-              },
-              {
-                "event": "drag_move",
-                "description": "Show drop indicator; auto-expand after 500ms hover on collapsed container"
-              },
-              {
-                "event": "drag_end",
-                "description": "Validate constraints and reparent/reorder elements"
-              }
-            ],
             "context_menu": [
               {
                 "label": "Options for Layer...",
