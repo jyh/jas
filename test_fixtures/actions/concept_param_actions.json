@@ -1,0 +1,27 @@
+[
+ {
+  "_doc": "set_concept_param on the placed regular_polygon: `params.sides` becomes the committed value (value-in-op), one undo step. The instance stores only its params, so the expected document is place_concept_instance_expected.json with params.sides 6 -> 5 (one edit, round-trip checked).",
+  "name": "set_concept_param_sets_sides",
+  "setup_svg": "empty_layer.svg",
+  "actions": [
+   {
+    "action": "concepts_panel_select",
+    "params": {
+     "concept_id": "regular_polygon"
+    }
+   },
+   {
+    "action": "place_concept_instance",
+    "params": {}
+   },
+   {
+    "action": "set_concept_param",
+    "params": {
+     "name": "sides",
+     "value": 5
+    }
+   }
+  ],
+  "expected_json": "set_concept_param_sets_sides_expected.json"
+ }
+]

@@ -5856,6 +5856,8 @@ private let actionFixtures = [
     "new_symbol.json",
     "place_instance.json",
     "place_concept_instance.json",
+    // set_concept_param, held to place_concept_instance's golden.
+    "concept_param_actions.json",
     "menu_object_ops.json",
     // CPTRIAGE: the fill_stroke None verbs. The FIRST cases to carry an
     // `expected_panel_state` block — the document golden alone cannot see the
