@@ -6609,6 +6609,12 @@
     "delete_symbol_orphan_confirm_ok": {
       "description": "Confirm the reference-aware Symbols-panel delete from the delete_symbol_orphan_confirm dialog. delete_symbol_action opens that dialog only when the panel-selected master still has live instances, and passes the master's id; clicking Delete here deletes THAT master (`param.master`, which the dialog's Delete button passes from the dialog's own `master` param: the one the user was asked about), clears the Symbols panel's selection and closes the dialog, as one undo step. A DISTINCT action id from delete_symbol_action so the question is not asked again. The orphaned instances stay in place, resolving to nothing until undone. Cancel uses dismiss_dialog (no snapshot, no delete).\n",
       "category": "dialog",
+      "params": {
+        "master": {
+          "type": "string",
+          "description": "The id of the master to delete: the one the dialog asked about."
+        }
+      },
       "effects": [
         "snapshot",
         {
