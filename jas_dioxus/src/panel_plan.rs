@@ -706,9 +706,11 @@ fn canonical_tabs_node(node: &Value, scope: &Value) -> Value {
 /// literal rather than removing the node keeps every child index, so a path
 /// names the same node in the plan, the rows and the panel events.
 ///
-/// ⚠️ A node inside a `foreach` item is not pruned: its row's path counts the
-/// expanded ITEM, which names no child of the template. Such a node is still
-/// placed, as before; no panel in the workspace binds one today.
+/// A node inside a `foreach` item cannot be marked: its row's path counts the
+/// expanded ITEM, which names no child of the template. The layout pass
+/// evaluates its visibility in the item's scope and drops it itself (the
+/// Layers rename field, the Artboards rename field), so its path is still
+/// listed as hidden and its rows are not reported unjoined.
 pub(crate) fn laid_out_node(panel_node: &Value, rows: &Value) -> (Value, Vec<Vec<i64>>) {
     let mut node = panel_node.clone();
     let mut hidden: Vec<Vec<i64>> = vec![];
@@ -724,8 +726,8 @@ pub(crate) fn laid_out_node(panel_node: &Value, rows: &Value) -> (Value, Vec<Vec
         }
         if let Some(Value::Object(m)) = at {
             m.insert("visible".to_string(), Value::Bool(false));
-            hidden.push(path);
         }
+        hidden.push(path);
     }
     (node, hidden)
 }
@@ -1062,12 +1064,27 @@ mod tests {
     }
 
     /// The pruned plan is shorter than the stacked one: the layout compacts,
-    /// rather than leaving the hidden groups' rows as gaps.
+    /// rather than leaving the hidden groups' rows as gaps. The layout pass now
+    /// drops a dynamically hidden node itself, so "stacked" is the panel with
+    /// every dynamic `visible` removed: all five groups shown.
     #[test]
     fn a_hidden_group_leaves_no_gap() {
+        fn strip_visible(v: &mut Value) {
+            match v {
+                Value::Object(m) => {
+                    if m.get("visible").is_some_and(Value::is_string) {
+                        m.remove("visible");
+                    }
+                    m.values_mut().for_each(strip_visible);
+                }
+                Value::Array(a) => a.iter_mut().for_each(strip_visible),
+                _ => {}
+            }
+        }
         let ws = Workspace::load().expect("workspace");
-        let spec = ws.panel("color_panel_content").expect("color panel");
-        let stacked = render_plan(spec, 228, 0, &engine_scope()).height;
+        let mut all_shown = ws.panel("color_panel_content").expect("color panel").clone();
+        strip_visible(&mut all_shown);
+        let stacked = render_plan(&all_shown, 228, 0, &engine_scope()).height;
         let one = colour_plan("rgb")["height"].as_i64().unwrap();
         assert!(one < stacked, "one group ({one}) must be shorter than five stacked ({stacked})");
     }
@@ -1126,6 +1143,9 @@ mod tests {
                     .map(|r| (r["path"].to_string(), r.clone()))
                     .collect();
                 let rows = bind_values(spec, ctx);
+                // A node whose visibility resolved false is not laid out, by the
+                // layout pass's own law; neither are its descendants.
+                let (_, hidden) = super::laid_out_node(spec, &rows);
                 let rows = rows.as_array().unwrap();
                 for (w, h) in SIZES {
                     let plan = render_plan(spec, w, h, ctx);
@@ -1187,8 +1207,11 @@ mod tests {
                             }
                             None => {
                                 entry.2 += 1;
+                                let p = super::path_of(&row["path"]);
                                 let cause = if layout.contains(&key) {
                                     "laid out, omitted from the plan"
+                                } else if hidden.iter().any(|h| p.starts_with(h)) {
+                                    "hidden, not laid out"
                                 } else {
                                     "not laid out"
                                 };
@@ -1221,7 +1244,7 @@ mod tests {
         assert!(joined > 0 && joined_in_foreach > 0, "vacuous: nothing joined under a foreach");
         assert!(disagreements.is_empty(), "{} disagreements", disagreements.len());
         assert!(
-            unmatched.keys().all(|k| k.starts_with("laid out, omitted")),
+            unmatched.keys().all(|k| k.starts_with("laid out, omitted") || k.starts_with("hidden,")),
             "a bound row is on a node the layout pass never placed: {unmatched:?}"
         );
     }

@@ -426,14 +426,29 @@ fn parse_padding(v: &Value) -> (i64, i64, i64, i64) {
     }
 }
 
-fn visible_children(n: &Value) -> Vec<(i64, &Value)> {
+/// True when a node draws nothing, so it takes no space (CSS `display:
+/// none`): a static `visible: false`, or a dynamic `visible: <expr>` /
+/// `bind.visible` that evaluates false in the node's scope (reference
+/// `_hidden`). A bound-hidden child that kept its width over-subscribed its
+/// row (the Layers rename field squeezed the indent, flask STATUS §617).
+fn hidden(n: &Value, ctx: &Value) -> bool {
+    let v = n.get("visible");
+    if v.map_or(false, |v| v.as_bool() == Some(false)) {
+        return true;
+    }
+    let bound = n.get("bind").and_then(|b| b.get("visible"));
+    [v, bound]
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.as_str())
+        .any(|e| !super::expr::eval(e, ctx).to_bool())
+}
+
+fn visible_children<'a>(n: &'a Value, ctx: &Value) -> Vec<(i64, &'a Value)> {
     let mut out = vec![];
     if let Some(ch) = n.get("children").and_then(|v| v.as_array()) {
         for (i, c) in ch.iter().enumerate() {
-            if !c.is_object() {
-                continue;
-            }
-            if c.get("visible").map_or(false, |v| v.as_bool() == Some(false)) {
+            if !c.is_object() || hidden(c, ctx) {
                 continue;
             }
             out.push((i as i64, c));
@@ -456,10 +471,11 @@ fn col_span(n: &Value) -> i64 {
 }
 
 /// Vertical/horizontal flex weight: `style.flex` (int), with an implicit
-/// weight of 1 for a `spacer` that declares no explicit flex.
+/// weight of 1 for a `spacer` that declares neither a flex nor a width (the
+/// Layers indent is `width: depth * 16` and must not grow on a short row).
 fn flex(n: &Value) -> i64 {
     let w = style_i(n, "flex").unwrap_or(0);
-    if w == 0 && node_type(n) == "spacer" {
+    if w == 0 && node_type(n) == "spacer" && style(n).get("width").is_none() {
         1
     } else {
         w
@@ -588,7 +604,7 @@ fn natural_w(n: &Value, ctx: &Value) -> i64 {
     let (_pt, pr, _pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
     let gap = style_i(n, "gap").unwrap_or(0);
     if node_type(n) == "disclosure" {
-        let kids = visible_children(n);
+        let kids = visible_children(n, ctx);
         let inner = kids.iter().map(|&(_, c)| natural_w(c, ctx)).max().unwrap_or(0);
         return inner + pl + pr;
     }
@@ -597,7 +613,7 @@ fn natural_w(n: &Value, ctx: &Value) -> i64 {
         let template = n.get("do").unwrap_or(&Value::Null);
         return natural_w(template, ctx) + pl + pr;
     }
-    let (kids, placed) = split_positioned(visible_children(n));
+    let (kids, placed) = split_positioned(visible_children(n, ctx));
     // B.8: the natural width reaches the rightmost positioned child.
     let reach = placed
         .iter()
@@ -661,9 +677,9 @@ fn measure(
         } else if has_foreach {
             foreach(n, path, inner_w, gap, ctx)
         } else if node_type(n) == "grid" {
-            grid_2d(&visible_children(n), path, inner_w, gap, grid_cols(n), ctx)
+            grid_2d(&visible_children(n, ctx), path, inner_w, gap, grid_cols(n), ctx)
         } else {
-            let (children, placed) = split_positioned(visible_children(n));
+            let (children, placed) = split_positioned(visible_children(n, ctx));
             let lay = resolved_layout(n);
             let (mut items, mut content_h) = if lay == "row" && children.iter().any(|&(_, c)| has_col(c)) {
                 grid(&children, path, inner_w, gap, ctx)
@@ -1015,7 +1031,7 @@ fn disclosure(
     gap: i64,
     ctx: &Value,
 ) -> (Vec<MItem>, i64) {
-    let children = visible_children(n);
+    let children = visible_children(n, ctx);
     let (mut ch_items, body_h) = column(&children, path, inner_w, gap, 0, ctx);
     for it in ch_items.iter_mut() {
         it.y += DISCLOSURE_HEADER_H;
