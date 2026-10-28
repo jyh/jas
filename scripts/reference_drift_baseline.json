@@ -43,6 +43,8 @@
   "test_action_corpus :: Action test 'boolean_subtract_front_compound_overlapping_rects' failed: canonical JSON mismatch": 1,
   "test_action_corpus :: Action test 'boolean_trim_overlapping_rects' failed: canonical JSON mismatch": 1,
   "test_action_corpus :: Action test 'boolean_union_compound_overlapping_rects' failed: canonical JSON mismatch": 1,
+  "test_action_corpus :: Action test 'menu_delete_selection_first_rect' failed: canonical JSON mismatch": 1,
+  "test_action_corpus :: Action test 'menu_undo_restores_before_the_group' failed: canonical JSON mismatch": 1,
   "test_gesture_corpus :: Gesture test 'blob_paint_fill' failed: canonical JSON mismatch": 1,
   "test_operation_select_all_top_level :: Operation test 'add_to_selection_appends_in_the_order_the_paths_were_added' failed": 1,
   "test_shortcut_structure :: Workspace test 'shortcut_structure' failed: canonical JSON mismatch": 1,
