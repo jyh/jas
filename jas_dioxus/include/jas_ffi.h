@@ -791,6 +791,12 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
  * character; anything else is refused `BadKey`. A key nothing handled replies
  * EMPTY with `KeyUnhandled`, so the shell may apply its own default.
  *
+ * `{"panel": <content id>, "key": <name>, "mods": {...}}` is a key on a focused
+ * PANEL: it resolves against that panel's `keyboard:` rows in the panel's scope
+ * (`mods.ctrl` or `mods.meta` is the rows' `Ctrl`) and runs the row's action as
+ * `{"panel", "action", "params"}` does. A key no row binds replies EMPTY with
+ * `UnboundPanelKey` (`"<panel>: <key>"`), and is never a menubar shortcut.
+ *
  * The owner's notes (2026-10-11): the Windows menus drew every item live and
  * ran five; File > New made no tab, because nothing ran `new_document`.
  *
