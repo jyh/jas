@@ -3981,7 +3981,6 @@ struct TreeViewContent: View {
         get { model.layersIsolationStack }
         nonmutating set { model.layersIsolationStack = newValue }
     }
-    @State private var soloState: (path: ElementPath, saved: [ElementPath: Visibility])? = nil
     @State private var showLayerOptionsFor: ElementPath? = nil
     @FocusState private var treeFocused: Bool
     // Tracks current modifier keys from an NSEvent monitor (macOS).
@@ -4238,54 +4237,7 @@ struct TreeViewContent: View {
     }
 
     private func handleEyeTap(path: ElementPath) {
-        let opt = modifierFlags.contains(.option)
-        let e = model.document.getElement(path)
-        if opt {
-            // Option-click: solo/unsolo among siblings
-            let parentPrefix = Array(path.dropLast())
-            let siblings: [ElementPath] = {
-                if parentPrefix.isEmpty {
-                    return (0..<model.document.layers.count).map { [$0] }
-                }
-                let parent = model.document.getElement(parentPrefix)
-                let kids: [Element]
-                switch parent {
-                case .group(let g): kids = g.children
-                case .layer(let l): kids = l.children
-                default: return []
-                }
-                return (0..<kids.count).map { parentPrefix + [$0] }
-            }()
-            if let s = soloState, s.path == path {
-                // Unsolo: restore. editDocument self-brackets one undo step.
-                var d = model.document
-                for (sp, vis) in s.saved {
-                    let e2 = d.getElement(sp)
-                    d = d.replaceElement(sp, with: e2.withVisibility(vis))
-                }
-                model.editDocument(d)
-                soloState = nil
-            } else {
-                var saved: [ElementPath: Visibility] = [:]
-                for sp in siblings where sp != path {
-                    saved[sp] = model.document.getElement(sp).visibility
-                }
-                var d = model.document
-                if e.visibility == .invisible {
-                    d = d.replaceElement(path, with: e.withVisibility(.preview))
-                }
-                for sp in siblings where sp != path {
-                    let e2 = d.getElement(sp)
-                    d = d.replaceElement(sp, with: e2.withVisibility(.invisible))
-                }
-                model.editDocument(d)
-                soloState = (path: path, saved: saved)
-            }
-        } else {
-            soloState = nil
-            // Cycle visibility + deselect-on-invisible, one undoable edit.
-            model.editDocument(model.document.cyclingElementVisibility(at: path))
-        }
+        LayersPanel.eyeClick(path: path, option: modifierFlags.contains(.option), model: model)
     }
 
     private func performDeleteSelection() {

@@ -277,11 +277,6 @@ pub(crate) struct AppState {
     /// Isolation mode stack. Each entry is the path of a container that
     /// has been entered. Panel and canvas restrict interaction to
     /// descendants of the deepest (last) isolated container.
-    /// Solo visibility state: when Option-clicking the eye button, the
-    /// clicked element's siblings get saved and hidden. Second Option-click
-    /// on the same element restores them. Map from sibling path to saved
-    /// visibility state. None when no solo is active.
-    pub(crate) layers_solo_state: Option<LayerSoloState>,
     /// Set of element types currently hidden by the layers type filter.
     /// Type names: layer, group, path, rect, circle, ellipse, polyline,
     /// polygon, text, textpath, line. When empty (default), all types
@@ -353,15 +348,6 @@ pub(crate) struct AppState {
     /// `list_toggle` whose target is `panel.<key>` writes this panel, as the
     /// reference and the engine write their ACTIVE panel.
     pub(crate) menu_panel: Option<String>,
-}
-
-/// Solo/unsolo state for the layers panel.
-#[derive(Debug, Clone)]
-pub(crate) struct LayerSoloState {
-    /// Path of the element that was Option-clicked (the soloed sibling).
-    pub(crate) soloed_path: Vec<usize>,
-    /// Saved visibility of each sibling before solo.
-    pub(crate) saved: std::collections::HashMap<Vec<usize>, crate::geometry::element::Visibility>,
 }
 
 // The two recolour rules live web-free in `interpreter::colour_host`, where the
@@ -690,7 +676,6 @@ impl AppState {
             layers_drag_source: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
-            layers_solo_state: None,
             layers_type_filter: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
             artboards_panel_selection: Vec::new(),
