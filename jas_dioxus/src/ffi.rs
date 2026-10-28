@@ -4508,6 +4508,7 @@ mod tests {
         "dialog_actions/print.json",
         "dialog_actions/panel_menu_actions.json",
         "dialog_actions/model_verbs.json",
+        "dialog_actions/symbol_actions.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design

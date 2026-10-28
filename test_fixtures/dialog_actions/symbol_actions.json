@@ -1,0 +1,28 @@
+[
+ {
+  "name": "delete_symbol_action_on_a_used_master_asks_first",
+  "setup_svg": "rect_basic.svg",
+  "note": "actions.yaml delete_symbol_action: a master with live instances (symbol_usage > 0) is not deleted; the delete_symbol_orphan_confirm dialog opens instead and the document is unchanged. new_symbol mints the master 01234567, leaves its instance in place, and selects the master in the Symbols panel (its own set_panel_state). The panel_state seed's VALUE does not matter (new_symbol overwrites it; a seed of an unknown id survives as a mutant): it stands for the Symbols panel being open, because the Mac store route drops a set_panel_state on a panel scope that was never initialized, and the runner initializes one only for a seeded panel. The delete runs in that panel's scope, as its button does.",
+  "panel_state": {
+   "symbols_panel_content": {
+    "selected_symbol": null
+   }
+  },
+  "actions": [
+   {
+    "action": "select_all"
+   },
+   {
+    "action": "new_symbol"
+   },
+   {
+    "action": "delete_symbol_action",
+    "panel": "symbols_panel_content"
+   }
+  ],
+  "expected_dialog": {
+   "id": "delete_symbol_orphan_confirm"
+  },
+  "expected_document": "unchanged"
+ }
+]

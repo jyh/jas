@@ -3011,6 +3011,8 @@ pub(crate) mod tests {
         "new_symbol.json",
         "place_instance.json",
         "place_concept_instance.json",
+        // set_concept_param, held to place_concept_instance's golden.
+        "concept_param_actions.json",
         // Object / Edit menu model-pure verbs (select_all, group, ungroup,
         // ungroup_all, lock, hide_selection, make_instance). These are
         // bespoke-native: their actions.yaml entries are `log` stubs (the
