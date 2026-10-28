@@ -700,10 +700,11 @@ content:
             type: element_preview
             summary: "Element preview"
             description: >
-              32px square rasterized thumbnail of the element, scaled to
-              fit on a white background. Outline/invisible elements are
+              24px square rasterized thumbnail of the element, scaled to
+              fit on a white background, the height of the 24-high row (both
+              native trees draw 24). Outline/invisible elements are
               rendered as if in preview mode. Empty containers show blank.
-            style: { size: 32 }
+            style: { size: 24 }
             bind:
               element_id: "node.id"
 
