@@ -1701,6 +1701,34 @@ pub unsafe extern "C" fn jas_dispatch_action(
     let Some(ws) = Workspace::load() else {
         return JasBytes::empty();
     };
+    // `{"panel": <content id>, "key": <name>, "mods"?}`: a key on a focused
+    // PANEL (STATUS-jas item 8 class L, step 2b; the Windows Layers tree sends
+    // it). It resolves against that panel's `keyboard:` rows in the panel's
+    // scope (`resolve_panel_key`, the law the web's `layers_tree_key` and the
+    // Mac's `LayersPanel.treeKey` run) and then runs as `{"panel", "action",
+    // "params"}` below. A key no row binds is refused by name: it never falls
+    // through to the menubar's shortcuts, which a focused panel does not own.
+    let panel_key = match (req.get("panel").and_then(serde_json::Value::as_str),
+                           req.get("key").and_then(serde_json::Value::as_str)) {
+        (Some(pid), Some(name)) => {
+            let Some(spec) = ws.panel(pid) else {
+                set_panel_event_error(engine, "UnknownPanel", pid);
+                return JasBytes::empty();
+            };
+            let mods = req.get("mods");
+            let held = |k: &str| mods.and_then(|m| m.get(k)).and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let chord = crate::workspace::resolve_key::KeyChord::new(
+                name, held("ctrl") || held("meta"), held("shift"), held("alt"), false);
+            let scope = panel_ctx(engine, &ws, pid);
+            let Some(cmd) = crate::workspace::resolve_key::resolve_panel_key(spec, &chord, &scope) else {
+                set_panel_event_error(engine, "UnboundPanelKey", &format!("{pid}: {name}"));
+                return JasBytes::empty();
+            };
+            Some(serde_json::json!({"panel": pid, "action": cmd.action, "params": cmd.params}))
+        }
+        _ => None,
+    };
+    let req = panel_key.unwrap_or(req);
     // `{"key": <name>, "mods": {"shift","alt","ctrl"}}`: a KEY, resolved in the
     // engine and answered with the act reply (flask STATUS § 310, jas § 311).
     if let Some(name) = req.get("key").and_then(serde_json::Value::as_str) {
@@ -7053,6 +7081,56 @@ mod tests {
         // Neither a menu index nor an action names nothing to run.
         let (r2, e2) = dispatch(e, r#"{"panel":"align_panel_content"}"#);
         assert!(r2.is_empty() && e2.contains("UnknownMenuItem"), "{e2}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// `{"panel", "key", "mods"?}`: a key on a focused panel, resolved against
+    /// that panel's `keyboard:` rows (`resolve_panel_key`, STATUS-jas item 8
+    /// class L step 2b) in its scope, then run as `{"panel", "action"}` runs.
+    /// The Windows tree sends it; the web and the Mac resolve the same rows.
+    fn layers_selection(e: *mut JasEngine) -> serde_json::Value {
+        engine_of(e).store.borrow().get_panel("layers_panel_content", "layers_panel_selection").clone()
+    }
+
+    fn with_layers_selection(e: *mut JasEngine, paths: serde_json::Value) {
+        let _ = panel_menu(e, "layers_panel_content");
+        engine_of(e).store.borrow_mut().set_panel("layers_panel_content", "layers_panel_selection", paths);
+    }
+
+    #[test]
+    fn a_panel_key_runs_the_panels_keyboard_row() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        with_layers_selection(e, serde_json::json!([{"__path__": [1]}]));
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","key":"ArrowDown"}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "the Down row ran: {err}");
+        assert_eq!(layers_selection(e), serde_json::json!([{"__path__": [1, 0]}]));
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_panel_key_carries_its_mods() {
+        // Ctrl+A is `layers_select_all`: the visible rows, top first.
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        with_layers_selection(e, serde_json::json!([{"__path__": [1]}]));
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","key":"a","mods":{"ctrl":true}}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "the Ctrl+A row ran: {err}");
+        assert_eq!(layers_selection(e), serde_json::json!([
+            {"__path__": [1]}, {"__path__": [1, 0]}, {"__path__": [0]}, {"__path__": [0, 0]}]));
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_panel_key_no_row_binds_is_refused_by_name_and_runs_nothing() {
+        // Not the menubar's: a panel key never falls through to the app's
+        // shortcuts (`A` alone is the Direct Selection tool there).
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        with_layers_selection(e, serde_json::json!([{"__path__": [1]}]));
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","key":"a"}"#);
+        assert!(reply.is_empty() && err.contains("UnboundPanelKey") && err.contains("layers_panel_content"), "{err}");
+        assert_eq!(layers_selection(e), serde_json::json!([{"__path__": [1]}]), "nothing moved");
         unsafe { jas_engine_free(e) };
     }
 
