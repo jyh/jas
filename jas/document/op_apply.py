@@ -1343,7 +1343,7 @@ def apply_paste_clipboard_text(model: Model, text, offset: float,
 # for them). Named ONCE so a new selection verb has one place to register.
 # Mirrors Rust ``is_selection_only_verb`` and JasSwift ``isSelectionOnlyVerb``.
 _SELECTION_ONLY_VERBS = frozenset({
-    "select_rect", "select_by_ids", "select_element", "select_all",
+    "select_rect", "select_by_ids", "select_element", "select_path", "select_all",
     "add_to_selection",
 })
 
@@ -1461,9 +1461,24 @@ def op_apply(model: Model, op: dict) -> None:
             return
         try:
             model.document.get_element(path)
-        except (IndexError, KeyError, TypeError, AttributeError):
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
             return
         ctrl.select_element(path)
+        targets = selection_to_ids(model.document)
+    elif name == "select_path":
+        # The Layers select square's DIRECT selection (STATUS-jas item 38): the
+        # selection becomes exactly the element at ``path``, never lifted to a
+        # grouped child's group. Mirrors op_apply.rs "select_path". An absent
+        # path is skipped, as for select_element (no op-error channel here).
+        from document.document import ElementSelection
+        path = parse_path(op.get("path"))
+        if not path:
+            return
+        try:
+            model.document.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+            return
+        ctrl.set_selection(frozenset([ElementSelection.all(path)]))
         targets = selection_to_ids(model.document)
     elif name == "select_all":
         # Selection-only. Top-level objects, a group counting as ONE (section

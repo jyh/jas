@@ -271,6 +271,11 @@
         "array"
       ]
     },
+    "select_path": {
+      "path": [
+        "array"
+      ]
+    },
     "select_rect": {
       "extend": [
         "boolean"
@@ -603,6 +608,9 @@
       "ids": "witnessed"
     },
     "select_element": {
+      "path": "witnessed"
+    },
+    "select_path": {
       "path": "witnessed"
     },
     "select_rect": {

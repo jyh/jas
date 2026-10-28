@@ -229,7 +229,7 @@ content:
         layout: row
         style: { height: 24, padding: "0 4", gap: 4, alignment: center }
         bind:
-          background: "if mem(ab.id, active_document.artboards_panel_selection_ids) then '{{theme.colors.selection}}' else 'transparent'"
+          background: "if mem(ab.id, active_document.artboards_panel_selection_ids) then theme.colors.selection else 'transparent'"
         # Row-level drag-to-reorder. Flask declares the events; native
         # apps implement the actual drag behavior and insertion-line
         # rendering. See ARTBOARDS.md §Reordering.

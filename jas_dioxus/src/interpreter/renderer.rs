@@ -1771,8 +1771,22 @@ fn build_appstate_ctx(
             "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>()
         }))
         .collect();
+    // The Layers twirl and rename state, the same markers, so an action's
+    // `tree_visible_rows(..., panel.collapsed_paths, ..., panel.renaming_element)`
+    // sees the rows the tree draws. Without them a Shift-click range ran over
+    // every row as if nothing were collapsed (a collapsed group's children
+    // joined the range), where the reference and Swift skip them.
+    let marker = |p: &Vec<usize>| serde_json::json!({
+        "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>()
+    });
+    let mut collapsed: Vec<&Vec<usize>> = st.layers_collapsed.iter().collect();
+    collapsed.sort();
+    let collapsed: Vec<serde_json::Value> = collapsed.into_iter().map(marker).collect();
+    let renaming = st.layers_renaming.as_ref().map(marker).unwrap_or(serde_json::Value::Null);
     let panel = serde_json::json!({
         "layers_panel_selection": sel_paths,
+        "collapsed_paths": collapsed,
+        "renaming_element": renaming,
         "isolation_stack": isolation,
         // Symbols panel: the panel-selected master id (or null). Needed so
         // the symbols actions' enabled_when ("panel.selected_symbol != null")
@@ -14736,6 +14750,24 @@ mod tests {
             selection: vec![ElementSelection::all(vec![0, 0])],
             ..Document::default()
         });
+    }
+
+    #[test]
+    fn the_action_scope_carries_the_layers_collapse_and_rename() {
+        // An action's `tree_visible_rows(..)` reads these two keys; without them
+        // a Shift-click range ran over a collapsed group's hidden children.
+        let mut st = make_state_with_colors("ffffff", "000000");
+        let empty = build_appstate_ctx(&serde_json::Map::new(), &st);
+        assert!(matches!(expr::eval("panel.collapsed_paths.length", &empty), Value::Number(n) if n == 0.0));
+        assert!(matches!(expr::eval("panel.renaming_element", &empty), Value::Null));
+        st.layers_collapsed.insert(vec![1]);
+        st.layers_collapsed.insert(vec![0, 2]);
+        st.layers_renaming = Some(vec![0, 1]);
+        let ctx = build_appstate_ctx(&serde_json::Map::new(), &st);
+        assert!(matches!(expr::eval("panel.collapsed_paths.length", &ctx), Value::Number(n) if n == 2.0));
+        assert!(matches!(expr::eval("\"\" + as_path(panel.collapsed_paths[0])", &ctx), Value::Str(ref s) if s == "0.2"),
+                "sorted, as markers");
+        assert!(matches!(expr::eval("\"\" + as_path(panel.renaming_element)", &ctx), Value::Str(ref s) if s == "0.1"));
     }
 
     #[test]

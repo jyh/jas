@@ -125,7 +125,7 @@ content:
         layout: row
         style: { height: 24, padding: "0 6", gap: 4, alignment: center }
         bind:
-          background: "if sym.id == panel.selected_symbol then '{{theme.colors.selection}}' else 'transparent'"
+          background: "if sym.id == panel.selected_symbol then theme.colors.selection else 'transparent'"
         children:
 
           # SYMBOL_NAME (col-10): click panel-selects this master

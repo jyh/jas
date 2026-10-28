@@ -743,5 +743,35 @@
     ]
    }
   }
- }
+ },
+  {
+    "_doc": "The square of a GROUPED child selects that child, not its group (both native trees; STATUS-flask §619/§623). The expected document is the op golden select_path_grouped_child_expected.json.",
+    "name": "layers_element_select_keeps_a_grouped_child",
+    "setup_svg": "group_nested.svg",
+    "actions": [
+      {
+        "action": "layers_element_select",
+        "params": {
+          "path": [0, 0, 1]
+        }
+      }
+    ],
+    "expected_json": "layers_element_select_keeps_a_grouped_child_expected.json"
+  },
+  {
+    "_doc": "Shift-click across a COLLAPSED group selects its hidden descendants too (layers_panel_select: \"selecting a collapsed group includes all its descendants\"): [1] is collapsed, so the range [1] .. [0] is [1], [1,0], [0]. The document does not change (the twirl case's golden).",
+    "name": "layers_panel_select_shift_includes_a_collapsed_groups_descendants",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "toggle_element_twirl", "params": {"path": [1]}},
+      {"action": "layers_panel_select", "params": {"path": [0], "modifier": "shift"}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {
+        "layers_panel_selection": [{"__path__": [1]}, {"__path__": [1, 0]}, {"__path__": [0]}]
+      }
+    }
+  }
 ]

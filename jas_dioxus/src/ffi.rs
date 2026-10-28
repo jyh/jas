@@ -656,7 +656,13 @@ fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::
     // selection's, as the web's action context does (`action_fill_stroke_values`).
     crate::panel_scope::sync_colour_state(
         &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));
-    engine_scope_of(engine, panel_id)
+    let mut scope = engine_scope_of(engine, panel_id);
+    // A row's `background` reads `theme.colors.selection` (flask §630). The
+    // web's panel scope carries the theme's BASE colours (`dock_panel.rs`).
+    let colors = ws.theme().get("base").and_then(|b| b.get("colors")).cloned()
+        .unwrap_or(serde_json::Value::Null);
+    scope["theme"] = serde_json::json!({"colors": colors});
+    scope
 }
 
 /// Give `panel_id` a store scope, seeded from its declared `state:` defaults,
@@ -4111,6 +4117,38 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// flask §630: a panel-selected Layers row draws the theme's selection
+    /// colour. The row binds `background` to `theme.colors.selection`, so the
+    /// engine's panel scope must carry `theme.colors`, from the BASE colours
+    /// as the web's panel scope does (`dock_panel.rs`). Until then the plan
+    /// carried `transparent` for an unselected row and withheld the selected
+    /// one's value, so no row was ever highlighted on Windows.
+    #[test]
+    fn a_panel_selected_layers_row_carries_the_selection_colour() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().unwrap();
+        let want = ws.theme()["base"]["colors"]["selection"].clone();
+        assert!(want.as_str().is_some_and(|s| s.starts_with('#')), "the theme's selection: {want}");
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        let row = || {
+            let plan: serde_json::Value =
+                serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+            let row = ["chrome", "containers", "leaves"].iter()
+                .filter_map(|k| plan[*k].as_array()).flatten()
+                .find(|r| r["values"].get("bind.opacity").is_some())
+                .cloned().unwrap_or_else(|| panic!("no row in {plan}"));
+            assert!(!plan["withheld"].to_string().contains("bind.background"), "withheld: {plan}");
+            row
+        };
+        // The control: an unselected row reads transparent.
+        assert_eq!(row()["values"]["bind.background"], "transparent");
+        let (reply, err) = behave(e, "layers_panel_content",
+                                  &format!(r#"{{"path":{},"event":"click"}}"#, row()["path"]));
+        assert!(!reply.is_empty(), "the row click refused: {err}");
+        assert_eq!(row()["values"]["bind.background"], want, "the selected row");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// STATUS-jas item 38 step 3c, the gesture chain flask drives on the box
     /// (§610 (2)): a click on the row panel-selects it, and then a
     /// double-click on its name puts it in rename mode, which
@@ -4508,6 +4546,7 @@ mod tests {
         "dialog_actions/print.json",
         "dialog_actions/panel_menu_actions.json",
         "dialog_actions/model_verbs.json",
+        "dialog_actions/symbol_actions.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design

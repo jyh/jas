@@ -445,19 +445,36 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         # The rows' paths from one row to another, inclusive, in row order, as
         # path markers; [] when either end is not a row (STATUS-jas item 38
         # step 3c: a Shift-click on a Layers row). An end is a path, a list or
-        # a marker, as `as_path` reads one.
-        if len(node.args) != 3:
+        # a marker, as `as_path` reads one. An optional fourth argument is the
+        # element tree's full row list: a row in the range marked `collapsed`
+        # then brings every row under it from that list, right after it, in its
+        # order ("selecting a collapsed group includes all its descendants").
+        if len(node.args) not in (3, 4):
             return Value.null()
         rows = eval_node(node.args[0], ctx)
         if rows.type != ValueType.LIST:
             return Value.null()
         paths = [_index_path(Value.from_python(r.get("path"))) if isinstance(r, dict) else None
                  for r in rows.value]
-        ends = [_index_path(eval_node(a, ctx)) for a in node.args[1:]]
+        ends = [_index_path(eval_node(a, ctx)) for a in node.args[1:3]]
         if None in ends or ends[0] not in paths or ends[1] not in paths:
             return Value.list_([])
         lo, hi = sorted((paths.index(ends[0]), paths.index(ends[1])))
-        return Value.list_([{"__path__": list(p)} for p in paths[lo:hi + 1]])
+        every = []
+        if len(node.args) == 4:
+            full = eval_node(node.args[3], ctx)
+            if full.type == ValueType.LIST:
+                every = [_index_path(Value.from_python(r.get("path"))) if isinstance(r, dict) else None
+                         for r in full.value]
+        out = []
+        for k in range(lo, hi + 1):
+            out.append(paths[k])
+            row = rows.value[k]
+            if every and isinstance(row, dict) and row.get("collapsed") is True:
+                n = len(paths[k])
+                out.extend(q for q in every
+                           if q is not None and len(q) > n and q[:n] == paths[k])
+        return Value.list_([{"__path__": list(p)} for p in out])
 
     if name == "path_child":
         if len(node.args) != 2:
