@@ -7011,7 +7011,7 @@ pub(crate) mod tests {
                 "bring_to_front", "snap_to_edge", "clamp_floating_docks", "set_pane_position", "tile_panes",
                 "toggle_canvas_maximized", "resize_pane", "hide_pane",
                 "show_pane", "bring_pane_to_front", "set_canvas_maximized",
-                "toggle_pane",
+                "toggle_pane", "set_dock_collapsed", "toggle_dock_collapsed",
             ]
         }
     }

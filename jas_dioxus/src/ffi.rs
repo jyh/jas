@@ -6724,6 +6724,28 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The dock-collapse verbs act on the dock the engine DOES hold (unlike the
+    /// pane verbs above): `set_dock_collapsed` collapses the anchored right dock
+    /// and a second `set` keeps it collapsed; `toggle_dock_collapsed` expands it
+    /// again. An unknown edge is refused by name and changes nothing.
+    #[test]
+    fn the_dock_collapse_verbs_act_on_the_engines_dock() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let held = json(&layout_load(e, "Default"));
+        let collapsed = |v: &serde_json::Value| v["anchored"][0]["collapsed"].clone();
+        assert_eq!(collapsed(&held), serde_json::json!(false), "{held}");
+        let set = r#"{"op":"set_dock_collapsed","edge":"right","value":true}"#;
+        assert_eq!(collapsed(&json(&layout_op(e, set))), serde_json::json!(true));
+        assert_eq!(collapsed(&json(&layout_op(e, set))), serde_json::json!(true), "set is idempotent");
+        let back = json(&layout_op(e, r#"{"op":"toggle_dock_collapsed","edge":"right"}"#));
+        assert_eq!(back, held, "the toggle expands it to the layout it was loaded as");
+        assert_eq!(layout_op(e, r#"{"op":"toggle_dock_collapsed","edge":"top"}"#), "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadLayoutOp", "toggle_dock_collapsed"));
+        assert_eq!(json(&take(unsafe { jas_layout_state(e) })), held, "the refusal changed nothing");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Every refusal is the empty span, names its class, and leaves the held
     /// layout byte-identical; the control op between them DOES change it, so an
     /// entry that refused everything could not pass.

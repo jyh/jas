@@ -398,6 +398,18 @@ public func layoutApply(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
             pl.toggleCanvasMaximized()
         }
 
+    // The dock at an edge, collapsed to its icon strip or expanded
+    // (collapse_dock / expand_dock / toggle_dock_collapse). `set` is
+    // idempotent; `toggle` flips. No anchored dock there: nothing to act on.
+    case "set_dock_collapsed", "toggle_dock_collapsed":
+        guard let edge = layoutParseDockEdge(stringOf(op, "edge")) else { return } // required field missing or unknown: skip
+        let value = boolOf(op, "value")
+        if name == "set_dock_collapsed" && value == nil { return } // required field missing: skip
+        guard let dock = layout.anchoredDock(edge) else { return }
+        if value.map({ $0 != dock.collapsed }) ?? true {
+            layout.toggleDockCollapsed(dock.id)
+        }
+
     // The YAML's `set_canvas_maximized` (maximize_canvas / restore_canvas):
     // idempotent, unlike the toggle, so a second Maximize stays maximized.
     case "set_canvas_maximized":

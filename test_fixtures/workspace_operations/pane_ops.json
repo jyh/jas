@@ -107,5 +107,48 @@
       {"op": "set_canvas_maximized", "value": false}
     ],
     "expected_json": "pane_hide_show.json"
+  },
+  {
+    "name": "set_dock_collapsed_collapses_the_right_dock",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "set_dock_collapsed", "edge": "right", "value": true}
+    ],
+    "expected_json": "dock_collapsed_right.json"
+  },
+  {
+    "name": "set_dock_collapsed_true_twice_stays_collapsed",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "set_dock_collapsed", "edge": "right", "value": true},
+      {"op": "set_dock_collapsed", "edge": "right", "value": true}
+    ],
+    "expected_json": "dock_collapsed_right.json"
+  },
+  {
+    "name": "toggle_dock_collapsed_collapses_the_right_dock",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_dock_collapsed", "edge": "right"}
+    ],
+    "expected_json": "dock_collapsed_right.json"
+  },
+  {
+    "name": "toggle_dock_collapsed_twice_expands_it_again",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_dock_collapsed", "edge": "right"},
+      {"op": "toggle_dock_collapsed", "edge": "right"}
+    ],
+    "expected_json": "pane_hide_show.json"
+  },
+  {
+    "name": "set_dock_collapsed_false_after_a_toggle_expands_it",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "toggle_dock_collapsed", "edge": "right"},
+      {"op": "set_dock_collapsed", "edge": "right", "value": false}
+    ],
+    "expected_json": "pane_hide_show.json"
   }
 ]
