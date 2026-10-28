@@ -1169,6 +1169,7 @@ private func transformedCanonicalDocument() -> Document {
 /// `operation_layers_row_ops`.
 @Test func operationLayersRowOps() throws {
     try runOperationFixture("layers_row_ops.json")
+    try runOperationFixture("select_path.json")
 }
 
 /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md §13.
@@ -5856,6 +5857,8 @@ private let actionFixtures = [
     "new_symbol.json",
     "place_instance.json",
     "place_concept_instance.json",
+    // set_concept_param, held to place_concept_instance's golden.
+    "concept_param_actions.json",
     // promote_to_concept, held to the fitter corpus's answer.
     "promote_concept_actions.json",
     "menu_object_ops.json",

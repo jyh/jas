@@ -131,7 +131,8 @@ private func idPathsInDocumentOrder(_ doc: Document) -> [(String, ElementPath)] 
 /// register. Mirrors Rust `is_selection_only_verb`.
 private func isSelectionOnlyVerb(_ name: String) -> Bool {
     switch name {
-    case "select_rect", "select_by_ids", "select_element", "select_all", "add_to_selection":
+    case "select_rect", "select_by_ids", "select_element", "select_path", "select_all",
+         "add_to_selection":
         return true
     default:
         return false
@@ -1782,6 +1783,17 @@ public func opApply(
             return .missingTarget(id: String(describing: path))
         }
         controller.selectElement(path)
+        targets = selectionToIds(model.document)
+    // The Layers select square's DIRECT selection (STATUS-jas item 38): the
+    // selection becomes exactly the element at `path`, never lifted to a
+    // grouped child's group (both native trees' squares do not lift). An
+    // absent or empty path is MissingTarget. Mirrors Rust's `select_path`.
+    case "select_path":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        controller.setSelection([ElementSelection.all(path)])
         targets = selectionToIds(model.document)
     // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28): it
     // selects TOP-LEVEL objects, a group counting as ONE. Before this verb

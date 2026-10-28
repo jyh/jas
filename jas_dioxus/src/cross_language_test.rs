@@ -3011,6 +3011,8 @@ pub(crate) mod tests {
         "new_symbol.json",
         "place_instance.json",
         "place_concept_instance.json",
+        // set_concept_param, held to place_concept_instance's golden.
+        "concept_param_actions.json",
         // promote_to_concept, held to the fitter corpus's answer.
         "promote_concept_actions.json",
         // Object / Edit menu model-pure verbs (select_all, group, ungroup,
@@ -5751,6 +5753,7 @@ pub(crate) mod tests {
     #[test]
     fn operation_layers_row_ops() {
         run_operation_fixture("operations/layers_row_ops.json");
+        run_operation_fixture("operations/select_path.json");
     }
 
     /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md
