@@ -132,6 +132,35 @@ def test_panel_menu_state_vectors(ws, cases):
         assert actual == case["expected"], f"case {case['name']} ({pid})"
 
 
+def _keyboard_rows(node):
+    """Every ``keyboard:`` row a panel declares, at ANY depth: the panel's own
+    (artboards) and any element's (layers.yaml puts its ten on the tree_view,
+    ``lp_tree``). Until 2026-10-28 the census read only the panel's top level,
+    so it never saw the Layers rows its own docstring names."""
+    rows = []
+    if isinstance(node, dict):
+        if isinstance(node.get("keyboard"), list):
+            rows.extend(node["keyboard"])
+        for k, v in node.items():
+            if k != "keyboard":
+                rows.extend(_keyboard_rows(v))
+    elif isinstance(node, list):
+        for v in node:
+            rows.extend(_keyboard_rows(v))
+    return rows
+
+
+def test_the_census_reads_a_keyboard_owned_by_an_element(ws):
+    """The Layers tree's own rows are in the census: F2's ``element_id`` is
+    ``panel.layers_panel_selection[0]``, declared on ``lp_tree``, not on the
+    panel. A census that reads only the panel's top level misses all ten."""
+    sites = [(pid, key, expr) for pid, key, expr in _panel_menu_predicates(ws)
+             if pid == "layers_panel_content" and key.startswith("keyboard")]
+    assert ("layers_panel_content", "keyboard params.element_id",
+            "panel.layers_panel_selection[0]") in sites, sites
+    assert len(sites) >= 3, f"positive control: only {len(sites)} Layers keyboard sites"
+
+
 def _panel_menu_predicates(ws):
     """Every (panel id, key, expression) a panel's ``menu:`` block declares,
     over the three predicate keys the panel-menu vocabulary uses — and the
@@ -147,7 +176,7 @@ def _panel_menu_predicates(ws):
                 expr = item.get(key)
                 if isinstance(expr, str) and expr:
                     out.append((pid, key, expr))
-        for item in spec.get("keyboard", []):
+        for item in _keyboard_rows(spec):
             if not isinstance(item, dict):
                 continue
             expr = item.get("enabled_when")
