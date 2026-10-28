@@ -553,8 +553,8 @@ def self_test() -> int:
         # sort_swatches_by_name was anchored here as native_both from council
         # O1.3 (2026-07-30) until 2026-10-25, when it and the other four swatch
         # verbs became `swatch.*` effects in actions.yaml and LEFT the log-only
-        # set this table classifies. Dropped rather than moved: undo, save_as,
-        # revert and toggle_panel still hold the native_both class.
+        # set this table classifies. Dropped rather than moved: open_file, save_as
+        # and revert still hold the native_both class.
         # place_instance, new_symbol and then delete_symbol_action anchored the
         # `symbols_host::ACTIONS` scan until 2026-10-26, when each became a
         # `doc.*` effect and left the set. symbols_host no longer declares
@@ -562,10 +562,12 @@ def self_test() -> int:
         # because it reads any host that declares one later.
         # THE TWO CLASSES THAT PRODUCED FALSE DIVERGENCES on the first
         # production run, anchored so they cannot regress:
-        #   guard arm -- jas_dioxus routes panel toggles through
+        #   guard arm -- jas_dioxus routed panel toggles through
         #   `c if c.starts_with("toggle_panel_")`, invisible to a
-        #   string-literal scan
-        "toggle_panel": "native_both",
+        #   string-literal scan. toggle_panel anchored it until 2026-10-28,
+        #   when it became a `layout:` effect and LEFT the log-only set;
+        #   no log-only action takes a guard arm now, so the scan stays
+        #   (it reads any guard arm added later) and has no anchor.
         #   native intercept -- a host's `pub const ACTIONS` (W2b-17's
         #   symbols_host, until 2026-10-26): its anchors caught the literal
         #   scan going blind to them, and none is left to anchor.
