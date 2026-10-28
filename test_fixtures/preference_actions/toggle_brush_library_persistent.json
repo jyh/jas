@@ -1,0 +1,36 @@
+{
+  "_doc": [
+    "STATUS-jas item 7: toggle_brush_library_persistent, a corpus case. The action toggles panel.selected_library in",
+    "preferences.brushes.persistent_libraries, a user override over the bundle's list. It writes a process-wide store",
+    "in Swift, so these cases run inside each runner's preference suite (Swift's PreferenceWriteTests, .serialized),",
+    "never the shared action corpus, which runs in parallel with it. Each case starts from NO overrides.",
+    "`selected_library` is a slug, or `bundle[N]` for the bundle's Nth persistent library (derived, never typed).",
+    "`expected` is the list after the actions: `bundle`, `bundle + selected` or `bundle - selected`."
+  ],
+  "cases": [
+    {
+      "name": "a_library_not_in_the_bundle_is_added_after_the_bundles",
+      "selected_library": "zz_a_library_not_in_the_bundle",
+      "actions": [{"action": "toggle_brush_library_persistent"}],
+      "expected": "bundle + selected"
+    },
+    {
+      "name": "toggling_twice_drops_the_override",
+      "selected_library": "zz_a_library_not_in_the_bundle",
+      "actions": [{"action": "toggle_brush_library_persistent"}, {"action": "toggle_brush_library_persistent"}],
+      "expected": "bundle"
+    },
+    {
+      "name": "a_bundled_library_is_removed",
+      "selected_library": "bundle[0]",
+      "actions": [{"action": "toggle_brush_library_persistent"}],
+      "expected": "bundle - selected"
+    },
+    {
+      "name": "a_bundled_library_toggled_twice_is_restored",
+      "selected_library": "bundle[0]",
+      "actions": [{"action": "toggle_brush_library_persistent"}, {"action": "toggle_brush_library_persistent"}],
+      "expected": "bundle"
+    }
+  ]
+}

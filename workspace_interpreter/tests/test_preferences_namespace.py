@@ -82,6 +82,36 @@ def test_the_persistent_toggle_writes_an_override_and_the_check_follows():
     assert _bundle_preferences()["brushes"]["persistent_libraries"] == bundled, "the bundle is never written"
 
 
+def test_the_preference_action_corpus_holds():
+    """STATUS-jas item 7: the shared corpus case for the toggle
+    (test_fixtures/preference_actions/), each case on a fresh store (no
+    overrides). Rust ``the_preference_action_corpus_holds``."""
+    import json
+    import os
+    from workspace_interpreter.effects import run_effects
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
+                        "preference_actions/toggle_brush_library_persistent.json")
+    with open(path, encoding="utf-8") as f:
+        cases = json.load(f)["cases"]
+    assert len(cases) >= 4, "the fixture is not vacuous"
+    actions = _actions()
+    bundled = _bundle_preferences()["brushes"]["persistent_libraries"]
+    for case in cases:
+        sel = case["selected_library"]
+        if sel.startswith("bundle["):
+            sel = bundled[int(sel[len("bundle["):-1])]
+        store = StateStore()
+        store.init_panel("brushes", {"selected_library": sel})
+        store.set_active_panel("brushes")
+        for a in case["actions"]:
+            run_effects(actions[a["action"]]["effects"], {}, store, actions=actions)
+        want = {"bundle": bundled,
+                "bundle + selected": bundled + [sel],
+                "bundle - selected": [b for b in bundled if b != sel]}[case["expected"]]
+        got = store.eval_context()["preferences"]["brushes"]["persistent_libraries"]
+        assert got == want, case["name"]
+
+
 def test_the_toggle_refuses_a_key_that_is_not_a_bundled_list():
     store = StateStore()
     before = store.eval_context()["preferences"]
