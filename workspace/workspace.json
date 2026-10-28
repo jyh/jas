@@ -2183,7 +2183,7 @@
       ]
     },
     "layers_panel_select": {
-      "description": "Panel-select an element in the layers panel by clicking on its spacer, twirl-down gap, preview, or name area. Click selects the element and deselects all others. Shift-click extends the selection in visual (flattened) row order from the last-clicked element; selecting a collapsed group includes all its descendants. Command-click toggles the element in or out of the current selection. Panel selection is independent of element selection. In isolation mode, constrained to the isolated subtree.\n",
+      "description": "Panel-select an element in the layers panel by clicking on its spacer, twirl-down gap, preview, or name area. Click selects the element and deselects all others. Shift-click extends the selection in visual (flattened) row order from the last-clicked element; selecting a collapsed group includes all its descendants. Command-click toggles the element in or out of the current selection. Panel selection is independent of element selection. The layer holding the last panel-selected row becomes the target layer, where a new element is drawn or pasted; when the selection is left empty the target layer does not change. Setting it is not an undoable step. In isolation mode, constrained to the isolated subtree.\n",
       "category": "layers",
       "tier": 3,
       "params": {
@@ -2198,6 +2198,21 @@
         }
       },
       "effects": [
+        {
+          "let": {
+            "kept_rows": "filter(panel.layers_panel_selection, fun r -> r != as_path(param.path))"
+          }
+        },
+        {
+          "let": {
+            "shift_rows": "tree_row_range(tree_visible_rows(active_document.element_tree,\n    panel.collapsed_paths, panel.layers_panel_selection,\n    panel.renaming_element),\n  panel.layers_panel_selection[panel.layers_panel_selection.length - 1],\n  param.path, active_document.element_tree)\n"
+          }
+        },
+        {
+          "let": {
+            "target_row": "if param.modifier == 'toggle'\n    and mem(as_path(param.path), panel.layers_panel_selection)\n  then (if kept_rows.length > 0 then kept_rows[kept_rows.length - 1] else null)\nelse if param.modifier == 'shift' and panel.layers_panel_selection.length > 0\n  then (if shift_rows.length > 0 then shift_rows[shift_rows.length - 1] else null)\nelse as_path(param.path)\n"
+          }
+        },
         {
           "if": {
             "condition": "param.modifier == 'toggle'",
@@ -2216,6 +2231,19 @@
                   "panel": "layers",
                   "key": "layers_panel_selection",
                   "value": "if param.modifier == 'shift' and panel.layers_panel_selection.length > 0\n  then tree_row_range(tree_visible_rows(active_document.element_tree,\n         panel.collapsed_paths, panel.layers_panel_selection,\n         panel.renaming_element),\n       panel.layers_panel_selection[panel.layers_panel_selection.length - 1],\n       param.path, active_document.element_tree)\n  else [as_path(param.path)]\n"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "condition": "target_row != null",
+            "then": [
+              {
+                "doc.op": {
+                  "op": "set_target_layer",
+                  "path": "target_row"
                 }
               }
             ]

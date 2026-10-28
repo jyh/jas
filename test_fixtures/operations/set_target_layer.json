@@ -1,0 +1,38 @@
+[
+ {
+  "_doc": [
+   "STATUS-jas item 38 (iii): set_target_layer {path} makes the document's target layer (selected_layer, where",
+   "a new element lands) the TOP-LEVEL index of path, the layer a Layers row belongs to. Selection-class:",
+   "no undo step, as the web's row click has had since 05-01. The expected documents are multi_layer.svg",
+   "unchanged (the twirl case's golden) with only `selected_layer` edited."
+  ],
+  "name": "set_target_layer_takes_the_paths_top_level_index",
+  "setup_svg": "multi_layer.svg",
+  "ops": [{"op": "set_target_layer", "path": [1, 0]}],
+  "expected_json": "set_target_layer_1_expected.json"
+ },
+ {
+  "name": "set_target_layer_on_a_layer_row",
+  "setup_svg": "multi_layer.svg",
+  "ops": [{"op": "set_target_layer", "path": [1]}],
+  "expected_json": "set_target_layer_1_expected.json"
+ },
+ {
+  "name": "set_target_layer_back_to_the_first_layer",
+  "setup_svg": "multi_layer.svg",
+  "ops": [{"op": "set_target_layer", "path": [1]}, {"op": "set_target_layer", "path": [0, 0]}],
+  "expected_json": "set_target_layer_noop_expected.json"
+ },
+ {
+  "name": "set_target_layer_on_an_absent_layer_is_missing_target",
+  "setup_svg": "multi_layer.svg",
+  "ops": [{"op": "set_target_layer", "path": [5], "expected_error": "MissingTarget"}],
+  "expected_json": "set_target_layer_noop_expected.json"
+ },
+ {
+  "name": "set_target_layer_on_an_empty_path_is_missing_target",
+  "setup_svg": "multi_layer.svg",
+  "ops": [{"op": "set_target_layer", "path": [], "expected_error": "MissingTarget"}],
+  "expected_json": "set_target_layer_noop_expected.json"
+ }
+]
