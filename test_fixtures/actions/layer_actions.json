@@ -13,7 +13,34 @@
         "params": {}
       }
     ],
-    "expected_json": "delete_layer_selection_foreground_expected.json"
+    "expected_json": "delete_layer_selection_foreground_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {
+        "layers_panel_selection": []
+      }
+    }
+  },
+  {
+    "_doc": "delete_layer_orphan_confirm_ok (the orphan dialog's Delete): the spec says its effects are delete_layer_selection's plus close_dialog, so it is held to delete_layer_selection_foreground's own setup and golden.",
+    "name": "delete_layer_orphan_confirm_ok_deletes_as_delete_layer_selection_does",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [
+      [
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "delete_layer_orphan_confirm_ok",
+        "params": {}
+      }
+    ],
+    "expected_json": "delete_layer_selection_foreground_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {
+        "layers_panel_selection": []
+      }
+    }
   },
   {
     "name": "duplicate_layer_selection_foreground",

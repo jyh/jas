@@ -6044,9 +6044,14 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
     // Optional Layers-panel selection, published where the live panel publishes
     // it (`YamlPanelBodyView`'s mirror into `layers_panel_content`). No verb
     // sets it: the native row click does. Mirrors Rust `run_action_case`.
+    // The row click it stands in for also makes Layers the active panel
+    // (the live panel pins it before running effects), so an unscoped
+    // `set_panel_state` in the action writes the Layers panel, as it does
+    // in the app. Without it the selection was never cleared here.
     if let rows = tc["layers_panel_selection"] as? [[Any]] {
         let paths = rows.map { $0.map { ($0 as! NSNumber).intValue } }
         model.stateStore.setPanel("layers_panel_content", "layers_panel_selection", paths)
+        model.stateStore.setActivePanel("layers_panel_content")
     }
 
     // Install the deterministic id source for the dispatch below: a per-char
