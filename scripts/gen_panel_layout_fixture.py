@@ -362,12 +362,10 @@ _BV_SWATCHES_NESTED = {
 # is the one element arm no other vector reaches: `type` "path" occurs zero
 # times in the 225 rows of the four seeds above.
 #
-# `element_tree` is left null on purpose -- it is an OBJECT-list binding (the
-# Layers tree's `twirl_states` map was one too, until item 38 made it the
-# `collapsed_paths` list), and an object's JSON key order is a known cross-port
-# divergence (census row #50), which `bind_values`' own module docs say no vector may bind
-# until that row closes.  A null there also keeps the tree's row foreach from
-# expanding, so the vector stays 12 rows wide and is about the list forms.
+# `element_tree` is left null on purpose: a null keeps the tree's row foreach
+# from expanding, so this vector stays 12 rows wide and is about the list
+# forms. The object rows have their own vector, `_BV_LAYERS_TREE` below (census
+# row #50, an object's key order, closed 2026-10-27).
 _BV_LAYERS_LISTS = {
     "state": {},
     "panel": {
@@ -390,6 +388,19 @@ _BV_LAYERS_LISTS = {
     },
 }
 
+# The OBJECT-list vector (census row #50, closed 2026-10-27 with this vector):
+# `lp_tree`'s `bind.source` is `tree_visible_rows(...)`, a list of row OBJECTS,
+# so its value is each row's JSON text. The three ports now agree on that text:
+# compact, keys sorted (Rust's serde form; the reference's `Value.to_string`
+# and Swift's `.sortedKeys` follow it). The rows are the element-tree
+# fixture's, as `_LAYERS_CTX`'s are, and they expand the row template.
+_BV_LAYERS_TREE = {
+    **_BV_LAYERS_LISTS,
+    "panel": {**_BV_LAYERS_LISTS["panel"], "layers_panel_selection": [], "type_filter": []},
+    "active_document": {**_BV_LAYERS_LISTS["active_document"],
+                        "element_tree": _element_tree_rows()},
+}
+
 # (case name, compiled panel id, ctx)
 BIND_SEED = [
     ("color@hsb_selected", "color_panel_content", _BV_COLOR_SELECTED),
@@ -400,6 +411,7 @@ BIND_SEED = [
     ("swatches@nested_selection", "swatches_panel_content",
      _BV_SWATCHES_NESTED),
     ("layers@selection_lists", "layers_panel_content", _BV_LAYERS_LISTS),
+    ("layers@element_tree_rows", "layers_panel_content", _BV_LAYERS_TREE),
 ]
 
 # (case name, dialog id, ctx): a dialog's binds, read the same way. The
