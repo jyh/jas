@@ -276,12 +276,34 @@ def _parse_padding(v: Any) -> tuple[int, int, int, int]:
     return (0, 0, 0, 0)
 
 
-def _visible_children(node: dict) -> list[tuple[int, dict]]:
+def _hidden(node: dict, ctx: dict) -> bool:
+    """True when a node draws nothing, so it takes no space (CSS
+    ``display: none``): a static ``visible: false``, or a dynamic
+    ``visible: <expr>`` / ``bind.visible`` that evaluates false in the node's
+    scope. A bound-hidden child that kept its width over-subscribed its row
+    (the Layers rename field beside every row's name squeezed the indent,
+    flask STATUS §603/§617). An expression that cannot be evaluated keeps
+    the child, as the renderers show it."""
+    v = node.get("visible")
+    if v is False:
+        return True
+    exprs = [v] if isinstance(v, str) else []
+    bind = node.get("bind")
+    if isinstance(bind, dict) and isinstance(bind.get("visible"), str):
+        exprs.append(bind["visible"])
+    for expr in exprs:
+        try:
+            if not evaluate(expr, ctx).to_bool():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _visible_children(node: dict, ctx: dict) -> list[tuple[int, dict]]:
     out = []
     for i, c in enumerate(node.get("children") or []):
-        if isinstance(c, dict) and c.get("visible") is False:
-            continue
-        if isinstance(c, dict):
+        if isinstance(c, dict) and not _hidden(c, ctx):
             out.append((i, c))
     return out
 
@@ -302,7 +324,9 @@ def _grid_cols(node: dict) -> int:
 def _flex(node: dict) -> int:
     f = _style(node).get("flex")
     w = int(f) if isinstance(f, (int, float)) else 0
-    if w == 0 and node.get("type") == "spacer":
+    # A spacer fills the leftover (flex 1) unless it declares its width: the
+    # Layers indent is `width: depth * 16` and must not grow on a short row.
+    if w == 0 and node.get("type") == "spacer" and "width" not in _style(node):
         w = 1
     return w
 
@@ -423,12 +447,12 @@ def _natural_w(node: dict, ctx: dict) -> int:
     _pt, pr, _pb, pl = _parse_padding(st.get("padding"))
     gap = _gap(node)
     if node.get("type") == "disclosure":
-        kids = _visible_children(node)
+        kids = _visible_children(node, ctx)
         inner = max((_natural_w(c, ctx) for _, c in kids), default=0)
         return inner + pl + pr
     if isinstance(node.get("foreach"), dict) and node.get("do"):
         return _natural_w(node["do"], ctx) + pl + pr
-    kids, placed = _split_positioned(_visible_children(node))
+    kids, placed = _split_positioned(_visible_children(node, ctx))
     # B.8: the natural width reaches the rightmost positioned child.
     reach = max((_position(c)[0] + _natural_w(c, ctx) for _, c in placed), default=0)
     return max(_flow_natural_w(node, kids, gap, ctx) + pl + pr, reach + pl)
@@ -472,10 +496,10 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
         elif isinstance(node.get("foreach"), dict) and node.get("do"):
             ch_items, content_h = _foreach(node, path, inner_w, gap, ctx)
         elif node.get("type") == "grid":
-            ch_items, content_h = _grid2d(_visible_children(node), path, inner_w,
+            ch_items, content_h = _grid2d(_visible_children(node, ctx), path, inner_w,
                                           gap, _grid_cols(node), ctx)
         else:
-            children, placed = _split_positioned(_visible_children(node))
+            children, placed = _split_positioned(_visible_children(node, ctx))
             lay = _resolved_layout(node)
             if lay == "row" and any(_has_col(c) for _, c in children):
                 ch_items, content_h = _grid(children, path, inner_w, gap, ctx)
@@ -735,7 +759,7 @@ def _disclosure(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
     header is drawn by the widget itself (no separate rect). The body's inner
     foreach (swatch / brush grids) expands through the normal recursion.
     """
-    children = _visible_children(node)
+    children = _visible_children(node, ctx)
     ch_items, body_h = _column(children, path, inner_w, gap, 0, ctx)
     for it in ch_items:
         it["y"] += _DISCLOSURE_HEADER_H

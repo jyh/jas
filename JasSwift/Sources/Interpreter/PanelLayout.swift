@@ -316,10 +316,12 @@ public enum PanelLayout {
         fillKinds.contains(kind)
     }
 
-    /// Flex weight: explicit `style.flex`, or implicit 1 for a `spacer`.
+    /// Flex weight: explicit `style.flex`, or implicit 1 for a `spacer` that
+    /// declares no width (the Layers indent is `width: depth * 16` and must
+    /// not grow on a short row).
     private static func flexWeight(_ n: [String: Any]) -> Int {
         let w = styleI(n, "flex") ?? 0
-        return (w == 0 && nodeType(n) == "spacer") ? 1 : w
+        return (w == 0 && nodeType(n) == "spacer" && style(n)["width"] == nil) ? 1 : w
     }
 
     private static func kindHeight(_ kind: String) -> Int {
@@ -400,12 +402,24 @@ public enum PanelLayout {
         }
     }
 
-    private static func visibleChildren(_ n: [String: Any]) -> [(Int, [String: Any])] {
+    /// True when a node draws nothing, so it takes no space (CSS `display:
+    /// none`): a static `visible: false`, or a dynamic `visible: <expr>` /
+    /// `bind.visible` that evaluates false in the node's scope (reference
+    /// `_hidden`). A bound-hidden child that kept its width over-subscribed
+    /// its row (the Layers rename field squeezed the indent, flask STATUS §617).
+    private static func hidden(_ n: [String: Any], _ ctx: [String: Any]) -> Bool {
+        if let vis = n["visible"] as? Bool, vis == false { return true }
+        let exprs = [n["visible"] as? String,
+                     (n["bind"] as? [String: Any])?["visible"] as? String]
+        return exprs.compactMap { $0 }.contains { !evaluate($0, context: ctx).toBool() }
+    }
+
+    private static func visibleChildren(_ n: [String: Any],
+                                        _ ctx: [String: Any]) -> [(Int, [String: Any])] {
         var out: [(Int, [String: Any])] = []
         guard let ch = n["children"] as? [Any] else { return out }
         for (i, c) in ch.enumerated() {
-            guard let c = c as? [String: Any] else { continue }
-            if let vis = c["visible"] as? Bool, vis == false { continue }
+            guard let c = c as? [String: Any], !hidden(c, ctx) else { continue }
             out.append((i, c))
         }
         return out
@@ -538,7 +552,7 @@ public enum PanelLayout {
         let (_, pr, _, pl) = parsePadding(st["padding"])
         let gap = gap(node)
         if nodeType(node) == "disclosure" {
-            let kids = visibleChildren(node)
+            let kids = visibleChildren(node, ctx)
             let inner = kids.map { naturalW($0.1, ctx) }.max() ?? 0
             return inner + pl + pr
         }
@@ -546,7 +560,7 @@ public enum PanelLayout {
             let template = (node["do"] as? [String: Any]) ?? [:]
             return naturalW(template, ctx) + pl + pr
         }
-        let (kids, placed) = splitPositioned(visibleChildren(node))
+        let (kids, placed) = splitPositioned(visibleChildren(node, ctx))
         // B.8: the natural width reaches the rightmost positioned child.
         let reach = placed.map { (positionI($0.1)?.0 ?? 0) + naturalW($0.1, ctx) }.max() ?? 0
         return max(flowNaturalW(node, kids, gap, ctx) + pl + pr, reach + pl)
@@ -598,10 +612,10 @@ public enum PanelLayout {
                 (chItems, contentH) = foreach(n, foreachSpec: fe, path: path,
                                               innerW: innerW, gap: gap, ctx: ctx)
             } else if nodeType(n) == "grid" {
-                (chItems, contentH) = grid2d(visibleChildren(n), path: path, innerW: innerW,
+                (chItems, contentH) = grid2d(visibleChildren(n, ctx), path: path, innerW: innerW,
                                              gap: gap, cols: gridCols(n), ctx: ctx)
             } else {
-                let (children, placed) = splitPositioned(visibleChildren(n))
+                let (children, placed) = splitPositioned(visibleChildren(n, ctx))
                 let lay = resolvedLayout(n)
                 var flowItems: [MItem]
                 var flowH: Int
@@ -906,7 +920,7 @@ public enum PanelLayout {
 
     private static func disclosure(_ node: [String: Any], path: [Int],
                                   innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
-        let children = visibleChildren(node)
+        let children = visibleChildren(node, ctx)
         var (chItems, bodyH) = column(children, path: path, innerW: innerW,
                                       gap: gap, availH: 0, ctx: ctx)
         for j in chItems.indices {
