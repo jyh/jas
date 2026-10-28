@@ -178,6 +178,11 @@ struct JasApp: App {
     init() {
         Preferences.importOverrides(UserDefaults.standard.string(forKey: Preferences.storageKey))
         Preferences.onChange = { UserDefaults.standard.set($0, forKey: Preferences.storageKey) }
+        // Saved brush libraries (Save Brush Library), read and written beside
+        // the session; a `--test-fifo` harness launch keeps none.
+        if !TestHarness.isolatesSession() {
+            BrushLibraryStore.live = BrushLibraryStore(root: BrushLibraryStore.appSupportRoot)
+        }
     }
 
     var body: some Scene {
