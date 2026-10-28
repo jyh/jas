@@ -197,6 +197,14 @@ def gather_evidence(root, spec=None):
     ev["actions_dispatched"] = {
         a["action"] for case in _fixture_cases(root, "actions")
         for a in case.get("actions", []) if isinstance(a, dict) and "action" in a}
+    # The preference-action corpus (test_fixtures/preference_actions/, STATUS-jas
+    # item 7): one object per file whose `cases` each run their `actions` inside
+    # every runner's preference suite, because Swift's preferences are one
+    # process-wide store the shared action corpus would race.
+    ev["actions_dispatched"] |= {
+        a["action"] for doc in _fixture_cases(root, "preference_actions")
+        for case in (doc.get("cases", []) if isinstance(doc, dict) else [])
+        for a in case.get("actions", []) if isinstance(a, dict) and "action" in a}
     # The dialog-action corpus (test_fixtures/dialog_actions/), which Rust (the
     # engine's jas_dialog_event) and Swift (the overlay's store route) replay:
     # its plain action steps, the action a CLICKED widget names by its address,
@@ -641,6 +649,8 @@ def self_test():
         put("test_fixtures/actions/a.json",
             [{"name": "x", "actions": [{"action": "covered_act"}]}])
         put("test_fixtures/actions/a_expected.json", {"actions": [{"action": "decoy"}]})
+        put("test_fixtures/preference_actions/p.json",
+            {"_doc": ["x"], "cases": [{"name": "p", "actions": [{"action": "pref_act"}]}]})
         put("test_fixtures/dialog_actions/b.json",
             [{"name": "y", "actions": [
                 {"action": "dlg_setup"},
@@ -705,6 +715,7 @@ def self_test():
         spec = {
             "actions": {
                 "covered_act": {"effects": [{"log": "x"}]},
+                "pref_act": {"effects": [{"set": {"a": 1}}]},
                 "decoy": {"effects": [{"set": {"a": 1}}]},
                 "open_file": {"effects": [{"log": "open_file: show native file dialog"}]},
                 "later": {"effects": [{"log": "later (deferred)"}]},
@@ -776,6 +787,7 @@ def self_test():
             if got != want:
                 failures.append(f"{key}: want {want}, got {got}")
         expect(("actions", "covered_act"), COVERED)
+        expect(("actions", "pref_act"), COVERED)  # a preference_actions case dispatches it
         expect(("actions", "decoy"), NOT_YET_BUILT)  # an _expected file is not a dispatch
         expect(("actions", "open_file"), NOT_INSTRUMENTABLE)
         expect(("actions", "later"), NOT_YET_BUILT)

@@ -30,6 +30,47 @@ import Foundation
                 "the bundle is never written")
     }
 
+    /// STATUS-jas item 7: the shared corpus case for the toggle
+    /// (`test_fixtures/preference_actions/`), run HERE because this suite is
+    /// the one that owns the process-wide overrides (`.serialized`). Each
+    /// case starts from no overrides. Rust `the_preference_action_corpus_holds`.
+    @Test func thePreferenceActionCorpusHolds() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("test_fixtures")
+            .appendingPathComponent("preference_actions/toggle_brush_library_persistent.json")
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        let cases = json?["cases"] as? [[String: Any]] ?? []
+        #expect(cases.count >= 4, "the fixture is not vacuous")
+        let bundled = Self.list(WorkspaceData.load()?.data["preferences"] as? [String: Any])
+        for c in cases {
+            let name = c["name"] as? String ?? ""
+            let given = c["selected_library"] as? String ?? ""
+            var sel = given
+            if given.hasPrefix("bundle["), let n = Int(given.dropFirst(7).dropLast()) {
+                try #require(n < bundled.count, "\(name): the bundle has no \(given)")
+                sel = bundled[n]
+            }
+            Preferences.importOverrides(nil)
+            let m = Model()
+            m.stateStore.initPanel("brushes_panel_content", defaults: ["selected_library": sel])
+            m.stateStore.setActivePanel("brushes_panel_content")
+            for a in c["actions"] as? [[String: Any]] ?? [] {
+                runYamlActionByName(a["action"] as? String ?? "", params: [:], model: m)
+            }
+            let want: [String]
+            switch c["expected"] as? String ?? "" {
+            case "bundle": want = bundled
+            case "bundle + selected": want = bundled + [sel]
+            case "bundle - selected": want = bundled.filter { $0 != sel }
+            default: Issue.record("\(name): unknown expected form"); continue
+            }
+            #expect(Self.list(Preferences.current()) == want, "\(name)")
+        }
+        Preferences.importOverrides(nil)
+    }
+
     /// The launch half (state.yaml: `brushes_open_libraries` is initialised at
     /// startup from the preference), against the shared fixture the
     /// reference and Rust read.

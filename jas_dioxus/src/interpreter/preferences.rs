@@ -136,6 +136,46 @@ mod tests {
         assert_eq!(list(&super::bundled()), bundled, "the bundle is never written");
     }
 
+    /// STATUS-jas item 7: the shared corpus case for the toggle
+    /// (`test_fixtures/preference_actions/`), each case from no overrides.
+    /// `bundle[N]` and the `expected` forms are derived from the bundle.
+    #[test]
+    fn the_preference_action_corpus_holds() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        let raw = include_str!(concat!("../../../test_fixtures/",
+                                       "preference_actions/toggle_brush_library_persistent.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        let bundled = list(&bundled());
+        for case in cases {
+            let name = &case["name"];
+            let sel = match case["selected_library"].as_str().unwrap() {
+                s if s.starts_with("bundle[") => {
+                    let n: usize = s["bundle[".len()..s.len() - 1].parse().unwrap();
+                    bundled.get(n).cloned().unwrap_or_else(|| panic!("{name}: the bundle has no {s}"))
+                }
+                s => Value::String(s.into()),
+            };
+            load_overrides_json("{}");
+            let mut store = crate::interpreter::state_store::StateStore::new();
+            let ctx = serde_json::json!({"panel": {"selected_library": sel}});
+            for a in case["actions"].as_array().unwrap() {
+                let effects = ws.actions()[a["action"].as_str().unwrap()]["effects"]
+                    .as_array().cloned().expect("the action's effects");
+                crate::interpreter::effects::run_effects(&effects, &ctx, &mut store, None, None, None, None);
+            }
+            let want: Vec<Value> = match case["expected"].as_str().unwrap() {
+                "bundle" => bundled.clone(),
+                "bundle + selected" => bundled.iter().cloned().chain([sel.clone()]).collect(),
+                "bundle - selected" => bundled.iter().filter(|v| **v != sel).cloned().collect(),
+                other => panic!("{name}: unknown expected form {other}"),
+            };
+            assert_eq!(list(&current()), want, "{name}");
+        }
+        load_overrides_json("{}");
+    }
+
     /// The launch half (state.yaml: `brushes_open_libraries` is initialised
     /// at startup from the preference), against the shared fixture.
     #[test]
