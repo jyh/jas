@@ -30,8 +30,9 @@
 // `value` is built only from `Value.toStringCoerce()` — the same coercion
 // `{{ }}` interpolation uses — so this pass adds no new number-formatting
 // surface. A `bind` expression evaluating to a JSON OBJECT becomes a JSON
-// STRING inside the evaluator, whose key order is a known cross-port
-// divergence; no vector in `panel_bind_values.json` binds an object.
+// STRING inside the evaluator: compact, keys sorted, `/` unescaped, in all
+// three runners (census row #50, closed 2026-10-27; `layers@element_tree_rows`
+// in `panel_bind_values.json` binds the Layers tree's row objects).
 
 import Foundation
 
