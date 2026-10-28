@@ -2086,6 +2086,22 @@ public func opApply(
         } else {
             model.editDocument(model.document.namingElement(at: path, op["name"] as? String ?? ""))
         }
+    // The Layers solo's write (STATUS-jas item 8): one element's own
+    // visibility, by name. Mirrors Rust's arm: a path naming no element is a
+    // missing target, an unknown name a missing required argument.
+    case "set_element_visibility":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        let vis: Visibility
+        switch op["visibility"] as? String {
+        case "preview": vis = .preview
+        case "outline": vis = .outline
+        case "invisible": vis = .invisible
+        default: return reqErr(op, "visibility")
+        }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        model.editDocument(model.document.settingElementVisibility(at: path, vis))
     case "lock_selection":
         controller.lockSelection()
     case "unlock_all":
