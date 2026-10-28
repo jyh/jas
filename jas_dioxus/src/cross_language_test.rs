@@ -3028,6 +3028,8 @@ pub(crate) mod tests {
         "fill_stroke_none.json",
         // The Gradient button, held to the op layer's own goldens.
         "fill_type_actions.json",
+        // The Symbols orphan dialog's Delete, held to new_symbol's golden.
+        "symbol_delete_actions.json",
         "state_actions.json",
         // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
         // `set_fill_type_solid` on a stroke-only SELECTION must read that
