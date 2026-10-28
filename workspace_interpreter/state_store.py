@@ -336,6 +336,9 @@ class StateStore:
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
+        # File writes an effect asked for, in order, for the HOST to drain
+        # (`brush.save_library`): the interpreter does no file I/O itself.
+        self.pending_writes: list[dict] = []
         # The writable per-document lists (`active_document.<key>`), keyed by
         # the names in DOCUMENT_LISTS. Not part of the document tree: the
         # apps keep them on their Model beside the document, as this does.
