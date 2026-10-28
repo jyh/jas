@@ -529,10 +529,13 @@ pub extern "C" fn jas_menu_structure() -> JasBytes {
 /// * the **engine** supplies `active_document.{has_selection, selection_count,
 ///   can_undo, can_redo, is_modified}` and **WINS** on them — a shell that could
 ///   assert `can_undo` would be holding document state, which is **BL1**;
+/// * once a layout is loaded ([`jas_layout_load`]) the engine also supplies
+///   `panes.*` from the pane layout it holds, and **WINS** on it: the Window
+///   menu's Toolbar / Panels run on that layout, so their checkmarks read it;
 /// * the **shell** supplies everything else (`state.tab_count`,
 ///   `active_document.has_filename`, `workspace.has_saved_layout`, `panels.*`,
-///   `panes.*`) — tabs, filenames and chrome visibility are session facts and
-///   have never been the engine's.
+///   and `panes.*` before a layout load) — tabs, filenames and the rest of the
+///   chrome are session facts and are not the engine's.
 ///
 /// A NULL or empty ctx is therefore **not** "empty scope": it is "the shell
 /// supplies nothing", and every session predicate falls to the evaluator's own
@@ -576,6 +579,14 @@ pub unsafe extern "C" fn jas_menu_state(
     // carries too, so a menu item and a panel button cannot disagree.
     active.extend(crate::panel_scope::document_facts(&engine.model.borrow()));
     ctx.insert("active_document".into(), serde_json::Value::Object(active));
+    // The panes, once the engine holds a pane layout ([`jas_layout_load`]):
+    // the layout's, and they win over the shell's, as the document facts do.
+    let held_panes = engine.layout.borrow().as_ref()
+        .map(|l| crate::layout_seed::shell_state(l)["panes"].clone())
+        .filter(|p| p.is_object());
+    if let Some(panes) = held_panes {
+        ctx.insert("panes".into(), panes);
+    }
 
     let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
         return JasBytes::empty();
@@ -4389,6 +4400,35 @@ mod tests {
 
         let (reply, _) = dispatch(e, r#"{"action":"select_all"}"#);
         assert_eq!(json(&reply)["layout"], serde_json::Value::Null, "an act with no layout effect carries null");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The Window menu's Toolbar / Panels checkmarks (`checked_when:
+    /// panes.<id>`) read the ENGINE's pane layout once it holds one, and the
+    /// engine wins over a `panes` the shell sends, as it does on the document
+    /// facts: a shell asserting pane visibility would be holding layout state.
+    /// Before a layout load the shell's `panes` still stands.
+    #[test]
+    fn menu_state_checks_the_window_menu_from_the_engines_panes() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        // [Toolbar, Panels]: the menubar's two `toggle_pane` items, in order.
+        let checked = |e, ctx: &str| -> Vec<serde_json::Value> {
+            let rows = json(&take(unsafe { jas_menu_state(e, ctx.as_ptr(), ctx.len()) }));
+            let got: Vec<_> = rows.as_array().unwrap().iter()
+                .filter(|r| r["action"] == "toggle_pane").map(|r| r["checked"].clone()).collect();
+            assert_eq!(got.len(), 2, "Toolbar and Panels: {rows}");
+            got
+        };
+        let (t, f) = (serde_json::json!(true), serde_json::json!(false));
+        let shell_says = r#"{"panes":{"toolbar":false,"dock":false}}"#;
+        assert_eq!(checked(e, shell_says), [f.clone(), f.clone()], "no layout: the shell's panes");
+        layout_load(e, "Default");
+        assert_eq!(checked(e, shell_says), [t.clone(), t.clone()], "the engine's panes win");
+        dispatch(e, r#"{"menu_item":"menu_toolbar"}"#);
+        assert_eq!(checked(e, ""), [f.clone(), t.clone()], "Toolbar hidden: unchecked; Panels still checked");
+        dispatch(e, r#"{"menu_item":"menu_panels"}"#);
+        assert_eq!(checked(e, ""), [f.clone(), f.clone()], "both hidden");
         unsafe { jas_engine_free(e) };
     }
 

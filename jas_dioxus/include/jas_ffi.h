@@ -505,10 +505,13 @@ struct JasBytes jas_menu_structure(void);
  * * the **engine** supplies `active_document.{has_selection, selection_count,
  *   can_undo, can_redo, is_modified}` and **WINS** on them — a shell that could
  *   assert `can_undo` would be holding document state, which is **BL1**;
+ * * once a layout is loaded ([`jas_layout_load`]) the engine also supplies
+ *   `panes.*` from the pane layout it holds, and **WINS** on it: the Window
+ *   menu's Toolbar / Panels run on that layout, so their checkmarks read it;
  * * the **shell** supplies everything else (`state.tab_count`,
  *   `active_document.has_filename`, `workspace.has_saved_layout`, `panels.*`,
- *   `panes.*`) — tabs, filenames and chrome visibility are session facts and
- *   have never been the engine's.
+ *   and `panes.*` before a layout load) — tabs, filenames and the rest of the
+ *   chrome are session facts and are not the engine's.
  *
  * A NULL or empty ctx is therefore **not** "empty scope": it is "the shell
  * supplies nothing", and every session predicate falls to the evaluator's own
