@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "STATUS-jas item 37, launch half: state.brushes_open_libraries is initialised at startup from",
+    "preferences.brushes.persistent_libraries (state.yaml), one open, expanded section per slug, in the",
+    "preference's order; when the list is empty, the declared fallback [{id: default_brushes, collapsed: false}].",
+    "Each runner's open_libraries_at_launch(slugs) is pinned here, and its state defaults apply it to the",
+    "CURRENT preferences (the bundle with the user's overrides)."
+  ],
+  "cases": [
+    {
+      "name": "the_bundle_default",
+      "persistent_libraries": ["default_brushes"],
+      "expected": [{"id": "default_brushes", "collapsed": false}]
+    },
+    {
+      "name": "two_libraries_in_the_preference_order",
+      "persistent_libraries": ["wet_media", "default_brushes"],
+      "expected": [{"id": "wet_media", "collapsed": false}, {"id": "default_brushes", "collapsed": false}]
+    },
+    {
+      "name": "an_empty_list_falls_back_to_the_default_library",
+      "persistent_libraries": [],
+      "expected": [{"id": "default_brushes", "collapsed": false}]
+    },
+    {
+      "name": "a_list_without_the_default_library_does_not_add_it",
+      "persistent_libraries": ["wet_media"],
+      "expected": [{"id": "wet_media", "collapsed": false}]
+    }
+  ]
+}

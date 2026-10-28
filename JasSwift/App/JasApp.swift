@@ -171,6 +171,15 @@ struct JasApp: App {
     @NSApplicationDelegateAdaptor(JasAppDelegate.self) var appDelegate
     @StateObject private var workspace = WorkspaceState()
 
+    /// The user's preference overrides (STATUS-jas item 37), saved across
+    /// launches beside the app config. Imported here, before the workspace and
+    /// any canvas read state: `brushes_open_libraries` is initialised from
+    /// them. Here and not in `WorkspaceState`, which tests construct.
+    init() {
+        Preferences.importOverrides(UserDefaults.standard.string(forKey: Preferences.storageKey))
+        Preferences.onChange = { UserDefaults.standard.set($0, forKey: Preferences.storageKey) }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(workspace: workspace)
