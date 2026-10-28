@@ -117,5 +117,9 @@
       }
     ],
     "expected_json": "menu_make_instance_rect_expected.json"
-  }
+  },
+  {"name": "menu_delete_selection_first_rect", "_doc": "delete_selection with no orphan: the selected rect is removed and the selection empties (STATUS-jas 7). The golden is menu_select_all's with the first rect and the selection removed.", "setup_svg": "two_rects.svg", "selection": [[0, 0]], "actions": [{"action": "delete_selection", "params": {}}], "expected_json": "menu_delete_selection_first_rect_expected.json"},
+  {"name": "menu_undo_restores_before_the_group", "_doc": "undo after group returns the document to its state before the group, selection included: menu_select_all's golden (STATUS-jas 7).", "setup_svg": "two_rects.svg", "selection": [[0, 0], [0, 1]], "actions": [{"action": "group", "params": {}}, {"action": "undo", "params": {}}], "expected_json": "menu_select_all_two_rects_expected.json"},
+  {"name": "menu_redo_reapplies_the_group", "_doc": "redo after undo re-applies the group: menu_group's golden (STATUS-jas 7).", "setup_svg": "two_rects.svg", "selection": [[0, 0], [0, 1]], "actions": [{"action": "group", "params": {}}, {"action": "undo", "params": {}}, {"action": "redo", "params": {}}], "expected_json": "menu_group_two_rects_expected.json"},
+  {"name": "menu_cut_first_rect", "_doc": "cut is copy then delete_selection: the document is the delete case's golden (the clipboard is not asserted here; copy is tested at the op layer). STATUS-jas 7.", "setup_svg": "two_rects.svg", "selection": [[0, 0]], "actions": [{"action": "cut", "params": {}}], "expected_json": "menu_delete_selection_first_rect_expected.json"}
 ]
