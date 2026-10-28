@@ -417,21 +417,6 @@ pub(crate) use crate::interpreter::paragraph_host::{
 /// through to the YAML actions catalog for open_dialog, dispatch, etc.
 /// Returns a list of deferred effects (open_dialog, close_dialog) that
 /// must be applied outside the AppState borrow.
-/// Advance a visibility state one step in the Layers eye-button cycle:
-/// Preview -> Outline -> Invisible -> Preview. Pure; shared by the tree_view
-/// eye onclick. Mirrors the Swift `cycleVisibility`, OCaml, and Python
-/// `_cycle_visibility` cycle order.
-pub(crate) fn cycle_visibility(
-    v: crate::geometry::element::Visibility,
-) -> crate::geometry::element::Visibility {
-    use crate::geometry::element::Visibility;
-    match v {
-        Visibility::Preview => Visibility::Outline,
-        Visibility::Outline => Visibility::Invisible,
-        Visibility::Invisible => Visibility::Preview,
-    }
-}
-
 /// Element-level behavior of the Layers tree eye button (regular click):
 /// cycle the visibility of the element at `path` and, when it becomes
 /// Invisible, drop it (and its descendants) from the selection. Pure —
@@ -440,20 +425,8 @@ pub(crate) fn cycle_element_visibility_at(
     doc: &crate::document::document::Document,
     path: &crate::document::document::ElementPath,
 ) -> crate::document::document::Document {
-    use crate::geometry::element::Visibility;
-    let Some(elem) = doc.get_element(path) else {
-        return doc.clone();
-    };
-    let new_vis = cycle_visibility(elem.visibility());
-    let mut new_elem = elem.clone();
-    new_elem.common_mut().visibility = new_vis;
-    let mut new_doc = doc.replace_element(path, new_elem);
-    if new_vis == Visibility::Invisible {
-        new_doc
-            .selection
-            .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));
-    }
-    new_doc
+    // The op layer's `cycle_element_visibility` runs the same function.
+    doc.cycling_element_visibility(path)
 }
 
 /// Fill `ctx.panel` with the keys of a panel's `scope` that it LACKS. A key the
@@ -13227,13 +13200,9 @@ mod tests {
     }
 
     // ── Layers eye-button visibility cycle (LYR) ──────────────────
-    #[test]
-    fn cycle_visibility_advances_preview_outline_invisible_preview() {
-        use crate::geometry::element::Visibility;
-        assert_eq!(cycle_visibility(Visibility::Preview), Visibility::Outline);
-        assert_eq!(cycle_visibility(Visibility::Outline), Visibility::Invisible);
-        assert_eq!(cycle_visibility(Visibility::Invisible), Visibility::Preview);
-    }
+    // The cycle's three transitions are pinned by the shared op fixture
+    // `test_fixtures/operations/layers_row_ops.json` (item 38), through
+    // `Document::cycling_element_visibility`, which the eye button calls.
 
     #[test]
     fn cycle_element_visibility_at_cycles_and_deselects_on_invisible() {

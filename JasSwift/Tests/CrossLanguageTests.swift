@@ -1164,6 +1164,13 @@ private func transformedCanonicalDocument() -> Document {
     try runOperationFixture("lock_toggle_no_materialization.json")
 }
 
+/// STATUS-jas item 38 step 2: the Layers row's eye and rename ops, through
+/// `Document.cyclingElementVisibility` / `namingElement`. Rust
+/// `operation_layers_row_ops`.
+@Test func operationLayersRowOps() throws {
+    try runOperationFixture("layers_row_ops.json")
+}
+
 /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md §13.
 /// Twin of Rust `operation_lock_selection_no_materialization`.
 ///

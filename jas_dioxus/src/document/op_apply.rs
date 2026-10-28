@@ -2533,6 +2533,23 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             let new_doc = model.document().toggling_element_lock(&path);
             model.edit_document(new_doc);
         }
+        // The Layers row's eye and rename commit (STATUS-jas item 38), through
+        // the pure `Document::cycling_element_visibility` / `naming_element`.
+        "cycle_element_visibility" | "set_element_name" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            let new_doc = if name == "cycle_element_visibility" {
+                model.document().cycling_element_visibility(&path)
+            } else {
+                let n = op.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                model.document().naming_element(&path, n)
+            };
+            model.edit_document(new_doc);
+        }
         "lock_selection" => {
             Controller::lock_selection(model);
         }
