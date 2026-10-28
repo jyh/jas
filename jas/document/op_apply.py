@@ -1344,7 +1344,7 @@ def apply_paste_clipboard_text(model: Model, text, offset: float,
 # Mirrors Rust ``is_selection_only_verb`` and JasSwift ``isSelectionOnlyVerb``.
 _SELECTION_ONLY_VERBS = frozenset({
     "select_rect", "select_by_ids", "select_element", "select_path", "select_all",
-    "add_to_selection",
+    "add_to_selection", "set_target_layer",
 })
 
 
@@ -1480,6 +1480,16 @@ def op_apply(model: Model, op: dict) -> None:
             return
         ctrl.set_selection(frozenset([ElementSelection.all(path)]))
         targets = selection_to_ids(model.document)
+    elif name == "set_target_layer":
+        # The document's TARGET layer, where a new element lands (STATUS-jas
+        # item 38 (iii)): the top-level index of ``path``. Selection-class: no
+        # undo step. An empty path or an absent layer is skipped (no op-error
+        # channel here). Mirrors op_apply.rs "set_target_layer".
+        from dataclasses import replace
+        path = parse_path(op.get("path"))
+        if not path or path[0] >= len(model.document.layers):
+            return
+        model.set_document_unbracketed(replace(model.document, selected_layer=path[0]))
     elif name == "select_all":
         # Selection-only. Top-level objects, a group counting as ONE (section
         # 16). Mirrors op_apply.rs "select_all", through the production

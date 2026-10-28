@@ -920,6 +920,7 @@ class CrossLanguageTest(absltest.TestCase):
         # STATUS-jas item 38 step 2: the Layers row's eye and rename ops.
         self._run_operation_fixture("layers_row_ops.json")
         self._run_operation_fixture("select_path.json")
+        self._run_operation_fixture("set_target_layer.json")
 
     def test_operation_lock_selection_no_materialization(self):
         # Object > Lock writes the target's own flag (LOCKMAT), a locked

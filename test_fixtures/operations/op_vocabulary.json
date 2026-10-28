@@ -74,6 +74,7 @@
     "set_output_field": "edit",
     "set_output_ink_field": "edit",
     "set_print_preferences_field": "edit",
+    "set_target_layer": "selection",
     "shear_transform": "edit",
     "show_all": "edit",
     "simplify": "edit",

@@ -132,7 +132,7 @@ private func idPathsInDocumentOrder(_ doc: Document) -> [(String, ElementPath)] 
 private func isSelectionOnlyVerb(_ name: String) -> Bool {
     switch name {
     case "select_rect", "select_by_ids", "select_element", "select_path", "select_all",
-         "add_to_selection":
+         "add_to_selection", "set_target_layer":
         return true
     default:
         return false
@@ -1795,6 +1795,16 @@ public func opApply(
         }
         controller.setSelection([ElementSelection.all(path)])
         targets = selectionToIds(model.document)
+    // The document's TARGET layer, where a new element lands (STATUS-jas item
+    // 38 (iii)): the top-level index of `path`, the layer a Layers row belongs
+    // to. Selection-class: no undo step. An empty path or an absent layer is
+    // MissingTarget. Mirrors Rust's `set_target_layer`.
+    case "set_target_layer":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard let layer = path.first, layer < model.document.layers.count else {
+            return .missingTarget(id: String(describing: path))
+        }
+        model.setDocumentUnbracketed(model.document.replacing(selectedLayer: layer), intent: .activeLayer)
     // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28): it
     // selects TOP-LEVEL objects, a group counting as ONE. Before this verb
     // nothing shared could reach `selectAll` in either port, which is how this
