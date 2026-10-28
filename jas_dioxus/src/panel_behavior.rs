@@ -27,7 +27,9 @@
 //!    half-applied behavior is worse than a refused one. The dry run is exact
 //!    for THIS click: the report is dynamic, and a clone is the real state.
 //!    ⛔ It is sound only because no panel behavior reaches an effect whose
-//!    state lives outside the model and the store. An arm below walks every
+//!    state lives outside the model and the store, and a host that holds such
+//!    state (the engine's lent layout, a menu action's `layout:` effect)
+//!    restores it in [`EffectHost::rewind`] before the real run. An arm below walks every
 //!    panel and fails if one ever does.
 //! 5. **The batch runs for real**, and the runner's owner rule makes it one
 //!    undo step. The host runs `snapshot` as `begin_txn`, as the web renderer
@@ -257,9 +259,47 @@ pub struct EngineHost {
     /// The file name a `geometry.export_pdf` (Print > Print) asked the shell
     /// to save the document's PDF under. Set, never appended.
     pub export_pdf: Option<String>,
+    /// The layout the engine holds, lent for the run, so a `layout:` effect
+    /// (Window > Toolbar, the canvas maximize) acts on it. `None`: the engine
+    /// holds no layout, and the effect is refused unknown.
+    pub layout: Option<crate::workspace::workspace::WorkspaceLayout>,
+    /// A `layout:` effect changed [`EngineHost::layout`].
+    pub layout_ran: bool,
+    /// The layout as lent, before the pre-flight acted on it
+    /// ([`EffectHost::rewind`] restores it for the real run).
+    layout_lent: Option<Option<crate::workspace::workspace::WorkspaceLayout>>,
+}
+
+impl EngineHost {
+    /// A host lent the engine's layout, for a run whose `layout:` effects act on it.
+    pub fn with_layout(layout: Option<crate::workspace::workspace::WorkspaceLayout>) -> EngineHost {
+        EngineHost { layout_lent: Some(layout.clone()), layout, ..Default::default() }
+    }
 }
 
 impl EffectHost for EngineHost {
+    /// One verb on the lent layout, checked: a verb the runtime refuses (an
+    /// unknown verb, a missing field) is refused by name and changes nothing.
+    fn layout_op(&mut self, op: &Value) -> Option<Option<Unhandled>> {
+        let layout = self.layout.as_mut()?;
+        let mut next = layout.clone();
+        if !crate::workspace::layout_apply::layout_apply_checked(&mut next, op) {
+            let verb = op["op"].as_str().unwrap_or("");
+            return Some(Some(Unhandled::UnknownEffect(format!("layout:{verb}"))));
+        }
+        *layout = next;
+        self.layout_ran = true;
+        Some(None)
+    }
+
+    fn rewind(&mut self) {
+        if let Some(lent) = &self.layout_lent {
+            self.layout = lent.clone();
+            self.layout_ran = false;
+        }
+    }
+
+
     fn run(
         &mut self,
         key: &str,
@@ -846,6 +886,7 @@ fn run_batch(
         return Err(Refusal::new("PlatformEffect", unhandled_detail(first)));
     }
 
+    host.rewind();
     if panel_id.is_some() { store.set_active_panel(panel_id); }
     let state_before = store.eval_context();
     // Every panel's scope, not only the active one's: a menu dispatch has no

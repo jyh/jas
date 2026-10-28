@@ -145,6 +145,21 @@ pub trait EffectHost {
         None
     }
 
+    /// The pre-flight passed and the real run follows: discard what the dry
+    /// run did to state this host holds OUTSIDE the store and the model (the
+    /// engine's lent layout), so the batch acts once. The default holds none.
+    fn rewind(&mut self) {}
+
+    /// Run one verb of the layout-op runtime, from a `layout: {op, ...}`
+    /// effect whose fields the runner has already evaluated (`op` literal,
+    /// every other string an expression). `Some(None)`: the host ran it.
+    /// `Some(Some(u))`: the host refuses it by name. `None` (the default): the
+    /// host holds no layout, and the effect is reported unknown, as before
+    /// this hook.
+    fn layout_op(&mut self, _op: &serde_json::Value) -> Option<Option<Unhandled>> {
+        None
+    }
+
     /// Refuse the effect `key` by name (FB wave 2b, A12). The runner asks
     /// this before [`EffectHost::run`] and before any built-in arm. A refused
     /// key is reported as the returned item, and nothing runs for it. The
@@ -608,6 +623,28 @@ fn run_one<'h>(
             if h.run(key, arg, store, model.as_deref_mut()) {
                 return;
             }
+        }
+    }
+
+    // ── layout: {op: <verb>, <field>: <expr>, ...} — one verb of the shared
+    // layout-op runtime, offered to a host that holds a layout. `op` is the
+    // literal verb; every other string is an expression, as the web route
+    // evaluates it (`renderer.rs` `run_yaml_effect`).
+    if let (Some(spec), Some(h)) = (effect.get("layout").and_then(|v| v.as_object()), host.as_deref_mut()) {
+        let op: serde_json::Map<String, serde_json::Value> = spec.iter().map(|(k, v)| {
+            let val = match v.as_str() {
+                Some(e) if k != "op" => value_to_json(&eval(e, ctx)),
+                _ => v.clone(),
+            };
+            (k.clone(), val)
+        }).collect();
+        match h.layout_op(&serde_json::Value::Object(op)) {
+            Some(None) => return,
+            Some(Some(refused)) => {
+                report.unhandled.push(refused);
+                return;
+            }
+            None => {} // no layout: reported unknown below, as before
         }
     }
 

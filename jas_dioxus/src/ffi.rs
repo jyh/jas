@@ -967,6 +967,10 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 
 /// The engine's layout as a shell draws it, or the empty span with
 /// `{"panel_event":"NoLayout"}` before a load.
+/// The viewport the engine's pane layout is seeded at. Nominal: no reply
+/// carries pane geometry, only visibility and maximization.
+const ENGINE_PANE_VIEWPORT: (f64, f64) = (1200.0, 900.0);
+
 fn layout_reply(engine: &JasEngine) -> JasBytes {
     match engine.layout.borrow().as_ref() {
         Some(l) => JasBytes::from_string(crate::layout_seed::shell_state(l).to_string()),
@@ -1000,10 +1004,14 @@ pub unsafe extern "C" fn jas_layout_load(e: *mut JasEngine, name: *const u8, len
     };
     let seeded = crate::interpreter::workspace::Workspace::load()
         .and_then(|ws| crate::layout_seed::from_default_layout(ws.data(), name));
-    let Some(layout) = seeded else {
+    let Some(mut layout) = seeded else {
         set_panel_event_error(engine, "LayoutRefused", name);
         return JasBytes::empty();
     };
+    // The engine holds the PANE layout too, so the pane verbs act at
+    // `jas_layout_apply` and the reply carries the panes' state. Its geometry
+    // is nominal (the reply carries none: the shell lays out its columns).
+    layout.ensure_pane_layout(ENGINE_PANE_VIEWPORT.0, ENGINE_PANE_VIEWPORT.1);
     *engine.layout.borrow_mut() = Some(layout);
     let out = layout_reply(engine);
     ffi_instr::record_out(Crossing::LayoutLoad, out.len);
@@ -1099,8 +1107,9 @@ pub unsafe extern "C" fn jas_layout_apply(e: *mut JasEngine, op: *const u8, len:
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
 /// "remove_tab": <index> | null, "close_window": <bool>,
 /// "save_all_then_close": <bool>, "clipboard_write": <text> | null,
-/// "export_pdf": <file name> | null}` ([`act_reply`]; `clipboard_write` is
-/// [`jas_dispatch_action`]'s, and `export_pdf` is the Print button's).
+/// "export_pdf": <file name> | null, "layout": <layout> | null}` ([`act_reply`];
+/// `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
+/// is the Print button's).
 /// `close_window` names a window close the shell must do (the engine owns no
 /// window): `quit` with nothing edited, or Save Changes' Don't Save.
 /// `save_all_then_close` (Save Changes' Save All) names "save every modified
@@ -1425,7 +1434,9 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
 /// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
-/// null, "export_pdf": <file name> | null}`. `export_pdf` names a PDF save the
+/// null, "export_pdf": <file name> | null, "layout": <layout> | null}`. `layout` is
+/// the engine's layout after a `layout:` effect moved it (Window > Toolbar), as
+/// [`jas_layout_state`] answers it, for the shell to apply. `export_pdf` names a PDF save the
 /// shell must do (Print > Print; the engine owns no file system): the file name
 /// to save [`jas_document_pdf`]'s bytes under. `dialog` is the dialog open
 /// in the engine's store after the act (the dialog door, design 2026-10-14):
@@ -1437,7 +1448,8 @@ fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: 
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
                        "save_all_then_close": named.save_all_then_close,
-                       "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf})
+                       "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf,
+                       "layout": named.layout})
 }
 
 /// The acts the host NAMES for the shell to do, because the engine owns no tabs
@@ -1452,13 +1464,17 @@ struct Named {
     /// The file name a Print asks the shell to save the document's PDF under
     /// (`geometry.export_pdf`); the bytes are [`jas_document_pdf`]'s.
     export_pdf: Option<String>,
+    /// The layout after a `layout:` effect (Window > Toolbar), as
+    /// [`jas_layout_state`] answers it; the engine has already committed it.
+    layout: Option<serde_json::Value>,
 }
 
 impl Named {
     fn of(host: crate::panel_behavior::EngineHost) -> Named {
         Named { remove_tab: host.removed_tab, close_window: host.closed_window,
                 save_all_then_close: host.save_all_then_close, clipboard_write: host.clipboard_write,
-                export_pdf: host.export_pdf }
+                export_pdf: host.export_pdf,
+                layout: host.layout.filter(|_| host.layout_ran).map(|l| crate::layout_seed::shell_state(&l)) }
     }
 }
 
@@ -1783,11 +1799,15 @@ pub unsafe extern "C" fn jas_dispatch_action(
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost::default();
+        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone());
         let ran = crate::panel_behavior::run_action(
             panel, action, params, params_are_values, &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
             &mut host);
+        // A `layout:` effect ran on the lent copy: the engine holds it now.
+        if ran.is_ok() && host.layout_ran {
+            *engine.layout.borrow_mut() = host.layout.clone();
+        }
         (ran, Named::of(host))
     };
     let ran = match ran {
@@ -1807,7 +1827,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
     let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
-    if ran.doc_changed || state_changed || moved || named.clipboard_write.is_some() {
+    if ran.doc_changed || state_changed || moved || named.clipboard_write.is_some() || named.layout.is_some() {
         *engine.last_error.borrow_mut() = None;
     } else {
         set_panel_event_error(engine, "Unchanged", action);
@@ -4321,12 +4341,13 @@ mod tests {
         (reply, take(unsafe { jas_last_error_json(e) }))
     }
 
-    /// Window > Toolbar runs its YAML in the engine and is REFUSED BY NAME:
-    /// `toggle_pane` is a `layout:` effect (the pane layout), and the engine
-    /// holds no pane layout (`pane_verbs_are_accepted_no_ops_at_the_engine_door`).
-    /// Until 2026-10-28 the YAML toggled `state.toolbar_visible`, a key no
-    /// renderer read, and this test pinned THAT as "its state moves". The
-    /// store stays where it was, so a refusal that half-ran would red.
+    /// Window > Toolbar BEFORE any layout is loaded is REFUSED BY NAME:
+    /// `toggle_pane` is a `layout:` effect, and an engine with no layout has
+    /// nothing to run it on (after `jas_layout_load` it runs:
+    /// `dispatch_toggle_pane_moves_the_engines_pane_layout`). Until 2026-10-28
+    /// the YAML toggled `state.toolbar_visible`, a key no renderer read, and
+    /// this test pinned THAT as "its state moves". The store stays where it
+    /// was, so a refusal that half-ran would red.
     #[test]
     fn dispatch_action_names_the_pane_layout_it_cannot_run() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -4335,6 +4356,39 @@ mod tests {
         let (_reply, err) = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
         assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:layout"), "toggle_pane is refused by name");
         assert_eq!(engine_of(e).store.borrow().get("toolbar_visible"), &before, "and moved nothing");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Window > Toolbar / Panels and the canvas maximize, AFTER a layout load:
+    /// the action's `layout:` effect runs on the engine's held layout (design
+    /// step 4), and the act reply carries that layout under `layout` (as
+    /// `jas_layout_state` answers it), so the shell applies the panes from the
+    /// reply. A reply with no layout act carries `layout: null`.
+    #[test]
+    fn dispatch_toggle_pane_moves_the_engines_pane_layout() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let loaded = json(&layout_load(e, "Default"));
+        let before = engine_of(e).store.borrow().get("toolbar_visible").clone();
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
+        assert_eq!(err, "", "it ran: {reply}");
+        let reply = json(&reply);
+        assert_eq!(reply["layout"]["panes"], serde_json::json!({"toolbar": false, "canvas": true, "dock": true}),
+                   "{reply}");
+        assert_eq!(reply["layout"].to_string(), take(unsafe { jas_layout_state(e) }), "the reply is the held layout");
+        assert_eq!(reply["layout"]["anchored"], loaded["anchored"], "the docks are untouched");
+        assert_eq!(engine_of(e).store.borrow().get("toolbar_visible"), &before, "no shadow key moves");
+
+        let (reply, _) = dispatch(e, r#"{"menu_item":"menu_toolbar"}"#);
+        assert_eq!(json(&reply)["layout"]["panes"]["toolbar"], serde_json::json!(true), "the menu item toggles back");
+        let (reply, _) = dispatch(e, r#"{"menu_item":"menu_panels"}"#);
+        assert_eq!(json(&reply)["layout"]["panes"]["dock"], serde_json::json!(false), "Window > Panels hides the dock");
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_canvas_maximize"}"#);
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(json(&reply)["layout"]["canvas_maximized"], serde_json::json!(true), "{reply}");
+
+        let (reply, _) = dispatch(e, r#"{"action":"select_all"}"#);
+        assert_eq!(json(&reply)["layout"], serde_json::Value::Null, "an act with no layout effect carries null");
         unsafe { jas_engine_free(e) };
     }
 
@@ -6696,31 +6750,44 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// The two verbs the YAML window actions need (#735) reach the engine's
-    /// door exactly as the pane verbs already there do. The engine holds a DOCK
-    /// layout and NO pane layout, so every pane verb (`hide_pane` before #735,
-    /// `toggle_pane` and `set_canvas_maximized` after) is ACCEPTED AND CHANGES
-    /// NOTHING: the "no pane layout" arm of `layout_apply` returns true before
-    /// any field is read. That is the silent skip this door exists to refuse,
-    /// and it is pinned here as it stands so a change to it is a decision
-    /// (design step 4), never an accident. The control op changes the layout.
+    /// The engine holds a PANE layout beside its dock layout (design step 4,
+    /// flask §639's plan), so the pane verbs ACT at its door, and its reply
+    /// carries what a shell needs to show the panes: `panes` (each pane's
+    /// visibility, the vocabulary of the menus' `panes.<id>` scope) and
+    /// `canvas_maximized`. Until this, every pane verb was accepted and changed
+    /// nothing (the "no pane layout" arm returned true before reading a field).
+    /// A pane verb missing its required field is refused by name, as a dock
+    /// verb is.
     #[test]
-    fn pane_verbs_are_accepted_no_ops_at_the_engine_door() {
+    fn pane_verbs_act_on_the_engines_pane_layout() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let held = layout_load(e, "Default");
-        assert!(json(&held).get("pane_layout").is_none(), "the engine holds no pane layout: {held}");
-        for op in [
-            r#"{"op":"hide_pane","kind":"toolbar"}"#,
-            r#"{"op":"toggle_pane","kind":"toolbar"}"#,
-            r#"{"op":"toggle_pane"}"#,
-            r#"{"op":"set_canvas_maximized","value":true}"#,
-            r#"{"op":"set_canvas_maximized"}"#,
-        ] {
-            assert_eq!(layout_op(e, op), held, "{op} is accepted and changes nothing");
+        let held = json(&layout_load(e, "Default"));
+        assert_eq!(held["panes"], serde_json::json!({"toolbar": true, "canvas": true, "dock": true}), "{held}");
+        assert_eq!(held["canvas_maximized"], serde_json::json!(false), "{held}");
+
+        let hid = json(&layout_op(e, r#"{"op":"toggle_pane","kind":"toolbar"}"#));
+        assert_eq!(hid["panes"], serde_json::json!({"toolbar": false, "canvas": true, "dock": true}), "{hid}");
+        assert_eq!(hid["anchored"], held["anchored"], "a pane verb leaves the docks alone");
+        let shown = json(&layout_op(e, r#"{"op":"toggle_pane","kind":"toolbar"}"#));
+        assert_eq!(shown["panes"], held["panes"], "toggled twice is where it started");
+        let dock = json(&layout_op(e, r#"{"op":"toggle_pane","kind":"dock"}"#));
+        assert_eq!(dock["panes"], serde_json::json!({"toolbar": true, "canvas": true, "dock": false}), "{dock}");
+
+        let max = json(&layout_op(e, r#"{"op":"set_canvas_maximized","value":true}"#));
+        assert_eq!(max["canvas_maximized"], serde_json::json!(true), "{max}");
+        assert_eq!(json(&layout_op(e, r#"{"op":"set_canvas_maximized","value":true}"#))["canvas_maximized"],
+                   serde_json::json!(true), "set is idempotent");
+        assert_eq!(json(&layout_op(e, r#"{"op":"toggle_canvas_maximized"}"#))["canvas_maximized"],
+                   serde_json::json!(false), "the toggle restores it");
+
+        let before = take(unsafe { jas_layout_state(e) });
+        for (op, verb) in [(r#"{"op":"toggle_pane"}"#, "toggle_pane"),
+                           (r#"{"op":"set_canvas_maximized"}"#, "set_canvas_maximized")] {
+            assert_eq!(layout_op(e, op), "", "{op} lacks its required field");
+            assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadLayoutOp", verb));
         }
-        assert_ne!(layout_op(e, r#"{"op":"toggle_group_collapsed","dock_id":0,"group_idx":0}"#), held,
-                   "the control op changes the layout");
+        assert_eq!(take(unsafe { jas_layout_state(e) }), before, "a refused verb changes nothing");
         unsafe { jas_engine_free(e) };
     }
 
@@ -7002,7 +7069,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "remove_tab", "save_all_then_close"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -7026,7 +7093,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -7082,13 +7149,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second

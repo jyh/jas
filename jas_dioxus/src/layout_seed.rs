@@ -15,7 +15,8 @@
 
 use serde_json::{json, Value};
 
-use crate::workspace::layout_apply::{panel_kind_str, parse_panel_kind};
+use crate::workspace::layout_apply::{pane_kind_str, panel_kind_str, parse_panel_kind};
+use crate::workspace::pane::PaneKind;
 use crate::workspace::workspace::{Dock, DockEdge, PanelGroup, PanelKind, WorkspaceLayout};
 
 const CONTENT_SUFFIX: &str = "_panel_content";
@@ -106,12 +107,24 @@ pub fn shell_state(layout: &WorkspaceLayout) -> Value {
         v["z"] = json!(layout.z_index_for(f.dock.id));
         v
     }).collect();
-    json!({
+    let mut out = json!({
         "name": layout.name,
         "anchored": anchored,
         "floating": floating,
         "z_order": layout.z_order.iter().map(|id| id.0).collect::<Vec<_>>(),
-    })
+    });
+    // The pane layout, when the layout holds one: each pane's visibility (the
+    // menus' `panes.<id>` vocabulary) and whether the canvas is maximized. Not
+    // the panes' geometry: a shell lays out its own columns.
+    if let Some(pl) = &layout.pane_layout {
+        let panes: serde_json::Map<String, Value> = [PaneKind::Toolbar, PaneKind::Canvas, PaneKind::Dock]
+            .into_iter()
+            .map(|k| (pane_kind_str(k).to_string(), json!(pl.is_pane_visible(k))))
+            .collect();
+        out["panes"] = Value::Object(panes);
+        out["canvas_maximized"] = json!(pl.canvas_maximized);
+    }
+    out
 }
 
 #[cfg(test)]
