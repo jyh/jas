@@ -234,6 +234,10 @@ public enum LayersPanel {
                                 artboardsPanelSelection: [], params: [:])
         guard let cmd = resolvePanelKey(panel, chord: chord, context: ctx) else { return false }
         dispatchYamlAction(cmd.action, model: model, params: cmd.params, onCloseDialog: onCloseDialog)
+        // The rows' panel writes (`list_toggle` of collapsed_paths, the
+        // selection, renaming_element) publish nothing; the tree draws from the
+        // store, so it redraws on this.
+        model.panelStateVersion &+= 1
         return true
     }
 

@@ -1,5 +1,7 @@
 import Testing
 import Foundation
+import SwiftUI
+import AppKit
 @testable import JasLib
 
 // The Layers tree's three pieces of view state -- the collapsed containers,
@@ -120,4 +122,66 @@ private func twoLayers() -> Model {
     #expect(layersCollapsedPaths(model: model) == [[0]])
     #expect(model.stateStore.getPanel("layers_panel_content", "type_filter") != nil,
             "seeded from the defaults, not created empty")
+}
+
+// MARK: - the tree's key hook
+
+// `layersTreeKeyChord` is the hook's translation of a SwiftUI key press into the
+// chord `LayersPanel.treeKey` resolves. Delete/Backspace and ⌘A stay with the
+// view's native monitor (its orphan-confirm Delete; `layers_select_all` is a
+// `log` stub), so the hook names neither.
+
+@Test func theTreeHookNamesTheKeysLayersYamlBindsAndNoOthers() {
+    #expect(layersTreeKeyChord(.upArrow, []) == KeyChord(key: "ArrowUp"))
+    #expect(layersTreeKeyChord(.downArrow, []) == KeyChord(key: "ArrowDown"))
+    #expect(layersTreeKeyChord(.leftArrow, []) == KeyChord(key: "ArrowLeft"))
+    #expect(layersTreeKeyChord(.rightArrow, []) == KeyChord(key: "ArrowRight"))
+    #expect(layersTreeKeyChord(.return, []) == KeyChord(key: "Enter"))
+    #expect(layersTreeKeyChord(.escape, []) == KeyChord(key: "Escape"))
+    #expect(layersTreeKeyChord(KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!)), [])
+            == KeyChord(key: "F2"))
+    #expect(layersTreeKeyChord(.delete, []) == nil, "native: the orphan-confirm Delete")
+    #expect(layersTreeKeyChord(.deleteForward, []) == nil)
+    #expect(layersTreeKeyChord("a", .command) == nil, "native: select all")
+    #expect(layersTreeKeyChord("x", []) == nil)
+}
+
+@Test func theTreeHookCarriesModifiersWithCommandAsCtrl() {
+    #expect(layersTreeKeyChord(.downArrow, .shift) == KeyChord(key: "ArrowDown", shift: true))
+    #expect(layersTreeKeyChord(.downArrow, .command) == KeyChord(key: "ArrowDown", ctrl: true))
+    #expect(layersTreeKeyChord(.downArrow, .option) == KeyChord(key: "ArrowDown", alt: true))
+}
+
+@Test func everyKeyTheHookNamesResolvesToALayersRow() {
+    // The other direction: a name the hook produces that no row binds would be
+    // a key the hook swallows for nothing (it returns .handled only on a
+    // dispatch, but a typo here would read as "no row" forever).
+    let model = twoLayers()
+    setLayersPanelSelection(model: model, [[1]])
+    guard let ws = WorkspaceData.load(),
+          let panel = (ws.data["panels"] as? [String: Any])?["layers_panel_content"] else {
+        Issue.record("no layers panel"); return
+    }
+    let ctx = LayersPanel.actionContext(model: model, ws: ws, panelSelection: [],
+                                        artboardsPanelSelection: [], params: [:])
+    let keys: [KeyEquivalent] = [.upArrow, .downArrow, .leftArrow, .rightArrow, .return, .escape,
+                                 KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!))]
+    for k in keys {
+        let chord = layersTreeKeyChord(k, [])!
+        #expect(resolvePanelKey(panel, chord: chord, context: ctx) != nil, "\(chord.key)")
+    }
+}
+
+@Test func aKeyTheTreeTakesRedrawsTheViewsReadingTheStore() {
+    // Left's `list_toggle` writes the store and publishes nothing, so without a
+    // bump the tree reads the new collapsed_paths only at its next unrelated
+    // redraw.
+    let model = twoLayers()
+    setLayersPanelSelection(model: model, [[1]])
+    let before = model.panelStateVersion
+    #expect(LayersPanel.treeKey(KeyChord(key: "ArrowLeft"), model: model))
+    #expect(model.panelStateVersion != before)
+    let unbound = model.panelStateVersion
+    #expect(!LayersPanel.treeKey(KeyChord(key: "X"), model: model))
+    #expect(model.panelStateVersion == unbound, "an unbound key changes nothing")
 }
