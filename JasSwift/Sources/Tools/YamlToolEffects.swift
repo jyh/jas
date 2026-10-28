@@ -367,7 +367,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             store.listToggle("brushes", "open_libraries", slug, keyField: "id", insert: ["collapsed": false])
             store.setPanel("brushes", "selected_library", slug)
         }
-        store.pendingWrites.append(["kind": "brush_library", "slug": slug, "manifest": saved])
+        store.appendPendingWrite(["kind": "brush_library", "slug": slug, "manifest": saved])
         syncCanvasBrushes(store: store)
         return nil
     }

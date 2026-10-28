@@ -20,6 +20,19 @@ public class StateStore {
     /// Mirrors the reference's `StateStore.pending_writes`.
     public var pendingWrites: [[String: Any]] = []
 
+    /// The host's writer, installed by the app (``BrushLibraryStore/live``),
+    /// never in a test process. Called on every queued write; a write it
+    /// reports done leaves the queue, a failed one stays.
+    public var pendingWriteSink: (([String: Any]) -> Bool)?
+
+    /// Queue a file write for the host and hand it to the sink if one is
+    /// installed. The ONE way an effect queues a write, so every route drains.
+    public func appendPendingWrite(_ w: [String: Any]) {
+        pendingWrites.append(w)
+        guard let sink = pendingWriteSink else { return }
+        pendingWrites.removeAll { sink($0) }
+    }
+
     // MARK: - Tool state
     //
     // Parallels `panels` but keyed by tool id. YAML tool handlers
