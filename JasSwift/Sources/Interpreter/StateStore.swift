@@ -452,11 +452,28 @@ public class StateStore {
     /// Appends, never prepends. A key holding no list starts from an empty
     /// one. Mirrors the reference's `StateStore.list_toggle` (Python's
     /// `list.remove`: the first occurrence only).
-    public func listToggle(_ panelId: String, _ key: String, _ value: Any) {
+    ///
+    /// With `keyField`, membership is `item[keyField] == value` over a list of
+    /// objects: the first such item is removed, else `{keyField: value}` is
+    /// appended beside the literal `insert` fields (the key wins).
+    public func listToggle(_ panelId: String, _ key: String, _ value: Any,
+                           keyField: String? = nil, insert: [String: Any]? = nil) {
         let panelId = Self.panelContentId(panelId)
         guard panels[panelId] != nil else { return }
         var lst = (panels[panelId]?[key] as? [Any]) ?? []
-        if let i = lst.firstIndex(where: { ($0 as? NSObject)?.isEqual(value) ?? false }) {
+        if let keyField {
+            let match: (Any) -> Bool = { item in
+                guard let d = item as? [String: Any], let v = d[keyField] as? NSObject else { return false }
+                return v.isEqual(value)
+            }
+            if let i = lst.firstIndex(where: match) {
+                lst.remove(at: i)
+            } else {
+                var item = insert ?? [:]
+                item[keyField] = value
+                lst.append(item)
+            }
+        } else if let i = lst.firstIndex(where: { ($0 as? NSObject)?.isEqual(value) ?? false }) {
             lst.remove(at: i)
         } else {
             lst.append(value)
