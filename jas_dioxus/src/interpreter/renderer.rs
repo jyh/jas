@@ -9292,16 +9292,7 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
 /// menu_bar helper but lives here so the YAML effect handler doesn't
 /// need to reach into workspace::menu_bar.
 fn pdf_filename_for_tab(filename: &str) -> String {
-    let trimmed = filename.trim();
-    if trimmed.is_empty() {
-        return "Untitled.pdf".to_string();
-    }
-    for ext in [".svg", ".pdf", ".jas"] {
-        if let Some(stem) = trimmed.strip_suffix(ext) {
-            return format!("{}.pdf", stem);
-        }
-    }
-    format!("{}.pdf", trimmed)
+    crate::geometry::pdf::pdf_filename_for(filename)
 }
 
 /// Tabs widget — left-rail tab list plus a content area showing the

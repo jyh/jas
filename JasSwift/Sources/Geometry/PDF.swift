@@ -15,6 +15,32 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+/// Where Print > Print's PDF goes (`geometry.export_pdf`, PRINT.md §1B). The
+/// default asks the user for a destination with an `NSSavePanel` and writes
+/// the bytes there. It is a SEAM because a save panel throws under `swift test`,
+/// which has no running application: a test replaces `save` to record the
+/// request, and restores it. Rust's engine NAMES the same save for its shell
+/// (`export_pdf` in the reply, bytes from `jas_document_pdf`).
+public enum PdfExport {
+    nonisolated(unsafe) public static var save: (Data, String) -> Void = presentSavePanel
+
+    /// The production save: an `NSSavePanel` with the file name filled in.
+    public static func presentSavePanel(_ bytes: Data, _ hint: String) {
+        let panel = NSSavePanel()
+        panel.title = "Export to PDF"
+        panel.nameFieldStringValue = hint
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsOtherFileTypes = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try bytes.write(to: url)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
+    }
+}
+
 /// Strip a known filename extension and append `.pdf`. Falls back to
 /// "Untitled.pdf" for empty / Untitled-N filenames.
 public func pdfFilenameForModel(_ model: Model) -> String {

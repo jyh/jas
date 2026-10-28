@@ -31,6 +31,38 @@
     "expected_json": "print_done_stores_the_edited_copies_expected.json"
   },
   {
+    "name": "print_print_stores_the_edited_copies_and_exports_a_pdf",
+    "setup_svg": "rect_with_stroke.svg",
+    "note": "print_dialog_print makes Done's field writes, asks for the PDF save (geometry.export_pdf) and closes the dialog, so it is held to the Done case's golden. The save is the shell's: Rust's engine NAMES it in the reply (export_pdf), Swift's PdfExport seam records it in the test. expected_pdf_export says a save was asked for.",
+    "actions": [
+      {
+        "action": "open_print_dialog",
+        "params": {}
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "pr_copies"
+          },
+          "event": "commit",
+          "value": "3"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "print_dialog_print"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "changed",
+    "expected_json": "print_done_stores_the_edited_copies_expected.json",
+    "expected_pdf_export": true
+  },
+  {
     "name": "print_cancel_stores_nothing",
     "setup_svg": "rect_with_stroke.svg",
     "note": "Cancel runs dismiss_dialog: the edit to Copies is dropped and the document is as it opened.",

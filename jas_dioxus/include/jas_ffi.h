@@ -733,8 +733,9 @@ struct JasBytes jas_layout_apply(struct JasEngine *e, const uint8_t *op, uintptr
  *
  * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
  * "remove_tab": <index> | null, "close_window": <bool>,
- * "save_all_then_close": <bool>, "clipboard_write": <text> | null}`
- * ([`act_reply`]; `clipboard_write` is [`jas_dispatch_action`]'s).
+ * "save_all_then_close": <bool>, "clipboard_write": <text> | null,
+ * "export_pdf": <file name> | null}` ([`act_reply`]; `clipboard_write` is
+ * [`jas_dispatch_action`]'s, and `export_pdf` is the Print button's).
  * `close_window` names a window close the shell must do (the engine owns no
  * window): `quit` with nothing edited, or Save Changes' Don't Save.
  * `save_all_then_close` (Save Changes' Save All) names "save every modified
@@ -874,6 +875,18 @@ uint8_t jas_document_mark_saved(struct JasEngine *e);
  * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
  */
 uint8_t jas_dialog_dismiss(struct JasEngine *e);
+
+/**
+ * **The document as a PDF** (Print > Print): the bytes a shell saves under
+ * the file name a reply's `export_pdf` names, from `geometry::pdf`, the
+ * builder the web's Print downloads. The engine owns no file system, so the
+ * shell does the save. NULL handle: the empty span.
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+struct JasBytes jas_document_pdf(struct JasEngine *e);
 
 /**
  * **The open dialog's plan** (the dialog door, design 2026-10-14): the panel

@@ -901,18 +901,7 @@ public enum LayersPanel {
             let bytes = documentToPdf(model.document)
             let hint: String = (spec["filename_hint"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? pdfFilenameForModel(model)
-            let panel = NSSavePanel()
-            panel.title = "Export to PDF"
-            panel.nameFieldStringValue = hint
-            panel.allowedContentTypes = [.pdf]
-            panel.allowsOtherFileTypes = false
-            guard panel.runModal() == .OK, let url = panel.url else { return nil }
-            do {
-                try bytes.write(to: url)
-            } catch {
-                let alert = NSAlert(error: error)
-                alert.runModal()
-            }
+            PdfExport.save(bytes, hint)
             return nil
         }
 
