@@ -235,7 +235,7 @@ class TestArtboardsPanel:
         assert keys.get("Backspace") == "delete_artboards"
         assert keys.get("F2") == "rename_artboard"
         assert keys.get("Enter") == "rename_artboard"
-        assert keys.get("Meta+A") == "artboards_select_all"
+        assert keys.get("Ctrl+A") == "artboards_select_all"
         assert keys.get("Alt+ArrowUp") == "move_artboard_up"
         assert keys.get("Alt+ArrowDown") == "move_artboard_down"
 

@@ -263,6 +263,50 @@ public func resolveKeyIn(_ chord: KeyChord, shortcuts: [Any]) -> ResolvedCommand
     return nil
 }
 
+/// Every `keyboard:` row under `node`, at any depth, in document order: the
+/// panel's own (artboards.yaml) and any element's (layers.yaml puts its rows on
+/// the tree_view). Mirrors Rust `panel_keyboard_rows`.
+private func panelKeyboardRows(_ node: Any) -> [Any] {
+    var out: [Any] = []
+    if let m = node as? [String: Any] {
+        if let rows = m["keyboard"] as? [Any] { out.append(contentsOf: rows) }
+        for (k, v) in m where k != "keyboard" { out.append(contentsOf: panelKeyboardRows(v)) }
+    } else if let a = node as? [Any] {
+        for v in a { out.append(contentsOf: panelKeyboardRows(v)) }
+    }
+    return out
+}
+
+/// Resolve a chord on a focused panel (`test_fixtures/panel_keys/`, STATUS-jas
+/// item 8 class L step 2). The first of the panel's `keyboard:` rows whose key
+/// parses to `chord` and whose `enabled_when` (if any) holds in `context` wins;
+/// its action may be a `{{...}}` template, and its string params are
+/// expressions, with a `dispatch` effect's bare-identifier rule (a null is kept
+/// as NSNull). nil when no row matches. Mirrors Rust `resolve_panel_key`.
+public func resolvePanelKey(_ panel: Any, chord: KeyChord,
+                            context: [String: Any]) -> (action: String, params: [String: Any])? {
+    for entry in panelKeyboardRows(panel) {
+        guard let row = entry as? [String: Any],
+              let keyStr = row["key"] as? String,
+              parseShortcutChord(keyStr) == chord else { continue }
+        if let cond = row["enabled_when"] as? String, !cond.isEmpty,
+           !evaluate(cond, context: context).toBool() { continue }
+        guard let raw = row["action"] as? String, !raw.isEmpty else { continue }
+        let action = raw.contains("{{") ? evaluateText(raw, context: context) : raw
+        var params: [String: Any] = [:]
+        for (k, v) in (row["params"] as? [String: Any]) ?? [:] {
+            guard let expr = v as? String else { params[k] = v; continue }
+            if let any = storedValue(evaluate(expr, context: context)) {
+                params[k] = any
+            } else {
+                params[k] = isBareIdentifier(expr) ? expr : NSNull()
+            }
+        }
+        return (action, params)
+    }
+    return nil
+}
+
 /// A parsed keyboard shortcut: the key character plus SwiftUI modifiers.
 public struct ParsedShortcut: Equatable {
     public let key: Character

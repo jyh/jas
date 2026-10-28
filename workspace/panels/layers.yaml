@@ -782,7 +782,7 @@ content:
         - { key: "Backspace",  action: delete_layer_selection }
         - { key: "F2",         action: rename_element, params: { element_id: "panel.layers_panel_selection[0]" } }
         - { key: "Enter",      action: rename_element, params: { element_id: "panel.layers_panel_selection[0]" }, enabled_when: "panel.layers_panel_selection.length == 1" }
-        - { key: "Meta+A",     action: layers_select_all }
+        - { key: "Ctrl+A",     action: layers_select_all }
         - { key: "ArrowUp",    action: layers_nav_up }
         - { key: "ArrowDown",  action: layers_nav_down }
         - { key: "ArrowRight", action: layers_nav_right }

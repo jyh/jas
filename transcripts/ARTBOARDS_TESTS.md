@@ -109,7 +109,7 @@ Structural + integration coverage of the panel yaml:
   `mem(ab.id, active_document.artboards_panel_selection_ids)`.
 - Footer has five buttons in the specified order, with
   invariant-respecting Delete disablement and always-enabled New.
-- Keyboard shortcuts: Delete/Backspace/F2/Enter/Meta+A/Alt+Arrows.
+- Keyboard shortcuts: Delete/Backspace/F2/Enter/Ctrl+A (Command on the Mac)/Alt+Arrows.
 - Panel renders inside a dock.
 - Row context_menu has the 5 expected entries; root and list
   containers have no context_menu (empty-area no-menu rule).
