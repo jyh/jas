@@ -904,6 +904,7 @@ public sealed partial class MainWindow : Window
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);
         _canvas.ExportPdfReady = SaveExportedPdf;
+        _canvas.PanesChanged = OnPanesChanged;
         _canvas.CloseApproved = () =>
         {
             _closeApproved = true;
@@ -2753,6 +2754,22 @@ public sealed partial class MainWindow : Window
     }
 
     private string? _savePath = Environment.GetEnvironmentVariable("SB_SAVE_PATH");
+
+    /// <summary>
+    /// jas §642 (#738): apply the engine's pane state to the side columns. A
+    /// column shows only when this scene wants it (`_toolbarWanted`,
+    /// `_paneWanted`) AND the engine shows it (<see cref="PaneRule.Shown"/>):
+    /// the shell never shows a pane its scene keeps off, and decides nothing
+    /// the engine did not say.
+    /// </summary>
+    private void OnPanesChanged(PaneState panes, string cause)
+    {
+        var (toolbar, dock) = PaneRule.Shown(panes);
+        if (_toolbarWanted) { ToolbarHost.Visibility = toolbar ? Visibility.Visible : Visibility.Collapsed; }
+        if (_paneWanted) { PaneHost.Visibility = dock ? Visibility.Visible : Visibility.Collapsed; }
+        Report($"PANES APPLIED cause={cause} toolbar={(toolbar ? "shown" : "hidden")} dock={(dock ? "shown" : "hidden")} "
+             + $"engine=toolbar:{panes.Toolbar},canvas:{panes.Canvas},dock:{panes.Dock},maximized:{panes.CanvasMaximized}");
+    }
 
     /// <summary>
     /// jas §637 (#733): save the PDF a Print reply named. The name is the
