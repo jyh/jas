@@ -68,6 +68,7 @@
     "set_concept_param": "edit",
     "set_document_setup_field": "edit",
     "set_element_name": "edit",
+    "set_element_visibility": "edit",
     "set_graphics_field": "edit",
     "set_instance_transform": "edit",
     "set_marks_and_bleed_field": "edit",

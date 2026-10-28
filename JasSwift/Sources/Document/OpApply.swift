@@ -2091,12 +2091,11 @@ public func opApply(
     // missing target, an unknown name a missing required argument.
     case "set_element_visibility":
         guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
-        let vis: Visibility
-        switch op["visibility"] as? String {
-        case "preview": vis = .preview
-        case "outline": vis = .outline
-        case "invisible": vis = .invisible
-        default: return reqErr(op, "visibility")
+        // A table, not a `switch`: `check_op_vocabulary` reads every string
+        // `case` in this function as an op name.
+        let byName: [String: Visibility] = ["preview": .preview, "outline": .outline, "invisible": .invisible]
+        guard let vis = (op["visibility"] as? String).flatMap({ byName[$0] }) else {
+            return reqErr(op, "visibility")
         }
         guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
             return .missingTarget(id: String(describing: path))
