@@ -7,8 +7,9 @@ import Foundation
 /// `toggle_preference_member`.
 ///
 /// One store per process, behind a lock: the readers include
-/// ``readPrefNumber(_:default:)``, which has no model. Persisting the overrides
-/// across launches is the launch half of item 37, not built here.
+/// ``readPrefNumber(_:default:)``, which has no model. The app saves them
+/// across launches through ``onChange`` and imports them with
+/// ``importOverrides(_:)`` before any canvas reads state (`JasApp.init`).
 public enum Preferences {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var overrides: [String: Any] = [:]
@@ -32,6 +33,31 @@ public enum Preferences {
         return out
     }
 
+    /// The app's storage key for ``exportOverrides()`` (UserDefaults), beside
+    /// `AppConfig.storageKey`.
+    public static let storageKey = "jas_preference_overrides"
+
+    /// The app's save, called with ``exportOverrides()`` after every write
+    /// (the app installs a UserDefaults write; nothing installed, nothing
+    /// saved, which is what a test sees).
+    nonisolated(unsafe) public static var onChange: ((String) -> Void)?
+
+    /// The overrides as JSON (dotted key -> value), the form the app saves.
+    public static func exportOverrides() -> String {
+        lock.lock(); let o = overrides; lock.unlock()
+        guard let data = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+
+    /// Replace the overrides with a saved set, at launch. An unreadable save
+    /// loads as no overrides (the bundle), never a crash.
+    public static func importOverrides(_ json: String?) {
+        let loaded = json.flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any] ?? [:]
+        lock.lock(); overrides = loaded; lock.unlock()
+    }
+
     /// The bundle's preferences with the overrides applied; nil when there is
     /// no bundle.
     public static func current() -> [String: Any]? {
@@ -43,6 +69,18 @@ public enum Preferences {
         return prefs
     }
 
+    /// `state.brushes_open_libraries` at startup (state.yaml; STATUS-jas item
+    /// 37): one open, expanded section per slug of
+    /// `preferences.brushes.persistent_libraries`, in order, or the declared
+    /// fallback when the list is empty. Mirrors the reference's
+    /// `open_libraries_at_launch`; shared fixture
+    /// `test_fixtures/preferences/open_libraries_at_launch.json`.
+    public static func openLibrariesAtLaunch(_ slugs: Any?) -> [[String: Any]] {
+        var ids = (slugs as? [Any] ?? []).compactMap { $0 as? String }
+        if ids.isEmpty { ids = ["default_brushes"] }
+        return ids.map { ["id": $0, "collapsed": false] }
+    }
+
     /// Add `value` to the LIST preference at `key` when absent, remove it when
     /// present, as an override; an override equal to the bundle's default is
     /// dropped. Refuses (false) a key the bundle does not declare as a list.
@@ -52,12 +90,15 @@ public enum Preferences {
               let now = at(current(), key) as? [Any] else { return false }
         let same = { (a: Any) in (a as AnyObject).isEqual(value) }
         let next: [Any] = now.contains(where: same) ? now.filter { !same($0) } : now + [value]
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         if (next as NSArray).isEqual(to: defaults) {
             overrides.removeValue(forKey: key)
         } else {
             overrides[key] = next
         }
+        lock.unlock()
+        // Outside the lock: the save reads the overrides back.
+        onChange?(exportOverrides())
         return true
     }
 }

@@ -4,8 +4,9 @@
 //! `StateStore.preferences` / `toggle_preference_member`.
 //!
 //! The overrides are per thread: the app's UI thread (web and desktop) and the
-//! engine each run on one, and a test thread sees only its own. Persisting
-//! them across launches is the launch half of item 37, not built here.
+//! engine each run on one, and a test thread sees only its own. The web app
+//! saves them across launches through `set_persist_hook` and imports them with
+//! `load_overrides_json` before anything reads state (`AppState::new`).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -14,6 +15,26 @@ use serde_json::Value;
 
 thread_local! {
     static OVERRIDES: RefCell<BTreeMap<String, Value>> = RefCell::new(BTreeMap::new());
+    static PERSIST: RefCell<Option<fn(&str)>> = const { RefCell::new(None) };
+}
+
+/// This thread's overrides as JSON (dotted key -> value), the form an app
+/// saves across launches.
+pub fn overrides_json() -> String {
+    OVERRIDES.with(|o| serde_json::to_string(&*o.borrow()).unwrap_or_else(|_| "{}".into()))
+}
+
+/// Replace this thread's overrides with a saved set, at launch. An unreadable
+/// save loads as no overrides (the bundle), never a crash.
+pub fn load_overrides_json(json: &str) {
+    let loaded: BTreeMap<String, Value> = serde_json::from_str(json).unwrap_or_default();
+    OVERRIDES.with(|o| *o.borrow_mut() = loaded);
+}
+
+/// The app's save, called with `overrides_json()` after every write (the web
+/// app installs a localStorage write; nothing installed, nothing saved).
+pub fn set_persist_hook(hook: Option<fn(&str)>) {
+    PERSIST.with(|p| *p.borrow_mut() = hook);
 }
 
 fn bundled() -> Value {
@@ -66,7 +87,26 @@ pub fn toggle_member(key: &str, value: &Value) -> bool {
             o.insert(key.to_string(), Value::Array(next));
         }
     });
+    if let Some(save) = PERSIST.with(|p| *p.borrow()) {
+        save(&overrides_json());
+    }
     true
+}
+
+/// `state.brushes_open_libraries` at startup (state.yaml; STATUS-jas item
+/// 37): one open, expanded section per slug of
+/// `preferences.brushes.persistent_libraries`, in order, or the declared
+/// fallback when the list is empty. Mirrors the reference's
+/// `open_libraries_at_launch`; shared fixture
+/// `test_fixtures/preferences/open_libraries_at_launch.json`.
+pub fn open_libraries_at_launch(slugs: &Value) -> Value {
+    let mut slugs: Vec<&str> = slugs.as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    if slugs.is_empty() {
+        slugs.push("default_brushes");
+    }
+    Value::Array(slugs.into_iter()
+        .map(|s| serde_json::json!({"id": s, "collapsed": false})).collect())
 }
 
 #[cfg(test)]
@@ -94,6 +134,58 @@ mod tests {
         crate::interpreter::effects::run_effects(&effects, &ctx, &mut store, None, None, None, None);
         assert_eq!(list(&current()), bundled, "toggled off: the override is dropped");
         assert_eq!(list(&super::bundled()), bundled, "the bundle is never written");
+    }
+
+    /// The launch half (state.yaml: `brushes_open_libraries` is initialised
+    /// at startup from the preference), against the shared fixture.
+    #[test]
+    fn open_libraries_at_launch_matches_the_shared_fixture() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "preferences/open_libraries_at_launch.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        for case in cases {
+            assert_eq!(open_libraries_at_launch(&case["persistent_libraries"]), case["expected"], "{}", case["name"]);
+        }
+    }
+
+    #[test]
+    fn the_state_defaults_open_the_current_preferences_libraries() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        let open = |ws: &crate::interpreter::workspace::Workspace| ws.state_defaults()["brushes_open_libraries"].clone();
+        assert_eq!(open(&ws), serde_json::json!([{"id": "default_brushes", "collapsed": false}]), "the bundle");
+        let lib = serde_json::json!("a_library_not_in_the_bundle");
+        assert!(toggle_member("brushes.persistent_libraries", &lib));
+        let got = open(&ws);
+        assert!(toggle_member("brushes.persistent_libraries", &lib), "restore");
+        assert_eq!(got, serde_json::json!([
+            {"id": "default_brushes", "collapsed": false},
+            {"id": "a_library_not_in_the_bundle", "collapsed": false}]), "the override is read");
+    }
+
+    thread_local! {
+        static SAVED: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    }
+    fn save_hook(json: &str) {
+        SAVED.with(|s| s.borrow_mut().push(json.to_string()));
+    }
+
+    /// Persistence across launches: every write hands the overrides to the
+    /// app's hook, and a launch imports what was saved.
+    #[test]
+    fn the_overrides_round_trip_through_the_apps_storage() {
+        set_persist_hook(Some(save_hook));
+        let lib = serde_json::json!("a_library_saved_across_launches");
+        assert!(toggle_member("brushes.persistent_libraries", &lib));
+        let saved = SAVED.with(|s| s.borrow().last().cloned()).expect("the toggle saved");
+        set_persist_hook(None);
+        load_overrides_json("{}");
+        assert!(!list(&current()).contains(&lib), "the control: a fresh launch without the save");
+        load_overrides_json(&saved);
+        assert!(list(&current()).contains(&lib), "the save restores the override");
+        load_overrides_json("garbage{{{");
+        assert_eq!(list(&current()), list(&bundled()), "an unreadable save is the bundle, not a crash");
+        assert_eq!(overrides_json(), "{}");
     }
 
     #[test]
