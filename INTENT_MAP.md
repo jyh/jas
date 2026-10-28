@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 5 |
-| `journaling` | 50 |
+| `journaling` | 53 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 179 |
+| `ui-state` | 176 |
 | `view` | 6 |
 | **total** | **245** |
 
 (The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (50)
+## Journaling actions (53)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -58,7 +58,9 @@ come additively from `native_intercepts`.)
 | `artboard_options_confirm` | `doc.set_artboard_field`, `doc.set_artboard_options_field` |
 | `collect_in_new_layer` | `doc.wrap_in_layer` |
 | `confirm_artboard_rename` | `doc.set_artboard_field` |
+| `confirm_rename` | `doc.op` |
 | `cut` | `doc.op` -> dispatches `copy`, `delete_selection` |
+| `cycle_element_visibility` | `doc.op` |
 | `delete_artboard_from_dialog` | `doc.delete_artboard_by_id` |
 | `delete_artboards` | `doc.delete_artboard_by_id` |
 | `delete_empty_artboards` | `doc.delete_artboard_by_id` |
@@ -100,6 +102,7 @@ come additively from `native_intercepts`.)
 | `set_fill_type_solid` | `doc.demote_to_solid` |
 | `shear_options_confirm` | `doc.preview.clear`, `doc.preview.restore`, `doc.shear.apply` (`doc.shear.apply` journal:true) |
 | `show_all` | `doc.op` |
+| `toggle_element_lock` | `doc.op` |
 | `ungroup` | `doc.op` |
 | `ungroup_all` | `doc.op` |
 | `unlock_all` | `doc.op` |
@@ -141,7 +144,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (179)
+## UI-state actions (176)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -154,42 +157,41 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `boolean_trim`, `boolean_union`, `boolean_union_compound`, `brush_options_confirm`,
 `cancel_artboard_rename`, `cancel_rename`, `clear_layers_type_filter`, `close_panel`,
 `close_tab`, `close_window`, `close_without_saving`, `collapse_dock`,
-`complement_active_color`, `concepts_panel_select`, `confirm_rename`, `convert_to_artboards`,
-`copy`, `cut_orphan_confirm_ok`, `cycle_element_visibility`, `delete_brush`,
-`delete_orphan_confirm_ok`, `delete_swatch`, `delete_workspace`, `discard_and_close_tab`,
-`dismiss_dialog`, `distribute_bottom`, `distribute_horizontal_center`, `distribute_horizontal_spacing`,
-`distribute_left`, `distribute_right`, `distribute_top`, `distribute_vertical_center`,
-`distribute_vertical_spacing`, `document_setup_toggle_bleed_uniform`, `duplicate_brush`, `duplicate_swatch`,
-`enter_isolation_mode`, `exit_isolation_mode`, `exit_isolation_to_level`, `expand_compound_shape`,
-`expand_dock`, `eyedropper_tool_options_confirm`, `eyedropper_tool_options_reset`, `flip_stroke_profile`,
-`invert_active_color`, `layers_element_select`, `layers_nav_down`, `layers_nav_left`,
-`layers_nav_right`, `layers_nav_up`, `layers_panel_select`, `layers_select_all`,
-`make_compound_shape`, `maximize_canvas`, `new_document`, `new_swatch`,
-`noop`, `open_artboard_options`, `open_boolean_options`, `open_brush_libraries_menu`,
-`open_brush_options`, `open_color_picker`, `open_document_setup`, `open_file`,
-`open_layer_options`, `open_paragraph_hyphenation`, `open_paragraph_justification`, `open_print_dialog`,
-`open_swatch_options`, `paintbrush_tool_options_confirm`, `paintbrush_tool_options_reset`, `paragraph_hyphenation_confirm`,
-`paragraph_justification_confirm`, `quit`, `rearrange_artboards`, `release_compound_shape`,
-`release_transform`, `remove_tab`, `rename_artboard`, `rename_element`,
-`repeat_boolean_operation`, `reset_align_panel`, `reset_artboards_panel`, `reset_boolean_panel`,
-`reset_fill_stroke`, `reset_magic_wand_panel`, `reset_paragraph_panel`, `reset_stroke_profile`,
-`reset_workspace`, `restore_canvas`, `revert`, `revert_workspace`,
-`rotate_options_reset`, `save`, `save_all_and_close`, `save_all_then_close`,
-`save_and_close`, `save_appearance_as`, `save_appearance_confirm`, `save_as`,
-`save_brush_library`, `save_swatch_library`, `save_swatch_library_confirm`, `save_workspace_as`,
-`save_workspace_confirm`, `scale_options_reset`, `scroll_to_selected`, `select_all_unused_brushes`,
-`select_all_unused_swatches`, `set_active_color`, `set_active_color_none`, `set_align_to`,
-`set_arrow_align`, `set_artboard_fill_preset`, `set_artboard_reference_point`, `set_brush_thumbnail_size`,
-`set_brush_view_mode`, `set_color_panel_mode`, `set_fill_none`, `set_layers_search`,
-`set_stroke_align`, `set_stroke_cap`, `set_stroke_join`, `set_stroke_none`,
-`set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`, `show_panel`,
-`solo_element_visibility`, `solo_layers_type_filter`, `sort_brushes_by_name`, `sort_swatches_by_name`,
-`swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`, `switch_appearance`,
-`switch_workspace`, `symbols_panel_select`, `tile_panes`, `toggle_artboard_chain_link`,
-`toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`, `toggle_canvas_maximize`,
-`toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`, `toggle_element_twirl`,
-`toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`, `toggle_link_arrowhead_scale`,
-`toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`
+`complement_active_color`, `concepts_panel_select`, `convert_to_artboards`, `copy`,
+`cut_orphan_confirm_ok`, `delete_brush`, `delete_orphan_confirm_ok`, `delete_swatch`,
+`delete_workspace`, `discard_and_close_tab`, `dismiss_dialog`, `distribute_bottom`,
+`distribute_horizontal_center`, `distribute_horizontal_spacing`, `distribute_left`, `distribute_right`,
+`distribute_top`, `distribute_vertical_center`, `distribute_vertical_spacing`, `document_setup_toggle_bleed_uniform`,
+`duplicate_brush`, `duplicate_swatch`, `enter_isolation_mode`, `exit_isolation_mode`,
+`exit_isolation_to_level`, `expand_compound_shape`, `expand_dock`, `eyedropper_tool_options_confirm`,
+`eyedropper_tool_options_reset`, `flip_stroke_profile`, `invert_active_color`, `layers_element_select`,
+`layers_nav_down`, `layers_nav_left`, `layers_nav_right`, `layers_nav_up`,
+`layers_panel_select`, `layers_select_all`, `make_compound_shape`, `maximize_canvas`,
+`new_document`, `new_swatch`, `noop`, `open_artboard_options`,
+`open_boolean_options`, `open_brush_libraries_menu`, `open_brush_options`, `open_color_picker`,
+`open_document_setup`, `open_file`, `open_layer_options`, `open_paragraph_hyphenation`,
+`open_paragraph_justification`, `open_print_dialog`, `open_swatch_options`, `paintbrush_tool_options_confirm`,
+`paintbrush_tool_options_reset`, `paragraph_hyphenation_confirm`, `paragraph_justification_confirm`, `quit`,
+`rearrange_artboards`, `release_compound_shape`, `release_transform`, `remove_tab`,
+`rename_artboard`, `rename_element`, `repeat_boolean_operation`, `reset_align_panel`,
+`reset_artboards_panel`, `reset_boolean_panel`, `reset_fill_stroke`, `reset_magic_wand_panel`,
+`reset_paragraph_panel`, `reset_stroke_profile`, `reset_workspace`, `restore_canvas`,
+`revert`, `revert_workspace`, `rotate_options_reset`, `save`,
+`save_all_and_close`, `save_all_then_close`, `save_and_close`, `save_appearance_as`,
+`save_appearance_confirm`, `save_as`, `save_brush_library`, `save_swatch_library`,
+`save_swatch_library_confirm`, `save_workspace_as`, `save_workspace_confirm`, `scale_options_reset`,
+`scroll_to_selected`, `select_all_unused_brushes`, `select_all_unused_swatches`, `set_active_color`,
+`set_active_color_none`, `set_align_to`, `set_arrow_align`, `set_artboard_fill_preset`,
+`set_artboard_reference_point`, `set_brush_thumbnail_size`, `set_brush_view_mode`, `set_color_panel_mode`,
+`set_fill_none`, `set_layers_search`, `set_stroke_align`, `set_stroke_cap`,
+`set_stroke_join`, `set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`,
+`shear_options_reset`, `show_panel`, `solo_element_visibility`, `solo_layers_type_filter`,
+`sort_brushes_by_name`, `sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`,
+`swatch_options_confirm`, `switch_appearance`, `switch_workspace`, `symbols_panel_select`,
+`tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`,
+`toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`,
+`toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`,
+`toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`
 
 ## Verb -> journaling evidence table
 

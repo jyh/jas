@@ -182,7 +182,13 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # item 36).
 # 25 the same day: `toggle_brush_library_persistent`
 # (`preferences.toggle_member`, STATUS-jas item 37).
-MIN_LOG_ONLY = 25
+# 19 the same day: the Layers row's six (STATUS-jas item 38 step 3b):
+# `cycle_element_visibility`, `toggle_element_lock` (`doc.op` with an evaluated
+# `path`), `toggle_element_twirl` (`list_toggle` on `collapsed_paths`),
+# `rename_element`, `confirm_rename`, `cancel_rename` (`renaming_element`, and
+# `doc.op: {op: set_element_name}`). Both native trees still run their own
+# handlers; routing them through these actions is a later step.
+MIN_LOG_ONLY = 19
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;

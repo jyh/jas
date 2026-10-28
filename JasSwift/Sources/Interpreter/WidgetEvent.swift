@@ -193,6 +193,54 @@ enum WidgetEvent {
         return Result(outcome: "committed", behaviorsRun: ran)
     }
 
+    /// The three text-entry events a `text_input` takes besides its commit
+    /// (the reference's `TEXT_ENTRY_EVENTS`).
+    static let textEntryEvents = ["input", "blur", "keydown"]
+
+    /// Deliver `input`, `keydown` or `blur` to a `text_input`: the reference's
+    /// `text_entry` (widget_event.py, WIDGET_EVENTS.md "Typing in a text
+    /// field").
+    ///
+    /// `event.value` is `text`, the field's text (for `keydown`, the text
+    /// before the key acts); `event.key` is the key's name on `keydown` only,
+    /// and a `keydown` without one is refused; the four modifiers ride beside
+    /// them. Only this event's own behaviors run. None is a commit, and no
+    /// bind is written. A row's names reach the behaviors through
+    /// `host.scope`, as a click's do.
+    @discardableResult
+    static func textEntry(
+        widget: [String: Any], event: String, store: StateStore,
+        panel: [String: Any]?, text: String?, key: String? = nil,
+        modifiers: [String: Any] = [:],
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        _ = panel  // no bind write: accepted for the procedures' common signature
+        guard widget["type"] as? String == "text_input" else {
+            return Result(outcome: "refused", reason: wrongKind)
+        }
+        guard textEntryEvents.contains(event) else {
+            return Result(outcome: "refused", reason: wrongEvent)
+        }
+        guard let text = text, event != "keydown" || key != nil else {
+            return Result(outcome: "refused", reason: missingValue)
+        }
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        var ev: [String: Any] = ["value": text]
+        for k in clickModifiers { ev[k] = (modifiers[k] as? Bool) ?? false }
+        if event == "keydown", let key = key { ev["key"] = key }
+        let ran = runBehaviors(declared(widget, events: [event]), value: text, store: store,
+                               actions: actions, dialogs: dialogs,
+                               platformEffects: platformEffects, model: model, host: host,
+                               event: ev)
+        settle(store: store, actions: actions, dialogs: dialogs,
+               platformEffects: platformEffects, model: model)
+        return Result(outcome: ran > 0 ? "committed" : "inert", value: text, behaviorsRun: ran)
+    }
+
     static func press(
         widget: [String: Any], store: StateStore, panel: [String: Any]?,
         actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,

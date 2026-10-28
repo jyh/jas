@@ -76,6 +76,39 @@ def test_show_all_reveals_the_hidden_and_selects_exactly_them():
     assert {es.path for es in after.selection} == {(0, 0)}, "the selection is what was shown"
 
 
+def test_doc_op_evaluates_its_fields_in_the_action_scope():
+    """Every field but `op` is an expression in the action's scope (STATUS-jas
+    item 38 step 3b): a PATH value (here the `__path__` marker) reaches the op
+    layer as its index list, a list param as itself, a string param as its
+    string; a non-string field is passed as written. Rust
+    `doc_op_evaluates_its_fields_in_the_action_scope` is the same."""
+    store = _store(_two_rects(_rect(), _rect()))
+    ctx = {"row": {"__path__": [0, 1]}, "param": {"path": [0, 0], "name": "Sun"}}
+    run_effects([{"doc.op": {"op": "toggle_element_lock", "path": "row"}}], ctx, store)
+    after = _doc_of(store)
+    assert [c.locked for c in after.layers[0].children] == [False, True], "a path value names the row"
+
+    run_effects([{"doc.op": {"op": "set_element_name", "path": "param.path", "name": "param.name"}}],
+                ctx, store)
+    assert _doc_of(store).layers[0].children[0].name == "Sun", "a list and a string param are evaluated"
+
+    run_effects([{"doc.op": {"op": "cycle_element_visibility", "path": [0, 1]}}], ctx, store)
+    assert _doc_of(store).layers[0].children[1].visibility == Visibility.OUTLINE, "a literal path as written"
+
+
+def test_list_toggle_writes_the_named_panel():
+    """`list_toggle` with `panel:` writes that panel's list, active or not (the
+    Layers twirl's collapsed_paths); toggling an entry twice removes it."""
+    store = StateStore()
+    store.init_panel("layers_panel_content", {"collapsed_paths": []})
+    store.init_panel("color_panel_content", {})
+    store.set_active_panel("color_panel_content")
+    eff = {"list_toggle": {"target": "panel.collapsed_paths", "value": "param.path", "panel": "layers"}}
+    for p in ([0], [1], [0]):
+        run_effects([eff], {"param": {"path": p}}, store)
+    assert store.get_panel("layers_panel_content", "collapsed_paths") == [[1]]
+
+
 def test_an_op_the_layer_does_not_know_changes_nothing():
     doc = _two_rects(_rect(locked=True), _rect())
     store = _store(doc)

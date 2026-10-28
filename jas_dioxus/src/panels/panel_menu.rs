@@ -440,6 +440,8 @@ pub fn typed_panel_slot_keys() -> Vec<(&'static str, &'static str)> {
         ("symbols_panel_content", "selected_symbol"),
         ("concepts_panel_content", "selected_concept"),
         ("layers_panel_content", "type_filter"),
+        ("layers_panel_content", "collapsed_paths"),
+        ("layers_panel_content", "renaming_element"),
     ]
 }
 
@@ -560,6 +562,19 @@ fn live_panel_state(
                             }))
                             .collect(),
                     ),
+                ),
+                // The twirl state and the rename row (STATUS-jas item 38),
+                // as the YAML's paths (lists of child indices). The set is
+                // sorted so the published scope is deterministic; only
+                // membership is ever read (`tree_visible_rows`, the twirl icon).
+                ("collapsed_paths", {
+                    let mut paths: Vec<&Vec<usize>> = st.layers_collapsed.iter().collect();
+                    paths.sort();
+                    J::Array(paths.into_iter().map(|p| serde_json::json!(p)).collect())
+                }),
+                (
+                    "renaming_element",
+                    st.layers_renaming.as_ref().map_or(J::Null, |p| serde_json::json!(p)),
                 ),
                 // "Exit Isolation Mode" reads `panel.isolation_stack.length`;
                 // "Collect in New Layer" wants it EMPTY. Each entry is a path

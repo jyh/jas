@@ -305,5 +305,245 @@
     "selected_symbol": "sym_star"
    }
   }
+ },
+ {
+  "_doc": "The eye on a Layers row (STATUS-jas item 38 step 3b): cycle_element_visibility on the circle's path moves it preview -> outline through the op layer (doc.op with an evaluated path); the panel's state does not change.",
+  "name": "cycle_element_visibility_on_the_circle",
+  "setup_svg": "multi_layer.svg",
+  "actions": [
+   {
+    "action": "cycle_element_visibility",
+    "params": {
+     "path": [
+      1,
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "cycle_element_visibility_on_the_circle_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "renaming_element": null,
+    "collapsed_paths": []
+   }
+  }
+ },
+ {
+  "_doc": "The lock on a Layers row: toggle_element_lock on the Background layer's path locks that layer only (lock is inherited, nothing is written onto its contents).",
+  "name": "toggle_element_lock_on_a_layer",
+  "setup_svg": "multi_layer.svg",
+  "actions": [
+   {
+    "action": "toggle_element_lock",
+    "params": {
+     "path": [
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "toggle_element_lock_on_a_layer_expected.json"
+ },
+ {
+  "_doc": "The twirl on a Layers row: toggle_element_twirl adds the container's path to collapsed_paths; the document does not change.",
+  "name": "toggle_element_twirl_collapses_a_layer",
+  "setup_svg": "multi_layer.svg",
+  "actions": [
+   {
+    "action": "toggle_element_twirl",
+    "params": {
+     "path": [
+      1
+     ]
+    }
+   }
+  ],
+  "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "collapsed_paths": [
+     [
+      1
+     ]
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Twirling the same container twice expands it again: its path leaves collapsed_paths, and a second container's entry stays.",
+  "name": "toggle_element_twirl_twice_expands_it",
+  "setup_svg": "multi_layer.svg",
+  "actions": [
+   {
+    "action": "toggle_element_twirl",
+    "params": {
+     "path": [
+      0
+     ]
+    }
+   },
+   {
+    "action": "toggle_element_twirl",
+    "params": {
+     "path": [
+      1
+     ]
+    }
+   },
+   {
+    "action": "toggle_element_twirl",
+    "params": {
+     "path": [
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "toggle_element_twirl_twice_expands_it_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "collapsed_paths": [
+     [
+      1
+     ]
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Rename (a double-click on a row's name) puts that row into rename mode: renaming_element is the row's path. The document does not change until the rename is confirmed.",
+  "name": "rename_element_enters_rename_mode",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    1,
+    0
+   ]
+  ],
+  "actions": [
+   {
+    "action": "rename_element",
+    "params": {
+     "path": [
+      1,
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "rename_element_enters_rename_mode_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "renaming_element": [
+     1,
+     0
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Enter confirms a rename: the element takes the typed name through the op layer (set_element_name) and rename mode ends.",
+  "name": "confirm_rename_names_the_element",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    1,
+    0
+   ]
+  ],
+  "actions": [
+   {
+    "action": "rename_element",
+    "params": {
+     "path": [
+      1,
+      0
+     ]
+    }
+   },
+   {
+    "action": "confirm_rename",
+    "params": {
+     "path": [
+      1,
+      0
+     ],
+     "name": "Sun"
+    }
+   }
+  ],
+  "expected_json": "confirm_rename_names_the_element_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "renaming_element": null
+   }
+  }
+ },
+ {
+  "_doc": "Escape cancels a rename: rename mode ends and the element keeps its name.",
+  "name": "cancel_rename_leaves_the_name",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    1,
+    0
+   ]
+  ],
+  "actions": [
+   {
+    "action": "rename_element",
+    "params": {
+     "path": [
+      1,
+      0
+     ]
+    }
+   },
+   {
+    "action": "cancel_rename",
+    "params": {}
+   }
+  ],
+  "expected_json": "cancel_rename_leaves_the_name_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "renaming_element": null
+   }
+  }
+ },
+ {
+  "_doc": "A confirm with no name (the row template's Enter or blur, whose typed value is not yet a defined event field) ends rename mode and leaves the name as it was; it never clears it.",
+  "name": "confirm_rename_without_a_name_keeps_it",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    0
+   ]
+  ],
+  "actions": [
+   {
+    "action": "rename_element",
+    "params": {
+     "path": [
+      0
+     ]
+    }
+   },
+   {
+    "action": "confirm_rename",
+    "params": {
+     "path": [
+      0
+     ]
+    }
+   }
+  ],
+  "expected_json": "confirm_rename_without_a_name_keeps_it_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "renaming_element": null
+   }
+  }
  }
 ]

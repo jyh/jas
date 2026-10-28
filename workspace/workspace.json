@@ -2050,8 +2050,12 @@
         }
       },
       "effects": [
+        "snapshot",
         {
-          "log": "cycle_element_visibility"
+          "doc.op": {
+            "op": "cycle_element_visibility",
+            "path": "param.path"
+          }
         }
       ]
     },
@@ -2082,8 +2086,12 @@
         }
       },
       "effects": [
+        "snapshot",
         {
-          "log": "toggle_element_lock"
+          "doc.op": {
+            "op": "toggle_element_lock",
+            "path": "param.path"
+          }
         }
       ]
     },
@@ -2099,7 +2107,11 @@
       },
       "effects": [
         {
-          "log": "toggle_element_twirl"
+          "list_toggle": {
+            "target": "panel.collapsed_paths",
+            "value": "param.path",
+            "panel": "layers"
+          }
         }
       ]
     },
@@ -2265,7 +2277,11 @@
       "enabled_when": "active_document.layers_panel_selection_count == 1",
       "effects": [
         {
-          "log": "rename_element"
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "renaming_element",
+            "value": "param.path"
+          }
         }
       ]
     },
@@ -2273,9 +2289,38 @@
       "description": "Confirm the inline rename (triggered by Enter or click-outside). If the name is empty, the element reverts to its auto-generated type name. Duplicate names are allowed. The rename is a single undoable action.\n",
       "category": "layers",
       "tier": 3,
+      "params": {
+        "path": {
+          "type": "path",
+          "description": "The renamed row's element path (STATUS-jas item 38)."
+        },
+        "name": {
+          "type": "string",
+          "description": "The typed name; empty clears it, so the row shows its type name."
+        }
+      },
       "effects": [
         {
-          "log": "confirm_rename"
+          "if": {
+            "condition": "param.name != null",
+            "then": [
+              "snapshot",
+              {
+                "doc.op": {
+                  "op": "set_element_name",
+                  "path": "param.path",
+                  "name": "param.name"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "renaming_element",
+            "value": "null"
+          }
         }
       ]
     },
@@ -2285,7 +2330,11 @@
       "tier": 3,
       "effects": [
         {
-          "log": "cancel_rename"
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "renaming_element",
+            "value": "null"
+          }
         }
       ]
     },
@@ -11754,7 +11803,11 @@
                     {
                       "event": "keydown",
                       "condition": "event.key == 'Enter'",
-                      "action": "confirm_artboard_rename"
+                      "action": "confirm_artboard_rename",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "new_name": "event.value"
+                      }
                     },
                     {
                       "event": "keydown",
@@ -11763,7 +11816,12 @@
                     },
                     {
                       "event": "blur",
-                      "action": "confirm_artboard_rename"
+                      "condition": "panel.renaming_artboard == ab.id",
+                      "action": "confirm_artboard_rename",
+                      "params": {
+                        "artboard_id": "ab.id",
+                        "new_name": "event.value"
+                      }
                     }
                   ]
                 },
@@ -17225,7 +17283,11 @@
                     {
                       "event": "keydown",
                       "condition": "event.key == 'Enter'",
-                      "action": "confirm_rename"
+                      "action": "confirm_rename",
+                      "params": {
+                        "path": "node.path",
+                        "name": "event.value"
+                      }
                     },
                     {
                       "event": "keydown",
@@ -17234,7 +17296,12 @@
                     },
                     {
                       "event": "blur",
-                      "action": "confirm_rename"
+                      "condition": "panel.renaming_element == node.path",
+                      "action": "confirm_rename",
+                      "params": {
+                        "path": "node.path",
+                        "name": "event.value"
+                      }
                     }
                   ]
                 },
