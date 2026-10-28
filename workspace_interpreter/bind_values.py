@@ -59,10 +59,10 @@ Swift factor the number arm out as ``number_to_canonical_string`` /
 The three agree on every number the corpus reaches, which is what the shared
 golden proves.)  Lists are bracketed and
 comma-joined element-wise.  A ``bind`` expression whose value is a JSON OBJECT
-is coerced to a JSON string by the evaluator itself, and the key order of that
-string is a known cross-port divergence (census row #50) — no vector in
-``panel_bind_values.json`` binds an object, and one should not be added until
-that row closes.
+is coerced to a JSON string by the evaluator itself: compact, keys sorted, ``/``
+unescaped, in all three runners (census row #50, closed 2026-10-27; until then
+the order differed across ports and from run to run in Swift, and this port
+crashed). ``layers@element_tree_rows`` binds the Layers tree's row objects.
 """
 from __future__ import annotations
 

@@ -328,3 +328,14 @@ def test_no_checkbox_or_toggle_binds_its_state_as_value():
         for key, node in bundle[section].items():
             walk(node, f"{section}/{key}")
     assert found == [], found
+
+
+def test_an_object_in_a_list_is_its_sorted_compact_json():
+    """Census row #50: an object's text is compact JSON with sorted keys and
+    an unescaped `/`, in all three runners (Rust
+    `an_object_is_its_sorted_compact_json`, Swift
+    `anObjectIsItsSortedCompactJson`). The Layers tree's rows are objects."""
+    from workspace_interpreter.bind_values import canon_value
+    from workspace_interpreter.expr_types import Value
+    v = Value.from_python([{"b": 1, "a": "x/y", "c": [True, None]}])
+    assert canon_value(v) == ("list", '[{"a":"x/y","b":1,"c":[true,null]}]')

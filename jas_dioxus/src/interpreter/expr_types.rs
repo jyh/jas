@@ -159,3 +159,18 @@ impl fmt::Display for Value {
         write!(f, "{}", self.to_string_coerce())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Value;
+
+    /// Census row #50: an object's text is compact JSON with sorted keys and
+    /// an unescaped `/`, in all three runners (the reference's
+    /// `test_an_object_in_a_list_is_its_sorted_compact_json`, Swift
+    /// `anObjectIsItsSortedCompactJson`).
+    #[test]
+    fn an_object_is_its_sorted_compact_json() {
+        let v = Value::from_json(&serde_json::json!({"b": 1, "a": "x/y", "c": [true, null]}));
+        assert_eq!(v.to_string_coerce(), r#"{"a":"x/y","b":1,"c":[true,null]}"#);
+    }
+}
