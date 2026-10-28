@@ -688,6 +688,37 @@ fn eval_func(
             Value::Path(idx)
         }
 
+        // A list of child indices, or a path marker, as a PATH value; null for
+        // anything else (STATUS-jas item 38 step 3c: an effect writing paths
+        // from a row's `node.path`, which is a list). The reference's `as_path`.
+        "as_path" => {
+            if args.len() != 1 { return Value::Null; }
+            index_path(&eval_inner(&args[0], ctx, scope, store_cb)).map_or(Value::Null, Value::Path)
+        }
+
+        // The rows' paths from one row to another, inclusive, in row order, as
+        // path markers; [] when either end is not a row (STATUS-jas item 38
+        // step 3c: a Shift-click on a Layers row). The reference's
+        // `tree_row_range`; an end is read as `as_path` reads one.
+        "tree_row_range" => {
+            if args.len() != 3 { return Value::Null; }
+            let Value::List(rows) = eval_inner(&args[0], ctx, scope, store_cb) else { return Value::Null };
+            let paths: Vec<Option<Vec<usize>>> = rows.iter()
+                .map(|r| r.get("path").and_then(|p| index_path(&Value::from_json(p))))
+                .collect();
+            let ends: Vec<Option<Vec<usize>>> = args[1..].iter()
+                .map(|a| index_path(&eval_inner(a, ctx, scope, store_cb))).collect();
+            let at = |e: &Option<Vec<usize>>| e.as_ref().and_then(|e| paths.iter().position(|p| p.as_ref() == Some(e)));
+            match (at(&ends[0]), at(&ends[1])) {
+                (Some(a), Some(b)) => {
+                    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                    Value::List(paths[lo..=hi].iter().flatten()
+                        .map(|p| serde_json::json!({"__path__": p})).collect())
+                }
+                _ => Value::List(vec![]),
+            }
+        }
+
         "path_child" => {
             if args.len() != 2 { return Value::Null; }
             let p = eval_inner(&args[0], ctx, scope, store_cb);
@@ -2080,5 +2111,18 @@ mod tests {
     fn brush_type_of_null_when_no_brush_libraries() {
         let r = eval("brush_type_of(\"mylib/cal_1\")", &json!({}));
         assert_eq!(r, Value::Null);
+    }
+}
+
+/// A PATH value, a list of non-negative integer indices, or a path marker (which
+/// `Value::from_json` already reads as a PATH) as indices; `None` for anything
+/// else. `as_path` and `tree_row_range` read their paths through it.
+fn index_path(v: &Value) -> Option<Vec<usize>> {
+    match v {
+        Value::Path(p) => Some(p.clone()),
+        Value::List(items) => items.iter()
+            .map(|i| i.as_f64().filter(|n| *n >= 0.0 && n.fract() == 0.0).map(|n| n as usize))
+            .collect(),
+        _ => None,
     }
 }

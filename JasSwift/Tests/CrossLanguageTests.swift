@@ -6049,7 +6049,7 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
     // `set_panel_state` in the action writes the Layers panel, as it does
     // in the app. Without it the selection was never cleared here.
     if let rows = tc["layers_panel_selection"] as? [[Any]] {
-        let paths = rows.map { $0.map { ($0 as! NSNumber).intValue } }
+        let paths: [[String: Any]] = rows.map { ["__path__": $0.map { ($0 as! NSNumber).intValue }] }
         model.stateStore.setPanel("layers_panel_content", "layers_panel_selection", paths)
         model.stateStore.setActivePanel("layers_panel_content")
     }

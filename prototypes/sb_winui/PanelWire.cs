@@ -91,9 +91,11 @@ internal static class PanelWire
     /// a `foreach` stamped out can be addressed (its id names a template). A
     /// path that is not a JSON array of non-negative integers is left out, so
     /// the event falls back to the widget id rather than carrying garbage.
+    /// jas item 40: a `keydown` also carries `key`, the key's W3C name
+    /// (<see cref="KeyName"/>); every other event carries none.
     internal static byte[] EventJson(string widget, string eventName, string? value,
                                      bool alt, bool shift, bool ctrl, bool meta,
-                                     string? path = null)
+                                     string? path = null, string? key = null)
     {
         var ev = new Dictionary<string, object>
         {
@@ -105,9 +107,32 @@ internal static class PanelWire
             ["meta"] = meta,
         };
         if (value is not null) { ev["value"] = value; }
+        if (key is not null) { ev["key"] = key; }
         if (PlanPath(path) is { } p) { ev["path"] = p; }
         return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
     }
+
+    /// <summary>
+    /// jas item 40: the W3C name a text field's key crosses as, from WinUI's
+    /// `VirtualKey` name, or null for a key the box keeps (it types, moves the
+    /// caret, or has no behaviour in any template yet). Only Enter and Escape
+    /// have behaviours today (`layers.yaml`, `artboards.yaml`); sending every
+    /// keystroke would cross the boundary once per character to be refused
+    /// `EmptyBehavior`.
+    /// </summary>
+    internal static string? KeyName(string virtualKey) => virtualKey switch
+    {
+        "Enter" => "Enter",
+        "Escape" => "Escape",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether the plan says a node answers <paramref name="eventName"/>
+    /// (<see cref="ReadEvents"/>). No channel answers nothing.
+    /// </summary>
+    internal static bool Answers(IReadOnlyList<string>? events, string eventName) =>
+        events is not null && events.Contains(eventName);
 
     /// <summary>
     /// The event JSON for a gesture on a stops kind (`WIDGET_EVENTS.md` §The
@@ -714,6 +739,64 @@ internal static class PanelWire
     /// </summary>
     internal static string? ColorBarChange(string? point, string? lastSent) =>
         point is not null && point != lastSent ? point : null;
+
+    /// <summary>
+    /// jas §612: a layout container that answers events (a Layers or Artboards
+    /// row, the Layers select square), by path; drawn as a transparent surface
+    /// beneath its children, so a child's own control wins the press.
+    /// </summary>
+    internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events);
+
+    /// <summary>
+    /// jas §612: the plan's layout containers (`chrome` and `containers`, in plan
+    /// order) whose `events` is non-empty, with any under a `hidden` path
+    /// skipped. Leaves are their own controls and never surfaces. Null when the
+    /// plan does not parse: never read as "no surfaces".
+    /// </summary>
+    internal static List<HitBox>? HitBoxes(string planJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(planJson);
+            var root = doc.RootElement;
+            var hidden = new List<long[]>();
+            if (root.TryGetProperty("hidden", out var hs))
+            {
+                foreach (var h in hs.EnumerateArray()) { hidden.Add(h.EnumerateArray().Select(x => x.GetInt64()).ToArray()); }
+            }
+            var boxes = new List<HitBox>();
+            foreach (var list in new[] { "chrome", "containers" })
+            {
+                if (!root.TryGetProperty(list, out var entries)) { continue; }
+                foreach (var e in entries.EnumerateArray())
+                {
+                    if (ReadEvents(e.TryGetProperty("events", out var evs) ? evs.GetRawText() : null) is not { Count: > 0 } events) { continue; }
+                    var p = e.GetProperty("path").EnumerateArray().Select(x => x.GetInt64()).ToArray();
+                    if (hidden.Any(h => h.Length <= p.Length && h.SequenceEqual(p.Take(h.Length)))) { continue; }
+                    var r = e.GetProperty("rect");
+                    boxes.Add(new HitBox(
+                        e.GetProperty("path").GetRawText(),
+                        e.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                        r.GetProperty("x").GetDouble(), r.GetProperty("y").GetDouble(),
+                        r.GetProperty("w").GetDouble(), r.GetProperty("h").GetDouble(),
+                        events));
+                }
+            }
+            return boxes;
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a gesture on a node is sent as <paramref name="eventName"/>: the
+    /// plan says the node answers it, and the node has an address
+    /// (<see cref="Addressable"/>). <see cref="RoutesPress"/> is this for `click`.
+    /// </summary>
+    internal static bool RoutesEvent(IReadOnlyList<string>? events, string id, string? path, string eventName) =>
+        Answers(events, eventName) && Addressable(id, path);
 
     /// <summary>§255: a chrome row carrying `bind.active` (a document tab), by path; drawn behind its leaves.</summary>
     internal sealed record ActiveBox(string Path, double X, double Y, double W, double H, bool Active);

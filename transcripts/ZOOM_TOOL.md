@@ -469,7 +469,10 @@ branch on a null and the merge changes nothing there. Verified by mutating the m
 off with `artboardsPanelSelectWithNoModifierReplacesTheSelection` in place — green
 both ways. The gate landed as ruled anyway, so the path is pinned rather than
 believed, and `exactlyThreeActionsDeclareParamDefaults` reads the blast radius off the
-compiled workspace so a fourth declaring action fails loudly. Note also that this
+compiled workspace so a fourth declaring action fails loudly. (It did, 2026-10-27:
+`layers_panel_select`'s `modifier` became the fourth, gated by the action corpus's
+`layers_panel_select_selects_the_row`, and the test is now
+`exactlyFourActionsDeclareParamDefaults`.) Note also that this
 verb cannot be reached from the ACTION CORPUS: its effect writes panel-scoped state
 and Swift's `buildLiveStateMap` does not publish `artboards_panel_selection` at all,
 where Rust's `build_live_state_map` does — so `expected_panel_state` cannot express

@@ -193,6 +193,21 @@ def _dispatch_param(v, store: StateStore, ctx: dict):
     return value
 
 
+def _stored(v):
+    """A value as the store holds it: a PATH (alone, or as an element of a list
+    literal such as ``[as_path(param.path)]``) is the ``__path__`` marker, as
+    ``list_toggle`` writes it and as Rust's ``value_to_json`` and Swift's
+    ``valueToAny`` do (STATUS-jas item 38 step 3c)."""
+    from workspace_interpreter.expr_types import Value, ValueType
+    if isinstance(v, Value):
+        return {"__path__": list(v.value)} if v.type == ValueType.PATH else _stored(v.value)
+    if isinstance(v, tuple):
+        return {"__path__": list(v)}
+    if isinstance(v, list):
+        return [_stored(e) for e in v]
+    return v
+
+
 def _doc_op_args(spec: dict, eval_ctx: dict) -> dict:
     """A `doc.op` spec as the op layer reads it: `op` verbatim, every other
     string field evaluated as an expression in the action's scope, other
@@ -1276,7 +1291,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     if "set_panel_state" in effect:
         sps = effect["set_panel_state"]
         key = sps.get("key", "")
-        value = _eval(sps.get("value", "null"), store, ctx)
+        value = _stored(_eval(sps.get("value", "null"), store, ctx))
         panel_id = sps.get("panel") or store.get_active_panel_id()
         if panel_id:
             store.set_panel(panel_id, key, value)

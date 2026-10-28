@@ -1175,15 +1175,18 @@ pub(crate) fn apply_set_panel_state_with_ctx(
     if key == "layers_panel_selection" {
         let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
         let resolved = if let Some(expr_str) = val.as_str() {
-            let ctx = serde_json::json!({});
+            // The ACTION's scope: `layers_panel_select` writes `[as_path(param.path)]`
+            // (STATUS-jas item 38 step 3c). An empty scope read `param` as null.
+            let ctx = action_ctx.cloned().unwrap_or_else(|| serde_json::json!({}));
             let result = super::expr::eval(expr_str, &ctx);
             super::effects::value_to_json(&result)
         } else {
             val.clone()
         };
-        // Only accept an empty list (clear); richer updates not supported yet.
-        if matches!(resolved, serde_json::Value::Array(ref a) if a.is_empty()) {
-            st.layers_panel_selection.clear();
+        // A list of paths (markers or index lists) replaces the selection; an
+        // entry that is not a path is dropped. Anything but a list writes nothing.
+        if let Some(items) = resolved.as_array() {
+            st.layers_panel_selection = items.iter().filter_map(json_index_path).collect();
         }
         return;
     }

@@ -188,7 +188,11 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # `rename_element`, `confirm_rename`, `cancel_rename` (`renaming_element`, and
 # `doc.op: {op: set_element_name}`). Both native trees still run their own
 # handlers; routing them through these actions is a later step.
-MIN_LOG_ONLY = 19
+# 17 the same day: `layers_panel_select` and `layers_element_select` (item 38
+# step 3c: a plain click; the panel selection is `[as_path(param.path)]`, the
+# element selection the op layer's `select_element`). Shift and Command are a
+# later step, and both native trees still run their own handlers.
+MIN_LOG_ONLY = 17
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;

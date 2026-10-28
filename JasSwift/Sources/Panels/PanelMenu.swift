@@ -337,6 +337,9 @@ func layersPanelSelection(model: Model?) -> [[Int]] {
           let raw = store.getPanel("layers_panel_content", "layers_panel_selection") as? [Any]
     else { return [] }
     return raw.compactMap { entry -> [Int]? in
+        // A `__path__` marker is the stored form (STATUS-jas item 38 step 3c);
+        // a bare list is still read.
+        let entry = (entry as? [String: Any])?["__path__"] ?? entry
         if let ints = entry as? [Int] { return ints }
         if let nums = entry as? [NSNumber] { return nums.map { $0.intValue } }
         return nil
