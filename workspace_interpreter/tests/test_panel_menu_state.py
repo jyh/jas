@@ -151,12 +151,12 @@ def _keyboard_rows(node):
 
 
 def test_the_census_reads_a_keyboard_owned_by_an_element(ws):
-    """The Layers tree's own rows are in the census: F2's ``element_id`` is
+    """The Layers tree's own rows are in the census: F2's ``path`` is
     ``panel.layers_panel_selection[0]``, declared on ``lp_tree``, not on the
     panel. A census that reads only the panel's top level misses all ten."""
     sites = [(pid, key, expr) for pid, key, expr in _panel_menu_predicates(ws)
              if pid == "layers_panel_content" and key.startswith("keyboard")]
-    assert ("layers_panel_content", "keyboard params.element_id",
+    assert ("layers_panel_content", "keyboard params.path",
             "panel.layers_panel_selection[0]") in sites, sites
     assert len(sites) >= 3, f"positive control: only {len(sites)} Layers keyboard sites"
 

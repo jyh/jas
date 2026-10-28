@@ -17656,14 +17656,14 @@
                 "key": "F2",
                 "action": "rename_element",
                 "params": {
-                  "element_id": "panel.layers_panel_selection[0]"
+                  "path": "panel.layers_panel_selection[0]"
                 }
               },
               {
                 "key": "Enter",
                 "action": "rename_element",
                 "params": {
-                  "element_id": "panel.layers_panel_selection[0]"
+                  "path": "panel.layers_panel_selection[0]"
                 },
                 "enabled_when": "panel.layers_panel_selection.length == 1"
               },

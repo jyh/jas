@@ -966,7 +966,7 @@ mod tests {
         let mut rows = Vec::new();
         keyboard_rows(layers, &mut rows);
         let f2 = rows.iter().find(|r| r["key"] == "F2").expect("the Layers tree's F2 row");
-        assert_eq!(f2["params"]["element_id"], "panel.layers_panel_selection[0]");
+        assert_eq!(f2["params"]["path"], "panel.layers_panel_selection[0]");
         assert!(rows.len() >= 10, "positive control: only {} Layers keyboard rows", rows.len());
         assert!(layers.get("keyboard").is_none(), "the rows are the tree_view's, not the panel's");
     }
