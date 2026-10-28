@@ -19,8 +19,8 @@ recent-colors list.
 Five color modes are supported: Grayscale, RGB, HSB, CMYK, and Web Safe
 RGB. The mode is panel-local state; switching modes re-displays the
 same underlying color with a different slider set without changing the
-color itself. The mode is re-initialised from the active color when the
-panel first opens.
+color itself. The mode is kept for the session; opening the panel
+re-populates the channel values from the active color, never the mode.
 
 When the active attribute is `none` (fill or stroke explicitly unset
 via the `NONE_SWATCH` or by other means), the sliders, hex field, and
@@ -173,11 +173,12 @@ through to the same active fill or stroke color via the same
 
 The mode is **panel-local state**, not persisted with the document or
 across sessions. On first open, the mode defaults to HSB (per the yaml
-`state.mode.default`); thereafter, the mode is re-initialised from the
-active color each time the panel is re-opened (this initialisation
-also re-populates `panel.h/s/b`, `panel.r/g/bl`, `panel.c/m/y/k`, and
-`panel.hex` from the current active color so every mode is ready to
-display).
+`state.mode.default`); thereafter a closed and re-opened panel keeps
+the mode it was closed in. A color carries no mode, so nothing in the
+active color can choose one. What each open does re-initialise is the
+channel values: `panel.h/s/b`, `panel.r/g/bl`, `panel.c/m/y/k`, and
+`panel.hex` are re-populated from the current active color (the yaml
+`init` block, which sets no `mode`) so every mode is ready to display.
 
 ## Recent colors
 

@@ -6,8 +6,9 @@ description: >
   swatch is in front, per fill_on_top). The panel has five color modes
   (Grayscale, RGB, HSB, CMYK, Web Safe RGB) stored as panel-local state.
   Changing the mode shows the appropriate slider set without changing the
-  current color. The mode is re-initialized from the active color when the
-  panel first opens.
+  current color. The mode starts as HSB and is kept for the session: a
+  closed and re-opened panel shows the mode it was closed in, and only the
+  channel values are re-populated from the active color on each open.
 
   Layout (top to bottom):
 

@@ -1274,6 +1274,24 @@ mod tests {
         assert!(!st.workspace_layout.is_panel_visible(PanelKind::Gradient));
     }
 
+    // COLOR.md §Color modes: the mode is panel-local state, kept for the
+    // session; a reopen re-populates the channel values from the active
+    // color, never the mode (a color carries no mode). Driven from a
+    // non-default mode, so a reset to the HSB default reds.
+    #[test]
+    fn toggle_panel_color_reopen_keeps_the_mode() {
+        use crate::workspace::color_panel_view::ColorMode;
+        use crate::workspace::workspace::PanelKind;
+        let mut st = seeded_state();
+        assert!(st.workspace_layout.panel_on_screen(PanelKind::Color));
+        st.color_panel_mode = ColorMode::Cmyk;
+        toggle_panel(&mut st, "color");
+        assert!(!st.workspace_layout.panel_on_screen(PanelKind::Color));
+        toggle_panel(&mut st, "color");
+        assert!(st.workspace_layout.panel_on_screen(PanelKind::Color));
+        assert_eq!(st.color_panel_mode, ColorMode::Cmyk);
+    }
+
     #[test]
     fn toggle_panel_concepts_shows_then_hides() {
         use crate::workspace::workspace::PanelKind;

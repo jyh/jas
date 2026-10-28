@@ -529,9 +529,9 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
 
     // Native intercept: the Window-menu panel toggle (actions.yaml
     // `toggle_panel`), which runs the action's one effect, the shared
-    // `toggle_panel` layout op, and then the web's colour-mode reset, which
-    // no YAML effect can say. An unknown/garbage panel id resolves to Layers
-    // via parse_panel_kind and never panics.
+    // `toggle_panel` layout op. An unknown/garbage panel id resolves to
+    // Layers via parse_panel_kind and never panics. A reopened Color panel
+    // keeps its mode (COLOR.md §Color modes), as Swift's does.
     if action == "toggle_panel" {
         if let Some(panel_id) = params.get("panel").and_then(|v| v.as_str()) {
             let kind = crate::workspace::layout_apply::parse_panel_kind(panel_id);
@@ -539,16 +539,6 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
                 &mut st.workspace_layout,
                 &crate::workspace::layout_apply::op_toggle_panel(kind),
             );
-            // COLOR.md §Panel initialization rule: color_panel_mode is
-            // panel-local and resets to its default (HSB) on each reopen —
-            // not persisted across close. WEB ONLY: no other port resets it
-            // (a divergence, flagged 2026-10-28), so it stays here, beside
-            // the op, and not in the shared runtime.
-            if kind == crate::workspace::workspace::PanelKind::Color
-                && st.workspace_layout.panel_on_screen(kind)
-            {
-                st.color_panel_mode = crate::workspace::color_panel_view::ColorMode::Hsb;
-            }
         }
         return Vec::new();
     }
