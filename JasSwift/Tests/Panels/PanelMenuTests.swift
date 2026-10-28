@@ -521,7 +521,7 @@ private func keyboardRows(_ node: Any) -> [Any] {
     }
     let rows = keyboardRows(layers).compactMap { $0 as? [String: Any] }
     let f2 = rows.first { ($0["key"] as? String) == "F2" }
-    #expect((f2?["params"] as? [String: Any])?["element_id"] as? String == "panel.layers_panel_selection[0]")
+    #expect((f2?["params"] as? [String: Any])?["path"] as? String == "panel.layers_panel_selection[0]")
     #expect(rows.count >= 10, "positive control: only \(rows.count) Layers keyboard rows")
     #expect(layers["keyboard"] == nil, "the rows are the tree_view's, not the panel's")
 }

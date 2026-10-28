@@ -202,7 +202,7 @@
       "expected": {
         "action": "rename_element",
         "params": {
-          "element_id": {
+          "path": {
             "__path__": [
               1,
               0
@@ -234,7 +234,7 @@
       "expected": {
         "action": "rename_element",
         "params": {
-          "element_id": {
+          "path": {
             "__path__": [
               1,
               0

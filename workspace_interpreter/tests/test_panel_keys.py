@@ -37,3 +37,31 @@ def test_the_corpus_is_not_empty():
 def test_panel_key_resolution(ws, case):
     panel = case["panel_spec"] if "panel_spec" in case else ws["panels"][case["panel"]]
     assert resolve_panel_key(panel, case["chord"], case["ctx"]) == case["expected"]
+
+
+def test_every_keyboard_row_names_an_action_and_only_its_params(ws):
+    """A `keyboard:` row is a dispatch: its action must exist, and every param
+    it passes must be one the action declares, or the action reads null. The
+    Layers tree's F2 and Enter rows passed `element_id` to `rename_element`,
+    which declares `path`, so the keys renamed nothing (found 2026-10-28,
+    before any host routed a panel key). A templated action is checked per
+    branch it can name."""
+    import re
+    from workspace_interpreter.panel_keys import keyboard_rows
+    actions = ws["actions"]
+    rows = [(pid, r) for pid, spec in ws["panels"].items() for r in keyboard_rows(spec)]
+    assert len(rows) >= 15, f"positive control: only {len(rows)} keyboard rows"
+    bad = []
+    for pid, row in rows:
+        raw = row.get("action", "")
+        names = re.findall(r"'([a-z_]+)'", raw) if "{{" in raw else [raw]
+        assert names, f"{pid} {row.get('key')}: no action name in {raw!r}"
+        for name in names:
+            if name not in actions:
+                bad.append(f"{pid} {row.get('key')}: no action {name!r}")
+                continue
+            declared = set((actions[name].get("params") or {}).keys())
+            for p in (row.get("params") or {}):
+                if p not in declared:
+                    bad.append(f"{pid} {row.get('key')}: {name} declares {sorted(declared)}, the row passes {p!r}")
+    assert not bad, "\n".join(bad)
