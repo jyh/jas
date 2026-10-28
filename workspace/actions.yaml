@@ -2011,13 +2011,29 @@ actions:
     tier: 3
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
+      modifier: { type: string, default: "none", description: "none | toggle (Command or Ctrl) | shift." }
     effects:
-      # A plain click (STATUS-jas item 38 step 3c): the row becomes the whole
-      # panel selection, stored as paths. Shift and Command are a later step.
-      - set_panel_state:
-          panel: layers
-          key: layers_panel_selection
-          value: "[as_path(param.path)]"
+      # STATUS-jas item 38 step 3c, stored as paths. none: the row becomes the
+      # whole selection. toggle: the row goes in or out. shift: the visible rows
+      # from the selection's LAST entry to this row, inclusive (the web's rule;
+      # with nothing selected it is a plain click). Not built: a collapsed
+      # group's descendants joining a range (design row, part 3 (ii)).
+      - if:
+          condition: "param.modifier == 'toggle'"
+          then:
+            - list_toggle: { target: "panel.layers_panel_selection", value: "as_path(param.path)", panel: layers }
+          else:
+            - set_panel_state:
+                panel: layers
+                key: layers_panel_selection
+                value: >
+                  if param.modifier == 'shift' and panel.layers_panel_selection.length > 0
+                    then tree_row_range(tree_visible_rows(active_document.element_tree,
+                           panel.collapsed_paths, panel.layers_panel_selection,
+                           panel.renaming_element),
+                         panel.layers_panel_selection[panel.layers_panel_selection.length - 1],
+                         param.path)
+                    else [as_path(param.path)]
 
   layers_element_select:
     description: >

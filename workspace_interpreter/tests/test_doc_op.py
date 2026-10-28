@@ -1067,3 +1067,27 @@ def test_the_layers_row_selects_from_actions_yaml():
 
     run_effects(_action_effects("layers_element_select"), {"param": {"path": [0, 1]}}, store)
     assert {es.path for es in _doc_of(store).selection} == {(0, 1)}
+
+
+def test_the_layers_row_click_modifiers_from_actions_yaml():
+    """STATUS-jas item 38 step 3c part 3: toggle puts a row in or out; shift
+    takes the visible rows from the selection's last row to the clicked one, in
+    row order (topmost layer first); shift with nothing selected is a plain
+    click. The action corpus's `layers_panel_select_*` modifier cases."""
+    doc = Document(layers=(Layer(name="A", children=(_rect(),)), Layer(name="B", children=(_rect(),))))
+    effects = _action_effects("layers_panel_select")
+    M = lambda *ps: [{"__path__": list(p)} for p in ps]
+
+    def click(seed, path, modifier):
+        store = _store(doc)
+        store.init_panel("layers_panel_content", {"layers_panel_selection": M(*seed),
+                                                   "collapsed_paths": [], "renaming_element": None})
+        store.set_active_panel("layers_panel_content")
+        run_effects(effects, {"param": {"path": list(path), "modifier": modifier}}, store)
+        return store.get_panel("layers_panel_content", "layers_panel_selection")
+
+    assert click([(1,)], (0,), "toggle") == M((1,), (0,))
+    assert click([(1,), (0,)], (1,), "toggle") == M((0,))
+    assert click([(1,)], (0,), "shift") == M((1,), (1, 0), (0,))
+    assert click([], (0,), "shift") == M((0,))
+    assert click([(1,), (0,)], (0, 0), "none") == M((0, 0))

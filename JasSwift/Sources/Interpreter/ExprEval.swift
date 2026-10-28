@@ -1248,19 +1248,23 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     // row's `node.path`, which is a list). The reference's `as_path`.
     case "as_path":
         guard args.count == 1 else { return .null }
-        switch evalNode(args[0], ctx) {
-        case .path(let p): return .path(p)
-        case .list(let items):
-            var out: [Int] = []
-            for item in items {
-                // A JSON bool bridges to an NSNumber too: the CF type tells them apart.
-                guard let num = item.value as? NSNumber, CFGetTypeID(num) != CFBooleanGetTypeID(),
-                      num.doubleValue >= 0, let i = intIfIntegral(num.doubleValue) else { return .null }
-                out.append(i)
-            }
-            return .path(out)
-        default: return .null
+        return indexPath(evalNode(args[0], ctx)).map { .path($0) } ?? .null
+
+    // The rows' paths from one row to another, inclusive, in row order, as path
+    // markers; [] when either end is not a row (STATUS-jas item 38 step 3c: a
+    // Shift-click on a Layers row). The reference's `tree_row_range`; an end is
+    // read as `as_path` reads one.
+    case "tree_row_range":
+        guard args.count == 3, case .list(let rows) = evalNode(args[0], ctx) else { return .null }
+        let paths: [[Int]?] = rows.map { r in
+            (r.value as? [String: Any])?["path"].flatMap { indexPath(Value.fromJson($0)) }
         }
+        let ends = args[1...].map { indexPath(evalNode($0, ctx)) }
+        guard let from = ends[0], let to = ends[1],
+              let a = paths.firstIndex(where: { $0 == from }),
+              let b = paths.firstIndex(where: { $0 == to }) else { return .list([]) }
+        return .list(paths[min(a, b)...max(a, b)].compactMap { $0 }
+            .map { AnyJSON(["__path__": $0] as [String: Any]) })
 
     case "path_child":
         guard args.count == 2 else { return .null }
@@ -1703,4 +1707,23 @@ private func evalLogicalOr(_ left: Expr, _ right: Expr, _ ctx: [String: Any]) ->
     let lv = evalNode(left, ctx)
     if lv.toBool() { return lv }
     return evalNode(right, ctx)
+}
+
+/// A PATH value, a list of non-negative integer indices, or a path marker
+/// (which `Value.fromJson` already reads as a PATH) as indices; nil for
+/// anything else. `as_path` and `tree_row_range` read their paths through it.
+private func indexPath(_ v: Value) -> [Int]? {
+    switch v {
+    case .path(let p): return p
+    case .list(let items):
+        var out: [Int] = []
+        for item in items {
+            // A JSON bool bridges to an NSNumber too: the CF type tells them apart.
+            guard let num = item.value as? NSNumber, CFGetTypeID(num) != CFBooleanGetTypeID(),
+                  num.doubleValue >= 0, let i = intIfIntegral(num.doubleValue) else { return nil }
+            out.append(i)
+        }
+        return out
+    default: return nil
+    }
 }

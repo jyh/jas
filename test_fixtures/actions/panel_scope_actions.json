@@ -596,5 +596,152 @@
    }
   ],
   "expected_json": "layers_element_select_selects_the_element_expected.json"
+ },
+ {
+  "_doc": "Command- or Ctrl-click on an unselected row adds it, after the rows already selected. (STATUS-jas item 38 step 3c)",
+  "name": "layers_panel_select_toggle_adds_a_row",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    1
+   ]
+  ],
+  "actions": [
+   {
+    "action": "layers_panel_select",
+    "params": {
+     "path": [
+      0
+     ],
+     "modifier": "toggle"
+    }
+   }
+  ],
+  "expected_json": "layers_panel_select_toggle_adds_a_row_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "layers_panel_selection": [
+     {
+      "__path__": [
+       1
+      ]
+     },
+     {
+      "__path__": [
+       0
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Command- or Ctrl-click on a selected row takes it out. (STATUS-jas item 38 step 3c)",
+  "name": "layers_panel_select_toggle_removes_a_row",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    1
+   ],
+   [
+    0
+   ]
+  ],
+  "actions": [
+   {
+    "action": "layers_panel_select",
+    "params": {
+     "path": [
+      1
+     ],
+     "modifier": "toggle"
+    }
+   }
+  ],
+  "expected_json": "layers_panel_select_toggle_removes_a_row_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "layers_panel_selection": [
+     {
+      "__path__": [
+       0
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Shift-click selects the visible rows from the selection's last row to the clicked one, inclusive, in row order (topmost layer first: [1], [1,0], [0], [0,0]). (STATUS-jas item 38 step 3c)",
+  "name": "layers_panel_select_shift_extends_in_row_order",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [
+   [
+    1
+   ]
+  ],
+  "actions": [
+   {
+    "action": "layers_panel_select",
+    "params": {
+     "path": [
+      0
+     ],
+     "modifier": "shift"
+    }
+   }
+  ],
+  "expected_json": "layers_panel_select_shift_extends_in_row_order_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "layers_panel_selection": [
+     {
+      "__path__": [
+       1
+      ]
+     },
+     {
+      "__path__": [
+       1,
+       0
+      ]
+     },
+     {
+      "__path__": [
+       0
+      ]
+     }
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Shift-click with nothing selected is a plain click. (STATUS-jas item 38 step 3c)",
+  "name": "layers_panel_select_shift_with_nothing_selected",
+  "setup_svg": "multi_layer.svg",
+  "layers_panel_selection": [],
+  "actions": [
+   {
+    "action": "layers_panel_select",
+    "params": {
+     "path": [
+      0
+     ],
+     "modifier": "shift"
+    }
+   }
+  ],
+  "expected_json": "layers_panel_select_shift_with_nothing_selected_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "layers_panel_selection": [
+     {
+      "__path__": [
+       0
+      ]
+     }
+    ]
+   }
+  }
  }
 ]

@@ -6041,7 +6041,7 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
     // it (`YamlPanelBodyView`'s mirror into `layers_panel_content`). No verb
     // sets it: the native row click does. Mirrors Rust `run_action_case`.
     if let rows = tc["layers_panel_selection"] as? [[Any]] {
-        let paths = rows.map { $0.map { ($0 as! NSNumber).intValue } }
+        let paths: [[String: Any]] = rows.map { ["__path__": $0.map { ($0 as! NSNumber).intValue }] }
         model.stateStore.setPanel("layers_panel_content", "layers_panel_selection", paths)
     }
 

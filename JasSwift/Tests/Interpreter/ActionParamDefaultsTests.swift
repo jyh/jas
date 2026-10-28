@@ -67,11 +67,14 @@ import Testing
 // MARK: - The live workspace: which verbs this actually reaches
 
 /// The blast radius, read off the COMPILED workspace rather than asserted in
-/// prose: exactly three of the declared actions carry a param default, and they
-/// are the two zoom verbs plus `artboards_panel_select`. If a fourth appears,
+/// prose: the declared actions that carry a param default. If another appears,
 /// this fails and whoever added it is told to gate it — which is the whole
-/// reason the ruling called the third verb out.
-@Test func exactlyThreeActionsDeclareParamDefaults() {
+/// reason the ruling called the third verb out. The fourth,
+/// `layers_panel_select` (`modifier`, default "none"; STATUS-jas item 38 step
+/// 3c), is gated by the action corpus's `layers_panel_select_selects_the_row`,
+/// which dispatches it WITHOUT `modifier` and pins the replace; its effects
+/// read an absent modifier and "none" the same way.
+@Test func exactlyFourActionsDeclareParamDefaults() {
     let actions = WorkspaceData.load()?.data["actions"] as? [String: Any] ?? [:]
     #expect(!actions.isEmpty)
     var withDefaults: [String] = []
@@ -84,7 +87,7 @@ import Testing
         if anyDefault { withDefaults.append(name) }
     }
     #expect(withDefaults.sorted()
-            == ["artboards_panel_select", "zoom_in", "zoom_out"])
+            == ["artboards_panel_select", "layers_panel_select", "zoom_in", "zoom_out"])
 }
 
 /// `artboards_panel_select` dispatched WITHOUT `modifier` — the third verb, and

@@ -621,8 +621,19 @@ content:
         behavior:
           - event: click
             description: "Panel-select on click (spacer, twirl-gap, preview, name areas)"
+            condition: "not (event.shift or event.meta or event.ctrl)"
             action: layers_panel_select
-            params: { path: "node.path" }
+            params: { path: "node.path", modifier: "none" }
+          - event: click
+            description: "Command- or Ctrl-click toggles the row in or out"
+            condition: "(event.meta or event.ctrl) and not event.shift"
+            action: layers_panel_select
+            params: { path: "node.path", modifier: "toggle" }
+          - event: click
+            description: "Shift-click extends the selection from its last row to this one"
+            condition: "event.shift"
+            action: layers_panel_select
+            params: { path: "node.path", modifier: "shift" }
           - event: double_click
             condition: "node.is_container and event.target_id != 'lp_name'"
             action: enter_isolation_mode

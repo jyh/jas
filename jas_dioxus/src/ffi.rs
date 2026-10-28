@@ -4144,6 +4144,43 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// STATUS-jas item 38 step 3c part 3: the row's click is three behaviours
+    /// split on the click's modifiers. A plain click on one row, a Shift-click
+    /// on another (the range, in row order, topmost layer first), then a
+    /// Ctrl-click that takes the first back out.
+    #[test]
+    fn a_layers_row_click_reads_its_modifiers() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let mut doc = crate::document::document::Document::default();
+        let second = doc.layers[0].clone();
+        doc.layers.push(second);
+        let e = engine_with(Model::new(doc, None));
+        let rows = || {
+            let plan: serde_json::Value =
+                serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+            ["chrome", "containers", "leaves"].iter()
+                .filter_map(|k| plan[*k].as_array()).flatten()
+                .filter(|r| r["type"] == "container" && r["values"].get("bind.opacity").is_some())
+                .map(|r| r["path"].clone()).collect::<Vec<_>>()
+        };
+        let sel = || unsafe { e.as_ref() }.unwrap().store.borrow()
+            .get_panel("layers_panel_content", "layers_panel_selection").clone();
+        let click = |row: &serde_json::Value, mods: &str| {
+            let (reply, err) = behave(e, "layers_panel_content",
+                                      &format!(r#"{{"path":{row},"event":"click"{mods}}}"#));
+            assert!(!reply.is_empty(), "the click{mods} refused: {err}");
+        };
+        let r = rows();
+        assert_eq!(r.len(), 2, "two layer rows");
+        click(&r[0], "");
+        assert_eq!(sel(), serde_json::json!([{"__path__": [1]}]), "row 0 is the topmost layer");
+        click(&r[1], r#","shift":true"#);
+        assert_eq!(sel(), serde_json::json!([{"__path__": [1]}, {"__path__": [0]}]), "the range");
+        click(&r[0], r#","ctrl":true"#);
+        assert_eq!(sel(), serde_json::json!([{"__path__": [0]}]), "Ctrl takes it back out");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// STATUS-jas item 40, the Layers row: with the default document's one
     /// layer in rename mode, Enter in `lp_name_edit` names THAT layer and ends
     /// rename mode, and the blur that follows runs nothing. Rename mode is
