@@ -3468,6 +3468,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     let toolEffects = buildYamlToolEffects(model: model)
     for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
                 "brush.append", "brush.update", "brush.sort_by_name", "brush.select_unused",
+                "brush.save_library",
                 "swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
                 "swatch.select_unused", "swatch.add_used_colors", "swatch.store"] {
         guard let handler = toolEffects[key] else {

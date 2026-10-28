@@ -15,6 +15,11 @@ public class StateStore {
     private var panels: [String: [String: Any]] = [:]
     private var activePanel: String?
 
+    /// File writes an effect asked for, in order, for the HOST to drain
+    /// (`brush.save_library`): the interpreter does no file I/O itself.
+    /// Mirrors the reference's `StateStore.pending_writes`.
+    public var pendingWrites: [[String: Any]] = []
+
     // MARK: - Tool state
     //
     // Parallels `panels` but keyed by tool id. YAML tool handlers

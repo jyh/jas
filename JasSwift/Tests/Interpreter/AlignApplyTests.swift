@@ -155,6 +155,8 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         // The Brushes menu's Sort by Name and Select All Unused (log-only stubs
         // until they took `library:` as an expression, as delete does).
         "brush.sort_by_name", "brush.select_unused",
+        // Save Brush Library's confirm (2026-10-28 brush-library design B.2).
+        "brush.save_library",
         // The Swatches menu's five library verbs (2026-10-25), `swatch.*`
         // effects over the app-global libraries; until then a native copy.
         "swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
