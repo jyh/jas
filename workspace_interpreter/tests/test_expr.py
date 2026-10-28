@@ -545,3 +545,36 @@ class TestBrushTypeOf:
     def test_null_when_no_brush_libraries(self):
         r = evaluate('brush_type_of("mylib/cal_1")', {})
         assert r.type == ValueType.NULL
+
+
+class TestKeys:
+    """`keys(map)` -- a map's keys as a list of strings, sorted by Unicode code
+    point (no locale collation). The order is DEFINED because Rust's
+    serde_json map and Swift's Dictionary keep no insertion order. It feeds
+    the Brushes panel's Open Brush Library submenu (`items_from`); design:
+    the 2026-10-28 jas brush-library design, A.2. A non-map gives [].
+    """
+
+    def test_keys_are_sorted_by_code_point_not_insertion(self):
+        r = evaluate("keys(data.libs)", {"data": {"libs": {"b": 1, "a": 2, "Z": 3, "é": 4}}})
+        assert r.type == ValueType.LIST
+        # Upper case before lower case; a precomposed e-acute after z.
+        assert r.value == ["Z", "a", "b", "é"]
+
+    def test_the_insertion_order_alone_would_differ(self):
+        # The control: this dict's insertion order is NOT the sorted order,
+        # so the arm above cannot pass by passing the dict's keys through.
+        assert list({"b": 1, "a": 2, "Z": 3, "é": 4}) != ["Z", "a", "b", "é"]
+
+    def test_an_empty_map_gives_an_empty_list(self):
+        r = evaluate("keys(data.libs)", {"data": {"libs": {}}})
+        assert r.type == ValueType.LIST and r.value == []
+
+    @pytest.mark.parametrize("ctx", [{"data": {"libs": [1, 2]}}, {"data": {"libs": "ab"}}, {}])
+    def test_a_non_map_gives_an_empty_list(self, ctx):
+        r = evaluate("keys(data.libs)", ctx)
+        assert r.type == ValueType.LIST and r.value == []
+
+    def test_keys_compose_with_any(self):
+        r = evaluate('any(keys(data.libs), fun k -> k == "a")', {"data": {"libs": {"a": 1}}})
+        assert r.value is True

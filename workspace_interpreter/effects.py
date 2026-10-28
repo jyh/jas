@@ -1419,9 +1419,11 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                                         "reason": "field_not_writable"})
         return
 
-    # list_toggle: { target, value, panel? } -- set membership, the checkbox
-    # primitive; `panel.<key>` on the named panel when `panel` is given (as
-    # set_panel_state), else the active one
+    # list_toggle: { target, value, panel?, key?, insert? } -- set membership,
+    # the checkbox primitive; `panel.<key>` on the named panel when `panel` is
+    # given (as set_panel_state), else the active one. With `key`, membership
+    # is `item[key] == value` over a list of objects and the item added is
+    # `{key: value}` beside the YAML-literal `insert` fields.
     if "list_toggle" in effect:
         lt = effect["list_toggle"]
         target = lt.get("target", "")
@@ -1440,7 +1442,8 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         if len(parts) == 2 and parts[0] == "panel":
             panel_id = lt.get("panel") or store.get_active_panel_id()
             if panel_id:
-                store.list_toggle(panel_id, parts[1], value)
+                store.list_toggle(panel_id, parts[1], value,
+                                  key_field=lt.get("key"), insert=lt.get("insert"))
         return
 
     # dispatch: action_name or { action, params }

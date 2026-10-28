@@ -561,6 +561,67 @@ class TestListToggleEffect:
         assert self._toggle(["path"], '"rect"', target="state.type_filter") == ["path"]
 
 
+class TestListToggleKeyed:
+    """`list_toggle: { target, value, key, insert }` -- membership over a list
+    of keyed OBJECTS (the Brushes panel's `open_libraries`, `{id, collapsed}`).
+    Without `key` an entry whose other fields differ from the value never
+    matches, so a whole-value toggle cannot close an open library. With `key`,
+    an item is a member when `item[key] == value`; the item added is
+    `{key: value}` with the YAML-literal `insert` fields beside it. Design:
+    the 2026-10-28 jas brush-library design, A.1. Each arm has its own store.
+    """
+
+    @staticmethod
+    def _toggle(initial, value, insert=None, key="id"):
+        store = StateStore()
+        store.init_panel("brushes", {"open_libraries": initial})
+        store.set_active_panel("brushes")
+        spec = {"target": "panel.open_libraries", "value": value, "key": key}
+        if insert is not None:
+            spec["insert"] = insert
+        run_effects([{"list_toggle": spec}], {}, store)
+        return store.get_panel("brushes", "open_libraries")
+
+    def test_an_absent_key_appends_the_keyed_item_with_insert(self):
+        got = self._toggle([{"id": "a", "collapsed": True}], '"b"', {"collapsed": False})
+        assert got == [{"id": "a", "collapsed": True}, {"id": "b", "collapsed": False}]
+
+    def test_a_present_key_is_removed_whatever_its_other_fields(self):
+        # The stale-field direction: `collapsed` differs from `insert`, and a
+        # whole-value compare would APPEND a second "a" here.
+        got = self._toggle([{"id": "a", "collapsed": True}, {"id": "b", "collapsed": False}],
+                           '"a"', {"collapsed": False})
+        assert got == [{"id": "b", "collapsed": False}]
+
+    def test_only_the_first_keyed_match_is_removed(self):
+        # As the unkeyed form (Python's list.remove).
+        got = self._toggle([{"id": "a"}, {"id": "b"}, {"id": "a", "x": 1}], '"a"')
+        assert got == [{"id": "b"}, {"id": "a", "x": 1}]
+
+    def test_without_insert_the_item_is_the_key_alone(self):
+        assert self._toggle([], '"a"') == [{"id": "a"}]
+
+    def test_the_key_wins_over_the_same_field_in_insert(self):
+        assert self._toggle([], '"a"', {"id": "zzz", "collapsed": False}) == [
+            {"id": "a", "collapsed": False}]
+
+    def test_a_non_object_item_never_matches(self):
+        assert self._toggle(["a", {"id": "a"}], '"a"') == ["a"]
+
+    def test_insert_is_a_literal_not_an_expression(self):
+        got = self._toggle([], '"a"', {"label": "param.x"})
+        assert got == [{"id": "a", "label": "param.x"}]
+
+    def test_the_unkeyed_form_still_compares_whole_values(self):
+        # The control: the same list and value WITHOUT `key` appends, which is
+        # the defect the keyed form exists to fix.
+        store = StateStore()
+        store.init_panel("brushes", {"open_libraries": [{"id": "a", "collapsed": True}]})
+        store.set_active_panel("brushes")
+        run_effects([{"list_toggle": {"target": "panel.open_libraries", "value": '"a"'}}], {}, store)
+        assert store.get_panel("brushes", "open_libraries") == [{"id": "a", "collapsed": True}, "a"]
+
+
 # `select: { target, list, scope, scope_value, mode }` -- the tile-selection
 # effect (Swatches library tiles). It had NO test in this reference until the
 # engine door needed a library swatch's tap to run, so these rows are its
