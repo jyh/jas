@@ -210,6 +210,16 @@ public enum PanelLayout {
     /// (`"auto"`, junk) is ignored.
     /// Internal rather than private so `R9GuardedCastTests` can hold its two
     /// float branches to Rust's `f as i64` (interpreter/panel_layout.rs).
+    /// A style dimension as written, with a template (`"{{node.depth * 16}}"`,
+    /// the Layers row's indent, STATUS-jas item 38) evaluated in the node's
+    /// scope first, as a bound text is; `resolveDim` then reads the number. A
+    /// template that does not yield a number resolves to nil, as any
+    /// unparsable dimension does.
+    static func dim(_ v: Any?, _ ctx: [String: Any]) -> Any? {
+        if let s = v as? String, s.contains("{{") { return evaluateText(s, context: ctx) }
+        return v
+    }
+
     static func resolveDim(_ v: Any?, _ avail: Int) -> Int? {
         guard let v = v, !(v is NSNull) else { return nil }
         if let n = v as? NSNumber { return n.intValue }
@@ -434,8 +444,8 @@ public enum PanelLayout {
                 w = 0
             }
         }
-        if let x = resolveDim(st["width"], availW) { w = x }
-        if let m = resolveDim(st["min_width"], availW) { w = max(w, m) }
+        if let x = resolveDim(dim(st["width"], ctx), availW) { w = x }
+        if let m = resolveDim(dim(st["min_width"], ctx), availW) { w = max(w, m) }
         return (w, h, fill)
     }
 
@@ -514,7 +524,7 @@ public enum PanelLayout {
         let st = style(node)
         // B.5: a declared width is the container's natural width. A percentage
         // has nothing to resolve against here and is ignored, as a leaf's is.
-        if let declared = resolveDim(st["width"], -1) { return declared }
+        if let declared = resolveDim(dim(st["width"], ctx), -1) { return declared }
         let (_, pr, _, pl) = parsePadding(st["padding"])
         let gap = gap(node)
         if nodeType(node) == "disclosure" {
@@ -563,7 +573,7 @@ public enum PanelLayout {
         // clamped to the width it is given; its children are laid out in it.
         var availW = availW
         if isContainer(n) || nodeType(n) == "disclosure",
-           let declared = resolveDim(st["width"], availW) {
+           let declared = resolveDim(dim(st["width"], ctx), availW) {
             availW = availW > 0 ? min(declared, availW) : declared
         }
         let innerW = availW - pl - pr

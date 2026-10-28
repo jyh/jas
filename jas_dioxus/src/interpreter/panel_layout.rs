@@ -343,6 +343,18 @@ fn kind_fallback_w(kind: &str) -> i64 {
 /// Resolve a style dimension to integer px, or None to ignore. Numbers truncate
 /// toward zero; `"N%"` is `(avail*N)/100` (ignored when avail <= 0); a bare numeric
 /// string is that int; anything else (`"auto"`, junk) is ignored.
+/// A style dimension as written, with a template (`"{{node.depth * 16}}"`, the
+/// Layers row's indent, STATUS-jas item 38) evaluated in the node's scope first,
+/// as a bound text is; `resolve_dim` then reads the number. A template that does
+/// not yield a number resolves to None, as any unparsable dimension does.
+fn dim(v: Option<&Value>, ctx: &Value) -> Value {
+    match v {
+        Some(Value::String(s)) if s.contains("{{") => Value::String(eval_text(s, ctx)),
+        Some(v) => v.clone(),
+        None => Value::Null,
+    }
+}
+
 fn resolve_dim(v: &Value, avail: i64) -> Option<i64> {
     if v.is_null() {
         return None;
@@ -476,10 +488,10 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
             _ => 0,
         }
     };
-    if let Some(x) = resolve_dim(st.get("width").unwrap_or(&Value::Null), avail_w) {
+    if let Some(x) = resolve_dim(&dim(st.get("width"), ctx), avail_w) {
         w = x;
     }
-    if let Some(m) = resolve_dim(st.get("min_width").unwrap_or(&Value::Null), avail_w) {
+    if let Some(m) = resolve_dim(&dim(st.get("min_width"), ctx), avail_w) {
         w = w.max(m);
     }
     (w, h)
@@ -559,7 +571,7 @@ fn natural_w(n: &Value, ctx: &Value) -> i64 {
     let st = style(n);
     // B.5: a declared width is the container's natural width. A percentage has
     // nothing to resolve against here and is ignored, as a leaf's is.
-    if let Some(declared) = resolve_dim(st.get("width").unwrap_or(&Value::Null), -1) {
+    if let Some(declared) = resolve_dim(&dim(st.get("width"), ctx), -1) {
         return declared;
     }
     let (_pt, pr, _pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
@@ -624,7 +636,7 @@ fn measure(
     // clamped to the width it is given; its children are laid out in it.
     let mut avail_w = avail_w;
     if is_container(n) || node_type(n) == "disclosure" {
-        if let Some(declared) = resolve_dim(st.get("width").unwrap_or(&Value::Null), avail_w) {
+        if let Some(declared) = resolve_dim(&dim(st.get("width"), ctx), avail_w) {
             avail_w = if avail_w > 0 { declared.min(avail_w) } else { declared };
         }
     }
