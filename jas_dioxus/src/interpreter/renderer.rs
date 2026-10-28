@@ -7891,48 +7891,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 return;
             }
         }
-        // Ctrl/Command+A stays native: `layers_select_all` is still a `log`
-        // stub, declared bypassed (check_action_implementations).
-        if let dioxus::prelude::Key::Character(c) = &key {
-            if c == "a" || c == "A" {
-                if evt.data().modifiers().meta() || evt.data().modifiers().ctrl() {
-                    spawn(async move {
-                        let mut st = a.borrow_mut();
-                        // Collect all element paths in the document
-                        if let Some(tab) = st.tab() {
-                            let doc = tab.model.document();
-                            let mut all_paths = Vec::new();
-                            fn collect(elements: &[crate::geometry::element::Element], prefix: &[usize], out: &mut Vec<Vec<usize>>) {
-                                for (i, elem) in elements.iter().enumerate() {
-                                    let mut p = prefix.to_vec();
-                                    p.push(i);
-                                    out.push(p.clone());
-                                    if let Some(children) = elem.children() {
-                                        fn collect_rc(children: &[std::rc::Rc<crate::geometry::element::Element>], prefix: &[usize], out: &mut Vec<Vec<usize>>) {
-                                            for (i, c) in children.iter().enumerate() {
-                                                let mut p = prefix.to_vec();
-                                                p.push(i);
-                                                out.push(p.clone());
-                                                if let Some(gc) = c.children() {
-                                                    collect_rc(gc, &p, out);
-                                                }
-                                            }
-                                        }
-                                        collect_rc(children, &p, out);
-                                    }
-                                }
-                            }
-                            collect(&doc.layers, &[], &mut all_paths);
-                            st.layers_panel_selection = all_paths;
-                        }
-                        kb_rev += 1;
-                    });
-                    return;
-                }
-            }
-        }
         // Every other key runs layers.yaml's `keyboard:` rows (STATUS-jas item 8
-        // class L, step 2b): the arrows, Delete/Backspace, F2, Enter, Escape.
+        // class L, step 2b): the arrows, Delete/Backspace, F2, Enter, Escape,
+        // and Ctrl/Command+A (`layers_select_all`, which ran natively until its
+        // effects were written: the visible rows, scoped to an isolation).
         // The Mac's Command is the vocabulary's Ctrl. A key no row binds does
         // nothing here, as before.
         let name = match &key {
@@ -15467,5 +15429,26 @@ mod layers_tree_key_tests {
         st.layers_panel_selection = vec![vec![1]];
         assert!(layers_tree_key(&mut st, &key("X")).is_none());
         assert_eq!(st.layers_panel_selection, vec![vec![1]], "nothing moved");
+    }
+
+    #[test]
+    fn ctrl_a_selects_every_visible_row() {
+        // `layers_select_all` runs its YAML now; the native Ctrl/Command+A arm
+        // that collected every element path is gone.
+        let mut st = two_layers();
+        st.layers_panel_selection = vec![vec![1]];
+        let ctrl_a = KeyChord::new("a", true, false, false, false);
+        assert!(layers_tree_key(&mut st, &ctrl_a).is_some(), "the Ctrl+A row resolved");
+        assert_eq!(st.layers_panel_selection, vec![vec![1], vec![1, 0], vec![0], vec![0, 0]]);
+    }
+
+    #[test]
+    fn ctrl_a_in_isolation_selects_only_the_isolated_subtree() {
+        let mut st = two_layers();
+        st.layers_panel_selection = vec![vec![1]];
+        st.isolation_stack_mut().expect("a tab").push(vec![1]);
+        let ctrl_a = KeyChord::new("a", true, false, false, false);
+        assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
+        assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
     }
 }
