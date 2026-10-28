@@ -332,10 +332,19 @@ public struct Document: Equatable {
     /// Pure. Mirrors Rust `cycle_element_visibility_at`, OCaml
     /// `Document.cycle_element_visibility_at`, and the Python eye handler.
     public func cyclingElementVisibility(at path: ElementPath) -> Document {
+        settingElementVisibility(at: path, getElement(path).visibility.cycled)
+    }
+
+    /// The Layers solo's write (STATUS-jas item 8): the element at `path`'s OWN
+    /// visibility set to `visibility`; nothing is written onto its descendants.
+    /// An element that becomes invisible leaves the selection with its
+    /// descendants, as the eye cycle's does. Mirrors Rust
+    /// `Document::setting_element_visibility` and the reference's
+    /// `setting_element_visibility`.
+    public func settingElementVisibility(at path: ElementPath, _ visibility: Visibility) -> Document {
         let e = getElement(path)
-        let newVis = e.visibility.cycled
-        let doc = replaceElement(path, with: e.withVisibility(newVis))
-        if newVis == .invisible {
+        let doc = replaceElement(path, with: e.withVisibility(visibility))
+        if visibility == .invisible {
             let filtered = doc.selection.filter {
                 !($0.path == path || $0.path.starts(with: path))
             }

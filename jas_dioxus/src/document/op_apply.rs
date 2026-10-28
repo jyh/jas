@@ -2584,6 +2584,26 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             };
             model.edit_document(new_doc);
         }
+        // The Layers solo's write (STATUS-jas item 8): one element's own
+        // visibility, by name. A path naming no element is a MissingTarget, as
+        // the eye's is; an unknown name is a missing required argument.
+        "set_element_visibility" => {
+            use crate::geometry::element::Visibility;
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            let vis = match op.get("visibility").and_then(|v| v.as_str()) {
+                Some("preview") => Visibility::Preview,
+                Some("outline") => Visibility::Outline,
+                Some("invisible") => Visibility::Invisible,
+                _ => return Err(req_err(op, "visibility")),
+            };
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            let new_doc = model.document().setting_element_visibility(&path, vis);
+            model.edit_document(new_doc);
+        }
         "lock_selection" => {
             Controller::lock_selection(model);
         }

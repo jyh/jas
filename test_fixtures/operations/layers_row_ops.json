@@ -77,5 +77,53 @@
     ],
     "history": ["undo"],
     "expected_json": "layers_row_ops_named_expected.json"
+  },
+  {
+    "_doc": ["set_element_visibility {path, visibility} (the solo verb, item 8): sets the element's OWN visibility. Outline on [0,1] is the state one eye cycle reaches, so it is pinned to the cycle case's file."],
+    "name": "setting_a_leaf_to_outline_matches_one_cycle",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "set_element_visibility", "ops": [{"op": "set_element_visibility", "path": [0, 1], "visibility": "outline"}]}
+    ],
+    "expected_json": "layers_row_ops_leaf_outline_expected.json"
+  },
+  {
+    "_doc": ["Setting a layer invisible drops its selected child from the selection, the same law as the eye cycle reaching invisible; pinned to that case's file."],
+    "name": "setting_a_layer_invisible_drops_its_selected_child",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "select_element", "ops": [{"op": "select_element", "path": [0, 0]}]},
+      {"name": "set_element_visibility", "ops": [{"op": "set_element_visibility", "path": [0], "visibility": "invisible"}]}
+    ],
+    "expected_json": "layers_row_ops_layer_invisible_expected.json"
+  },
+  {
+    "_doc": ["Setting a layer to outline keeps its selected child; pinned to the cycle case's file."],
+    "name": "setting_a_layer_to_outline_keeps_its_selected_child",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "select_element", "ops": [{"op": "select_element", "path": [0, 0]}]},
+      {"name": "set_element_visibility", "ops": [{"op": "set_element_visibility", "path": [0], "visibility": "outline"}]}
+    ],
+    "expected_json": "layers_row_ops_layer_outline_selected_expected.json"
+  },
+  {
+    "_doc": ["Setting an element to the visibility it already has changes nothing."],
+    "name": "setting_the_current_visibility_is_a_no_op",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "set_element_visibility", "ops": [{"op": "set_element_visibility", "path": [0, 1], "visibility": "preview"}]}
+    ],
+    "expected_json": "lock_toggle_noop_expected.json"
+  },
+  {
+    "_doc": ["Invisible, then preview again: the element is back where it started (the solo restore's shape)."],
+    "name": "setting_invisible_then_preview_is_a_round_trip",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {"name": "set_element_visibility", "ops": [{"op": "set_element_visibility", "path": [0, 1], "visibility": "invisible"}]},
+      {"name": "set_element_visibility", "ops": [{"op": "set_element_visibility", "path": [0, 1], "visibility": "preview"}]}
+    ],
+    "expected_json": "lock_toggle_noop_expected.json"
   }
 ]
