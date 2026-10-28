@@ -4697,6 +4697,8 @@ actions:
       nothing until undone. Cancel uses dismiss_dialog (no snapshot, no
       delete).
     category: dialog
+    params:
+      master: { type: string, description: "The id of the master to delete: the one the dialog asked about." }
     effects:
       - snapshot
       - doc.delete_symbol: { master: "param.master" }

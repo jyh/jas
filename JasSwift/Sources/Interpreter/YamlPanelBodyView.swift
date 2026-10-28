@@ -3927,10 +3927,29 @@ struct FlatRow: Identifiable {
 
 struct TreeViewContent: View {
     @ObservedObject var model: Model
-    @State private var collapsed: Set<ElementPath> = []
-    @State private var panelSelection: Set<ElementPath> = []
+    /// The collapsed containers, the panel selection and the row being renamed
+    /// are the Layers panel's STORE values (`panel.collapsed_paths`,
+    /// `panel.layers_panel_selection`, `panel.renaming_element`), the ones
+    /// layers.yaml's actions and keyboard rows read and write. They were
+    /// view-lived `@State` until 2026-10-28, with only the selection mirrored
+    /// out, so a YAML twirl, rename or arrow key changed state this tree never
+    /// drew (STATUS-jas item 8 class L, step 2b). Each write bumps
+    /// `panelStateVersion`, which redraws this view.
+    private var collapsed: Set<ElementPath> {
+        get { layersCollapsedPaths(model: model) }
+        nonmutating set { setLayersCollapsedPaths(model: model, newValue) }
+    }
+    private var panelSelection: Set<ElementPath> {
+        get { Set(layersPanelSelection(model: model)) }
+        nonmutating set { setLayersPanelSelection(model: model, newValue) }
+    }
+    private var renamingPath: ElementPath? {
+        get { layersRenamingPath(model: model) }
+        nonmutating set { setLayersRenamingPath(model: model, newValue) }
+    }
+    /// The Shift-click range anchor stays view state: layers.yaml declares no
+    /// key for it.
     @State private var panelSelectionAnchor: ElementPath? = nil
-    @State private var renamingPath: ElementPath? = nil
     /// The rename field must TAKE the keyboard when it appears. jas_dioxus sets
     /// `autofocus` on its rename input AND calls `.focus()` explicitly, with a
     /// comment noting the browser blocks autofocus when something else already
@@ -4118,30 +4137,22 @@ struct TreeViewContent: View {
         }
         .focusable()
         .focused($treeFocused)
-        // Mirror the tree selection into the store under the key layers.yaml
-        // declares (`panel.layers_panel_selection`), so readers outside this view —
-        // the hamburger menu's `enabled_when` rows through
-        // `layersPanelSelection(model:)`, the dock's body context — see the
-        // selection the artist made. Sorted so the published list is
-        // deterministic; a Set has no order and the YAML indexes `[0]`.
-        .onChange(of: panelSelection) { sel in
-            let store = model.stateStore
-            if !store.hasPanel("layers_panel_content") {
-                let defaults = WorkspaceData.load()?.panelStateDefaults("layers_panel_content") ?? [:]
-                store.initPanel("layers_panel_content", defaults: defaults)
-            }
-            // As `__path__` markers, the form the YAML's own writes take
-            // (`[as_path(param.path)]`, `list_toggle`; STATUS-jas item 38 step
-            // 3c) and the form Rust stores, so a toggle compares like with like.
-            let paths: [[String: Any]] = sel.map { Array($0) }
-                .sorted(by: { $0.lexicographicallyPrecedes($1) })
-                .map { ["__path__": $0] }
-            store.setPanel("layers_panel_content", "layers_panel_selection", paths)
-            model.panelStateVersion &+= 1
-        }
+        // layers.yaml's `keyboard:` rows (STATUS-jas item 8 class L, step 2b):
+        // the arrows, F2, Enter and Escape resolve and dispatch through
+        // `LayersPanel.treeKey`, writing the store this view draws from. Not
+        // while the rename field holds the keyboard (the web's input guard).
+        // Delete/Backspace and ⌘A stay in the monitor below: its Delete
+        // confirms orphaning a reference first, which `delete_layer_selection`
+        // does not, and `layers_select_all` is a `log` stub.
+        .modifier(LayersTreeKeys { chord in
+            guard !renameFieldFocused else { return false }
+            return LayersPanel.treeKey(chord, model: model)
+        })
         .onAppear {
             // NSEvent local monitor to capture modifier keys during mouse events.
-            // Also handles Delete/Cmd-A/Escape key shortcuts when the tree is focused.
+            // Also handles Delete and Cmd-A when the tree is focused; Escape is
+            // layers.yaml's row now (`LayersTreeKeys` above), which cancels a
+            // rename or pops one isolation level exactly as this arm did.
             NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown, .keyDown]) { evt in
                 modifierFlags = evt.modifierFlags
                 if evt.type == .keyDown && treeFocused {
@@ -4153,10 +4164,6 @@ struct TreeViewContent: View {
                         // 0 = 'a' — Cmd-A selects all
                         selectAll()
                         return nil
-                    } else if evt.keyCode == 53 {
-                        // 53 = Escape
-                        if renamingPath != nil { renamingPath = nil; return nil }
-                        if !isolationStack.isEmpty { isolationStack.removeLast(); return nil }
                     }
                 }
                 return evt
@@ -5173,6 +5180,45 @@ func gradientSliderKey(_ key: KeyEquivalent) -> String? {
     case .delete: return "Backspace"
     case .deleteForward: return "Delete"
     default: return nil
+    }
+}
+
+/// The Layers tree's key press as the chord `LayersPanel.treeKey` resolves, or
+/// nil for a key the tree hook leaves alone. The names are the `keyboard:`
+/// rows' tokens; ⌘ is `ctrl`, the command chord (`KeyMods.ctrl`'s rule).
+/// Delete/Backspace and ⌘A are NOT named: the tree's native monitor keeps them
+/// (see `TreeViewContent`).
+func layersTreeKeyChord(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyChord? {
+    let name: String
+    switch key {
+    case .upArrow: name = "ArrowUp"
+    case .downArrow: name = "ArrowDown"
+    case .leftArrow: name = "ArrowLeft"
+    case .rightArrow: name = "ArrowRight"
+    case .return: name = "Enter"
+    case .escape: name = "Escape"
+    case KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!)): name = "F2"
+    default: return nil
+    }
+    return KeyChord(key: name, ctrl: modifiers.contains(.command),
+                    shift: modifiers.contains(.shift), alt: modifiers.contains(.option))
+}
+
+/// The tree's keys, where `onKeyPress` exists (macOS 14); on 13 the view is
+/// unchanged. `send` answers whether a row took the key: a chord no row binds
+/// (or one the caller refuses) passes on.
+struct LayersTreeKeys: ViewModifier {
+    let send: (KeyChord) -> Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14, *) {
+            content.onKeyPress { press in
+                guard let chord = layersTreeKeyChord(press.key, press.modifiers) else { return .ignored }
+                return send(chord) ? .handled : .ignored
+            }
+        } else {
+            content
+        }
     }
 }
 

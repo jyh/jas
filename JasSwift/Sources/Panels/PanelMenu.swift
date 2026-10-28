@@ -327,23 +327,75 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
 /// `layers_panel_content` — the ONE name for it since 2026-09-05; the panel's
 /// file alone had spelled it `panel_selection`).
 ///
-/// `TreeViewContent` keeps the selection in view-lived `@State` and mirrors
-/// it here on every change; before the mirror existed nothing outside that
-/// view could read it, so `active_document.layers_panel_selection_count` was
-/// 0 in every context this app built — the dock's body context read a store
-/// key nothing had ever written. One reader for both surfaces now.
+/// `TreeViewContent` reads and writes the selection here (since 2026-10-28; it
+/// was view-lived `@State` mirrored one way before that). Before the mirror
+/// existed nothing outside that view could read it, so
+/// `active_document.layers_panel_selection_count` was 0 in every context this
+/// app built. One store value for the tree, the keys and the menus now.
 func layersPanelSelection(model: Model?) -> [[Int]] {
     guard let store = model?.stateStore,
           let raw = store.getPanel("layers_panel_content", "layers_panel_selection") as? [Any]
     else { return [] }
-    return raw.compactMap { entry -> [Int]? in
-        // A `__path__` marker is the stored form (STATUS-jas item 38 step 3c);
-        // a bare list is still read.
-        let entry = (entry as? [String: Any])?["__path__"] ?? entry
-        if let ints = entry as? [Int] { return ints }
-        if let nums = entry as? [NSNumber] { return nums.map { $0.intValue } }
-        return nil
+    return raw.compactMap(layersStoredPath)
+}
+
+/// One stored path: a `__path__` marker (the stored form, STATUS-jas item 38
+/// step 3c, and what the YAML's own writes produce), or a bare list, still read.
+private func layersStoredPath(_ entry: Any) -> [Int]? {
+    let entry = (entry as? [String: Any])?["__path__"] ?? entry
+    if let ints = entry as? [Int] { return ints }
+    if let nums = entry as? [NSNumber] { return nums.map { $0.intValue } }
+    return nil
+}
+
+/// Paths as the store holds them: sorted (a Set has no order and the YAML
+/// indexes `[0]`) `__path__` markers, so a YAML `list_toggle` of `param.path`
+/// compares like with like and finds the tree's entry.
+private func layersPathMarkers(_ paths: Set<[Int]>) -> [[String: Any]] {
+    paths.sorted(by: { $0.lexicographicallyPrecedes($1) }).map { ["__path__": $0] }
+}
+
+/// Write one key of the Layers panel's store, seeding the panel from the
+/// workspace defaults first: the tree can draw before anything initialised it,
+/// and `StateStore.setPanel` on an unknown panel would drop the write. Bumps
+/// `panelStateVersion` so the views reading the store redraw.
+private func setLayersPanelKey(model: Model, _ key: String, _ value: Any) {
+    let store = model.stateStore
+    if !store.hasPanel("layers_panel_content") {
+        let defaults = WorkspaceData.load()?.panelStateDefaults("layers_panel_content") ?? [:]
+        store.initPanel("layers_panel_content", defaults: defaults)
     }
+    store.setPanel("layers_panel_content", key, value)
+    model.panelStateVersion &+= 1
+}
+
+func setLayersPanelSelection(model: Model, _ paths: Set<[Int]>) {
+    setLayersPanelKey(model: model, "layers_panel_selection", layersPathMarkers(paths))
+}
+
+/// The collapsed containers of the Layers tree (`panel.collapsed_paths`), the
+/// list `toggle_element_twirl` and the Left/Right arrow rows toggle and
+/// `tree_visible_rows` reads. A container not listed is expanded.
+func layersCollapsedPaths(model: Model?) -> Set<[Int]> {
+    guard let raw = model?.stateStore.getPanel("layers_panel_content", "collapsed_paths") as? [Any]
+    else { return [] }
+    return Set(raw.compactMap(layersStoredPath))
+}
+
+func setLayersCollapsedPaths(model: Model, _ paths: Set<[Int]>) {
+    setLayersPanelKey(model: model, "collapsed_paths", layersPathMarkers(paths))
+}
+
+/// The row being renamed inline (`panel.renaming_element`), or nil: written by
+/// `rename_element` (F2, Enter, a double-click) and cleared to null by
+/// `confirm_rename` / `cancel_rename`.
+func layersRenamingPath(model: Model?) -> [Int]? {
+    model?.stateStore.getPanel("layers_panel_content", "renaming_element").flatMap(layersStoredPath)
+}
+
+func setLayersRenamingPath(model: Model, _ path: [Int]?) {
+    setLayersPanelKey(model: model, "renaming_element",
+                      path.map { ["__path__": $0] as Any } ?? NSNull())
 }
 
 /// The artboards-panel selection ids, read from the store scope the
