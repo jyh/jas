@@ -1878,7 +1878,8 @@ fn selection_for_ids(
 fn is_selection_only_verb(name: &str) -> bool {
     matches!(
         name,
-        "select_rect" | "select_by_ids" | "select_element" | "select_all" | "add_to_selection"
+        "select_rect" | "select_by_ids" | "select_element" | "select_path" | "select_all"
+            | "add_to_selection"
     )
 }
 
@@ -2130,6 +2131,23 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
                 return Err(OpError::MissingTarget { id: format!("{path:?}") });
             }
             Controller::select_element(model, &path);
+            targets = controller::selection_to_ids(model.document());
+        }
+        // The Layers select square's DIRECT selection (STATUS-jas item 38): the
+        // selection becomes exactly the element at `path`. Unlike `select_element`
+        // it never lifts a grouped child to its group, as both native trees'
+        // squares do not. An absent or empty path is MissingTarget, as for select_element.
+        "select_path" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            if path.is_empty() || model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            Controller::set_selection(
+                model,
+                vec![crate::document::document::ElementSelection::all(path)],
+            );
             targets = controller::selection_to_ids(model.document());
         }
         // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28):

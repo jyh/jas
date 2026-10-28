@@ -2236,7 +2236,7 @@
       "effects": [
         {
           "doc.op": {
-            "op": "select_element",
+            "op": "select_path",
             "path": "param.path"
           }
         }
