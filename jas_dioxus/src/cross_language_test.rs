@@ -5749,6 +5749,7 @@ pub(crate) mod tests {
     #[test]
     fn operation_layers_row_ops() {
         run_operation_fixture("operations/layers_row_ops.json");
+        run_operation_fixture("operations/select_path.json");
     }
 
     /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md
