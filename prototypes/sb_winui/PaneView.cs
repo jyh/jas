@@ -1526,7 +1526,7 @@ public sealed partial class MainWindow
         /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
         /// </summary>
         private void SendPane(string widget, string eventName, string? value, string? path = null,
-                              Dictionary<string, object>? gesture = null)
+                              Dictionary<string, object>? gesture = null, string? key = null)
         {
             var act = new PanelClickCmd
             {
@@ -1537,6 +1537,7 @@ public sealed partial class MainWindow
                 Event = eventName,
                 Value = value,
                 Gesture = gesture,
+                Key = key,
                 Alt = IsKeyDown(Windows.System.VirtualKey.Menu),
                 Shift = IsKeyDown(Windows.System.VirtualKey.Shift),
                 Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
@@ -1589,14 +1590,29 @@ public sealed partial class MainWindow
             if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { return box; }
 
             var id = leaf.Id;
+            // jas item 40: a field whose node answers `keydown` / `blur` (the
+            // rename fields) sends those events and the template decides; every
+            // other field commits, as before. The plan's `events` says which.
+            var takesKeys = PanelWire.Answers(leaf.Events, "keydown");
+            var takesBlur = PanelWire.Answers(leaf.Events, "blur");
             box.KeyDown += (_, e) =>
             {
+                if (takesKeys)
+                {
+                    if (PanelWire.KeyName(e.Key.ToString()) is not { } name) { return; }
+                    e.Handled = true;
+                    // The text BEFORE the key acts: KeyDown runs before the box
+                    // applies it, and neither Enter nor Escape edits the text.
+                    SendPane(id, "keydown", box.Text, leaf.Path, key: name);
+                    return;
+                }
                 if (e.Key != Windows.System.VirtualKey.Enter) { return; }
                 e.Handled = true;
                 CommitBox(box, id, leaf.Path);
             };
             void Blur()
             {
+                if (takesBlur) { SendPane(id, "blur", box.Text, leaf.Path); return; }
                 if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id, leaf.Path); }
             }
             box.LostFocus += (_, _) => Blur();

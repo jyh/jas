@@ -358,6 +358,27 @@ static class Program
             && Bool(mods, "alt") == true && Bool(mods, "shift") == false
             && Bool(mods, "ctrl") == true && Bool(mods, "meta") == false, Show(mods));
 
+        // jas item 40 (#715): a text field whose node answers `keydown` sends the
+        // key's W3C name and the text BEFORE the key acts, at its plan path; one
+        // that answers `blur` sends its text on losing focus. The plan's `events`
+        // channel says which; the shell does not decide by kind.
+        var keyed = Parse(PanelWire.EventJson("lp_name_edit", "keydown", "Bob", false, false, false, false, "[3,0,6]", "Enter"));
+        Check("item 40: a keydown carries its key name, its text and its plan path",
+            keyed is not null && Str(keyed, "event") == "keydown" && Str(keyed, "key") == "Enter"
+            && Str(keyed, "value") == "Bob" && keyed.RootElement.TryGetProperty("path", out _), Show(keyed));
+        Check("item 40: an event with no key sends no key field",
+            press is not null && !press.RootElement.TryGetProperty("key", out _), Show(press));
+        Eq("item 40: Enter crosses as Enter", "Enter", PanelWire.KeyName("Enter") ?? "(none)");
+        Eq("item 40: Escape crosses as Escape", "Escape", PanelWire.KeyName("Escape") ?? "(none)");
+        Eq("item 40: a letter is the box's own, not sent", "(none)", PanelWire.KeyName("A") ?? "(none)");
+        Eq("item 40: Tab is not sent", "(none)", PanelWire.KeyName("Tab") ?? "(none)");
+        Check("item 40: a node that answers keydown takes its keys",
+            PanelWire.Answers(new[] { "keydown", "blur" }, "keydown"), "");
+        Check("item 40: a node that answers only commit does not",
+            !PanelWire.Answers(new[] { "commit" }, "keydown"), "");
+        Check("item 40: no events channel answers nothing",
+            !PanelWire.Answers(null, "blur"), "");
+
         var token = PanelWire.RowValue("a b\tc");
         Check("W2b-2: a row value is one whitespace-free token",
             token.Length > 0 && !token.Any(char.IsWhiteSpace), $"'{token}'");

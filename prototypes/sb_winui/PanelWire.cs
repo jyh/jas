@@ -91,9 +91,11 @@ internal static class PanelWire
     /// a `foreach` stamped out can be addressed (its id names a template). A
     /// path that is not a JSON array of non-negative integers is left out, so
     /// the event falls back to the widget id rather than carrying garbage.
+    /// jas item 40: a `keydown` also carries `key`, the key's W3C name
+    /// (<see cref="KeyName"/>); every other event carries none.
     internal static byte[] EventJson(string widget, string eventName, string? value,
                                      bool alt, bool shift, bool ctrl, bool meta,
-                                     string? path = null)
+                                     string? path = null, string? key = null)
     {
         var ev = new Dictionary<string, object>
         {
@@ -105,9 +107,32 @@ internal static class PanelWire
             ["meta"] = meta,
         };
         if (value is not null) { ev["value"] = value; }
+        if (key is not null) { ev["key"] = key; }
         if (PlanPath(path) is { } p) { ev["path"] = p; }
         return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
     }
+
+    /// <summary>
+    /// jas item 40: the W3C name a text field's key crosses as, from WinUI's
+    /// `VirtualKey` name, or null for a key the box keeps (it types, moves the
+    /// caret, or has no behaviour in any template yet). Only Enter and Escape
+    /// have behaviours today (`layers.yaml`, `artboards.yaml`); sending every
+    /// keystroke would cross the boundary once per character to be refused
+    /// `EmptyBehavior`.
+    /// </summary>
+    internal static string? KeyName(string virtualKey) => virtualKey switch
+    {
+        "Enter" => "Enter",
+        "Escape" => "Escape",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether the plan says a node answers <paramref name="eventName"/>
+    /// (<see cref="ReadEvents"/>). No channel answers nothing.
+    /// </summary>
+    internal static bool Answers(IReadOnlyList<string>? events, string eventName) =>
+        events is not null && events.Contains(eventName);
 
     /// <summary>
     /// The event JSON for a gesture on a stops kind (`WIDGET_EVENTS.md` §The
