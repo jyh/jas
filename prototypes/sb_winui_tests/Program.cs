@@ -379,6 +379,42 @@ static class Program
         Check("item 40: no events channel answers nothing",
             !PanelWire.Answers(null, "blur"), "");
 
+        // jas §612: every layout container the plan lists (`chrome` or
+        // `containers`) whose `events` is non-empty gets a hit surface beneath
+        // its children, addressed by its plan path. One with `events: []`, no
+        // `events`, or under a `hidden` path gets none.
+        const string HitPlan = """
+            {"height": 60,
+             "chrome": [
+               {"path": [3, 0], "rect": {"x": 0, "y": 0, "w": 200, "h": 24}, "type": "container", "id": "", "values": {}, "events": ["click", "double_click"]},
+               {"path": [3, 1], "rect": {"x": 0, "y": 24, "w": 200, "h": 24}, "type": "container", "id": "", "values": {}, "events": []}],
+             "leaves": [
+               {"path": [3, 0, 2], "rect": {"x": 40, "y": 0, "w": 60, "h": 24}, "type": "text", "id": "lp_name", "values": {}, "events": ["double_click"]}],
+             "containers": [
+               {"path": [3, 0, 5], "rect": {"x": 180, "y": 0, "w": 20, "h": 24}, "type": "container", "id": "lp_select", "values": {"bind.visible": "true"}, "events": ["click"]},
+               {"path": [4, 0], "rect": {"x": 0, "y": 48, "w": 200, "h": 12}, "type": "container", "id": "", "values": {"bind.visible": "false"}, "events": ["click"]},
+               {"path": [5], "rect": {"x": 0, "y": 0, "w": 1, "h": 1}, "type": "container", "id": "", "values": {"bind.x": "1"}}],
+             "hidden": [[4]]}
+            """;
+        var hits = PanelWire.HitBoxes(HitPlan);
+        Eq("§612: the containers with events get surfaces, in plan order",
+            "[3,0]|[3,0,5]", hits is null ? "(null)" : string.Join("|", hits.Select(h => h.Path.Replace(" ", ""))));
+        Eq("§612: a surface keeps its rect",
+            "180,0,20x24", hits is { Count: 2 } ? $"{hits[1].X},{hits[1].Y},{hits[1].W}x{hits[1].H}" : "(none)");
+        Eq("§612: a surface keeps its id and events",
+            "lp_select:click", hits is { Count: 2 } ? $"{hits[1].Id}:{string.Join(",", hits[1].Events)}" : "(none)");
+        Check("§612: a leaf is never a surface (it is its own control)",
+            hits is not null && hits.All(h => h.Id != "lp_name"), "");
+        Check("§612: an unparseable plan reads null, never 'no surfaces'",
+            PanelWire.HitBoxes("{not json") is null, "");
+        // A text that answers `double_click` (the Layers name starts a rename).
+        Check("§612: a text answering double_click routes it",
+            PanelWire.RoutesEvent(new[] { "double_click" }, "lp_name", null, "double_click"), "");
+        Check("§612: ...an id-less one by its plan path",
+            PanelWire.RoutesEvent(new[] { "double_click" }, "", "[3,0,2]", "double_click"), "");
+        Check("§612: a text that answers only click does not route a double_click",
+            !PanelWire.RoutesEvent(new[] { "click" }, "ap_name", null, "double_click"), "");
+
         var token = PanelWire.RowValue("a b\tc");
         Check("W2b-2: a row value is one whitespace-free token",
             token.Length > 0 && !token.Any(char.IsWhiteSpace), $"'{token}'");
