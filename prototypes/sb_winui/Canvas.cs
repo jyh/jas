@@ -121,6 +121,9 @@ internal sealed class KeyCmd : Cmd
     /// <summary>A resend after `NeedsClipboard`: the request carries <see cref="Clipboard"/>.</summary>
     internal bool ClipboardCarried;
     internal string? Clipboard;
+    /// <summary>jas §644/#753: the focused panel's content id, for a key sent to
+    /// the panel door; null for the document's key door.</summary>
+    internal string? Panel;
 }
 
 internal sealed class PointerCmd : Cmd
@@ -1011,7 +1014,7 @@ internal sealed unsafe class Canvas : IDisposable
     internal void Pointer(uint kind, double x, double y, uint mods) =>
         _queue.Add(new PointerCmd { Kind = kind, X = x, Y = y, Mods = mods });
 
-    internal void Key(uint code, uint mods) => _queue.Add(new KeyCmd { Code = code, Mods = mods });
+    internal void Key(uint code, uint mods, string? panel = null) => _queue.Add(new KeyCmd { Code = code, Mods = mods, Panel = panel });
 
     internal void PointerReport(PointerReportCmd report) => _queue.Add(report);
 
@@ -1112,14 +1115,23 @@ internal sealed unsafe class Canvas : IDisposable
             return false;
         }
         var request = KeyWire.Request(name, (k.Mods & JasCore.ModShift) != 0,
-                                      (k.Mods & JasCore.ModAlt) != 0, (k.Mods & JasCore.ModCmd) != 0)!;
+                                      (k.Mods & JasCore.ModAlt) != 0, (k.Mods & JasCore.ModCmd) != 0, k.Panel)!;
         if (k.ClipboardCarried) { request = ActWire.WithClipboard(request, k.Clipboard); }
         var json = System.Text.Encoding.UTF8.GetBytes(request);
         var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
         var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
-        var head = $"key={name} mods={k.Mods}";
+        var head = k.Panel is null ? $"key={name} mods={k.Mods}" : $"key={name} mods={k.Mods} panel={k.Panel}";
         if (reply.Length == 0)
         {
+            // jas §644/#753: a key the focused panel does not bind goes on to the
+            // document's key door, so a panel with focus keeps nothing it does
+            // not claim (Delete on a Color panel button still deletes).
+            if (k.Panel is not null && KeyWire.UnboundPanelKey(channel))
+            {
+                _report($"PANEL KEY UNBOUND {head} -> document {Tids()}");
+                _queue.Add(new KeyCmd { Code = k.Code, Mods = k.Mods });
+                return false;
+            }
             var code = k.Code; var mods = k.Mods;
             if (ClipboardAsked(channel, k.ClipboardCarried, head, text => _queue.Add(
                     new KeyCmd { Code = code, Mods = mods, ClipboardCarried = true, Clipboard = text })))
@@ -1158,6 +1170,14 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyExportPdf(reply, head);
         ApplyLayoutReply(reply, head);
         ApplySaveAllThenClose(reply, head);
+        if (k.Panel is not null)
+        {
+            // A panel key can move panel state with no document change (the
+            // tree's arrows, a rename): re-read the panes as a click does.
+            ApplyMenuRefresh("panel");
+            ApplyPanelRefresh("key");
+            ApplyPanesRefresh("key");
+        }
         _report($"KEY RAN {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog={DialogWire.Named(reply) ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
         return false;
