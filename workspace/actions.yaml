@@ -2092,7 +2092,22 @@ actions:
     category: layers
     tier: 3
     effects:
-      - log: "layers_select_all"
+      # STATUS-jas item 8 class L. "Visible" is the tree's rows as drawn
+      # (`tree_visible_rows`, the rows Shift-click and the arrow keys walk), so
+      # a collapsed container's descendants are not listed: selecting the
+      # container already covers them. In isolation, a row is kept when the
+      # isolated container's path is a proper prefix of its own. A row's
+      # `path` is a plain list in some runtimes, so every use goes through
+      # `as_path`, and the stored selection holds path markers. Panel state
+      # only; the target layer does not change.
+      - let:
+          sa_rows: "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
+      - let:
+          sa_root: "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1] else null"
+      - set_panel_state:
+          panel: layers
+          key: layers_panel_selection
+          value: "map(filter(sa_rows, fun r -> sa_root == null or (as_path(r.path).depth > as_path(sa_root).depth and all(range(0, as_path(sa_root).depth), fun i -> as_path(r.path).indices[i] == as_path(sa_root).indices[i]))), fun r -> as_path(r.path))"
 
   layers_nav_up:
     description: >
