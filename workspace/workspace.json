@@ -2288,7 +2288,7 @@
       ]
     },
     "layers_nav_up": {
-      "description": "Move the panel-selection focus to the previous visible row in the layers panel. If at the first row, no-op. The focus is the last panel-selected row; with no row selected the key does nothing. A move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
+      "description": "Move the panel-selection focus to the previous visible row in the layers panel. If at the first row, no-op. The focus is the last panel-selected row; with no row selected, Up selects the last visible row. A move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
       "category": "layers",
       "tier": 3,
       "effects": [
@@ -2309,14 +2309,31 @@
         },
         {
           "if": {
-            "condition": "nav_before.length > 1",
+            "condition": "nav_focus == null and nav_rows.length > 0",
             "then": [
               {
                 "dispatch": {
                   "action": "layers_panel_select",
                   "params": {
-                    "path": "nav_before[nav_before.length - 2]"
+                    "path": "nav_rows[nav_rows.length - 1].path"
                   }
+                }
+              }
+            ],
+            "else": [
+              {
+                "if": {
+                  "condition": "nav_before.length > 1",
+                  "then": [
+                    {
+                      "dispatch": {
+                        "action": "layers_panel_select",
+                        "params": {
+                          "path": "nav_before[nav_before.length - 2]"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             ]
@@ -2325,7 +2342,7 @@
       ]
     },
     "layers_nav_down": {
-      "description": "Move the panel-selection focus to the next visible row in the layers panel. If at the last row, no-op. The focus is the last panel-selected row; with no row selected the key does nothing. A move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
+      "description": "Move the panel-selection focus to the next visible row in the layers panel. If at the last row, no-op. The focus is the last panel-selected row; with no row selected, Down selects the first visible row. A move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
       "category": "layers",
       "tier": 3,
       "effects": [
@@ -2346,14 +2363,31 @@
         },
         {
           "if": {
-            "condition": "nav_after.length > 1",
+            "condition": "nav_focus == null and nav_rows.length > 0",
             "then": [
               {
                 "dispatch": {
                   "action": "layers_panel_select",
                   "params": {
-                    "path": "nav_after[1]"
+                    "path": "nav_rows[0].path"
                   }
+                }
+              }
+            ],
+            "else": [
+              {
+                "if": {
+                  "condition": "nav_after.length > 1",
+                  "then": [
+                    {
+                      "dispatch": {
+                        "action": "layers_panel_select",
+                        "params": {
+                          "path": "nav_after[1]"
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             ]
