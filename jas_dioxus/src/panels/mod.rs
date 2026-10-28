@@ -550,7 +550,7 @@ mod tests {
     /// Where this app WRITES a declared panel key and where it READS one back
     /// have to be the same place.
     ///
-    /// `panel_menu::typed_panel_slot_keys` names the five (panel, key) pairs a
+    /// `panel_menu::typed_panel_slot_keys` names the seven (panel, key) pairs a
     /// panel-named `set_panel_state` is routed into a typed `AppState` slot for
     /// instead of into the generic per-panel table; `panel_menu_ctx` builds the
     /// scope a panel menu evaluates against. This drives each pair END TO END —
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn every_typed_write_target_round_trips_through_the_menu_context() {
         let claimed = panel_menu::typed_panel_slot_keys();
-        assert_eq!(claimed.len(), 5, "the typed-slot census changed; add a probe below");
+        assert_eq!(claimed.len(), 7, "the typed-slot census changed; add a probe below");
         for (content_id, key) in claimed {
             // A value the key's own enum / type accepts and that is NOT the
             // declared default, so a write that silently does nothing reds.
@@ -574,6 +574,10 @@ mod tests {
                     ("\"triangle\"", serde_json::json!("triangle")),
                 ("layers_panel_content", "type_filter") =>
                     ("[\"path\"]", serde_json::json!(["path"])),
+                ("layers_panel_content", "collapsed_paths") =>
+                    ("[[1, 0]]", serde_json::json!([[1, 0]])),
+                ("layers_panel_content", "renaming_element") =>
+                    ("[1, 0]", serde_json::json!([1, 0])),
                 other => panic!("no probe for {other:?}"),
             };
             let layout = WorkspaceLayout::default_layout();

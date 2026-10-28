@@ -1864,7 +1864,9 @@ actions:
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
-      - log: "cycle_element_visibility"
+      # One undo step through the op layer; `path` is evaluated (doc.op).
+      - snapshot
+      - doc.op: { op: cycle_element_visibility, path: "param.path" }
 
   solo_element_visibility:
     description: >
@@ -1904,7 +1906,9 @@ actions:
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
-      - log: "toggle_element_lock"
+      # One undo step through the op layer; `path` is evaluated (doc.op).
+      - snapshot
+      - doc.op: { op: toggle_element_lock, path: "param.path" }
 
   toggle_element_twirl:
     description: >
@@ -1917,7 +1921,8 @@ actions:
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
-      - log: "toggle_element_twirl"
+      # Panel state only: the path joins or leaves collapsed_paths.
+      - list_toggle: { target: "panel.collapsed_paths", value: "param.path", panel: layers }
 
   # Isolation mode
 
@@ -2087,7 +2092,10 @@ actions:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     enabled_when: "active_document.layers_panel_selection_count == 1"
     effects:
-      - log: "rename_element"
+      - set_panel_state:
+          panel: layers
+          key: renaming_element
+          value: "param.path"
 
   confirm_rename:
     description: >
@@ -2097,8 +2105,21 @@ actions:
       undoable action.
     category: layers
     tier: 3
+    params:
+      path: { type: path, description: "The renamed row's element path (STATUS-jas item 38)." }
+      name: { type: string, description: "The typed name; empty clears it, so the row shows its type name." }
     effects:
-      - log: "confirm_rename"
+      # No name (the template's Enter / blur until the text_input event value
+      # is defined) renames nothing; an empty name clears it.
+      - if:
+          condition: "param.name != null"
+          then:
+            - snapshot
+            - doc.op: { op: set_element_name, path: "param.path", name: "param.name" }
+      - set_panel_state:
+          panel: layers
+          key: renaming_element
+          value: "null"
 
   cancel_rename:
     description: >
@@ -2107,7 +2128,10 @@ actions:
     category: layers
     tier: 3
     effects:
-      - log: "cancel_rename"
+      - set_panel_state:
+          panel: layers
+          key: renaming_element
+          value: "null"
 
   # Search and filter
 

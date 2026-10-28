@@ -1467,7 +1467,7 @@ pub(crate) fn apply_set_panel_state_with_ctx(
 /// WRITTEN to, and `typed_panel_slot_keys` is the two lists' shared census.
 /// Anything not claimed here lands in the generic `AppState::panel_state`
 /// table, which is the default and the reference's own semantics; these arms
-/// exist only because this app already keeps these five values somewhere its
+/// exist only because this app already keeps these seven values somewhere its
 /// panel bodies render from.
 fn apply_typed_panel_slot(
     st: &mut crate::workspace::app_state::AppState,
@@ -1506,8 +1506,32 @@ fn apply_typed_panel_slot(
             }
             true
         }
+        // The Layers twirl and rename row (STATUS-jas item 38): paths, as the
+        // tree draws them. An entry that is not a path is dropped.
+        ("layers_panel_content", "collapsed_paths") => {
+            if let Some(items) = resolved.as_array() {
+                st.layers_collapsed = items.iter().filter_map(json_index_path).collect();
+            }
+            true
+        }
+        ("layers_panel_content", "renaming_element") => {
+            st.layers_renaming = json_index_path(resolved);
+            true
+        }
         _ => false,
     }
+}
+
+/// A path as panel state holds one: a list of child indices, or the store's
+/// `{"__path__": [..]}` marker. An index may arrive as a float (`1.0`, how
+/// the expression layer writes a number); a fraction or a negative is not an
+/// index, and anything else is not a path.
+fn json_index_path(v: &serde_json::Value) -> Option<Vec<usize>> {
+    let items = v.get("__path__").unwrap_or(v).as_array()?;
+    items
+        .iter()
+        .map(|i| i.as_f64().filter(|n| *n >= 0.0 && n.fract() == 0.0).map(|n| n as usize))
+        .collect()
 }
 
 /// Get a stroke panel field as a JSON value.
@@ -2606,12 +2630,13 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // list_toggle: { target, value } — set membership. The Layers type filter
-    // is held as a typed set. Any other `panel.<key>` target is the list in
-    // the panel whose menu is running (`AppState::menu_panel`), written through
-    // the panel-named `set_panel_state` route (the Brushes menu's Show <Type>
-    // Brushes). With no running menu panel it is a no-op, as an unknown
-    // `list_push` target is.
+    // list_toggle: { target, value, panel? } — set membership. The Layers type
+    // filter is held as a typed set. Any other `panel.<key>` target is the list
+    // in the effect's named `panel` (the Layers twirl's collapsed_paths), else
+    // in the panel whose menu is running (`AppState::menu_panel`), written
+    // through the panel-named `set_panel_state` route (the Brushes menu's Show
+    // <Type> Brushes). With neither it is a no-op, as an unknown `list_push`
+    // target is.
     if let Some(lt) = eff.get("list_toggle").and_then(|v| v.as_object()) {
         let target = lt.get("target").and_then(|v| v.as_str()).unwrap_or("");
         let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
@@ -2622,7 +2647,13 @@ fn run_yaml_effect(
                     st.layers_type_filter.insert(t.to_string());
                 }
             }
-        } else if let (Some(key), Some(pid)) = (target.strip_prefix("panel."), st.menu_panel.clone()) {
+        } else if let (Some(key), Some(pid)) = (
+            target.strip_prefix("panel."),
+            lt.get("panel")
+                .and_then(|v| v.as_str())
+                .map(crate::panels::panel_menu::panel_content_id)
+                .or_else(|| st.menu_panel.clone()),
+        ) {
             let current = crate::panels::panel_menu::panel_menu_ctx(&pid, st)["panel"][key].clone();
             let mut list = current.as_array().cloned().unwrap_or_default();
             match list.iter().position(|v| v == &value) {

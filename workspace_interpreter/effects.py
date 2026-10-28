@@ -193,6 +193,28 @@ def _dispatch_param(v, store: StateStore, ctx: dict):
     return value
 
 
+def _doc_op_args(spec: dict, eval_ctx: dict) -> dict:
+    """A `doc.op` spec as the op layer reads it: `op` verbatim, every other
+    string field evaluated as an expression in the action's scope, other
+    values verbatim. A PATH value passes as its index list (the op layer's
+    `parse_path` form, not the store's `__path__` marker); a closure as null.
+    Rust `doc_op_args` and Swift `docOpArgs` are the same."""
+    from workspace_interpreter.expr_types import ValueType
+    op = {}
+    for key, v in spec.items():
+        if key == "op" or not isinstance(v, str):
+            op[key] = v
+            continue
+        result = evaluate(v, eval_ctx)
+        if result.type == ValueType.PATH:
+            op[key] = list(result.value)
+        elif result.type == ValueType.CLOSURE:
+            op[key] = None
+        else:
+            op[key] = result.value
+    return op
+
+
 def _used_stroke_brushes(document: dict | None) -> set[str]:
     """Every non-empty ``stroke_brush`` id on any element of the document, at
     any depth (layers and groups nest through ``children``), selected or not.
@@ -542,13 +564,15 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         store.set_artboard_field(id_val.value, field, value)
         return None
 
-    # doc.op: { op: <name>, ...literal fields } — one journaled op by name,
-    # through the op layer every port has (the model verbs: unlock_all,
-    # show_all). Applied to the store's document (StateStore.apply_op).
+    # doc.op: { op: <name>, ...fields } — one journaled op by name, through
+    # the op layer every port has (the model verbs: unlock_all, show_all).
+    # Applied to the store's document (StateStore.apply_op). Every field but
+    # `op` is an expression in the action's scope, so a row action names its
+    # row (`path: param.path`, STATUS-jas item 38); see _doc_op_args.
     if "doc.op" in effect:
         spec = effect["doc.op"]
         if isinstance(spec, dict) and isinstance(spec.get("op"), str):
-            store.apply_op(dict(spec))
+            store.apply_op(_doc_op_args(spec, store.eval_context(ctx)))
         return None
 
     # doc.make_instance: { offset: <number> } — Object > Make Instance, an
@@ -1380,7 +1404,9 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                                         "reason": "field_not_writable"})
         return
 
-    # list_toggle: { target, value } -- set membership, the checkbox primitive
+    # list_toggle: { target, value, panel? } -- set membership, the checkbox
+    # primitive; `panel.<key>` on the named panel when `panel` is given (as
+    # set_panel_state), else the active one
     if "list_toggle" in effect:
         lt = effect["list_toggle"]
         target = lt.get("target", "")
@@ -1397,7 +1423,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         else:
             value = result.value
         if len(parts) == 2 and parts[0] == "panel":
-            panel_id = store.get_active_panel_id()
+            panel_id = lt.get("panel") or store.get_active_panel_id()
             if panel_id:
                 store.list_toggle(panel_id, parts[1], value)
         return

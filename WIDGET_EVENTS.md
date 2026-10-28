@@ -533,7 +533,16 @@ module, none of them is a measured failure.
 - **The engine's value door** (`jas_panel_behavior` with a `value`) and
   the panel-write host. They implement this contract; they do not
   define it.
-- **What `input`, `blur` and `keydown` mean on `text_input`.**
+- **What `input`, `blur` and `keydown` mean on `text_input`.** One open
+  item depends on it: the two inline rename fields (`lp_name_edit` in
+  `layers.yaml`, the Artboards rename field in `artboards.yaml`) raise
+  `confirm_rename` / `confirm_artboard_rename` on `keydown` (Enter) and
+  `blur`, and both actions take the typed name as a param (`name`,
+  `new_name`). Until `event.value` is defined on those events, neither
+  template can pass it: the native ports pass the name themselves, and a
+  dispatch with no name renames nothing (`confirm_rename`'s
+  `param.name != null` guard; corpus case
+  `confirm_rename_without_a_name_keeps_it`).
 - **Dialog OK / Cancel / preview.** A dialog widget's commit follows this
   contract. What the dialog does with its state afterwards is
   `transcripts/SCALE_TOOL.md` §Preview and the dialog's own YAML.
