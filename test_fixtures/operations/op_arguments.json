@@ -375,6 +375,14 @@
         "array"
       ]
     },
+    "set_element_visibility": {
+      "path": [
+        "array"
+      ],
+      "visibility": [
+        "string"
+      ]
+    },
     "set_graphics_field": {
       "field": [
         "string"
@@ -660,6 +668,10 @@
     "set_element_name": {
       "name": "witnessed",
       "path": "witnessed"
+    },
+    "set_element_visibility": {
+      "path": "witnessed",
+      "visibility": "witnessed"
     },
     "set_graphics_field": {
       "field": "witnessed",
