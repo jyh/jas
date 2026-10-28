@@ -127,9 +127,8 @@ private func twoLayers() -> Model {
 // MARK: - the tree's key hook
 
 // `layersTreeKeyChord` is the hook's translation of a SwiftUI key press into the
-// chord `LayersPanel.treeKey` resolves. Delete/Backspace and ⌘A stay with the
-// view's native monitor (its orphan-confirm Delete; `layers_select_all` is a
-// `log` stub), so the hook names neither.
+// chord `LayersPanel.treeKey` resolves. Delete/Backspace stay with the view's
+// native monitor (its orphan-confirm Delete), so the hook does not name them.
 
 @Test func theTreeHookNamesTheKeysLayersYamlBindsAndNoOthers() {
     #expect(layersTreeKeyChord(.upArrow, []) == KeyChord(key: "ArrowUp"))
@@ -142,7 +141,9 @@ private func twoLayers() -> Model {
             == KeyChord(key: "F2"))
     #expect(layersTreeKeyChord(.delete, []) == nil, "native: the orphan-confirm Delete")
     #expect(layersTreeKeyChord(.deleteForward, []) == nil)
-    #expect(layersTreeKeyChord("a", .command) == nil, "native: select all")
+    #expect(layersTreeKeyChord("a", .command) == KeyChord(key: "A", ctrl: true),
+            "⌘A is the Ctrl+A row (`layers_select_all`)")
+    #expect(layersTreeKeyChord("a", []) == nil, "a plain letter is not the tree's")
     #expect(layersTreeKeyChord("x", []) == nil)
 }
 
@@ -164,10 +165,11 @@ private func twoLayers() -> Model {
     }
     let ctx = LayersPanel.actionContext(model: model, ws: ws, panelSelection: [],
                                         artboardsPanelSelection: [], params: [:])
-    let keys: [KeyEquivalent] = [.upArrow, .downArrow, .leftArrow, .rightArrow, .return, .escape,
-                                 KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!))]
-    for k in keys {
-        let chord = layersTreeKeyChord(k, [])!
+    let keys: [(KeyEquivalent, EventModifiers)] = [
+        (.upArrow, []), (.downArrow, []), (.leftArrow, []), (.rightArrow, []), (.return, []), (.escape, []),
+        (KeyEquivalent(Character(UnicodeScalar(NSF2FunctionKey)!)), []), ("a", .command)]
+    for (k, mods) in keys {
+        let chord = layersTreeKeyChord(k, mods)!
         #expect(resolvePanelKey(panel, chord: chord, context: ctx) != nil, "\(chord.key)")
     }
 }
@@ -184,4 +186,22 @@ private func twoLayers() -> Model {
     let unbound = model.panelStateVersion
     #expect(!LayersPanel.treeKey(KeyChord(key: "X"), model: model))
     #expect(model.panelStateVersion == unbound, "an unbound key changes nothing")
+}
+
+@Test func commandASelectsEveryVisibleRowThroughTheYaml() {
+    // `layers_select_all` runs its YAML (the visible rows, scoped to an
+    // isolation); the tree's native select-all, which took every element path,
+    // is gone.
+    let model = twoLayers()
+    setLayersPanelSelection(model: model, [[1]])
+    #expect(LayersPanel.treeKey(KeyChord(key: "A", ctrl: true), model: model))
+    #expect(layersPanelSelection(model: model) == [[1], [1, 0], [0], [0, 0]], "rows, top first")
+}
+
+@Test func commandAInIsolationSelectsOnlyTheIsolatedSubtree() {
+    let model = twoLayers()
+    setLayersPanelSelection(model: model, [[1]])
+    model.layersIsolationStack = [[1]]
+    #expect(LayersPanel.treeKey(KeyChord(key: "A", ctrl: true), model: model))
+    #expect(layersPanelSelection(model: model) == [[1, 0]])
 }

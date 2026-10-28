@@ -972,5 +972,46 @@
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}]}
     }
+  },
+  {
+    "_doc": "Ctrl/Command+A in the Layers tree (layers_select_all): every visible row becomes the panel selection, top first, as the tree draws them: [1], [1,0], [0], [0,0]. Panel state only, so the document and its target layer do not change.",
+    "name": "layers_select_all_selects_every_visible_row",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "layers_select_all", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}, {"__path__": [1, 0]}, {"__path__": [0]}, {"__path__": [0, 0]}]}
+    }
+  },
+  {
+    "_doc": "layers_select_all with layer [1] collapsed: [1,0] is not a visible row, so it is not selected (a selected collapsed container already covers its descendants, layers.yaml). Rows: [1], [0], [0,0].",
+    "name": "layers_select_all_skips_the_rows_a_collapse_hides",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "toggle_element_twirl", "params": {"path": [1]}},
+      {"action": "layers_select_all", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}, {"__path__": [0]}, {"__path__": [0, 0]}], "collapsed_paths": [[1]]}
+    }
+  },
+  {
+    "_doc": "layers_select_all in isolation mode selects only the visible rows INSIDE the isolated container (the action's description). enter_isolation_mode isolates the one selected container, [1]; its one row inside is [1,0].",
+    "name": "layers_select_all_in_isolation_selects_only_the_isolated_subtree",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [[1]],
+    "actions": [
+      {"action": "enter_isolation_mode", "params": {}},
+      {"action": "layers_select_all", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
+    }
   }
 ]

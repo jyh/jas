@@ -2283,7 +2283,21 @@
       "tier": 3,
       "effects": [
         {
-          "log": "layers_select_all"
+          "let": {
+            "sa_rows": "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
+          }
+        },
+        {
+          "let": {
+            "sa_root": "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1] else null"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "layers_panel_selection",
+            "value": "map(filter(sa_rows, fun r -> sa_root == null or (as_path(r.path).depth > as_path(sa_root).depth and all(range(0, as_path(sa_root).depth), fun i -> as_path(r.path).indices[i] == as_path(sa_root).indices[i]))), fun r -> as_path(r.path))"
+          }
         }
       ]
     },
