@@ -2288,42 +2288,202 @@
       ]
     },
     "layers_nav_up": {
-      "description": "Move the panel-selection focus to the previous visible row in the layers panel. If at the first row, no-op.\n",
+      "description": "Move the panel-selection focus to the previous visible row in the layers panel. If at the first row, no-op. The focus is the last panel-selected row; with no row selected the key does nothing. A move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
       "category": "layers",
       "tier": 3,
       "effects": [
         {
-          "log": "layers_nav_up"
+          "let": {
+            "nav_rows": "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
+          }
+        },
+        {
+          "let": {
+            "nav_focus": "if panel.layers_panel_selection.length > 0 then panel.layers_panel_selection[panel.layers_panel_selection.length - 1] else null"
+          }
+        },
+        {
+          "let": {
+            "nav_before": "if nav_focus != null and nav_rows.length > 0 then tree_row_range(nav_rows, nav_rows[0].path, nav_focus) else []"
+          }
+        },
+        {
+          "if": {
+            "condition": "nav_before.length > 1",
+            "then": [
+              {
+                "dispatch": {
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "nav_before[nav_before.length - 2]"
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
     },
     "layers_nav_down": {
-      "description": "Move the panel-selection focus to the next visible row in the layers panel. If at the last row, no-op.\n",
+      "description": "Move the panel-selection focus to the next visible row in the layers panel. If at the last row, no-op. The focus is the last panel-selected row; with no row selected the key does nothing. A move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
       "category": "layers",
       "tier": 3,
       "effects": [
         {
-          "log": "layers_nav_down"
+          "let": {
+            "nav_rows": "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
+          }
+        },
+        {
+          "let": {
+            "nav_focus": "if panel.layers_panel_selection.length > 0 then panel.layers_panel_selection[panel.layers_panel_selection.length - 1] else null"
+          }
+        },
+        {
+          "let": {
+            "nav_after": "if nav_focus != null and nav_rows.length > 0 then tree_row_range(nav_rows, nav_focus, nav_rows[nav_rows.length - 1].path) else []"
+          }
+        },
+        {
+          "if": {
+            "condition": "nav_after.length > 1",
+            "then": [
+              {
+                "dispatch": {
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "nav_after[1]"
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
     },
     "layers_nav_right": {
-      "description": "If the focused row is a collapsed container, expand it. If it is an expanded container, move focus to its first child. If it is a leaf, no-op.\n",
+      "description": "If the focused row is a collapsed container, expand it. If it is an expanded container, move focus to its first child; an empty container has none, and the key does nothing. If it is a leaf, no-op. The focus is the last panel-selected row; with no row selected the key does nothing. Expanding or collapsing does not move the selection; a move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
       "category": "layers",
       "tier": 3,
       "effects": [
         {
-          "log": "layers_nav_right"
+          "let": {
+            "nav_rows": "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
+          }
+        },
+        {
+          "let": {
+            "nav_focus": "if panel.layers_panel_selection.length > 0 then panel.layers_panel_selection[panel.layers_panel_selection.length - 1] else null"
+          }
+        },
+        {
+          "let": {
+            "nav_hit": "filter(nav_rows, fun r -> as_path(r.path) == as_path(nav_focus))"
+          }
+        },
+        {
+          "let": {
+            "nav_after": "if nav_focus != null and nav_rows.length > 0 then tree_row_range(nav_rows, nav_focus, nav_rows[nav_rows.length - 1].path) else []"
+          }
+        },
+        {
+          "let": {
+            "nav_next": "if nav_after.length > 1 then filter(nav_rows, fun r -> as_path(r.path) == as_path(nav_after[1])) else []"
+          }
+        },
+        {
+          "if": {
+            "condition": "nav_hit.length > 0 and nav_hit[0].is_container and nav_hit[0].collapsed",
+            "then": [
+              {
+                "list_toggle": {
+                  "target": "panel.collapsed_paths",
+                  "value": "nav_hit[0].path",
+                  "panel": "layers"
+                }
+              }
+            ],
+            "else": [
+              {
+                "if": {
+                  "condition": "nav_hit.length > 0 and nav_hit[0].is_container and nav_next.length > 0 and nav_next[0].depth == nav_hit[0].depth + 1",
+                  "then": [
+                    {
+                      "dispatch": {
+                        "action": "layers_panel_select",
+                        "params": {
+                          "path": "nav_next[0].path"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
         }
       ]
     },
     "layers_nav_left": {
-      "description": "If the focused row is an expanded container, collapse it. If it is a collapsed container or a leaf, move focus to its parent. If already at a top-level layer, no-op.\n",
+      "description": "If the focused row is an expanded container, collapse it. If it is a collapsed container or a leaf, move focus to its parent. If already at a top-level layer, no-op. The focus is the last panel-selected row; with no row selected the key does nothing. Expanding or collapsing does not move the selection; a move selects the new row alone, exactly as a plain click on it does, so its layer becomes the target layer.\n",
       "category": "layers",
       "tier": 3,
       "effects": [
         {
-          "log": "layers_nav_left"
+          "let": {
+            "nav_rows": "tree_visible_rows(active_document.element_tree, panel.collapsed_paths, panel.layers_panel_selection, panel.renaming_element)"
+          }
+        },
+        {
+          "let": {
+            "nav_focus": "if panel.layers_panel_selection.length > 0 then panel.layers_panel_selection[panel.layers_panel_selection.length - 1] else null"
+          }
+        },
+        {
+          "let": {
+            "nav_hit": "filter(nav_rows, fun r -> as_path(r.path) == as_path(nav_focus))"
+          }
+        },
+        {
+          "let": {
+            "nav_before": "if nav_focus != null and nav_rows.length > 0 then tree_row_range(nav_rows, nav_rows[0].path, nav_focus) else []"
+          }
+        },
+        {
+          "let": {
+            "nav_parents": "if nav_hit.length > 0 then filter(nav_rows, fun r -> mem(as_path(r.path), nav_before) and r.depth == nav_hit[0].depth - 1) else []"
+          }
+        },
+        {
+          "if": {
+            "condition": "nav_hit.length > 0 and nav_hit[0].is_container and not nav_hit[0].collapsed",
+            "then": [
+              {
+                "list_toggle": {
+                  "target": "panel.collapsed_paths",
+                  "value": "nav_hit[0].path",
+                  "panel": "layers"
+                }
+              }
+            ],
+            "else": [
+              {
+                "if": {
+                  "condition": "nav_parents.length > 0",
+                  "then": [
+                    {
+                      "dispatch": {
+                        "action": "layers_panel_select",
+                        "params": {
+                          "path": "nav_parents[nav_parents.length - 1].path"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
         }
       ]
     },

@@ -2347,7 +2347,12 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 100, "the fixture corpus changed size");
+        assert_eq!(total, 101, "the fixture corpus changed size");
+        // ⛔ 100 → 101 (jas, 2026-10-28, the layers_nav_right empty-container
+        // case): `two_layers_top_empty.svg`, multi_layer.svg with the circle
+        // removed, so its top layer is empty: one rect, no gradient, no text.
+        // Expected to present; measured by this test's presentable arm. Both
+        // pins bumped in the same edit.
         // ⛔ 99 → 100 (jas, 2026-10-27, promote_to_concept's action case):
         // `regular_square_polygon.svg`, one layer holding one polygon (solid
         // fill, no stroke) whose four points are a regular square: no
@@ -2525,6 +2530,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 100, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 101, "the whole corpus presents");
     }
 }

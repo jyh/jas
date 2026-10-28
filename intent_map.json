@@ -454,20 +454,40 @@
       ]
     },
     "layers_nav_down": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "dispatches": [
+        "layers_panel_select"
+      ],
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "layers_nav_left": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "dispatches": [
+        "layers_panel_select"
+      ],
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "layers_nav_right": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "dispatches": [
+        "layers_panel_select"
+      ],
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "layers_nav_up": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "dispatches": [
+        "layers_panel_select"
+      ],
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "layers_panel_select": {
       "class": "journaling",
@@ -1264,11 +1284,11 @@
     ],
     "by_class": {
       "doc-direct": 5,
-      "journaling": 55,
+      "journaling": 59,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 174,
+      "ui-state": 170,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1318,7 +1338,7 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 55,
+    "journaling_actions": 59,
     "native_intercepts": [
       "export_to_pdf"
     ],

@@ -149,6 +149,13 @@ public enum LayersPanel {
             "layers_panel_selection": selectionMarkers,
             "artboards_panel_selection": artboardsPanelSelection,
             "isolation_stack": model.layersIsolationStack.map { ["__path__": $0] },
+            // The tree's other two binds, from the Layers panel's own store,
+            // which `tree_visible_rows(…, panel.collapsed_paths, …,
+            // panel.renaming_element)` reads. Absent, every collapsed row read
+            // as expanded inside an action: a Shift range and the arrow keys
+            // walked rows the tree hides (layers_nav_* corpus, 2026-10-28).
+            "collapsed_paths": model.stateStore.getPanel("layers_panel_content", "collapsed_paths") ?? [Any](),
+            "renaming_element": model.stateStore.getPanel("layers_panel_content", "renaming_element") ?? NSNull(),
             // The Symbols panel's master (`panel.selected_symbol`), which
             // `place_instance` reads; Rust's app scope carries it the same way.
             "selected_symbol": SymbolsPanel.selectedSymbol(model) ?? NSNull(),
