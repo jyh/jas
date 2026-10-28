@@ -1414,6 +1414,41 @@ internal static class KeyWire
 /// </summary>
 internal static class LayoutWire
 {
+    /// <summary>
+    /// jas §642 (#738): the pane state a layout carries, `"panes": {"toolbar",
+    /// "canvas", "dock"}` (bools) and `"canvas_maximized"` (bool). Null when a
+    /// key is missing (an older engine), a member is not a bool, or the bytes
+    /// are unreadable: never read as "every pane hidden".
+    /// </summary>
+    internal static PaneState? Panes(string layout)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(layout);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("panes", out var p) || p.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("canvas_maximized", out var m))
+            {
+                return null;
+            }
+            static bool? B(System.Text.Json.JsonElement e) => e.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                _ => null,
+            };
+            bool? Member(string k) => p.TryGetProperty(k, out var v) ? B(v) : null;
+            return (Member("toolbar"), Member("canvas"), Member("dock"), B(m)) is ({ } t, { } c, { } d, { } x)
+                ? new PaneState(t, c, d, x)
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     internal sealed record Group(IReadOnlyList<string> Panels, int Active, bool Collapsed);
     internal sealed record Anchored(int DockId, IReadOnlyList<Group> Groups);
     internal sealed record Floated(int DockId, double X, double Y, double Width, int Z, IReadOnlyList<Group> Groups);
@@ -1632,6 +1667,29 @@ internal static class ActWire
         if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name == "." || name == "..") { return null; }
         if (name.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0) { return null; }
         return name;
+    }
+    /// <summary>
+    /// jas §642 (#738): `"layout": <the whole layout> | null`, in every act
+    /// reply. A layout effect ran (Window ▸ Toolbar / Panels, the canvas
+    /// maximize) when it is an object; the shell publishes it as it publishes
+    /// `jas_layout_apply`'s answer. Null for null, a missing key, a non-object
+    /// or unreadable bytes. Returned as the object's raw text, unchanged.
+    /// </summary>
+    internal static string? Layout(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("layout", out var l)
+                   && l.ValueKind == System.Text.Json.JsonValueKind.Object
+                ? l.GetRawText()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -1867,4 +1925,22 @@ internal static class GradientSliderWire
         "Back" => "Backspace",
         _ => null,
     };
+}
+
+/// <summary>
+/// jas §642 (#738): the engine's pane state, as a layout reply carries it.
+/// Geometry is not in it; the columns are the shell's.
+/// </summary>
+internal sealed record PaneState(bool Toolbar, bool Canvas, bool Dock, bool CanvasMaximized);
+
+/// <summary>
+/// jas §642: which side columns show for a <see cref="PaneState"/>. A pane shows
+/// when the engine says so and the canvas is not maximized (a maximized canvas
+/// takes the window's whole width). The shell applies this and decides nothing
+/// else.
+/// </summary>
+internal static class PaneRule
+{
+    internal static (bool Toolbar, bool Dock) Shown(PaneState p) =>
+        (p.Toolbar && !p.CanvasMaximized, p.Dock && !p.CanvasMaximized);
 }

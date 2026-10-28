@@ -816,6 +816,33 @@ static class Program
             + "|" + (ActWire.PdfFileName("a/b.pdf") ?? "(null)"));
         Eq("export_pdf: an empty name is refused", "(null)", ActWire.PdfFileName("") ?? "(null)");
 
+        // jas §642 (#738): every layout reply carries `panes` and
+        // `canvas_maximized`; an act reply carries `layout` (the whole layout) or
+        // null. The shell SHOWS what they say and decides nothing.
+        const string PanesLayout = """{"dock":{"groups":[]},"panes":{"toolbar":false,"canvas":true,"dock":true},"canvas_maximized":false}""";
+        var panes = LayoutWire.Panes(PanesLayout);
+        Eq("panes: read from a layout", "toolbar=False canvas=True dock=True max=False",
+            panes is { } p0 ? $"toolbar={p0.Toolbar} canvas={p0.Canvas} dock={p0.Dock} max={p0.CanvasMaximized}" : "(null)");
+        Check("panes: an older layout with no `panes` reads null, never 'all hidden'",
+            LayoutWire.Panes("""{"dock":{"groups":[]}}""") is null, "");
+        Check("panes: a non-bool member reads null",
+            LayoutWire.Panes("""{"panes":{"toolbar":"no","canvas":true,"dock":true},"canvas_maximized":false}""") is null, "");
+        Check("panes: unreadable bytes read null", LayoutWire.Panes("{nope") is null, "");
+        Eq("layout: an act reply's layout is passed on whole", PanesLayout,
+            ActWire.Layout("{\"changed\":[],\"layout\":" + PanesLayout + "}") ?? "(null)");
+        Eq("layout: a null layout (no layout effect ran) is none", "(null)",
+            ActWire.Layout("""{"changed":[],"layout":null}""") ?? "(null)");
+        Eq("layout: an older engine with no key is none", "(null)",
+            ActWire.Layout("""{"changed":[]}""") ?? "(null)");
+        // Which columns show: a pane is shown when the engine says so and the
+        // canvas is not maximized (maximized gives the canvas the whole width).
+        Eq("panes: the toolbar hidden, the dock shown", "toolbar=False dock=True",
+            PaneRule.Shown(new PaneState(false, true, true, false)) is var s1 ? $"toolbar={s1.Toolbar} dock={s1.Dock}" : "");
+        Eq("panes: maximized hides both side columns", "toolbar=False dock=False",
+            PaneRule.Shown(new PaneState(true, true, true, true)) is var s2 ? $"toolbar={s2.Toolbar} dock={s2.Dock}" : "");
+        Eq("panes: all shown", "toolbar=True dock=True",
+            PaneRule.Shown(new PaneState(true, true, true, false)) is var s3 ? $"toolbar={s3.Toolbar} dock={s3.Dock}" : "");
+
         // jas §364 (plan § 5 slice 8): every act reply carries
         // `"clipboard_write": <text> | null`. A string goes on the system
         // clipboard UNCHANGED; anything else writes nothing.
