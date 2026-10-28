@@ -4321,19 +4321,20 @@ mod tests {
         (reply, take(unsafe { jas_last_error_json(e) }))
     }
 
+    /// Window > Toolbar runs its YAML in the engine and is REFUSED BY NAME:
+    /// `toggle_pane` is a `layout:` effect (the pane layout), and the engine
+    /// holds no pane layout (`pane_verbs_are_accepted_no_ops_at_the_engine_door`).
+    /// Until 2026-10-28 the YAML toggled `state.toolbar_visible`, a key no
+    /// renderer read, and this test pinned THAT as "its state moves". The
+    /// store stays where it was, so a refusal that half-ran would red.
     #[test]
-    fn dispatch_action_runs_a_menu_action_and_its_state_moves() {
+    fn dispatch_action_names_the_pane_layout_it_cannot_run() {
         let _counters = crate::ffi_instr::test_lock::lock();
-        // Window > Toolbar, as the menu structure names it.
         let e = jas_engine_new();
         let before = engine_of(e).store.borrow().get("toolbar_visible").clone();
-        let (reply, err) = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
-        assert!(!reply.is_empty(), "toggle_pane ran (error: {err})");
-        assert!(err.is_empty(), "a run that moved state clears the channel: {err}");
-        let after = engine_of(e).store.borrow().get("toolbar_visible").clone();
-        assert_ne!(before, after, "the toggle moved state.toolbar_visible");
-        let _ = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
-        assert_eq!(engine_of(e).store.borrow().get("toolbar_visible"), &before, "and back");
+        let (_reply, err) = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
+        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:layout"), "toggle_pane is refused by name");
+        assert_eq!(engine_of(e).store.borrow().get("toolbar_visible"), &before, "and moved nothing");
         unsafe { jas_engine_free(e) };
     }
 
@@ -4391,10 +4392,10 @@ mod tests {
         // structure carries no params, and a shell must not author them).
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let before = engine_of(e).store.borrow().get("toolbar_visible").clone();
-        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_toolbar"}"#);
-        assert!(!reply.is_empty() && err.is_empty(), "Window > Toolbar ran: {err}");
-        assert_ne!(engine_of(e).store.borrow().get("toolbar_visible"), &before);
+        // Window > Toolbar resolves to `toggle_pane {pane: toolbar}` and reaches
+        // its effect: the refusal names the `layout:` effect, never the item.
+        let (_reply, err) = dispatch(e, r#"{"menu_item":"menu_toolbar"}"#);
+        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:layout"), "Window > Toolbar reached its YAML");
         let (reply2, err2) = dispatch(e, r#"{"menu_item":"zz_no_such_item"}"#);
         assert!(reply2.is_empty() && err2.contains("UnknownMenuItem") && err2.contains("zz_no_such_item"), "{err2}");
         unsafe { jas_engine_free(e) };
@@ -6184,6 +6185,9 @@ mod tests {
             "reset_workspace -> UnknownEffect:reset_layout",
             "revert_workspace -> UnknownEffect:revert_layout",
             "tile_panes -> UnknownEffect:tile",
+            // Window > Toolbar / Panels: the pane layout, which the engine
+            // does not hold (2026-10-28, design step 3).
+            "toggle_pane -> UnknownEffect:layout",
             // The dock: the shell shows and hides its own panels.
             "toggle_panel -> Logged:toggle_panel (native): {{param.panel}}",
         ];

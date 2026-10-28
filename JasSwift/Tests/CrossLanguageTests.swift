@@ -5873,6 +5873,10 @@ private let actionFixtures = [
     "fill_type_actions.json",
     // The Symbols orphan dialog's Delete, held to new_symbol's golden.
     "symbol_delete_actions.json",
+    // The YAML window verbs (design "the YAML window verbs run on the
+    // layout-op runtime"): each seeds a pane layout and pins the layout it
+    // leaves (`expected_layout`). Mirrors Rust's ACTION_FIXTURES.
+    "window_actions.json",
     "state_actions.json",
     // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
     // `set_fill_type_solid` on a stroke-only SELECTION must read that
@@ -6027,6 +6031,19 @@ private func assertActionView(_ tc: [String: Any], _ model: Model) {
 ///   it has transformed, and re-reading the fixture would silently discard the
 ///   transformation. Mirrors Rust's `run_action_case(tc, &svg)`.
 private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Model {
+    runActionCase(tc, svgText: svgText).model
+}
+
+/// ``runActionModel``, also returning the pane layout the case seeded
+/// (`setup_layout`, a golden under `expected/`) as the actions left it, for
+/// `expected_layout`. Nil when the case seeds none. Mirrors Rust's
+/// `setup_layout_json` seed in `run_action_case`.
+private func runActionCase(_ tc: [String: Any], svgText: String? = nil)
+    -> (model: Model, layout: WorkspaceLayout?)
+{
+    var layout: WorkspaceLayout? = (tc["setup_layout"] as? String).map {
+        testJsonToWorkspace(readFixture("expected/\($0)").trimmingCharacters(in: .whitespacesAndNewlines))
+    }
     let model = svgText.map { Model(document: svgToDocument($0)) }
         ?? actionModelFromSvg(tc["setup_svg"] as! String)
     // Optional non-identity view seed (VIEWSEED) — must precede the dispatch
@@ -6089,9 +6106,28 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
         let params = (step["params"] as? [String: Any]) ?? [:]
         // Every menu verb runs its YAML (the deterministic id source installed
         // above covers make_instance's mint, as it does new_artboard's).
-        LayersPanel.dispatchYamlAction(action, model: model, params: params)
+        LayersPanel.dispatchYamlAction(action, model: model, params: params,
+                                       onLayoutOp: { op in
+                                           if layout != nil { layoutApply(&layout!, op) }
+                                       })
     }
-    return model
+    return (model, layout)
+}
+
+/// OPTIONAL: `expected_layout`, a `workspace_operations/` golden the case's pane
+/// layout must equal after its actions. The window verbs move panes, not the
+/// document, so the document golden alone would pass a no-op. Mirrors Rust's
+/// `assert_action_layout`.
+private func assertActionLayout(_ tc: [String: Any], _ layout: WorkspaceLayout?) {
+    guard let file = tc["expected_layout"] as? String else { return }
+    let name = tc["name"] as! String
+    let expected = readFixture("workspace_operations/\(file)")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let actual = layout.map(workspaceToTestJson) ?? "(no layout: the case seeds none)"
+    if actual != expected {
+        print("=== EXPECTED LAYOUT (\(name)) ===\n\(expected)\n=== ACTUAL ===\n\(actual)")
+    }
+    #expect(actual == expected, "Action test '\(name)': the layout it left is not \(file)")
 }
 
 /// OPTIONAL second assertion: `expected_panel_state`.
@@ -6163,7 +6199,7 @@ private func assertActionTest(_ tc: [String: Any]) {
     let expectedFile = tc["expected_json"] as! String
     let expected = readFixture("actions/\(expectedFile)")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    let model = runActionModel(tc)
+    let (model, layout) = runActionCase(tc)
     let actual = documentToTestJson(model.document)
 
     if actual != expected {
@@ -6177,6 +6213,7 @@ private func assertActionTest(_ tc: [String: Any]) {
     assertActionPanelScope(tc, model)
     assertActionView(tc, model)
     assertActionDialog(tc, model)
+    assertActionLayout(tc, layout)
 }
 
 /// OPTIONAL assertion: `expected_dialog`, `{"id", "params": {..}, "state":

@@ -834,7 +834,7 @@
       ]
     },
     "toggle_pane": {
-      "description": "Toggle a pane's visibility. When hidden, the pane is removed from the layout and adjacent panes may expand to fill the space. When shown, the pane reappears at its last position. Controlled via the Window menu checkmarks for Toolbar and Panels.\n",
+      "description": "Toggle a pane's visibility. When hidden, the pane is removed from the layout and adjacent panes may expand to fill the space. When shown, the pane reappears at its last position. Controlled via the Window menu checkmarks for Toolbar and Panels and by the toolbar's close button. The pane layout decides: the pane is hidden if it is visible and shown if it is hidden (the layout op `toggle_pane`).\n",
       "category": "window",
       "params": {
         "pane": {
@@ -848,7 +848,10 @@
       },
       "effects": [
         {
-          "toggle": "{{param.pane}}_visible"
+          "layout": {
+            "op": "toggle_pane",
+            "kind": "param.pane"
+          }
         }
       ]
     },
@@ -886,11 +889,13 @@
       ]
     },
     "toggle_canvas_maximize": {
-      "description": "Toggle the canvas pane between maximized (fills the entire viewport, title bar hidden) and its normal size within the pane layout.\n",
+      "description": "Toggle the canvas pane between maximized (fills the entire viewport, title bar hidden) and its normal size within the pane layout. The flag lives on the pane layout (the layout op `toggle_canvas_maximized`).\n",
       "category": "window",
       "effects": [
         {
-          "toggle": "canvas_maximized"
+          "layout": {
+            "op": "toggle_canvas_maximized"
+          }
         }
       ]
     },

@@ -1,0 +1,51 @@
+[
+ {
+  "name": "toggle_pane_hides_the_toolbar",
+  "setup_svg": "rect_with_stroke.svg",
+  "setup_layout": "workspace_default_with_panes.json",
+  "actions": [
+   {
+    "action": "toggle_pane",
+    "params": {
+     "pane": "toolbar"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_layout": "pane_hide_toolbar.json"
+ },
+ {
+  "name": "toggle_pane_twice_shows_the_dock_again",
+  "setup_svg": "rect_with_stroke.svg",
+  "setup_layout": "workspace_default_with_panes.json",
+  "actions": [
+   {
+    "action": "toggle_pane",
+    "params": {
+     "pane": "dock"
+    }
+   },
+   {
+    "action": "toggle_pane",
+    "params": {
+     "pane": "dock"
+    }
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_layout": "pane_hide_show.json"
+ },
+ {
+  "name": "toggle_canvas_maximize_maximizes_the_canvas",
+  "setup_svg": "rect_with_stroke.svg",
+  "setup_layout": "workspace_default_with_panes.json",
+  "actions": [
+   {
+    "action": "toggle_canvas_maximize",
+    "params": {}
+   }
+  ],
+  "expected_json": "open_print_dialog_expected.json",
+  "expected_layout": "pane_maximize.json"
+ }
+]
