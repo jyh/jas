@@ -335,7 +335,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
                 None => return false, // required field missing: skip
             };
             if layout.panel_on_screen(kind) {
-                if let Some(addr) = crate::workspace::clipboard::find_panel(layout, kind) {
+                if let Some(addr) = find_panel(layout, kind) {
                     layout.close_panel(addr);
                 }
             } else {
@@ -538,6 +538,32 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
         _ => return false,
     }
     true
+}
+
+
+/// The first group (anchored docks, then floating) holding `kind`.
+pub(crate) fn find_panel(layout: &crate::workspace::workspace::WorkspaceLayout, kind: crate::workspace::workspace::PanelKind) -> Option<crate::workspace::workspace::PanelAddr> {
+    for (_, dock) in &layout.anchored {
+        for (gi, group) in dock.groups.iter().enumerate() {
+            if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
+                return Some(crate::workspace::workspace::PanelAddr {
+                    group: crate::workspace::workspace::GroupAddr { dock_id: dock.id, group_idx: gi },
+                    panel_idx: pi,
+                });
+            }
+        }
+    }
+    for fd in &layout.floating {
+        for (gi, group) in fd.dock.groups.iter().enumerate() {
+            if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
+                return Some(crate::workspace::workspace::PanelAddr {
+                    group: crate::workspace::workspace::GroupAddr { dock_id: fd.dock.id, group_idx: gi },
+                    panel_idx: pi,
+                });
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

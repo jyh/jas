@@ -126,6 +126,11 @@ public func opShowPanel(_ kind: PanelKind) -> [String: Any] {
     ["op": "show_panel", "kind": layoutPanelKindStr(kind)]
 }
 
+/// `{op:"toggle_panel", kind}`: close the panel if on screen, else reveal it.
+public func opTogglePanel(_ kind: PanelKind) -> [String: Any] {
+    ["op": "toggle_panel", "kind": layoutPanelKindStr(kind)]
+}
+
 /// `{op:"toggle_group_collapsed", dock_id, group_idx}`.
 public func opToggleGroupCollapsed(_ addr: GroupAddr) -> [String: Any] {
     ["op": "toggle_group_collapsed",

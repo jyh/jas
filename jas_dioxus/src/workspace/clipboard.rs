@@ -864,29 +864,7 @@ pub(crate) fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>
 }
 
 /// Find the address of a panel kind in the layout (first occurrence).
-pub(crate) fn find_panel(layout: &super::workspace::WorkspaceLayout, kind: super::workspace::PanelKind) -> Option<super::workspace::PanelAddr> {
-    for (_, dock) in &layout.anchored {
-        for (gi, group) in dock.groups.iter().enumerate() {
-            if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
-                return Some(super::workspace::PanelAddr {
-                    group: super::workspace::GroupAddr { dock_id: dock.id, group_idx: gi },
-                    panel_idx: pi,
-                });
-            }
-        }
-    }
-    for fd in &layout.floating {
-        for (gi, group) in fd.dock.groups.iter().enumerate() {
-            if let Some(pi) = group.panels.iter().position(|&k| k == kind) {
-                return Some(super::workspace::PanelAddr {
-                    group: super::workspace::GroupAddr { dock_id: fd.dock.id, group_idx: gi },
-                    panel_idx: pi,
-                });
-            }
-        }
-    }
-    None
-}
+pub(crate) use super::layout_apply::find_panel;
 
 #[cfg(test)]
 mod save_as_tests {

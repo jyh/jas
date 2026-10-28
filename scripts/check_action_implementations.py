@@ -192,13 +192,16 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # step 3c: a plain click; the panel selection is `[as_path(param.path)]`, the
 # element selection the op layer's `select_element`). Shift and Command are a
 # later step, and both native trees still run their own handlers.
-MIN_LOG_ONLY = 17
+# 16 on 2026-10-28: `toggle_panel` runs its YAML (`layout: {op: toggle_panel}`,
+# the shared layout-op runtime; the engine runs it on the dock it holds).
+MIN_LOG_ONLY = 16
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
 # close_window and save_all_then_close have no arm in either port, so they
 # cannot declare it, and the clipboard four are engine law plus a host write).
-NATIVE_DECLARED = 4
+# 3 on 2026-10-28: toggle_panel left (it declares a `layout:` effect now).
+NATIVE_DECLARED = 3
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 

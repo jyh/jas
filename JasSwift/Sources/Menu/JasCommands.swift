@@ -359,23 +359,9 @@ public struct JasCommands: Commands {
                 // Unknown panel id — graceful no-op.
                 return
             }
-            // The ONE generic native toggle_panel path (actions.yaml contract),
-            // keyed by the panel-id string, identical to the Rust dispatch:
-            // SHOW -> make dock_main visible + expanded, append to its LAST
-            // group, activate (showPanelInLastGroup); HIDE -> close_panel + drop
-            // the emptied group (shared layout-op runtime). This makes Gradient
-            // and Concepts reachable, same as every other panel.
-            // Routed on `panelOnScreen`, NOT on group membership: a
-            // background tab is a member that is drawn nowhere, and routing it
-            // to the close branch deleted the panel the artist was asking to
-            // see (they saw nothing happen, then had to click twice).
-            if ws.workspaceLayout.panelOnScreen(kind) {
-                if let addr = layoutFindPanel(ws.workspaceLayout, kind) {
-                    layoutApply(&ws.workspaceLayout, opClosePanel(addr))
-                }
-            } else {
-                ws.workspaceLayout.revealPanel(kind)
-            }
+            // The shared `toggle_panel` op (the action's YAML `layout:` effect):
+            // hide a panel that is on screen, else reveal it.
+            layoutApply(&ws.workspaceLayout, opTogglePanel(kind))
             ws.workspaceLayout.saveIfNeeded()
         default:
             break

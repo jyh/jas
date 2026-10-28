@@ -528,42 +528,26 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
     let _recorder_guard = crate::recorder::hooks::ActionGuard::enter(action, params, st);
 
     // Native intercept: the Window-menu panel toggle (actions.yaml
-    // `toggle_panel`). Dock-group mutation is not declaratively expressible, so
-    // this ONE generic path — keyed by the panel-id STRING — implements the
-    // action's English contract for every panel: SHOW a panel that is off
-    // screen (make dock_main visible + expanded, append to its LAST group,
-    // activate) or HIDE a panel that is on screen (close_panel + drop an empty
-    // group). It supersedes the 15 legacy per-panel `toggle_panel_<name>` menu
-    // arms; the menu bar now routes every panel row through here. The active
-    // ports (Rust + Swift) share this behavior exactly (equivalence law); the
-    // YAML `log` effect is a native breadcrumb only, so we return [] and skip
-    // it. An unknown/garbage panel id resolves to Layers via parse_panel_kind
-    // and never panics.
+    // `toggle_panel`), which runs the action's one effect, the shared
+    // `toggle_panel` layout op, and then the web's colour-mode reset, which
+    // no YAML effect can say. An unknown/garbage panel id resolves to Layers
+    // via parse_panel_kind and never panics.
     if action == "toggle_panel" {
         if let Some(panel_id) = params.get("panel").and_then(|v| v.as_str()) {
             let kind = crate::workspace::layout_apply::parse_panel_kind(panel_id);
-            // Routed on `panel_on_screen`, NOT on group membership: a
-            // background tab is a member that is drawn nowhere, and routing
-            // it to the close branch deleted the panel the artist was asking
-            // to see (they saw nothing happen, then had to click twice).
-            if st.workspace_layout.panel_on_screen(kind) {
-                if let Some(addr) =
-                    crate::workspace::clipboard::find_panel(&st.workspace_layout, kind)
-                {
-                    crate::workspace::layout_apply::layout_apply(
-                        &mut st.workspace_layout,
-                        &crate::workspace::layout_apply::op_close_panel(addr),
-                    );
-                }
-            } else {
-                st.workspace_layout.reveal_panel(kind);
-                // COLOR.md §Panel initialization rule: color_panel_mode is
-                // panel-local and resets to its default (HSB) on each reopen —
-                // not persisted across close. Preserved from the legacy
-                // `toggle_panel_color` arm, now the sole per-panel show hook.
-                if kind == crate::workspace::workspace::PanelKind::Color {
-                    st.color_panel_mode = crate::workspace::color_panel_view::ColorMode::Hsb;
-                }
+            crate::workspace::layout_apply::layout_apply(
+                &mut st.workspace_layout,
+                &crate::workspace::layout_apply::op_toggle_panel(kind),
+            );
+            // COLOR.md §Panel initialization rule: color_panel_mode is
+            // panel-local and resets to its default (HSB) on each reopen —
+            // not persisted across close. WEB ONLY: no other port resets it
+            // (a divergence, flagged 2026-10-28), so it stays here, beside
+            // the op, and not in the shared runtime.
+            if kind == crate::workspace::workspace::PanelKind::Color
+                && st.workspace_layout.panel_on_screen(kind)
+            {
+                st.color_panel_mode = crate::workspace::color_panel_view::ColorMode::Hsb;
             }
         }
         return Vec::new();
