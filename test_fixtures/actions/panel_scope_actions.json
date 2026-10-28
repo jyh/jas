@@ -946,5 +946,31 @@
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
     }
+  },
+  {
+    "_doc": "Down arrow with no row selected selects the FIRST visible row ([1] of [1], [1,0], [0], [0,0]), as the web tree always did; its layer, 1, becomes the target layer.",
+    "name": "layers_nav_down_with_nothing_selected_selects_the_first_row",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [],
+    "actions": [
+      {"action": "layers_nav_down", "params": {}}
+    ],
+    "expected_json": "layers_panel_select_selects_the_row_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}]}
+    }
+  },
+  {
+    "_doc": "Up arrow with no row selected selects the LAST visible row ([0,0]); its layer, 0, becomes the target layer.",
+    "name": "layers_nav_up_with_nothing_selected_selects_the_last_row",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [],
+    "actions": [
+      {"action": "layers_nav_up", "params": {}}
+    ],
+    "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
+    "expected_panel_scope": {
+      "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}]}
+    }
   }
 ]
