@@ -369,9 +369,24 @@ private let dialogActionFixtures = [
     #expect(cases.count >= 6, "the dialog-action corpus holds \(cases.count) case(s)")
     var failures: [String] = []
     var gapsHeld: Set<String> = []
+    // Print > Print's save is the shell's (`PdfExport.save`, a save panel in
+    // the app): record it instead, and restore the app's save after.
+    final class Exported { var hint: String?; var bytes = Data() }
+    let saved = PdfExport.save
+    defer { PdfExport.save = saved }
     for tc in cases {
         let name = tc["name"] as? String ?? "?"
-        let found = runCase(tc, root: root)
+        let exported = Exported()
+        PdfExport.save = { bytes, hint in exported.hint = hint; exported.bytes = bytes }
+        var found = runCase(tc, root: root)
+        // `expected_pdf_export`: a PDF save was asked for, with PDF bytes, and
+        // no case asks for one unasked. Rust reads its reply's `export_pdf`.
+        let wantPdf = tc["expected_pdf_export"] as? Bool ?? false
+        if wantPdf != (exported.hint != nil) {
+            found.append("\(name): a PDF export was asked for \(exported.hint ?? "nil"), the corpus wants \(wantPdf)")
+        } else if wantPdf && !exported.bytes.starts(with: Array("%PDF".utf8)) {
+            found.append("\(name): the exported bytes are not a PDF")
+        }
         if swiftDialogGaps[name] != nil {
             if !found.isEmpty { gapsHeld.insert(name) }
         } else {

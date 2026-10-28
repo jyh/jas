@@ -39,6 +39,22 @@ const REG_MARK_RADIUS: f64 = 4.0;
 /// Edge of one color-bar swatch in points.
 const COLOR_BAR_SWATCH: f64 = 10.0;
 
+/// The file name a Print saves the document's PDF under: the document's name
+/// with `.svg`, `.pdf` or `.jas` replaced by `.pdf`, or `Untitled.pdf`. The
+/// web's download and the engine's `export_pdf` reply both use it.
+pub fn pdf_filename_for(filename: &str) -> String {
+    let trimmed = filename.trim();
+    if trimmed.is_empty() {
+        return "Untitled.pdf".to_string();
+    }
+    for ext in [".svg", ".pdf", ".jas"] {
+        if let Some(stem) = trimmed.strip_suffix(ext) {
+            return format!("{}.pdf", stem);
+        }
+    }
+    format!("{}.pdf", trimmed)
+}
+
 /// Convert a document to PDF bytes. The returned Vec<u8> is a valid
 /// PDF 1.4 file: catalog → pages → page objects → content streams,
 /// xref, trailer.

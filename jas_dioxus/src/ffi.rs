@@ -55,7 +55,12 @@ impl JasBytes {
     /// Leak a `String` into a caller-owned span. The capacity is dropped to the
     /// length first so `jas_free` can reconstitute the exact allocation.
     fn from_string(s: String) -> Self {
-        let mut boxed = s.into_bytes().into_boxed_slice();
+        Self::from_vec(s.into_bytes())
+    }
+
+    /// [`from_string`](Self::from_string) for bytes that are not text (a PDF).
+    fn from_vec(v: Vec<u8>) -> Self {
+        let mut boxed = v.into_boxed_slice();
         let ptr = boxed.as_mut_ptr();
         let len = boxed.len();
         std::mem::forget(boxed);
@@ -1093,8 +1098,9 @@ pub unsafe extern "C" fn jas_layout_apply(e: *mut JasEngine, op: *const u8, len:
 ///
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
 /// "remove_tab": <index> | null, "close_window": <bool>,
-/// "save_all_then_close": <bool>, "clipboard_write": <text> | null}`
-/// ([`act_reply`]; `clipboard_write` is [`jas_dispatch_action`]'s).
+/// "save_all_then_close": <bool>, "clipboard_write": <text> | null,
+/// "export_pdf": <file name> | null}` ([`act_reply`]; `clipboard_write` is
+/// [`jas_dispatch_action`]'s, and `export_pdf` is the Print button's).
 /// `close_window` names a window close the shell must do (the engine owns no
 /// window): `quit` with nothing edited, or Save Changes' Don't Save.
 /// `save_all_then_close` (Save Changes' Save All) names "save every modified
@@ -1419,7 +1425,9 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
 /// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
-/// null}`. `dialog` is the dialog open
+/// null, "export_pdf": <file name> | null}`. `export_pdf` names a PDF save the
+/// shell must do (Print > Print; the engine owns no file system): the file name
+/// to save [`jas_document_pdf`]'s bytes under. `dialog` is the dialog open
 /// in the engine's store after the act (the dialog door, design 2026-10-14):
 /// a shell that reads an id there asks for that dialog's plan, and `null`
 /// means none is open, so a shell showing one closes it.
@@ -1429,7 +1437,7 @@ fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: 
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
                        "save_all_then_close": named.save_all_then_close,
-                       "clipboard_write": named.clipboard_write})
+                       "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf})
 }
 
 /// The acts the host NAMES for the shell to do, because the engine owns no tabs
@@ -1441,12 +1449,16 @@ struct Named {
     save_all_then_close: bool,
     /// The payload a Copy or Cut asks the shell to put on the system clipboard.
     clipboard_write: Option<String>,
+    /// The file name a Print asks the shell to save the document's PDF under
+    /// (`geometry.export_pdf`); the bytes are [`jas_document_pdf`]'s.
+    export_pdf: Option<String>,
 }
 
 impl Named {
     fn of(host: crate::panel_behavior::EngineHost) -> Named {
         Named { remove_tab: host.removed_tab, close_window: host.closed_window,
-                save_all_then_close: host.save_all_then_close, clipboard_write: host.clipboard_write }
+                save_all_then_close: host.save_all_then_close, clipboard_write: host.clipboard_write,
+                export_pdf: host.export_pdf }
     }
 }
 
@@ -1863,6 +1875,22 @@ pub unsafe extern "C" fn jas_dialog_dismiss(e: *mut JasEngine) -> u8 {
     }
     engine.with_model_mut(|m| crate::interpreter::effects::close_dialog_in(&mut store, Some(m)));
     1
+}
+
+/// **The document as a PDF** (Print > Print): the bytes a shell saves under
+/// the file name a reply's `export_pdf` names, from `geometry::pdf`, the
+/// builder the web's Print downloads. The engine owns no file system, so the
+/// shell does the save. NULL handle: the empty span.
+/// **BL4**: copy the span, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    JasBytes::from_vec(crate::geometry::pdf::document_to_pdf(engine.model.borrow().document()))
 }
 
 /// **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
@@ -2376,6 +2404,16 @@ mod tests {
         }
         let s = unsafe { std::slice::from_raw_parts(b.ptr, b.len) };
         let out = String::from_utf8(s.to_vec()).unwrap();
+        unsafe { jas_free(b) };
+        out
+    }
+
+    /// [`take`] for a span that is not text (a PDF).
+    fn take_bytes(b: JasBytes) -> Vec<u8> {
+        if b.ptr.is_null() {
+            return Vec::new();
+        }
+        let out = unsafe { std::slice::from_raw_parts(b.ptr, b.len) }.to_vec();
         unsafe { jas_free(b) };
         out
     }
@@ -4601,6 +4639,7 @@ mod tests {
             // OPENED (after the setup steps), never the setup file itself.
             let mut at_open: Option<String> = None;
             let mut step_failed = false;
+            let mut pdf_export: Option<String> = None;
             for step in tc["actions"].as_array().unwrap() {
                 if let Some(od) = step.get("open_dialog") {
                     let id = od["id"].as_str().unwrap();
@@ -4705,6 +4744,10 @@ mod tests {
                     if let Some(v) = ev.get("value") { msg["value"] = v.clone(); }
                     let msg = msg.to_string();
                     let reply = take(unsafe { jas_dialog_event(e, msg.as_ptr(), msg.len()) });
+                    if let Some(f) = serde_json::from_str::<serde_json::Value>(&reply).ok()
+                        .and_then(|v| v["export_pdf"].as_str().map(str::to_string)) {
+                        pdf_export = Some(f);
+                    }
                     if reply.is_empty() {
                         let err = take(unsafe { jas_last_error_json(e) });
                         // `Unchanged` is a run that moved nothing, not a refusal of the act.
@@ -4721,6 +4764,12 @@ mod tests {
                 }
             }
             if step_failed { unsafe { jas_engine_free(e) }; continue; }
+            // `expected_pdf_export`: a step's reply NAMED a PDF save (Print >
+            // Print's `geometry.export_pdf`), and no case names one unasked.
+            let want_pdf = tc.get("expected_pdf_export").and_then(|v| v.as_bool()).unwrap_or(false);
+            if want_pdf != pdf_export.is_some() {
+                failures.push(format!("{name}: a PDF export was named {pdf_export:?}, the corpus wants {want_pdf}"));
+            }
             let en = engine_of(e);
             let store = en.store.borrow();
             match tc.get("expected_dialog") {
@@ -4976,6 +5025,32 @@ mod tests {
             seen.push(engine_of(e).store.borrow().eval_context()["dialog"]["active_tab"].clone());
         }
         assert_eq!(seen, vec![pages[other]["id"].clone(), pages[0]["id"].clone()], "the bind wrote each tab id");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// STATUS-jas (Print > Print, recorded 10-25): the Print button runs
+    /// Done's field writes and closes the dialog, and `geometry.export_pdf` is
+    /// a NAMED host act: the reply carries the file name the shell saves under,
+    /// and `jas_document_pdf` gives the bytes. Until then the engine refused
+    /// the whole click (`PlatformEffect`, `UnknownEffect:geometry.export_pdf`).
+    #[test]
+    fn the_print_button_names_a_pdf_export_and_the_engine_gives_its_bytes() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (_r, err) = dispatch(e, r#"{"action":"open_print_dialog"}"#);
+        let path = dialog_leaf_path(e, "button", "Print");
+        let (reply, err2) = dialog_event(e, &format!(r#"{{"path":{path},"event":"click"}}"#));
+        assert!(!reply.is_empty(), "the Print click refused: {err} {err2}");
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(v["dialog"], serde_json::Value::Null, "the dialog closed: {v}");
+        let name = v["export_pdf"].as_str().unwrap_or_else(|| panic!("no export_pdf named: {v}"));
+        assert!(name.ends_with(".pdf"), "{name}");
+        let pdf = take_bytes(unsafe { jas_document_pdf(e) });
+        assert!(pdf.starts_with(b"%PDF"), "the engine's bytes are a PDF: {:?}", &pdf[..pdf.len().min(8)]);
+        // The control: an ordinary click names no export.
+        let (reply, _) = dispatch(e, r#"{"action":"select_all"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(v["export_pdf"], serde_json::Value::Null, "{v}");
         unsafe { jas_engine_free(e) };
     }
 
@@ -6873,7 +6948,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "remove_tab", "save_all_then_close"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -6897,7 +6972,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"remove_tab":null,"save_all_then_close":false}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -6953,13 +7028,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second

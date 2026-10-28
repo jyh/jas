@@ -234,6 +234,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   and NAMED: the host records the selection's payload in
 ///   [`EngineHost::clipboard_write`] and the reply carries it for the shell
 ///   to write to the system clipboard.
+/// * `geometry.export_pdf` (Print > Print) is claimed and NAMED: the host
+///   records the file name in [`EngineHost::export_pdf`], and the shell saves
+///   the bytes `jas_document_pdf` gives.
 /// * `delete_selection` is not claimed: its YAML runs (an orphan, read from
 ///   `active_document.selection_orphan_count`, opens `delete_orphan_confirm`).
 ///
@@ -251,13 +254,16 @@ pub struct EngineHost {
     /// The payload a `doc.copy_selection_to_clipboard` asked the shell to put
     /// on the system clipboard. Set, never appended, as `removed_tab` is.
     pub clipboard_write: Option<String>,
+    /// The file name a `geometry.export_pdf` (Print > Print) asked the shell
+    /// to save the document's PDF under. Set, never appended.
+    pub export_pdf: Option<String>,
 }
 
 impl EffectHost for EngineHost {
     fn run(
         &mut self,
         key: &str,
-        _arg: &Value,
+        arg: &Value,
         store: &mut StateStore,
         model: Option<&mut Model>,
     ) -> bool {
@@ -270,6 +276,15 @@ impl EffectHost for EngineHost {
         // so the payload is NAMED for the shell, as `close_window` is.
         if key == "doc.copy_selection_to_clipboard" {
             self.clipboard_write = crate::document::op_apply::selection_clipboard_svg(model.document());
+            return true;
+        }
+        // Print > Print: the engine owns no file system, so the save is NAMED
+        // for the shell, with the file name the web downloads under
+        // (`filename_hint`, else the document's name as `.pdf`).
+        if key == "geometry.export_pdf" {
+            let hint = arg.get("filename_hint").and_then(Value::as_str).filter(|s| !s.is_empty());
+            self.export_pdf = Some(hint.map(str::to_string)
+                .unwrap_or_else(|| crate::geometry::pdf::pdf_filename_for(&model.filename)));
             return true;
         }
         if align_host::hosts(key) {
