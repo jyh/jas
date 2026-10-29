@@ -251,9 +251,15 @@ public sealed partial class MainWindow
                 && _paneControls.TryGetValue(focusPath, out var field) && field is Control focusable)
             {
                 var panelId = snap.PanelId;
-                void Take(string when) =>
+                // Its text is selected, as the web's rename input does
+                // (`input.select()`), so typing replaces the old name.
+                void Take(string when)
+                {
+                    var took = focusable.Focus(FocusState.Programmatic);
+                    if (took && focusable is TextBox box) { box.SelectAll(); }
                     _w.Report($"PANEL FOCUS panel={panelId} path={focusPath} when={when} "
-                            + $"took={(focusable.Focus(FocusState.Programmatic) ? "true" : "false")}");
+                            + $"took={(took ? "true" : "false")}");
+                }
                 if (focusable.IsLoaded) { focusable.DispatcherQueue.TryEnqueue(() => Take("drawn")); }
                 else
                 {
