@@ -1445,6 +1445,7 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.Down => JasCore.KeyArrowDown,
             Windows.System.VirtualKey.Left => JasCore.KeyArrowLeft,
             Windows.System.VirtualKey.Right => JasCore.KeyArrowRight,
+            Windows.System.VirtualKey.F2 => JasCore.KeyF2,
             Windows.System.VirtualKey.Home => JasCore.KeyHome,
             Windows.System.VirtualKey.End => JasCore.KeyEnd,
             _ => 0,
@@ -1473,7 +1474,34 @@ public sealed partial class MainWindow : Window
             // accelerator's.
             e.Handled = true;
         }
+        // jas §644/#753: a key the focused PANEL binds (its `keyboard:` rows: the
+        // tree's arrows, F2, Enter, Escape, Delete, Backspace, Ctrl+A) goes to
+        // the panel door, and is kept from XAML's own focus navigation. One the
+        // panel does not bind comes back `UnboundPanelKey` and is re-sent to the
+        // document (`Canvas.ApplyKey`). Any other key is unchanged.
+        if (code != 0 && PanelKeyTarget(e.OriginalSource as DependencyObject) is { } panel
+            && PanelKeys.Forwards(code, (mods & JasCore.ModCmd) != 0))
+        {
+            e.Handled = true;
+            _canvas.Key(code, mods, panel);
+            return;
+        }
+        if (code == JasCore.KeyF2) { return; }
         if (code != 0) { _canvas.Key(code, mods); }
+    }
+
+    /// <summary>
+    /// jas §644: the content id of the panel a focused element sits in (an
+    /// ancestor `PanelHost` names it, `*_panel_content`), or null outside one.
+    /// </summary>
+    private static string? PanelKeyTarget(DependencyObject? from)
+    {
+        for (var node = from; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            var id = Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(node);
+            if (id.EndsWith("_panel_content", StringComparison.Ordinal)) { return id; }
+        }
+        return null;
     }
 
     /// <summary>
