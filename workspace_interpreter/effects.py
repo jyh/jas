@@ -1517,6 +1517,18 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         return
 
     # open_dialog: { id, params }
+    # open_menu: { id } -- ask the host to pop up the declared menu item `id`'s
+    # submenu (the 2026-10-28 jas brush-library design, A.3). The id is a
+    # LITERAL, as open_dialog's is. It is recorded as the store's
+    # `pending_menu`, the latest request winning; an empty or non-string id
+    # records nothing.
+    if "open_menu" in effect:
+        om = effect["open_menu"]
+        menu_id = om.get("id") if isinstance(om, dict) else om
+        if isinstance(menu_id, str) and menu_id:
+            store.pending_menu = menu_id
+        return
+
     if "open_dialog" in effect:
         od = effect["open_dialog"]
         dlg_id = od.get("id", "") if isinstance(od, dict) else str(od)
