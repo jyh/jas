@@ -242,18 +242,24 @@ public sealed partial class MainWindow
             // jas §647/#757: a text field this draw shows and the last one did not
             // (F2's rename field) takes the keyboard, as the web's and the Mac's
             // rename inputs do. Without it the field appears and every key goes
-            // elsewhere. Deferred: a field built by this draw is not loaded yet.
+            // elsewhere. A field built by this draw is not loaded yet, and Focus
+            // refuses an unloaded control (measured: `took=false` one dispatcher
+            // turn later), so it is focused on its Loaded.
             var shownInputs = PanelWire.ShownInputs(leaves.Select(l =>
                 (l.Path, l.Type, (l.Value("bind.visible") ?? l.Value("visible")) != "false")));
             if (PanelWire.InputToFocus(samePanel ? _paneShownInputs : null, shownInputs) is { } focusPath
                 && _paneControls.TryGetValue(focusPath, out var field) && field is Control focusable)
             {
                 var panelId = snap.PanelId;
-                focusable.DispatcherQueue.TryEnqueue(() =>
+                void Take(string when) =>
+                    _w.Report($"PANEL FOCUS panel={panelId} path={focusPath} when={when} "
+                            + $"took={(focusable.Focus(FocusState.Programmatic) ? "true" : "false")}");
+                if (focusable.IsLoaded) { focusable.DispatcherQueue.TryEnqueue(() => Take("drawn")); }
+                else
                 {
-                    var took = focusable.Focus(FocusState.Programmatic);
-                    _w.Report($"PANEL FOCUS panel={panelId} path={focusPath} took={(took ? "true" : "false")}");
-                });
+                    void OnLoaded(object _, RoutedEventArgs __) { focusable.Loaded -= OnLoaded; Take("loaded"); }
+                    focusable.Loaded += OnLoaded;
+                }
             }
             _paneShownInputs = new HashSet<string>(shownInputs, StringComparer.Ordinal);
 
