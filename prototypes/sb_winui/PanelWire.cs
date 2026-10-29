@@ -135,6 +135,24 @@ internal static class PanelWire
         events is not null && events.Contains(eventName);
 
     /// <summary>
+    /// The plan paths of the text fields a draw shows (`text_input`,
+    /// `number_input`, `length_input`), in plan order.
+    /// </summary>
+    internal static List<string> ShownInputs(IEnumerable<(string Path, string Type, bool Shown)> leaves) =>
+        leaves.Where(l => l.Shown && l.Type is "text_input" or "number_input" or "length_input")
+              .Select(l => l.Path).ToList();
+
+    /// <summary>
+    /// jas §647/#757: the field to give the keyboard after a draw: the first one
+    /// shown now that the last draw of the same panel did not show (F2's rename
+    /// field), as the web's and the Mac's rename inputs take focus when they
+    /// appear. Null when none is new, and on a panel's first draw
+    /// (<paramref name="before"/> null), so opening a panel never takes focus.
+    /// </summary>
+    internal static string? InputToFocus(IReadOnlySet<string>? before, IReadOnlyList<string> now) =>
+        before is null ? null : now.FirstOrDefault(p => !before.Contains(p));
+
+    /// <summary>
     /// The event JSON for a gesture on a stops kind (`WIDGET_EVENTS.md` §The
     /// stops kind): `value` is an OBJECT of the gesture's RAW parameters (an
     /// `index`, a `pair`, a `location` in percent, a `dy` in DIPs), never a

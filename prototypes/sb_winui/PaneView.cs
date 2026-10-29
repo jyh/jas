@@ -76,6 +76,10 @@ public sealed partial class MainWindow
         /// </summary>
         private string? _paneSignature;
 
+        /// <summary>The text fields the last draw of <see cref="_paneDrawnPanel"/>
+        /// showed (<see cref="PanelWire.ShownInputs"/>); a newly shown one takes focus.</summary>
+        private HashSet<string>? _paneShownInputs;
+
         /// <summary>§1.2: the newest plan's `items` per leaf path, read by a
         /// dropdown's flyout when it opens.</summary>
         private readonly Dictionary<string, PaneItems> _paneItems = new(StringComparer.Ordinal);
@@ -203,6 +207,7 @@ public sealed partial class MainWindow
                 + "\n" + string.Join("\n", boxes)
                 + "\n" + string.Join("\n", hits.Select(h => $"{h.Path}|{h.Id}|{h.X},{h.Y},{h.W},{h.H}|{string.Join(",", h.Events)}"));
             var rebuilt = signature != _paneSignature;
+            var samePanel = _paneDrawnPanel == snap.PanelId;
             _paneDrawnPanel = snap.PanelId;
             if (rebuilt) { BuildPane(leaves, icons, height, boxes, hits); }
             _paneSignature = signature;
@@ -233,6 +238,24 @@ public sealed partial class MainWindow
                 hidden += h;
                 editing += ed;
             }
+
+            // jas §647/#757: a text field this draw shows and the last one did not
+            // (F2's rename field) takes the keyboard, as the web's and the Mac's
+            // rename inputs do. Without it the field appears and every key goes
+            // elsewhere. Deferred: a field built by this draw is not loaded yet.
+            var shownInputs = PanelWire.ShownInputs(leaves.Select(l =>
+                (l.Path, l.Type, (l.Value("bind.visible") ?? l.Value("visible")) != "false")));
+            if (PanelWire.InputToFocus(samePanel ? _paneShownInputs : null, shownInputs) is { } focusPath
+                && _paneControls.TryGetValue(focusPath, out var field) && field is Control focusable)
+            {
+                var panelId = snap.PanelId;
+                focusable.DispatcherQueue.TryEnqueue(() =>
+                {
+                    var took = focusable.Focus(FocusState.Programmatic);
+                    _w.Report($"PANEL FOCUS panel={panelId} path={focusPath} took={(took ? "true" : "false")}");
+                });
+            }
+            _paneShownInputs = new HashSet<string>(shownInputs, StringComparer.Ordinal);
 
             // ⚠️ THE MENU ROW's ARITHMETIC, AND ITS LIMIT: this handler also reads the
             // CURRENT snapshot, so a gap is a coalesce OR a loss. Nothing asserts on

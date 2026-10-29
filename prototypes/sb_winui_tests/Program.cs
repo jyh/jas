@@ -856,6 +856,22 @@ static class Program
             KeyWire.UnboundPanelKey("""{"panel_event":"UnboundPanelKey","detail":"Delete"}"""), "");
         Check("panel key: any other refusal is not",
             !KeyWire.UnboundPanelKey("""{"panel_event":"KeyUnhandled","detail":"x"}""") && !KeyWire.UnboundPanelKey(""), "");
+        // jas §647/#757: a text field the plan SHOWS that it did not show at the
+        // last draw (F2's rename field) takes the keyboard, as the web's and the
+        // Mac's rename inputs do; otherwise it appears and swallows nothing.
+        var rows = new (string Path, string Type, bool Shown)[]
+        {
+            ("[3,0,6]", "text", true), ("[3,0,7]", "text_input", true),
+            ("[3,1,7]", "text_input", false), ("[0,2]", "number_input", true),
+        };
+        Eq("input focus: the shown fields, in plan order", "[3,0,7] [0,2]",
+            string.Join(" ", PanelWire.ShownInputs(rows)));
+        Eq("input focus: the first field shown now and not before takes focus", "[3,0,7]",
+            PanelWire.InputToFocus(new HashSet<string> { "[0,2]" }, PanelWire.ShownInputs(rows)) ?? "(null)");
+        Eq("input focus: nothing newly shown takes nothing", "(null)",
+            PanelWire.InputToFocus(new HashSet<string> { "[0,2]", "[3,0,7]" }, PanelWire.ShownInputs(rows)) ?? "(null)");
+        Eq("input focus: a panel's first draw takes nothing (an open never steals focus)", "(null)",
+            PanelWire.InputToFocus(null, PanelWire.ShownInputs(rows)) ?? "(null)");
         // Which columns show: a pane is shown when the engine says so and the
         // canvas is not maximized (maximized gives the canvas the whole width).
         Eq("panes: the toolbar hidden, the dock shown", "toolbar=False dock=True",
