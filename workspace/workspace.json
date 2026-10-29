@@ -2655,7 +2655,7 @@
           "set_panel_state": {
             "panel": "layers",
             "key": "renaming_element",
-            "value": "param.path"
+            "value": "as_path(param.path).indices"
           }
         }
       ]

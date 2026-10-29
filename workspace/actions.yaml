@@ -2298,10 +2298,14 @@ actions:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     enabled_when: "active_document.layers_panel_selection_count == 1"
     effects:
+      # Stored as the PLAIN index list layers.yaml declares, whatever form it
+      # arrives in: the name double-click passes `node.path` (a list) and F2 /
+      # Enter pass a selection entry (a PATH), and `lp_name_edit` shows only
+      # when this EQUALS the row's `node.path` (STATUS-flask §646).
       - set_panel_state:
           panel: layers
           key: renaming_element
-          value: "param.path"
+          value: "as_path(param.path).indices"
 
   confirm_rename:
     description: >
