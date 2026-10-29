@@ -4559,6 +4559,46 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The View menu's zoom, on the engine's route (the 10-30 feel sitting's
+    /// tour, line 1). `zoom_in` multiplies by `preferences.viewport.zoom_step`
+    /// and, from a menu, anchors at the viewport centre (its `anchor_x` /
+    /// `anchor_y` default to -1). Measured on the Windows box at `423cd822`:
+    /// the engine's action context carried no `preferences` and no param
+    /// defaults, so the factor read 0 and every Zoom In or Zoom Out pinned the
+    /// view at `min_zoom` (0.1) with its anchor at the corner.
+    #[test]
+    fn the_view_menus_zoom_steps_by_the_preference_about_the_viewport_centre() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let view = || {
+            let m = unsafe { e.as_ref() }.unwrap().model.borrow();
+            (m.zoom_level, m.view_offset_x, m.view_offset_y, m.viewport_w, m.viewport_h)
+        };
+        let (z0, x0, y0, w, h) = view();
+        assert_eq!(z0, 1.0, "a new engine is at 100%");
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        // The document point under the viewport centre before each step.
+        let doc_at_centre = |z: f64, x: f64, y: f64| ((cx - x) / z, (cy - y) / z);
+        let before = doc_at_centre(z0, x0, y0);
+
+        let (_r, err) = dispatch(e, r#"{"menu_item":"menu_zoom_in"}"#);
+        assert!(err.is_empty() || err.contains("Unchanged"), "{err}");
+        let (z1, x1, y1, _, _) = view();
+        assert!((z1 - 1.2).abs() < 1e-9, "Zoom In steps by zoom_step 1.2 (got {z1})");
+        let after = doc_at_centre(z1, x1, y1);
+        assert!((after.0 - before.0).abs() < 1e-9 && (after.1 - before.1).abs() < 1e-9,
+                "the point under the viewport centre stays there: {before:?} -> {after:?}");
+
+        let (_r, err) = dispatch(e, r#"{"menu_item":"menu_zoom_out"}"#);
+        assert!(err.is_empty() || err.contains("Unchanged"), "{err}");
+        let (z2, x2, y2, _, _) = view();
+        assert!((z2 - 1.0).abs() < 1e-9, "Zoom Out undoes the step (got {z2})");
+        let back = doc_at_centre(z2, x2, y2);
+        assert!((back.0 - before.0).abs() < 1e-9 && (back.1 - before.1).abs() < 1e-9,
+                "Zoom Out keeps the centre too: {before:?} -> {back:?}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Every menubar item with an `action`, in menu order: (item id, action).
     fn menubar_items() -> Vec<(String, String)> {
         fn walk(node: &serde_json::Value, out: &mut Vec<(String, String)>) {

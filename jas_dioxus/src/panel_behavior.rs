@@ -866,6 +866,10 @@ fn run_batch(
     let mut ctx = json!({
         "active_document": scope.get("active_document").cloned().unwrap_or(Value::Null),
         "event": event,
+        // `preferences.*` is not in the store, so the context carries it, as
+        // the web's action context does (`build_appstate_ctx`): the View
+        // actions read `preferences.viewport.zoom_step` and `fit_padding_px`.
+        "preferences": crate::interpreter::preferences::current(),
     });
     // W2b-16: a row addressed by path carries its loop variables (`ab`,
     // `brush`, ...), which a behavior's params read (`artboard_id: "ab.id"`).
@@ -1001,6 +1005,32 @@ pub(crate) fn run_action(
     }
     let mut d = Map::new();
     d.insert("action".into(), Value::String(action.to_string()));
+    // A param the caller leaves out reads the action's declared `default`, as
+    // the web's `dispatch_action` merges it: without it, a menu's `zoom_in`
+    // read `param.anchor_x` as null and anchored at the corner, not at the -1
+    // "viewport centre" sentinel.
+    let declared = actions[action].get("params").and_then(Value::as_object);
+    let merged = declared.filter(|ps| !ps.is_empty()).map(|ps| {
+        let mut m = params.and_then(Value::as_object).cloned().unwrap_or_default();
+        for (name, spec) in ps {
+            if m.contains_key(name) { continue; }
+            let Some(default) = spec.as_object().and_then(|o| o.get("default")) else { continue };
+            // Among a menu's EXPRESSION params a string default goes in quoted.
+            let v = match (default, params.is_some() && !params_are_values) {
+                (Value::String(t), true) if t.contains('\'') => continue,
+                (Value::String(t), true) => Value::String(format!("'{t}'")),
+                (other, _) => other.clone(),
+            };
+            m.insert(name.clone(), v);
+        }
+        Value::Object(m)
+    });
+    // No caller params: the defaults alone are values.
+    let (params, params_are_values) = match (&merged, params) {
+        (Some(m), None) => (Some(m), true),
+        (Some(m), Some(_)) => (Some(m), params_are_values),
+        (None, p) => (p, params_are_values),
+    };
     // Params a menu's YAML declares are EXPRESSIONS, which the dispatch arm
     // evaluates. Params a CALLER passes are VALUES, as the web's
     // `dispatch_action` takes them: they are bound as `param` directly, so
