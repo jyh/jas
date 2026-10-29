@@ -65,3 +65,35 @@ def test_every_keyboard_row_names_an_action_and_only_its_params(ws):
                 if p not in declared:
                     bad.append(f"{pid} {row.get('key')}: {name} declares {sorted(declared)}, the row passes {p!r}")
     assert not bad, "\n".join(bad)
+
+
+@pytest.mark.parametrize("route", ["F2", "Enter", "double_click"])
+def test_every_rename_route_stores_the_rows_path_form(ws, route):
+    """`renaming_element` is a plain index list (layers.yaml declares it `list`
+    of numbers), and `lp_name_edit` shows when it EQUALS the row's `node.path`.
+    The name double-click passes `node.path`, a plain list; F2 and Enter pass
+    `panel.layers_panel_selection[0]`, a selection entry, which is a PATH and
+    is stored as `{"__path__": [...]}`. That never equals the row's list, so a
+    key-started rename showed no field and Escape cancelled a rename nobody
+    could see (flask, STATUS-flask §646, measured on the engine). The one
+    writer, `rename_element`, stores the plain form whatever it is passed."""
+    from workspace_interpreter.effects import run_effects
+    from workspace_interpreter.expr import evaluate
+    from workspace_interpreter.state_store import StateStore
+    sel = [{"__path__": [1]}]
+    if route == "double_click":
+        params = {"path": [1]}
+    else:
+        hit = resolve_panel_key(ws["panels"]["layers_panel_content"], {"key": route},
+                                {"panel": {"layers_panel_selection": sel}})
+        assert hit and hit["action"] == "rename_element", hit
+        params = hit["params"]
+    store = StateStore()
+    store.init_panel("layers", {"renaming_element": None, "layers_panel_selection": sel})
+    store.set_active_panel("layers")
+    run_effects(ws["actions"]["rename_element"]["effects"], {"param": params}, store, ws["actions"])
+    stored = store.get_panel("layers", "renaming_element")
+    assert stored == [1], (route, stored)
+    shown = evaluate("panel.renaming_element == node.path",
+                     {"panel": {"renaming_element": stored}, "node": {"path": [1]}})
+    assert shown.to_bool(), route

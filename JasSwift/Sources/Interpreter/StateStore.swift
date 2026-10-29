@@ -15,6 +15,24 @@ public class StateStore {
     private var panels: [String: [String: Any]] = [:]
     private var activePanel: String?
 
+    /// File writes an effect asked for, in order, for the HOST to drain
+    /// (`brush.save_library`): the interpreter does no file I/O itself.
+    /// Mirrors the reference's `StateStore.pending_writes`.
+    public var pendingWrites: [[String: Any]] = []
+
+    /// The host's writer, installed by the app (``BrushLibraryStore/live``),
+    /// never in a test process. Called on every queued write; a write it
+    /// reports done leaves the queue, a failed one stays.
+    public var pendingWriteSink: (([String: Any]) -> Bool)?
+
+    /// Queue a file write for the host and hand it to the sink if one is
+    /// installed. The ONE way an effect queues a write, so every route drains.
+    public func appendPendingWrite(_ w: [String: Any]) {
+        pendingWrites.append(w)
+        guard let sink = pendingWriteSink else { return }
+        pendingWrites.removeAll { sink($0) }
+    }
+
     // MARK: - Tool state
     //
     // Parallels `panels` but keyed by tool id. YAML tool handlers
@@ -452,11 +470,28 @@ public class StateStore {
     /// Appends, never prepends. A key holding no list starts from an empty
     /// one. Mirrors the reference's `StateStore.list_toggle` (Python's
     /// `list.remove`: the first occurrence only).
-    public func listToggle(_ panelId: String, _ key: String, _ value: Any) {
+    ///
+    /// With `keyField`, membership is `item[keyField] == value` over a list of
+    /// objects: the first such item is removed, else `{keyField: value}` is
+    /// appended beside the literal `insert` fields (the key wins).
+    public func listToggle(_ panelId: String, _ key: String, _ value: Any,
+                           keyField: String? = nil, insert: [String: Any]? = nil) {
         let panelId = Self.panelContentId(panelId)
         guard panels[panelId] != nil else { return }
         var lst = (panels[panelId]?[key] as? [Any]) ?? []
-        if let i = lst.firstIndex(where: { ($0 as? NSObject)?.isEqual(value) ?? false }) {
+        if let keyField {
+            let match: (Any) -> Bool = { item in
+                guard let d = item as? [String: Any], let v = d[keyField] as? NSObject else { return false }
+                return v.isEqual(value)
+            }
+            if let i = lst.firstIndex(where: match) {
+                lst.remove(at: i)
+            } else {
+                var item = insert ?? [:]
+                item[keyField] = value
+                lst.append(item)
+            }
+        } else if let i = lst.firstIndex(where: { ($0 as? NSObject)?.isEqual(value) ?? false }) {
             lst.remove(at: i)
         } else {
             lst.append(value)

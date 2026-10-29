@@ -1865,6 +1865,9 @@ actions:
       # One undo step through the op layer; `path` is evaluated (doc.op).
       - snapshot
       - doc.op: { op: cycle_element_visibility, path: "param.path" }
+      # A manual visibility change discards a pending solo (solo_element_visibility).
+      - set_panel_state: { panel: layers, key: solo_path, value: "null" }
+      - set_panel_state: { panel: layers, key: solo_saved, value: "[]" }
 
   solo_element_visibility:
     description: >
@@ -1882,7 +1885,41 @@ actions:
     params:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     effects:
-      - log: "solo_element_visibility"
+      # STATUS-jas item 8. The state is two keys (no expression can build an
+      # object): `solo_path`, and `solo_saved` as [path, visibility] pairs.
+      # Siblings and their visibilities come from the element tree's rows with
+      # nothing collapsed (a row carries `visibility`); a sibling shares the
+      # clicked path's parent. Each half is one undo step.
+      - if:
+          condition: "panel.solo_path != null and as_path(panel.solo_path) == as_path(param.path)"
+          then:
+            - snapshot
+            - foreach:
+                source: "panel.solo_saved"
+                as: saved
+              do:
+                - doc.op: { op: set_element_visibility, path: "saved[0]", visibility: "saved[1]" }
+            - set_panel_state: { panel: layers, key: solo_path, value: "null" }
+            - set_panel_state: { panel: layers, key: solo_saved, value: "[]" }
+          else:
+            - let:
+                solo_sibs: "filter(tree_visible_rows(active_document.element_tree, [], [], null), fun r -> as_path(r.path).parent == as_path(param.path).parent and as_path(r.path) != as_path(param.path))"
+            - snapshot
+            - set_panel_state: { panel: layers, key: solo_saved, value: "map(solo_sibs, fun r -> [as_path(r.path), r.visibility])" }
+            - set_panel_state: { panel: layers, key: solo_path, value: "as_path(param.path)" }
+            - foreach:
+                source: "solo_sibs"
+                as: sib
+              do:
+                - doc.op: { op: set_element_visibility, path: "as_path(sib.path)", visibility: "'invisible'" }
+            # The soloed element is shown if it was hidden; an Outline one stays
+            # Outline (both native trees' rule).
+            - let:
+                solo_self: "filter(tree_visible_rows(active_document.element_tree, [], [], null), fun r -> as_path(r.path) == as_path(param.path))"
+            - if:
+                condition: "solo_self.length > 0 and solo_self[0].visibility == 'invisible'"
+                then:
+                  - doc.op: { op: set_element_visibility, path: "as_path(param.path)", visibility: "'preview'" }
 
   toggle_element_lock:
     description: >
@@ -2261,10 +2298,14 @@ actions:
       path: { type: path, description: "The row's element path (child indices; STATUS-jas item 38)." }
     enabled_when: "active_document.layers_panel_selection_count == 1"
     effects:
+      # Stored as the PLAIN index list layers.yaml declares, whatever form it
+      # arrives in: the name double-click passes `node.path` (a list) and F2 /
+      # Enter pass a selection entry (a PATH), and `lp_name_edit` shows only
+      # when this EQUALS the row's `node.path` (STATUS-flask §646).
       - set_panel_state:
           panel: layers
           key: renaming_element
-          value: "param.path"
+          value: "as_path(param.path).indices"
 
   confirm_rename:
     description: >

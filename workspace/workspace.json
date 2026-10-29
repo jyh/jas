@@ -2063,6 +2063,20 @@
             "op": "cycle_element_visibility",
             "path": "param.path"
           }
+        },
+        {
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "solo_path",
+            "value": "null"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "solo_saved",
+            "value": "[]"
+          }
         }
       ]
     },
@@ -2078,7 +2092,97 @@
       },
       "effects": [
         {
-          "log": "solo_element_visibility"
+          "if": {
+            "condition": "panel.solo_path != null and as_path(panel.solo_path) == as_path(param.path)",
+            "then": [
+              "snapshot",
+              {
+                "foreach": {
+                  "source": "panel.solo_saved",
+                  "as": "saved"
+                },
+                "do": [
+                  {
+                    "doc.op": {
+                      "op": "set_element_visibility",
+                      "path": "saved[0]",
+                      "visibility": "saved[1]"
+                    }
+                  }
+                ]
+              },
+              {
+                "set_panel_state": {
+                  "panel": "layers",
+                  "key": "solo_path",
+                  "value": "null"
+                }
+              },
+              {
+                "set_panel_state": {
+                  "panel": "layers",
+                  "key": "solo_saved",
+                  "value": "[]"
+                }
+              }
+            ],
+            "else": [
+              {
+                "let": {
+                  "solo_sibs": "filter(tree_visible_rows(active_document.element_tree, [], [], null), fun r -> as_path(r.path).parent == as_path(param.path).parent and as_path(r.path) != as_path(param.path))"
+                }
+              },
+              "snapshot",
+              {
+                "set_panel_state": {
+                  "panel": "layers",
+                  "key": "solo_saved",
+                  "value": "map(solo_sibs, fun r -> [as_path(r.path), r.visibility])"
+                }
+              },
+              {
+                "set_panel_state": {
+                  "panel": "layers",
+                  "key": "solo_path",
+                  "value": "as_path(param.path)"
+                }
+              },
+              {
+                "foreach": {
+                  "source": "solo_sibs",
+                  "as": "sib"
+                },
+                "do": [
+                  {
+                    "doc.op": {
+                      "op": "set_element_visibility",
+                      "path": "as_path(sib.path)",
+                      "visibility": "'invisible'"
+                    }
+                  }
+                ]
+              },
+              {
+                "let": {
+                  "solo_self": "filter(tree_visible_rows(active_document.element_tree, [], [], null), fun r -> as_path(r.path) == as_path(param.path))"
+                }
+              },
+              {
+                "if": {
+                  "condition": "solo_self.length > 0 and solo_self[0].visibility == 'invisible'",
+                  "then": [
+                    {
+                      "doc.op": {
+                        "op": "set_element_visibility",
+                        "path": "as_path(param.path)",
+                        "visibility": "'preview'"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
         }
       ]
     },
@@ -2551,7 +2655,7 @@
           "set_panel_state": {
             "panel": "layers",
             "key": "renaming_element",
-            "value": "param.path"
+            "value": "as_path(param.path).indices"
           }
         }
       ]
@@ -17077,11 +17181,18 @@
           "default": false,
           "description": "Whether a drag operation is in progress"
         },
-        "solo_state": {
-          "type": "object",
+        "solo_path": {
+          "type": "list",
+          "item_type": "number",
           "default": null,
           "nullable": true,
-          "description": "Saved sibling visibility states for solo/unsolo. Contains element_id of the soloed element and a map of sibling_id to saved visibility state. Null when not in solo mode."
+          "description": "The path of the element soloed by an Option-click on its eye, or null when nothing is soloed. A second Option-click on the same path restores solo_saved; a plain eye click clears both. A path, not an element id (STATUS-jas item 8; this and solo_saved replace `solo_state`, which held ids in a map that no expression could write).\n"
+        },
+        "solo_saved": {
+          "type": "list",
+          "item_type": "list",
+          "default": [],
+          "description": "The soloed element's siblings as they were before the solo, as [path, visibility] pairs (visibility \"preview\", \"outline\" or \"invisible\"), so the unsolo restores each one exactly, an Outline sibling included. Empty when nothing is soloed.\n"
         },
         "next_layer_color_index": {
           "type": "number",

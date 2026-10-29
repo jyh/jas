@@ -554,6 +554,18 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             cur = children[idx]
         return Value.from_python(cur)
 
+    # keys: map → list of strings, sorted by Unicode code point (no locale
+    # collation). The order is defined because Rust's serde_json map and
+    # Swift's Dictionary keep no insertion order. A non-map gives [].
+    # (A dict rides as a STRING-typed Value holding the dict; see from_python.)
+    if name == "keys":
+        if len(node.args) != 1:
+            return Value.list_([])
+        arg = eval_node(node.args[0], ctx)
+        if not isinstance(arg.value, dict):
+            return Value.list_([])
+        return Value.list_(sorted(str(k) for k in arg.value))
+
     # reverse: list → list — reverses a list (useful for foreach over
     # index-sensitive paths where deletion order matters)
     if name == "reverse":

@@ -488,20 +488,20 @@ impl Document {
     }
 
     /// Element-level behavior of the Layers tree LOCK button. Pure: takes a
-    /// Document, returns a Document. The twin of `cycle_element_visibility_at`
-    /// (still in the web-gated `interpreter::renderer`, where this lived until
-    /// LOCKINHERIT; it moved here because it is document logic with no UI in
-    /// it, `op_apply` must reach it in a `--no-default-features` build, and
-    /// JasSwift's twin `Document.togglingElementLock(at:)` was already a
-    /// Document method — so the move is toward parity, not away. The
-    /// VISIBILITY half is still on the wrong side of that line; banked).
+    /// Document, returns a Document. The twin of [`Self::cycling_element_visibility`].
+    /// It lived in the web-gated `interpreter::renderer` until LOCKINHERIT and
+    /// moved here because it is document logic with no UI in it, `op_apply`
+    /// must reach it in a `--no-default-features` build, and JasSwift's twin
+    /// `Document.togglingElementLock(at:)` was already a Document method. (The
+    /// renderer's visibility wrapper was removed on 2026-10-28, when the eye
+    /// began dispatching its YAML.)
     ///
     /// Two things happen, in this order:
     ///   1. the element's own `locked` flips — and ONLY the element's own, at
     ///      any depth. A container's lock reaches its contents by INHERITANCE
     ///      ([`Self::effective_locked`]), never by being written onto them;
     ///   2. locking removes the element AND its descendants from the selection,
-    ///      exactly as `cycle_element_visibility_at` does on Invisible.
+    ///      exactly as [`Self::setting_element_visibility`] does on Invisible.
     ///
     /// Step 2 is not cosmetic: nothing downstream refuses to move or delete a
     /// selected-but-locked element, so a lock that leaves the selection alone

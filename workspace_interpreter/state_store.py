@@ -336,6 +336,9 @@ class StateStore:
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
+        # File writes an effect asked for, in order, for the HOST to drain
+        # (`brush.save_library`): the interpreter does no file I/O itself.
+        self.pending_writes: list[dict] = []
         # The writable per-document lists (`active_document.<key>`), keyed by
         # the names in DOCUMENT_LISTS. Not part of the document tree: the
         # apps keep them on their Model beside the document, as this does.
@@ -833,7 +836,8 @@ class StateStore:
         scope[key] = lst
         self._notify_panel(panel_id, key, lst)
 
-    def list_toggle(self, panel_id: str, key: str, value):
+    def list_toggle(self, panel_id: str, key: str, value, *,
+                    key_field: str | None = None, insert: dict | None = None):
         """Add `value` to a panel-state list, or remove it if already present.
 
         The membership primitive a CHECKBOX SET needs, and the one the effect
@@ -858,7 +862,19 @@ class StateStore:
         if not isinstance(lst, list):
             lst = []
         lst = list(lst)  # copy
-        if value in lst:
+        if key_field:
+            # Keyed membership over a list of objects: the first item whose
+            # `key_field` equals `value` is removed, else `{key_field: value}`
+            # is appended beside `insert` (a YAML literal; the key wins).
+            hit = next((i for i, it in enumerate(lst)
+                        if isinstance(it, dict) and it.get(key_field) == value), None)
+            if hit is not None:
+                del lst[hit]
+            else:
+                item = dict(insert) if isinstance(insert, dict) else {}
+                item[key_field] = value
+                lst.append(item)
+        elif value in lst:
             lst.remove(value)
         else:
             lst.append(value)

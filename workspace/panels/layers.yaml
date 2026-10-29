@@ -355,11 +355,27 @@ state:
     default: false
     description: "Whether a drag operation is in progress"
 
-  solo_state:
-    type: object
+  solo_path:
+    type: list
+    item_type: number
     default: null
     nullable: true
-    description: "Saved sibling visibility states for solo/unsolo. Contains element_id of the soloed element and a map of sibling_id to saved visibility state. Null when not in solo mode."
+    description: >
+      The path of the element soloed by an Option-click on its eye, or null
+      when nothing is soloed. A second Option-click on the same path restores
+      solo_saved; a plain eye click clears both. A path, not an element id
+      (STATUS-jas item 8; this and solo_saved replace `solo_state`, which held
+      ids in a map that no expression could write).
+
+  solo_saved:
+    type: list
+    item_type: list
+    default: []
+    description: >
+      The soloed element's siblings as they were before the solo, as
+      [path, visibility] pairs (visibility "preview", "outline" or
+      "invisible"), so the unsolo restores each one exactly, an Outline
+      sibling included. Empty when nothing is soloed.
 
   next_layer_color_index:
     type: number

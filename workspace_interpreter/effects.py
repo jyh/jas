@@ -208,6 +208,17 @@ def _stored(v):
     return v
 
 
+def _brush_library_slug(name: str) -> str:
+    """Save Brush Library's slug: lower-case ASCII letters and digits kept,
+    every other run of characters one `_`, the ends trimmed, `library` when
+    nothing is left (`brush.save_library`)."""
+    import re
+    # ASCII-only lower-casing: str.lower() is Unicode-wide (the Kelvin sign
+    # U+212A becomes "k"), and the ports must not depend on that table.
+    ascii_lower = name.translate({c: c + 32 for c in range(ord("A"), ord("Z") + 1)})
+    return re.sub(r"[^a-z0-9]+", "_", ascii_lower).strip("_") or "library"
+
+
 def _doc_op_args(spec: dict, eval_ctx: dict) -> dict:
     """A `doc.op` spec as the op layer reads it: `op` verbatim, every other
     string field evaluated as an expression in the action's scope, other
@@ -1064,6 +1075,43 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             ])
             return None
 
+    # brush.save_library: { library, name } -- Save Brush Library's confirm
+    # (the 2026-10-28 jas brush-library design, B.2). Both operands are
+    # EXPRESSIONS. The slug keeps lower-case ASCII letters and digits, turns
+    # every other run into one `_`, trims the ends, and is `library` when
+    # nothing is left. The source's own slug saves IN PLACE; another existing
+    # slug takes the first free `_2`, `_3`, ... . The library written is a
+    # deep copy of the source with `name` set; a NEW one opens expanded and
+    # becomes the selected library (the brush selection is kept, slugs being
+    # copied unchanged). One `{kind, slug, manifest}` request goes on the
+    # store's `pending_writes` for the host. An empty name or a missing source
+    # is a no-op.
+    if "brush.save_library" in effect:
+        import copy
+        spec = effect["brush.save_library"] if isinstance(effect["brush.save_library"], dict) else {}
+        lib = _eval(spec.get("library"), store, ctx)
+        name = _eval(spec.get("name"), store, ctx)
+        libs = store.get_data_path("brush_libraries")
+        if (not isinstance(lib, str) or not isinstance(name, str) or not name
+                or not isinstance(libs, dict) or not isinstance(libs.get(lib), dict)):
+            return None
+        slug = _brush_library_slug(name)
+        if slug != lib and slug in libs:
+            n = 2
+            while f"{slug}_{n}" in libs:
+                n += 1
+            slug = f"{slug}_{n}"
+        saved = copy.deepcopy(libs[lib])
+        saved["name"] = name
+        store.set_data_path(f"brush_libraries.{slug}", saved)
+        if slug != lib:
+            store.list_toggle("brushes", "open_libraries", slug,
+                              key_field="id", insert={"collapsed": False})
+            store.set_panel("brushes", "selected_library", slug)
+        store.pending_writes.append(
+            {"kind": "brush_library", "slug": slug, "manifest": copy.deepcopy(saved)})
+        return None
+
     # swatch.duplicate_selected / swatch.delete_selected: { library, indices }
     # and swatch.sort_by_name / swatch.select_unused / swatch.add_used_colors:
     # { library } — the Swatches panel's five library verbs (swatches.yaml
@@ -1419,9 +1467,11 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                                         "reason": "field_not_writable"})
         return
 
-    # list_toggle: { target, value, panel? } -- set membership, the checkbox
-    # primitive; `panel.<key>` on the named panel when `panel` is given (as
-    # set_panel_state), else the active one
+    # list_toggle: { target, value, panel?, key?, insert? } -- set membership,
+    # the checkbox primitive; `panel.<key>` on the named panel when `panel` is
+    # given (as set_panel_state), else the active one. With `key`, membership
+    # is `item[key] == value` over a list of objects and the item added is
+    # `{key: value}` beside the YAML-literal `insert` fields.
     if "list_toggle" in effect:
         lt = effect["list_toggle"]
         target = lt.get("target", "")
@@ -1440,7 +1490,8 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         if len(parts) == 2 and parts[0] == "panel":
             panel_id = lt.get("panel") or store.get_active_panel_id()
             if panel_id:
-                store.list_toggle(panel_id, parts[1], value)
+                store.list_toggle(panel_id, parts[1], value,
+                                  key_field=lt.get("key"), insert=lt.get("insert"))
         return
 
     # dispatch: action_name or { action, params }

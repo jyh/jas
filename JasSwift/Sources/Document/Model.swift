@@ -499,9 +499,15 @@ public class Model: ObservableObject {
         // `panel_scope::seed_library_data` seeds them: the library effects
         // (Brush Options, Duplicate, Delete) write here and the canvas brush
         // registry reads here. Swatches live in `swatchLibraries` instead.
+        // The user's saved libraries shadow the bundle's by slug, and the
+        // app's writer drains Save Brush Library (``BrushLibraryStore``); both
+        // only when the app installed a live store, never under test.
+        let live = BrushLibraryStore.live
         if let libs = WorkspaceData.load()?.brushLibraries() {
-            store.setDataPath("brush_libraries", libs)
+            store.setDataPath("brush_libraries",
+                              live.map { BrushLibraryStore.merged(bundle: libs, user: $0.load()) } ?? libs)
         }
+        store.pendingWriteSink = live?.sink
         return store
     }()
     /// Mirror hook for ``state.active_tool`` writes that originate in

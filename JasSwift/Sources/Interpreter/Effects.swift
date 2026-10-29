@@ -298,13 +298,21 @@ private func valueToAny(_ v: Value) -> Any? {
     // A list literal can hold evaluated values (`[as_path(param.path)]`): a
     // path element becomes the `__path__` marker the store holds, as the other
     // runners' `value_to_json` writes it (STATUS-jas item 38 step 3c).
-    case .list(let l): return l.map { e -> Any in
-        if case .path(let p)? = e.value as? Value { return ["__path__": p] }
-        return e.value
-    }
+    // At any depth: a list of [path, visibility] pairs (the Layers solo's
+    // `solo_saved`) held raw `Value.path`s one level down until 2026-10-28.
+    case .list(let l): return l.map { storableListElement($0.value) }
     case .path(let p): return ["__path__": p]
     case .closure: return v  // keep as Value for closure dispatch
     }
+}
+
+/// One element of an evaluated list, as the store holds it: an evaluated
+/// `Value` through ``valueToAny`` (a path becomes its marker), a nested list
+/// element by element, anything else as it is.
+private func storableListElement(_ x: Any) -> Any {
+    if let v = x as? Value { return valueToAny(v) ?? NSNull() }
+    if let arr = x as? [Any] { return arr.map(storableListElement) }
+    return x
 }
 
 /// Extract default values from a dialog state definition dict.
@@ -639,7 +647,9 @@ private func runOne(
         return
     }
 
-    // list_toggle: { target, value, panel? }: set membership (the Layers type
+    // list_toggle: { target, value, panel?, key?, insert? }: with `key`,
+    // membership is `item[key] == value` over a list of objects (Brushes'
+    // open_libraries). Without it: set membership (the Layers type
     // filter, the Layers twirl's collapsed_paths). `panel.<key>` on the named
     // panel when `panel` is given (as set_panel_state), else the active one,
     // as the reference's arm.
@@ -649,7 +659,8 @@ private func runOne(
         if parts.count == 2, parts[0] == "panel",
            let panel = (lt["panel"] as? String) ?? store.getActivePanelId() {
             let value = evalExpr(lt["value"], store: store, ctx: ctx)
-            store.listToggle(panel, parts[1], valueToAny(value) ?? NSNull())
+            store.listToggle(panel, parts[1], valueToAny(value) ?? NSNull(),
+                             keyField: lt["key"] as? String, insert: lt["insert"] as? [String: Any])
         }
         return
     }
@@ -3457,6 +3468,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     let toolEffects = buildYamlToolEffects(model: model)
     for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
                 "brush.append", "brush.update", "brush.sort_by_name", "brush.select_unused",
+                "brush.save_library",
                 "swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
                 "swatch.select_unused", "swatch.add_used_colors", "swatch.store"] {
         guard let handler = toolEffects[key] else {

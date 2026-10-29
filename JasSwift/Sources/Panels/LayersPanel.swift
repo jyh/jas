@@ -174,6 +174,10 @@ public enum LayersPanel {
             // walked rows the tree hides (layers_nav_* corpus, 2026-10-28).
             "collapsed_paths": model.stateStore.getPanel("layers_panel_content", "collapsed_paths") ?? [Any](),
             "renaming_element": model.stateStore.getPanel("layers_panel_content", "renaming_element") ?? NSNull(),
+            // The solo's two keys (`solo_element_visibility`), so a second
+            // Option-click on the soloed row sees `panel.solo_path` and restores.
+            "solo_path": model.stateStore.getPanel("layers_panel_content", "solo_path") ?? NSNull(),
+            "solo_saved": model.stateStore.getPanel("layers_panel_content", "solo_saved") ?? [Any](),
             // The Symbols panel's master (`panel.selected_symbol`), which
             // `place_instance` reads; Rust's app scope carries it the same way.
             "selected_symbol": SymbolsPanel.selectedSymbol(model) ?? NSNull(),
@@ -239,6 +243,17 @@ public enum LayersPanel {
         // store, so it redraws on this.
         model.panelStateVersion &+= 1
         return true
+    }
+
+    /// The tree's eye button (STATUS-jas item 8): Option-click runs
+    /// `solo_element_visibility` (the siblings' saved visibilities live in the
+    /// panel's `solo_path` / `solo_saved`), a plain click runs
+    /// `cycle_element_visibility`, which also discards a pending solo. Mirrors
+    /// the web tree's eye.
+    public static func eyeClick(path: [Int], option: Bool, model: Model) {
+        dispatchYamlAction(option ? "solo_element_visibility" : "cycle_element_visibility",
+                           model: model, params: ["path": ["__path__": path]])
+        model.panelStateVersion &+= 1
     }
 
     /// Build the LayersPanel platform-effect registry and run `effects` through
