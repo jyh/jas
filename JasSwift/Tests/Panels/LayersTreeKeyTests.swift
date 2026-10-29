@@ -42,8 +42,11 @@ private func twoLayers(selection: [[Int]]) -> Model {
 @Test func treeKeyF2StartsTheRenameOfTheOneSelectedRow() {
     let model = twoLayers(selection: [[1, 0]])
     #expect(LayersPanel.treeKey(KeyChord(key: "F2"), model: model))
-    let renaming = model.stateStore.getPanel("layers_panel_content", "renaming_element") as? [String: Any]
-    #expect(renaming?["__path__"] as? [Int] == [1, 0])
+    // The PLAIN list `lp_name_edit` compares to `node.path`. This arm pinned
+    // the `__path__` marker until 2026-10-28, which certified the defect
+    // flask measured (STATUS-flask §646): a key-started rename showed no field.
+    let renaming = model.stateStore.getPanel("layers_panel_content", "renaming_element")
+    #expect(renaming as? [Int] == [1, 0], "\(String(describing: renaming))")
 }
 
 @Test func treeKeyRightCollapsesNothingAndEntersTheContainer() {
