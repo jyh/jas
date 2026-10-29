@@ -135,6 +135,24 @@ internal static class PanelWire
         events is not null && events.Contains(eventName);
 
     /// <summary>
+    /// The plan paths of the text fields a draw shows (`text_input`,
+    /// `number_input`, `length_input`), in plan order.
+    /// </summary>
+    internal static List<string> ShownInputs(IEnumerable<(string Path, string Type, bool Shown)> leaves) =>
+        leaves.Where(l => l.Shown && l.Type is "text_input" or "number_input" or "length_input")
+              .Select(l => l.Path).ToList();
+
+    /// <summary>
+    /// jas §647/#757: the field to give the keyboard after a draw: the first one
+    /// shown now that the last draw of the same panel did not show (F2's rename
+    /// field), as the web's and the Mac's rename inputs take focus when they
+    /// appear. Null when none is new, and on a panel's first draw
+    /// (<paramref name="before"/> null), so opening a panel never takes focus.
+    /// </summary>
+    internal static string? InputToFocus(IReadOnlySet<string>? before, IReadOnlyList<string> now) =>
+        before is null ? null : now.FirstOrDefault(p => !before.Contains(p));
+
+    /// <summary>
     /// The event JSON for a gesture on a stops kind (`WIDGET_EVENTS.md` §The
     /// stops kind): `value` is an OBJECT of the gesture's RAW parameters (an
     /// `index`, a `pair`, a `location` in percent, a `dy` in DIPs), never a
@@ -1331,8 +1349,10 @@ internal static class KeyWire
 {
     /// <summary>The request for a key named <paramref name="name"/> (`Delete`,
     /// `Backspace`, `Enter`, `Escape`, or one character), or null for no name.
-    /// Every flag is written; `ctrl` is the command modifier.</summary>
-    internal static string? Request(string name, bool shift, bool alt, bool ctrl)
+    /// Every flag is written; `ctrl` is the command modifier. jas §644/#753: a
+    /// key pressed in a focused panel also names that panel's content id, and
+    /// the engine resolves it against the panel's own `keyboard:` rows.</summary>
+    internal static string? Request(string name, bool shift, bool alt, bool ctrl, string? panel = null)
     {
         if (name.Length == 0) { return null; }
         using var buffer = new System.IO.MemoryStream();
@@ -1340,6 +1360,7 @@ internal static class KeyWire
                { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             w.WriteStartObject();
+            if (panel is not null) { w.WriteString("panel", panel); }
             w.WriteString("key", name);
             w.WriteStartObject("mods");
             w.WriteBoolean("shift", shift);
@@ -1350,6 +1371,12 @@ internal static class KeyWire
         }
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
+
+    /// <summary>jas §644/#753: the panel door's refusal for a key the focused
+    /// panel does not bind. The shell then sends the same key to the document
+    /// door, so a panel with focus keeps every key it does not claim.</summary>
+    internal static bool UnboundPanelKey(string channel) =>
+        channel.Contains("\"UnboundPanelKey\"", StringComparison.Ordinal);
 
     /// <summary>The key name for a code `OnKeyDown` or `OnCharacterReceived`
     /// sent (`JasCore.Key*`): a named key by its table, else the character.
@@ -1365,6 +1392,7 @@ internal static class KeyWire
         0xF701 => "ArrowDown",
         0xF702 => "ArrowLeft",
         0xF703 => "ArrowRight",
+        0xF705 => "F2",
         0xF729 => "Home",
         0xF72B => "End",
         _ => CharName(code),
@@ -1943,4 +1971,22 @@ internal static class PaneRule
 {
     internal static (bool Toolbar, bool Dock) Shown(PaneState p) =>
         (p.Toolbar && !p.CanvasMaximized, p.Dock && !p.CanvasMaximized);
+}
+
+/// <summary>
+/// jas §644/#753: which keys pressed in a focused panel go to the panel door.
+/// They are the keys a panel's `keyboard:` rows bind (the tree's arrows,
+/// F2, Enter, Escape, Delete and Backspace, and Ctrl+A). Every other key,
+/// Ctrl+Z and the plain letters among them, stays on the document's route
+/// exactly as before. Which ACTION a forwarded key runs is the engine's.
+/// </summary>
+internal static class PanelKeys
+{
+    internal static bool Forwards(uint code, bool ctrl) => code switch
+    {
+        0xF700 or 0xF701 or 0xF702 or 0xF703 or 0xF705 => true,
+        0x0D or 0x1B or 0x7F or 0x08 => true,
+        'a' => ctrl,
+        _ => false,
+    };
 }

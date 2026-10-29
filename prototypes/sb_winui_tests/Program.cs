@@ -834,6 +834,44 @@ static class Program
             ActWire.Layout("""{"changed":[],"layout":null}""") ?? "(null)");
         Eq("layout: an older engine with no key is none", "(null)",
             ActWire.Layout("""{"changed":[]}""") ?? "(null)");
+
+        // jas §644/#753: a key pressed in a focused PANEL goes to the panel door,
+        // `{"panel": <content id>, "key", "mods"}`, which resolves the panel's
+        // own `keyboard:` rows. Only the keys those rows bind are forwarded; an
+        // unbound one comes back `UnboundPanelKey` and goes on to the document.
+        var pk = System.Text.Json.JsonDocument.Parse(KeyWire.Request("ArrowDown", false, false, false, "layers_panel_content")!);
+        Eq("panel key: the request names its panel", "layers_panel_content",
+            pk.RootElement.TryGetProperty("panel", out var pkp) ? pkp.GetString() ?? "(null)" : "(absent)");
+        Eq("panel key: ...and its key", "ArrowDown", pk.RootElement.GetProperty("key").GetString() ?? "");
+        var dk = System.Text.Json.JsonDocument.Parse(KeyWire.Request("Delete", false, false, false)!);
+        Check("panel key: a document key names no panel", !dk.RootElement.TryGetProperty("panel", out _), "");
+        Eq("panel key: F2 is named", "F2", KeyWire.Name(0xF705) ?? "(null)");
+        Check("panel key: the arrows, F2, Enter, Escape, Delete and Backspace are forwarded",
+            new uint[] { 0xF700, 0xF701, 0xF702, 0xF703, 0xF705, 0x0D, 0x1B, 0x7F, 0x08 }.All(c => PanelKeys.Forwards(c, ctrl: false)), "");
+        Check("panel key: Ctrl+A is forwarded (the tree's select-all)", PanelKeys.Forwards('a', ctrl: true), "");
+        Check("panel key: a plain letter is not (it is the document's shortcut)", !PanelKeys.Forwards('a', ctrl: false), "");
+        Check("panel key: Ctrl+Z is not (undo stays the document's)", !PanelKeys.Forwards('z', ctrl: true), "");
+        Check("panel key: Home and Tab are not", !PanelKeys.Forwards(0xF729, false) && !PanelKeys.Forwards(0x09, false), "");
+        Check("panel key: an UnboundPanelKey refusal is read",
+            KeyWire.UnboundPanelKey("""{"panel_event":"UnboundPanelKey","detail":"Delete"}"""), "");
+        Check("panel key: any other refusal is not",
+            !KeyWire.UnboundPanelKey("""{"panel_event":"KeyUnhandled","detail":"x"}""") && !KeyWire.UnboundPanelKey(""), "");
+        // jas §647/#757: a text field the plan SHOWS that it did not show at the
+        // last draw (F2's rename field) takes the keyboard, as the web's and the
+        // Mac's rename inputs do; otherwise it appears and swallows nothing.
+        var rows = new (string Path, string Type, bool Shown)[]
+        {
+            ("[3,0,6]", "text", true), ("[3,0,7]", "text_input", true),
+            ("[3,1,7]", "text_input", false), ("[0,2]", "number_input", true),
+        };
+        Eq("input focus: the shown fields, in plan order", "[3,0,7] [0,2]",
+            string.Join(" ", PanelWire.ShownInputs(rows)));
+        Eq("input focus: the first field shown now and not before takes focus", "[3,0,7]",
+            PanelWire.InputToFocus(new HashSet<string> { "[0,2]" }, PanelWire.ShownInputs(rows)) ?? "(null)");
+        Eq("input focus: nothing newly shown takes nothing", "(null)",
+            PanelWire.InputToFocus(new HashSet<string> { "[0,2]", "[3,0,7]" }, PanelWire.ShownInputs(rows)) ?? "(null)");
+        Eq("input focus: a panel's first draw takes nothing (an open never steals focus)", "(null)",
+            PanelWire.InputToFocus(null, PanelWire.ShownInputs(rows)) ?? "(null)");
         // Which columns show: a pane is shown when the engine says so and the
         // canvas is not maximized (maximized gives the canvas the whole width).
         Eq("panes: the toolbar hidden, the dock shown", "toolbar=False dock=True",

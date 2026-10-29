@@ -210,6 +210,8 @@ internal static unsafe class JasCore
     internal const uint KeyArrowDown = 0xF701;
     internal const uint KeyArrowLeft = 0xF702;
     internal const uint KeyArrowRight = 0xF703;
+    /// <summary>jas §644: F2 (a panel row's rename), the platform function-key code.</summary>
+    internal const uint KeyF2 = 0xF705;
     internal const uint KeyHome = 0xF729;
     internal const uint KeyEnd = 0xF72B;
 
