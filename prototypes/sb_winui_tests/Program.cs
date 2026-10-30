@@ -872,6 +872,29 @@ static class Program
             PanelWire.InputToFocus(new HashSet<string> { "[0,2]", "[3,0,7]" }, PanelWire.ShownInputs(rows)) ?? "(null)");
         Eq("input focus: a panel's first draw takes nothing (an open never steals focus)", "(null)",
             PanelWire.InputToFocus(null, PanelWire.ShownInputs(rows)) ?? "(null)");
+        // flask §656: a press on a leaf that does not answer `click` (a Layers
+        // name answers only `double_click`) belongs to the innermost row around
+        // it that does, as a click bubbles on the web. The row's surface is a
+        // sibling beneath the leaf, so XAML never takes it there by itself.
+        static PanelWire.HitBox Hit(string path, params string[] events) => new(path, "", 0, 0, 10, 10, events);
+        var layerRows = new List<PanelWire.HitBox>
+        {
+            Hit("[3]", "click"), Hit("[3,5]", "click", "double_click"), Hit("[3,5,9]", "click"), Hit("[3,6]", "double_click"),
+        };
+        Eq("press target: a name's press goes to its row", "[3,5]",
+            PanelWire.PressTarget(layerRows, "[3,5,7]")?.Path ?? "(null)");
+        Eq("press target: the innermost answering row wins", "[3,5,9]",
+            PanelWire.PressTarget(layerRows, "[3,5,9,0]")?.Path ?? "(null)");
+        Eq("press target: a row that does not answer click is passed over", "[3]",
+            PanelWire.PressTarget(layerRows, "[3,6,7]")?.Path ?? "(null)");
+        Eq("press target: [3,5] does not enclose [3,50,7]", "[3]",
+            PanelWire.PressTarget(layerRows, "[3,50,7]")?.Path ?? "(null)");
+        Eq("press target: a row never encloses itself", "[3]",
+            PanelWire.PressTarget(layerRows, "[3,5]")?.Path ?? "(null)");
+        Eq("press target: nothing around it, nothing", "(null)",
+            PanelWire.PressTarget(layerRows, "[4,0]")?.Path ?? "(null)");
+        Eq("press target: no rows, nothing", "(null)",
+            PanelWire.PressTarget(new List<PanelWire.HitBox>(), "[3,5,7]")?.Path ?? "(null)");
         // Which columns show: a pane is shown when the engine says so and the
         // canvas is not maximized (maximized gives the canvas the whole width).
         Eq("panes: the toolbar hidden, the dock shown", "toolbar=False dock=True",
