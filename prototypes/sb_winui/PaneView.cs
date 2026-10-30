@@ -90,6 +90,8 @@ public sealed partial class MainWindow
         /// selection's highlight is applied in place (a selection change
         /// re-plans without moving any rect, so it does not rebuild).</summary>
         private readonly Dictionary<string, Border> _paneSurfaces = new();
+        /// <summary>flask §656: the pane's own keyboard focus; see <see cref="PressRow"/>.</summary>
+        private ContentControl? _paneFocus;
 
         /// <summary>Icon loads still outstanding for the build numbered `_paneBuild`.</summary>
         private int _paneIconsPending;
@@ -378,7 +380,8 @@ public sealed partial class MainWindow
                 var (hitId, hitPath) = (hit.Id, hit.Path);
                 if (PanelWire.RoutesEvent(hit.Events, hitId, hitPath, "click"))
                 {
-                    surface.Tapped += (_, _) => OnPaneClick(hitId, hitPath);
+                    var row = hit;
+                    surface.Tapped += (_, _) => PressRow(row);
                 }
                 if (PanelWire.RoutesEvent(hit.Events, hitId, hitPath, "double_click"))
                 {
@@ -388,6 +391,45 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(surface, hit.Y);
                 host.Children.Add(surface);
             }
+            // flask §656: THE PANE'S FOCUS, as the canvas has `CanvasFocus`. A
+            // surface is a Border and cannot take the keyboard, so a press on a
+            // row left it wherever it was, and a redraw that replaced the focused
+            // control (the dock's tab) handed it to the next tab stop, the Layers
+            // search box: every arrow key, F2 and Ctrl+A went into its text. A
+            // row press focuses this one-pixel, invisible, unhittable control
+            // inside the panel's host, so a key bubbles to the panel's door
+            // (`PanelKeyTarget`) as from any control of the panel.
+            _paneFocus = new ContentControl
+            {
+                Width = 1,
+                Height = 1,
+                Opacity = 0,
+                IsHitTestVisible = false,
+                IsTabStop = true,
+                UseSystemFocusVisuals = false,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(
+                _paneFocus, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            // ...and a key a scrolling dock would take on its way up goes through
+            // the window's own route here, before the scroller sees it
+            // (`PanelKeys.BeforeScroller`). Handled, so it is not routed twice.
+            _paneFocus.PreviewKeyDown += (s, e) =>
+            {
+                uint code = e.Key switch
+                {
+                    Windows.System.VirtualKey.Up => JasCore.KeyArrowUp,
+                    Windows.System.VirtualKey.Down => JasCore.KeyArrowDown,
+                    Windows.System.VirtualKey.Left => JasCore.KeyArrowLeft,
+                    Windows.System.VirtualKey.Right => JasCore.KeyArrowRight,
+                    Windows.System.VirtualKey.Home => JasCore.KeyHome,
+                    Windows.System.VirtualKey.End => JasCore.KeyEnd,
+                    _ => 0,
+                };
+                if (!PanelKeys.BeforeScroller(code)) { return; }
+                _w.OnKeyDown(s, e);
+                e.Handled = true;
+            };
+            host.Children.Add(_paneFocus);
             // The toolbar's buttons sit at the TOP of its column, as every port
             // draws a toolbar. The dock keeps its placement (unchanged here).
             if (_topAligned) { host.VerticalAlignment = VerticalAlignment.Top; }
@@ -434,6 +476,13 @@ public sealed partial class MainWindow
                             textClicks++;
                             var (textId, textPath) = (leaf.Id, leaf.Path);
                             label.Tapped += (_, _) => OnPaneClick(textId, textPath);
+                        }
+                        // flask §656: a text that does not answer `click` passes
+                        // its press to the row around it (a Layers name: a click
+                        // selects the row, a double-click below renames).
+                        else if (PanelWire.PressTarget(hits, leaf.Path) is { } row)
+                        {
+                            label.Tapped += (_, _) => PressRow(row);
                         }
                         // jas §612: a text answering `double_click` (the Layers
                         // name starts a rename) routes it, by the same rule.
@@ -1604,6 +1653,25 @@ public sealed partial class MainWindow
         /// writes is the receipt.
         /// </summary>
         private void OnPaneClick(string widget, string? path = null) => SendPane(widget, "click", null, path);
+
+        /// <summary>
+        /// flask §656: a press on a row's surface, or on a leaf that passes its
+        /// press to the row (<see cref="PanelWire.PressTarget"/>). The pane's
+        /// focus moves onto the row first, so the scroller has nothing to bring
+        /// into view and a value typed elsewhere commits before the click; then
+        /// the row's `click` is sent. A dialog's keys are the dialog's, so a
+        /// dialog pane keeps its focus.
+        /// </summary>
+        private void PressRow(PanelWire.HitBox row)
+        {
+            if (!_dialog && _paneFocus is { } focus)
+            {
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(focus, row.X);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(focus, row.Y);
+                focus.Focus(FocusState.Pointer);
+            }
+            OnPaneClick(row.Id, row.Path);
+        }
 
         /// <summary>
         /// jas §630: a surface's brush from its `bind.background`. A colour the
