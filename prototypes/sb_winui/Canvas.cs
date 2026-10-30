@@ -5131,7 +5131,8 @@ internal sealed unsafe class Canvas : IDisposable
     /// A menu item's action, run by the ENGINE (`jas_dispatch_action`). A refusal
     /// is written by its class (an action the spec gives only a `log:`, a dialog
     /// the shell does not build, an effect no engine runs), never as a silent
-    /// no-op; a run re-reads the menus and every pane, as a click does.
+    /// no-op; a run re-reads the menus and every pane, as a click does. Returns
+    /// true when the action ran, so the canvas repaints.
     /// </summary>
     private bool ApplyMenuAction(MenuActionCmd cmd)
     {
@@ -5185,7 +5186,12 @@ internal sealed unsafe class Canvas : IDisposable
         _report($"MENU ACTION RAN {head} outcome={(channel.Length == 0 ? "changed" : "unchanged")} "
               + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
               + $"channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
-        return docChanged;
+        // TRUE WHEN IT RAN, not only when the document changed: View > Zoom In,
+        // Zoom Out and the Fits change the view and nothing else, and returning
+        // `docChanged` left them unpainted until the next pointer move (flask,
+        // the 10-30 feel sitting's build, measured without SB_PROBE, whose own
+        // read repainted and hid it). One frame per menu choice costs nothing.
+        return true;
     }
 
     /// <summary>Queue Q6's replay on <paramref name="widget"/> (W2-6). See <see cref="ApplyPanelSynth"/>.</summary>
