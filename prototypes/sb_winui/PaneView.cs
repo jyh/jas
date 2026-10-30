@@ -410,6 +410,25 @@ public sealed partial class MainWindow
             };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(
                 _paneFocus, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+            // ...and a key a scrolling dock would take on its way up goes through
+            // the window's own route here, before the scroller sees it
+            // (`PanelKeys.BeforeScroller`). Handled, so it is not routed twice.
+            _paneFocus.PreviewKeyDown += (s, e) =>
+            {
+                uint code = e.Key switch
+                {
+                    Windows.System.VirtualKey.Up => JasCore.KeyArrowUp,
+                    Windows.System.VirtualKey.Down => JasCore.KeyArrowDown,
+                    Windows.System.VirtualKey.Left => JasCore.KeyArrowLeft,
+                    Windows.System.VirtualKey.Right => JasCore.KeyArrowRight,
+                    Windows.System.VirtualKey.Home => JasCore.KeyHome,
+                    Windows.System.VirtualKey.End => JasCore.KeyEnd,
+                    _ => 0,
+                };
+                if (!PanelKeys.BeforeScroller(code)) { return; }
+                _w.OnKeyDown(s, e);
+                e.Handled = true;
+            };
             host.Children.Add(_paneFocus);
             // The toolbar's buttons sit at the TOP of its column, as every port
             // draws a toolbar. The dock keeps its placement (unchanged here).

@@ -2012,4 +2012,13 @@ internal static class PanelKeys
         'a' => ctrl,
         _ => false,
     };
+
+    /// <summary>
+    /// flask §656: the keys routed from a pane's focus BEFORE they bubble: the
+    /// arrows, Home and End. A dock column that overflows is a ScrollViewer,
+    /// which takes exactly these on their way up to scroll itself, so a row
+    /// press that gave the panel the keyboard still lost Up and Down while F2
+    /// and Ctrl+A arrived. Every other key bubbles as before.
+    /// </summary>
+    internal static bool BeforeScroller(uint code) => code is 0xF700 or 0xF701 or 0xF702 or 0xF703 or 0xF729 or 0xF72B;
 }

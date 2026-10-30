@@ -852,6 +852,13 @@ static class Program
         Check("panel key: a plain letter is not (it is the document's shortcut)", !PanelKeys.Forwards('a', ctrl: false), "");
         Check("panel key: Ctrl+Z is not (undo stays the document's)", !PanelKeys.Forwards('z', ctrl: true), "");
         Check("panel key: Home and Tab are not", !PanelKeys.Forwards(0xF729, false) && !PanelKeys.Forwards(0x09, false), "");
+        // flask §656: the keys a scrolling dock would take on their way up (the
+        // arrows, Home, End) are routed from the pane's focus BEFORE the
+        // scroller sees them; every other key bubbles as before.
+        Check("panel key: the arrows, Home and End go before the scroller",
+            new uint[] { 0xF700, 0xF701, 0xF702, 0xF703, 0xF729, 0xF72B }.All(PanelKeys.BeforeScroller), "");
+        Check("panel key: F2, Enter, Escape, Delete, Backspace, Tab and a letter do not",
+            !new uint[] { 0xF705, 0x0D, 0x1B, 0x7F, 0x08, 0x09, 'a', 0 }.Any(PanelKeys.BeforeScroller), "");
         Check("panel key: an UnboundPanelKey refusal is read",
             KeyWire.UnboundPanelKey("""{"panel_event":"UnboundPanelKey","detail":"Delete"}"""), "");
         Check("panel key: any other refusal is not",
