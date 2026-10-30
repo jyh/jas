@@ -1136,6 +1136,22 @@ JasStatus jas_set_tool(struct JasEngine *e, uintptr_t index);
 JasStatus jas_set_dpi_scale(struct JasEngine *e, double scale);
 
 /**
+ * Tell the core the size of the surface it draws into, in PHYSICAL pixels,
+ * the units the shell's swapchain and every pointer are in. The core keeps
+ * the model's viewport in DIPs from it (and re-derives it on a scale change),
+ * which is what Fit in Window, Fit Artboard and the View menu's zoom anchor
+ * centre on. Before this the viewport stayed at the model's 888x900 default
+ * whatever the window was.
+ *
+ * ⛔ REFUSED, NOT CLAMPED, like [`jas_set_dpi_scale`]: a zero, negative or
+ * non-finite size cannot describe a surface, and it changes nothing.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+JasStatus jas_set_viewport_size(struct JasEngine *e, double w, double h);
+
+/**
  * ⭐ THE POINTER ITSELF. `x` and `y` are PHYSICAL pixels -- what the shell's
  * swapchain is sized in -- and this function converts them to DIPs before the
  * tool sees them. `mods` is a bitmask of `MOD_*`.
