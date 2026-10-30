@@ -247,6 +247,26 @@ pub unsafe extern "C" fn jas_set_dpi_scale(e: *mut JasEngine, scale: f64) -> Jas
     JasStatus::Ok
 }
 
+/// Tell the core the size of the surface it draws into, in PHYSICAL pixels,
+/// the units the shell's swapchain and every pointer are in. The core keeps
+/// the model's viewport in DIPs from it (and re-derives it on a scale change),
+/// which is what Fit in Window, Fit Artboard and the View menu's zoom anchor
+/// centre on. Before this the viewport stayed at the model's 888x900 default
+/// whatever the window was.
+///
+/// ⛔ REFUSED, NOT CLAMPED, like [`jas_set_dpi_scale`]: a zero, negative or
+/// non-finite size cannot describe a surface, and it changes nothing.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_set_viewport_size(e: *mut JasEngine, w: f64, h: f64) -> JasStatus {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
+    if !(w.is_finite() && w > 0.0 && h.is_finite() && h > 0.0) { return JasStatus::BadParamType; }
+    engine.set_surface_px(w, h);
+    JasStatus::Ok
+}
+
 /// ⭐ THE POINTER ITSELF. `x` and `y` are PHYSICAL pixels -- what the shell's
 /// swapchain is sized in -- and this function converts them to DIPs before the
 /// tool sees them. `mods` is a bitmask of `MOD_*`.

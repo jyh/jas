@@ -192,6 +192,11 @@ pub struct JasEngine {
     /// single most common Windows-app defect there is -- on the far side of the
     /// boundary, which is what BL1 exists to prevent.
     dpi_scale: std::cell::Cell<f64>,
+    /// The shell's surface in PHYSICAL pixels, `None` until it states one. Kept
+    /// in the shell's units for the same reason as `dpi_scale`: the model's
+    /// viewport is DIPs, derived here whenever either changes, so a scale
+    /// change alone re-sizes it and C# never divides.
+    surface_px: std::cell::Cell<Option<(f64, f64)>>,
     /// The tool the pointer drives, by index into `ffi_pointer::TOOL_IDS`.
     /// Built lazily: a `YamlTool` costs a workspace lookup and a state-store
     /// init, and most engines never take a pointer at all.
@@ -264,7 +269,25 @@ impl JasEngine {
     /// Name a refusal for [`jas_last_error_json`] from a sibling module.
     pub(crate) fn set_last_error(&self, json: String) { *self.last_error.borrow_mut() = Some(json); }
     pub(crate) fn dpi_scale(&self) -> f64 { self.dpi_scale.get() }
-    pub(crate) fn set_dpi_scale(&self, s: f64) { self.dpi_scale.set(s); }
+    pub(crate) fn set_dpi_scale(&self, s: f64) {
+        self.dpi_scale.set(s);
+        self.sync_viewport();
+    }
+    pub(crate) fn set_surface_px(&self, w: f64, h: f64) {
+        self.surface_px.set(Some((w, h)));
+        self.sync_viewport();
+    }
+    /// The model's viewport, in DIPs, from the surface the shell stated. Before
+    /// it states one the model keeps its default.
+    fn sync_viewport(&self) {
+        if let Some((w, h)) = self.surface_px.get() {
+            let s = self.dpi_scale.get();
+            self.with_model_mut(|m| {
+                m.viewport_w = w / s;
+                m.viewport_h = h / s;
+            });
+        }
+    }
     pub(crate) fn tool_slot(
         &self,
     ) -> std::cell::RefMut<'_, Option<(usize, Box<dyn crate::tools::tool::CanvasTool>)>> {
@@ -339,6 +362,7 @@ impl JasEngine {
             registry: RefCell::new(PanelRegistry::default()),
             store: RefCell::new(store),
             dpi_scale: std::cell::Cell::new(1.0),
+            surface_px: std::cell::Cell::new(None),
             tool: RefCell::new(None),
             layout: RefCell::new(None),
         }
@@ -4596,6 +4620,60 @@ mod tests {
         let back = doc_at_centre(z2, x2, y2);
         assert!((back.0 - before.0).abs() < 1e-9 && (back.1 - before.1).abs() < 1e-9,
                 "Zoom Out keeps the centre too: {before:?} -> {back:?}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Fit Artboard centres the artboard in the canvas the shell HAS, not in
+    /// the model's 888x900 default (the 10-30 feel sitting's page, §3: "Fit
+    /// puts the artboard left of centre"; measured on the Windows box at
+    /// `ce4fa520` on a 2379x1333 surface at 150 %). The shell states its
+    /// surface in PHYSICAL pixels, as it states every pointer, and the core
+    /// divides by the scale it was told, so the viewport is in the DIPs the
+    /// view and the tools use. A scale change after the size re-derives it.
+    #[test]
+    fn fit_artboard_centres_in_the_surface_the_shell_states() {
+        use crate::ffi_pointer::{jas_set_dpi_scale, jas_set_viewport_size};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let engine = || unsafe { e.as_ref() }.unwrap();
+        let viewport = || engine().with_model(|m| (m.viewport_w, m.viewport_h));
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+
+        unsafe {
+            assert_eq!(jas_set_dpi_scale(e, 1.5), JasStatus::Ok);
+            assert_eq!(jas_set_viewport_size(e, 2379.0, 1333.0), JasStatus::Ok);
+        }
+        let (vw, vh) = viewport();
+        assert!(close(vw, 2379.0 / 1.5) && close(vh, 1333.0 / 1.5),
+                "the viewport is the surface in DIPs (got {vw}x{vh})");
+
+        let (_r, err) = dispatch(e, r#"{"menu_item":"menu_fit_artboard"}"#);
+        assert!(err.is_empty() || err.contains("Unchanged"), "{err}");
+        let (ax, ay, aw, ah) = engine().with_document(|d| {
+            let ab = d.artboards.first().expect("a new document has an artboard");
+            (ab.x, ab.y, ab.width, ab.height)
+        });
+        let (z, ox, oy) = engine().with_model(|m| (m.zoom_level, m.view_offset_x, m.view_offset_y));
+        let (sx, sy) = ((ax + aw / 2.0) * z + ox, (ay + ah / 2.0) * z + oy);
+        assert!(close(sx, vw / 2.0) && close(sy, vh / 2.0),
+                "the artboard's centre lands on the viewport's: ({sx}, {sy}) vs ({}, {})",
+                vw / 2.0, vh / 2.0);
+
+        // The display moves to 100 %: the same surface is more DIPs.
+        unsafe { assert_eq!(jas_set_dpi_scale(e, 1.0), JasStatus::Ok) };
+        let (vw1, vh1) = viewport();
+        assert!(close(vw1, 2379.0) && close(vh1, 1333.0),
+                "a scale change re-derives the viewport (got {vw1}x{vh1})");
+
+        // REFUSED, NOT CLAMPED, as `jas_set_dpi_scale` refuses: a size that
+        // cannot describe a surface is named at the boundary and changes nothing.
+        for (w, h) in [(0.0, 600.0), (800.0, -1.0), (f64::NAN, 600.0), (800.0, f64::INFINITY)] {
+            assert_eq!(unsafe { jas_set_viewport_size(e, w, h) }, JasStatus::BadParamType,
+                       "{w}x{h} is refused");
+            assert_eq!(viewport(), (vw1, vh1), "and a refusal leaves the viewport");
+        }
+        assert_eq!(unsafe { jas_set_viewport_size(std::ptr::null_mut(), 800.0, 600.0) },
+                   JasStatus::NullHandle);
         unsafe { jas_engine_free(e) };
     }
 
