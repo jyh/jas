@@ -1474,6 +1474,16 @@ public sealed partial class MainWindow : Window
             // accelerator's.
             e.Handled = true;
         }
+        // The 10-30 sitting, finding 2: Ctrl+= and Ctrl+- (Zoom In, Zoom Out) take
+        // the same route. They cannot be menu accelerators (one on VK_OEM_PLUS or
+        // VK_OEM_MINUS left the View menu opening with zero items), so the engine
+        // resolves `=`/`-` with MOD_CMD and InvokeByKey runs the item it names.
+        if (code == 0 && (mods & JasCore.ModCmd) != 0
+            && ShortcutWire.ChordChar((int)e.Key) is { } chordChar)
+        {
+            code = (uint)chordChar;
+            e.Handled = true;
+        }
         // jas §644/#753: a key the focused PANEL binds (its `keyboard:` rows: the
         // tree's arrows, F2, Enter, Escape, Delete, Backspace, Ctrl+A) goes to
         // the panel door, and is kept from XAML's own focus navigation. One the
@@ -2585,8 +2595,16 @@ public sealed partial class MainWindow : Window
                         // `enabled_when`; it reads the answer.
                         IsEnabled = isOn,
                     };
-                    var accel = Accelerator(Str(node, "shortcut"));
+                    var shortcut = Str(node, "shortcut");
+                    var accel = Accelerator(shortcut);
                     if (accel is not null) { item.KeyboardAccelerators.Add(accel); }
+                    // A chord the key handler owns (Ctrl+=, Ctrl+-) has no
+                    // accelerator to draw its text, so the item shows the spec's.
+                    else if (ShortcutWire.Parse(shortcut) is { } owned
+                             && ShortcutWire.ChordChar(owned.Key) is not null)
+                    {
+                        item.KeyboardAcceleratorTextOverride = shortcut;
+                    }
                     var itemId = Str(node, "id") ?? "";
                     if (itemId.Length > 0)
                     {
@@ -2639,33 +2657,21 @@ public sealed partial class MainWindow : Window
     private KeyboardAccelerator? Accelerator(string? spec)
     {
         if (string.IsNullOrWhiteSpace(spec)) { return null; }
-        var mods = Windows.System.VirtualKeyModifiers.None;
-        Windows.System.VirtualKey? key = null;
-        foreach (var part in spec.Split('+', StringSplitOptions.RemoveEmptyEntries))
-        {
-            switch (part.Trim())
-            {
-                case "Ctrl": mods |= Windows.System.VirtualKeyModifiers.Control; break;
-                case "Shift": mods |= Windows.System.VirtualKeyModifiers.Shift; break;
-                case "Alt": mods |= Windows.System.VirtualKeyModifiers.Menu; break;
-                default:
-                    if (Enum.TryParse<Windows.System.VirtualKey>(part.Trim(), true, out var k)) { key = k; }
-                    else if (part.Trim().Length == 1
-                             && Enum.TryParse<Windows.System.VirtualKey>("Number" + part.Trim(), true, out var n))
-                    {
-                        key = n;
-                    }
-                    break;
-            }
-        }
-        if (key is null)
+        if (ShortcutWire.Parse(spec) is not { } chord)
         {
             _shortcutsUnparsed++;
             Report($"MENU SHORTCUT UNPARSED '{spec}' — no accelerator was attached, "
                  + "which is deliberate: a wrong one steals a keystroke silently");
             return null;
         }
-        return new KeyboardAccelerator { Key = key.Value, Modifiers = mods };
+        // Ctrl+= and Ctrl+- are OnKeyDown's (ShortcutWire.ChordChar), never an
+        // accelerator: on VK_OEM_PLUS/MINUS one empties the View menu.
+        if (ShortcutWire.ChordChar(chord.Key) is not null) { return null; }
+        var mods = Windows.System.VirtualKeyModifiers.None;
+        if (chord.Ctrl) { mods |= Windows.System.VirtualKeyModifiers.Control; }
+        if (chord.Shift) { mods |= Windows.System.VirtualKeyModifiers.Shift; }
+        if (chord.Alt) { mods |= Windows.System.VirtualKeyModifiers.Menu; }
+        return new KeyboardAccelerator { Key = (Windows.System.VirtualKey)chord.Key, Modifiers = mods };
     }
 
     // =======================================================================
