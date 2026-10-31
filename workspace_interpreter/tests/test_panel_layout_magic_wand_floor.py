@@ -41,7 +41,7 @@ INPUTS = ["mwp_fill_tolerance", "mwp_stroke_tolerance",
 
 def _panel(pid):
     path = pathlib.Path(__file__).resolve().parents[2] / "workspace" / "workspace.json"
-    panel = json.loads(path.read_text())["panels"][pid]
+    panel = json.loads(path.read_text(encoding="utf-8"))["panels"][pid]
     rects = {tuple(r["path"]): r["rect"] for r in layout_panel(panel, PANEL_W, 600, {})}
     nodes = {}
 
