@@ -337,8 +337,10 @@ def _half_away(x: float) -> int:
 
 def _commit_picker_pick(widget: dict, value, store: StateStore, panel,
                         run_kwargs: dict) -> EventResult:
+    # Only a TEXT mode other than h refuses; anything else reads as h, as
+    # the engine's door and its pictures read it (#794's LOW 2).
     mode = evaluate_in(store, "dialog.radio_channel")
-    if mode is not None and mode != "h":
+    if isinstance(mode, str) and mode != "h":
         return EventResult("refused", reason=WRONG_MODE)
     bind = widget.get("bind") if isinstance(widget.get("bind"), dict) else {}
     if widget.get("type") == "color_hue_bar":
@@ -348,8 +350,10 @@ def _commit_picker_pick(widget: dict, value, store: StateStore, panel,
         writes = [(bind.get("saturation"), _half_away(s)), (bind.get("brightness"), _half_away(b))]
     written = False
     for expr, picked in writes:
+        # A pick writes a DIALOG target, and only outside a panel, as the
+        # engine's door does (#794's LOW 1): both widgets are the dialog's.
         target = writable_target(expr)
-        if target is not None:
+        if target is not None and target[0] == "dialog" and panel is None:
             _write_bind(target, picked, store, panel)
             written = True
     ran = _run_behaviors(_declared(widget, COMMIT_EVENTS), value, store, run_kwargs)

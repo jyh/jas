@@ -1476,6 +1476,52 @@ def test_off_h_mode_a_pick_is_refused_wrong_mode_and_writes_nothing(widget, text
     assert (store.get_dialog("h"), store.get_dialog("s"), store.get_dialog("b")) == (7, 7, 7)
 
 
+
+@pytest.mark.parametrize("mode", [3, True, ["s"]], ids=["number", "bool", "list"])
+def test_a_radio_channel_that_is_not_text_is_h_mode(mode):
+    """#794's LOW 2: only a TEXT mode other than `h` is WrongMode. A mode
+    that is not text reads as h, as the engine's door and its pictures read
+    it (`panel_plan.rs` `display_of`, `panel_behavior.rs` `commit_value`)."""
+    store = _picker(radio_channel=mode)
+    r = we.commit(_STRIP, "0.25", store, panel=None)
+    assert r.outcome == "committed" and r.bind_written, (mode, r)
+    assert store.get_dialog("h") == 269
+
+
+def test_an_empty_radio_channel_is_wrong_mode():
+    """The control for the arm above: an empty TEXT mode is not h."""
+    store = _picker(radio_channel="")
+    assert we.commit(_STRIP, "0.25", store, panel=None) == \
+        we.EventResult("refused", reason=we.WRONG_MODE)
+
+
+@pytest.mark.parametrize("widget, text", [
+    ({"type": "color_hue_bar", "bind": {"value": "panel.h"}}, "0.25"),
+    ({"type": "color_gradient", "bind": {"saturation": "panel.s", "brightness": "panel.b"}}, "0.5,0.5"),
+], ids=["strip", "field"])
+def test_a_pick_writes_only_a_dialog_target_outside_a_panel(widget, text):
+    """#794's LOW 1: a pick writes its DIALOG binds only, and only when the
+    widget is not in a panel, as the engine's door does. A strip or field
+    bound to `panel.` (which no YAML does) writes nothing and, with no
+    behavior, is inert."""
+    store = _picker()
+    store.init_panel("p", {"h": 7, "s": 7, "b": 7})
+    r = we.commit(widget, text, store, panel={"id": "p"})
+    assert r.outcome == "inert" and not r.bind_written, r
+    assert [store.get_panel("p", k) for k in ("h", "s", "b")] == [7, 7, 7]
+
+
+def test_a_dialog_bound_pick_inside_a_panel_writes_nothing():
+    """The engine writes a pick only with no panel (`(Some(("dialog", key)),
+    None)` in `commit_value`); the reference agrees. The control: the same
+    widget with no panel writes."""
+    store = _picker()
+    store.init_panel("p", {})
+    assert we.commit(_STRIP, "0.25", store, panel={"id": "p"}).outcome == "inert"
+    assert store.get_dialog("h") == 7
+    assert we.commit(_STRIP, "0.25", store, panel=None).bind_written
+    assert store.get_dialog("h") == 269
+
 # ── Text entry: input, keydown, blur on a text_input (STATUS-jas item 40) ──
 
 

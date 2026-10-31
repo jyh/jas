@@ -240,6 +240,9 @@ struct YamlDialogOverlay: View {
     /// would be a no-op transition and the bridge would miss it.
     var onDismiss: (() -> Void)? = nil
 
+    /// The open flyout's Escape monitor (see ``FlyoutEscapeMonitor``).
+    @State private var escapeMonitor = FlyoutEscapeMonitor()
+
     var body: some View {
         if let ds = dialogState {
             if !isModal(ds), let anchor = ds.anchor {
@@ -345,6 +348,14 @@ struct YamlDialogOverlay: View {
                     .offset(x: anchor.x - o.x + dx, y: anchor.y - o.y + dy)
             }
         }
+        // Escape closes the flyout as the backdrop tap does (SCHEMA.md).
+        .onAppear {
+            escapeMonitor.install {
+                dialogState = nil
+                onDismiss?()
+            }
+        }
+        .onDisappear { escapeMonitor.remove() }
     }
 
     /// The popover's content container: bare (no title bar), shadowed,
@@ -479,6 +490,61 @@ struct YamlDialogOverlay: View {
 
     private func dialogWidth(_ ds: YamlDialogState) -> CGFloat {
         declaredDialogWidth(WorkspaceData.load()?.dialog(ds.id)) ?? 500
+    }
+}
+
+/// Whether a key closes a non-modal flyout (SCHEMA.md, "Non-Modal Dialogs":
+/// a button whose effects close it, a press outside it, and Escape). Escape
+/// ALONE: Cmd-Escape is the proposal bar's, and a chord is not Escape. Caps
+/// Lock and the function key do not make a chord.
+func flyoutEscapeDismisses(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+    let chord = modifiers.intersection([.command, .option, .control, .shift])
+    return keyCode == 53 && chord.isEmpty
+}
+
+/// The open flyout's Escape (STATUS-jas row 54). A LOCAL monitor sees the key
+/// before the first responder, which is usually the canvas with its own
+/// Escape for the active tool, so the flyout closes and the tool does not
+/// also act. ⛔ It is removed when the flyout closes, or Escape would be eaten
+/// for the rest of the session; installing again replaces the monitor, it
+/// never stacks a second.
+@MainActor
+final class FlyoutEscapeMonitor {
+    enum Outcome: Equatable { case consumed, passed }
+    private var token: Any?
+    private var onEscape: (() -> Void)?
+
+    var isInstalled: Bool { token != nil }
+    /// How many of these monitors are installed in the process, so a stacked
+    /// second install (or a missed removal) is observable.
+    private(set) static var liveCount = 0
+
+    func install(_ onEscape: @escaping () -> Void) {
+        remove()
+        self.onEscape = onEscape
+        Self.liveCount += 1
+        token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] evt in
+            guard let self else { return evt }
+            let outcome = MainActor.assumeIsolated {
+                self.handle(keyCode: evt.keyCode, modifiers: evt.modifierFlags)
+            }
+            return outcome == .consumed ? nil : evt
+        }
+    }
+
+    func remove() {
+        if let token { NSEvent.removeMonitor(token); Self.liveCount -= 1 }
+        token = nil
+        onEscape = nil
+    }
+
+    /// The monitor's decision, separated from the event so it can be tested.
+    func handle(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Outcome {
+        guard let onEscape, flyoutEscapeDismisses(keyCode: keyCode, modifiers: modifiers) else {
+            return .passed
+        }
+        onEscape()
+        return .consumed
     }
 }
 
