@@ -339,6 +339,8 @@ public sealed partial class MainWindow : Window
         if (!_dockGroups.TryGetValue(key, out var g)) { return; }
         g.Body.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         g.Chevron.Content = collapsed ? "▸" : "▾";
+        // #774: the menu is hidden while its group is collapsed.
+        g.Menu.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         var body = g.Body.Visibility == Visibility.Collapsed ? "hidden" : "visible";
         Report($"DOCK GROUP key={key} collapsed={(collapsed ? "true" : "false")} body={body} via={via}");
     }
@@ -580,7 +582,6 @@ public sealed partial class MainWindow : Window
                 var tabs = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
-                    Margin = new Thickness(4, 4, 4, 0),
                     Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 };
                 var tabList = new List<(string, Button)>();
@@ -621,7 +622,11 @@ public sealed partial class MainWindow : Window
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(chevron, key + "_collapse");
                 ToolTipService.SetToolTip(chevron, "Collapse/Expand");
                 chevron.Click += (_, _) => ToggleDockGroup(groupKey, "hand");
-                tabs.Children.Add(chevron);
+                // The 10-30 sitting, finding 7 (#774): the chevron and the menu sit at
+                // the header's TRAILING edge whatever the tab count, in their own
+                // `Auto` column; the tabs fill the `*` column (still the tear-out handle).
+                var trailing = new StackPanel { Orientation = Orientation.Horizontal };
+                trailing.Children.Add(chevron);
                 // The panel menu (the owner's note 3, 2026-10-12): the core's rows
                 // for the group's CURRENT panel, read when it is opened.
                 var menuButton = new Button
@@ -635,9 +640,16 @@ public sealed partial class MainWindow : Window
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(menuButton, key + "_menu");
                 ToolTipService.SetToolTip(menuButton, "Panel menu");
                 menuButton.Click += (_, _) => RequestPanelMenu(groupKey, "hand");
-                tabs.Children.Add(menuButton);
+                trailing.Children.Add(menuButton);
+                var header = new Grid { Margin = new Thickness(4, 4, 4, 0) };
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                Grid.SetColumn(tabs, 0);
+                Grid.SetColumn(trailing, 1);
+                header.Children.Add(tabs);
+                header.Children.Add(trailing);
                 var body = new StackPanel();
-                body.Children.Add(tabs);
+                body.Children.Add(header);
                 body.Children.Add(scroll);
                 var frame = new Border
                 {
@@ -652,7 +664,8 @@ public sealed partial class MainWindow : Window
                 _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
                 MarkDockTab(key, ids[active]);
                 // The engine's collapse, drawn silently at build (the YAML seeds every group open).
-                if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; }
+                // #774: the menu is hidden while its group is collapsed.
+                if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; menuButton.Visibility = Visibility.Collapsed; }
                 // A floating group's collapse is addressed by its own dock id,
                 // which FP-4a does not send; its chevron is hidden, not inert.
                 if (!key.StartsWith("dock", StringComparison.Ordinal)) { chevron.Visibility = Visibility.Collapsed; }
