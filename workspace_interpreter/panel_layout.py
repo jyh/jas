@@ -523,7 +523,8 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
             if lay == "row" and any(_has_col(c) for _, c in children):
                 ch_items, content_h = _grid(children, path, inner_w, gap, ctx)
             elif lay == "row":
-                ch_items, content_h = _flow(children, path, inner_w, gap, ctx)
+                ch_items, content_h = _flow(children, path, inner_w, gap, ctx,
+                                            _stretch_h(node, pt, pb))
             else:
                 ch_items, content_h = _column(children, path, inner_w, gap, inner_h, ctx)
             if placed:
@@ -610,7 +611,90 @@ def _column(children, path, inner_w, gap, avail_h, ctx) -> tuple[list[dict], int
     return items, (cy - gap if n else 0)
 
 
-def _flow(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
+def _floor_w(node: dict, ctx: dict) -> int:
+    """The least width a row may shrink ``node`` to (STATUS-flask 705 (1b)):
+    CSS ``min-width`` beats ``flex-shrink``. A leaf's floor is its declared
+    ``min_width`` (a percentage has nothing to resolve against and is
+    ignored, as in ``_natural_w``). A container's is its content's, as a flex
+    item's automatic minimum is: a row sums its cells' floors and gaps, any
+    other container takes its widest child's, both plus padding. A node with
+    no floor anywhere inside it has 0 and shrinks as before."""
+    if not (_is_container(node) or node.get("type") == "disclosure"):
+        f = _resolve_dim(_dim(_style(node).get("min_width"), ctx), -1)
+        return f if f is not None and f > 0 else 0
+    if isinstance(node.get("foreach"), dict):
+        return 0
+    kids, _placed = _split_positioned(_visible_children(node, ctx))
+    floors = [_floor_w(c, ctx) for _, c in kids]
+    if not any(floors):
+        return 0
+    _pt, pr, _pb, pl = _parse_padding(_style(node).get("padding"))
+    if (node.get("type") != "disclosure" and _resolved_layout(node) == "row"
+            and not any(_has_col(c) for _, c in kids)):
+        inner = sum(floors) + _gap(node) * (len(kids) - 1)
+    else:
+        inner = max(floors)
+    return inner + pl + pr
+
+
+def _stretch_h(node: dict, pt: int, pb: int) -> int | None:
+    """A row's cross-axis rule (STATUS-flask 705 (2), CSS ``align-items:
+    stretch``). ``None`` when the row declares an alignment other than
+    ``stretch``: its leaves are centred, as before. Otherwise the height its
+    heightless leaves take: its declared height less its padding, or 0 for
+    "its tallest child"."""
+    if _style(node).get("alignment") not in (None, "stretch"):
+        return None
+    h = _resolve_dim(_style(node).get("height"), 0)
+    return max(h - pt - pb, 0) if h is not None else 0
+
+
+def _stretches(node: dict) -> bool:
+    """A leaf that declares no ``height``, ``size`` or ``aspect_ratio``."""
+    if _is_container(node) or node.get("type") == "disclosure":
+        return False
+    return (_resolve_dim(_style(node).get("height"), 0) is None
+            and _size(node) is None and _aspect(node) is None)
+
+
+def _shrink(nat: list[int], floors: list[int], avail: int) -> list[int]:
+    """Shrink ``nat`` to sum to ``avail``, each cell in proportion to its
+    natural width but never below its floor (STATUS-flask 705 (1b)). A cell
+    whose share would fall below its floor is frozen there and the rest are
+    re-shared, until none is; the rounding remainder then goes one pixel at a
+    time to the unfrozen cells in order (deterministic). When the floors
+    alone exceed ``avail`` they cannot all hold, and every cell shrinks in
+    proportion as it did before."""
+    n = len(nat)
+    floors = [min(f, w) for f, w in zip(floors, nat)]
+    if sum(floors) > avail:
+        floors = [0] * n
+    widths = [0] * n
+    frozen = [False] * n
+    while True:
+        free = [k for k in range(n) if not frozen[k]]
+        space = avail - sum(widths[k] for k in range(n) if frozen[k])
+        total = sum(nat[k] for k in free)
+        share = {k: (nat[k] * space // total if total > 0 else 0) for k in free}
+        over = [k for k in free if share[k] < floors[k]]
+        if not over:
+            for k in free:
+                widths[k] = share[k]
+            break
+        for k in over:
+            frozen[k] = True
+            widths[k] = floors[k]
+    rem = avail - sum(widths)
+    order = [k for k in range(n) if not frozen[k]] or list(range(n))
+    j = 0
+    while rem > 0:
+        widths[order[j]] += 1
+        rem -= 1
+        j = (j + 1) % len(order)
+    return widths
+
+
+def _flow(children, path, inner_w, gap, ctx, stretch_h=None) -> tuple[list[dict], int]:
     n = len(children)
     nat = [_natural_w(c, ctx) for _i, c in children]
     weights = [_flex(c) for _i, c in children]
@@ -618,18 +702,12 @@ def _flow(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
     fixed = sum(nat) + (gap * (n - 1) if n else 0)
     widths = list(nat)
     if inner_w > 0 and fixed > inner_w:
-        # Over-subscribed: shrink every cell proportionally to fit the row, then
-        # hand out the rounding remainder one pixel at a time (deterministic).
+        # Over-subscribed: shrink every cell proportionally to fit the row,
+        # never below a floor it declares (STATUS-flask 705 (1b)).
         avail = inner_w - gap * (n - 1 if n else 0)
         total = sum(nat)
         if total > 0 and avail > 0:
-            widths = [w * avail // total for w in nat]
-            rem = avail - sum(widths)
-            k = 0
-            while rem > 0 and n:
-                widths[k] += 1
-                rem -= 1
-                k = (k + 1) % n
+            widths = _shrink(nat, [_floor_w(c, ctx) for _i, c in children], avail)
     elif inner_w > 0 and sumw > 0:
         # Fits: distribute the leftover width to flex-weighted children.
         leftover = inner_w - fixed
@@ -653,10 +731,25 @@ def _flow(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
             cit[0]["w"] = widths[k]
         placed.append((cit, ch))
         row_h = max(row_h, ch)
+    # STATUS-flask 705 (2), CSS's align-items: stretch. A heightless leaf
+    # takes the row's inner height (its declared one, else its tallest
+    # child), floored by the leaf's own min_height, and sits at the top.
+    stretched = [stretch_h is not None and bool(placed[k][0]) and _stretches(c)
+                 for k, (_i, c) in enumerate(children)]
+    if any(stretched):
+        line_h = stretch_h if stretch_h else row_h
+        for k, (_i, c) in enumerate(children):
+            if stretched[k]:
+                cit, _ch = placed[k]
+                floor = _resolve_dim(_style(c).get("min_height"), 0)
+                sh = max(line_h, floor) if floor is not None else line_h
+                cit[0]["h"] = sh
+                placed[k] = (cit, sh)
+                row_h = max(row_h, sh)
     items: list[dict] = []
     cx = 0
     for k, (cit, ch) in enumerate(placed):
-        dy = (row_h - ch) // 2
+        dy = 0 if stretched[k] else (row_h - ch) // 2
         for it in cit:
             it["x"] += cx
             it["y"] += dy
