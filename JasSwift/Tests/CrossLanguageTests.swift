@@ -3776,6 +3776,41 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+/// The Color Picker's two picks (`stripValue`, `gradientSB`): a normalized
+/// point -> the value written. Goldens derived from the spec's formula
+/// (`scripts/derive_picker_picks_goldens.py`). `expected` within 1e-9;
+/// `written` is the pick's `.rounded()`, half away from zero. Mirror of Rust's
+/// `algorithm_picker_picks_vectors` and the reference's `test_picker_picks.py`.
+@Test func algorithmPickerPicksVectors() throws {
+    let json = readFixture("algorithms/picker_picks.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    var strips = 0, fields = 0
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let v = (tc["v"] as! NSNumber).doubleValue
+        switch tc["function"] as! String {
+        case "strip_value":
+            strips += 1
+            let got = stripValue(v: v, max: (tc["max"] as! NSNumber).doubleValue)
+            let want = (tc["expected"] as! NSNumber).doubleValue
+            #expect(abs(got - want) < 1e-9, "strip_value '\(name)': \(got), corpus pins \(want)")
+            #expect(Int(got.rounded()) == (tc["written"] as! NSNumber).intValue, "strip_value '\(name)' written")
+        case "gradient_sb":
+            fields += 1
+            let (s, b) = gradientSB(u: (tc["u"] as! NSNumber).doubleValue, v: v)
+            let want = (tc["expected"] as! [NSNumber]).map { $0.doubleValue }
+            #expect(abs(s - want[0]) < 1e-9 && abs(b - want[1]) < 1e-9,
+                    "gradient_sb '\(name)': (\(s), \(b)), corpus pins (\(want[0]), \(want[1]))")
+            let written = (tc["written"] as! [NSNumber]).map { $0.intValue }
+            #expect([Int(s.rounded()), Int(b.rounded())] == written, "gradient_sb '\(name)' written")
+        default:
+            Issue.record("picker_picks '\(name)': unknown function")
+        }
+    }
+    #expect(strips >= 8 && fields >= 8, "picker_picks.json has \(strips) strip and \(fields) field vectors")
+}
+
 // MARK: - Option rows (SCHEMA.md `options`)
 
 /// The `options` corpus: how a literal list reads, and what a commit of each

@@ -932,6 +932,48 @@ pub(crate) mod tests {
         }
     }
 
+    /// The Color Picker's two picks (`strip_value`, `gradient_sb`): a
+    /// normalized point -> the value written. Goldens derived from the spec's
+    /// formula (`scripts/derive_picker_picks_goldens.py`). `expected` within
+    /// 1e-9; `written` is the pick's `.round()`, half away from zero. Mirrored
+    /// by Swift's `algorithmPickerPicksVectors` and the reference's
+    /// `test_picker_picks.py`.
+    #[test]
+    fn algorithm_picker_picks_vectors() {
+        use crate::interpreter::color_util::{gradient_sb, strip_value};
+        let doc: serde_json::Value = serde_json::from_str(&read_fixture("algorithms/picker_picks.json"))
+            .expect("Failed to parse picker_picks.json");
+        let vectors = doc["vectors"].as_array().expect("picker_picks.json has no vectors");
+        let (mut strips, mut fields) = (0, 0);
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            let v = tc["v"].as_f64().unwrap();
+            match tc["function"].as_str().unwrap() {
+                "strip_value" => {
+                    strips += 1;
+                    let got = strip_value(v, tc["max"].as_f64().unwrap());
+                    let want = tc["expected"].as_f64().unwrap();
+                    assert!((got - want).abs() < 1e-9, "strip_value '{name}': {got}, corpus pins {want}");
+                    assert_eq!(got.round() as i64, tc["written"].as_i64().unwrap(), "strip_value '{name}' written");
+                }
+                "gradient_sb" => {
+                    fields += 1;
+                    let (s, b) = gradient_sb(tc["u"].as_f64().unwrap(), v);
+                    let want = tc["expected"].as_array().unwrap();
+                    let (ws, wb) = (want[0].as_f64().unwrap(), want[1].as_f64().unwrap());
+                    assert!((s - ws).abs() < 1e-9 && (b - wb).abs() < 1e-9,
+                            "gradient_sb '{name}': ({s}, {b}), corpus pins ({ws}, {wb})");
+                    let written = tc["written"].as_array().unwrap();
+                    assert_eq!((s.round() as i64, b.round() as i64),
+                               (written[0].as_i64().unwrap(), written[1].as_i64().unwrap()),
+                               "gradient_sb '{name}' written");
+                }
+                other => panic!("picker_picks '{name}': unknown function {other}"),
+            }
+        }
+        assert!(strips >= 8 && fields >= 8, "picker_picks.json has {strips} strip and {fields} field vectors");
+    }
+
     /// The `options` corpus (SCHEMA.md, `options`): how a literal list reads
     /// and what a commit of each text accepts. A bare `separator` is a divider
     /// and NEVER a value. Authored from the schema text, because every reader

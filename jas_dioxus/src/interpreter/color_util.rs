@@ -108,6 +108,23 @@ pub fn color_bar_hex(u: f64, v: f64) -> String {
     rgb_to_hex(r, g, b)
 }
 
+/// The Color Picker's vertical strip (`cp_colorbar`): the value of its channel
+/// at `v`, 0 at the top to 1 at the bottom, clamped. TOP IS MAX for every
+/// channel (h 359, s and b 100, r g b 255), so the H-mode picture is red,
+/// magenta, blue, cyan, green, yellow, red top to bottom and a pick lands on
+/// the hue drawn under it. Held to `test_fixtures/algorithms/picker_picks.json`.
+pub fn strip_value(v: f64, max: f64) -> f64 {
+    (1.0 - v.clamp(0.0, 1.0)) * max
+}
+
+/// The Color Picker's field (`cp_gradient`): the saturation and brightness at
+/// a point normalized to [0, 1]², each clamped. `u` left to right is
+/// saturation 0 → 100; `v` top to bottom is brightness 100 → 0. Held to
+/// `test_fixtures/algorithms/picker_picks.json`.
+pub fn gradient_sb(u: f64, v: f64) -> (f64, f64) {
+    (100.0 * u.clamp(0.0, 1.0), 100.0 * (1.0 - v.clamp(0.0, 1.0)))
+}
+
 /// Convert HSB (h:0-360, s:0-100, b:0-100) to RGB (0-255).
 ///
 /// Channels outside those ranges are clamped (see [`clamp_channel`]). Hue's

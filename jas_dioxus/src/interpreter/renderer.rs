@@ -6904,9 +6904,7 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
     let xy_to_sb = move |x: f64, y: f64| -> (f64, f64) {
         let width = 180.0_f64;
         let height = 180.0_f64;
-        let sat = (x / width * 100.0).clamp(0.0, 100.0);
-        let bri = ((1.0 - y / height) * 100.0).clamp(0.0, 100.0);
-        (sat, bri)
+        crate::interpreter::color_util::gradient_sb(x / width, y / height)
     };
 
     let on_mousedown = move |evt: Event<MouseData>| {
@@ -6978,7 +6976,7 @@ const HUE_BAR_H_GRADIENT: &str = "linear-gradient(to bottom, #f00, #f0f, #00f, #
 /// A pointer `y` on the strip as its channel's value: top (`y = 0`) is `max`,
 /// the bottom is 0, for every channel.
 fn hue_bar_value(y: f64, height: f64, max: f64) -> f64 {
-    (max - y / height * max).clamp(0.0, max)
+    crate::interpreter::color_util::strip_value(y / height, max)
 }
 
 fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
