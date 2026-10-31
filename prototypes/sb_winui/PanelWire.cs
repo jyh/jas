@@ -835,7 +835,7 @@ internal static class PanelWire
     /// beneath its children, so a child's own control wins the press.
     /// </summary>
     internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events,
-                                  string? Background = null);
+                                  string? Background = null, string? Border = null);
 
     /// <summary>
     /// jas §630: a surface's paint, from its `bind.background`: a `#rrggbb`
@@ -845,6 +845,26 @@ internal static class PanelWire
     /// colour.
     /// </summary>
     internal static (byte R, byte G, byte B)? SurfaceFill(string? background) => SwatchColor(background);
+
+    /// <summary>
+    /// The 10-30 sitting, finding 6: a surface's border, from its `bind.border`
+    /// (#769 binds the Layers select square's, e.g. `1px solid #555555`; the
+    /// colour follows the appearance). Exactly `&lt;w&gt;px solid #rrggbb` with a
+    /// positive width draws; any other spelling (another style, no colour, a
+    /// template) is refused, never guessed.
+    /// </summary>
+    internal static (double Width, byte R, byte G, byte B)? SurfaceBorder(string? border)
+    {
+        if (border is null) { return null; }
+        var m = System.Text.RegularExpressions.Regex.Match(border,
+            @"^\s*(\d+(?:\.\d+)?)px\s+solid\s+(#[0-9a-fA-F]{6})\s*$");
+        if (!m.Success
+            || !double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var width)
+            || !(width > 0)
+            || SwatchColor(m.Groups[2].Value) is not { } c) { return null; }
+        return (width, c.R, c.G, c.B);
+    }
 
     /// <summary>
     /// jas §612: the plan's layout containers (`chrome` and `containers`, in plan
@@ -881,7 +901,10 @@ internal static class PanelWire
                         events,
                         e.TryGetProperty("values", out var vs) && vs.ValueKind == System.Text.Json.JsonValueKind.Object
                             && vs.TryGetProperty("bind.background", out var bg) && bg.ValueKind == System.Text.Json.JsonValueKind.String
-                            ? bg.GetString() : null));
+                            ? bg.GetString() : null,
+                        e.TryGetProperty("values", out var vb) && vb.ValueKind == System.Text.Json.JsonValueKind.Object
+                            && vb.TryGetProperty("bind.border", out var bd) && bd.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? bd.GetString() : null));
                 }
             }
             return boxes;
