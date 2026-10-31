@@ -376,7 +376,16 @@ public struct PanelGroupView: View {
                 panelIsEnabled(activeKind, cmd: cmd,
                                layout: workspaceLayout, model: model)
             },
-            onSelect: dispatchWithDialogBridge
+            onSelect: dispatchWithDialogBridge,
+            submenuRows: { spec in
+                panelSubmenuRows(capturedKind, spec: spec,
+                                 layout: workspaceLayout, model: capturedModel)
+            },
+            onSelectRow: { action, params in
+                panelDispatchRow(capturedKind, action: action, params: params,
+                                 addr: addr, layout: &workspaceLayout, model: capturedModel)
+                workspaceLayout.saveIfNeeded()
+            }
         )
     }
 }
@@ -395,6 +404,10 @@ private struct HamburgerMenuButton: View {
     let isChecked: (String) -> Bool
     let isEnabled: (String) -> Bool
     let onSelect: (String) -> Void
+    /// The rows of an `items_from` submenu, evaluated as the menu is built.
+    let submenuRows: ([String: Any]) -> [MenuState.ItemsFromRow]
+    /// Run a selected `items_from` row: its action with its params.
+    let onSelectRow: (String, [String: Any]) -> Void
 
     var body: some View {
         Button(action: showMenu) {
@@ -433,6 +446,8 @@ private struct HamburgerMenuButton: View {
                                        enabled: isEnabled(command)))
             case .separator:
                 menu.addItem(NSMenuItem.separator())
+            case .submenu(let label, let spec):
+                menu.addItem(buildSubmenu(label: label, rows: submenuRows(spec)))
             }
         }
         // Pop at the current event location so the menu drops below
@@ -456,6 +471,30 @@ private struct HamburgerMenuButton: View {
         item.state = checked ? .on : .off
         item.isEnabled = enabled
         return item
+    }
+
+    /// An `items_from` submenu: one item per evaluated row, a check where the
+    /// row declares one, and the parent disabled when there are no rows (the
+    /// design's empty-source rule).
+    private func buildSubmenu(label: String, rows: [MenuState.ItemsFromRow]) -> NSMenuItem {
+        let parent = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+        let sub = NSMenu(title: label)
+        sub.autoenablesItems = false
+        for row in rows {
+            let item = NSMenuItem(title: row.label ?? "",
+                                  action: #selector(MenuActionTarget.fire(_:)),
+                                  keyEquivalent: "")
+            let (action, params) = (row.action, row.params)
+            let target = MenuActionTarget(callback: { onSelectRow(action, params) })
+            item.target = target
+            item.representedObject = target  // retain
+            item.state = (row.checked ?? false) ? .on : .off
+            item.isEnabled = row.enabled
+            sub.addItem(item)
+        }
+        parent.submenu = sub
+        parent.isEnabled = !rows.isEmpty
+        return parent
     }
 }
 

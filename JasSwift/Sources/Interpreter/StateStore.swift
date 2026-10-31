@@ -20,6 +20,11 @@ public class StateStore {
     /// Mirrors the reference's `StateStore.pending_writes`.
     public var pendingWrites: [[String: Any]] = []
 
+    /// The menu an effect asked the HOST to pop up (`open_menu`), by its
+    /// declared menu item id; the latest request wins. Mirrors the
+    /// reference's `StateStore.pending_menu`.
+    public var pendingMenu: String?
+
     /// The host's writer, installed by the app (``BrushLibraryStore/live``),
     /// never in a test process. Called on every queued write; a write it
     /// reports done leaves the queue, a failed one stays.

@@ -14,7 +14,7 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     items.compactMap { item in
         switch item {
         case .action(_, let c, _), .toggle(_, let c), .radio(_, let c, _): return c
-        case .separator: return nil
+        case .separator, .submenu: return nil
         }
     }
 }
@@ -37,7 +37,7 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     let labels: [String] = items.compactMap { item in
         switch item {
         case .action(let l, _, _), .toggle(let l, _), .radio(let l, _, _): return l
-        case .separator: return nil
+        case .separator, .submenu: return nil
         }
     }
     #expect(labels.contains("New Symbol"))
