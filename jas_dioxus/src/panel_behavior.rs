@@ -1069,21 +1069,34 @@ pub(crate) fn run_action(
     // read `param.anchor_x` as null and anchored at the corner, not at the -1
     // "viewport centre" sentinel.
     let declared = actions[action].get("params").and_then(Value::as_object);
-    let merged = declared.filter(|ps| !ps.is_empty()).map(|ps| {
+    let mut merged = None;
+    if let Some(ps) = declared.filter(|ps| !ps.is_empty()) {
         let mut m = params.and_then(Value::as_object).cloned().unwrap_or_default();
         for (name, spec) in ps {
             if m.contains_key(name) { continue; }
-            let Some(default) = spec.as_object().and_then(|o| o.get("default")) else { continue };
-            // Among a menu's EXPRESSION params a string default goes in quoted.
+            // A bare scalar declaration (`n: 3`) is its own default, as Swift's
+            // `mergeDeclaredParamDefaults` reads it; a mapping with no `default`
+            // contributes nothing.
+            let default = match spec.as_object() {
+                Some(o) => match o.get("default") { Some(d) => d, None => continue },
+                None => spec,
+            };
+            // Among a menu's EXPRESSION params a string default goes in as a
+            // string literal: `'...'`, or `"..."` when it holds `'`. One holding
+            // both cannot be written as an expression and is refused by name,
+            // never dropped (a dropped default reads null, silently).
             let v = match (default, params.is_some() && !params_are_values) {
-                (Value::String(t), true) if t.contains('\'') => continue,
-                (Value::String(t), true) => Value::String(format!("'{t}'")),
+                (Value::String(t), true) if !t.contains('\'') => Value::String(format!("'{t}'")),
+                (Value::String(t), true) if !t.contains('"') => Value::String(format!("\"{t}\"")),
+                (Value::String(_), true) => {
+                    return Err(Refusal::new("BadParamDefault", format!("{action}.{name}")));
+                }
                 (other, _) => other.clone(),
             };
             m.insert(name.clone(), v);
         }
-        Value::Object(m)
-    });
+        merged = Some(Value::Object(m));
+    }
     // No caller params: the defaults alone are values.
     let (params, params_are_values) = match (&merged, params) {
         (Some(m), None) => (Some(m), true),
@@ -1726,6 +1739,38 @@ mod tests {
         json!({"zz_take": {"effects": [
             {"set_panel_state": {"key": "got", "value": "param.target"}},
         ]}})
+    }
+
+    /// An action's declared string DEFAULT reaches the action through a menu's
+    /// expression params whatever quote it holds (#759's review nit, 10-29):
+    /// one holding `'` is quoted with `"`, where it was SILENTLY dropped and
+    /// the param read null; one holding both quotes cannot be written as an
+    /// expression and is refused by name. A bare-scalar declaration is its own
+    /// default, as Swift's `mergeDeclaredParamDefaults` reads it.
+    #[test]
+    fn an_actions_string_default_reaches_it_whatever_quote_it_holds() {
+        let actions = json!({
+            "say": {"params": {"text": {"type": "string", "default": "it's"}},
+                    "effects": [{"set": {"said": "param.text"}}]},
+            "both": {"params": {"text": {"type": "string", "default": "it's \"x\""}},
+                     "effects": [{"set": {"said": "param.text"}}]},
+            "bare": {"params": {"n": 3}, "effects": [{"set": {"said": "param.n"}}]},
+        });
+        let go = |action: &str, store: &mut StateStore| {
+            // A menu's params are EXPRESSIONS (`params_are_values` false).
+            run_action(None, action, Some(&json!({})), false, &json!({"state": {}, "panel": {}}),
+                       store, &mut Model::default(), &actions, &json!({}), &mut EngineHost::default())
+        };
+        let mut store = StateStore::new();
+        assert!(go("say", &mut store).is_ok());
+        assert_eq!(store.get("said"), &json!("it's"), "a default holding ' is quoted with \"");
+        let mut store = StateStore::new();
+        assert_eq!(go("both", &mut store).err().map(|r| (r.class, r.detail)),
+                   Some(("BadParamDefault", "both.text".to_string())), "both quotes: refused by name");
+        assert_eq!(store.get("said"), &Value::Null, "a refusal runs nothing");
+        let mut store = StateStore::new();
+        assert!(go("bare", &mut store).is_ok());
+        assert_eq!(store.get("said"), &json!(3), "a bare scalar declaration is the default");
     }
 
     struct MarkHost {
