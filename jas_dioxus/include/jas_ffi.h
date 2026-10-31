@@ -841,7 +841,9 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
  * menu item id the menubar does not hold, named), `MissingAction` (no
  * `action` string), `UnknownAction` (an id the workspace does not define,
  * named), `NeedsClipboard` (a paste sent without its `clipboard` field, the
- * action named), or `PlatformEffect` (an effect only the shell can run, such
+ * action named), `BadParamDefault` (a declared string default holding both
+ * quote characters, which an expression param cannot carry, named
+ * `<action>.<param>`), or `PlatformEffect` (an effect only the shell can run, such
  * as a native dialog, found by the pre-flight before anything moved). An action
  * that ran and changed nothing replies normally and ALSO reads `Unchanged`.
  *
