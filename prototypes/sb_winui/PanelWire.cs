@@ -752,6 +752,35 @@ internal static class PanelWire
             : ContractNumber(dragged);
 
     /// <summary>
+    /// How a WinUI Slider fits a planned height (the 10-30 sitting, finding 15):
+    /// the thumb, its inner dot, and the equal margins that centre it, or null
+    /// when the plan's height already holds the template. WinAppSDK 1.8's
+    /// template stacks `SliderPreContentMargin` (14), an 18-DIP thumb and
+    /// `SliderPostContentMargin` (14): 46 DIP. In Swatch Options' 12-DIP rows
+    /// the track was clipped and only the thumb's top showed. The shell sets
+    /// these as the control's own theme resources.
+    /// </summary>
+    internal static (double Thumb, double Inner, double Margin)? SliderFit(double planHeight)
+    {
+        const double natural = 14 + 18 + 14;
+        if (!(planHeight > 0) || planHeight >= natural) { return null; }
+        var thumb = Math.Clamp(planHeight - 2, 6, 18);
+        return (thumb, Math.Round(thumb * 2 / 3, 2), (planHeight - thumb) / 2);
+    }
+
+    /// <summary>
+    /// The scale that fits a WinUI RadioButton into a planned height (finding
+    /// 14), or null when it fits as it is. Its template draws a 20-DIP circle
+    /// centred in a FIXED 32-DIP row, and no theme resource sizes either, so
+    /// the color picker's shorter rows showed part of a circle.
+    /// </summary>
+    internal static double? RadioScale(double planHeight) =>
+        planHeight > 0 && planHeight < RadioNaturalHeight ? planHeight / RadioNaturalHeight : null;
+
+    /// <summary>The row height WinUI's RadioButton template draws in.</summary>
+    internal const double RadioNaturalHeight = 32;
+
+    /// <summary>
     /// A number as the contract's grammar writes it (`WIDGET_EVENTS.md`):
     /// invariant, fixed-point, to 15 significant digits. ⛔ NEVER `"R"`: .NET's
     /// round-trip text writes an EXPONENT below 1e-5 (`1.6666666666666667E-06`),
