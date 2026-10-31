@@ -767,7 +767,9 @@ content:
               width: 12
               height: 12
             bind:
-              background: "if node.element_selected then node.ancestor_layer_color else 'transparent'"
+              # No port builds `ancestor_layer_color` yet (STATUS-jas row 53), so a
+              # selected row falls back to the theme's selection colour.
+              background: "if node.element_selected then (if node.ancestor_layer_color then node.ancestor_layer_color else theme.colors.selection) else 'transparent'"
               border: "'1px solid ' + theme.colors.border"
             behavior:
               - event: click

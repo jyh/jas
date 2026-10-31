@@ -17760,7 +17760,7 @@
                     "height": 12
                   },
                   "bind": {
-                    "background": "if node.element_selected then node.ancestor_layer_color else 'transparent'",
+                    "background": "if node.element_selected then (if node.ancestor_layer_color then node.ancestor_layer_color else theme.colors.selection) else 'transparent'",
                     "border": "'1px solid ' + theme.colors.border"
                   },
                   "behavior": [
