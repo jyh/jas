@@ -4576,7 +4576,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4595,7 +4596,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
@@ -4675,7 +4678,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4694,7 +4698,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
@@ -4774,7 +4780,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4793,7 +4800,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
@@ -4888,7 +4897,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4907,7 +4917,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [

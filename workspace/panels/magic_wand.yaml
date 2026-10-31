@@ -125,10 +125,17 @@ content:
           layout: row
           style: { gap: 4, alignment: center }
           children:
+            # WinUI draws "Tolerance:" 54-57 wide (the web 51), so its
+            # floor is 57; the inputs beside it keep theirs (STATUS-jas row 65).
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11 } }
+                style: { font_size: 11, min_width: 57 } }
             - id: mwp_fill_tolerance
               type: number_input
+              # The planner's text metric is a stub (10 per character), so
+              # "Tolerance:" plans 100 wide and an over-subscribed row would
+              # squeeze this input below the 45 an input plans at. The floor
+              # makes the row shrink the text instead (STATUS-jas row 65).
+              style: { min_width: 45 }
               min: 0
               max: 255
               step: 1
@@ -171,9 +178,10 @@ content:
           style: { gap: 4, alignment: center }
           children:
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11 } }
+                style: { font_size: 11, min_width: 57 } }
             - id: mwp_stroke_tolerance
               type: number_input
+              style: { min_width: 45 }
               min: 0
               max: 255
               step: 1
@@ -216,9 +224,14 @@ content:
           style: { gap: 4, alignment: center }
           children:
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11 } }
+                style: { font_size: 11, min_width: 57 } }
             - id: mwp_stroke_weight_tolerance
               type: number_input
+              # This row's cell is the narrowest (102 at the dock's 228): 57 +
+              # the gap + 45 would not fit, and a row whose floors do not fit
+              # drops them all. 41 is what the text's 57 leaves, and still
+              # shows "255" whole on Windows.
+              style: { min_width: 41 }
               min: 0
               max: 100
               step: 0.1
@@ -267,9 +280,10 @@ content:
           style: { gap: 4, alignment: center }
           children:
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11 } }
+                style: { font_size: 11, min_width: 57 } }
             - id: mwp_opacity_tolerance
               type: number_input
+              style: { min_width: 45 }
               min: 0
               max: 100
               step: 1
