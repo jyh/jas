@@ -946,6 +946,18 @@ static class Program
         Eq("edge: a labelled face, unchecked, has none", "0", BE(false, true));
         Eq("edge: an icon-only button, checked, keeps its 1", "1", BE(true, false));
         Eq("edge: an icon-only button, unchecked, takes the style's", "(style default)", BE(false, false));
+        // Row 69 (flask 719-721, jas 722), measured on the box at 150%: a text-faced
+        // toggle's label line is 15.96 DIP high at the shell's font 12, and the plan
+        // draws every toggle 20 high. WinUI's own top padding, 5 (laid out at 5.33),
+        // ended the line at 21.29, and the toggle cut the bottom two pixel rows off
+        // every descender. The label's top must leave the line a whole pixel row
+        // (0.67 DIP at 150%) inside the toggle; 4 clears by 0.04 DIP, no row at all.
+        static double LaidOutAt150(double dip) => Math.Round(dip * 1.5, MidpointRounding.AwayFromZero) / 1.5;
+        var (padL, padT, padR, padB) = PanelWire.ToggleLabelPadding;
+        Eq("toggle label: the template's left 8, a top of 3, nothing right or below", "8,3,0,0", $"{padL},{padT},{padR},{padB}");
+        var toggleSpare = 20 - (LaidOutAt150(padT) + 15.96);
+        Check("toggle label: its 15.96 line ends a whole pixel row inside the 20-DIP toggle at 150%",
+            toggleSpare >= 2.0 / 3.0 - 0.01, $"spare {toggleSpare:0.##} DIP (needs 0.67)");
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.
