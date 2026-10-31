@@ -285,6 +285,32 @@ class TestSwatchOptions:
         assert _lib(store)[-1]["color"] == "#123456"
         assert _names(store, "lib_b") == ["Other"]
 
+    def test_new_swatch_then_ok_appends_to_the_selected_library(self):
+        # The panel menu's New Swatch runs `new_swatch`, NOT
+        # `open_swatch_options`, so the case above never drove it. Until
+        # 2026-10-31 it opened the dialog with no `library`, and OK's
+        # `swatch.store` found an unknown library and changed NOTHING: a
+        # dialog that looked like it committed and did not.
+        store = _store([dict(s) for s in ABC], [], library="lib_a")
+        run_effects(ACTIONS["new_swatch"]["effects"], {}, store,
+                    actions=ACTIONS, dialogs=DIALOGS)
+        assert store.get_dialog_id() == "swatch_options"
+        store.set_dialog("swatch_name", "Fresh")
+        _ok(store)
+        assert store.get_dialog_id() is None
+        assert _names(store) == ["A", "B", "C", "Fresh"]
+        assert _names(store, "lib_b") == ["Other"], "only the selected library grows"
+
+    def test_new_swatch_with_another_library_selected_appends_there(self):
+        # The control: the library is the panel's selection, not a constant.
+        store = _store([dict(s) for s in ABC], [], library="lib_b")
+        run_effects(ACTIONS["new_swatch"]["effects"], {}, store,
+                    actions=ACTIONS, dialogs=DIALOGS)
+        store.set_dialog("swatch_name", "Fresh")
+        _ok(store)
+        assert _names(store, "lib_b") == ["Other", "Fresh"]
+        assert _names(store) == ["A", "B", "C"]
+
     def test_a_tile_names_its_own_swatch_over_the_selection(self):
         # A library tile's double-click passes its library and index; with a
         # multi-selection, the first selected swatch is NOT the one edited.
