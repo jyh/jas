@@ -5670,13 +5670,14 @@ mod tests {
         assert!(seen >= 20, "the fixture reached the door ({seen})");
     }
 
-    /// ROW 62 at the object: the Color Picker's plan lays out the field at
-    /// `min_width` × `w / aspect_ratio` (floored by `min_height`) and the strip at
-    /// `width` × `min_height`, every number read from the YAML here, not typed.
-    /// Until row 62 both were 20 tall, and the field drew squashed on Windows
-    /// (#799's live run). Planned at 720, where the row gives each leaf its own
-    /// width: narrower, the row clamps the field below its `min_width` (135 at
-    /// the shell's 420 default), a width fork raised in STATUS-flask, not ruled.
+    /// ROW 62 and STATUS-flask 705 at the object: the Color Picker's plan, at
+    /// its DECLARED width (the one the Windows shell plans it at), lays out the
+    /// field at `min_width` × `w / aspect_ratio` (floored by `min_height`) and
+    /// the strip at its `width` × the field's height (705 (2): a heightless leaf
+    /// takes its row's height), every number read from the YAML here, not
+    /// typed. Until row 62 both were 20 tall; until 705 the row squeezed the
+    /// field below its `min_width` (135 at the shell's 420, 168 at 510) and left
+    /// the strip at its `min_height`.
     #[test]
     fn the_color_pickers_field_and_strip_are_laid_out_from_their_own_yaml() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -5692,7 +5693,8 @@ mod tests {
             }
             find(&picker["content"], id).unwrap_or_else(|| panic!("no node {id}"))
         };
-        let plan: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 720, 640) })).unwrap();
+        let declared = picker["width"].as_i64().expect("the picker declares its width (705 (1a))");
+        let plan: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, declared, 640) })).unwrap();
         let rect_of = |id: &str| -> (i64, i64) {
             let leaf = plan["plan"]["leaves"].as_array().unwrap().iter().find(|l| l["id"] == id)
                 .unwrap_or_else(|| panic!("no leaf {id}"));
@@ -5705,8 +5707,8 @@ mod tests {
         assert_eq!(rect_of("cp_gradient"), (fw, fh));
         assert_eq!((fw, fh), (180, 180), "the web draws the field 180 x 180 (measured 10-31)");
         let strip = node_of("cp_colorbar");
-        assert_eq!(rect_of("cp_colorbar"),
-                   (strip["style"]["width"].as_i64().unwrap(), strip["style"]["min_height"].as_i64().unwrap()));
+        assert_eq!(rect_of("cp_colorbar"), (strip["style"]["width"].as_i64().unwrap(), fh),
+                   "the strip keeps its width and takes the field's height");
         unsafe { jas_engine_free(e) };
     }
 

@@ -478,6 +478,118 @@ public enum PanelLayout {
         numI(style(n)["size"])
     }
 
+    /// ROW 62 (STATUS-flask §703), the reference's `_leaf_h`: a leaf's height at
+    /// its FINAL width `w`. A declared `height` (or B.9's `size`) is the height;
+    /// else an `aspect_ratio` (width / height) gives `w / r`, rounded half away
+    /// from zero; else the kind's height. Then `min_height` floors it.
+    private static func leafH(_ n: [String: Any], _ w: Int) -> Int {
+        let st = style(n)
+        var h: Int
+        if let d = resolveDim(st["height"], 0) {
+            h = d
+        } else if let sz = sizeI(n) {
+            h = sz
+        } else if let r = aspectRatio(n) {
+            h = Int((Double(w) / r).rounded(.toNearestOrAwayFromZero))
+        } else {
+            h = kindHeight(nodeType(n))
+        }
+        if let floor = resolveDim(st["min_height"], 0) { h = max(h, floor) }
+        return h
+    }
+
+    /// Row 62: a leaf's `style.aspect_ratio` (width / height), a positive
+    /// number; else nil. A bool or a string is not a number here.
+    private static func aspectRatio(_ n: [String: Any]) -> Double? {
+        guard let v = style(n)["aspect_ratio"] as? NSNumber,
+              CFGetTypeID(v) != CFBooleanGetTypeID() else { return nil }
+        return v.doubleValue > 0 ? v.doubleValue : nil
+    }
+
+    /// STATUS-flask 705 (1b), the reference's `_floor_w`: the least width a row
+    /// may shrink `n` to, as CSS `min-width` beats `flex-shrink`. A leaf's floor
+    /// is its declared `min_width` (a percentage has nothing to resolve against
+    /// and is ignored). A container's is its content's, as a flex item's
+    /// automatic minimum is: a row sums its cells' floors and gaps, any other
+    /// container takes its widest child's, both plus padding. A node with no
+    /// floor anywhere inside it has 0 and shrinks as before.
+    private static func floorW(_ n: [String: Any], _ ctx: [String: Any]) -> Int {
+        if !(isContainer(n) || nodeType(n) == "disclosure") {
+            if let f = resolveDim(dim(style(n)["min_width"], ctx), -1), f > 0 { return f }
+            return 0
+        }
+        if n["foreach"] is [String: Any] { return 0 }
+        let (kids, _) = splitPositioned(visibleChildren(n, ctx))
+        let floors = kids.map { floorW($0.1, ctx) }
+        if floors.allSatisfy({ $0 == 0 }) { return 0 }
+        let (_, pr, _, pl) = parsePadding(style(n)["padding"])
+        let inner: Int
+        if nodeType(n) != "disclosure" && resolvedLayout(n) == "row" && !kids.contains(where: { hasCol($0.1) }) {
+            inner = floors.reduce(0, +) + gap(n) * (kids.count - 1)
+        } else {
+            inner = floors.max() ?? 0
+        }
+        return inner + pl + pr
+    }
+
+    /// STATUS-flask 705 (2), the reference's `_stretch_h`: a row's cross-axis
+    /// rule, CSS `align-items: stretch`. nil when the row declares an alignment
+    /// other than `stretch`: its leaves are centred, as before. Otherwise the
+    /// height its heightless leaves take: its declared height less its
+    /// padding, or 0 for "its tallest child".
+    private static func stretchH(_ n: [String: Any], _ pt: Int, _ pb: Int) -> Int? {
+        let a = style(n)["alignment"]
+        if let a = a, !(a is NSNull), (a as? String) != "stretch" { return nil }
+        if let h = resolveDim(style(n)["height"], 0) { return max(h - pt - pb, 0) }
+        return 0
+    }
+
+    /// STATUS-flask 705 (2), the reference's `_stretches`: a leaf that declares
+    /// no `height`, `size` or `aspect_ratio`.
+    private static func stretches(_ n: [String: Any]) -> Bool {
+        if isContainer(n) || nodeType(n) == "disclosure" { return false }
+        return resolveDim(style(n)["height"], 0) == nil && sizeI(n) == nil && aspectRatio(n) == nil
+    }
+
+    /// STATUS-flask 705 (1b), the reference's `_shrink`: shrink `nat` to sum to
+    /// `avail`, each cell in proportion to its natural width but never below
+    /// its floor. A cell whose share would fall below its floor is frozen there
+    /// and the rest are re-shared, until none is; the rounding remainder then
+    /// goes one pixel at a time to the unfrozen cells in order. When the floors
+    /// alone exceed `avail`, every cell shrinks in proportion as before.
+    private static func shrink(_ nat: [Int], _ floorsIn: [Int], _ avail: Int) -> [Int] {
+        let n = nat.count
+        var floors = (0..<n).map { min(floorsIn[$0], nat[$0]) }
+        if floors.reduce(0, +) > avail { floors = Array(repeating: 0, count: n) }
+        var widths = Array(repeating: 0, count: n)
+        var frozen = Array(repeating: false, count: n)
+        while true {
+            let free = (0..<n).filter { !frozen[$0] }
+            let space = avail - (0..<n).filter { frozen[$0] }.map { widths[$0] }.reduce(0, +)
+            let total = free.map { nat[$0] }.reduce(0, +)
+            func share(_ k: Int) -> Int { total > 0 ? nat[k] * space / total : 0 }
+            let over = free.filter { share($0) < floors[$0] }
+            if over.isEmpty {
+                for k in free { widths[k] = share(k) }
+                break
+            }
+            for k in over {
+                frozen[k] = true
+                widths[k] = floors[k]
+            }
+        }
+        var rem = avail - widths.reduce(0, +)
+        let unfrozen = (0..<n).filter { !frozen[$0] }
+        let order = unfrozen.isEmpty ? Array(0..<n) : unfrozen
+        var j = 0
+        while rem > 0 && !order.isEmpty {
+            widths[order[j]] += 1
+            rem -= 1
+            j = (j + 1) % order.count
+        }
+        return widths
+    }
+
     /// B.8: a child's `style.position` as integer `(x, y)` when it is two
     /// numbers; else nil, and the child stays in its parent's flow.
     private static func positionI(_ n: [String: Any]) -> (Int, Int)? {
@@ -622,7 +734,8 @@ public enum PanelLayout {
                 if lay == "row" && children.contains(where: { hasCol($0.1) }) {
                     (flowItems, flowH) = grid(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
                 } else if lay == "row" {
-                    (flowItems, flowH) = flow(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
+                    (flowItems, flowH) = flow(children, path: path, innerW: innerW, gap: gap, ctx: ctx,
+                                              stretch: stretchH(n, pt, pb))
                 } else {
                     (flowItems, flowH) = column(children, path: path, innerW: innerW,
                                                 gap: gap, availH: innerH, ctx: ctx)
@@ -655,10 +768,11 @@ public enum PanelLayout {
             }
             return (w, h, items)
         } else {
-            let (lw, h, _) = leafSize(n, availW: availW, ctx: ctx)
+            let (lw, _, _) = leafSize(n, availW: availW, ctx: ctx)
             // A leaf renders at its own width regardless of its slot; clamp it
             // to the width available so it cannot overrun a neighbour.
             let w = (availW > 0 && lw > availW) ? availW : lw
+            let h = leafH(n, w)
             return (w, h, [MItem(path: path, x: 0, y: 0, w: w, h: h, node: n, ctx: ctx)])
         }
     }
@@ -711,7 +825,8 @@ public enum PanelLayout {
     }
 
     private static func flow(_ children: [(Int, [String: Any])], path: [Int],
-                            innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
+                            innerW: Int, gap: Int, ctx: [String: Any],
+                            stretch: Int? = nil) -> ([MItem], Int) {
         let n = children.count
         let nat = children.map { naturalW($0.1, ctx) }
         let weights = children.map { flexWeight($0.1) }
@@ -720,18 +835,11 @@ public enum PanelLayout {
         var widths = nat
         if innerW > 0 && fixed > innerW {
             // Over-subscribed: shrink every cell proportionally to fit the row,
-            // then hand out the rounding remainder one pixel at a time.
+            // never below a floor it declares (STATUS-flask 705 (1b)).
             let avail = innerW - gap * (n > 0 ? n - 1 : 0)
             let total = nat.reduce(0, +)
             if total > 0 && avail > 0 {
-                widths = nat.map { $0 * avail / total }
-                var rem = avail - widths.reduce(0, +)
-                var k = 0
-                while rem > 0 && n > 0 {
-                    widths[k] += 1
-                    rem -= 1
-                    k = (k + 1) % n
-                }
+                widths = shrink(nat, children.map { floorW($0.1, ctx) }, avail)
             }
         } else if innerW > 0 && sumw > 0 {
             // Fits: distribute the leftover width to flex-weighted children.
@@ -762,12 +870,29 @@ public enum PanelLayout {
             placed.append((cit, ch))
             rowH = max(rowH, ch)
         }
+        // STATUS-flask 705 (2), CSS's align-items: stretch. A heightless leaf
+        // takes the row's inner height (its declared one, else its tallest
+        // child), floored by the leaf's own min_height, and sits at the top.
+        let stretched = children.indices.map { k in
+            stretch != nil && !placed[k].items.isEmpty && stretches(children[k].1)
+        }
+        if stretched.contains(true) {
+            let lineH: Int
+            if let st = stretch, st > 0 { lineH = st } else { lineH = rowH }
+            for k in children.indices where stretched[k] {
+                let floor = resolveDim(style(children[k].1)["min_height"], 0)
+                let sh = floor.map { max(lineH, $0) } ?? lineH
+                placed[k].items[0].h = sh
+                placed[k].h = sh
+                rowH = max(rowH, sh)
+            }
+        }
         var items: [MItem] = []
         var cx = 0
         for k in 0..<placed.count {
             let ch = placed[k].h
             var cit = placed[k].items
-            let dy = (rowH - ch) / 2
+            let dy = stretched[k] ? 0 : (rowH - ch) / 2
             for j in cit.indices {
                 cit[j].x += cx
                 cit[j].y += dy

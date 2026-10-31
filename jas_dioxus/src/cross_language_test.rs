@@ -7405,6 +7405,37 @@ pub(crate) mod tests {
         }
     }
 
+    /// Layout DIALOGS through the same pass, from their own golden:
+    /// `dialog_layout.json` (STATUS-flask 705; #806's review). A case names a
+    /// dialog, whose `content` is planned at the dialog's declared width, the
+    /// width every shell plans it at.
+    #[test]
+    fn algorithm_dialog_layout_vectors() {
+        use crate::interpreter::panel_layout::layout_panel;
+
+        let json_str = read_fixture("algorithms/dialog_layout.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let cases = tests.as_array().unwrap();
+        assert!(!cases.is_empty(), "dialog_layout.json has no vectors");
+
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            assert_eq!(tc["function"].as_str(), Some("layout_panel"), "{name}");
+            let dialog_id = tc["args"]["dialog"].as_str().unwrap();
+            let content = &bundle["dialogs"][dialog_id]["content"];
+            assert!(content.is_object(), "no dialog '{dialog_id}' with content");
+            let avail_w = tc["args"]["avail_w"].as_i64().unwrap();
+            let avail_h = tc["args"]["avail_h"].as_i64().unwrap_or(0);
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            let actual = layout_panel(&serde_json::json!({"content": content}), avail_w, avail_h, ctx);
+            assert_eq!(&actual, &tc["expected"], "Dialog layout '{}' mismatch", name);
+        }
+    }
+
     // ---------------------------------------------------------------
     // Panel widget-TREE (structural snapshot) algorithm test vectors
     // ---------------------------------------------------------------

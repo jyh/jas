@@ -680,10 +680,7 @@ fn measure(
 ) -> (i64, i64, Vec<MItem>) {
     let st = style(n);
     let (pt, pr, pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
-    // B.7: a 2-D grid may carry its gap on the node itself (the toolbar's form).
-    let gap = style_i(n, "gap")
-        .or_else(|| (node_type(n) == "grid").then(|| num_i(n.get("gap"))).flatten())
-        .unwrap_or(0);
+    let gap = node_gap(n);
     // B.5: a container's declared width is honoured as its height is (B.4),
     // clamped to the width it is given; its children are laid out in it.
     let mut avail_w = avail_w;
@@ -709,7 +706,7 @@ fn measure(
             let (mut items, mut content_h) = if lay == "row" && children.iter().any(|&(_, c)| has_col(c)) {
                 grid(&children, path, inner_w, gap, ctx)
             } else if lay == "row" {
-                flow(&children, path, inner_w, gap, ctx)
+                flow(&children, path, inner_w, gap, ctx, stretch_h(n, pt, pb))
             } else {
                 column(&children, path, inner_w, gap, inner_h, ctx)
             };
@@ -835,12 +832,122 @@ fn column(
     (items, if n > 0 { cy - gap } else { 0 })
 }
 
+/// A node's gap: `style.gap`, or (B.7) a 2-D grid's gap on the node itself,
+/// the toolbar's form; truncated as the reference's `int()` does.
+fn node_gap(n: &Value) -> i64 {
+    style_i(n, "gap")
+        .or_else(|| (node_type(n) == "grid").then(|| num_i(n.get("gap"))).flatten())
+        .unwrap_or(0)
+}
+
+/// STATUS-flask 705 (1b), the reference's `_floor_w`: the least width a row
+/// may shrink `n` to, as CSS `min-width` beats `flex-shrink`. A leaf's floor
+/// is its declared `min_width` (a percentage has nothing to resolve against
+/// and is ignored). A container's is its content's, as a flex item's
+/// automatic minimum is: a row sums its cells' floors and gaps, any other
+/// container takes its widest child's, both plus padding. A node with no
+/// floor anywhere inside it has 0 and shrinks as before.
+fn floor_w(n: &Value, ctx: &Value) -> i64 {
+    if !(is_container(n) || node_type(n) == "disclosure") {
+        return resolve_dim(&dim(style(n).get("min_width"), ctx), -1).filter(|f| *f > 0).unwrap_or(0);
+    }
+    if st_foreach(n).is_some() {
+        return 0;
+    }
+    let (kids, _placed) = split_positioned(visible_children(n, ctx));
+    let floors: Vec<i64> = kids.iter().map(|&(_, c)| floor_w(c, ctx)).collect();
+    if floors.iter().all(|f| *f == 0) {
+        return 0;
+    }
+    let (_pt, pr, _pb, pl) = parse_padding(style(n).get("padding").unwrap_or(&Value::Null));
+    let inner = if node_type(n) != "disclosure"
+        && resolved_layout(n) == "row"
+        && !kids.iter().any(|&(_, c)| has_col(c))
+    {
+        floors.iter().sum::<i64>() + node_gap(n) * (kids.len() as i64 - 1)
+    } else {
+        floors.iter().copied().max().unwrap_or(0)
+    };
+    inner + pl + pr
+}
+
+/// STATUS-flask 705 (2), the reference's `_stretch_h`: a row's cross-axis
+/// rule, CSS `align-items: stretch`. `None` when the row declares an
+/// alignment other than `stretch`: its leaves are centred, as before.
+/// Otherwise the height its heightless leaves take: its declared height less
+/// its padding, or 0 for "its tallest child".
+fn stretch_h(n: &Value, pt: i64, pb: i64) -> Option<i64> {
+    match style(n).get("alignment") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(a)) if a == "stretch" => {}
+        Some(_) => return None,
+    }
+    let h = resolve_dim(style(n).get("height").unwrap_or(&Value::Null), 0);
+    Some(h.map_or(0, |h| (h - pt - pb).max(0)))
+}
+
+/// STATUS-flask 705 (2), the reference's `_stretches`: a leaf that declares
+/// no `height`, `size` or `aspect_ratio`.
+fn stretches(n: &Value) -> bool {
+    if is_container(n) || node_type(n) == "disclosure" {
+        return false;
+    }
+    resolve_dim(style(n).get("height").unwrap_or(&Value::Null), 0).is_none()
+        && size_i(n).is_none()
+        && aspect_ratio(n).is_none()
+}
+
+/// STATUS-flask 705 (1b), the reference's `_shrink`: shrink `nat` to sum to
+/// `avail`, each cell in proportion to its natural width but never below its
+/// floor. A cell whose share would fall below its floor is frozen there and
+/// the rest are re-shared, until none is; the rounding remainder then goes
+/// one pixel at a time to the unfrozen cells in order (deterministic). When
+/// the floors alone exceed `avail` they cannot all hold, and every cell
+/// shrinks in proportion as it did before.
+fn shrink(nat: &[i64], floors: &[i64], avail: i64) -> Vec<i64> {
+    let n = nat.len();
+    let mut floors: Vec<i64> = floors.iter().zip(nat).map(|(f, w)| (*f).min(*w)).collect();
+    if floors.iter().sum::<i64>() > avail {
+        floors = vec![0; n];
+    }
+    let mut widths = vec![0i64; n];
+    let mut frozen = vec![false; n];
+    loop {
+        let free: Vec<usize> = (0..n).filter(|&k| !frozen[k]).collect();
+        let space = avail - (0..n).filter(|&k| frozen[k]).map(|k| widths[k]).sum::<i64>();
+        let total: i64 = free.iter().map(|&k| nat[k]).sum();
+        let share = |k: usize| if total > 0 { nat[k] * space / total } else { 0 };
+        let over: Vec<usize> = free.iter().copied().filter(|&k| share(k) < floors[k]).collect();
+        if over.is_empty() {
+            for &k in &free {
+                widths[k] = share(k);
+            }
+            break;
+        }
+        for k in over {
+            frozen[k] = true;
+            widths[k] = floors[k];
+        }
+    }
+    let mut rem = avail - widths.iter().sum::<i64>();
+    let unfrozen: Vec<usize> = (0..n).filter(|&k| !frozen[k]).collect();
+    let order: Vec<usize> = if unfrozen.is_empty() { (0..n).collect() } else { unfrozen };
+    let mut j = 0usize;
+    while rem > 0 && !order.is_empty() {
+        widths[order[j]] += 1;
+        rem -= 1;
+        j = (j + 1) % order.len();
+    }
+    widths
+}
+
 fn flow(
     children: &[(i64, &Value)],
     path: &[i64],
     inner_w: i64,
     gap: i64,
     ctx: &Value,
+    stretch: Option<i64>,
 ) -> (Vec<MItem>, i64) {
     let n = children.len();
     let nat: Vec<i64> = children.iter().map(|&(_, c)| natural_w(c, ctx)).collect();
@@ -850,19 +957,13 @@ fn flow(
         nat.iter().sum::<i64>() + if n > 0 { gap * (n as i64 - 1) } else { 0 };
     let mut widths: Vec<i64> = nat.clone();
     if inner_w > 0 && fixed > inner_w {
-        // Over-subscribed: shrink every cell proportionally to fit the row, then
-        // hand out the rounding remainder one pixel at a time (deterministic).
+        // Over-subscribed: shrink every cell proportionally to fit the row,
+        // never below a floor it declares (STATUS-flask 705 (1b)).
         let avail = inner_w - gap * (if n > 0 { n as i64 - 1 } else { 0 });
         let total: i64 = nat.iter().sum();
         if total > 0 && avail > 0 {
-            widths = nat.iter().map(|&w| w * avail / total).collect();
-            let mut rem = avail - widths.iter().sum::<i64>();
-            let mut k = 0usize;
-            while rem > 0 && n > 0 {
-                widths[k] += 1;
-                rem -= 1;
-                k = (k + 1) % n;
-            }
+            let floors: Vec<i64> = children.iter().map(|&(_, c)| floor_w(c, ctx)).collect();
+            widths = shrink(&nat, &floors, avail);
         }
     } else if inner_w > 0 && sumw > 0 {
         // Fits: distribute the leftover width to flex-weighted children.
@@ -896,10 +997,33 @@ fn flow(
         placed.push((cit, ch));
         row_h = row_h.max(ch);
     }
+    // STATUS-flask 705 (2), CSS's align-items: stretch. A heightless leaf
+    // takes the row's inner height (its declared one, else its tallest
+    // child), floored by the leaf's own min_height, and sits at the top.
+    let stretched: Vec<bool> = children
+        .iter()
+        .enumerate()
+        .map(|(k, &(_, c))| stretch.is_some() && !placed[k].0.is_empty() && stretches(c))
+        .collect();
+    if stretched.iter().any(|s| *s) {
+        let line_h = match stretch {
+            Some(h) if h > 0 => h,
+            _ => row_h,
+        };
+        for (k, &(_, c)) in children.iter().enumerate() {
+            if stretched[k] {
+                let floor = resolve_dim(style(c).get("min_height").unwrap_or(&Value::Null), 0);
+                let sh = floor.map_or(line_h, |f| line_h.max(f));
+                placed[k].0[0].h = sh;
+                placed[k].1 = sh;
+                row_h = row_h.max(sh);
+            }
+        }
+    }
     let mut items = vec![];
     let mut cx = 0;
     for (k, (mut cit, ch)) in placed.into_iter().enumerate() {
-        let dy = (row_h - ch) / 2;
+        let dy = if stretched[k] { 0 } else { (row_h - ch) / 2 };
         for it in cit.iter_mut() {
             it.x += cx;
             it.y += dy;
@@ -1556,5 +1680,195 @@ mod radio_width_tests {
         let r = &rects.as_array().unwrap().iter().find(|r| r["path"] == json!([0])).expect("a rect at [0]")["rect"];
         assert_eq!((r["w"].as_i64(), r["h"].as_i64()), (Some(28), Some(28)), "the 3x3 grid: {rects}");
         assert_eq!(w(json!({"type": "radio_group", "options": "dialog.list"})), 0);
+    }
+}
+
+/// STATUS-flask 705 (1b) and (2), ruled 2026-10-31 (708), the reference's
+/// `test_panel_layout_row_min_width_stretch.py` row for row. (1b): an
+/// over-subscribed row never shrinks a cell below its floor (a leaf's
+/// `min_width`; a container's is its content's, CSS's automatic minimum).
+/// (2): in a row with no `alignment` (or `stretch`), a leaf with no declared
+/// `height`, `size` or `aspect_ratio` takes the row's inner height, floored by
+/// its `min_height`, at the top.
+#[cfg(test)]
+mod row_floor_stretch_tests {
+    use super::layout_panel;
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    type Rects = HashMap<Vec<i64>, (i64, i64, i64, i64)>;
+
+    fn plan(content: &Value, avail_w: i64) -> Rects {
+        let out = layout_panel(&json!({"content": content}), avail_w, 0, &json!({}));
+        out.as_array().unwrap().iter().map(|r| {
+            let p: Vec<i64> = r["path"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+            let n = |k: &str| r["rect"][k].as_i64().unwrap();
+            (p, (n("x"), n("y"), n("w"), n("h")))
+        }).collect()
+    }
+
+    fn row(children: Value, avail_w: i64, style: Value) -> Rects {
+        plan(&json!({"type": "container", "layout": "row", "style": style, "children": children}), avail_w)
+    }
+
+    fn leaf(style: Value) -> Value {
+        json!({"type": "color_gradient", "style": style})
+    }
+
+    fn w(r: &Rects, p: &[i64]) -> i64 { r[&p.to_vec()].2 }
+    fn h(r: &Rects, p: &[i64]) -> i64 { r[&p.to_vec()].3 }
+
+    // (1b) the floor
+
+    #[test]
+    fn an_over_subscribed_row_without_floors_shrinks_every_cell_in_proportion() {
+        let r = row(json!([leaf(json!({"width": 100})), leaf(json!({"width": 300}))]), 200, json!({}));
+        assert_eq!((w(&r, &[0]), w(&r, &[1])), (50, 150), "CONTROL");
+    }
+
+    #[test]
+    fn a_row_never_shrinks_a_leaf_below_its_min_width() {
+        let r = row(json!([leaf(json!({"width": 100, "min_width": 90})), leaf(json!({"width": 300}))]), 200, json!({}));
+        assert_eq!((w(&r, &[0]), w(&r, &[1])), (90, 110));
+    }
+
+    #[test]
+    fn the_other_cells_share_what_is_left_in_proportion() {
+        let r = row(json!([leaf(json!({"min_width": 100})), leaf(json!({"width": 100})), leaf(json!({"width": 300}))]),
+                    300, json!({}));
+        assert_eq!((w(&r, &[0]), w(&r, &[1]), w(&r, &[2])), (100, 50, 150));
+    }
+
+    #[test]
+    fn the_floor_carries_up_through_a_container() {
+        let col = json!({"type": "container", "layout": "column", "children": [leaf(json!({"width": 100, "min_width": 90}))]});
+        let r = row(json!([col, leaf(json!({"width": 300}))]), 200, json!({}));
+        assert_eq!((w(&r, &[0]), w(&r, &[0, 0]), w(&r, &[1])), (90, 90, 110));
+    }
+
+    #[test]
+    fn a_nested_rows_floor_is_the_sum_of_its_cells_floors_and_gaps() {
+        let inner = json!({"type": "container", "layout": "row", "style": {"gap": 4},
+                           "children": [leaf(json!({"min_width": 60})), leaf(json!({"min_width": 30})), leaf(json!({"width": 50}))]});
+        let r = row(json!([inner, leaf(json!({"width": 400}))]), 200, json!({}));
+        // 60 + 30 + 0, and two gaps of 4: the floorless cell shrinks to 0, its gap stays.
+        assert_eq!(w(&r, &[0]), 98);
+        assert_eq!((w(&r, &[0, 0]), w(&r, &[0, 1]), w(&r, &[0, 2])), (60, 30, 0));
+    }
+
+    #[test]
+    fn when_the_floors_do_not_fit_the_row_shrinks_as_before() {
+        let r = row(json!([leaf(json!({"width": 150, "min_width": 150})), leaf(json!({"width": 150, "min_width": 150}))]),
+                    200, json!({}));
+        assert_eq!((w(&r, &[0]), w(&r, &[1])), (100, 100));
+    }
+
+    #[test]
+    fn a_row_that_fits_is_unchanged_by_a_floor() {
+        let r = row(json!([leaf(json!({"width": 100, "min_width": 90})), leaf(json!({"width": 50}))]), 400, json!({}));
+        assert_eq!((w(&r, &[0]), w(&r, &[1])), (100, 50));
+    }
+
+    // (2) the stretch
+
+    #[test]
+    fn a_heightless_leaf_takes_the_rows_height() {
+        let r = row(json!([leaf(json!({"width": 10, "height": 60})), leaf(json!({"width": 10}))]), 400, json!({}));
+        assert_eq!((h(&r, &[1]), r[&vec![1]].1), (60, 0));
+    }
+
+    #[test]
+    fn a_row_that_declares_another_alignment_centres_as_before() {
+        let r = row(json!([leaf(json!({"width": 10, "height": 60})), leaf(json!({"width": 10}))]), 400,
+                    json!({"alignment": "center"}));
+        assert_eq!((h(&r, &[1]), r[&vec![1]].1), (20, 20), "CONTROL");
+    }
+
+    #[test]
+    fn alignment_stretch_is_the_default_spelled_out() {
+        let r = row(json!([leaf(json!({"width": 10, "height": 60})), leaf(json!({"width": 10}))]), 400,
+                    json!({"alignment": "stretch"}));
+        assert_eq!(h(&r, &[1]), 60);
+    }
+
+    #[test]
+    fn a_declared_height_size_or_aspect_ratio_is_not_stretched() {
+        let r = row(json!([leaf(json!({"width": 10, "height": 60})), leaf(json!({"width": 10, "height": 30})),
+                           {"type": "color_swatch", "style": {"size": 16}}, leaf(json!({"width": 40, "aspect_ratio": 2}))]),
+                    400, json!({}));
+        assert_eq!((h(&r, &[1]), h(&r, &[2]), h(&r, &[3])), (30, 16, 20));
+    }
+
+    #[test]
+    fn a_container_child_is_not_stretched() {
+        let col = json!({"type": "container", "layout": "column", "children": [leaf(json!({"width": 10}))]});
+        let r = row(json!([leaf(json!({"width": 10, "height": 60})), col]), 400, json!({}));
+        assert_eq!(h(&r, &[1]), 20);
+    }
+
+    #[test]
+    fn the_rows_declared_height_less_its_padding_is_the_inner_height() {
+        let r = row(json!([leaf(json!({"width": 10}))]), 400, json!({"height": 50, "padding": "5 0 5 0"}));
+        assert_eq!(h(&r, &[0]), 40);
+    }
+
+    #[test]
+    fn a_stretched_leaf_is_floored_by_its_min_height() {
+        let r = row(json!([leaf(json!({"width": 10, "min_height": 70}))]), 400, json!({"height": 50}));
+        assert_eq!(h(&r, &[0]), 70);
+    }
+
+    // At the object: the shipped dialogs, their numbers read from the YAML.
+
+    fn dialog(id: &str) -> Value {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../workspace/workspace.json");
+        let ws: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        ws["dialogs"][id].clone()
+    }
+
+    fn find(n: &Value, id: &str, p: Vec<i64>) -> Option<(Value, Vec<i64>)> {
+        if n.get("id").and_then(Value::as_str) == Some(id) {
+            return Some((n.clone(), p));
+        }
+        for (i, c) in n.get("children").and_then(Value::as_array).into_iter().flatten().enumerate() {
+            let mut q = p.clone();
+            q.push(i as i64);
+            if let Some(hit) = find(c, id, q) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn the_color_pickers_field_and_strip_at_its_declared_width() {
+        let d = dialog("color_picker");
+        let r = plan(&d["content"], d["width"].as_i64().unwrap());
+        let (field, fp) = find(&d["content"], "cp_gradient", vec![]).unwrap();
+        let (strip, sp) = find(&d["content"], "cp_colorbar", vec![]).unwrap();
+        let side = field["style"]["min_width"].as_i64().unwrap();
+        assert_eq!((w(&r, &fp), h(&r, &fp)), (side, side), "the field is its min_width square");
+        assert_eq!(h(&r, &sp), h(&r, &fp), "the strip is the field's height");
+        assert_eq!(strip["style"]["min_width"], strip["style"]["width"]);
+        assert_eq!(w(&r, &sp), strip["style"]["width"].as_i64().unwrap(), "the strip keeps its width");
+    }
+
+    #[test]
+    fn layer_options_dim_percentage_keeps_its_min_width() {
+        let d = dialog("layer_options");
+        let r = plan(&d["content"], d["width"].as_i64().unwrap());
+        let (input, ip) = find(&d["content"], "lo_dim_percentage", vec![]).unwrap();
+        assert_eq!(w(&r, &ip), input["style"]["min_width"].as_i64().unwrap());
+    }
+
+    #[test]
+    fn a_shipped_center_aligned_row_does_not_stretch_its_leaves() {
+        let d = dialog("swatch_options");
+        let r = plan(&d["content"], d["width"].as_i64().unwrap());
+        let (_t, tp) = find(&d["content"], "so_preview", vec![]).unwrap();
+        let rowp = tp[..tp.len() - 1].to_vec();
+        let (toggle, rowr) = (r[&tp], r[&rowp]);
+        assert_eq!(toggle.3, super::kind_height("toggle"), "{toggle:?}");
+        assert_eq!(toggle.1 - rowr.1, (rowr.3 - toggle.3) / 2, "centred: {toggle:?} in {rowr:?}");
     }
 }

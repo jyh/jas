@@ -12,6 +12,7 @@ workspace bundle and writes their pinned goldens:
     test_fixtures/algorithms/initial_state_map.json
   * ``widget_tree`` over every DIALOG -> test_fixtures/algorithms/dialog_widget_tree.json
   * ``layout_panel`` over layout PANES -> test_fixtures/algorithms/pane_layout.json
+  * ``layout_panel`` over DIALOGS at their declared widths -> test_fixtures/algorithms/dialog_layout.json
 
 A layout pane (``layout.children[i]`` with an ``id`` and ``content``, the
 toolbar) is planned by the same pass as a panel. Its vectors live in their own
@@ -153,6 +154,10 @@ _CTX = {
     "swatches": _SWATCHES_CTX,
 }
 _AVAIL_H = 600
+
+# Dialogs whose plans the corpus pins (STATUS-flask 705: the two plans the
+# row floor changes). Each is planned at its declared width.
+DIALOG_LAYOUT_SEED = ["color_picker", "layer_options"]
 
 SEED = [
     (f"{name}@228", f"{name}_panel_content", 228, _AVAIL_H, _CTX.get(name, {}))
@@ -447,6 +452,28 @@ def main() -> int:
         json.dump(cases, f, indent=2)
         f.write("\n")
     print(f"wrote {len(cases)} cases -> {out_path}")
+
+    # STATUS-flask 705 / #806's review: DIALOG plans, each at its declared
+    # width (the width every shell plans it at), so the ports cannot drift on
+    # them silently. Their own golden, as the panes have theirs (the frozen
+    # ports' harnesses read panel_layout.json as panels only): `args.dialog`
+    # names the dialog, whose `content` is planned through the same pass.
+    dialogs = bundle["dialogs"]
+    dl_cases = []
+    for dialog_id in DIALOG_LAYOUT_SEED:
+        d = dialogs[dialog_id]
+        avail_w = d["width"]
+        dl_cases.append({
+            "name": f"{dialog_id}@{avail_w}",
+            "function": "layout_panel",
+            "args": {"dialog": dialog_id, "avail_w": avail_w, "avail_h": 0, "ctx": {}},
+            "expected": layout_panel({"content": d["content"]}, avail_w, 0, {}),
+        })
+    dl_path = os.path.join(ROOT, "test_fixtures", "algorithms", "dialog_layout.json")
+    with open(dl_path, "w", encoding="utf-8", newline="") as f:
+        json.dump(dl_cases, f, indent=2)
+        f.write("\n")
+    print(f"wrote {len(dl_cases)} cases -> {dl_path}")
 
     # Widget-tree golden from the SAME seeds/ctx (the panel_widget_tree.json
     # gate had no generator, so it could drift undetected — finding #32). Each
