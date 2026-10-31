@@ -790,6 +790,18 @@ static class Program
         Eq("long press: a click before the answer waits, then goes once on stale", "1", LP("press", "tick", "click", "stale"));
         Eq("long press: a new press forgets the last one's flyout", "1", LP("press", "tick", "open", "click", "press", "click"));
         Eq("long press: an answer with no click pending sends nothing", "0", LP("press", "tick", "stale"));
+        // An act reply's `dialog` is STATE (the dialog open after the act; jas's
+        // ruling on #771's (a)), so a `mouse_up` after the flyout opened names the
+        // same dialog again. The shell opens only when the reply names a dialog
+        // that is not the one it shows. It compares with what it SHOWS, never the
+        // last reply: a flyout closed by another door must open again.
+        static string RO(string? reply, bool open, string? shown) => DialogWire.Reopens(reply, open, shown) ? "open" : "skip";
+        Eq("dialog door: a dialog named while none is shown opens", "open", RO("hand_alternates", false, null));
+        Eq("dialog door: the dialog already shown is not shown again", "skip", RO("hand_alternates", true, "hand_alternates"));
+        Eq("dialog door: a different dialog opens", "open", RO("color_picker", true, "hand_alternates"));
+        Eq("dialog door: the same id after it was closed elsewhere opens again", "open", RO("hand_alternates", false, "hand_alternates"));
+        Eq("dialog door: no dialog named opens nothing", "skip", RO(null, false, null));
+        Eq("dialog door: an empty name opens nothing", "skip", RO("", true, "hand_alternates"));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

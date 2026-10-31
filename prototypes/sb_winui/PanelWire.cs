@@ -1419,6 +1419,16 @@ internal sealed record DialogReading(bool Open, string Id, string Summary, bool 
 /// </summary>
 internal static class DialogWire
 {
+    /// <summary>
+    /// Whether an act reply's `dialog` opens a dialog. `dialog` is STATE (the
+    /// dialog open after the act), so a reply that names the dialog already
+    /// shown, such as a `mouse_up` after the tool flyout opened, shows nothing
+    /// new. The comparison is with what the shell SHOWS, never the last reply,
+    /// so a dialog closed by another door opens again when named.
+    /// </summary>
+    internal static bool Reopens(string? replyDialog, bool shownOpen, string? shownId) =>
+        !string.IsNullOrEmpty(replyDialog) && !(shownOpen && shownId == replyDialog);
+
     /// <summary>`{"open": false}`, or `{"open": true, "id", "summary", "modal",
     /// "depth", "plan"}`; null when the bytes are not that.</summary>
     internal static DialogReading? Read(string json)

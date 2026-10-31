@@ -1398,7 +1398,15 @@ internal sealed unsafe class Canvas : IDisposable
         {
             return;
         }
-        _report($"DIALOG OPENED {head} dialog={dialog.GetString()} {Tids()}");
+        // `dialog` is state: the one already shown is not shown again (a
+        // `mouse_up` after the tool flyout opened names it a second time).
+        var named = dialog.GetString();
+        if (!DialogWire.Reopens(named, Dialog?.Reading?.Open == true, Dialog?.Reading?.Id))
+        {
+            _report($"DIALOG UNCHANGED {head} dialog={named} {Tids()}");
+            return;
+        }
+        _report($"DIALOG OPENED {head} dialog={named} {Tids()}");
         ApplyDialogRefresh("open");
     }
 
