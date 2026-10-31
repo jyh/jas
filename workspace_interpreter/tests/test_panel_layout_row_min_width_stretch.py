@@ -166,3 +166,55 @@ def test_the_color_pickers_strip_keeps_its_width_at_the_declared_width():
     strip, sr = plan["cp_colorbar"]
     assert strip["style"].get("min_width") == strip["style"]["width"], strip["style"]
     assert sr["w"] == strip["style"]["width"], sr
+
+
+def test_layer_options_dim_percentage_keeps_its_min_width():
+    """The census's second changed plan: Layer Options at its declared width.
+    The Dim Images row is over-subscribed, and its percentage input declares
+    ``min_width`` (the web's CSS ``min-width: 60px``), so the row cannot take
+    it to 59, as it did before the floor."""
+    path = pathlib.Path(__file__).resolve().parents[2] / "workspace" / "workspace.json"
+    dialog = json.loads(path.read_text(encoding="utf-8"))["dialogs"]["layer_options"]
+    found = {}
+
+    def walk(n, p):
+        if isinstance(n, dict):
+            if n.get("id") == "lo_dim_percentage":
+                found["node"], found["path"] = n, p
+            for i, c in enumerate(n.get("children") or []):
+                walk(c, p + [i])
+
+    walk(dialog["content"], [])
+    rects = {tuple(r["path"]): r["rect"]
+             for r in layout_panel({"content": dialog["content"]}, dialog["width"])}
+    floor = found["node"]["style"]["min_width"]
+    assert rects[tuple(found["path"])]["w"] == floor, rects[tuple(found["path"])]
+
+
+def test_a_shipped_center_aligned_row_does_not_stretch_its_leaves():
+    """At the object, the stretch's control: Swatch Options' button row
+    declares ``alignment: center``, so its Preview toggle keeps its own height
+    beside the taller buttons and is centred, as the web's ``align-items:
+    center`` draws it. A stretch that leaked past the alignment would make it
+    the buttons' height."""
+    from workspace_interpreter.panel_layout import _KIND_HEIGHT
+
+    path = pathlib.Path(__file__).resolve().parents[2] / "workspace" / "workspace.json"
+    dialog = json.loads(path.read_text(encoding="utf-8"))["dialogs"]["swatch_options"]
+    found = {}
+
+    def walk(n, p, parent):
+        if isinstance(n, dict):
+            if n.get("id") == "so_preview":
+                found["path"], found["row"] = p, parent
+            for i, c in enumerate(n.get("children") or []):
+                walk(c, p + [i], n)
+
+    walk(dialog["content"], [], None)
+    assert found["row"]["style"].get("alignment") == "center", found["row"].get("style")
+    rects = {tuple(r["path"]): r["rect"]
+             for r in layout_panel({"content": dialog["content"]}, dialog["width"])}
+    toggle = rects[tuple(found["path"])]
+    row = rects[tuple(found["path"][:-1])]
+    assert toggle["h"] == _KIND_HEIGHT["toggle"], toggle
+    assert toggle["y"] - row["y"] == (row["h"] - toggle["h"]) // 2, (toggle, row)
