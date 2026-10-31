@@ -809,7 +809,18 @@ public sealed partial class MainWindow
                     var (ev, v) = PanelWire.RadioEvent("radio_group", value);
                     SendPane(id, ev, v, path);
                 };
-                row.Children.Add(radio);
+                // Finding 14: in a row shorter than the template's fixed 32 DIP
+                // the circle was cut; a Viewbox the plan's height scales it whole.
+                if (PanelWire.RadioScale(leaf.H) is { } scale)
+                {
+                    row.Children.Add(new Viewbox
+                    {
+                        Height = PanelWire.RadioNaturalHeight * scale,
+                        Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+                        Child = radio,
+                    });
+                }
+                else { row.Children.Add(radio); }
             }
             return row;
         }
@@ -1638,7 +1649,7 @@ public sealed partial class MainWindow
                     var items = leaf.Options?.Items;
                     for (var i = 0; i < group.Children.Count; i++)
                     {
-                        if (group.Children[i] is not RadioButton r) { continue; }
+                        if (group.RadioAt(i) is not { } r) { continue; }
                         var sel = items is not null && i < items.Count && items[i].Selected;
                         r.Tag = sel;
                         r.IsChecked = sel;
@@ -1895,6 +1906,17 @@ public sealed partial class MainWindow
                 IsThumbToolTipEnabled = false,
                 Tag = grip,
             };
+            // Finding 15: a plan shorter than WinUI's 46-DIP template clipped the
+            // track. Its sizes are theme resources, so this control gets its own.
+            if (PanelWire.SliderFit(leaf.H) is { } fit)
+            {
+                slider.Resources["SliderPreContentMargin"] = fit.Margin;
+                slider.Resources["SliderPostContentMargin"] = fit.Margin;
+                slider.Resources["SliderHorizontalThumbWidth"] = fit.Thumb;
+                slider.Resources["SliderHorizontalThumbHeight"] = fit.Thumb;
+                slider.Resources["SliderInnerThumbWidth"] = fit.Inner;
+                slider.Resources["SliderInnerThumbHeight"] = fit.Inner;
+            }
             if (leaf.Id.Length == 0) { slider.IsEnabled = false; return slider; }
 
             var id = leaf.Id;
@@ -2408,4 +2430,12 @@ internal sealed partial class AnchorGrid : Grid
 /// value applier can tell it from any other StackPanel.</summary>
 internal sealed partial class RadioGroupRow : StackPanel
 {
+    /// <summary>Option i's radio, whether it sits in the row itself or in the
+    /// Viewbox that fits it to a short row (finding 14).</summary>
+    internal RadioButton? RadioAt(int i) => Children[i] switch
+    {
+        RadioButton r => r,
+        Viewbox { Child: RadioButton r } => r,
+        _ => null,
+    };
 }
