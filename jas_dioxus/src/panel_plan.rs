@@ -530,6 +530,10 @@ fn icon_names(entry: &Value, out: &mut Vec<String>) {
 /// `justify: start` or none (no YAML uses `center` or `end`, so a shell falls
 /// back to icon-only rather than to a guess). A rect with no room for the
 /// label (its width ≤ 0) plans the `icon` part alone. `None` otherwise.
+/// The vertical centring is integer division, which truncates toward zero:
+/// an odd spare pixel goes below the icon, and an icon taller than the inner
+/// height (the flyouts' 28 in 20) overhangs it, by one more pixel at the
+/// bottom when the difference is odd.
 fn parts_of(node: &Value, x: i64, y: i64, w: i64, h: i64) -> Option<Value> {
     use crate::interpreter::panel_layout::{parse_padding, style_i};
     if node.get("type").and_then(Value::as_str) != Some("icon_button") {
