@@ -114,7 +114,8 @@ public sealed partial class MainWindow
             string Path, string Type, string Id, double X, double Y, double W, double H,
             Dictionary<string, string> Values, Dictionary<string, string> Static,
             Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items,
-            SliderTrack? Track = null, IReadOnlyList<string>? Events = null)
+            SliderTrack? Track = null, IReadOnlyList<string>? Events = null,
+            PanelWire.LeafParts? Parts = null)
         {
             internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
             internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -182,7 +183,11 @@ public sealed partial class MainWindow
                     PanelWire.ReadSliderTrack(e.TryGetProperty("numbers", out var nums) ? nums.GetRawText() : null),
                     // jas §316 (#464): the events the node answers; null from an
                     // older core, which then routes no press on a text.
-                    PanelWire.ReadEvents(e.TryGetProperty("events", out var evs) ? evs.GetRawText() : null)));
+                    PanelWire.ReadEvents(e.TryGetProperty("events", out var evs) ? evs.GetRawText() : null),
+                    // Row 56 (#796): a labelled icon_button's icon and label rects;
+                    // null for every other leaf, and from an older core.
+                    PanelWire.ReadParts(e.TryGetProperty("parts", out var pts) ? pts.GetRawText() : null,
+                                        rect.GetProperty("x").GetInt64(), rect.GetProperty("y").GetInt64())));
             }
             var icons = new Dictionary<string, (string Viewbox, string Svg)>();
             foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -1291,11 +1296,51 @@ public sealed partial class MainWindow
             if (PanelWire.RoutesEvent(leaf.Events, id, path, "mouse_down")) { WirePressAndHold(btn, id, path, sendsClick); }
             else if (sendsClick) { btn.Click += (_, _) => OnPaneClick(id, path); }
 
+            // Row 56 (#796): a labelled row (a tool-alternates flyout's) draws the
+            // icon, then the label, each in the rect the engine planned for it; the
+            // shell lays nothing out. With no parts it stays an icon-only face.
+            ContentControl iconHost = btn;
+            var iconBox = leaf.W < leaf.H ? leaf.W : leaf.H;
+            if (leaf.Parts is { } parts && (leaf.Value("bind.label") ?? leaf.Literal("label")) is { Length: > 0 } text)
+            {
+                var face = new Microsoft.UI.Xaml.Controls.Canvas { Width = leaf.W, Height = leaf.H };
+                var icon = new ContentControl
+                {
+                    Width = parts.Icon.W,
+                    Height = parts.Icon.H,
+                    IsTabStop = false,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(icon, parts.Icon.X);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(icon, parts.Icon.Y);
+                face.Children.Add(icon);
+                if (parts.Label is { } l)
+                {
+                    var cell = new Grid { Width = l.W, Height = l.H };
+                    cell.Children.Add(new TextBlock
+                    {
+                        Text = text,
+                        FontSize = 12,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    });
+                    Microsoft.UI.Xaml.Controls.Canvas.SetLeft(cell, l.X);
+                    Microsoft.UI.Xaml.Controls.Canvas.SetTop(cell, l.Y);
+                    face.Children.Add(cell);
+                }
+                btn.HorizontalContentAlignment = HorizontalAlignment.Left;
+                btn.VerticalContentAlignment = VerticalAlignment.Top;
+                btn.Content = face;
+                iconHost = icon;
+                iconBox = parts.Icon.W < parts.Icon.H ? parts.Icon.W : parts.Icon.H;
+            }
+
             var name = leaf.IconName;
             if (name is not null && icons.TryGetValue(name, out var def))
             {
                 _paneIconsPending++;
-                LoadIcon(btn, def.Viewbox, def.Svg, leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild);
+                LoadIcon(iconHost, def.Viewbox, def.Svg, iconBox, _paneBuild);
             }
             else
             {
