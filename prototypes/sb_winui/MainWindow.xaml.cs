@@ -2387,16 +2387,18 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Shortcut specs this rebuild could not turn into an accelerator.
     ///
-    /// ⛔ IT EXISTS BECAUSE THE REFUSAL HAD NO READER. Measured on kenai
-    /// 2026-09-09: `MENU SHORTCUT UNPARSED 'Ctrl+='` and `'Ctrl+-'` are written
-    /// TWICE PER REBUILD -- zoom-in and zoom-out have no keyboard accelerator
-    /// on Windows. The refusal is the RIGHT behaviour (a wrong accelerator
-    /// steals a keystroke silently) and it was announced only in a log line
-    /// that nothing reads and no oracle looks at. ⇒ A producer needs a consumer
-    /// that can red: the count goes on the MENU row, where P4 reads it, so the
+    /// ⛔ IT EXISTS BECAUSE THE REFUSAL HAD NO READER. Measured 2026-09-09:
+    /// `MENU SHORTCUT UNPARSED 'Ctrl+='` and `'Ctrl+-'` were written twice per
+    /// rebuild, in a log line nothing read. ⇒ A producer needs a consumer that
+    /// can red: the count goes on the MENU row, where P4 reads it, so the
     /// number CHANGING is visible instead of merely being printed.
-    /// ⚠️ It is REPORTED, not asserted to be zero. Two are expected today and
-    /// pinning that number would red the day a menubar gains an item.
+    /// Since #766 (the 10-30 sitting, finding 2) the expected count is ZERO.
+    /// `ShortcutWire.Parse` maps every menubar.yaml shortcut, and Ctrl+= and
+    /// Ctrl+- return null from `Accelerator` WITHOUT counting, by design:
+    /// OnKeyDown owns them, because an accelerator on an OEM key empties the
+    /// View menu.
+    /// ⚠️ It is REPORTED, not asserted to be zero: a shortcut a later menubar
+    /// adds that this parse refuses shows here first.
     /// </summary>
     private int _shortcutsUnparsed = 0;
 

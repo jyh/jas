@@ -203,6 +203,11 @@ pub struct JasEngine {
     tool: RefCell<Option<(usize, Box<dyn crate::tools::tool::CanvasTool>)>>,
     /// The dock layout a shell draws (FP-2): `None` until `jas_layout_load`.
     layout: RefCell<Option<crate::workspace::workspace::WorkspaceLayout>>,
+    /// The PENDING timers (finding 1 of the 10-30 sitting), by (panel, timer
+    /// id): the effects a `start_timer` keeps until the shell's tick. The
+    /// shell holds only the clock, so a tick for an id not here (cancelled,
+    /// already fired, never started) runs nothing.
+    timers: RefCell<std::collections::BTreeMap<(String, String), Vec<serde_json::Value>>>,
 }
 
 impl JasEngine {
@@ -365,6 +370,7 @@ impl JasEngine {
             surface_px: std::cell::Cell::new(None),
             tool: RefCell::new(None),
             layout: RefCell::new(None),
+            timers: RefCell::new(std::collections::BTreeMap::new()),
         }
     }
 }
@@ -1155,6 +1161,19 @@ pub unsafe extern "C" fn jas_layout_apply(e: *mut JasEngine, op: *const u8, len:
 /// [`jas_panel_event`] delta row, tagged with its `panel`, across every open
 /// panel. `doc_changed` says the document moved, so the shell repaints.
 ///
+/// # A timer (`start_timer` / `cancel_timer`)
+///
+/// A behavior that starts a timer (a tool slot's press-and-hold, `mouse_down`)
+/// makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>}]`, and
+/// one that cancels it (`mouse_up`) carries `{"cancel": <id>}`. The key is
+/// present only when the act started or cancelled one. The ENGINE keeps the
+/// timer's effects; the shell keeps only the clock and, when it fires, sends
+/// `{"event": "timer", "value": <id>}` through this door with the same panel
+/// id. That tick runs the kept effects (the reply is the act reply) if the
+/// timer is still pending; one cancelled, already fired or never started is
+/// the empty span with `StaleTimer`, so a tick that races a release runs
+/// nothing.
+///
 /// # ⛔ A refusal runs NOTHING
 ///
 /// A refused behavior returns the empty span, and [`jas_last_error_json`]
@@ -1205,30 +1224,51 @@ pub unsafe extern "C" fn jas_panel_behavior(
         set_panel_event_error(engine, r.class, &r.detail);
         JasBytes::empty()
     };
-    let ev = match crate::panel_behavior::parse_event(&ev) {
-        Ok(ev) => ev,
-        Err(r) => return refuse(r),
+    // A TICK of a timer this panel started (finding 1): run the effects the
+    // engine kept for it, or nothing if it is no longer pending.
+    let tick = ev.get("event").and_then(|v| v.as_str()) == Some("timer");
+    let (parsed, stored) = if tick {
+        let timer = ev.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let Some(effects) = engine.timers.borrow_mut().remove(&(id.to_string(), timer.clone())) else {
+            set_panel_event_error(engine, "StaleTimer", &timer);
+            return JasBytes::empty();
+        };
+        (None, Some((timer, effects)))
+    } else {
+        match crate::panel_behavior::parse_event(&ev) {
+            Ok(ev) => (Some(ev), None),
+            Err(r) => return refuse(r),
+        }
     };
 
-    if id == crate::panel_scope::COLOUR_PANEL && is_value_commit(spec, &ev) {
-        return colour_value_commit(engine, &ws, spec, &ev);
+    if let Some(ev) = &parsed {
+        if id == crate::panel_scope::COLOUR_PANEL && is_value_commit(spec, ev) {
+            return colour_value_commit(engine, &ws, spec, ev);
+        }
     }
     // Every other Color event (a swatch, a chip, swap) runs its declared
     // behaviour in the colour scope like any panel's; the value branches of
     // `run_widget_behavior` still refuse Color by name.
     let scope = panel_ctx(engine, &ws, id);
-    let (ran, named) = {
+    let (ran, named, timer_ops) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost::default();
-        let ran = crate::panel_behavior::run_widget_behavior(
-            id, spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
-        (ran, Named::of(host))
+        let mut host = crate::panel_behavior::EngineHost::accepting_timers();
+        let ran = match (&parsed, &stored) {
+            (Some(ev), _) => crate::panel_behavior::run_widget_behavior(
+                id, spec, ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host),
+            (None, Some((_, effects))) => crate::panel_behavior::run_timer_effects(
+                id, effects, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host),
+            (None, None) => unreachable!("a tick or a parsed event"),
+        };
+        let timer_ops = std::mem::take(&mut host.timers);
+        (ran, Named::of(host), timer_ops)
     };
     let ran = match ran {
         Ok(ran) => ran,
         Err(r) => return refuse(r),
     };
+    let timers = apply_timers(engine, id, &timer_ops);
     // A toolbar click wrote `active_tool`; the pointer must now drive that tool.
     let tool = crate::ffi_pointer::sync_tool_to_state(engine);
     // A behavior writes the store's copy of the colour slice's three
@@ -1243,15 +1283,45 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
     // A tool write that was REFUSED was also undone, so it changed nothing.
     let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
-    if ran.doc_changed || state_changed || moved {
+    if ran.doc_changed || state_changed || moved || !timers.is_empty() {
         *engine.last_error.borrow_mut() = None;
     } else {
-        set_panel_event_error(engine, "Unchanged", &ev.widget);
+        let what = match (&parsed, &stored) {
+            (Some(ev), _) => ev.widget.as_str(),
+            (None, Some((timer, _))) => timer.as_str(),
+            (None, None) => "",
+        };
+        set_panel_event_error(engine, "Unchanged", what);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
+    let mut reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
+    // `timers` only when this act started or cancelled one, so every reply
+    // shape without a timer is unchanged.
+    if !timers.is_empty() {
+        reply["timers"] = serde_json::Value::Array(timers);
+    }
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
+}
+
+/// Apply a run's timer acts to the engine's pending set for `panel`, and
+/// return them as the reply's `timers`: `{"start": <id>, "delay_ms": <n>}`
+/// (the shell starts, or restarts, a timer of that id) and `{"cancel": <id>}`
+/// (the shell stops it). The effects stay in the engine.
+fn apply_timers(engine: &JasEngine, panel: &str,
+                ops: &[crate::panel_behavior::TimerOp]) -> Vec<serde_json::Value> {
+    use crate::panel_behavior::TimerOp;
+    let mut pending = engine.timers.borrow_mut();
+    ops.iter().map(|op| match op {
+        TimerOp::Start { id, delay_ms, effects } => {
+            pending.insert((panel.to_string(), id.clone()), effects.clone());
+            serde_json::json!({"start": id, "delay_ms": delay_ms})
+        }
+        TimerOp::Cancel(id) => {
+            pending.remove(&(panel.to_string(), id.clone()));
+            serde_json::json!({"cancel": id})
+        }
+    }).collect()
 }
 
 /// A Color panel event through the behaviour door (flask §228, 2026-10-12).
@@ -6854,6 +6924,82 @@ mod tests {
         assert_eq!(slot_tool(e), Some("rect"), "the pointer now drives the rect tool");
         let (_, _) = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
         assert_eq!(slot_tool(e), Some("selection"), "and back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// FINDING 1 (the 10-30 Windows feel sitting): no toolbar flyouts. A tool
+    /// slot opens its alternates on a 250 ms press-and-hold (`mouse_down` runs
+    /// `start_timer`, `mouse_up` runs `cancel_timer`, `layout.yaml`), and the
+    /// native door refused `start_timer`. The engine now NAMES the timer for
+    /// the shell to run (`"timers"`), keeps its effects, and runs them on the
+    /// shell's tick, `{"event":"timer","value":<id>}`.
+    #[test]
+    fn a_press_and_hold_on_a_tool_slot_opens_its_alternates_on_the_tick() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        assert!(!reply.is_empty(), "the press ran: {err}");
+        let r = json(&reply);
+        assert_eq!(r["timers"], serde_json::json!([{"start": "long_press_btn_arrow_slot", "delay_ms": 250}]),
+                   "the shell is told to run one 250 ms timer: {reply}");
+        assert_eq!(r["dialog"], serde_json::Value::Null, "nothing opens before the tick");
+        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        assert!(!reply.is_empty(), "the tick ran: {err}");
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "{reply}");
+        // A fired timer is no longer pending, so a second tick runs nothing.
+        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        assert_eq!(reply, "", "a spent timer's tick runs nothing");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A release before the delay CANCELS: the engine owns which timers are
+    /// pending, so a tick that races the release (the shell's timer fired
+    /// just as the finger lifted) runs nothing, and no flyout opens under a
+    /// finger that has gone.
+    #[test]
+    fn a_release_before_the_tick_cancels_the_flyout() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_up"}"#);
+        assert!(!reply.is_empty(), "the release ran: {err}");
+        assert_eq!(json(&reply)["timers"], serde_json::json!([{"cancel": "long_press_btn_arrow_slot"}]), "{reply}");
+        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        assert_eq!(reply, "", "the raced tick runs nothing");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        assert!(unsafe { &*e }.store.borrow().dialog_id().is_none(), "no flyout opened");
+        // A tick for an id nobody started is the same no-op.
+        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"never_started"}"#);
+        assert_eq!(reply, "");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A timer is the PANEL's: a tick through another panel's door does not
+    /// run the toolbar's pending effects.
+    #[test]
+    fn a_tick_runs_only_the_timer_its_own_panel_started() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, "layers_panel_content", r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        assert_eq!(reply, "", "another panel's door: {err}");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "still pending on its own door");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A reply with no timer act carries no `timers` key, so every reply shape
+    /// pinned before finding 1 is unchanged.
+    #[test]
+    fn a_plain_click_reply_carries_no_timers() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_shape_slot","event":"click"}"#);
+        assert!(!reply.is_empty(), "{err}");
+        assert!(json(&reply).get("timers").is_none(), "{reply}");
         unsafe { jas_engine_free(e) };
     }
 

@@ -11504,7 +11504,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -11521,7 +11523,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -11539,6 +11543,7 @@
         "visible": true,
         "dyn_visible": true,
         "bind": [
+          "icon",
           "visible"
         ],
         "style": [
@@ -11639,10 +11644,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -11698,7 +11704,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -11715,7 +11723,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -11733,6 +11743,7 @@
         "visible": true,
         "dyn_visible": true,
         "bind": [
+          "icon",
           "visible"
         ],
         "style": [
@@ -11833,10 +11844,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -11892,7 +11904,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -11909,7 +11923,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -11927,6 +11943,7 @@
         "visible": true,
         "dyn_visible": true,
         "bind": [
+          "icon",
           "visible"
         ],
         "style": [
@@ -12027,10 +12044,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -12086,7 +12104,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -12103,7 +12123,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -12121,6 +12143,7 @@
         "visible": true,
         "dyn_visible": true,
         "bind": [
+          "icon",
           "visible"
         ],
         "style": [
@@ -12221,10 +12244,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -12280,7 +12304,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -12297,7 +12323,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "icon"
+        ],
         "style": [
           "size"
         ]
@@ -12315,6 +12343,7 @@
         "visible": true,
         "dyn_visible": true,
         "bind": [
+          "icon",
           "visible"
         ],
         "style": [
@@ -12415,10 +12444,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
