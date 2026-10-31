@@ -10,4 +10,8 @@ public enum PanelMenuItem {
     case radio(label: String, command: String, group: String)
     /// Horizontal separator line.
     case separator
+    /// A submenu whose rows are declared by `items_from` and evaluated when
+    /// the menu opens (`panelSubmenuRows`); `spec` is the YAML `items_from`
+    /// mapping, carried unevaluated.
+    case submenu(label: String, spec: [String: Any])
 }

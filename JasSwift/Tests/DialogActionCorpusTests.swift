@@ -107,6 +107,7 @@ private func panelMenuCommand(_ step: [String: Any], ws: WorkspaceData)
     switch items[hits[0]] {
     case .action(_, let cmd, _), .toggle(_, let cmd), .radio(_, let cmd, _): return .success((kind, cmd))
     case .separator: return .failure(DialogCorpusError(text: "row \(hits[0]) of \(pid)'s menu is a separator"))
+    case .submenu: return .failure(DialogCorpusError(text: "row \(hits[0]) of \(pid)'s menu is an items_from submenu, which has no command"))
     }
 }
 

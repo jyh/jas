@@ -29,8 +29,15 @@ import Foundation
 /// the no-params menu dispatch stays able to distinguish them.
 public func menuItemsFromYaml(_ contentId: String) -> [PanelMenuItem] {
     guard let ws = WorkspaceData.load() else { return [] }
-    let menu = ws.panelMenuRaw(contentId)
+    return menuItems(fromRaw: ws.panelMenuRaw(contentId))
+}
 
+/// The builder behind ``menuItemsFromYaml``, over a panel's raw `menu:` array.
+/// An entry that declares `items_from` becomes ``PanelMenuItem/submenu``,
+/// carrying the mapping for evaluation when the menu opens (the 2026-10-28
+/// brush-library design, A.2); a `type: submenu` entry without one stays a
+/// disabled action, as before.
+func menuItems(fromRaw menu: [Any]) -> [PanelMenuItem] {
     // Count action occurrences: an action that recurs marks a radio
     // group; a one-off action with a `checked` expr is a plain toggle.
     var actionCounts: [String: Int] = [:]
@@ -50,6 +57,10 @@ public func menuItemsFromYaml(_ contentId: String) -> [PanelMenuItem] {
         }
         guard let obj = entry as? [String: Any],
               let label = obj["label"] as? String else { continue }
+        if let spec = obj["items_from"] as? [String: Any] {
+            items.append(.submenu(label: label, spec: spec))
+            continue
+        }
         let action = obj["action"] as? String
         // A radio-group member is one whose `action` recurs across the
         // menu (grouping is by action sameness, not an explicit key).
@@ -198,6 +209,30 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     }
 }
 
+/// The rows of a panel's `items_from` submenu, evaluated now in the panel
+/// menu's own context (``panelMenuContext``), so a menu opened again reads
+/// the store as it is then.
+public func panelSubmenuRows(_ kind: PanelKind, spec: [String: Any],
+                             layout: WorkspaceLayout, model: Model? = nil) -> [MenuState.ItemsFromRow] {
+    let ctx = panelMenuContext(panelKindToContentId(kind), layout: layout, model: model)
+    return MenuState.itemsFromEntries(spec, ctx)
+}
+
+/// Run one selected `items_from` row: its YAML action with its evaluated
+/// params. The row carries its params, so nothing is folded into a command
+/// string and split back off (``commandWithParams``). A row with no action
+/// runs nothing.
+public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String: Any],
+                             addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
+    guard !action.isEmpty, let model = model else { return }
+    let pid = panelKindToContentId(kind)
+    if !model.stateStore.hasPanel(pid) {
+        model.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+    }
+    model.stateStore.setActivePanel(pid)
+    runYamlActionByName(action, params: params, model: model)
+}
+
 /// Query whether a toggle/radio command is checked for a panel kind.
 ///
 /// ONE path for every panel: the panel's bundle menu entry is looked up by
@@ -304,6 +339,12 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     for (k, v) in layoutHeldPanelState(contentId, layout: layout) { panel[k] = v }
     for (k, v) in modelHeldPanelState(contentId, model: model) { panel[k] = v }
     var ctx: [String: Any] = ["panel": panel]
+    // The data namespace, read from the store the library effects write, so an
+    // `items_from` source such as `keys(data.brush_libraries)` lists what is
+    // there when the menu opens (the 2026-10-28 brush-library design, A.2).
+    // Without a model it falls back to the bundle's libraries.
+    ctx["data"] = (model?.stateStore.getDataPath("") as? [String: Any])
+        ?? ["brush_libraries": ws?.brushLibraries() ?? [:]] as [String: Any]
     ctx["preferences"] = Preferences.current() ?? [:]
     if let ws = ws {
         ctx["state"] = buildLiveStateMap(ws: ws, model: model)

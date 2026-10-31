@@ -776,6 +776,17 @@ private func runOne(
         return
     }
 
+    // open_menu: { id } -- ask the host to pop up the declared menu item
+    // `id`'s submenu (the 2026-10-28 jas brush-library design, A.3). The id
+    // is a LITERAL, as open_dialog's is; it is recorded as the store's
+    // `pendingMenu`, the latest request winning. An empty or non-string id
+    // records nothing. Mirrors the reference's `open_menu`.
+    if let om = effect["open_menu"] {
+        let menuId = (om as? [String: Any]).map { $0["id"] } ?? om
+        if let id = menuId as? String, !id.isEmpty { store.pendingMenu = id }
+        return
+    }
+
     // open_dialog: { id, params }
     if let od = effect["open_dialog"] {
         let dlgId: String
