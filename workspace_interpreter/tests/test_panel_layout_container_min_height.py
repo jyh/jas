@@ -77,7 +77,7 @@ def test_a_percentage_or_unreadable_floor_is_ignored_as_a_height_is():
 # any OTHER min/max key is drawn by the web (CSS) and ignored by every port's
 # rects: the B.5 divergence again. Zero panel nodes do today; this reds on the
 # first one, so the deferral fires on its own precondition.
-READ = {"container": {"min_height"}, "leaf": {"min_width"}}
+READ = {"container": {"min_height"}, "leaf": {"min_width", "min_height"}}
 SIZE_KEYS = {"min_width", "min_height", "max_width", "max_height"}
 
 
@@ -104,10 +104,12 @@ def unread_size_keys(panels):
 
 def test_the_gate_names_a_size_key_no_layout_reads():
     # Positive control: every unread class is reported, the read ones are not.
+    # A leaf's min_height is read since row 62 (2026-10-31); its max_height is not.
     panels = {"p": {"content": {"type": "container", "style": {"max_width": 9, "min_height": 9},
-                                "children": [{"type": "text", "style": {"min_height": 9, "min_width": 9}}]}}}
+                                "children": [{"type": "text", "style": {"min_height": 9, "min_width": 9,
+                                                                         "max_height": 9}}]}}}
     assert unread_size_keys(panels) == [("p", None, "container", "max_width"),
-                                        ("p", None, "leaf", "min_height")]
+                                        ("p", None, "leaf", "max_height")]
 
 
 def test_no_shipped_panel_declares_a_size_key_no_layout_reads():
