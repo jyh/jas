@@ -1226,6 +1226,86 @@ internal static class MenuWire
 }
 
 /// <summary>
+/// A menu `shortcut:` ("Ctrl+Shift+S") as a Windows virtual-key code and its
+/// modifiers, or null. Pure, so `sb_winui_tests` drives it; MainWindow makes
+/// the KeyboardAccelerator from it.
+///
+/// ⛔ NULL, NEVER A GUESS: a wrong accelerator silently steals a keystroke. The
+/// 10-30 sitting (finding 2) found the old parse wrong both ways: `=` and `-`
+/// named no key, so Zoom In and Zoom Out had none; and a DIGIT went through
+/// `Enum.TryParse&lt;VirtualKey&gt;` as a NUMBER, so "Ctrl+1" bound VirtualKey 1,
+/// the left mouse button, and never the 1 key.
+/// </summary>
+internal static class ShortcutWire
+{
+    internal readonly record struct Chord(int Key, bool Ctrl, bool Shift, bool Alt);
+
+    // The named keys a shortcut may spell out, as virtual-key codes.
+    private static readonly Dictionary<string, int> Named = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Backspace"] = 0x08, ["Tab"] = 0x09, ["Enter"] = 0x0D, ["Escape"] = 0x1B, ["Space"] = 0x20,
+        ["PageUp"] = 0x21, ["PageDown"] = 0x22, ["End"] = 0x23, ["Home"] = 0x24,
+        ["Left"] = 0x25, ["Up"] = 0x26, ["Right"] = 0x27, ["Down"] = 0x28,
+        ["Insert"] = 0x2D, ["Delete"] = 0x2E,
+    };
+
+    internal static Chord? Parse(string? spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec)) { return null; }
+        bool ctrl = false, shift = false, alt = false;
+        int? key = null;
+        foreach (var raw in spec.Split('+', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var part = raw.Trim();
+            switch (part)
+            {
+                case "Ctrl": ctrl = true; continue;
+                case "Shift": shift = true; continue;
+                case "Alt": alt = true; continue;
+            }
+            // A second key is not a chord; keeping the last one would be a guess.
+            if (key is not null) { return null; }
+            key = KeyOf(part);
+            if (key is null) { return null; }
+        }
+        return key is { } k ? new Chord(k, ctrl, shift, alt) : null;
+    }
+
+    /// <summary>
+    /// The character OnKeyDown sends the engine for a key the KEY HANDLER owns,
+    /// or null. Only `=` and `-`: a KeyboardAccelerator on VK_OEM_PLUS or
+    /// VK_OEM_MINUS left the View menu opening with ZERO items (measured 10-30,
+    /// both ways), so Ctrl+= and Ctrl+- go the Ctrl+letter route instead.
+    /// </summary>
+    internal static int? ChordChar(int virtualKey) => virtualKey switch
+    {
+        0xBB => '=',
+        0xBD => '-',
+        _ => null,
+    };
+
+    private static int? KeyOf(string part)
+    {
+        if (part.Length == 1)
+        {
+            var c = char.ToUpperInvariant(part[0]);
+            if (c is >= 'A' and <= 'Z') { return c; }   // VK_A..VK_Z
+            if (c is >= '0' and <= '9') { return c; }   // VK_0..VK_9, the top row
+            if (c == '=') { return 0xBB; }              // VK_OEM_PLUS, the =/+ key
+            if (c == '-') { return 0xBD; }              // VK_OEM_MINUS
+            return null;
+        }
+        if (Named.TryGetValue(part, out var named)) { return named; }
+        if (part.Length is 2 or 3 && part[0] is 'F' or 'f'
+            && int.TryParse(part[1..], out var f) && f is >= 1 and <= 24)
+        {
+            return 0x6F + f;                             // VK_F1 = 0x70
+        }
+        return null;
+    }
+}
+
+/// <summary>
 /// SB_TOOL, read against the core's own tool list. Pure, so `sb_winui_tests`
 /// drives it.
 /// </summary>
