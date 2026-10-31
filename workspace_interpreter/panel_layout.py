@@ -32,6 +32,8 @@ its i-th child = ``[i]``, a foreach's i-th expansion = ``[..., i]``).
 """
 from __future__ import annotations
 
+import math
+
 from typing import Any
 
 from .expr import evaluate, evaluate_text
@@ -371,13 +373,30 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
     return w
 
 
-def _leaf_h(node: dict) -> int:
-    t = node.get("type")
-    h = _resolve_dim(_style(node).get("height"), 0)
-    if h is not None:
-        return h
-    size = _size(node)
-    return size if size is not None else _KIND_HEIGHT.get(t, 20)
+def _leaf_h(node: dict, w: int) -> int:
+    """A leaf's height at its FINAL width ``w``. A declared ``height`` (or
+    B.9's ``size``) is the height; else an ``aspect_ratio`` (width / height)
+    gives ``w / r``, rounded half away from zero; else the kind's height.
+    Then ``min_height`` floors it (row 62, STATUS-flask §703: B.6 for a leaf,
+    ``min_width``'s twin)."""
+    st = _style(node)
+    h = _resolve_dim(st.get("height"), 0)
+    if h is None:
+        h = _size(node)
+    if h is None:
+        ar = _aspect(node)
+        h = math.floor(w / ar + 0.5) if ar is not None else _KIND_HEIGHT.get(node.get("type"), 20)
+    floor = _resolve_dim(st.get("min_height"), 0)
+    return max(h, floor) if floor is not None else h
+
+
+def _aspect(node: dict) -> float | None:
+    """Row 62: a leaf's ``style.aspect_ratio`` (width / height), a positive
+    number; else None."""
+    v = _style(node).get("aspect_ratio")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return float(v)
+    return None
 
 
 def _size(node: dict) -> int | None:
@@ -535,7 +554,7 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
     # width available so it cannot overrun a neighbour (text/labels may clip).
     if avail_w > 0 and w > avail_w:
         w = avail_w
-    h = _leaf_h(node)
+    h = _leaf_h(node, w)
     return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}])
 
 
