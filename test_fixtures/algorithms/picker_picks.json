@@ -1,0 +1,251 @@
+{
+  "_doc": [
+    "The Color Picker's two pick functions, each over a point normalized",
+    "to [0,1] (`u` left to right, `v` top to bottom, each clamped):",
+    "`strip_value(v, max)` = (1 - v) max, the vertical strip, TOP IS MAX",
+    "for every channel; `gradient_sb(u, v)` = (100 u, 100 (1 - v)), the",
+    "field's saturation and brightness (workspace/dialogs/color_picker.yaml).",
+    "`expected` is exact, compared within 1e-9; `written` is what a pick",
+    "stores, rounded half away from zero. Goldens are derived from the",
+    "formula by scripts/derive_picker_picks_goldens.py, not captured from",
+    "a port, and no vector lands on an exact .5 rounding tie. The",
+    "v = 1/6 vector pins the strip's MIDDLE, where a picture drawn the",
+    "other way up disagrees with the pick (the ends are both red)."
+  ],
+  "vectors": [
+    {
+      "name": "hue_top_is_max",
+      "function": "strip_value",
+      "v": 0.0,
+      "max": 359.0,
+      "expected": 359.0,
+      "written": 359
+    },
+    {
+      "name": "hue_bottom_is_zero",
+      "function": "strip_value",
+      "v": 1.0,
+      "max": 359.0,
+      "expected": 0.0,
+      "written": 0
+    },
+    {
+      "name": "hue_one_sixth_down_is_magenta",
+      "function": "strip_value",
+      "v": 0.16666666666666666,
+      "max": 359.0,
+      "expected": 299.1666666666667,
+      "written": 299
+    },
+    {
+      "name": "hue_two_thirds_down_is_green",
+      "function": "strip_value",
+      "v": 0.6666666666666666,
+      "max": 359.0,
+      "expected": 119.66666666666669,
+      "written": 120
+    },
+    {
+      "name": "hue_above_the_strip_clamps_to_max",
+      "function": "strip_value",
+      "v": -0.3,
+      "max": 359.0,
+      "expected": 359.0,
+      "written": 359
+    },
+    {
+      "name": "hue_below_the_strip_clamps_to_zero",
+      "function": "strip_value",
+      "v": 1.4,
+      "max": 359.0,
+      "expected": 0.0,
+      "written": 0
+    },
+    {
+      "name": "percent_centre_is_half",
+      "function": "strip_value",
+      "v": 0.5,
+      "max": 100.0,
+      "expected": 50.0,
+      "written": 50
+    },
+    {
+      "name": "percent_interior",
+      "function": "strip_value",
+      "v": 0.27,
+      "max": 100.0,
+      "expected": 73.0,
+      "written": 73
+    },
+    {
+      "name": "byte_quarter_down",
+      "function": "strip_value",
+      "v": 0.25,
+      "max": 255.0,
+      "expected": 191.25,
+      "written": 191
+    },
+    {
+      "name": "byte_interior",
+      "function": "strip_value",
+      "v": 0.85,
+      "max": 255.0,
+      "expected": 38.25000000000001,
+      "written": 38
+    },
+    {
+      "name": "top_left_is_white",
+      "function": "gradient_sb",
+      "u": 0.0,
+      "v": 0.0,
+      "expected": [
+        0.0,
+        100.0
+      ],
+      "written": [
+        0,
+        100
+      ]
+    },
+    {
+      "name": "top_right_is_the_pure_hue",
+      "function": "gradient_sb",
+      "u": 1.0,
+      "v": 0.0,
+      "expected": [
+        100.0,
+        100.0
+      ],
+      "written": [
+        100,
+        100
+      ]
+    },
+    {
+      "name": "bottom_left_is_black",
+      "function": "gradient_sb",
+      "u": 0.0,
+      "v": 1.0,
+      "expected": [
+        0.0,
+        0.0
+      ],
+      "written": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "bottom_right_is_black",
+      "function": "gradient_sb",
+      "u": 1.0,
+      "v": 1.0,
+      "expected": [
+        100.0,
+        0.0
+      ],
+      "written": [
+        100,
+        0
+      ]
+    },
+    {
+      "name": "centre_is_half_and_half",
+      "function": "gradient_sb",
+      "u": 0.5,
+      "v": 0.5,
+      "expected": [
+        50.0,
+        50.0
+      ],
+      "written": [
+        50,
+        50
+      ]
+    },
+    {
+      "name": "interior",
+      "function": "gradient_sb",
+      "u": 0.27,
+      "v": 0.73,
+      "expected": [
+        27.0,
+        27.0
+      ],
+      "written": [
+        27,
+        27
+      ]
+    },
+    {
+      "name": "interior_off_axis",
+      "function": "gradient_sb",
+      "u": 0.9,
+      "v": 0.15,
+      "expected": [
+        90.0,
+        85.0
+      ],
+      "written": [
+        90,
+        85
+      ]
+    },
+    {
+      "name": "left_of_the_field_clamps_to_grey",
+      "function": "gradient_sb",
+      "u": -0.4,
+      "v": 0.4,
+      "expected": [
+        0.0,
+        60.0
+      ],
+      "written": [
+        0,
+        60
+      ]
+    },
+    {
+      "name": "right_of_the_field_clamps_to_full",
+      "function": "gradient_sb",
+      "u": 1.3,
+      "v": 0.4,
+      "expected": [
+        100.0,
+        60.0
+      ],
+      "written": [
+        100,
+        60
+      ]
+    },
+    {
+      "name": "above_the_field_clamps_to_bright",
+      "function": "gradient_sb",
+      "u": 0.6,
+      "v": -0.2,
+      "expected": [
+        60.0,
+        100.0
+      ],
+      "written": [
+        60,
+        100
+      ]
+    },
+    {
+      "name": "below_the_field_clamps_to_black",
+      "function": "gradient_sb",
+      "u": 0.6,
+      "v": 1.7,
+      "expected": [
+        60.0,
+        0.0
+      ],
+      "written": [
+        60,
+        0
+      ]
+    }
+  ]
+}
