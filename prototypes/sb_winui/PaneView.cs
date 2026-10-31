@@ -1455,6 +1455,12 @@ public sealed partial class MainWindow
         {
             var shown = (leaf.Value("bind.visible") ?? leaf.Value("visible")) != "false";
             el.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+            // The 10-30 sitting, finding 12: the toolbar swatches bind their draw
+            // order to `fill_on_top`; without this the stroke swatch was always on top.
+            if (PanelWire.ZIndex(leaf.Value("bind.z_index")) is { } z)
+            {
+                Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(el, z);
+            }
             var off = leaf.Value("bind.disabled") == "true";
             var on = leaf.Value("bind.checked") == "true";
             var typing = false;

@@ -719,6 +719,20 @@ static class Program
         static string Ev(string? json) => PanelWire.ReadEvents(json) is { } ev ? string.Join(",", ev) : "(null)";
         Eq("events: the declared order, read as sent", "click,click_and_wait", Ev("""["click","click_and_wait"]"""));
         Eq("events: a node that answers nothing", "", Ev("[]"));
+        // -- bind.z_index (the 10-30 sitting, finding 12: "I cannot get the fill
+        // swatch to come to the front") -------------------------------------------
+        // The toolbar swatches bind `z_index: if state.fill_on_top then 2 else 1`;
+        // the core resolves it into the leaf's values and the shell drew in plan
+        // order regardless, so the stroke swatch was always on top. `ZIndex` reads
+        // the resolved string; null is "no z", never a guessed 0.
+        static string Z(string? s) => PanelWire.ZIndex(s) is { } z ? z.ToString(System.Globalization.CultureInfo.InvariantCulture) : "(null)";
+        Eq("z_index: the core's \"2\" is 2", "2", Z("2"));
+        Eq("z_index: \"1\" is 1", "1", Z("1"));
+        Eq("z_index: a whole number written as a decimal is that integer", "2", Z("2.0"));
+        Eq("z_index: a negative order is kept", "-1", Z("-1"));
+        Eq("z_index: a fraction names no order and is refused", "(null)", Z("1.5"));
+        Eq("z_index: a word is refused", "(null)", Z("top"));
+        Eq("z_index: absent is no z", "(null)", Z(null));
         Eq("events: no channel, an older core, is no list", "(null)", Ev(null));
         Eq("events: a channel that is not an array is no list", "(null)", Ev("""{"click":true}"""));
         Eq("events: text that is not JSON is no list", "(null)", Ev("click"));
