@@ -1135,12 +1135,39 @@ fn value_event(ev: &UserEvent, value: Value) -> Value {
     event
 }
 
+/// The Color Picker's strip and field (finding 13, step 2b; WIDGET_EVENTS.md
+/// §The bound target): a commit writes the PICK, not the point.
+pub const PICKER_PICK_KINDS: [&str; 2] = ["color_hue_bar", "color_gradient"];
+/// The strip's hue max, the pick's own (`test_fixtures/algorithms/picker_picks.json`).
+const PICKER_HUE_MAX: f64 = 359.0;
+
+/// What a strip or field commit writes: each bound expression with the pick
+/// for it, rounded half away from zero (`f64::round`). The strip's
+/// `bind.value` takes `strip_value(v, 359)`; the field's `bind.saturation` and
+/// `bind.brightness` take the two halves of `gradient_sb(u, v)`. `value` is the
+/// parsed commit (`v`, or `[u, v]`). A bind the widget does not declare is
+/// skipped.
+pub fn picker_pick_writes(node: &Value, value: &Value) -> Vec<(String, f64)> {
+    use crate::interpreter::color_util::{gradient_sb, strip_value};
+    let bind = |key: &str| node.get("bind").and_then(|b| b.get(key)).and_then(Value::as_str).map(str::to_string);
+    let picks: Vec<(Option<String>, f64)> = if node.get("type").and_then(Value::as_str) == Some("color_hue_bar") {
+        vec![(bind("value"), strip_value(value.as_f64().unwrap_or(0.0), PICKER_HUE_MAX))]
+    } else {
+        let (u, v) = (value[0].as_f64().unwrap_or(0.0), value[1].as_f64().unwrap_or(0.0));
+        let (s, b) = gradient_sb(u, v);
+        vec![(bind("saturation"), s), (bind("brightness"), b)]
+    };
+    picks.into_iter().filter_map(|(expr, pick)| expr.map(|e| (e, pick.round()))).collect()
+}
+
 /// A commit on an input kind (WIDGET_EVENTS.md, "Committing a value"). The
 /// disabled refusal has already run. `MissingValue` for no text (or JSON
 /// null), `BadValue` for text the kind refuses or a value that is not text.
 /// Then ONE batch: the bind write, then every `commit`/`change` behavior.
 /// A widget with neither is refused as `EmptyBehavior` (the contract's
-/// `inert`).
+/// `inert`). A Color Picker strip or field (`PICKER_PICK_KINDS`) writes its
+/// pick instead of its point, and only in H mode (`dialog.radio_channel`,
+/// absent meaning h); off H it is refused `WrongMode`, naming the mode.
 #[allow(clippy::too_many_arguments)]
 fn commit_value(
     panel_id: Option<&str>,
@@ -1162,7 +1189,22 @@ fn commit_value(
     let Some(value) = widget_commit::parse_commit(node, text) else {
         return Err(Refusal::new("BadValue", ev.widget.clone()));
     };
-    let mut batch: Vec<Value> = bind_write(node, spec, panel_id);
+    let kind = node.get("type").and_then(Value::as_str).unwrap_or("");
+    let mut batch: Vec<Value> = if PICKER_PICK_KINDS.contains(&kind) {
+        if let crate::interpreter::expr_types::Value::Str(mode) = eval("dialog.radio_channel", scope) {
+            if mode != "h" {
+                return Err(Refusal::new("WrongMode", format!("radio_channel={mode}")));
+            }
+        }
+        picker_pick_writes(node, &value).into_iter()
+            .filter_map(|(expr, pick)| match (widget_commit::writable_target(&expr), panel_id) {
+                (Some(("dialog", key)), None) => Some(json!({"set": {format!("dialog.{key}"): format!("{pick}")}})),
+                _ => None,
+            })
+            .collect()
+    } else {
+        bind_write(node, spec, panel_id)
+    };
     let (behaviors, _) = value_behaviors(node, &COMMIT_EVENTS, &ev.widget)?;
     batch.extend(behaviors);
     if batch.is_empty() {
@@ -2376,5 +2418,35 @@ mod tests {
         assert!(r.is_ok(), "{r:?}");
         assert_eq!(store.get_panel(PROBE, "q"), &json!("abc"));
         assert_eq!(store.get_panel(PROBE, "typed"), &json!(false));
+    }
+
+    /// FINDING 13, STEP 2b (WIDGET_EVENTS.md §The bound target): a commit on
+    /// the Color Picker's strip or field writes the PICK, rounded half away
+    /// from zero, to the widget's own binds. Replays every vector of step 1's
+    /// corpus: the strip's hue vectors against `bind.value`, the field's
+    /// against `bind.saturation` and `bind.brightness`.
+    #[test]
+    fn a_picker_commit_writes_the_corpus_written_pick_to_its_binds() {
+        let text = std::fs::read_to_string("../test_fixtures/algorithms/picker_picks.json").unwrap();
+        let doc: Value = serde_json::from_str(&text).unwrap();
+        let strip = json!({"type": "color_hue_bar", "bind": {"value": "dialog.h"}});
+        let field = json!({"type": "color_gradient",
+                           "bind": {"hue": "dialog.h", "saturation": "dialog.s", "brightness": "dialog.b"}});
+        let (mut strips, mut fields) = (0, 0);
+        for vec in doc["vectors"].as_array().unwrap() {
+            if vec["function"] == "strip_value" && vec["max"] == json!(359.0) {
+                let v = vec["v"].as_f64().unwrap().clamp(0.0, 1.0);
+                assert_eq!(picker_pick_writes(&strip, &json!(v)),
+                           vec![("dialog.h".to_string(), vec["written"].as_f64().unwrap())], "{}", vec["name"]);
+                strips += 1;
+            } else if vec["function"] == "gradient_sb" {
+                let (u, v) = (vec["u"].as_f64().unwrap().clamp(0.0, 1.0), vec["v"].as_f64().unwrap().clamp(0.0, 1.0));
+                assert_eq!(picker_pick_writes(&field, &json!([u, v])),
+                           vec![("dialog.s".to_string(), vec["written"][0].as_f64().unwrap()),
+                                ("dialog.b".to_string(), vec["written"][1].as_f64().unwrap())], "{}", vec["name"]);
+                fields += 1;
+            }
+        }
+        assert!(strips >= 6 && fields >= 11, "the corpus reached the arm ({strips}, {fields})");
     }
 }

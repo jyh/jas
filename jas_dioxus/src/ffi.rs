@@ -5559,6 +5559,58 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// FINDING 13, STEP 2b (WIDGET_EVENTS.md): at the dialog door, the Color
+    /// Picker's strip takes ONE number `v` and writes `dialog.h`, and its field
+    /// takes `u,v` and writes `dialog.s` and `dialog.b`, each the pick rounded
+    /// half away from zero. `commit` and `change` parse and write alike. Off H
+    /// mode a pick is refused `WrongMode`, naming the mode, and writes nothing.
+    /// The points are ones the dialog's 8-bit colour reads back exactly.
+    #[test]
+    fn the_color_pickers_strip_and_field_commit_their_pick_in_h_mode_and_refuse_off_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#ff0000"}}"##);
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("color_picker"));
+        let hsb = |e: *mut JasEngine| -> (f64, f64, f64) {
+            let ctx = engine_of(e).store.borrow().eval_context();
+            let n = |k: &str| match crate::interpreter::expr::eval(&format!("dialog.{k}"), &ctx) {
+                crate::interpreter::expr_types::Value::Number(n) => n,
+                other => panic!("dialog.{k} is {other:?}"),
+            };
+            (n("h"), n("s"), n("b"))
+        };
+        let commit = |e: *mut JasEngine, widget: &str, event: &str, text: &str| {
+            dialog_event(e, &serde_json::json!({"widget": widget, "event": event, "value": text}).to_string())
+        };
+        // The strip's middle: v = 1/6 picks magenta, 299.
+        let (reply, err) = commit(e, "cp_colorbar", "commit", "0.16666666666666666");
+        assert!(!reply.is_empty(), "the strip committed: {err}");
+        assert_eq!(hsb(e), (299.0, 100.0, 100.0));
+        // A drag's `change` writes alike: v = 2/3 picks green, 120.
+        let (reply, err) = commit(e, "cp_colorbar", "change", "0.6666666666666666");
+        assert!(!reply.is_empty(), "the strip changed: {err}");
+        assert_eq!(hsb(e), (120.0, 100.0, 100.0));
+        // The field writes s and b, never h.
+        let (reply, err) = commit(e, "cp_gradient", "commit", "1,0.27");
+        assert!(!reply.is_empty(), "the field committed: {err}");
+        assert_eq!(hsb(e), (120.0, 100.0, 73.0));
+        // The parse refusals.
+        for (widget, text) in [("cp_colorbar", "0.5,0.5"), ("cp_gradient", "0.5")] {
+            let (reply, err) = commit(e, widget, "commit", text);
+            assert!(reply.is_empty() && err.contains("BadValue"), "{widget} {text:?}: {reply} {err}");
+        }
+        // Off H mode: refused by name, nothing written.
+        let _ = dialog_event(e, r#"{"widget":"cp_radio_s","event":"toggle","value":"s"}"#);
+        for (widget, text) in [("cp_colorbar", "0.5"), ("cp_gradient", "0.1,0.1")] {
+            let (reply, err) = commit(e, widget, "commit", text);
+            assert!(reply.is_empty() && err.contains(r#""panel_event":"WrongMode""#)
+                    && err.contains("radio_channel=s"), "{widget}: {reply} {err}");
+        }
+        assert_eq!(hsb(e), (120.0, 100.0, 73.0), "off H mode nothing was written");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A tool's resolved dialog params travel as literals that evaluate back
     /// to themselves, through the same evaluator the `open_dialog` effect uses.
     #[test]
