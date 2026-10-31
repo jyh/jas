@@ -50,16 +50,16 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_eighteen_kinds_and_nothing_else(self):
+    def test_the_twenty_kinds_and_nothing_else(self):
         families = [we.INPUT_KINDS, we.BOOLEAN_KINDS, we.ITEM_KINDS,
                     we.CHECK_KINDS, we.OPTION_KINDS, we.CLICK_KINDS, we.STOPS_KINDS]
         assert set(we.ALLOWED_EVENTS) == set().union(*families)
-        assert len(we.INPUT_KINDS) == 10 and len(we.BOOLEAN_KINDS) == 2
+        assert len(we.INPUT_KINDS) == 12 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert we.CHECK_KINDS == {"radio"} and we.OPTION_KINDS == {"radio_group"}
         assert we.CLICK_KINDS == {"button", "icon_button"}
         assert we.STOPS_KINDS == {"gradient_slider"}
-        assert sum(len(f) for f in families) == len(set().union(*families)) == 18, \
+        assert sum(len(f) for f in families) == len(set().union(*families)) == 20, \
             "the families are disjoint"
 
     def test_a_button_clicks_and_names_its_two_pointer_events(self):
@@ -1356,6 +1356,95 @@ def test_a_color_bar_refuses_anything_but_two_numbers(text):
 def test_a_color_bar_is_an_input_kind_with_the_sliders_events():
     assert "color_bar" in we.INPUT_KINDS
     assert we.ALLOWED_EVENTS["color_bar"] == we.ALLOWED_EVENTS["slider"] == ("commit", "change")
+
+
+# ── The Color Picker's strip and field (finding 13, step 2b) ──────────────
+# The strip (`color_hue_bar`) parses ONE number v; the field
+# (`color_gradient`) parses a point "u,v" as color_bar does. A commit writes
+# the PICK, rounded half away from zero, to the dialog's binds, and only in
+# H mode (`dialog.radio_channel`, absent meaning h); off H it is WrongMode.
+
+_PICKS = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
+                      "algorithms", "picker_picks.json")
+
+
+def _pick_vectors(function):
+    with open(_PICKS, encoding="utf-8") as f:
+        return [v for v in json.load(f)["vectors"] if v["function"] == function]
+
+
+_STRIP = {"type": "color_hue_bar", "bind": {"value": "dialog.h"}}
+_FIELD = {"type": "color_gradient",
+          "bind": {"hue": "dialog.h", "saturation": "dialog.s", "brightness": "dialog.b"}}
+
+
+def _picker(**fields):
+    store = StateStore()
+    store.init_dialog("color_picker", {"h": 7, "s": 7, "b": 7, **fields})
+    return store
+
+
+@pytest.mark.parametrize("text, want", [
+    ("0.25", 0.25), ("0", 0.0), ("1", 1.0), ("1.4", 1.0), ("-0.2", 0.0),
+])
+def test_a_hue_strip_commit_is_one_clamped_number(text, want):
+    assert we.parse_commit(_STRIP, text) == (True, want), text
+
+
+@pytest.mark.parametrize("text", ["0.5,0.5", "a", "", ".5", "0.5 ", "+0.5"])
+def test_a_hue_strip_refuses_anything_but_one_number(text):
+    assert we.parse_commit(_STRIP, text) == (False, None), text
+
+
+@pytest.mark.parametrize("text, want", [
+    ("0.25,0.5", [0.25, 0.5]), ("1.4,-0.2", [1.0, 0.0]), ("-3,7", [0.0, 1.0]),
+])
+def test_a_field_commit_is_a_clamped_point_as_the_color_bars(text, want):
+    assert we.parse_commit(_FIELD, text) == (True, want), text
+
+
+@pytest.mark.parametrize("text", ["0.5", "0.5,0.5,0.5", "0.5, 0.5", ",0.5", ""])
+def test_a_field_refuses_anything_but_two_numbers(text):
+    assert we.parse_commit(_FIELD, text) == (False, None), text
+
+
+def test_the_strip_and_the_field_are_input_kinds():
+    for kind in ("color_hue_bar", "color_gradient"):
+        assert kind in we.INPUT_KINDS
+        assert we.ALLOWED_EVENTS[kind] == ("commit", "change")
+
+
+@pytest.mark.parametrize("vec", [v for v in _pick_vectors("strip_value") if v["max"] == 359.0],
+                         ids=lambda v: v["name"])
+def test_a_strip_commit_writes_the_picked_hue_rounded(vec):
+    store = _picker(radio_channel="h")
+    r = we.commit(_STRIP, repr(vec["v"]), store, panel=None)
+    assert r.outcome == "committed" and r.bind_written, r
+    assert store.get_dialog("h") == vec["written"], (vec["name"], store.get_dialog("h"))
+
+
+@pytest.mark.parametrize("vec", _pick_vectors("gradient_sb"), ids=lambda v: v["name"])
+def test_a_field_commit_writes_the_picked_saturation_and_brightness_rounded(vec):
+    store = _picker(radio_channel="h")
+    r = we.commit(_FIELD, f"{vec['u']!r},{vec['v']!r}", store, panel=None)
+    assert r.outcome == "committed" and r.bind_written, r
+    assert [store.get_dialog("s"), store.get_dialog("b")] == vec["written"], vec["name"]
+    assert store.get_dialog("h") == 7, "the field never writes the hue"
+
+
+def test_an_absent_radio_channel_is_h_mode():
+    store = _picker()
+    assert we.commit(_STRIP, "0.5", store, panel=None).bind_written
+    assert store.get_dialog("h") == 180       # 179.5 rounds half away to 180
+
+
+@pytest.mark.parametrize("widget, text", [(_STRIP, "0.5"), (_FIELD, "0.5,0.5")])
+@pytest.mark.parametrize("mode", ["s", "b", "r", "g", "bl"])
+def test_off_h_mode_a_pick_is_refused_wrong_mode_and_writes_nothing(widget, text, mode):
+    store = _picker(radio_channel=mode)
+    r = we.commit(widget, text, store, panel=None)
+    assert r == we.EventResult("refused", reason=we.WRONG_MODE), (mode, r)
+    assert (store.get_dialog("h"), store.get_dialog("s"), store.get_dialog("b")) == (7, 7, 7)
 
 
 # ── Text entry: input, keydown, blur on a text_input (STATUS-jas item 40) ──

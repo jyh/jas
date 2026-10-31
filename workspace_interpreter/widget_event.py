@@ -62,6 +62,7 @@ from workspace_interpreter.effects import (
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.length import parse_length
 from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.color_util import gradient_sb, strip_value
 
 # ── The table ──────────────────────────────────────────────────
 # WIDGET_EVENTS.md carries this table too, between its
@@ -76,7 +77,7 @@ TEXT_ENTRY_EVENTS = ("input", "blur", "keydown")
 INPUT_KINDS = frozenset({
     "number_input", "length_input", "text_input",
     "select", "icon_select", "icon_button_group", "reference_point_widget",
-    "combo_box", "slider", "color_bar",
+    "combo_box", "slider", "color_bar", "color_hue_bar", "color_gradient",
 })
 BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
 # A plain pick and an Alt pick of one declared item. They carry the ITEM,
@@ -143,6 +144,7 @@ WRONG_EVENT = "WrongEvent"      # an event the kind's procedure does not take
 NO_PRESS = "NoPress"            # a drag or release with no press snapshot
 LAW_REFUSED = "LawRefused"      # the slider law refused the gesture
 NOT_WRITABLE = "NotWritable"    # a stops widget whose binds are not panel fields
+WRONG_MODE = "WrongMode"        # a Color Picker strip or field pick off H mode
 
 
 @dataclass(frozen=True)
@@ -275,7 +277,13 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
             return refused
         return (True, _clamp(_snap(v, lo, _as_bound(widget.get("step"))), lo, hi))
 
-    if kind == "color_bar":
+    if kind == "color_hue_bar":
+        # ONE number v, clamped to [0,1] (finding 13): the strip's pick
+        # (color_util.strip_value) never reads a u, so its text carries none.
+        v = number_commit(text, 0.0, 1.0)
+        return refused if v is None else (True, v)
+
+    if kind in ("color_bar", "color_gradient"):
         # A point normalized to [0,1]^2 (fork B2): "u,v", each coordinate in
         # the number grammar, each clamped. The colour is
         # color_util.color_bar_rgb(u, v); the parse stops at the point.
@@ -314,6 +322,40 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
 
 _WRITABLE_RE = re.compile(r"(panel|dialog)\.([A-Za-z0-9_]+)", re.ASCII)
 _GLOBAL_RE = re.compile(r"state\.([A-Za-z0-9_]+)", re.ASCII)
+
+
+# The Color Picker's strip and field (finding 13, WIDGET_EVENTS.md §The bound
+# target): a commit writes the PICK, rounded half away from zero, to the
+# dialog's binds, and only in H mode (`dialog.radio_channel`, absent = h).
+PICKER_PICK_KINDS = ("color_hue_bar", "color_gradient")
+HUE_MAX = 359.0
+
+
+def _half_away(x: float) -> int:
+    return math.floor(x + 0.5) if x >= 0 else -math.floor(-x + 0.5)
+
+
+def _commit_picker_pick(widget: dict, value, store: StateStore, panel,
+                        run_kwargs: dict) -> EventResult:
+    mode = evaluate_in(store, "dialog.radio_channel")
+    if mode is not None and mode != "h":
+        return EventResult("refused", reason=WRONG_MODE)
+    bind = widget.get("bind") if isinstance(widget.get("bind"), dict) else {}
+    if widget.get("type") == "color_hue_bar":
+        writes = [(bind.get("value"), _half_away(strip_value(value, HUE_MAX)))]
+    else:
+        s, b = gradient_sb(value[0], value[1])
+        writes = [(bind.get("saturation"), _half_away(s)), (bind.get("brightness"), _half_away(b))]
+    written = False
+    for expr, picked in writes:
+        target = writable_target(expr)
+        if target is not None:
+            _write_bind(target, picked, store, panel)
+            written = True
+    ran = _run_behaviors(_declared(widget, COMMIT_EVENTS), value, store, run_kwargs)
+    _settle(store, run_kwargs)
+    return EventResult("committed" if written or ran else "inert", value=value,
+                       bind_written=written, behaviors_run=ran)
 
 
 def bound_target(widget: dict) -> str | None:
@@ -432,6 +474,8 @@ def commit(widget: dict, text: str | None, store: StateStore, *,
     accepted, value = parse_commit(widget, text)
     if not accepted:
         return EventResult("refused", reason=BAD_VALUE)
+    if widget.get("type") in PICKER_PICK_KINDS:
+        return _commit_picker_pick(widget, value, store, panel, run_kwargs)
 
     target = writable_target(bound_target(widget))
     if target is not None:
