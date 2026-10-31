@@ -38865,8 +38865,9 @@
     },
     "arrow_alternates": {
       "summary": "Selection Tools",
-      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the arrow selection tool button. Lists alternate selection tools: Partial Selection (select individual anchor points and path segments), Interior Selection (select objects within groups without ungrouping), and Magic Wand (select objects with similar appearance attributes). Clicking an item selects that tool and closes the dialog.\n",
+      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the arrow selection tool button. Lists alternate selection tools: Partial Selection (select individual anchor points and path segments), Interior Selection (select objects within groups without ungrouping), and Magic Wand (select objects with similar appearance attributes). Clicking an item selects that tool and closes the dialog. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",
@@ -38964,8 +38965,9 @@
     },
     "pen_alternates": {
       "summary": "Pen Tools",
-      "description": "Tool-alternate flyout menu for the pen tool slot. Lists: Pen (draw paths by clicking anchor points), Add Anchor Point (add anchors to existing paths), Delete Anchor Point (remove anchors from paths), and Anchor Point (convert anchor point types between smooth and corner). Clicking selects the tool and closes the dialog.\n",
+      "description": "Tool-alternate flyout menu for the pen tool slot. Lists: Pen (draw paths by clicking anchor points), Add Anchor Point (add anchors to existing paths), Delete Anchor Point (remove anchors from paths), and Anchor Point (convert anchor point types between smooth and corner). Clicking selects the tool and closes the dialog. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",
@@ -39091,8 +39093,9 @@
     },
     "pencil_alternates": {
       "summary": "Pencil Tools",
-      "description": "Tool-alternate flyout menu for the pencil tool slot. Lists: Pencil (draw freehand paths), Paintbrush (paint calligraphic and art-brush strokes along a freehand path), Blob Brush (paint filled blob shapes that merge with overlapping fills), Path Eraser (erase portions of paths), and Smooth (smooth out rough path segments). Clicking selects the tool and closes the dialog.\n",
+      "description": "Tool-alternate flyout menu for the pencil tool slot. Lists: Pencil (draw freehand paths), Paintbrush (paint calligraphic and art-brush strokes along a freehand path), Blob Brush (paint filled blob shapes that merge with overlapping fills), Path Eraser (erase portions of paths), and Smooth (smooth out rough path segments). Clicking selects the tool and closes the dialog. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",
@@ -39246,8 +39249,9 @@
     },
     "text_alternates": {
       "summary": "Type Tools",
-      "description": "Tool-alternate flyout menu for the type tool slot. Lists: Type (create and edit text) and Type on a Path (place text along a path curve). Clicking selects the tool and closes the dialog.\n",
+      "description": "Tool-alternate flyout menu for the type tool slot. Lists: Type (create and edit text) and Type on a Path (place text along a path curve). Clicking selects the tool and closes the dialog. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",
@@ -39317,8 +39321,9 @@
     },
     "shape_alternates": {
       "summary": "Shape Tools",
-      "description": "Tool-alternate flyout menu for the shape tool slot. Lists: Rectangle (draw rectangles and squares), Rounded Rectangle (draw rectangles with rounded corners), Polygon (draw regular polygons), and Star (draw star shapes). Clicking selects the tool and closes the dialog.\n",
+      "description": "Tool-alternate flyout menu for the shape tool slot. Lists: Rectangle (draw rectangles and squares), Rounded Rectangle (draw rectangles with rounded corners), Polygon (draw regular polygons), and Star (draw star shapes). Clicking selects the tool and closes the dialog. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",
@@ -39472,8 +39477,9 @@
     },
     "hand_alternates": {
       "summary": "Navigation Tools",
-      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the Hand tool button (row 4 col 0 of the tool grid). Lists the two navigation tools: Hand (pan the canvas by drag; spacebar pass-through) and Zoom (step / scrubby / marquee zoom). Clicking an item selects that tool and closes the dialog. Hand is the slot's primary; Zoom is the alternate. See HAND_TOOL.md and ZOOM_TOOL.md.\n",
+      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the Hand tool button (row 4 col 0 of the tool grid). Lists the two navigation tools: Hand (pan the canvas by drag; spacebar pass-through) and Zoom (step / scrubby / marquee zoom). Clicking an item selects that tool and closes the dialog. Hand is the slot's primary; Zoom is the alternate. See HAND_TOOL.md and ZOOM_TOOL.md. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",
@@ -39543,8 +39549,9 @@
     },
     "scale_alternates": {
       "summary": "Transform Tools",
-      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the transform tool button. Lists Scale (the slot's primary) and Shear, its toolbar alternate. Clicking selects that tool and closes the dialog. Both tools share the transform-family conventions (state.transform_reference_point, dblclick-icon and Alt-click-canvas dialog gestures). The Rotate tool lives in its own slot. See SCALE_TOOL.md and SHEAR_TOOL.md.\n",
+      "description": "Tool-alternate flyout menu shown on long-press (250ms) of the transform tool button. Lists Scale (the slot's primary) and Shear, its toolbar alternate. Clicking selects that tool and closes the dialog. Both tools share the transform-family conventions (state.transform_reference_point, dblclick-icon and Alt-click-canvas dialog gestures). The Rotate tool lives in its own slot. See SCALE_TOOL.md and SHEAR_TOOL.md. The flyout is 200 px wide in every shell, enough for the longest label (\"Delete Anchor Point\") beside its icon.\n",
       "modal": false,
+      "width": 200,
       "content": {
         "type": "container",
         "layout": "column",

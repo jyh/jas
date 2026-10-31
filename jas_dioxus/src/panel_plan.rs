@@ -235,6 +235,14 @@ fn numbers_of(node: &Value) -> Map<String, Value> {
 /// every pixel is the pick's own `color_bar_rgb`), and the shell scales it to
 /// the leaf's rect (STATUS-flask §249).
 ///
+/// The Color Picker's `color_hue_bar` and `color_gradient` are the same case
+/// (finding 13, step 2a): `picture` is the engine's own, each pixel the pick
+/// there ([`crate::color_picker_picture`]); the strip's is static, the field's
+/// is drawn at the leaf's `bind.hue`. Only in H mode (`dialog.radio_channel`,
+/// read as the web reads it, absent meaning h): in another mode the two widgets
+/// mean other channels, and no picture a pick would contradict is sent
+/// (STATUS-flask §691, Q2 (b)).
+///
 /// Empty for every other kind: a shell reads `display` first and must never
 /// find a stale or invented string shadowing a resolved value.
 fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<String, Value> {
@@ -261,6 +269,24 @@ fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<Str
     }
     if node.get("type").and_then(Value::as_str) == Some("color_bar") {
         out.insert("picture".to_string(), Value::String(crate::color_bar_picture::data_uri()));
+        return out;
+    }
+    let kind = node.get("type").and_then(Value::as_str);
+    if matches!(kind, Some("color_hue_bar" | "color_gradient")) {
+        use crate::interpreter::expr::eval;
+        use crate::interpreter::expr_types::Value as Ev;
+        let channel = match eval("dialog.radio_channel", ctx) { Ev::Str(s) => s, _ => "h".to_string() };
+        if channel == "h" {
+            let picture = if kind == Some("color_hue_bar") {
+                crate::color_picker_picture::strip_data_uri()
+            } else {
+                let hue = node.get("bind").and_then(|b| b.get("hue")).and_then(Value::as_str)
+                    .map(|e| match eval(e, ctx) { Ev::Number(n) => n, _ => 0.0 })
+                    .unwrap_or(0.0);
+                crate::color_picker_picture::field_data_uri(hue)
+            };
+            out.insert("picture".to_string(), Value::String(picture));
+        }
         return out;
     }
     if node.get("type").and_then(Value::as_str) != Some("length_input") {

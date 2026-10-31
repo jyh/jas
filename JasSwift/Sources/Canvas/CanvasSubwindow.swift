@@ -2310,9 +2310,9 @@ public let showSelectionBBox: Bool = false
 ///
 /// The selection OUTLINE trace and the bezier tangent handles are drawn UNDER
 /// the element transform; dividing their fixed pen widths / circle radii by this
-/// factor cancels the element transform's scaling, so they render at a constant
-/// size (still scaled by zoom, like the handle squares). Returns 1.0 when there
-/// is no transform.
+/// factor cancels the element transform's scaling; the overlay divides by
+/// `selectionOutlineScaleAtZoom`, which also cancels the zoom. Returns 1.0 when
+/// there is no transform.
 ///
 /// Mirrors the Python reference `selection_outline_scale` (ref commit
 /// 107505da): `det` is multiplicative, so order does not matter — just multiply
@@ -2415,10 +2415,10 @@ func containerSelectionOutlineRect(_ elem: Element,
 func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps()),
                         outlineScale: Double = 1.0,
                         resolvedBy resolver: ElementResolver) {
-    // Counter-scale fixed pen widths / circle radii by the element transform's
-    // scale (`outlineScale`) so the overlay — drawn UNDER that transform —
-    // renders at a constant width regardless of the element's scale (it stays
-    // zoom-scaled, like the handle squares).
+    // Counter-scale fixed pen widths / circle radii by `outlineScale`, the
+    // element transform's scale times the view zoom
+    // (`selectionOutlineScaleAtZoom`), so the overlay, drawn UNDER both, is a
+    // fixed screen size at every element scale and zoom, like the squares.
     let inv: CGFloat = outlineScale > 1e-6 ? CGFloat(1.0 / outlineScale) : 1.0
     ctx.setStrokeColor(selectionColor)
     ctx.setLineWidth(inv)
@@ -2784,6 +2784,17 @@ private func drawArtboardDisplayMarks(_ ctx: CGContext, _ doc: Document) {
 /// 08b3f3a9): transforms are applied innermost-first — the element's own
 /// transform, then each ancestor outward (layer last) — matching the
 /// painter's combined CTM.
+/// The selection outline's counter-scale AT A VIEW ZOOM: the element chain's
+/// `selectionOutlineScale` times the zoom (a non-view zoom, `<= 0` or NaN,
+/// counts as 1, as the squares' `handleZoom` does). A 1 px pen or a 3 px
+/// tangent-handle radius divided by this is a fixed SCREEN size at every zoom.
+/// Finding 9's scope, ruled 2026-10-31: the outline is chrome, like the squares.
+/// Mirrors Rust `selection_outline_scale_at_zoom`.
+func selectionOutlineScaleAtZoom(_ doc: Document, _ path: ElementPath, zoom: CGFloat) -> Double {
+    let z: CGFloat = zoom > 0 && zoom.isFinite ? zoom : 1
+    return selectionOutlineScale(doc, path) * Double(z)
+}
+
 func selectionHandleRects(_ doc: Document, _ path: ElementPath, zoom: CGFloat = 1) -> [CGRect] {
     guard !path.isEmpty else { return [] }
     // Resolve the element + collect ancestor transforms (outermost first).
@@ -2897,7 +2908,7 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
             case .live(let v): applyTransform(ctx, v.transform)
             }
             drawElementOverlay(ctx, node, kind: es.kind,
-                               outlineScale: selectionOutlineScale(doc, path),
+                               outlineScale: selectionOutlineScaleAtZoom(doc, path, zoom: zoom),
                                resolvedBy: overlayResolver)
             // Key-object indicator: thicker accent outline around the
             // element's bounds so the user can see which selected element

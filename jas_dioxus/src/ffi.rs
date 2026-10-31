@@ -5516,6 +5516,49 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// FINDING 13, STEP 2a (STATUS-flask §691): the Color Picker's hue strip
+    /// (`cp_colorbar`) and field (`cp_gradient`) carry the ENGINE's pictures as
+    /// `display.picture`, each pixel the pick there
+    /// ([`crate::color_picker_picture`]), so a native shell draws what a click
+    /// picks. The strip's is static; the field's follows `dialog.h`. Off H mode
+    /// (`dialog.radio_channel` ≠ h) neither carries one: nothing is drawn that
+    /// a pick would contradict (§691 Q2 (b); the named refusal of a pick there
+    /// is step 2b's).
+    #[test]
+    fn the_color_pickers_strip_and_field_carry_the_engines_pictures_in_h_mode() {
+        use crate::color_picker_picture::{field_data_uri, strip_data_uri};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#0000ff"}}"##);
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("color_picker"));
+        let picture = |e: *mut JasEngine, id: &str| -> serde_json::Value {
+            let v: serde_json::Value =
+                serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 720, 640) })).unwrap();
+            let leaves = v["plan"]["leaves"].as_array().expect("an open dialog's plan");
+            let leaf = leaves.iter().find(|l| l["id"] == id).unwrap_or_else(|| panic!("no leaf {id}"));
+            leaf["display"]["picture"].clone()
+        };
+        assert_eq!(picture(e, "cp_colorbar"), serde_json::json!(strip_data_uri()), "the strip");
+        assert_eq!(picture(e, "cp_gradient"), serde_json::json!(field_data_uri(240.0)), "the field at blue's hue");
+        // The field follows the hue; the strip does not move.
+        let (reply, err) = dialog_event(e, r#"{"widget":"cp_h","event":"commit","value":"120"}"#);
+        assert!(!reply.is_empty(), "H committed: {err}");
+        assert_eq!(picture(e, "cp_gradient"), serde_json::json!(field_data_uri(120.0)), "the field at the new hue");
+        assert_eq!(picture(e, "cp_colorbar"), serde_json::json!(strip_data_uri()), "the strip is static");
+        // Off H mode: no picture on either.
+        let (reply, err) = dialog_event(e, r#"{"widget":"cp_radio_s","event":"toggle","value":"s"}"#);
+        assert!(!reply.is_empty(), "S picked: {err}");
+        assert_eq!(picture(e, "cp_colorbar"), serde_json::Value::Null, "no strip picture in S mode");
+        assert_eq!(picture(e, "cp_gradient"), serde_json::Value::Null, "no field picture in S mode");
+        // And back to H.
+        let (reply, err) = dialog_event(e, r#"{"widget":"cp_radio_h","event":"toggle","value":"h"}"#);
+        assert!(!reply.is_empty(), "H picked: {err}");
+        assert_eq!(picture(e, "cp_colorbar"), serde_json::json!(strip_data_uri()), "the strip again");
+        assert_eq!(picture(e, "cp_gradient"), serde_json::json!(field_data_uri(120.0)), "the field again");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A tool's resolved dialog params travel as literals that evaluate back
     /// to themselves, through the same evaluator the `open_dialog` effect uses.
     #[test]
