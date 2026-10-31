@@ -3401,6 +3401,7 @@
         "style": [
           "flex",
           "min_height",
+          "min_width",
           "width"
         ]
       },

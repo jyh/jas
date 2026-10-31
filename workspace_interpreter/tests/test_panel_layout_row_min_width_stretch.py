@@ -155,3 +155,14 @@ def test_the_color_pickers_field_is_its_min_width_square_and_the_strip_its_heigh
     side = field["style"]["min_width"]
     assert (fr["w"], fr["h"]) == (side, side), fr
     assert sr["h"] == fr["h"], sr
+
+
+def test_the_color_pickers_strip_keeps_its_width_at_the_declared_width():
+    """The strip declares ``min_width`` equal to its ``width`` (32), so the
+    over-subscribed main row cannot take it below what the web draws (32 x
+    180, measured 10-31; on the web the row is not over-subscribed, and
+    ``min-width: 32px`` moves nothing there, measured)."""
+    plan = _picker_plan()
+    strip, sr = plan["cp_colorbar"]
+    assert strip["style"].get("min_width") == strip["style"]["width"], strip["style"]
+    assert sr["w"] == strip["style"]["width"], sr
