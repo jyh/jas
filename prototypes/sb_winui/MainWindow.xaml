@@ -247,13 +247,18 @@
           (jas_dialog_plan) with the panel materializer, and its smoke takes
           every press meant for what lies under it. Last in the grid, so it is
           drawn over everything. Collapsed until the engine names a dialog.
+          #783: the smoke is its own element under the frame, so a press on it
+          is a press OUTSIDE the dialog. Dimmed for a modal dialog; clear but
+          still hit-testable for a flyout, whose outside press dismisses it.
         -->
         <Grid
             x:Name="DialogLayer"
             Grid.RowSpan="3"
             Grid.ColumnSpan="3"
-            Background="#80000000"
             Visibility="Collapsed">
+            <Border
+                x:Name="DialogSmoke"
+                Background="#80000000" />
             <Border
                 x:Name="DialogFrame"
                 HorizontalAlignment="Center"
@@ -268,7 +273,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Background="#FFE4E4E4">
+                    <Grid x:Name="DialogTitleBar" Grid.Row="0" Background="#FFE4E4E4">
                         <TextBlock
                             x:Name="DialogTitle"
                             Margin="8,6,32,6"

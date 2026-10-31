@@ -1520,6 +1520,67 @@ internal static class DialogWire
             return null;
         }
     }
+
+    /// <summary>How the open dialog is drawn: dimmed or clear smoke, with or
+    /// without its title bar, centred (null Left/Top) or at a point in the
+    /// dialog layer (DIPs).</summary>
+    internal readonly record struct DialogLook(bool Dim, bool TitleBar, double? Left, double? Top);
+
+    /// <summary>
+    /// #783: a `modal: false` dialog is a POPOVER beside the control that
+    /// opened it, with no backdrop and no title bar; its top-left is the
+    /// opener's right edge and top. A modal dialog is dimmed, titled and
+    /// centred whatever opened it. A non-modal one with no opener the shell can
+    /// place is centred, as the web centres one with no anchor. No fit rule:
+    /// the web has none, and every shipped flyout fits beside its slot.
+    /// </summary>
+    internal static DialogLook Look(bool modal, (double X, double Y, double W, double H)? anchor) =>
+        modal ? new DialogLook(Dim: true, TitleBar: true, null, null)
+        : anchor is { } a ? new DialogLook(Dim: false, TitleBar: false, a.X + a.W, a.Y)
+        : new DialogLook(Dim: false, TitleBar: false, null, null);
+}
+
+/// <summary>
+/// #783's second door, a press OUTSIDE a flyout: it closes the flyout and does
+/// NOTHING else, so neither the press nor its release reaches what lies
+/// beneath (a dismissing click never draws or selects). The dialog layer's
+/// smoke takes the press and asks the engine to dismiss; when the engine's
+/// close arrives first, the smoke stays up, clear, until that press's release,
+/// and goes with it. A modal dialog's smoke only swallows, as it always has.
+/// Pure, so `sb_winui_tests` drives it.
+/// </summary>
+internal sealed class OutsidePress
+{
+    private bool _held;
+    private bool _closed;
+
+    /// <summary>A press on the smoke; true when it should dismiss the dialog.</summary>
+    internal bool Pressed(bool modal)
+    {
+        if (modal) { return false; }
+        _held = true;
+        _closed = false;
+        return true;
+    }
+
+    /// <summary>The engine closed the dialog; true when the layer goes now,
+    /// false when a dismissing press still holds the smoke.</summary>
+    internal bool HideOnClose()
+    {
+        if (!_held) { return true; }
+        _closed = true;
+        return false;
+    }
+
+    /// <summary>The press was released (or its capture lost); true when the
+    /// layer the close left up goes now.</summary>
+    internal bool Released()
+    {
+        var go = _held && _closed;
+        _held = false;
+        _closed = false;
+        return go;
+    }
 }
 
 /// <summary>
@@ -1625,43 +1686,79 @@ internal static class KeyWire
 /// engine keeps the effects and, on the tick `{"event": "timer", "value": id}`,
 /// runs them only if that id is still pending. Pure, so `sb_winui_tests`
 /// drives it. A start with no delay, or a negative one, is refused, never
-/// defaulted.
+/// defaulted. A malformed act (no id, no whole delay, both `start` and
+/// `cancel`, not an object) is REFUSED BY NAME: its own JSON text goes in
+/// `Refused` for the caller to report, never dropped silently (#778's review).
 /// </summary>
 internal static class TimerWire
 {
     internal readonly record struct Act(string Id, int DelayMs, bool Cancel);
 
-    internal static IReadOnlyList<Act> Parse(string? reply)
+    internal readonly record struct Reading(IReadOnlyList<Act> Acts, IReadOnlyList<string> Refused);
+
+    internal static Reading Parse(string? reply)
     {
         var acts = new List<Act>();
-        if (string.IsNullOrEmpty(reply)) { return acts; }
+        var refused = new List<string>();
+        if (string.IsNullOrEmpty(reply)) { return new Reading(acts, refused); }
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
-                || !doc.RootElement.TryGetProperty("timers", out var list)
-                || list.ValueKind != System.Text.Json.JsonValueKind.Array) { return acts; }
+                || !doc.RootElement.TryGetProperty("timers", out var list)) { return new Reading(acts, refused); }
+            if (list.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                refused.Add(list.GetRawText());
+                return new Reading(acts, refused);
+            }
             foreach (var e in list.EnumerateArray())
             {
-                if (e.ValueKind != System.Text.Json.JsonValueKind.Object) { continue; }
-                if (e.TryGetProperty("cancel", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
-                    && c.GetString() is { Length: > 0 } cancelId)
-                {
-                    acts.Add(new Act(cancelId, 0, Cancel: true));
-                    continue;
-                }
-                if (e.TryGetProperty("start", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String
-                    && s.GetString() is { Length: > 0 } startId
-                    && e.TryGetProperty("delay_ms", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number
-                    && d.TryGetInt32(out var ms) && ms >= 0)
-                {
-                    acts.Add(new Act(startId, ms, Cancel: false));
-                }
+                if (ReadAct(e) is { } act) { acts.Add(act); }
+                else { refused.Add(e.GetRawText()); }
             }
         }
         catch (System.Text.Json.JsonException) { }
-        return acts;
+        return new Reading(acts, refused);
     }
+
+    /// <summary>One act, or null when it is malformed.</summary>
+    private static Act? ReadAct(System.Text.Json.JsonElement e)
+    {
+        if (e.ValueKind != System.Text.Json.JsonValueKind.Object) { return null; }
+        var hasCancel = e.TryGetProperty("cancel", out var c);
+        var hasStart = e.TryGetProperty("start", out var s);
+        if (hasCancel == hasStart) { return null; }
+        if (hasCancel)
+        {
+            return c.ValueKind == System.Text.Json.JsonValueKind.String && c.GetString() is { Length: > 0 } cancelId
+                ? new Act(cancelId, 0, Cancel: true)
+                : null;
+        }
+        return s.ValueKind == System.Text.Json.JsonValueKind.String && s.GetString() is { Length: > 0 } startId
+            && e.TryGetProperty("delay_ms", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number
+            && d.TryGetInt32(out var ms) && ms >= 0
+            ? new Act(startId, ms, Cancel: false)
+            : null;
+    }
+}
+
+/// <summary>
+/// The clocks the shell runs for the engine's timers, keyed as the engine
+/// keys its pending set: by (panel, timer id) (#778's review). Two panels may
+/// pend the same id, and a cancel or a restart on one never stops the other's
+/// clock. Generic so `sb_winui_tests` drives it with no dispatcher.
+/// </summary>
+internal sealed class PendingTimers<T> where T : class
+{
+    private readonly Dictionary<(string Panel, string Id), T> _clocks = new();
+
+    internal int Count => _clocks.Count;
+
+    /// <summary>Takes out the clock pending for (panel, id), or null.</summary>
+    internal T? Take(string panel, string id) => _clocks.Remove((panel, id), out var clock) ? clock : null;
+
+    /// <summary>Records the clock now pending for (panel, id).</summary>
+    internal void Put(string panel, string id, T clock) => _clocks[(panel, id)] = clock;
 }
 
 /// <summary>
