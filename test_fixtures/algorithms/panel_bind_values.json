@@ -3864,6 +3864,28 @@
       {
         "path": [
           3,
+          0,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.background",
+        "type": "string",
+        "value": "transparent"
+      },
+      {
+        "path": [
+          3,
+          0,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.border",
+        "type": "string",
+        "value": "1px solid "
+      },
+      {
+        "path": [
+          3,
           1
         ],
         "id": "",
@@ -3994,6 +4016,28 @@
       {
         "path": [
           3,
+          1,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.background",
+        "type": "string",
+        "value": "transparent"
+      },
+      {
+        "path": [
+          3,
+          1,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.border",
+        "type": "string",
+        "value": "1px solid "
+      },
+      {
+        "path": [
+          3,
           2
         ],
         "id": "",
@@ -4120,6 +4164,28 @@
         "key": "bind.visible",
         "type": "bool",
         "value": "false"
+      },
+      {
+        "path": [
+          3,
+          2,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.background",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          2,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.border",
+        "type": "string",
+        "value": "1px solid "
       },
       {
         "path": [
@@ -4254,6 +4320,28 @@
       {
         "path": [
           3,
+          3,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.background",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          3,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.border",
+        "type": "string",
+        "value": "1px solid "
+      },
+      {
+        "path": [
+          3,
           4
         ],
         "id": "",
@@ -4380,6 +4468,28 @@
         "key": "bind.visible",
         "type": "bool",
         "value": "false"
+      },
+      {
+        "path": [
+          3,
+          4,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.background",
+        "type": "string",
+        "value": "transparent"
+      },
+      {
+        "path": [
+          3,
+          4,
+          8
+        ],
+        "id": "lp_select",
+        "key": "bind.border",
+        "type": "string",
+        "value": "1px solid "
       }
     ]
   },

@@ -11644,10 +11644,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -11843,10 +11844,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -12042,10 +12044,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -12241,10 +12244,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]
@@ -12440,10 +12444,11 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
-        "style": [
+        "bind": [
           "background",
-          "border",
+          "border"
+        ],
+        "style": [
           "height",
           "width"
         ]

@@ -132,3 +132,22 @@ def test_the_eye_and_lock_icons_are_bound_from_the_row():
     assert at(eye, visibility="invisible") == "eye_invisible"
     assert at(lock, locked=True) == "lock_locked"
     assert at(lock, locked=False) == "lock_unlocked"
+
+
+def test_the_select_square_binds_its_fill_and_border():
+    """The 10-30 Windows sitting, finding 6: no select square in the Layers
+    row. Its click already ran (flask STATUS §674), but its background and
+    border were `{{...}}` style strings, which the plan withholds, so the box
+    drew nothing on Windows. They are `bind` expressions, evaluated per row:
+    the fill is the row's layer colour when the element is selected and
+    transparent otherwise; the border is themed."""
+    tree = _tree()
+    sq = _widget(tree["do"], "lp_select")
+    assert "background" not in sq.get("style", {}) and "border" not in sq.get("style", {}), \
+        "the fill and border are binds, not templated style"
+    fill, border = sq["bind"]["background"], sq["bind"]["border"]
+    ctx = {**_ctx(), "theme": {"colors": {"border": "#6a6a6a"}}}
+    at = lambda expr, **node: evaluate(expr, {**ctx, "node": node}).value
+    assert at(fill, element_selected=True, ancestor_layer_color="#4a90d9") == "#4a90d9"
+    assert at(fill, element_selected=False, ancestor_layer_color="#4a90d9") == "transparent"
+    assert at(border) == "1px solid #6a6a6a", "the border follows the theme"

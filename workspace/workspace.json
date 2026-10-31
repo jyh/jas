@@ -17757,9 +17757,11 @@
                   "type": "container",
                   "style": {
                     "width": 12,
-                    "height": 12,
-                    "background": "{{if node.element_selected then node.ancestor_layer_color else 'transparent'}}",
-                    "border": "1px solid {{theme.colors.border}}"
+                    "height": 12
+                  },
+                  "bind": {
+                    "background": "if node.element_selected then node.ancestor_layer_color else 'transparent'",
+                    "border": "'1px solid ' + theme.colors.border"
                   },
                   "behavior": [
                     {
