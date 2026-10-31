@@ -395,8 +395,14 @@ internal sealed class DialogDismissCmd : Cmd
 /// S2: one published reading of the open dialog, IMMUTABLE for the reason
 /// <see cref="PanelSnapshot"/> is. `Reading` is null when the engine's reply
 /// could not be read, which the UI shows as an error, never as "closed".
+/// `Opener` is the panel control whose act opened the dialog shown, where a
+/// flyout is placed (#783); null when no panel control opened it.
 /// </summary>
-internal sealed record DialogSnapshot(DialogReading? Reading, long AvailW, long Seq, string Cause);
+internal sealed record DialogSnapshot(DialogReading? Reading, long AvailW, long Seq, string Cause,
+                                      DialogOpener? Opener = null);
+
+/// <summary>#783: the panel control whose act opened a dialog, by its plan path.</summary>
+internal sealed record DialogOpener(string Panel, string Widget, string? Path);
 
 /// <summary>
 /// Replay Q6's click sequence on the open panel's widget (W2-6, `SB_PANEL_SYNTH`).
@@ -1396,8 +1402,9 @@ internal sealed unsafe class Canvas : IDisposable
     /// The dialog door (design 2026-10-14): an act's reply names the dialog the
     /// engine opened in its store (`"dialog": <id> | null`, #414). S2: the
     /// shell reads that dialog's plan and publishes it for the overlay host.
-    /// Before S2 this dismissed it unshown (`DIALOG UNSHOWN`).
-    private void OpenNamedDialog(System.Text.Json.JsonElement reply, string head)
+    /// Before S2 this dismissed it unshown (`DIALOG UNSHOWN`). A panel act
+    /// names its control as the `opener`, which places a flyout (#783).
+    private void OpenNamedDialog(System.Text.Json.JsonElement reply, string head, DialogOpener? opener = null)
     {
         if (!reply.TryGetProperty("dialog", out var dialog)
             || dialog.ValueKind != System.Text.Json.JsonValueKind.String)
@@ -1413,6 +1420,7 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         _report($"DIALOG OPENED {head} dialog={named} {Tids()}");
+        _dialogOpener = opener is null || named is null ? null : (named, opener);
         ApplyDialogRefresh("open");
     }
 
@@ -1472,6 +1480,10 @@ internal sealed unsafe class Canvas : IDisposable
 
     private long _dialogSeq;
 
+    /// <summary>#783: the dialog a panel act opened, and that act's control.
+    /// Render thread only; dropped when that dialog is no longer the one shown.</summary>
+    private (string Id, DialogOpener Opener)? _dialogOpener;
+
     /// <summary>The newest dialog reading, published by the render thread for the UI thread.</summary>
     internal volatile DialogSnapshot? Dialog;
 
@@ -1495,7 +1507,10 @@ internal sealed unsafe class Canvas : IDisposable
             reading = DialogWire.Read(raw);
         }
         _dialogSeq++;
-        Dialog = new DialogSnapshot(reading, availW, _dialogSeq, cause);
+        // The opener belongs to the dialog it opened: a close, or another
+        // dialog on top, ends it (a nested modal is never placed by it).
+        if (reading is not null && (!reading.Open || _dialogOpener?.Id != reading.Id)) { _dialogOpener = null; }
+        Dialog = new DialogSnapshot(reading, availW, _dialogSeq, cause, _dialogOpener?.Opener);
         PostToUi(() => DialogChanged?.Invoke());
         if (reading is null)
         {
@@ -5439,7 +5454,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
-            OpenNamedDialog(doc.RootElement, head);
+            OpenNamedDialog(doc.RootElement, head, new DialogOpener(click.PanelId, click.Widget, click.Path));
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
             ApplyClipboardWrite(reply, head);
