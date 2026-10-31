@@ -118,7 +118,6 @@ let hitRadius: CGFloat = 8.0        // pixels to detect a click on a control poi
 let handleDrawSize: CGFloat = 10.0  // diameter of control-point handles in pixels
 let dragThreshold: Double = 4.0     // pixels of movement before a click becomes a drag
 let pasteOffset: Double = 24.0      // translation in pt applied when pasting
-let longPressDuration: Double = 0.5 // seconds before a press becomes a long-press
 let polygonSides = 5                // default number of sides for the polygon tool
 let flattenSteps = elementFlattenSteps  // shared constant from Element.swift
 
