@@ -1788,8 +1788,8 @@ struct YamlElementView: View {
         case "bl":
             stops = [sui(r, g, 255), sui(r, g, 0)]
             value = Double(bl); maxValue = 255
-        default:  // h: rainbow
-            stops = [.red, .yellow, .green, .cyan, .blue, .purple, .red]
+        default:  // h: rainbow, TOP = MAX like every channel above
+            stops = hueBarHStops.map { sui($0.0, $0.1, $0.2) }
             value = h; maxValue = 359
         }
 
@@ -1797,8 +1797,7 @@ struct YamlElementView: View {
         let channelKey = channel
         let max = maxValue
         let writeAt: (CGFloat) -> Void = { y in
-            let v = Swift.max(0, Swift.min(max, max - Double(y) / Double(height) * max))
-            onDialogWriteCb?(channelKey, v.rounded())
+            onDialogWriteCb?(channelKey, hueBarValue(y: Double(y), height: Double(height), max: max).rounded())
         }
         // Indicator y from current channel value (top = max).
         let indicatorY = (maxValue - value) / maxValue * Double(height)
@@ -5173,4 +5172,19 @@ struct GradientSliderKeys: ViewModifier {
             content
         }
     }
+}
+
+/// The hue strip's H-mode picture, top to bottom, as RGB: red, magenta, blue,
+/// cyan, green, yellow, red. TOP IS MAX, as the strip's pick reads every
+/// channel (`hueBarValue`). Until 2026-10-30 it was drawn the other way up
+/// (red, yellow, ...), so a click on the drawn yellow picked magenta; only
+/// the two ends agreed, both being red. Twin of Rust's `HUE_BAR_H_GRADIENT`.
+let hueBarHStops: [(Int, Int, Int)] = [
+    (255, 0, 0), (255, 0, 255), (0, 0, 255), (0, 255, 255), (0, 255, 0), (255, 255, 0), (255, 0, 0),
+]
+
+/// A pointer `y` on the hue strip as its channel's value: top (`y = 0`) is
+/// `max`, the bottom is 0, for every channel. Twin of Rust's `hue_bar_value`.
+func hueBarValue(y: Double, height: Double, max: Double) -> Double {
+    Swift.max(0, Swift.min(max, max - y / height * max))
 }
