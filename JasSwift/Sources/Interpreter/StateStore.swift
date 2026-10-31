@@ -95,7 +95,30 @@ public class StateStore {
     // the brush.* effect handlers and read by the canvas brush
     // registry sync.
 
-    private var data: [String: Any] = [:]
+    /// The store's own `data`. Read and written through ``data``, which
+    /// routes `brush_libraries` to the app-global tier when one is installed.
+    private var ownData: [String: Any] = [:]
+
+    /// The app-global brush libraries (STATUS-jas row 59), installed by the
+    /// workspace into every adopted canvas's store. When set, this store's
+    /// `data.brush_libraries` IS the tier's, so an edit in one tab is read in
+    /// every other, as on the web. `nil` keeps the store's own copy.
+    public var sharedBrushLibraries: AppBrushLibraries?
+
+    private var data: [String: Any] {
+        get {
+            guard let tier = sharedBrushLibraries else { return ownData }
+            var d = ownData
+            d["brush_libraries"] = tier.libs
+            return d
+        }
+        set {
+            guard let tier = sharedBrushLibraries else { ownData = newValue; return }
+            var d = newValue
+            tier.libs = (d.removeValue(forKey: "brush_libraries") as? [String: Any]) ?? [:]
+            ownData = d
+        }
+    }
 
     public func setData(_ data: [String: Any]) {
         self.data = data
