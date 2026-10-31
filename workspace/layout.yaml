@@ -812,7 +812,11 @@ layout:
           dock_view element renders group headers (tab bars with panel
           tabs, collapse chevrons, hamburger menus), group bodies
           (active panel content from workspace/panels/*.yaml), group
-          separators, and the collapsed icon strip. Panel tabs can be
+          separators, and the collapsed icon strip. A group header reads,
+          from the left: the grip handle, then the panel tabs; the collapse
+          chevron and then the hamburger menu sit at the header's TRAILING
+          edge (right-justified), however many tabs the group has, and the
+          hamburger is hidden while the group is collapsed. Panel tabs can be
           dragged to reorder within a group, move to another group's
           tab bar, or dropped on an empty area of a dock to create a
           new panel group at that position. Dragging a tab or group to
