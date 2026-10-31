@@ -21,7 +21,7 @@ use crate::color_bar_picture::bmp_data_uri;
 use crate::interpreter::color_util::{gradient_sb, hsb_to_rgb, strip_value};
 
 /// The hue strip's max, the pick's own (`strip_value(v, HUE_MAX)`).
-pub const HUE_MAX: f64 = 359.0;
+pub(crate) const HUE_MAX: f64 = 359.0;
 /// The strip picture's size in pixels; a shell scales it to the leaf's rect.
 const STRIP_WIDTH: usize = 16;
 const STRIP_HEIGHT: usize = 180;
