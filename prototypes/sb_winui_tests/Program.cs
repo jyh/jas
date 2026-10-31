@@ -1483,6 +1483,47 @@ static class Program
         Check("menu: the spec's menubar.yaml was read, with its labels", mbLabels.Count >= 40, $"read {mbLabels.Count} label(s)");
         var mbMarked = mbLabels.Where(l => System.Text.RegularExpressions.Regex.IsMatch(MenuWire.Label(l).Text, "&[^&\\s]")).ToList();
         Eq("menu: no shown menubar.yaml label keeps an & marker", "", string.Join(",", mbMarked));
+        // -- MENU SHORTCUTS (the 10-30 sitting, finding 2: "the keyboard shortcuts
+        // don't seem to work") ------------------------------------------------------
+        // `ShortcutWire.Parse` gives a `shortcut:` string's virtual-key code and
+        // modifiers, or null. Two ways the old parse went wrong: `=` and `-` named
+        // no key (Zoom In / Zoom Out had no accelerator, UNPARSED since 09-09), and
+        // a DIGIT parsed as a NUMBER through `Enum.TryParse<VirtualKey>`, so
+        // "Ctrl+1" bound VirtualKey 1 (the left mouse button), never the 1 key.
+        static string SK(string? s) => ShortcutWire.Parse(s) is { } c
+            ? $"{c.Key:X2}{(c.Ctrl ? "+C" : "")}{(c.Shift ? "+S" : "")}{(c.Alt ? "+A" : "")}"
+            : "(null)";
+        Eq("shortcut: Ctrl+= is VK_OEM_PLUS (0xBB), the =/+ key", "BB+C", SK("Ctrl+="));
+        Eq("shortcut: Ctrl+- is VK_OEM_MINUS (0xBD)", "BD+C", SK("Ctrl+-"));
+        Eq("shortcut: Ctrl+1 is the 1 key (0x31), never VirtualKey 1 = LeftButton", "31+C", SK("Ctrl+1"));
+        Eq("shortcut: Ctrl+0 is the 0 key (0x30), never VirtualKey 0 = None", "30+C", SK("Ctrl+0"));
+        Eq("shortcut: Ctrl+Alt+2 keeps both modifiers", "32+C+A", SK("Ctrl+Alt+2"));
+        Eq("shortcut: Ctrl+Shift+Z", "5A+C+S", SK("Ctrl+Shift+Z"));
+        Eq("shortcut: a lowercase letter is its key", "41+C", SK("Ctrl+a"));
+        Eq("shortcut: a named key, Delete", "2E", SK("Delete"));
+        Eq("shortcut: a function key, F2 (VK_F2 = 0x71)", "71", SK("F2"));
+        Eq("shortcut: an unknown key is refused, never guessed", "(null)", SK("Ctrl+§"));
+        Eq("shortcut: a word that names no key is refused", "(null)", SK("Ctrl+Plus1"));
+        Eq("shortcut: modifiers alone are refused", "(null)", SK("Ctrl+Shift"));
+        Eq("shortcut: two keys are refused, not the last one kept", "(null)", SK("Ctrl+A+B"));
+        Eq("shortcut: null is null, never a throw", "(null)", SK(null));
+        // The =/- keys are the KEY HANDLER's, never an accelerator: a
+        // KeyboardAccelerator on VK_OEM_PLUS or VK_OEM_MINUS left the View menu
+        // opening with ZERO items (measured 10-30, both ways). `ChordChar` is the
+        // character OnKeyDown sends the engine for such a key; null for the rest.
+        static string CC(int vk) => ShortcutWire.ChordChar(vk) is { } c ? ((char)c).ToString() : "(null)";
+        Eq("chord char: VK_OEM_PLUS sends '='", "=", CC(0xBB));
+        Eq("chord char: VK_OEM_MINUS sends '-'", "-", CC(0xBD));
+        Eq("chord char: a letter is not the handler's (its accelerator stays)", "(null)", CC(0x41));
+        Eq("chord char: a digit is not the handler's (its accelerator stays)", "(null)", CC(0x31));
+        // Over the REAL spec: every `shortcut:` menubar.yaml shows parses, and the
+        // read found them at all.
+        var mbShortcuts = mbDir is null ? new List<string>() : System.Text.RegularExpressions.Regex
+            .Matches(File.ReadAllText(Path.Combine(mbDir.FullName, "workspace", "menubar.yaml")), "shortcut:\\s*\"([^\"]+)\"")
+            .Select(m => m.Groups[1].Value).ToList();
+        Check("shortcut: the spec's menubar.yaml shortcuts were read", mbShortcuts.Count >= 20, $"read {mbShortcuts.Count}");
+        Eq("shortcut: every menubar.yaml shortcut parses (none UNPARSED)", "",
+            string.Join(",", mbShortcuts.Where(s => ShortcutWire.Parse(s) is null)));
         // -- SB_TOOL BY NAME (2026-10-11): an input script names its tool
         // (`"tool": "rect"`); the shell resolves it against the CORE's own list
         // (`jas_tool_name`), so no list is copied here. An index still works.
