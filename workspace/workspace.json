@@ -30081,8 +30081,9 @@
     },
     "color_picker": {
       "summary": "Select Color",
-      "description": "Modal color picker dialog matching the standard vector illustration application layout. Left column: saturation/brightness gradient + hue colorbar + web-safe checkbox. Center column: HSB fields with radio selectors + color preview swatch, RGB fields, CMYK fields, hex field. Right column: OK, Cancel, Color Swatches buttons. The radio buttons select which color channel the 2D gradient and colorbar visualize \u2014 e.g. selecting H maps hue to the colorbar and S/B to the gradient axes; selecting R maps red to the colorbar and G/B to the gradient axes.\n",
+      "description": "Modal color picker dialog matching the standard vector illustration application layout. Left column: saturation/brightness gradient + hue colorbar + web-safe checkbox. Center column: HSB fields with radio selectors + color preview swatch, RGB fields, CMYK fields, hex field. Right column: OK, Cancel, Color Swatches buttons. The radio buttons select which color channel the 2D gradient and colorbar visualize \u2014 e.g. selecting H maps hue to the colorbar and S/B to the gradient axes; selecting R maps red to the colorbar and G/B to the gradient axes.\nThe dialog is 510 px wide, measured to its outer edge with the border included. That is the width the web draws when it sizes the dialog to its content (509.06 px, rounded up to the least whole width that wraps nothing). Declaring it gives every application the same width, so none falls back to a default of its own that squeezes the left column.\n",
       "modal": true,
+      "width": 510,
       "params": {
         "target": {
           "type": "string"

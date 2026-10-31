@@ -9,7 +9,15 @@ color_picker:
     color channel the 2D gradient and colorbar visualize — e.g. selecting
     H maps hue to the colorbar and S/B to the gradient axes; selecting R
     maps red to the colorbar and G/B to the gradient axes.
+
+    The dialog is 510 px wide, measured to its outer edge with the border
+    included. That is the width the web draws when it sizes the dialog to
+    its content (509.06 px, rounded up to the least whole width that wraps
+    nothing). Declaring it gives every application the same width, so none
+    falls back to a default of its own that squeezes the left column.
   modal: true
+  # The OUTER width, border included; see the description's last paragraph.
+  width: 510
   params:
     # "fill", "stroke", or a field of the dialog the picker was opened over
     # ("dialog.color"); see the open_color_picker action.
