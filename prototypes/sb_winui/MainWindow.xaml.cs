@@ -855,6 +855,7 @@ public sealed partial class MainWindow : Window
         // #783: a flyout is a bare popover beside the control that opened it; a
         // modal dialog is dimmed, titled and centred.
         _dialogModal = r.Modal;
+        _outsidePress.Opened();
         var look = DialogWire.Look(r.Modal, r.Modal ? null : AnchorOf(snap.Opener));
         DialogSmoke.Background = look.Dim ? _dialogDim : _dialogClear;
         DialogTitleBar.Visibility = look.TitleBar ? Visibility.Visible : Visibility.Collapsed;
