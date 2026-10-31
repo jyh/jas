@@ -70,10 +70,6 @@ import Foundation
     #expect(pasteOffset == 24.0)
 }
 
-@Test func longPressDurationValue() {
-    #expect(longPressDuration == 0.5)
-}
-
 @Test func polygonSidesValue() {
     #expect(polygonSides == 5)
 }

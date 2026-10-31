@@ -835,7 +835,7 @@ internal static class PanelWire
     /// beneath its children, so a child's own control wins the press.
     /// </summary>
     internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events,
-                                  string? Background = null);
+                                  string? Background = null, string? Border = null);
 
     /// <summary>
     /// jas §630: a surface's paint, from its `bind.background`: a `#rrggbb`
@@ -845,6 +845,26 @@ internal static class PanelWire
     /// colour.
     /// </summary>
     internal static (byte R, byte G, byte B)? SurfaceFill(string? background) => SwatchColor(background);
+
+    /// <summary>
+    /// The 10-30 sitting, finding 6: a surface's border, from its `bind.border`
+    /// (#769 binds the Layers select square's, e.g. `1px solid #555555`; the
+    /// colour follows the appearance). Exactly `&lt;w&gt;px solid #rrggbb` with a
+    /// positive width draws; any other spelling (another style, no colour, a
+    /// template) is refused, never guessed.
+    /// </summary>
+    internal static (double Width, byte R, byte G, byte B)? SurfaceBorder(string? border)
+    {
+        if (border is null) { return null; }
+        var m = System.Text.RegularExpressions.Regex.Match(border,
+            @"^\s*(\d+(?:\.\d+)?)px\s+solid\s+(#[0-9a-fA-F]{6})\s*$");
+        if (!m.Success
+            || !double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var width)
+            || !(width > 0)
+            || SwatchColor(m.Groups[2].Value) is not { } c) { return null; }
+        return (width, c.R, c.G, c.B);
+    }
 
     /// <summary>
     /// jas §612: the plan's layout containers (`chrome` and `containers`, in plan
@@ -881,7 +901,10 @@ internal static class PanelWire
                         events,
                         e.TryGetProperty("values", out var vs) && vs.ValueKind == System.Text.Json.JsonValueKind.Object
                             && vs.TryGetProperty("bind.background", out var bg) && bg.ValueKind == System.Text.Json.JsonValueKind.String
-                            ? bg.GetString() : null));
+                            ? bg.GetString() : null,
+                        e.TryGetProperty("values", out var vb) && vb.ValueKind == System.Text.Json.JsonValueKind.Object
+                            && vb.TryGetProperty("bind.border", out var bd) && bd.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? bd.GetString() : null));
                 }
             }
             return boxes;
@@ -1419,6 +1442,16 @@ internal sealed record DialogReading(bool Open, string Id, string Summary, bool 
 /// </summary>
 internal static class DialogWire
 {
+    /// <summary>
+    /// Whether an act reply's `dialog` opens a dialog. `dialog` is STATE (the
+    /// dialog open after the act), so a reply that names the dialog already
+    /// shown, such as a `mouse_up` after the tool flyout opened, shows nothing
+    /// new. The comparison is with what the shell SHOWS, never the last reply,
+    /// so a dialog closed by another door opens again when named.
+    /// </summary>
+    internal static bool Reopens(string? replyDialog, bool shownOpen, string? shownId) =>
+        !string.IsNullOrEmpty(replyDialog) && !(shownOpen && shownId == replyDialog);
+
     /// <summary>`{"open": false}`, or `{"open": true, "id", "summary", "modal",
     /// "depth", "plan"}`; null when the bytes are not that.</summary>
     internal static DialogReading? Read(string json)
@@ -1582,6 +1615,93 @@ internal static class KeyWire
     /// for a control character (the named keys arrive by their own codes).</summary>
     internal static string? CharName(uint c) =>
         c < 0x20 || c == 0x7F || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF) ? null : char.ConvertFromUtf32((int)c);
+}
+
+/// <summary>
+/// Press-and-hold (the 10-30 sitting, finding 1; the engine half is #771). A
+/// `mouse_down` / `mouse_up` reply carries `"timers"`: `{"start": id,
+/// "delay_ms": n}` (start, or restart, that timer) or `{"cancel": id}`, and no
+/// key at all when no timer act happened. The shell only runs the clock: the
+/// engine keeps the effects and, on the tick `{"event": "timer", "value": id}`,
+/// runs them only if that id is still pending. Pure, so `sb_winui_tests`
+/// drives it. A start with no delay, or a negative one, is refused, never
+/// defaulted.
+/// </summary>
+internal static class TimerWire
+{
+    internal readonly record struct Act(string Id, int DelayMs, bool Cancel);
+
+    internal static IReadOnlyList<Act> Parse(string? reply)
+    {
+        var acts = new List<Act>();
+        if (string.IsNullOrEmpty(reply)) { return acts; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("timers", out var list)
+                || list.ValueKind != System.Text.Json.JsonValueKind.Array) { return acts; }
+            foreach (var e in list.EnumerateArray())
+            {
+                if (e.ValueKind != System.Text.Json.JsonValueKind.Object) { continue; }
+                if (e.TryGetProperty("cancel", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
+                    && c.GetString() is { Length: > 0 } cancelId)
+                {
+                    acts.Add(new Act(cancelId, 0, Cancel: true));
+                    continue;
+                }
+                if (e.TryGetProperty("start", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String
+                    && s.GetString() is { Length: > 0 } startId
+                    && e.TryGetProperty("delay_ms", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number
+                    && d.TryGetInt32(out var ms) && ms >= 0)
+                {
+                    acts.Add(new Act(startId, ms, Cancel: false));
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException) { }
+        return acts;
+    }
+}
+
+/// <summary>
+/// Whether a press-and-hold slot's CLICK goes (jas's ruling on finding 1,
+/// point 4). The web, the port of record, fires no click once the flyout has
+/// opened. So a press whose tick got a NON-EMPTY reply drops its click; a tick
+/// answered `StaleTimer` (cancelled, or raced by the release) leaves it; and a
+/// click that arrives before the tick's answer waits for it, then goes or drops
+/// once. The ENGINE's reply decides, never the shell's clock. One per button.
+/// </summary>
+internal sealed class LongPressGate
+{
+    internal enum Fate { Sent, Dropped, Held }
+
+    private bool _tickSent;
+    private bool? _opened;
+    private Action? _held;
+
+    internal void Pressed() { _tickSent = false; _opened = null; _held = null; }
+
+    internal void TickSent() => _tickSent = true;
+
+    /// <summary>The tick's answer; returns whether a held click was sent.</summary>
+    internal bool Answered(bool nonEmpty)
+    {
+        _opened = nonEmpty;
+        var held = _held;
+        _held = null;
+        if (held is null || nonEmpty) { return false; }
+        held();
+        return true;
+    }
+
+    internal Fate Click(Action send)
+    {
+        if (!_tickSent || _opened == false) { send(); return Fate.Sent; }
+        if (_opened == true) { return Fate.Dropped; }
+        _held = send;
+        return Fate.Held;
+    }
 }
 
 /// <summary>
