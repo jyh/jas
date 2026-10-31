@@ -1401,8 +1401,16 @@ button and `bind.visible` on warning text elements:
 ### Non-Modal Dialogs (Tool Alternates)
 
 Dialogs with `modal: false` are flyout menus (e.g., toolbar tool
-alternates). They render as compact lists of action buttons. Each
-button typically selects a tool and closes the dialog:
+alternates). They render as compact lists of action buttons, as a
+popover beside the control that opened them, with no backdrop. Each
+button typically selects a tool and closes the dialog.
+
+A non-modal flyout closes in exactly three ways: a button whose effects
+close it (above); a press outside it, which closes it and does NOTHING
+else, so the press is not also delivered to what lies beneath (a
+dismissing click never draws or selects); and Escape. While it is open,
+everything outside it stays live to the pointer only through that
+dismissing press.
 
 ```yaml
 arrow_alternates:
