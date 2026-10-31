@@ -916,6 +916,26 @@ static class Program
             OP("press", "closed", "opened", "release", "press", "closed", "release"));
         Eq("outside press: the SAME dialog redrawn before its close keeps the press held", "dismiss,open,wait,go",
             OP("press", "opened", "closed", "release"));
+        // ROW 56 (#796): a labelled icon_button's `parts`, the icon's and the
+        // label's rects in PLAN coordinates. The shell reads them relative to the
+        // leaf's own origin (its one subtraction), and draws each where it is told.
+        static string PR(string? json, long x, long y)
+        {
+            if (PanelWire.ReadParts(json, x, y) is not { } p) { return "(none)"; }
+            static string R(PanelWire.PartRect r) => $"{r.X},{r.Y} {r.W}x{r.H}";
+            return p.Label is { } l ? $"icon {R(p.Icon)} | label {R(l)}" : $"icon {R(p.Icon)} | no label";
+        }
+        Eq("parts: both, relative to the leaf's origin", "icon 10,4 28x28 | label 46,4 148x28",
+            PR("""{"icon":{"x":110,"y":54,"w":28,"h":28},"label":{"x":146,"y":54,"w":148,"h":28}}""", 100, 50));
+        Eq("parts: the icon alone (the engine sends no label with no room)", "icon 10,4 28x28 | no label",
+            PR("""{"icon":{"x":110,"y":54,"w":28,"h":28}}""", 100, 50));
+        Eq("parts: no key is no parts (an icon-only button)", "(none)", PR(null, 0, 0));
+        Eq("parts: a label without an icon is no parts", "(none)", PR("""{"label":{"x":1,"y":1,"w":9,"h":9}}""", 0, 0));
+        Eq("parts: an icon that is not four numbers is no parts", "(none)", PR("""{"icon":{"x":1,"y":1,"w":"9","h":9}}""", 0, 0));
+        Eq("parts: an empty icon is no parts", "(none)", PR("""{"icon":{"x":1,"y":1,"w":0,"h":9}}""", 0, 0));
+        Eq("parts: an empty label is dropped, the icon kept", "icon 1,1 9x9 | no label",
+            PR("""{"icon":{"x":1,"y":1,"w":9,"h":9},"label":{"x":12,"y":1,"w":0,"h":9}}""", 0, 0));
+        Eq("parts: text that is not JSON is no parts", "(none)", PR("parts", 0, 0));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

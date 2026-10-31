@@ -719,6 +719,45 @@ internal static class PanelWire
     internal static string ChoiceText(PaneOption row) =>
         row.Glyph is { Length: > 0 } g ? $"{g}  {row.Label}" : row.Label;
 
+    /// <summary>One part of a leaf (row 56), relative to the leaf's own origin, in DIPs.</summary>
+    internal readonly record struct PartRect(double X, double Y, double W, double H);
+
+    /// <summary>A labelled icon_button's parts (row 56): its icon, and its label when the engine planned room for one.</summary>
+    internal sealed record LeafParts(PartRect Icon, PartRect? Label);
+
+    /// <summary>
+    /// ROW 56 (#796): a labelled `icon_button`'s `parts`, the icon's and the
+    /// label's rects, which the engine plans in plan coordinates. Read relative to
+    /// the leaf's own origin (`leafX`, `leafY`), the shell's one subtraction; the
+    /// shell does no layout of its own. Null (an icon-only button) when there is no
+    /// `parts`, no usable icon (four numbers, a positive size), or the text is not
+    /// JSON. A label of no width is dropped and the icon kept.
+    /// </summary>
+    internal static LeafParts? ReadParts(string? partsJson, long leafX, long leafY)
+    {
+        if (string.IsNullOrEmpty(partsJson)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(partsJson);
+            PartRect? Read(string key)
+            {
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !doc.RootElement.TryGetProperty(key, out var r)
+                    || r.ValueKind != System.Text.Json.JsonValueKind.Object) { return null; }
+                double? N(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number
+                    ? v.GetDouble() : null;
+                return N("x") is { } x && N("y") is { } y && N("w") is { } w && N("h") is { } h && w > 0 && h > 0
+                    ? new PartRect(x - leafX, y - leafY, w, h)
+                    : null;
+            }
+            return Read("icon") is { } icon ? new LeafParts(icon, Read("label")) : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// FORK A (#384): a `slider`'s track, from the plan's `numbers` channel (the
     /// node's LITERAL min/max/step). Null -- a counted placeholder, never a guessed
