@@ -587,7 +587,7 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
     // selected, so an unselected frame is still exactly a document.
     engine.with_document(|doc| {
         let mut ctx = crate::painter::overlay_ctx::OverlayCtx::new(p);
-        crate::painter::selection_overlay::draw_selection_overlays(&mut ctx, doc);
+        crate::painter::selection_overlay::draw_selection_overlays(&mut ctx, doc, z);
         ctx.finish();
     });
     if viewed {
@@ -1252,6 +1252,38 @@ mod tests {
         corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert_eq!(corners, vec![(20.0, 30.0), (20.0, 110.0), (120.0, 30.0), (120.0, 110.0)],
                    "one anchor square per corner, on top of the document");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⭐ THE ANCHOR SQUARES ARE A FIXED SCREEN SIZE (the Captain's ruling, 10-30
+    /// feel sitting, finding 9): the frame draws them under the view, so at
+    /// zoom 2 each is HALF `HANDLE_DRAW_SIZE` in document units -- the view's
+    /// zoom is what reaches the overlay, not a constant.
+    #[test]
+    fn the_frames_anchor_squares_are_divided_by_the_zoom() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::painter::recording::{Command, RecordingPainter};
+        use crate::tool_consts::HANDLE_DRAW_SIZE;
+
+        let e = jas_engine_new();
+        seed(e);
+        unsafe {
+            assert_eq!(jas_set_tool(e, 0), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+        }
+        assert_eq!(unsafe { &*e }.with_model(|m| m.document().selection.len()), 1,
+                   "the click selected the rect");
+        unsafe { &*e }.with_model_mut(|m| m.zoom_level = 2.0);
+        let mut framed = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut framed);
+        let s = HANDLE_DRAW_SIZE / 2.0;
+        let squares = framed.commands().iter().filter(|c| matches!(c,
+            Command::FillRect { rect, .. } if rect.w == s && rect.h == s)).count();
+        assert_eq!(squares, 4, "four anchor squares of {s} document units at zoom 2");
+        let unscaled = framed.commands().iter().filter(|c| matches!(c,
+            Command::FillRect { rect, .. } if rect.w == HANDLE_DRAW_SIZE && rect.h == HANDLE_DRAW_SIZE)).count();
+        assert_eq!(unscaled, 0, "no square kept the zoom-1 size");
         unsafe { jas_engine_free(e) };
     }
 

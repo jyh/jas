@@ -18,10 +18,27 @@ use crate::tool_consts::HANDLE_DRAW_SIZE;
 /// carry no control-point squares (mirrors the in-transform overlay draw).
 /// The caller draws these under the VIEW (pan/zoom) transform only, NOT the
 /// element transform. Mirrors the Python reference `selection_handle_rects`.
+/// This is the picture at zoom 1; a drawing caller uses
+/// [`selection_handle_rects_at_zoom`].
 pub fn selection_handle_rects(
     doc: &Document,
     path: &[usize],
 ) -> Vec<(f64, f64, f64, f64)> {
+    selection_handle_rects_at_zoom(doc, path, 1.0)
+}
+
+/// [`selection_handle_rects`] for a view at `zoom`: the squares are a FIXED
+/// SCREEN SIZE (the Captain's ruling, 10-30 Windows feel sitting, finding 9).
+/// The caller draws them under the view transform, so each is
+/// `HANDLE_DRAW_SIZE / zoom` document units and shows as `HANDLE_DRAW_SIZE`
+/// pixels at every zoom; the centres do not move. A non-positive (or NaN)
+/// zoom is not a view and draws at zoom 1.
+pub fn selection_handle_rects_at_zoom(
+    doc: &Document,
+    path: &[usize],
+    zoom: f64,
+) -> Vec<(f64, f64, f64, f64)> {
+    let size = HANDLE_DRAW_SIZE / handle_zoom(zoom);
     if path.is_empty() {
         return Vec::new();
     }
@@ -64,7 +81,7 @@ pub fn selection_handle_rects(
             chain.push(*t);
         }
     }
-    let half = HANDLE_DRAW_SIZE / 2.0;
+    let half = size / 2.0;
     // RESOLVED: a symbol instance measures its TARGET, so the resolver-less
     // `control_points` collapsed its four corners onto the document origin —
     // the selection BOX resolved (it goes through `element_evaluated_bbox`)
@@ -79,9 +96,19 @@ pub fn selection_handle_rects(
                 px = nx;
                 py = ny;
             }
-            (px - half, py - half, HANDLE_DRAW_SIZE, HANDLE_DRAW_SIZE)
+            (px - half, py - half, size, size)
         })
         .collect()
+}
+
+/// The zoom a handle square is divided by: `zoom` itself when it is a view
+/// (positive and finite), else 1.
+pub fn handle_zoom(zoom: f64) -> f64 {
+    if zoom > 0.0 && zoom.is_finite() {
+        zoom
+    } else {
+        1.0
+    }
 }
 
 /// Combined transform SCALE of the element at `path` — the geometric mean of
