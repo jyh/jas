@@ -434,6 +434,15 @@ DIALOG_BIND_SEED.append(
                  "web_only": True}}))
 
 
+def _write(path: str, cases: list) -> None:
+    """Write one golden. Every golden goes through here, so the reference's
+    freshness test (``test_layout_goldens_are_fresh.py``) can collect what
+    this script WOULD write and compare it with what is on disk."""
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        json.dump(cases, f, indent=2)
+        f.write("\n")
+
+
 def main() -> int:
     bundle = json.load(open(os.path.join(ROOT, "workspace", "workspace.json"), encoding="utf-8"))
     panels = bundle["panels"]
@@ -448,9 +457,7 @@ def main() -> int:
             "expected": rects,
         })
     out_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_layout.json")
-    with open(out_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(cases, f, indent=2)
-        f.write("\n")
+    _write(out_path, cases)
     print(f"wrote {len(cases)} cases -> {out_path}")
 
     # STATUS-flask 705 / #806's review: DIALOG plans, each at its declared
@@ -470,9 +477,7 @@ def main() -> int:
             "expected": layout_panel({"content": d["content"]}, avail_w, 0, {}),
         })
     dl_path = os.path.join(ROOT, "test_fixtures", "algorithms", "dialog_layout.json")
-    with open(dl_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(dl_cases, f, indent=2)
-        f.write("\n")
+    _write(dl_path, dl_cases)
     print(f"wrote {len(dl_cases)} cases -> {dl_path}")
 
     # Widget-tree golden from the SAME seeds/ctx (the panel_widget_tree.json
@@ -488,9 +493,7 @@ def main() -> int:
             "expected": tree,
         })
     wt_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_widget_tree.json")
-    with open(wt_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(wt_cases, f, indent=2)
-        f.write("\n")
+    _write(wt_path, wt_cases)
     print(f"wrote {len(wt_cases)} cases -> {wt_path}")
 
     # Bind-VALUE golden, from BIND_SEED (its own seeds — see the module docs).
@@ -510,9 +513,7 @@ def main() -> int:
             "expected": bind_values(bundle["dialogs"][dialog_id], ctx),
         })
     bv_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_bind_values.json")
-    with open(bv_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(bv_cases, f, indent=2)
-        f.write("\n")
+    _write(bv_path, bv_cases)
     rows = sum(len(c["expected"]) for c in bv_cases)
     print(f"wrote {len(bv_cases)} cases ({rows} rows) -> {bv_path}")
 
@@ -526,9 +527,7 @@ def main() -> int:
             "expected": layout_panel(layout_pane(bundle, pane_id), avail_w, avail_h, ctx),
         })
     pane_path = os.path.join(ROOT, "test_fixtures", "algorithms", "pane_layout.json")
-    with open(pane_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(pane_cases, f, indent=2)
-        f.write("\n")
+    _write(pane_path, pane_cases)
     print(f"wrote {len(pane_cases)} cases -> {pane_path}")
     # Initial state map: the reference's `state_defaults` over the bundle's
     # whole `state:` section. Each port compares the map its app STARTS from
@@ -539,9 +538,7 @@ def main() -> int:
     sm_cases = [{"name": "no_document", "function": "initial_state_map",
                  "args": {}, "expected": {k: sm[k] for k in sorted(sm)}}]
     sm_path = os.path.join(ROOT, "test_fixtures", "algorithms", "initial_state_map.json")
-    with open(sm_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(sm_cases, f, indent=2)
-        f.write("\n")
+    _write(sm_path, sm_cases)
     print(f"wrote {len(sm_cases)} cases ({len(sm)} variables) -> {sm_path}")
     # Dialog widget-tree golden: EVERY dialog in the bundle, sorted by id, with
     # an empty data scope. Derived from the bundle, never a typed list, so a new
@@ -554,9 +551,7 @@ def main() -> int:
         "expected": widget_tree(dialogs[dialog_id], {}),
     } for dialog_id in sorted(dialogs)]
     dt_path = os.path.join(ROOT, "test_fixtures", "algorithms", "dialog_widget_tree.json")
-    with open(dt_path, "w", encoding="utf-8", newline="") as f:
-        json.dump(dt_cases, f, indent=2)
-        f.write("\n")
+    _write(dt_path, dt_cases)
     print(f"wrote {len(dt_cases)} cases -> {dt_path}")
     return 0
 
