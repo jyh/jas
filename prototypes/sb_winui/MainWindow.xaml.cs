@@ -765,10 +765,50 @@ public sealed partial class MainWindow : Window
     /// <summary>S2: whether the dialog layer is up, so input belongs to it.</summary>
     private bool DialogShown => DialogLayer.Visibility == Visibility.Visible;
 
+    /// <summary>#783: the outside press a flyout's smoke holds, if any.</summary>
+    private readonly OutsidePress _outsidePress = new();
+
+    /// <summary>#783: whether the dialog last drawn is modal; a press on a
+    /// modal dialog's smoke only swallows.</summary>
+    private bool _dialogModal = true;
+
+    /// <summary>#783: the smoke under a modal dialog (the old backdrop) and
+    /// under a flyout (clear, and still hit-testable, unlike no brush).</summary>
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _dialogDim =
+        new(Microsoft.UI.ColorHelper.FromArgb(0x80, 0x00, 0x00, 0x00));
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _dialogClear =
+        new(Microsoft.UI.Colors.Transparent);
+
     /// <summary>S2: the view drawing the open dialog, rebuilt when the dialog's id changes.</summary>
     private PaneView? _dialogView;
     private string? _dialogViewId;
     private long _dialogViewW;
+
+    /// <summary>
+    /// #783: the rect, in the dialog layer's DIPs, of the panel control that
+    /// opened the dialog, or null when no drawn view holds it. The layer spans
+    /// the window's root grid, so the root's coordinates are the layer's.
+    /// </summary>
+    private (double X, double Y, double W, double H)? AnchorOf(DialogOpener? opener)
+    {
+        if (opener is null) { return null; }
+        var views = new List<PaneView> { _toolbar, _canvasStrip };
+        views.AddRange(_dockGroups.Values.Select(g => g.View));
+        var el = views.FirstOrDefault(v => v._paneDrawnPanel == opener.Panel)?.ControlAt(opener.Path);
+        if (el is null || el.ActualWidth <= 0 || el.ActualHeight <= 0) { return null; }
+        var r = el.TransformToVisual((UIElement)Content)
+                  .TransformBounds(new Windows.Foundation.Rect(0, 0, el.ActualWidth, el.ActualHeight));
+        return (r.X, r.Y, r.Width, r.Height);
+    }
+
+    /// <summary>#783: the dismissing press ended; the smoke a close left up goes with it.</summary>
+    private void EndOutsidePress()
+    {
+        if (!_outsidePress.Released()) { return; }
+        DialogLayer.Visibility = Visibility.Collapsed;
+        DialogFrame.Visibility = Visibility.Visible;
+        Report("DIALOG SMOKE RELEASED");
+    }
 
     /// <summary>
     /// S2: draw the engine's newest dialog reading. Open: the TOP dialog's plan
@@ -787,11 +827,15 @@ public sealed partial class MainWindow : Window
         if (!r.Open)
         {
             var was = _dialogViewId;
-            DialogLayer.Visibility = Visibility.Collapsed;
+            // #783: a flyout's dismissing press holds the clear smoke up, with
+            // the frame gone, until that press is released.
+            var held = !_outsidePress.HideOnClose();
+            if (held) { DialogFrame.Visibility = Visibility.Collapsed; }
+            else { DialogLayer.Visibility = Visibility.Collapsed; }
             DialogScroll.Content = null;
             _dialogView = null;
             _dialogViewId = null;
-            if (was is not null) { Report($"DIALOG HIDDEN dialog={was} seq={snap.Seq} cause={snap.Cause}"); }
+            if (was is not null) { Report($"DIALOG HIDDEN dialog={was} seq={snap.Seq} cause={snap.Cause}{(held ? " smoke=held" : "")}"); }
             return;
         }
         // A view's width is fixed at build, so a new dialog OR a new width
@@ -808,6 +852,19 @@ public sealed partial class MainWindow : Window
         var windowH = ((FrameworkElement)Content).ActualHeight;
         if (windowH > 0) { DialogScroll.MaxHeight = windowH * 0.8; }
         DialogTitle.Text = r.Summary;
+        // #783: a flyout is a bare popover beside the control that opened it; a
+        // modal dialog is dimmed, titled and centred.
+        _dialogModal = r.Modal;
+        var look = DialogWire.Look(r.Modal, r.Modal ? null : AnchorOf(snap.Opener));
+        DialogSmoke.Background = look.Dim ? _dialogDim : _dialogClear;
+        DialogTitleBar.Visibility = look.TitleBar ? Visibility.Visible : Visibility.Collapsed;
+        var placed = look.Left.HasValue && look.Top.HasValue;
+        DialogFrame.HorizontalAlignment = placed ? HorizontalAlignment.Left : HorizontalAlignment.Center;
+        DialogFrame.VerticalAlignment = placed ? VerticalAlignment.Top : VerticalAlignment.Center;
+        DialogFrame.Margin = placed
+            ? new Thickness(look.Left.GetValueOrDefault(), look.Top.GetValueOrDefault(), 0, 0)
+            : new Thickness(0);
+        DialogFrame.Visibility = Visibility.Visible;
         var first = DialogLayer.Visibility != Visibility.Visible;
         DialogLayer.Visibility = Visibility.Visible;
         try { _dialogView.DrawPane(new PanelSnapshot(r.Id, r.PlanJson!, snap.Seq, snap.Cause)); }
@@ -816,10 +873,13 @@ public sealed partial class MainWindow : Window
             Report($"RUSTFAIL DIALOG DRAW threw {ex.GetType().Name}: {ex.Message}");
             return;
         }
-        // Keyboard focus goes into the layer, so Escape and Tab start there.
-        if (first) { DialogClose.Focus(FocusState.Programmatic); }
+        // Keyboard focus goes into the layer, so Escape and Tab start there. A
+        // flyout has no close box; Escape reaches the root's key handler.
+        if (first && look.TitleBar) { DialogClose.Focus(FocusState.Programmatic); }
+        var at = placed ? $"{look.Left:0.#},{look.Top:0.#}" : "centre";
         Report($"DIALOG SHOWN dialog={r.Id} depth={r.Depth} modal={(r.Modal ? "true" : "false")} avail-w={snap.AvailW} "
-             + $"seq={snap.Seq} cause={snap.Cause} frame-dips={DialogFrame.ActualWidth:0}x{DialogFrame.ActualHeight:0}");
+             + $"seq={snap.Seq} cause={snap.Cause} frame-dips={DialogFrame.ActualWidth:0}x{DialogFrame.ActualHeight:0} "
+             + $"look={(look.Dim ? "modal" : "popover")} at-dips={at} opener={snap.Opener?.Widget ?? "-"}");
     }
 
     /// <summary>A registry pane's new plan was published. Draw it, on the UI thread.</summary>
@@ -932,6 +992,27 @@ public sealed partial class MainWindow : Window
             Close();
         };
         DialogClose.Click += (_, _) => _canvas.DialogDismiss("close-box");
+        // #783: a press on a flyout's clear smoke is a press OUTSIDE it, and it
+        // dismisses the flyout and does nothing else. The smoke keeps that press,
+        // captured and handled, to its release, so neither half reaches beneath.
+        // A modal dialog's smoke is left as it was: it swallows by being there.
+        DialogSmoke.PointerPressed += (_, e) =>
+        {
+            if (!_outsidePress.Pressed(_dialogModal)) { return; }
+            e.Handled = true;
+            DialogSmoke.CapturePointer(e.Pointer);
+            var at = e.GetCurrentPoint(DialogSmoke).Position;
+            Report($"DIALOG OUTSIDE PRESS dialog={_dialogViewId} at-dips=({at.X:0},{at.Y:0})");
+            _canvas.DialogDismiss("outside");
+        };
+        DialogSmoke.PointerReleased += (_, e) =>
+        {
+            if (_dialogModal) { return; }
+            e.Handled = true;
+            DialogSmoke.ReleasePointerCapture(e.Pointer);
+            EndOutsidePress();
+        };
+        DialogSmoke.PointerCaptureLost += (_, _) => EndOutsidePress();
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
         // (W2-5, stop 5). Shown here, its column is already taken when the

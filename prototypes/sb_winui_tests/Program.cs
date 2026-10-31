@@ -824,6 +824,49 @@ static class Program
         Eq("dialog door: the same id after it was closed elsewhere opens again", "open", RO("hand_alternates", false, "hand_alternates"));
         Eq("dialog door: no dialog named opens nothing", "skip", RO(null, false, null));
         Eq("dialog door: an empty name opens nothing", "skip", RO("", true, "hand_alternates"));
+        // -- THE NON-MODAL LOOK (#783; the 10-30 sitting, finding 1) ---------------
+        // A `modal: false` dialog is a POPOVER beside the control that opened it:
+        // no dimming backdrop, no title bar, its top-left at the opener's right
+        // edge and top (DIPs, in the dialog layer). A modal dialog keeps its look,
+        // centred, whatever opened it. A non-modal one with no opener the shell
+        // can place is centred, as the web centres one with no anchor.
+        static string LK(bool modal, (double X, double Y, double W, double H)? anchor)
+        {
+            var k = DialogWire.Look(modal, anchor);
+            var at = k.Left is { } l && k.Top is { } t
+                ? $"at {l.ToString(System.Globalization.CultureInfo.InvariantCulture)},{t.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                : "centred";
+            return $"{(k.Dim ? "dim" : "clear")},{(k.TitleBar ? "title" : "bare")},{at}";
+        }
+        Eq("dialog look: a modal dialog is dimmed, titled and centred", "dim,title,centred", LK(true, null));
+        Eq("dialog look: ...even when a control opened it", "dim,title,centred", LK(true, (0, 120, 40, 40)));
+        Eq("dialog look: a flyout sits at its slot's right edge and top, bare", "clear,bare,at 40,120", LK(false, (0, 120, 40, 40)));
+        Eq("dialog look: the slot's own offset is kept", "clear,bare,at 46.5,200.25", LK(false, (4.5, 200.25, 42, 36)));
+        Eq("dialog look: a flyout with no placeable opener is centred, still bare", "clear,bare,centred", LK(false, null));
+        // The DISMISSING PRESS (#783's second door): a press outside a flyout
+        // closes it and does NOTHING else, so neither the press nor its release
+        // reaches what lies beneath. The smoke dismisses on the press and stays up,
+        // clear, until that press's release; a modal dialog's smoke only swallows.
+        static string OP(params string[] steps)
+        {
+            var g = new OutsidePress();
+            return string.Join(",", steps.Select(s => s switch
+            {
+                "press" => g.Pressed(modal: false) ? "dismiss" : "swallow",
+                "press:modal" => g.Pressed(modal: true) ? "dismiss" : "swallow",
+                "closed" => g.HideOnClose() ? "hide" : "wait",
+                "release" => g.Released() ? "go" : "-",
+                _ => "?",
+            }));
+        }
+        Eq("outside press: dismiss on the press, hold the smoke to the release", "dismiss,wait,go", OP("press", "closed", "release"));
+        Eq("outside press: a release before the close arrives, then the close hides", "dismiss,-,hide", OP("press", "release", "closed"));
+        Eq("outside press: a modal dialog's smoke only swallows", "swallow,-", OP("press:modal", "release"));
+        Eq("outside press: a close with no press held hides at once", "hide", OP("closed"));
+        Eq("outside press: a refused dismiss leaves the dialog open; the next press is held afresh",
+            "dismiss,-,dismiss,wait,go", OP("press", "release", "press", "closed", "release"));
+        Eq("outside press: the gate forgets its press after the release", "dismiss,wait,go,hide", OP("press", "closed", "release", "closed"));
+        Eq("outside press: a stray release with nothing held does nothing", "-", OP("release"));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

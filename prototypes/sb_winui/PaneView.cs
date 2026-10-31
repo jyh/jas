@@ -86,6 +86,10 @@ public sealed partial class MainWindow
 
         /// <summary>The drawn controls, by plan path.</summary>
         private readonly Dictionary<string, FrameworkElement> _paneControls = new();
+        /// <summary>#783: the drawn control at a plan path, or null; a flyout
+        /// opened by it is placed beside it.</summary>
+        internal FrameworkElement? ControlAt(string? path) =>
+            path is not null && _paneControls.TryGetValue(path, out var el) ? el : null;
         /// <summary>jas §612/§630: the hit surfaces by plan path, so a panel
         /// selection's highlight is applied in place (a selection change
         /// re-plans without moving any rect, so it does not rebuild).</summary>

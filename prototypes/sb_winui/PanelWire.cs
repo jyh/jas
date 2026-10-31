@@ -1520,6 +1520,67 @@ internal static class DialogWire
             return null;
         }
     }
+
+    /// <summary>How the open dialog is drawn: dimmed or clear smoke, with or
+    /// without its title bar, centred (null Left/Top) or at a point in the
+    /// dialog layer (DIPs).</summary>
+    internal readonly record struct DialogLook(bool Dim, bool TitleBar, double? Left, double? Top);
+
+    /// <summary>
+    /// #783: a `modal: false` dialog is a POPOVER beside the control that
+    /// opened it, with no backdrop and no title bar; its top-left is the
+    /// opener's right edge and top. A modal dialog is dimmed, titled and
+    /// centred whatever opened it. A non-modal one with no opener the shell can
+    /// place is centred, as the web centres one with no anchor. No fit rule:
+    /// the web has none, and every shipped flyout fits beside its slot.
+    /// </summary>
+    internal static DialogLook Look(bool modal, (double X, double Y, double W, double H)? anchor) =>
+        modal ? new DialogLook(Dim: true, TitleBar: true, null, null)
+        : anchor is { } a ? new DialogLook(Dim: false, TitleBar: false, a.X + a.W, a.Y)
+        : new DialogLook(Dim: false, TitleBar: false, null, null);
+}
+
+/// <summary>
+/// #783's second door, a press OUTSIDE a flyout: it closes the flyout and does
+/// NOTHING else, so neither the press nor its release reaches what lies
+/// beneath (a dismissing click never draws or selects). The dialog layer's
+/// smoke takes the press and asks the engine to dismiss; when the engine's
+/// close arrives first, the smoke stays up, clear, until that press's release,
+/// and goes with it. A modal dialog's smoke only swallows, as it always has.
+/// Pure, so `sb_winui_tests` drives it.
+/// </summary>
+internal sealed class OutsidePress
+{
+    private bool _held;
+    private bool _closed;
+
+    /// <summary>A press on the smoke; true when it should dismiss the dialog.</summary>
+    internal bool Pressed(bool modal)
+    {
+        if (modal) { return false; }
+        _held = true;
+        _closed = false;
+        return true;
+    }
+
+    /// <summary>The engine closed the dialog; true when the layer goes now,
+    /// false when a dismissing press still holds the smoke.</summary>
+    internal bool HideOnClose()
+    {
+        if (!_held) { return true; }
+        _closed = true;
+        return false;
+    }
+
+    /// <summary>The press was released (or its capture lost); true when the
+    /// layer the close left up goes now.</summary>
+    internal bool Released()
+    {
+        var go = _held && _closed;
+        _held = false;
+        _closed = false;
+        return go;
+    }
 }
 
 /// <summary>
