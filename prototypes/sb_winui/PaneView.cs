@@ -651,7 +651,13 @@ public sealed partial class MainWindow
                     // `commit` with the release point. The engine maps the point to a
                     // colour (`color_util::color_bar_rgb`) and clamps it; the shell
                     // does neither, so it draws no picture of its own.
+                    // Finding 13, step 4: the Color Picker's strip and field are the
+                    // same kind of surface: the engine's picture (`display.picture`,
+                    // H mode only), the strip sending ONE number `v`, the field `u,v`
+                    // (<see cref="PanelWire.PickerPoint"/>), through the dialog door.
                     case "color_bar":
+                    case "color_hue_bar":
+                    case "color_gradient":
                         inputs++;
                         if (leaf.Id.Length == 0) { unaddressable++; }
                         el = BuildColorBar(leaf);
@@ -1494,6 +1500,19 @@ public sealed partial class MainWindow
             // A leaf whose bind.z_index goes absent (or unreadable) returns to
             // plan order rather than keeping its last z (jas's #768 review).
             else { el.ClearValue(Microsoft.UI.Xaml.Controls.Canvas.ZIndexProperty); }
+            // Finding 13, step 4: a picker surface whose picture moved (the field
+            // at a new hue, or none off H mode) is redrawn in place, with no rebuild.
+            if (el is ColorBarSurface surface && surface.Tag is ColorBarState grip && grip.Picture != leaf.Shown("picture"))
+            {
+                grip.Picture = leaf.Shown("picture");
+                if (PanelWire.PictureBytes(grip.Picture) is { } picture) { LoadColorBarPicture(surface, picture, leaf, _paneBuild); }
+                else
+                {
+                    foreach (var old in surface.Children.OfType<Image>().ToList()) { surface.Children.Remove(old); }
+                    surface.BorderThickness = new Thickness(1);
+                    _w.Report($"PANEL PICTURE NONE {leaf.Id} -- the surface is an outline");
+                }
+            }
             var off = leaf.Value("bind.disabled") == "true";
             var on = leaf.Value("bind.checked") == "true";
             var typing = false;
@@ -2032,6 +2051,9 @@ public sealed partial class MainWindow
             internal bool Held;
             internal string? LastSent;
             internal string? LastPoint;
+            /// <summary>The `display.picture` drawn (or loading), so a new one
+            /// (the field's at a new hue) replaces it and a stale load is dropped.</summary>
+            internal string? Picture;
         }
 
         /// <summary>
@@ -2056,7 +2078,8 @@ public sealed partial class MainWindow
                 Tag = grip,
             };
             if (leaf.Literal("summary") is { Length: > 0 } tip) { ToolTipService.SetToolTip(bar, tip); }
-            if (PanelWire.PictureBytes(leaf.Shown("picture")) is { } picture) { LoadColorBarPicture(bar, picture, leaf, _paneBuild); }
+            grip.Picture = leaf.Shown("picture");
+            if (PanelWire.PictureBytes(grip.Picture) is { } picture) { LoadColorBarPicture(bar, picture, leaf, _paneBuild); }
             else { _w.Report($"PANEL PICTURE NONE {leaf.Id} -- the bar stays an outline"); }
             if (leaf.Id.Length == 0) { bar.IsHitTestVisible = false; return bar; }
 
@@ -2064,7 +2087,7 @@ public sealed partial class MainWindow
             string? Point(PointerRoutedEventArgs e)
             {
                 var at = e.GetCurrentPoint(bar).Position;
-                return PanelWire.ColorBarPoint(at.X, at.Y, bar.ActualWidth, bar.ActualHeight);
+                return PanelWire.PickerPoint(leaf.Type, at.X, at.Y, bar.ActualWidth, bar.ActualHeight);
             }
             void Move(string? point)
             {
@@ -2127,6 +2150,10 @@ public sealed partial class MainWindow
                 var source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
                 await source.SetSourceAsync(stream);
                 if (build != _paneBuild) { return; }
+                // A newer picture (the field at a new hue) replaced this one while
+                // it loaded: drop it, so the last plan's picture is the one drawn.
+                if (bar.Tag is ColorBarState { } held && held.Picture != leaf.Shown("picture")) { return; }
+                foreach (var old in bar.Children.OfType<Image>().ToList()) { bar.Children.Remove(old); }
                 // The outline goes: a Grid's border insets its children, and the
                 // pointer's u,v are measured over the whole bar, so an inset
                 // picture would put a different colour under the point it picks.

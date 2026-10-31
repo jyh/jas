@@ -1846,6 +1846,16 @@ static class Program
         Eq("color_bar: the first change after the press sends", "0.5,0.5", Show(PanelWire.ColorBarChange("0.5,0.5", null)));
         Eq("color_bar: a move that names the same point sends nothing", "(null)", Show(PanelWire.ColorBarChange("0.5,0.5", "0.5,0.5")));
         Eq("color_bar: no point, no change", "(null)", Show(PanelWire.ColorBarChange(null, "0.5,0.5")));
+        // Finding 13, step 4: the Color Picker's strip (`color_hue_bar`) sends
+        // ONE number, v (its pick never reads a u; WIDGET_EVENTS.md); the field
+        // (`color_gradient`) and the colour bar send the point u,v.
+        Eq("picker point: the strip sends v alone", "0.25", Show(PanelWire.PickerPoint("color_hue_bar", 10, 45, 32, 180)));
+        Eq("picker point: the strip's v ignores x entirely", "0.25", Show(PanelWire.PickerPoint("color_hue_bar", 999, 45, 32, 180)));
+        Eq("picker point: the field sends u,v", "0.5,0.25", Show(PanelWire.PickerPoint("color_gradient", 90, 45, 180, 180)));
+        Eq("picker point: the colour bar sends u,v as before", "0.25,0.5", Show(PanelWire.PickerPoint("color_bar", 30, 12, 120, 24)));
+        Eq("picker point: an unsized strip names no point", "(null)", Show(PanelWire.PickerPoint("color_hue_bar", 1, 1, 32, 0)));
+        Eq("picker point: a non-finite pointer on the strip names no point", "(null)", Show(PanelWire.PickerPoint("color_hue_bar", 1, double.NaN, 32, 180)));
+        Eq("picker point: a tiny v is fixed-point, never an exponent", "0.00000277777777778", Show(PanelWire.PickerPoint("color_hue_bar", 0, 0.0005, 32, 180)));
         // §252 (#399): the bar's picture is `display.picture`, a BMP data URI. The
         // shell decodes it and draws it; anything else draws no picture.
         static string Hex(byte[]? b) => b is null ? "(null)" : Convert.ToHexString(b);
