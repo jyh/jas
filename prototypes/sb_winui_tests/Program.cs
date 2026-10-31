@@ -719,6 +719,20 @@ static class Program
         static string Ev(string? json) => PanelWire.ReadEvents(json) is { } ev ? string.Join(",", ev) : "(null)";
         Eq("events: the declared order, read as sent", "click,click_and_wait", Ev("""["click","click_and_wait"]"""));
         Eq("events: a node that answers nothing", "", Ev("[]"));
+        // -- bind.z_index (the 10-30 sitting, finding 12: "I cannot get the fill
+        // swatch to come to the front") -------------------------------------------
+        // The toolbar swatches bind `z_index: if state.fill_on_top then 2 else 1`;
+        // the core resolves it into the leaf's values and the shell drew in plan
+        // order regardless, so the stroke swatch was always on top. `ZIndex` reads
+        // the resolved string; null is "no z", never a guessed 0.
+        static string Z(string? s) => PanelWire.ZIndex(s) is { } z ? z.ToString(System.Globalization.CultureInfo.InvariantCulture) : "(null)";
+        Eq("z_index: the core's \"2\" is 2", "2", Z("2"));
+        Eq("z_index: \"1\" is 1", "1", Z("1"));
+        Eq("z_index: a whole number written as a decimal is that integer", "2", Z("2.0"));
+        Eq("z_index: a negative order is kept", "-1", Z("-1"));
+        Eq("z_index: a fraction names no order and is refused", "(null)", Z("1.5"));
+        Eq("z_index: a word is refused", "(null)", Z("top"));
+        Eq("z_index: absent is no z", "(null)", Z(null));
         Eq("events: no channel, an older core, is no list", "(null)", Ev(null));
         Eq("events: a channel that is not an array is no list", "(null)", Ev("""{"click":true}"""));
         Eq("events: text that is not JSON is no list", "(null)", Ev("click"));
@@ -1604,6 +1618,38 @@ static class Program
         Eq("slider: the shell does NOT snap or clamp -- 359.7 on a 0..359 step-1 track is sent as dragged",
             "359.7", Show(PanelWire.SliderCommit(359.7, "359")));
         Eq("slider: a release where the core's value already is sends nothing", "(null)", Show(PanelWire.SliderCommit(50.0, "50")));
+        // -- CONTROLS BELOW THEIR TEMPLATE'S HEIGHT (the 10-30 sitting, findings
+        // 14 and 15) ---------------------------------------------------------------
+        // WinUI's Slider stacks a 14-DIP margin, an 18-DIP thumb and a 14-DIP
+        // margin (46 DIP); in Swatch Options' 12-DIP rows the track was clipped
+        // and only the thumb's top showed. `SliderFit` gives the thumb that fits,
+        // centred by equal margins, or null when the plan's height already fits.
+        static string SF(double h) => PanelWire.SliderFit(h) is { } f
+            ? FormattableString.Invariant($"{f.Thumb:0.##}/{f.Inner:0.##}/{f.Margin:0.##}") : "(null)";
+        Eq("slider fit: a 12-DIP row gets a 10-DIP thumb, centred by 1-DIP margins", "10/6.67/1", SF(12));
+        Eq("slider fit: 20 DIP gets an 18-DIP thumb (never larger than WinUI's)", "18/12/1", SF(20));
+        Eq("slider fit: 30 DIP keeps the 18-DIP thumb, centred by 6-DIP margins", "18/12/6", SF(30));
+        Eq("slider fit: an 8-DIP row gets the 6-DIP thumb it has room for", "6/4/1", SF(8));
+        // No floor and no clamp (check_shell_interaction_path, F-6): a row with
+        // no room for a thumb between its 1-DIP edges is REFUSED, never drawn
+        // with a thumb it cannot hold.
+        Eq("slider fit: a row with no room for a thumb is refused, never floored", "(null)", SF(2));
+        Eq("slider fit: a 20-DIP row holds the template's own 18-DIP thumb exactly", "18/12/1", SF(20));
+        Eq("slider fit: just under that, the thumb is the room the row has", "17.5/11.67/1", SF(19.5));
+        Eq("slider fit: the template's own 46 DIP needs nothing", "(null)", SF(46));
+        Eq("slider fit: taller than the template needs nothing", "(null)", SF(120));
+        Eq("slider fit: no height is no fit, never a throw", "(null)", SF(0));
+        Check("slider fit: margins + thumb fill the planned height exactly (12, 20, 30)",
+            new[] { 12.0, 20.0, 30.0 }.All(h => PanelWire.SliderFit(h) is { } f && Math.Abs(2 * f.Margin + f.Thumb - h) < 1e-9), "");
+        // WinUI's RadioButton draws its 20-DIP circle centred in a FIXED 32-DIP row
+        // (no theme resource sizes it), so the color picker's short rows showed
+        // half circles. `RadioScale` maps the natural 32 DIP onto the plan's height.
+        static string RS(double h) => PanelWire.RadioScale(h) is { } s ? FormattableString.Invariant($"{s:0.###}") : "(null)";
+        Eq("radio scale: a 16-DIP row draws the radio at half size", "0.5", RS(16));
+        Eq("radio scale: a 20-DIP row", "0.625", RS(20));
+        Eq("radio scale: the template's 32 DIP needs no scale", "(null)", RS(32));
+        Eq("radio scale: taller needs none", "(null)", RS(40));
+        Eq("radio scale: no height is no scale, never a throw", "(null)", RS(0));
         Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
         Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
         Eq("slider: a value within 1e-5 of 0 commits fixed-point, never an exponent", "0.0000025", Show(PanelWire.SliderCommit(0.0000025, "0")));

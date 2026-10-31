@@ -17602,7 +17602,9 @@
                 {
                   "id": "lp_eye",
                   "type": "icon_button",
-                  "icon": "{{if node.visibility == 'preview' then 'eye_preview' else if node.visibility == 'outline' then 'eye_outline' else 'eye_invisible'}}",
+                  "bind": {
+                    "icon": "if node.visibility == 'preview' then 'eye_preview' else if node.visibility == 'outline' then 'eye_outline' else 'eye_invisible'"
+                  },
                   "summary": "Visibility",
                   "style": {
                     "size": 16
@@ -17629,7 +17631,9 @@
                 {
                   "id": "lp_lock",
                   "type": "icon_button",
-                  "icon": "{{if node.locked then 'lock_locked' else 'lock_unlocked'}}",
+                  "bind": {
+                    "icon": "if node.locked then 'lock_locked' else 'lock_unlocked'"
+                  },
                   "summary": "Lock",
                   "style": {
                     "size": 16
@@ -17647,12 +17651,12 @@
                 {
                   "id": "lp_twirl",
                   "type": "icon_button",
-                  "icon": "{{if any(panel.collapsed_paths, fun p -> p == node.path) then 'twirl_closed' else 'twirl_open'}}",
                   "summary": "Expand/Collapse",
                   "style": {
                     "size": 16
                   },
                   "bind": {
+                    "icon": "if any(panel.collapsed_paths, fun p -> p == node.path) then 'twirl_closed' else 'twirl_open'",
                     "visible": "node.is_container"
                   },
                   "behavior": [
@@ -17753,9 +17757,11 @@
                   "type": "container",
                   "style": {
                     "width": 12,
-                    "height": 12,
-                    "background": "{{if node.element_selected then node.ancestor_layer_color else 'transparent'}}",
-                    "border": "1px solid {{theme.colors.border}}"
+                    "height": 12
+                  },
+                  "bind": {
+                    "background": "if node.element_selected then node.ancestor_layer_color else 'transparent'",
+                    "border": "'1px solid ' + theme.colors.border"
                   },
                   "behavior": [
                     {
@@ -28077,7 +28083,9 @@
                   {
                     "id": "ao_chain_link",
                     "type": "icon_button",
-                    "icon": "{{if dialog.chain_link_engaged then 'chain_linked' else 'chain_broken'}}",
+                    "bind": {
+                      "icon": "if dialog.chain_link_engaged then 'chain_linked' else 'chain_broken'"
+                    },
                     "summary": "Lock width / height aspect ratio",
                     "description": "Toggle \u2014 when engaged, W and H scale proportionally. Dialog-session-only; default off on each open.\n",
                     "style": {

@@ -214,7 +214,8 @@ artboard_options:
             children:
               - id: ao_chain_link
                 type: icon_button
-                icon: "{{if dialog.chain_link_engaged then 'chain_linked' else 'chain_broken'}}"
+                bind:
+                  icon: "if dialog.chain_link_engaged then 'chain_linked' else 'chain_broken'"
                 summary: "Lock width / height aspect ratio"
                 description: >
                   Toggle — when engaged, W and H scale proportionally.
