@@ -823,6 +823,18 @@ internal static class PanelWire
             : null;
 
     /// <summary>
+    /// Finding 13, step 4: the point a picker surface sends. The Color Picker's
+    /// strip (`color_hue_bar`) sends ONE number, `v`, since its pick never reads
+    /// a `u` (WIDGET_EVENTS.md); the field (`color_gradient`) and the colour bar
+    /// send `u,v` (<see cref="ColorBarPoint"/>). Null when the surface or the
+    /// pointer names no point.
+    /// </summary>
+    internal static string? PickerPoint(string kind, double x, double y, double width, double height) =>
+        kind == "color_hue_bar"
+            ? double.IsFinite(y) && double.IsFinite(height) && height > 0 ? ContractNumber(y / height) : null
+            : ColorBarPoint(x, y, width, height);
+
+    /// <summary>
     /// A held move sends `change` only when it names a new point, so a pointer
     /// that reports the same spot twice costs the engine nothing.
     /// </summary>
