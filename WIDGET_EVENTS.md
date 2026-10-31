@@ -485,7 +485,11 @@ expression that reads another root, or that does not parse.
     colour drawn under it.
   - In any other mode the commit is REFUSED, `WrongMode`, naming the mode
     (`radio_channel=<mode>`): nothing is written and no behavior runs. The other modes are deferred
-    (the finding 13 design, §4).
+    (the finding 13 design, §4). Only a TEXT mode other than `h` refuses: a
+    `radio_channel` that is absent, or is not text, reads as `h`.
+  - A pick writes only a `dialog.` target, and only when the widget is not in
+    a panel. Any other bind is not written, so a strip or field with no
+    writable bind and no behavior is `inert` (`EmptyBehavior`).
 - **Every other bind is read, never written, by this layer.** That
   covers a `state.` path, a `foreach` item's field (`ab.name`), an
   indexed path (`panel.stops[…].opacity`), an expression, and a name a
