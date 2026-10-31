@@ -9,6 +9,13 @@
 //! magenta, blue, cyan, green, yellow, red); the field's is [`gradient_sb`].
 //! Both picks are held to `test_fixtures/algorithms/picker_picks.json`, and
 //! so is each picture here, at every corpus point it can draw.
+//!
+//! SIZES (STATUS-flask §691, Q4): the strip is 16 × 180, as tall as the web's
+//! strip, so a hue step is under two degrees a row; the field is 64 × 64,
+//! design §2's "enough for a smooth gradient". Both are smooth enough at the
+//! sizes the picker draws, and a shell scales each to its leaf's rect. The
+//! strip in H mode depends on nothing, so it is built once and cached; the
+//! field is drawn per hue, and a plan carries it only in H mode.
 
 use crate::color_bar_picture::bmp_data_uri;
 use crate::interpreter::color_util::{gradient_sb, hsb_to_rgb, strip_value};
