@@ -2742,7 +2742,9 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
 // `document::selection_geometry` so a native frame (`ffi_pointer::emit_frame`,
 // the WinUI shell) can draw the same squares; re-exported so call sites here
 // and the tests below are unchanged.
-pub use crate::document::selection_geometry::{selection_handle_rects, selection_outline_scale};
+pub use crate::document::selection_geometry::{
+    handle_zoom, selection_handle_rects, selection_handle_rects_at_zoom, selection_outline_scale,
+};
 
 // The transform-aware (EVALUATED) bboxes moved to the NATIVE module
 // `document::evaluated_bounds` so the algorithm_roundtrip binary — built
@@ -2753,7 +2755,7 @@ pub use crate::document::selection_geometry::{selection_handle_rects, selection_
 pub use crate::document::evaluated_bounds::selection_evaluated_bounds;
 
 
-fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
+fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document, zoom: f64) {
     let sel_color = "rgba(0, 120, 215, 0.9)";
     ctx.set_stroke_style_str(sel_color);
     ctx.set_line_width(1.0);
@@ -2837,8 +2839,9 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
                 }
 
                 // NOTE: the control-point handle SQUARES are intentionally NOT
-                // drawn here. They are drawn below via `selection_handle_rects`
-                // at a FIXED screen size under the view (pan/zoom) transform
+                // drawn here. They are drawn below via
+                // `selection_handle_rects_at_zoom` at a FIXED screen size (the
+                // rects divided by the zoom) under the view (pan/zoom) transform
                 // only — the element transform was restored — so an element's
                 // transform moves them but never scales the glyphs. The
                 // outline trace above stays under the element transform (it
@@ -2857,10 +2860,10 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
         // have set it to `inv` (counter-scaled), but the handle SQUARES are a
         // separate fixed-size pass (drawn after `restore`, under the view
         // transform only) and must NOT be counter-scaled by the element scale.
-        ctx.set_line_width(1.0);
+        ctx.set_line_width(1.0 / handle_zoom(zoom));
         ctx.set_stroke_style_str(sel_color);
         for (i, (hx, hy, hw, hh)) in
-            selection_handle_rects(doc, &es.path).into_iter().enumerate()
+            selection_handle_rects_at_zoom(doc, &es.path, zoom).into_iter().enumerate()
         {
             if es.kind.contains(i) {
                 ctx.set_fill_style_str(sel_color);
@@ -3135,6 +3138,7 @@ pub fn render(
     brush_libraries: &serde_json::Value,
     id_index: &IdIndex,
     generation: u64,
+    zoom: f64,
 ) {
     // Install the brush registry for this render. Dropped on exit
     // (guard restores the prior value), so nested renders nest safely.
@@ -3225,8 +3229,9 @@ pub fn render(
     // Layer 8: per-artboard display marks.
     draw_artboard_display_marks(ctx, doc);
 
-    // Layer 9: selection overlays — unchanged.
-    draw_selection_overlays(ctx, doc);
+    // Layer 9: selection overlays; `zoom` keeps the anchor squares a fixed
+    // screen size.
+    draw_selection_overlays(ctx, doc, zoom);
 }
 
 #[cfg(test)]

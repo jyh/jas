@@ -1437,6 +1437,8 @@ impl AppState {
             // Phase 4c: epoch the reference-geometry recompute cache off the
             // Model's generation (cleared on any edit / undo / redo).
             tab.model.generation(),
+            // The anchor squares are a fixed screen size (finding 9).
+            tab.model.zoom_level,
         );
         drop(ctx_guard);
 

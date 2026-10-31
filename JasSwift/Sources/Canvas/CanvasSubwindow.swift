@@ -2784,7 +2784,7 @@ private func drawArtboardDisplayMarks(_ ctx: CGContext, _ doc: Document) {
 /// 08b3f3a9): transforms are applied innermost-first — the element's own
 /// transform, then each ancestor outward (layer last) — matching the
 /// painter's combined CTM.
-func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
+func selectionHandleRects(_ doc: Document, _ path: ElementPath, zoom: CGFloat = 1) -> [CGRect] {
     guard !path.isEmpty else { return [] }
     // Resolve the element + collect ancestor transforms (outermost first).
     var node: Element = .layer(doc.layers[path[0]])
@@ -2819,7 +2819,12 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
     // Apply transforms innermost-first: the element's own transform, then each
     // ancestor outward (layer last) — matching the painter's combined CTM.
     let chain: [Transform?] = [elem.transform] + ancestors.reversed()
-    let half = handleDrawSize / 2
+    // A FIXED SCREEN SIZE (the Captain's ruling, 10-30 feel sitting): the
+    // caller draws under the view transform, so the square is
+    // `handleDrawSize / zoom` document units. A non-positive zoom is not a
+    // view and draws at zoom 1.
+    let size = handleDrawSize / (zoom > 0 ? zoom : 1)
+    let half = size / 2
     var rects: [CGRect] = []
     // RESOLVED: a symbol instance measures its TARGET, so the resolver-less
     // form collapsed its four corners onto the document origin — the selection
@@ -2834,12 +2839,12 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
             }
         }
         rects.append(CGRect(x: px - half, y: py - half,
-                            width: handleDrawSize, height: handleDrawSize))
+                            width: size, height: size))
     }
     return rects
 }
 
-private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjectPath: ElementPath? = nil) {
+private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjectPath: ElementPath? = nil, zoom: CGFloat = 1) {
     // Built once for the whole overlay pass: a container's outline is the union
     // of its children, and a symbol instance child measures its TARGET.
     let overlayResolver = IdIndexResolver(index: rebuildIdIndex(doc))
@@ -2910,14 +2915,16 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
                 ctx.strokePath()
             }
         }
-        // Control-point handles: FIXED size at element-transformed positions,
-        // drawn under the VIEW (pan/zoom) transform only — the element
-        // transform was restored above — so the element's transform moves the
-        // handles but never scales the glyphs.
-        ctx.setLineWidth(1.0)
+        // Control-point handles: a FIXED SCREEN size at element-transformed
+        // positions, drawn under the VIEW (pan/zoom) transform only — the
+        // element transform was restored above — so the element's transform
+        // moves the handles but never scales the glyphs, and the rects and
+        // their 1 px edge are divided by the zoom so the view does not either.
+        let handleZoom = zoom > 0 ? zoom : 1
+        ctx.setLineWidth(1.0 / handleZoom)
         ctx.setLineDash(phase: 0, lengths: [])
         ctx.setStrokeColor(selectionColor)
-        for (i, r) in selectionHandleRects(doc, path).enumerated() {
+        for (i, r) in selectionHandleRects(doc, path, zoom: handleZoom).enumerated() {
             ctx.setFillColor(es.kind.contains(i) ? selectionColor : .white)
             ctx.fill(r)
             ctx.setStrokeColor(selectionColor)
@@ -3527,7 +3534,8 @@ class CanvasNSView: NSView {
             else { return nil }
             return arr
         }()
-        drawSelectionOverlays(ctx, document, keyObjectPath)
+        drawSelectionOverlays(ctx, document, keyObjectPath,
+                              zoom: CGFloat(controller?.model.zoomLevel ?? 1))
         // Restore the prior resolver now the live-evaluating passes are done.
         setCanvasRefResolver(priorRefResolver)
         ctx.restoreGState()

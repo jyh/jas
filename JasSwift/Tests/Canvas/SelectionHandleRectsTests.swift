@@ -80,3 +80,29 @@ private func sortedPoints(_ pts: [(Double, Double)]) -> [(Double, Double)] {
     let doc = Document(layers: [layer], selection: [ElementSelection.all([0, 0])])
     #expect(selectionHandleRects(doc, [0, 0]).isEmpty)
 }
+
+// THE CAPTAIN'S RULING, 10-30 Windows feel sitting (finding 9): handles are
+// drawn at a FIXED SCREEN SIZE. The rects are drawn under the view transform,
+// so at zoom z a square must be `handleDrawSize / z` document units: the
+// on-screen size is then `handleDrawSize` at every zoom. The centre does not
+// move with zoom. Zoom 1 is the old picture, byte for byte.
+@Test func selectionHandlesAreFixedOnScreenAtEveryZoom() {
+    let rect = Element.rect(Rect(x: 10, y: 20, width: 30, height: 40))
+    let doc = docWith(rect)
+    let atOne = selectionHandleRects(doc, [0, 0])
+    #expect(selectionHandleRects(doc, [0, 0], zoom: 1) == atOne)
+    for z in [0.25, 0.5, 2.0, 4.0] as [CGFloat] {
+        let rects = selectionHandleRects(doc, [0, 0], zoom: z)
+        #expect(rects.count == 4)
+        for (r, r1) in zip(rects, atOne) {
+            #expect(abs(r.width * z - handleDrawSize) < 1e-9, "zoom \(z): \(r.width) doc units")
+            #expect(abs(r.height * z - handleDrawSize) < 1e-9)
+            #expect(abs(r.midX - r1.midX) < 1e-9 && abs(r.midY - r1.midY) < 1e-9,
+                    "zoom \(z) moved a handle's centre")
+        }
+    }
+    // A non-positive zoom is not a view: it draws at zoom 1 rather than
+    // dividing by zero.
+    #expect(selectionHandleRects(doc, [0, 0], zoom: 0) == atOne)
+    #expect(selectionHandleRects(doc, [0, 0], zoom: -2) == atOne)
+}

@@ -18,7 +18,7 @@
 //! port owner's call; until then a change to either must be made to both.
 
 use crate::document::document::Document;
-use crate::document::selection_geometry::{selection_handle_rects, selection_outline_scale};
+use crate::document::selection_geometry::{handle_zoom, selection_handle_rects_at_zoom, selection_outline_scale};
 use crate::geometry::element::{Element, PathCommand};
 use crate::painter::overlay_ctx::OverlayCtx;
 
@@ -27,7 +27,8 @@ const SEL_COLOR: &str = "rgba(0, 120, 215, 0.9)";
 
 /// Draw the selection highlight for every selected element of `doc` -- the
 /// port of `canvas::render::draw_selection_overlays`; see the module docs.
-pub fn draw_selection_overlays(ctx: &mut OverlayCtx, doc: &Document) {
+/// `zoom` is the view's: the anchor squares are a fixed screen size.
+pub fn draw_selection_overlays(ctx: &mut OverlayCtx, doc: &Document, zoom: f64) {
     if doc.selection.is_empty() {
         return;
     }
@@ -83,11 +84,12 @@ pub fn draw_selection_overlays(ctx: &mut OverlayCtx, doc: &Document) {
             ctx.restore();
         }
 
-        // Control-point squares: fixed size, under the view transform only;
+        // Control-point squares: a FIXED SCREEN size (the rects and their
+        // 1 px edge divided by the zoom), under the view transform only;
         // blue when the point is selected, white when not.
-        ctx.set_line_width(1.0);
+        ctx.set_line_width(1.0 / handle_zoom(zoom));
         ctx.set_stroke_style_str(SEL_COLOR);
-        for (i, (hx, hy, hw, hh)) in selection_handle_rects(doc, &es.path).into_iter().enumerate() {
+        for (i, (hx, hy, hw, hh)) in selection_handle_rects_at_zoom(doc, &es.path, zoom).into_iter().enumerate() {
             ctx.set_fill_style_str(if es.kind.contains(i) { SEL_COLOR } else { "white" });
             ctx.fill_rect(hx, hy, hw, hh);
             ctx.stroke_rect(hx, hy, hw, hh);
@@ -190,10 +192,14 @@ mod tests {
     use crate::tool_consts::HANDLE_DRAW_SIZE;
 
     fn drawn(doc: &Document) -> Vec<Command> {
+        drawn_at(doc, 1.0)
+    }
+
+    fn drawn_at(doc: &Document, zoom: f64) -> Vec<Command> {
         let mut rec = RecordingPainter::new();
         {
             let mut ctx = OverlayCtx::new(&mut rec);
-            draw_selection_overlays(&mut ctx, doc);
+            draw_selection_overlays(&mut ctx, doc, zoom);
             ctx.finish();
         }
         rec.commands().to_vec()
@@ -231,6 +237,32 @@ mod tests {
         assert_eq!(edged, 4, "each square is also edged");
         assert!(cmds.iter().any(|c| matches!(c, Command::StrokePath { .. })),
                 "the element's own outline is traced");
+    }
+
+    /// THE CAPTAIN'S RULING, 10-30 feel sitting (finding 9): the squares are a
+    /// FIXED SCREEN SIZE. Drawn under the view transform, a square at zoom z
+    /// is `HANDLE_DRAW_SIZE / z` document units, so it shows the same size at
+    /// every zoom; its centre does not move, and zoom 1 is the old picture.
+    #[test]
+    fn the_anchor_squares_are_a_fixed_screen_size_at_every_zoom() {
+        let m = model_with(vec![rect(20.0, 30.0, 100.0, 80.0)], &[0]);
+        let at_one = fills(&drawn(m.document()));
+        assert_eq!(fills(&drawn_at(m.document(), 1.0)), at_one);
+        for z in [0.25, 0.5, 2.0, 4.0] {
+            let f = fills(&drawn_at(m.document(), z));
+            assert_eq!(f.len(), 4, "zoom {z}");
+            for (q, q1) in f.iter().zip(at_one.iter()) {
+                assert!((q.2 * z - HANDLE_DRAW_SIZE).abs() < 1e-9, "zoom {z}: {q:?}");
+                assert!((q.3 * z - HANDLE_DRAW_SIZE).abs() < 1e-9, "zoom {z}: {q:?}");
+                assert!((q.0 + q.2 / 2.0 - (q1.0 + q1.2 / 2.0)).abs() < 1e-9
+                        && (q.1 + q.3 / 2.0 - (q1.1 + q1.3 / 2.0)).abs() < 1e-9,
+                        "zoom {z} moved a centre: {q:?} vs {q1:?}");
+            }
+        }
+        // Not a view: drawn at zoom 1, never divided by zero.
+        for z in [0.0, -2.0, f64::NAN] {
+            assert_eq!(fills(&drawn_at(m.document(), z)), at_one, "zoom {z}");
+        }
     }
 
     /// A PARTIAL selection fills only the chosen anchor; the rest are white.
