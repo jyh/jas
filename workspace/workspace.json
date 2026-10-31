@@ -30264,9 +30264,10 @@
                         "id": "cp_colorbar",
                         "type": "color_hue_bar",
                         "summary": "Hue bar",
-                        "description": "Vertical bar showing a rainbow hue gradient. Click or drag to select a hue value (0-360). Arrow indicator shows current position.\n",
+                        "description": "Vertical bar showing a rainbow hue gradient. Click or drag to select a hue value (0-360). Arrow indicator shows current position. It is 32 px wide, never narrower, and as tall as the gradient beside it.\n",
                         "style": {
                           "width": 32,
+                          "min_width": 32,
                           "flex": 1,
                           "min_height": 100
                         },

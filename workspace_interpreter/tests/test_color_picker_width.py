@@ -32,29 +32,33 @@ PICKER = WORKSPACE["dialogs"]["color_picker"]
 SHELL_DEFAULT_W = 420
 
 
-def _field_width(avail_w):
+def _fields_column_width(avail_w):
+    """The width of the main row's cell that holds the HSB fields (``cp_h``).
+    Since STATUS-flask 705 (1b) the field keeps its min_width at any width,
+    so the declared width shows in this column instead."""
     path = None
 
     def walk(n, p):
         nonlocal path
         if isinstance(n, dict):
-            if n.get("id") == "cp_gradient":
+            if n.get("id") == "cp_h" or (n.get("params") or {}).get("input_id") == "cp_h":
                 path = p
             for i, c in enumerate(n.get("children") or []):
                 walk(c, p + [i])
 
     walk(PICKER["content"], [])
-    assert path is not None, "the picker has no cp_gradient"
+    assert path is not None and len(path) >= 2, "the picker has no cp_h"
+    cell = path[:2]
     rects = layout_panel({"content": PICKER["content"]}, avail_w)
-    return next(r["rect"]["w"] for r in rects if r["path"] == path)
+    return next(r["rect"]["w"] for r in rects if r["path"] == cell)
 
 
 def test_the_color_picker_declares_the_webs_measured_outer_width():
     assert PICKER.get("width") == 510, PICKER.get("width")
 
 
-def test_the_declared_width_gives_the_field_more_room_than_the_shell_default():
+def test_the_declared_width_gives_the_fields_column_more_room_than_the_shell_default():
     # A control: what the shell planned before, with no declared width.
-    before = _field_width(SHELL_DEFAULT_W)
-    after = _field_width(PICKER.get("width") or SHELL_DEFAULT_W)
+    before = _fields_column_width(SHELL_DEFAULT_W)
+    after = _fields_column_width(PICKER.get("width") or SHELL_DEFAULT_W)
     assert after > before, (before, after)

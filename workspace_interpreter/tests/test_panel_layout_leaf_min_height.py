@@ -96,4 +96,6 @@ def test_the_color_pickers_field_and_strip_from_their_own_yaml():
     assert (got["w"], got["h"]) == (want_w, want_h) == (180, 180), got
     strip, strip_path = nodes["cp_colorbar"]
     got = by_path[tuple(strip_path)]
-    assert (got["w"], got["h"]) == (strip["style"]["width"], strip["style"]["min_height"]), got
+    # The strip declares no height, so its row stretches it to the field's
+    # (STATUS-flask 705 (2), CSS align-items: stretch), not its min_height.
+    assert (got["w"], got["h"]) == (strip["style"]["width"], want_h), got
