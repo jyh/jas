@@ -3755,6 +3755,39 @@
         "path": [
           3,
           0,
+          1
+        ],
+        "id": "lp_eye",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "eye_invisible"
+      },
+      {
+        "path": [
+          3,
+          0,
+          2
+        ],
+        "id": "lp_lock",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "lock_locked"
+      },
+      {
+        "path": [
+          3,
+          0,
+          3
+        ],
+        "id": "lp_twirl",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "twirl_open"
+      },
+      {
+        "path": [
+          3,
+          0,
           3
         ],
         "id": "lp_twirl",
@@ -3847,6 +3880,39 @@
         "key": "bind.opacity",
         "type": "number",
         "value": "1"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1
+        ],
+        "id": "lp_eye",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "eye_preview"
+      },
+      {
+        "path": [
+          3,
+          1,
+          2
+        ],
+        "id": "lp_lock",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "lock_unlocked"
+      },
+      {
+        "path": [
+          3,
+          1,
+          3
+        ],
+        "id": "lp_twirl",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "twirl_open"
       },
       {
         "path": [
@@ -3949,6 +4015,39 @@
         "path": [
           3,
           2,
+          1
+        ],
+        "id": "lp_eye",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "eye_preview"
+      },
+      {
+        "path": [
+          3,
+          2,
+          2
+        ],
+        "id": "lp_lock",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "lock_unlocked"
+      },
+      {
+        "path": [
+          3,
+          2,
+          3
+        ],
+        "id": "lp_twirl",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "twirl_open"
+      },
+      {
+        "path": [
+          3,
+          2,
           3
         ],
         "id": "lp_twirl",
@@ -4041,6 +4140,39 @@
         "key": "bind.opacity",
         "type": "number",
         "value": "1"
+      },
+      {
+        "path": [
+          3,
+          3,
+          1
+        ],
+        "id": "lp_eye",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "eye_preview"
+      },
+      {
+        "path": [
+          3,
+          3,
+          2
+        ],
+        "id": "lp_lock",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "lock_unlocked"
+      },
+      {
+        "path": [
+          3,
+          3,
+          3
+        ],
+        "id": "lp_twirl",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "twirl_open"
       },
       {
         "path": [
@@ -4138,6 +4270,39 @@
         "key": "bind.opacity",
         "type": "number",
         "value": "1"
+      },
+      {
+        "path": [
+          3,
+          4,
+          1
+        ],
+        "id": "lp_eye",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "eye_preview"
+      },
+      {
+        "path": [
+          3,
+          4,
+          2
+        ],
+        "id": "lp_lock",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "lock_unlocked"
+      },
+      {
+        "path": [
+          3,
+          4,
+          3
+        ],
+        "id": "lp_twirl",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "twirl_open"
       },
       {
         "path": [
@@ -4262,6 +4427,17 @@
         "key": "bind.value",
         "type": "null",
         "value": ""
+      },
+      {
+        "path": [
+          2,
+          2,
+          0
+        ],
+        "id": "ao_chain_link",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "chain_broken"
       },
       {
         "path": [
@@ -4474,6 +4650,17 @@
       {
         "path": [
           2,
+          2,
+          0
+        ],
+        "id": "ao_chain_link",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "chain_broken"
+      },
+      {
+        "path": [
+          2,
           3,
           0
         ],
@@ -4682,6 +4869,17 @@
       {
         "path": [
           2,
+          2,
+          0
+        ],
+        "id": "ao_chain_link",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "chain_broken"
+      },
+      {
+        "path": [
+          2,
           3,
           0
         ],
@@ -4886,6 +5084,17 @@
         "key": "bind.value",
         "type": "null",
         "value": ""
+      },
+      {
+        "path": [
+          2,
+          2,
+          0
+        ],
+        "id": "ao_chain_link",
+        "key": "bind.icon",
+        "type": "string",
+        "value": "chain_broken"
       },
       {
         "path": [

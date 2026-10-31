@@ -670,7 +670,8 @@ content:
           # Eye button (visibility)
           - id: lp_eye
             type: icon_button
-            icon: "{{if node.visibility == 'preview' then 'eye_preview' else if node.visibility == 'outline' then 'eye_outline' else 'eye_invisible'}}"
+            bind:
+              icon: "if node.visibility == 'preview' then 'eye_preview' else if node.visibility == 'outline' then 'eye_outline' else 'eye_invisible'"
             summary: "Visibility"
             style: { size: 16 }
             behavior:
@@ -686,7 +687,8 @@ content:
           # Lock button
           - id: lp_lock
             type: icon_button
-            icon: "{{if node.locked then 'lock_locked' else 'lock_unlocked'}}"
+            bind:
+              icon: "if node.locked then 'lock_locked' else 'lock_unlocked'"
             summary: "Lock"
             style: { size: 16 }
             behavior:
@@ -697,10 +699,10 @@ content:
           # Twirl-down button (containers only) or alignment gap (leaves)
           - id: lp_twirl
             type: icon_button
-            icon: "{{if any(panel.collapsed_paths, fun p -> p == node.path) then 'twirl_closed' else 'twirl_open'}}"
             summary: "Expand/Collapse"
             style: { size: 16 }
             bind:
+              icon: "if any(panel.collapsed_paths, fun p -> p == node.path) then 'twirl_closed' else 'twirl_open'"
               visible: "node.is_container"
             behavior:
               - event: click

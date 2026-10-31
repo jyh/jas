@@ -98,9 +98,9 @@ def test_a_collapsed_path_hides_its_children_and_closes_its_twirl():
 
 def test_the_twirl_icon_reads_the_collapsed_paths():
     tree = _tree()
-    twirl = _widget(tree["do"], "lp_twirl")["icon"]
+    twirl = _widget(tree["do"], "lp_twirl")["bind"]["icon"]
     group = [r for r in _rows() if r["type"] == "group"][0]
-    icon = lambda collapsed: evaluate(twirl.strip("{}"), {**_ctx(collapsed=collapsed), "node": group}).value
+    icon = lambda collapsed: evaluate(twirl, {**_ctx(collapsed=collapsed), "node": group}).value
     assert icon([]) == "twirl_open"
     assert icon([group["path"]]) == "twirl_closed"
     assert icon([[9, 9]]) == "twirl_open", "another path does not close it"
@@ -115,3 +115,20 @@ def test_the_expanded_tree_is_not_also_drawn_as_a_leaf():
     kinds = [leaf["node"].get("type") for leaf in plan["leaves"]]
     assert "tree_view" not in kinds, kinds
     assert kinds.count("icon_button") >= 2 * len(_rows()), "the control: the rows' leaves are there"
+
+
+def test_the_eye_and_lock_icons_are_bound_from_the_row():
+    """The 10-30 Windows sitting, finding 4: the row's eye, lock and twirl drew
+    as TEXT on Windows, because their `icon:` was a `{{...}}` template, which
+    the plan withholds by design. They are `bind.icon` expressions, which every
+    shell already resolves. Each of the three visibilities and both lock states
+    names its own icon."""
+    tree = _tree()
+    eye = _widget(tree["do"], "lp_eye")["bind"]["icon"]
+    lock = _widget(tree["do"], "lp_lock")["bind"]["icon"]
+    at = lambda expr, **node: evaluate(expr, {**_ctx(), "node": node}).value
+    assert at(eye, visibility="preview") == "eye_preview"
+    assert at(eye, visibility="outline") == "eye_outline"
+    assert at(eye, visibility="invisible") == "eye_invisible"
+    assert at(lock, locked=True) == "lock_locked"
+    assert at(lock, locked=False) == "lock_unlocked"
