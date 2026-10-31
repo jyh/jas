@@ -482,14 +482,14 @@ fn flex(n: &Value) -> i64 {
     }
 }
 
-fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
+/// A leaf's width: its declared `size` (B.9), else its kind's, then a
+/// declared `width`, then floored by `min_width`. Its height is
+/// [`leaf_h`]'s, at the width the caller settles.
+fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> i64 {
     let t = node_type(n);
     let st = style(n);
     // B.9: a declared size is the leaf's width and height.
     let size = size_i(n);
-    let h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0)
-        .or(size)
-        .unwrap_or_else(|| kind_height(t));
     let mut w = if let Some(sz) = size {
         sz
     } else if is_fill(t) {
@@ -521,7 +521,32 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
     if let Some(m) = resolve_dim(&dim(st.get("min_width"), ctx), avail_w) {
         w = w.max(m);
     }
-    (w, h)
+    w
+}
+
+/// A leaf's height at its FINAL width `w` (row 62, STATUS-flask §703; the
+/// reference's `_leaf_h`): a declared `height` (or B.9's `size`) is the
+/// height; else an `aspect_ratio` (width / height) gives `w / r`, rounded half
+/// away from zero; else the kind's height. Then `min_height` floors it (B.6
+/// for a leaf, `min_width`'s twin).
+fn leaf_h(n: &Value, w: i64) -> i64 {
+    let st = style(n);
+    let h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0)
+        .or_else(|| size_i(n))
+        .unwrap_or_else(|| match aspect_ratio(n) {
+            Some(r) => (w as f64 / r).round() as i64,
+            None => kind_height(node_type(n)),
+        });
+    match resolve_dim(st.get("min_height").unwrap_or(&Value::Null), 0) {
+        Some(floor) => h.max(floor),
+        None => h,
+    }
+}
+
+/// Row 62: a leaf's `style.aspect_ratio` (width / height), a positive number;
+/// else `None`. A bool is not a number here (serde agrees).
+fn aspect_ratio(n: &Value) -> Option<f64> {
+    style(n).get("aspect_ratio").and_then(Value::as_f64).filter(|r| *r > 0.0)
 }
 
 /// B.9: a leaf's `style.size` (a number), truncated; else `None`.
@@ -593,7 +618,7 @@ fn grid_lines<'a>(children: &[(i64, &'a Value)]) -> Vec<Vec<(i64, &'a Value, i64
 /// letting a wide label or input overrun its neighbour.
 fn natural_w(n: &Value, ctx: &Value) -> i64 {
     if !(is_container(n) || node_type(n) == "disclosure") {
-        return leaf_size(n, -1, ctx).0;
+        return leaf_size(n, -1, ctx);
     }
     let st = style(n);
     // B.5: a declared width is the container's natural width. A percentage has
@@ -724,12 +749,13 @@ fn measure(
         }
         (w, h, items)
     } else {
-        let (mut w, h) = leaf_size(n, avail_w, ctx);
+        let mut w = leaf_size(n, avail_w, ctx);
         // A leaf renders at its own width regardless of its slot; clamp it to
         // the width available so it cannot overrun a neighbour (text may clip).
         if avail_w > 0 && w > avail_w {
             w = avail_w;
         }
+        let h = leaf_h(n, w);
         (
             w,
             h,
@@ -1363,6 +1389,32 @@ mod position_and_size_tests {
     fn a_declared_width_and_height_still_apply_after_size() {
         let r = rects(col(json!([btn(json!({"size": 14, "width": 30, "height": 9}))])), 200);
         assert_eq!((r[&vec![0]].2, r[&vec![0]].3), (30, 9));
+    }
+
+    /// ROW 62 (STATUS-flask §703), the reference's
+    /// `test_panel_layout_leaf_min_height.py` row for row: a leaf's height is
+    /// its declared `height` (or `size`); else `w / aspect_ratio` from its
+    /// FINAL width, rounded half away from zero; else its kind's; then its
+    /// `min_height` floors it.
+    #[test]
+    fn a_leafs_min_height_and_aspect_ratio_set_its_height() {
+        let h = |style: Value, avail: i64| {
+            let r = rects(col(json!([{"type": "color_gradient", "style": style}])), avail);
+            (r[&vec![0]].2, r[&vec![0]].3)
+        };
+        assert_eq!(h(json!({}), 400).1, 20, "CONTROL: the kind's height");
+        assert_eq!(h(json!({"min_height": 100}), 400).1, 100, "min_height floors the kind's height");
+        assert_eq!(h(json!({"height": 50, "min_height": 60}), 400).1, 60, "and a declared height");
+        assert_eq!(h(json!({"height": 80, "min_height": 60}), 400).1, 80, "never lowering it");
+        assert_eq!(h(json!({"width": 120, "aspect_ratio": 2}), 400).1, 60, "aspect sets an undeclared height");
+        assert_eq!(h(json!({"min_width": 180, "aspect_ratio": 1}), 400), (180, 180), "the picker's field");
+        assert_eq!(h(json!({"width": 181, "aspect_ratio": 2}), 400).1, 91, "90.5 rounds half away");
+        assert_eq!(h(json!({"width": 120, "aspect_ratio": 2, "height": 40}), 400).1, 40, "a declared height wins");
+        assert_eq!(h(json!({"width": 100, "aspect_ratio": 2, "min_height": 60}), 400).1, 60, "min_height floors aspect");
+        assert_eq!(h(json!({"min_width": 180, "aspect_ratio": 1}), 150), (150, 150), "the width after the clamp");
+        for bad in [json!(0), json!(-1), json!("1"), json!(true)] {
+            assert_eq!(h(json!({"width": 120, "aspect_ratio": bad.clone()}), 400).1, 20, "{bad} is ignored");
+        }
     }
 
     #[test]
