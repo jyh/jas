@@ -153,6 +153,29 @@ internal static class PanelWire
         before is null ? null : now.FirstOrDefault(p => !before.Contains(p));
 
     /// <summary>
+    /// flask §656: the row a press on <paramref name="leafPath"/> belongs to when
+    /// the leaf does not answer `click` itself: the innermost surface whose path
+    /// strictly encloses the leaf's and which routes `click`
+    /// (<see cref="RoutesPress"/>), as a click bubbles to its row on the web. A
+    /// Layers name answers only `double_click`, and a surface is a SIBLING drawn
+    /// beneath its leaves, so without this the name took the press and sent
+    /// nothing. Null when no surface around the leaf answers.
+    /// </summary>
+    internal static HitBox? PressTarget(IReadOnlyList<HitBox> hits, string leafPath)
+    {
+        HitBox? best = null;
+        foreach (var hit in hits)
+        {
+            // "[3,5" + "," so that [3,5] encloses [3,5,7] and not [3,50,7].
+            var prefix = hit.Path.TrimEnd(']') + ",";
+            if (!leafPath.StartsWith(prefix, StringComparison.Ordinal)) { continue; }
+            if (!RoutesPress(hit.Events, hit.Id, hit.Path)) { continue; }
+            if (best is null || hit.Path.Length > best.Path.Length) { best = hit; }
+        }
+        return best;
+    }
+
+    /// <summary>
     /// The event JSON for a gesture on a stops kind (`WIDGET_EVENTS.md` §The
     /// stops kind): `value` is an OBJECT of the gesture's RAW parameters (an
     /// `index`, a `pair`, a `location` in percent, a `dy` in DIPs), never a
@@ -1989,4 +2012,13 @@ internal static class PanelKeys
         'a' => ctrl,
         _ => false,
     };
+
+    /// <summary>
+    /// flask §656: the keys routed from a pane's focus BEFORE they bubble: the
+    /// arrows, Home and End. A dock column that overflows is a ScrollViewer,
+    /// which takes exactly these on their way up to scroll itself, so a row
+    /// press that gave the panel the keyboard still lost Up and Down while F2
+    /// and Ctrl+A arrived. Every other key bubbles as before.
+    /// </summary>
+    internal static bool BeforeScroller(uint code) => code is 0xF700 or 0xF701 or 0xF702 or 0xF703 or 0xF729 or 0xF72B;
 }

@@ -2183,6 +2183,7 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         JasCore.jas_set_dpi_scale(_engine, _scaleX);
+        TellViewport();
         // The window validated SB_TOOL against `jas_tool_count`; a refusal
         // here would mean the core's list moved under it, and it is named.
         var toolStatus = JasCore.jas_set_tool(_engine, ToolIndex);
@@ -2331,12 +2332,27 @@ internal sealed unsafe class Canvas : IDisposable
         // omission would have been a named negative rather than a silent
         // invariant.
         BindPanelFromRenderThread();
+        TellViewport();
 
         ResizeCost = $"rcw-release={swGc.Elapsed.TotalMilliseconds:F2}ms "
                    + $"resizebuffers={swBuf.Elapsed.TotalMilliseconds:F2}ms "
                    + $"target-recreate={swTgt.Elapsed.TotalMilliseconds:F2}ms";
         LastStatus = $"resized to {SurfaceLabel()} :: {ResizeCost}";
         return true;
+    }
+
+    /// <summary>
+    /// The engine's viewport is this surface, so Fit in Window, Fit Artboard and
+    /// the View menu's zoom centre on what is on screen and not on the model's
+    /// 888x900 default (the 10-30 feel sitting's page, §3). Physical pixels, as
+    /// every pointer is; the core divides by the scale it was told, and a scale
+    /// change alone re-derives it there.
+    /// </summary>
+    private void TellViewport()
+    {
+        if (_engine == IntPtr.Zero || _width == 0 || _height == 0) { return; }
+        var rc = JasCore.jas_set_viewport_size(_engine, _width, _height);
+        if (rc != 0) { _report($"RUSTFAIL jas_set_viewport_size({_width}x{_height}) returned {rc} {Tids()}"); }
     }
 
     private void ApplyPointer(PointerCmd p)
@@ -5115,7 +5131,8 @@ internal sealed unsafe class Canvas : IDisposable
     /// A menu item's action, run by the ENGINE (`jas_dispatch_action`). A refusal
     /// is written by its class (an action the spec gives only a `log:`, a dialog
     /// the shell does not build, an effect no engine runs), never as a silent
-    /// no-op; a run re-reads the menus and every pane, as a click does.
+    /// no-op; a run re-reads the menus and every pane, as a click does. Returns
+    /// true when the action ran, so the canvas repaints.
     /// </summary>
     private bool ApplyMenuAction(MenuActionCmd cmd)
     {
@@ -5169,7 +5186,12 @@ internal sealed unsafe class Canvas : IDisposable
         _report($"MENU ACTION RAN {head} outcome={(channel.Length == 0 ? "changed" : "unchanged")} "
               + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
               + $"channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
-        return docChanged;
+        // TRUE WHEN IT RAN, not only when the document changed: View > Zoom In,
+        // Zoom Out and the Fits change the view and nothing else, and returning
+        // `docChanged` left them unpainted until the next pointer move (flask,
+        // the 10-30 feel sitting's build, measured without SB_PROBE, whose own
+        // read repainted and hid it). One frame per menu choice costs nothing.
+        return true;
     }
 
     /// <summary>Queue Q6's replay on <paramref name="widget"/> (W2-6). See <see cref="ApplyPanelSynth"/>.</summary>

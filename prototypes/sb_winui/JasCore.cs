@@ -234,6 +234,14 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern int jas_set_dpi_scale(IntPtr engine, double scale);
 
+    /// <summary>
+    /// Tell the core the surface's size in PHYSICAL pixels, so Fit and the View
+    /// menu's zoom centre on the canvas on screen. Same rule as the scale: the
+    /// core turns it into DIPs, not the shell.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_set_viewport_size(IntPtr engine, double w, double h);
+
     /// <summary>Select the tool the pointer drives, by index.</summary>
     [DllImport(Lib)]
     internal static extern int jas_set_tool(IntPtr engine, nuint index);

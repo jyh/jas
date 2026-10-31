@@ -159,19 +159,6 @@
             Visibility="Collapsed" />
 
         <!--
-          FLOATING DOCKS (floating panels, FP-4a): an in-window layer over the
-          canvas's cell, one framed dock per floating dock the engine holds, at
-          its (x, y), stacked by the engine's `z`. NO BACKGROUND on purpose: the
-          layer's empty area passes every press to the canvas; each frame has
-          its own background and takes its own. Declared before DialogLayer, so a
-          dialog stays on top (no ZIndex is set between siblings here).
-        -->
-        <Canvas
-            x:Name="FloatLayer"
-            Grid.Row="1"
-            Grid.Column="1" />
-
-        <!--
           THE PANEL PANE, AND IT IS A MOUNT POINT LIKE THE MENUBAR (W2-5).
 
           Every control inside it is materialized at runtime from the core's
@@ -220,6 +207,23 @@
                     VerticalScrollBarVisibility="Auto" />
             </Grid>
         </Border>
+
+        <!--
+          FLOATING DOCKS (floating panels, FP-4a): an in-window layer over the
+          canvas's cell, one framed dock per floating dock the engine holds, at
+          its (x, y), stacked by the engine's `z`. NO BACKGROUND on purpose: the
+          layer's empty area passes every press to the canvas; each frame has
+          its own background and takes its own. Declared AFTER the dock column
+          and before DialogLayer (no ZIndex is set between siblings here), so a
+          floating panel draws over the dock and a dialog stays on top of both.
+          Until flask STATUS 660 it was declared before PaneHost: a panel dragged
+          by its title onto the dock went UNDER it, still floating, and its
+          title could no longer be double-clicked to redock it.
+        -->
+        <Canvas
+            x:Name="FloatLayer"
+            Grid.Row="1"
+            Grid.Column="1" />
 
         <!--
           Status is XAML, not painted content, so a blank canvas over a healthy
