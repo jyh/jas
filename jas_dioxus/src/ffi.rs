@@ -5670,6 +5670,46 @@ mod tests {
         assert!(seen >= 20, "the fixture reached the door ({seen})");
     }
 
+    /// ROW 62 at the object: the Color Picker's plan lays out the field at
+    /// `min_width` × `w / aspect_ratio` (floored by `min_height`) and the strip at
+    /// `width` × `min_height`, every number read from the YAML here, not typed.
+    /// Until row 62 both were 20 tall, and the field drew squashed on Windows
+    /// (#799's live run). Planned at 720, where the row gives each leaf its own
+    /// width: narrower, the row clamps the field below its `min_width` (135 at
+    /// the shell's 420 default), a width fork raised in STATUS-flask, not ruled.
+    #[test]
+    fn the_color_pickers_field_and_strip_are_laid_out_from_their_own_yaml() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#0000ff"}}"##);
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace");
+        let picker = ws.dialog("color_picker").expect("the Color Picker");
+        let node_of = |id: &str| -> serde_json::Value {
+            fn find(n: &serde_json::Value, id: &str) -> Option<serde_json::Value> {
+                if n["id"] == id { return Some(n.clone()); }
+                n["children"].as_array()?.iter().find_map(|c| find(c, id))
+            }
+            find(&picker["content"], id).unwrap_or_else(|| panic!("no node {id}"))
+        };
+        let plan: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 720, 640) })).unwrap();
+        let rect_of = |id: &str| -> (i64, i64) {
+            let leaf = plan["plan"]["leaves"].as_array().unwrap().iter().find(|l| l["id"] == id)
+                .unwrap_or_else(|| panic!("no leaf {id}"));
+            (leaf["rect"]["w"].as_i64().unwrap(), leaf["rect"]["h"].as_i64().unwrap())
+        };
+        let field = node_of("cp_gradient");
+        let fs = &field["style"];
+        let fw = fs["min_width"].as_i64().unwrap();
+        let fh = ((fw as f64 / fs["aspect_ratio"].as_f64().unwrap()).round() as i64).max(fs["min_height"].as_i64().unwrap());
+        assert_eq!(rect_of("cp_gradient"), (fw, fh));
+        assert_eq!((fw, fh), (180, 180), "the web draws the field 180 x 180 (measured 10-31)");
+        let strip = node_of("cp_colorbar");
+        assert_eq!(rect_of("cp_colorbar"),
+                   (strip["style"]["width"].as_i64().unwrap(), strip["style"]["min_height"].as_i64().unwrap()));
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A tool's resolved dialog params travel as literals that evaluate back
     /// to themselves, through the same evaluator the `open_dialog` effect uses.
     #[test]
