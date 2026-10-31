@@ -940,6 +940,12 @@ public enum PanelLayout {
             var widths: [Int]
             if total <= avail || total <= 0 {
                 widths = desired
+            } else if avail > 0 {
+                // Over-subscribed row: shrink cells in proportion, never below
+                // a floor a cell declares, as `flow` does (STATUS-jas row 68).
+                // With no floor this is the proportional rule below, remainder
+                // order included.
+                widths = shrink(desired, line.map { floorW($0.1, ctx) }, avail)
             } else {
                 // Over-subscribed row: shrink cells proportionally to fit, then
                 // hand the rounding remainder out one pixel at a time.

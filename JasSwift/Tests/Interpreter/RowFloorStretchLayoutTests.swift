@@ -98,3 +98,21 @@ private func row(_ children: [[String: Any]], _ availW: Int = 400,
     r = row([leaf(["width": 10, "min_height": 70])], 400, ["height": 50])
     #expect(r[[0]]?.h == 70, "floored by the leaf's min_height")
 }
+
+// STATUS-jas row 68: a `col` grid line honours its cells' floors, the
+// reference's test_panel_layout_grid_floor.py row for row.
+@Test func aColGridLineHonoursItsCellsFloorsRowForRowWithTheReference() {
+    func line(_ l: [String: Any], _ r: [String: Any]) -> [Int?] {
+        let cell = { (span: Int, c: [String: Any]) -> [String: Any] in
+            ["type": "container", "col": span, "children": [c]]
+        }
+        let p = row([cell(5, leaf(l)), cell(7, leaf(r))], 200, ["gap": 6])
+        return [p[[0]]?.w, p[[1]]?.w]
+    }
+    #expect(line(["width": 150], ["width": 149]) == [98, 96], "CONTROL: no floors, in proportion")
+    #expect(line(["width": 150, "min_width": 105], ["width": 149]) == [105, 89])
+    #expect(line(["width": 150, "min_width": 105], ["width": 149, "min_width": 80]) == [105, 89],
+            "only the cell that needs it freezes")
+    #expect(line(["width": 150, "min_width": 120], ["width": 149, "min_width": 100]) == [98, 96],
+            "floors that cannot all hold are dropped")
+}

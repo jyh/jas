@@ -18005,7 +18005,7 @@
                     "content": "Tolerance:",
                     "style": {
                       "font_size": 11,
-                      "min_width": 57
+                      "min_width": 55
                     }
                   },
                   {
@@ -18098,7 +18098,7 @@
                     "content": "Tolerance:",
                     "style": {
                       "font_size": 11,
-                      "min_width": 57
+                      "min_width": 55
                     }
                   },
                   {
@@ -18153,6 +18153,9 @@
                     "id": "mwp_stroke_weight",
                     "type": "toggle",
                     "label": "Stroke Weight",
+                    "style": {
+                      "min_width": 105
+                    },
                     "bind": {
                       "checked": "panel.stroke_weight"
                     },
@@ -18191,14 +18194,14 @@
                     "content": "Tolerance:",
                     "style": {
                       "font_size": 11,
-                      "min_width": 57
+                      "min_width": 55
                     }
                   },
                   {
                     "id": "mwp_stroke_weight_tolerance",
                     "type": "number_input",
                     "style": {
-                      "min_width": 41
+                      "min_width": 42
                     },
                     "min": 0,
                     "max": 100,
@@ -18291,7 +18294,7 @@
                     "content": "Tolerance:",
                     "style": {
                       "font_size": 11,
-                      "min_width": 57
+                      "min_width": 55
                     }
                   },
                   {

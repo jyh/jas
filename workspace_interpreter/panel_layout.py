@@ -790,6 +790,12 @@ def _grid(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
         total = sum(desired)
         if total <= avail or total <= 0:
             widths = desired
+        elif avail > 0:
+            # Over-subscribed row: shrink cells in proportion, never below a
+            # floor a cell declares, as _flow does (STATUS-jas row 68). With
+            # no floor this is the proportional rule below, remainder order
+            # included.
+            widths = _shrink(desired, [_floor_w(c, ctx) for _i, c, _s in line], avail)
         else:
             # Over-subscribed row: shrink cells proportionally to fit, then
             # hand the rounding remainder out one pixel at a time (deterministic
