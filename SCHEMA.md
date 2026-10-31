@@ -650,7 +650,7 @@ recommended for every element.
 | `tabs` | Tabbed container; one child visible at a time | `active`: index or bind expression |
 | `panel` | Named content region within tabs | `panel_kind`, `menu` |
 | `button` | Clickable button | `label`, `action`, `params`, `variant`, `icon` |
-| `icon_button` | Small icon-only button | `icon`, `action`, `params` |
+| `icon_button` | Small icon button. With a `label` it draws the icon, then the label beside it, laid out by its `justify` and `gap` (the tool-alternates flyout's rows); without one it is icon-only, and `summary` is its tooltip | `icon`, `label`, `action`, `params` |
 | `dropdown` | Button that opens a menu of items | `icon`, `label`, `items`: list of `{label, action, params}` |
 | `toggle` | Toggle / checkbox | `label`, `bind` |
 | `radio_group` | Mutually exclusive options | `options`: `[{id, label}]`, `bind` |
@@ -1401,8 +1401,16 @@ button and `bind.visible` on warning text elements:
 ### Non-Modal Dialogs (Tool Alternates)
 
 Dialogs with `modal: false` are flyout menus (e.g., toolbar tool
-alternates). They render as compact lists of action buttons. Each
-button typically selects a tool and closes the dialog:
+alternates). They render as compact lists of action buttons, as a
+popover beside the control that opened them, with no backdrop. Each
+button typically selects a tool and closes the dialog.
+
+A non-modal flyout closes in exactly three ways: a button whose effects
+close it (above); a press outside it, which closes it and does NOTHING
+else, so the press is not also delivered to what lies beneath (a
+dismissing click never draws or selects); and Escape. While it is open,
+everything outside it stays live to the pointer only through that
+dismissing press.
 
 ```yaml
 arrow_alternates:

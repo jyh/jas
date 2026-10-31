@@ -339,6 +339,8 @@ public sealed partial class MainWindow : Window
         if (!_dockGroups.TryGetValue(key, out var g)) { return; }
         g.Body.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         g.Chevron.Content = collapsed ? "▸" : "▾";
+        // #774: the menu is hidden while its group is collapsed.
+        g.Menu.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         var body = g.Body.Visibility == Visibility.Collapsed ? "hidden" : "visible";
         Report($"DOCK GROUP key={key} collapsed={(collapsed ? "true" : "false")} body={body} via={via}");
     }
@@ -580,7 +582,6 @@ public sealed partial class MainWindow : Window
                 var tabs = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
-                    Margin = new Thickness(4, 4, 4, 0),
                     Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 };
                 var tabList = new List<(string, Button)>();
@@ -621,7 +622,11 @@ public sealed partial class MainWindow : Window
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(chevron, key + "_collapse");
                 ToolTipService.SetToolTip(chevron, "Collapse/Expand");
                 chevron.Click += (_, _) => ToggleDockGroup(groupKey, "hand");
-                tabs.Children.Add(chevron);
+                // The 10-30 sitting, finding 7 (#774): the chevron and the menu sit at
+                // the header's TRAILING edge whatever the tab count, in their own
+                // `Auto` column; the tabs fill the `*` column (still the tear-out handle).
+                var trailing = new StackPanel { Orientation = Orientation.Horizontal };
+                trailing.Children.Add(chevron);
                 // The panel menu (the owner's note 3, 2026-10-12): the core's rows
                 // for the group's CURRENT panel, read when it is opened.
                 var menuButton = new Button
@@ -635,9 +640,16 @@ public sealed partial class MainWindow : Window
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(menuButton, key + "_menu");
                 ToolTipService.SetToolTip(menuButton, "Panel menu");
                 menuButton.Click += (_, _) => RequestPanelMenu(groupKey, "hand");
-                tabs.Children.Add(menuButton);
+                trailing.Children.Add(menuButton);
+                var header = new Grid { Margin = new Thickness(4, 4, 4, 0) };
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                Grid.SetColumn(tabs, 0);
+                Grid.SetColumn(trailing, 1);
+                header.Children.Add(tabs);
+                header.Children.Add(trailing);
                 var body = new StackPanel();
-                body.Children.Add(tabs);
+                body.Children.Add(header);
                 body.Children.Add(scroll);
                 var frame = new Border
                 {
@@ -652,7 +664,8 @@ public sealed partial class MainWindow : Window
                 _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
                 MarkDockTab(key, ids[active]);
                 // The engine's collapse, drawn silently at build (the YAML seeds every group open).
-                if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; }
+                // #774: the menu is hidden while its group is collapsed.
+                if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; menuButton.Visibility = Visibility.Collapsed; }
                 // A floating group's collapse is addressed by its own dock id,
                 // which FP-4a does not send; its chevron is hidden, not inert.
                 if (!key.StartsWith("dock", StringComparison.Ordinal)) { chevron.Visibility = Visibility.Collapsed; }
@@ -905,6 +918,13 @@ public sealed partial class MainWindow : Window
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);
         _canvas.ExportPdfReady = SaveExportedPdf;
         _canvas.PanesChanged = OnPanesChanged;
+        _canvas.TimersRequested = OnTimersRequested;
+        _canvas.TimerAnswered = (panel, widget, opened) =>
+        {
+            var heldSent = LongPress(panel, widget).Answered(opened);
+            Report($"TIMER ANSWERED panel={panel} widget={widget} opened={(opened ? "true" : "false")}"
+                 + (heldSent ? " held-click=sent" : ""));
+        };
         _canvas.CloseApproved = () =>
         {
             _closeApproved = true;
@@ -2295,6 +2315,61 @@ public sealed partial class MainWindow : Window
     /// which cannot see session 1's titles. Both, because they answer different
     /// questions.
     /// </summary>
+    // =======================================================================
+    // FINDING 1 (the 10-30 sitting; the engine half is #771): PRESS-AND-HOLD.
+    // A slot's `mouse_down` reply asks for a timer; this side runs the clock
+    // and, on the tick, sends `{"event": "timer", "value": id}` back through
+    // the same panel door. The engine keeps the effects and decides; a tick
+    // that raced a release is its StaleTimer, a no-op.
+    // =======================================================================
+
+    private readonly Dictionary<string, DispatcherQueueTimer> _behaviorTimers = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Panel, string Widget), LongPressGate> _longPress = new();
+
+    /// <summary>The click gate of one press-and-hold button, made on first use.</summary>
+    internal LongPressGate LongPress(string panel, string widget)
+    {
+        if (!_longPress.TryGetValue((panel, widget), out var gate))
+        {
+            gate = new LongPressGate();
+            _longPress[(panel, widget)] = gate;
+        }
+        return gate;
+    }
+
+    private void OnTimersRequested(string panel, string widget, string? path, IReadOnlyList<TimerWire.Act> acts)
+    {
+        foreach (var act in acts)
+        {
+            if (_behaviorTimers.Remove(act.Id, out var running)) { running.Stop(); }
+            if (act.Cancel) { continue; }
+            // Starting an id that is already pending REPLACES it (#771): the old
+            // one was stopped above.
+            var timer = _ui.CreateTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(act.DelayMs);
+            timer.IsRepeating = false;
+            var id = act.Id;
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                _behaviorTimers.Remove(id);
+                LongPress(panel, widget).TickSent();
+                Report($"TIMER TICK panel={panel} widget={widget} id={id}");
+                _canvas.PanelClick(new PanelClickCmd
+                {
+                    PanelId = panel,
+                    Widget = widget,
+                    Path = path,
+                    Via = "hand",
+                    Event = "timer",
+                    Value = id,
+                });
+            };
+            _behaviorTimers[id] = timer;
+            timer.Start();
+        }
+    }
+
     private void Report(string status)
     {
         string? lost = null;
