@@ -759,12 +759,18 @@ internal static class PanelWire
     /// `SliderPostContentMargin` (14): 46 DIP. In Swatch Options' 12-DIP rows
     /// the track was clipped and only the thumb's top showed. The shell sets
     /// these as the control's own theme resources.
+    ///
+    /// ⛔ NO FLOOR, NO CLAMP (check_shell_interaction_path, F-6). The template's
+    /// own 18-DIP thumb when the row holds it between 1-DIP edges; otherwise
+    /// the thumb the row has room for. A row with no room for any thumb is
+    /// REFUSED (null), never drawn with one it cannot hold. A first version
+    /// floored the thumb at 6 DIP, which gave a 2-DIP row a NEGATIVE margin.
     /// </summary>
     internal static (double Thumb, double Inner, double Margin)? SliderFit(double planHeight)
     {
-        const double natural = 14 + 18 + 14;
-        if (!(planHeight > 0) || planHeight >= natural) { return null; }
-        var thumb = Math.Clamp(planHeight - 2, 6, 18);
+        const double natural = 14 + 18 + 14, templateThumb = 18, edges = 2;
+        if (!(planHeight > edges) || planHeight >= natural) { return null; }
+        var thumb = planHeight >= templateThumb + edges ? templateThumb : planHeight - edges;
         return (thumb, Math.Round(thumb * 2 / 3, 2), (planHeight - thumb) / 2);
     }
 

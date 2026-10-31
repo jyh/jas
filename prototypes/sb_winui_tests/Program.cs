@@ -1615,7 +1615,13 @@ static class Program
         Eq("slider fit: a 12-DIP row gets a 10-DIP thumb, centred by 1-DIP margins", "10/6.67/1", SF(12));
         Eq("slider fit: 20 DIP gets an 18-DIP thumb (never larger than WinUI's)", "18/12/1", SF(20));
         Eq("slider fit: 30 DIP keeps the 18-DIP thumb, centred by 6-DIP margins", "18/12/6", SF(30));
-        Eq("slider fit: a very short row keeps a 6-DIP thumb, the floor", "6/4/1", SF(8));
+        Eq("slider fit: an 8-DIP row gets the 6-DIP thumb it has room for", "6/4/1", SF(8));
+        // No floor and no clamp (check_shell_interaction_path, F-6): a row with
+        // no room for a thumb between its 1-DIP edges is REFUSED, never drawn
+        // with a thumb it cannot hold.
+        Eq("slider fit: a row with no room for a thumb is refused, never floored", "(null)", SF(2));
+        Eq("slider fit: a 20-DIP row holds the template's own 18-DIP thumb exactly", "18/12/1", SF(20));
+        Eq("slider fit: just under that, the thumb is the room the row has", "17.5/11.67/1", SF(19.5));
         Eq("slider fit: the template's own 46 DIP needs nothing", "(null)", SF(46));
         Eq("slider fit: taller than the template needs nothing", "(null)", SF(120));
         Eq("slider fit: no height is no fit, never a throw", "(null)", SF(0));
