@@ -888,12 +888,14 @@ static class Program
         static string OP(params string[] steps)
         {
             var g = new OutsidePress();
+            static string Opened(OutsidePress gate) { gate.Opened(); return "open"; }
             return string.Join(",", steps.Select(s => s switch
             {
                 "press" => g.Pressed(modal: false) ? "dismiss" : "swallow",
                 "press:modal" => g.Pressed(modal: true) ? "dismiss" : "swallow",
                 "closed" => g.HideOnClose() ? "hide" : "wait",
                 "release" => g.Released() ? "go" : "-",
+                "opened" => Opened(g),
                 _ => "?",
             }));
         }
@@ -905,6 +907,15 @@ static class Program
             "dismiss,-,dismiss,wait,go", OP("press", "release", "press", "closed", "release"));
         Eq("outside press: the gate forgets its press after the release", "dismiss,wait,go,hide", OP("press", "closed", "release", "closed"));
         Eq("outside press: a stray release with nothing held does nothing", "-", OP("release"));
+        // #786's review (jas, LOW): a dialog that OPENS while a dismissing press
+        // still holds the smoke (a key shortcut with the button down) is not the
+        // one that press closed, so the release must not hide it.
+        Eq("outside press: a dialog opened before the release survives it", "dismiss,wait,open,-",
+            OP("press", "closed", "opened", "release"));
+        Eq("outside press: ...and a later outside press dismisses it as usual", "dismiss,wait,open,-,dismiss,wait,go",
+            OP("press", "closed", "opened", "release", "press", "closed", "release"));
+        Eq("outside press: the SAME dialog redrawn before its close keeps the press held", "dismiss,open,wait,go",
+            OP("press", "opened", "closed", "release"));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

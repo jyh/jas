@@ -1572,6 +1572,17 @@ internal sealed class OutsidePress
         return false;
     }
 
+    /// <summary>A dialog was drawn open. After the held press's close it is a
+    /// NEW dialog (a key shortcut with the button down), so that press's
+    /// release must not hide it and the gate forgets the press (#786's review).
+    /// Before the close it is the same dialog redrawn, and the press holds.</summary>
+    internal void Opened()
+    {
+        if (!_closed) { return; }
+        _held = false;
+        _closed = false;
+    }
+
     /// <summary>The press was released (or its capture lost); true when the
     /// layer the close left up goes now.</summary>
     internal bool Released()
