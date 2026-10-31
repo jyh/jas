@@ -2449,4 +2449,29 @@ mod tests {
         }
         assert!(strips >= 6 && fields >= 11, "the corpus reached the arm ({strips}, {fields})");
     }
+
+    /// `picker_commits.json`'s writes, exactly: each written vector's bind
+    /// roles against `picker_pick_writes` on the parsed `value`.
+    #[test]
+    fn a_picker_commit_writes_replay_picker_commits_json() {
+        let text = std::fs::read_to_string("../test_fixtures/algorithms/picker_commits.json").unwrap();
+        let doc: Value = serde_json::from_str(&text).unwrap();
+        let strip = json!({"type": "color_hue_bar", "bind": {"value": "dialog.h"}});
+        let field = json!({"type": "color_gradient",
+                           "bind": {"hue": "dialog.h", "saturation": "dialog.s", "brightness": "dialog.b"}});
+        let mut seen = 0;
+        for vec in doc["vectors"].as_array().unwrap() {
+            let Some(writes) = vec.get("writes") else { continue };
+            let (node, roles): (&Value, &[(&str, &str)]) = if vec["kind"] == "color_hue_bar" {
+                (&strip, &[("value", "dialog.h")])
+            } else {
+                (&field, &[("saturation", "dialog.s"), ("brightness", "dialog.b")])
+            };
+            let want: Vec<(String, f64)> = roles.iter()
+                .map(|(role, target)| (target.to_string(), writes[*role].as_f64().unwrap())).collect();
+            assert_eq!(picker_pick_writes(node, &vec["value"]), want, "{}", vec["name"]);
+            seen += 1;
+        }
+        assert!(seen >= 9, "the fixture's written vectors reached the arm ({seen})");
+    }
 }

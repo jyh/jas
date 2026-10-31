@@ -1434,8 +1434,37 @@ def test_a_field_commit_writes_the_picked_saturation_and_brightness_rounded(vec)
 
 def test_an_absent_radio_channel_is_h_mode():
     store = _picker()
-    assert we.commit(_STRIP, "0.5", store, panel=None).bind_written
-    assert store.get_dialog("h") == 180       # 179.5 rounds half away to 180
+    assert we.commit(_STRIP, "0.25", store, panel=None).bind_written
+    assert store.get_dialog("h") == 269       # 269.25, never a .5 tie
+
+
+_COMMITS = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
+                        "algorithms", "picker_commits.json")
+_ROLE_KEY = {"value": "h", "saturation": "s", "brightness": "b"}
+
+
+def _commit_vectors():
+    with open(_COMMITS, encoding="utf-8") as f:
+        return json.load(f)["vectors"]
+
+
+@pytest.mark.parametrize("vec", _commit_vectors(), ids=lambda v: v["name"])
+def test_a_picker_commit_replays_picker_commits_json(vec):
+    """Every vector of `picker_commits.json` (finding 13, step 2b): the
+    parse, the refusal by class, and each bind role's written pick."""
+    widget = _STRIP if vec["kind"] == "color_hue_bar" else _FIELD
+    fields = {} if "radio_channel" not in vec else {"radio_channel": vec["radio_channel"]}
+    store = _picker(**fields)
+    r = we.commit(widget, vec["text"], store, panel=None)
+    if "refusal" in vec:
+        assert r == we.EventResult("refused", reason=vec["refusal"]), (vec["name"], r)
+        assert (store.get_dialog("h"), store.get_dialog("s"), store.get_dialog("b")) == (7, 7, 7)
+        return
+    assert r.outcome == "committed" and r.value == vec["value"], (vec["name"], r)
+    want = {"h": 7, "s": 7, "b": 7}
+    want.update({_ROLE_KEY[role]: n for role, n in vec["writes"].items()})
+    got = {k: store.get_dialog(k) for k in ("h", "s", "b")}
+    assert got == want, (vec["name"], got)
 
 
 @pytest.mark.parametrize("widget, text", [(_STRIP, "0.5"), (_FIELD, "0.5,0.5")])

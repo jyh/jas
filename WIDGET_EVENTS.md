@@ -421,8 +421,8 @@ expression that reads another root, or that does not parse.
 | `combo_box` | a number (clamped as above) when the text is in the number grammar; otherwise the text | the text is blank |
 | `slider` | a number by the number grammar, clamped to `min:` / `max:` as `number_input` is, then SNAPPED to the declared `step:`: `min + floor((v − min) / step + 0.5) · step` (half up, offset from `min`, or from 0 with no `min`), then clamped again so a snap never leaves the range. No `step:`, or a step that is not a positive number, does not snap. A shell reports a drag as `change` (live) and the release as `commit`; both parse the same way. | the text is not in the grammar |
 | `color_bar` | a POINT normalized to [0, 1]²: the text is `u,v`, two numbers by the number grammar joined by one comma (no spaces), each clamped to `[0, 1]`; `u` runs left to right, `v` top to bottom. The value is the pair `[u, v]`; the colour it names is `color_util.color_bar_rgb(u, v)` (`test_fixtures/algorithms/color_bar.json`), which every view of the bar also calls, so a shell sends the point and never computes a colour. A shell reports a drag as `change` (live: the colour shows, nothing is committed) and the release as `commit` (the colour is committed once); both parse the same way. | the text is not two numbers joined by one comma |
-| `color_hue_bar` | ONE number `v` by the number grammar, clamped to `[0, 1]`: a point on the Color Picker's vertical strip, `v` running top to bottom. The value is `v`. The strip's pick never reads a `u`, so its text carries none. What a commit WRITES is the pick, not `v` (see §The bound target). A shell reports a drag as `change` and the release as `commit`; both parse and write the same way. | the text is not one number |
-| `color_gradient` | a POINT, exactly as `color_bar`'s: the text is `u,v`, two numbers by the number grammar joined by one comma (no spaces), each clamped to `[0, 1]`; `u` runs left to right, `v` top to bottom. The value is the pair `[u, v]`. What a commit WRITES is the pick (see §The bound target). `change` and `commit` both parse and write the same way. | the text is not two numbers joined by one comma |
+| `color_hue_bar` | ONE number `v` by the number grammar, clamped to `[0, 1]`: a point on the Color Picker's vertical strip, `v` running top to bottom. The value is `v`. The strip's pick never reads a `u`, so its text carries none. What a commit WRITES is the pick, not `v` (see §The bound target). A shell reports a drag as `change` and the release as `commit`; both parse and write the same way. Off H mode it is refused by the door; the Swift view's own channel write is outside the bind (deferred §5). `test_fixtures/algorithms/picker_commits.json` pins the parse, the refusals and the writes. | the text is not one number |
+| `color_gradient` | a POINT, exactly as `color_bar`'s: the text is `u,v`, two numbers by the number grammar joined by one comma (no spaces), each clamped to `[0, 1]`; `u` runs left to right, `v` top to bottom. The value is the pair `[u, v]`. What a commit WRITES is the pick (see §The bound target). `change` and `commit` both parse and write the same way. `test_fixtures/algorithms/picker_commits.json` pins the parse, the refusals and the writes. | the text is not two numbers joined by one comma |
 | `toggle`, `checkbox` | no text parse; see §Pressing | — |
 
 - **The number grammar** is `-?[0-9]+(\.[0-9]+)?`, matched against the
@@ -483,8 +483,8 @@ expression that reads another root, or that does not parse.
     `written`). The pictures a native shell draws them from are the same
     two functions (the plan's `display.picture`), so a pick lands on the
     colour drawn under it.
-  - In any other mode the commit is REFUSED, `WrongMode`, naming the mode:
-    nothing is written and no behavior runs. The other modes are deferred
+  - In any other mode the commit is REFUSED, `WrongMode`, naming the mode
+    (`radio_channel=<mode>`): nothing is written and no behavior runs. The other modes are deferred
     (the finding 13 design, §4).
 - **Every other bind is read, never written, by this layer.** That
   covers a `state.` path, a `foreach` item's field (`ab.name`), an

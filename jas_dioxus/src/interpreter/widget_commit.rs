@@ -570,6 +570,26 @@ mod tests {
         }
     }
 
+    /// `test_fixtures/algorithms/picker_commits.json` (finding 13, step 2b):
+    /// every vector's text parses to its `value`, or is refused when the
+    /// vector's refusal is `BadValue`.
+    #[test]
+    fn the_picker_kinds_parse_replays_picker_commits_json() {
+        let text = std::fs::read_to_string("../test_fixtures/algorithms/picker_commits.json").unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let vectors = doc["vectors"].as_array().unwrap();
+        for vec in vectors {
+            let w = json!({"type": vec["kind"]});
+            let got = parse(w, vec["text"].as_str().unwrap());
+            if vec["refusal"] == "BadValue" {
+                assert_eq!(got, None, "{}", vec["name"]);
+            } else {
+                assert_eq!(got, Some(vec["value"].clone()), "{}", vec["name"]);
+            }
+        }
+        assert!(vectors.len() >= 20, "the fixture reached the arm");
+    }
+
     #[test]
     fn a_boolean_or_unknown_kind_has_no_text_parse() {
         assert_eq!(parse(json!({"type": "toggle"}), "true"), None);
