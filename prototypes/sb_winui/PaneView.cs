@@ -1487,6 +1487,9 @@ public sealed partial class MainWindow
             {
                 Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(el, z);
             }
+            // A leaf whose bind.z_index goes absent (or unreadable) returns to
+            // plan order rather than keeping its last z (jas's #768 review).
+            else { el.ClearValue(Microsoft.UI.Xaml.Controls.Canvas.ZIndexProperty); }
             var off = leaf.Value("bind.disabled") == "true";
             var on = leaf.Value("bind.checked") == "true";
             var typing = false;
