@@ -279,6 +279,19 @@ internal static class PanelWire
         id.Length > 0 || PlanPath(path) is not null;
 
     /// <summary>
+    /// A leaf's resolved `bind.z_index` as a draw order, or null. The core
+    /// resolves the binding (the toolbar swatches: `if state.fill_on_top then 2
+    /// else 1`); the shell only applies it. A fraction or a word names no order
+    /// and is refused, never rounded.
+    /// </summary>
+    internal static int? ZIndex(string? resolved) =>
+        double.TryParse(resolved, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var d)
+        && d == Math.Floor(d) && d is >= int.MinValue and <= int.MaxValue
+            ? (int)d
+            : null;
+
+    /// <summary>
     /// The events a plan entry says its node ANSWERS (`"events"`, #464), in
     /// the order the core sent them. Null when there is no channel (an older
     /// core) or it is not an array; a non-string entry is skipped. `[]` is an
