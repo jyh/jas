@@ -1196,6 +1196,28 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
+    /// Finding 1 (#771): a reply's `timers`, handed to the UI thread to run. The
+    /// shell runs only the clock; the engine kept the effects.
+    /// </summary>
+    private void ApplyTimers(string reply, PanelClickCmd click, string head)
+    {
+        var acts = TimerWire.Parse(reply);
+        if (acts.Count == 0) { return; }
+        var named = string.Join(",", acts.Select(a => a.Cancel ? $"cancel:{a.Id}" : $"start:{a.Id}@{a.DelayMs}"));
+        _report($"TIMERS {head} acts={named} {Tids()}");
+        var (panel, widget, path) = (click.PanelId, click.Widget, click.Path);
+        PostToUi(() => TimersRequested?.Invoke(panel, widget, path, acts));
+    }
+
+    /// <summary>A tick's answer, to the UI thread: whether the engine ran the
+    /// timer's effects (non-empty) or answered StaleTimer (empty).</summary>
+    private void AnswerTick(PanelClickCmd click, bool opened)
+    {
+        var (panel, widget) = (click.PanelId, click.Widget);
+        PostToUi(() => TimerAnswered?.Invoke(panel, widget, opened));
+    }
+
+    /// <summary>
     /// jas §364: a reply that names `clipboard_write: <text>` (Copy, Cut, Cut's
     /// orphan confirm OK) puts that text on the system clipboard as plain
     /// text, unchanged. The clipboard is the UI thread's, so the write is
@@ -5015,6 +5037,13 @@ internal sealed unsafe class Canvas : IDisposable
     /// layout the engine answered (`jas_layout_state`'s JSON).</summary>
     internal Action<string, string, string>? LayoutChanged { get; set; }
 
+    /// <summary>Finding 1 (#771): a reply's timer acts, on the UI thread:
+    /// (panel, widget, plan path, acts).</summary>
+    internal Action<string, string, string?, IReadOnlyList<TimerWire.Act>>? TimersRequested { get; set; }
+
+    /// <summary>A tick's answer, on the UI thread: (panel, widget, opened).</summary>
+    internal Action<string, string, bool>? TimerAnswered { get; set; }
+
     /// <summary>
     /// A layout verb, run in the engine (FP-3). Every outcome is a row: a refusal
     /// is `RUSTFAIL DOCK OP REFUSED` with the channel, never a silent no-op; an
@@ -5375,6 +5404,10 @@ internal sealed unsafe class Canvas : IDisposable
 
         if (reply.Length == 0)
         {
+            // Finding 1 (#771): an empty answer to a tick (StaleTimer: cancelled,
+            // or raced by the release) leaves the slot's click alone. A failed
+            // tick answers the same, so a held click is never held forever.
+            if (click.Event == "timer") { AnswerTick(click, opened: false); }
             if (channel.Length == 0)
             {
                 _report($"RUSTFAIL PANEL CLICK SILENT {head} -- "
@@ -5399,9 +5432,14 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyExportPdf(reply, head);
             ApplyLayoutReply(reply, head);
             ApplySaveAllThenClose(reply, head);
+            ApplyTimers(reply, click, head);
+            // A non-empty answer to a tick: the engine ran the timer's effects
+            // (the flyout opened), so this press's click is dropped.
+            if (click.Event == "timer") { AnswerTick(click, opened: true); }
         }
         catch (Exception ex)
         {
+            if (click.Event == "timer") { AnswerTick(click, opened: false); }
             _report($"RUSTFAIL PANEL CLICK REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
             return false;
         }

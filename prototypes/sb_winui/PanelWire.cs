@@ -1585,6 +1585,93 @@ internal static class KeyWire
 }
 
 /// <summary>
+/// Press-and-hold (the 10-30 sitting, finding 1; the engine half is #771). A
+/// `mouse_down` / `mouse_up` reply carries `"timers"`: `{"start": id,
+/// "delay_ms": n}` (start, or restart, that timer) or `{"cancel": id}`, and no
+/// key at all when no timer act happened. The shell only runs the clock: the
+/// engine keeps the effects and, on the tick `{"event": "timer", "value": id}`,
+/// runs them only if that id is still pending. Pure, so `sb_winui_tests`
+/// drives it. A start with no delay, or a negative one, is refused, never
+/// defaulted.
+/// </summary>
+internal static class TimerWire
+{
+    internal readonly record struct Act(string Id, int DelayMs, bool Cancel);
+
+    internal static IReadOnlyList<Act> Parse(string? reply)
+    {
+        var acts = new List<Act>();
+        if (string.IsNullOrEmpty(reply)) { return acts; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("timers", out var list)
+                || list.ValueKind != System.Text.Json.JsonValueKind.Array) { return acts; }
+            foreach (var e in list.EnumerateArray())
+            {
+                if (e.ValueKind != System.Text.Json.JsonValueKind.Object) { continue; }
+                if (e.TryGetProperty("cancel", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
+                    && c.GetString() is { Length: > 0 } cancelId)
+                {
+                    acts.Add(new Act(cancelId, 0, Cancel: true));
+                    continue;
+                }
+                if (e.TryGetProperty("start", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String
+                    && s.GetString() is { Length: > 0 } startId
+                    && e.TryGetProperty("delay_ms", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number
+                    && d.TryGetInt32(out var ms) && ms >= 0)
+                {
+                    acts.Add(new Act(startId, ms, Cancel: false));
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException) { }
+        return acts;
+    }
+}
+
+/// <summary>
+/// Whether a press-and-hold slot's CLICK goes (jas's ruling on finding 1,
+/// point 4). The web, the port of record, fires no click once the flyout has
+/// opened. So a press whose tick got a NON-EMPTY reply drops its click; a tick
+/// answered `StaleTimer` (cancelled, or raced by the release) leaves it; and a
+/// click that arrives before the tick's answer waits for it, then goes or drops
+/// once. The ENGINE's reply decides, never the shell's clock. One per button.
+/// </summary>
+internal sealed class LongPressGate
+{
+    internal enum Fate { Sent, Dropped, Held }
+
+    private bool _tickSent;
+    private bool? _opened;
+    private Action? _held;
+
+    internal void Pressed() { _tickSent = false; _opened = null; _held = null; }
+
+    internal void TickSent() => _tickSent = true;
+
+    /// <summary>The tick's answer; returns whether a held click was sent.</summary>
+    internal bool Answered(bool nonEmpty)
+    {
+        _opened = nonEmpty;
+        var held = _held;
+        _held = null;
+        if (held is null || nonEmpty) { return false; }
+        held();
+        return true;
+    }
+
+    internal Fate Click(Action send)
+    {
+        if (!_tickSent || _opened == false) { send(); return Fate.Sent; }
+        if (_opened == true) { return Fate.Dropped; }
+        _held = send;
+        return Fate.Held;
+    }
+}
+
+/// <summary>
 /// The engine's dock layout (`jas_layout_state`, floating panels FP-3): the
 /// shell draws the dock from it and sends `layout_apply` verbs back, holding
 /// no dock state of its own. Read strictly: a reply the engine would never
