@@ -502,12 +502,12 @@ public class Model: ObservableObject {
         // The user's saved libraries shadow the bundle's by slug, and the
         // app's writer drains Save Brush Library (``BrushLibraryStore``); both
         // only when the app installed a live store, never under test.
-        let live = BrushLibraryStore.live
-        if let libs = WorkspaceData.load()?.brushLibraries() {
-            store.setDataPath("brush_libraries",
-                              live.map { BrushLibraryStore.merged(bundle: libs, user: $0.load()) } ?? libs)
+        // A workspace replaces this seed with its app-global tier at adoption
+        // (``AppBrushLibraries``, STATUS-jas row 59).
+        if WorkspaceData.load()?.brushLibraries() != nil {
+            store.setDataPath("brush_libraries", AppBrushLibraries.shippedSeed())
         }
-        store.pendingWriteSink = live?.sink
+        store.pendingWriteSink = BrushLibraryStore.live?.sink
         return store
     }()
     /// Mirror hook for ``state.active_tool`` writes that originate in

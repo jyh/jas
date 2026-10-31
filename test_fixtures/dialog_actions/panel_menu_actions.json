@@ -810,6 +810,60 @@
     }
   },
   {
+    "name": "new_swatch_ok_appends_to_the_selected_library",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatches.yaml menu New Swatch (new_swatch) opens Swatch Options in create mode on the panel's selected library; a name and hex, then OK (swatch_options_confirm -> swatch.store, create mode) APPENDS it at the end. Until 2026-10-31 new_swatch passed no library and OK appended nothing.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "new_swatch"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "so_name_input"
+          },
+          "event": "commit",
+          "value": "Fresh"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "so_hex"
+          },
+          "event": "commit",
+          "value": "1A2B3C"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "swatch_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "swatch_libraries.web_colors.swatches.216.name": "Fresh",
+      "swatch_libraries.web_colors.swatches.216.color": "#1a2b3c",
+      "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
+    }
+  },
+  {
     "name": "add_used_colors_appends_the_one_colour_the_library_lacks",
     "setup_svg": "paste_hidden_named_layer.svg",
     "note": "swatches.yaml menu Add Used Colors; actions.yaml swatch.add_used_colors appends each document colour the library lacks, sorted by hex, named 'R=r G=g B=b'. The document's blue is already web_colors' #0000ff, its green #008000 is not, so exactly one swatch is appended. Values from the reference.",

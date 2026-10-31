@@ -1336,7 +1336,7 @@
       ]
     },
     "new_swatch": {
-      "description": "Create a new swatch in the active library using the current fill/stroke color (per fill_on_top). Opens the Swatch Options dialog in create mode, initialized from the active color.\n",
+      "description": "Create a new swatch in the active library using the current fill/stroke color (per fill_on_top). Opens the Swatch Options dialog in create mode, initialized from the active color, on the panel's selected library (panel.selected_library), which its OK appends to. With no library selected, OK appends nothing.\n",
       "category": "swatches",
       "effects": [
         {
@@ -1346,7 +1346,8 @@
               "mode": "'create'",
               "color": "if state.fill_on_top then state.fill_color else state.stroke_color",
               "color_mode": "'rgb'",
-              "swatch_name": "''"
+              "swatch_name": "''",
+              "library": "panel.selected_library"
             }
           }
         }
@@ -14536,7 +14537,7 @@
         {
           "label": "Create New Swatch...",
           "enabled_when": "false",
-          "description": "Disabled. The stated reason USED to be \"when the Swatches panel is implemented\" \u2014 that landed, so the reason expired and was corrected 2026-07-29. The live blocker is one step further on: the `new_swatch` action itself is real (it opens the Swatch Options dialog in create mode, seeded from the active colour), but that dialog's OK button runs `swatch_options_confirm`, whose entire effect list is `- log:`. So enabling this item would open a dialog that cannot commit \u2014 a control that looks functional and does nothing, which this project holds to be worse than a visible placeholder. ENABLE WHEN `swatch_options_confirm` gains real effects, not before.\n"
+          "description": "Disabled. Its stated reason has expired twice. First it was \"when the Swatches panel is implemented\" (landed; corrected 2026-07-29). Then it was \"when `swatch_options_confirm` gains real effects\", which it did on 2026-10-25 (`swatch.store`, every port). The live blocker, measured 2026-10-31: OK appends to `param.library`, and `new_swatch` passes the CALLER's `panel.selected_library`. That works from the Swatches panel. From this panel it is null, so OK would append nothing: a control that looks functional and does nothing, which this project holds to be worse than a visible placeholder. ENABLE WHEN `new_swatch` can name a library from outside the Swatches panel (its selected library, or a declared default), not before.\n"
         },
         "separator",
         {
