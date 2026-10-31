@@ -741,6 +741,17 @@ static class Program
         static string Ev(string? json) => PanelWire.ReadEvents(json) is { } ev ? string.Join(",", ev) : "(null)";
         Eq("events: the declared order, read as sent", "click,click_and_wait", Ev("""["click","click_and_wait"]"""));
         Eq("events: a node that answers nothing", "", Ev("[]"));
+        Eq("events: no channel, an older core, is no list", "(null)", Ev(null));
+        Eq("events: a channel that is not an array is no list", "(null)", Ev("""{"click":true}"""));
+        Eq("events: text that is not JSON is no list", "(null)", Ev("click"));
+        Eq("events: a non-string entry is skipped, the rest read", "click", Ev("""[3,"click",null]"""));
+        Eq("routes press: click with an id", "True", PanelWire.RoutesPress(new[] { "click" }, "ap_number", null).ToString());
+        Eq("routes press: click with only a plan path", "True", PanelWire.RoutesPress(new[] { "click" }, "", "[0,2,1]").ToString());
+        Eq("routes press: click with no address sends nothing", "False", PanelWire.RoutesPress(new[] { "click" }, "", null).ToString());
+        Eq("routes press: events without click", "False", PanelWire.RoutesPress(new[] { "click_and_wait" }, "ap_name", null).ToString());
+        Eq("routes press: an empty list", "False", PanelWire.RoutesPress(System.Array.Empty<string>(), "t", null).ToString());
+        Eq("routes press: no list, an older core, routes nothing", "False", PanelWire.RoutesPress(null, "t", null).ToString());
+        Eq("routes press: the name is exact, not a prefix", "False", PanelWire.RoutesPress(new[] { "click_and_wait", "clicks" }, "t", null).ToString());
         // -- bind.z_index (the 10-30 sitting, finding 12: "I cannot get the fill
         // swatch to come to the front") -------------------------------------------
         // The toolbar swatches bind `z_index: if state.fill_on_top then 2 else 1`;
@@ -755,35 +766,62 @@ static class Program
         Eq("z_index: a fraction names no order and is refused", "(null)", Z("1.5"));
         Eq("z_index: a word is refused", "(null)", Z("top"));
         Eq("z_index: absent is no z", "(null)", Z(null));
-        Eq("events: no channel, an older core, is no list", "(null)", Ev(null));
-        Eq("events: a channel that is not an array is no list", "(null)", Ev("""{"click":true}"""));
-        Eq("events: text that is not JSON is no list", "(null)", Ev("click"));
-        Eq("events: a non-string entry is skipped, the rest read", "click", Ev("""[3,"click",null]"""));
-        Eq("routes press: click with an id", "True", PanelWire.RoutesPress(new[] { "click" }, "ap_number", null).ToString());
-        Eq("routes press: click with only a plan path", "True", PanelWire.RoutesPress(new[] { "click" }, "", "[0,2,1]").ToString());
-        Eq("routes press: click with no address sends nothing", "False", PanelWire.RoutesPress(new[] { "click" }, "", null).ToString());
-        Eq("routes press: events without click", "False", PanelWire.RoutesPress(new[] { "click_and_wait" }, "ap_name", null).ToString());
-        Eq("routes press: an empty list", "False", PanelWire.RoutesPress(System.Array.Empty<string>(), "t", null).ToString());
-        Eq("routes press: no list, an older core, routes nothing", "False", PanelWire.RoutesPress(null, "t", null).ToString());
-        Eq("routes press: the name is exact, not a prefix", "False", PanelWire.RoutesPress(new[] { "click_and_wait", "clicks" }, "t", null).ToString());
         // -- PRESS-AND-HOLD (the 10-30 sitting, finding 1: "I can't see flyouts on
         // the toolbar"; the engine half is #771) -----------------------------------
         // A `mouse_down`/`mouse_up` reply carries `"timers"`: `{"start", "delay_ms"}`
         // or `{"cancel"}`. The shell runs the clock; the ENGINE keeps the effects and
         // decides on the tick. `TimerWire.Parse` reads the list; an absent key is
         // an empty list, never a throw.
-        static string TP(string reply) => string.Join(",", TimerWire.Parse(reply).Select(a =>
+        static string TP(string reply) => string.Join(",", TimerWire.Parse(reply).Acts.Select(a =>
             a.Cancel ? $"cancel:{a.Id}" : $"start:{a.Id}@{a.DelayMs}"));
+        // #778's review: a malformed act is REFUSED BY NAME (its own JSON text),
+        // never dropped silently. The engine emits none; the arm is the shape.
+        static string TR(string reply) => string.Join(" | ", TimerWire.Parse(reply).Refused);
         Eq("timers: a start with its delay", "start:long_press_btn_hand_slot@250",
             TP("""{"doc_changed":false,"changed":[],"timers":[{"start":"long_press_btn_hand_slot","delay_ms":250}]}"""));
         Eq("timers: a cancel", "cancel:long_press_btn_hand_slot", TP("""{"timers":[{"cancel":"long_press_btn_hand_slot"}]}"""));
         Eq("timers: one reply can start one and cancel another, in order", "cancel:a,start:b@100",
             TP("""{"timers":[{"cancel":"a"},{"start":"b","delay_ms":100}]}"""));
+        Eq("timers: well-formed acts refuse nothing", "", TR("""{"timers":[{"cancel":"a"},{"start":"b","delay_ms":100}]}"""));
         Eq("timers: absent when no timer act happened", "", TP("""{"doc_changed":false,"changed":[]}"""));
+        Eq("timers: ...and an absent key refuses nothing", "", TR("""{"doc_changed":false,"changed":[]}"""));
         Eq("timers: a start with no delay is refused, not defaulted", "", TP("""{"timers":[{"start":"a"}]}"""));
-        Eq("timers: a negative delay is refused", "", TP("""{"timers":[{"start":"a","delay_ms":-5}]}"""));
-        Eq("timers: an entry with no id is skipped", "start:b@10", TP("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: ...and refused by name", """{"start":"a"}""", TR("""{"timers":[{"start":"a"}]}"""));
+        Eq("timers: a negative delay is refused by name", """{"start":"a","delay_ms":-5}""", TR("""{"timers":[{"start":"a","delay_ms":-5}]}"""));
+        Eq("timers: a fractional delay is refused by name", """{"start":"a","delay_ms":2.5}""", TR("""{"timers":[{"start":"a","delay_ms":2.5}]}"""));
+        Eq("timers: an entry with no id is refused, the rest read", "start:b@10", TP("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: ...and the refused entry is named", """{"delay_ms":10}""", TR("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: an empty cancel id is refused by name", """{"cancel":""}""", TR("""{"timers":[{"cancel":""}]}"""));
+        Eq("timers: an entry that is not an object is refused by name", "3", TR("""{"timers":[3]}"""));
+        Eq("timers: an act naming both start and cancel is refused, not read as either", "",
+            TP("""{"timers":[{"start":"a","delay_ms":5,"cancel":"a"}]}"""));
+        Eq("timers: ...and named", """{"start":"a","delay_ms":5,"cancel":"a"}""",
+            TR("""{"timers":[{"start":"a","delay_ms":5,"cancel":"a"}]}"""));
+        Eq("timers: a timers key that is not a list is refused by name", """{"start":"a","delay_ms":5}""",
+            TR("""{"timers":{"start":"a","delay_ms":5}}"""));
+        Eq("timers: each refusal is its own entry, in order", """3 | {"cancel":7}""", TR("""{"timers":[3,{"cancel":"ok"},{"cancel":7}]}"""));
         Eq("timers: text that is not JSON is no acts, never a throw", "", TP("not json"));
+        // #778's review: the shell's clocks are keyed as the engine keys its
+        // pending set, by (panel, timer id). Two panels may pend the same id;
+        // a cancel or a restart on one never stops the other's clock.
+        static string PT(params string[] steps)
+        {
+            var t = new PendingTimers<string>();
+            var taken = new List<string>();
+            foreach (var s in steps)
+            {
+                var p = s.Split(' ');
+                if (p[0] == "put") { t.Put(p[1], p[2], p[3]); }
+                else { taken.Add(t.Take(p[1], p[2]) ?? "-"); }
+            }
+            return string.Join(",", taken) + "/" + t.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        Eq("pending timers: one panel's clock is taken back by its key", "c1/0", PT("put tb x c1", "take tb x"));
+        Eq("pending timers: the same id on two panels is two clocks", "c2/1", PT("put tb x c1", "put lp x c2", "take lp x"));
+        Eq("pending timers: a cancel on one panel leaves the other's", "-/1", PT("put tb x c1", "take lp x"));
+        Eq("pending timers: a restart (take, then put) replaces only its own key", "c2,c1,c3/0",
+            PT("put tb x c1", "put lp x c2", "take lp x", "put lp x c3", "take tb x", "take lp x"));
+        Eq("pending timers: nothing pending takes nothing", "-/0", PT("take tb x"));
         // The CLICK after a long press (jas's ruling on point 4; the web, the port of
         // record, fires none): a press whose tick got a NON-EMPTY reply (the flyout
         // opened) drops the slot's click; a StaleTimer answer (cancelled or raced)
@@ -824,6 +862,49 @@ static class Program
         Eq("dialog door: the same id after it was closed elsewhere opens again", "open", RO("hand_alternates", false, "hand_alternates"));
         Eq("dialog door: no dialog named opens nothing", "skip", RO(null, false, null));
         Eq("dialog door: an empty name opens nothing", "skip", RO("", true, "hand_alternates"));
+        // -- THE NON-MODAL LOOK (#783; the 10-30 sitting, finding 1) ---------------
+        // A `modal: false` dialog is a POPOVER beside the control that opened it:
+        // no dimming backdrop, no title bar, its top-left at the opener's right
+        // edge and top (DIPs, in the dialog layer). A modal dialog keeps its look,
+        // centred, whatever opened it. A non-modal one with no opener the shell
+        // can place is centred, as the web centres one with no anchor.
+        static string LK(bool modal, (double X, double Y, double W, double H)? anchor)
+        {
+            var k = DialogWire.Look(modal, anchor);
+            var at = k.Left is { } l && k.Top is { } t
+                ? $"at {l.ToString(System.Globalization.CultureInfo.InvariantCulture)},{t.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                : "centred";
+            return $"{(k.Dim ? "dim" : "clear")},{(k.TitleBar ? "title" : "bare")},{at}";
+        }
+        Eq("dialog look: a modal dialog is dimmed, titled and centred", "dim,title,centred", LK(true, null));
+        Eq("dialog look: ...even when a control opened it", "dim,title,centred", LK(true, (0, 120, 40, 40)));
+        Eq("dialog look: a flyout sits at its slot's right edge and top, bare", "clear,bare,at 40,120", LK(false, (0, 120, 40, 40)));
+        Eq("dialog look: the slot's own offset is kept", "clear,bare,at 46.5,200.25", LK(false, (4.5, 200.25, 42, 36)));
+        Eq("dialog look: a flyout with no placeable opener is centred, still bare", "clear,bare,centred", LK(false, null));
+        // The DISMISSING PRESS (#783's second door): a press outside a flyout
+        // closes it and does NOTHING else, so neither the press nor its release
+        // reaches what lies beneath. The smoke dismisses on the press and stays up,
+        // clear, until that press's release; a modal dialog's smoke only swallows.
+        static string OP(params string[] steps)
+        {
+            var g = new OutsidePress();
+            return string.Join(",", steps.Select(s => s switch
+            {
+                "press" => g.Pressed(modal: false) ? "dismiss" : "swallow",
+                "press:modal" => g.Pressed(modal: true) ? "dismiss" : "swallow",
+                "closed" => g.HideOnClose() ? "hide" : "wait",
+                "release" => g.Released() ? "go" : "-",
+                _ => "?",
+            }));
+        }
+        Eq("outside press: dismiss on the press, hold the smoke to the release", "dismiss,wait,go", OP("press", "closed", "release"));
+        Eq("outside press: a release before the close arrives, then the close hides", "dismiss,-,hide", OP("press", "release", "closed"));
+        Eq("outside press: a modal dialog's smoke only swallows", "swallow,-", OP("press:modal", "release"));
+        Eq("outside press: a close with no press held hides at once", "hide", OP("closed"));
+        Eq("outside press: a refused dismiss leaves the dialog open; the next press is held afresh",
+            "dismiss,-,dismiss,wait,go", OP("press", "release", "press", "closed", "release"));
+        Eq("outside press: the gate forgets its press after the release", "dismiss,wait,go,hide", OP("press", "closed", "release", "closed"));
+        Eq("outside press: a stray release with nothing held does nothing", "-", OP("release"));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.
@@ -1698,6 +1779,11 @@ static class Program
         Eq("slider: the shell does NOT snap or clamp -- 359.7 on a 0..359 step-1 track is sent as dragged",
             "359.7", Show(PanelWire.SliderCommit(359.7, "359")));
         Eq("slider: a release where the core's value already is sends nothing", "(null)", Show(PanelWire.SliderCommit(50.0, "50")));
+        Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
+        Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
+        Eq("slider: a value within 1e-5 of 0 commits fixed-point, never an exponent", "0.0000025", Show(PanelWire.SliderCommit(0.0000025, "0")));
+        Eq("slider: a value below the 17th decimal commits as 0, still in the grammar", "0", Show(PanelWire.SliderCommit(1e-20, "1")));
+
         // -- CONTROLS BELOW THEIR TEMPLATE'S HEIGHT (the 10-30 sitting, findings
         // 14 and 15) ---------------------------------------------------------------
         // WinUI's Slider stacks a 14-DIP margin, an 18-DIP thumb and a 14-DIP
@@ -1714,7 +1800,7 @@ static class Program
         // no room for a thumb between its 1-DIP edges is REFUSED, never drawn
         // with a thumb it cannot hold.
         Eq("slider fit: a row with no room for a thumb is refused, never floored", "(null)", SF(2));
-        Eq("slider fit: a 20-DIP row holds the template's own 18-DIP thumb exactly", "18/12/1", SF(20));
+        Eq("slider fit: a 20.5-DIP row holds the template's 18-DIP thumb, centred by 1.25-DIP margins", "18/12/1.25", SF(20.5));
         Eq("slider fit: just under that, the thumb is the room the row has", "17.5/11.67/1", SF(19.5));
         Eq("slider fit: the template's own 46 DIP needs nothing", "(null)", SF(46));
         Eq("slider fit: taller than the template needs nothing", "(null)", SF(120));
@@ -1730,10 +1816,6 @@ static class Program
         Eq("radio scale: the template's 32 DIP needs no scale", "(null)", RS(32));
         Eq("radio scale: taller needs none", "(null)", RS(40));
         Eq("radio scale: no height is no scale, never a throw", "(null)", RS(0));
-        Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
-        Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
-        Eq("slider: a value within 1e-5 of 0 commits fixed-point, never an exponent", "0.0000025", Show(PanelWire.SliderCommit(0.0000025, "0")));
-        Eq("slider: a value below the 17th decimal commits as 0, still in the grammar", "0", Show(PanelWire.SliderCommit(1e-20, "1")));
 
         // FORK B2 (#394): the colour bar sends its POINT, u = x / width and
         // v = y / height from its own top-left, as invariant text with no space.

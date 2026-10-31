@@ -86,6 +86,10 @@ public sealed partial class MainWindow
 
         /// <summary>The drawn controls, by plan path.</summary>
         private readonly Dictionary<string, FrameworkElement> _paneControls = new();
+        /// <summary>#783: the drawn control at a plan path, or null; a flyout
+        /// opened by it is placed beside it.</summary>
+        internal FrameworkElement? ControlAt(string? path) =>
+            path is not null && _paneControls.TryGetValue(path, out var el) ? el : null;
         /// <summary>jas §612/§630: the hit surfaces by plan path, so a panel
         /// selection's highlight is applied in place (a selection change
         /// re-plans without moving any rect, so it does not rebuild).</summary>
@@ -1487,6 +1491,9 @@ public sealed partial class MainWindow
             {
                 Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(el, z);
             }
+            // A leaf whose bind.z_index goes absent (or unreadable) returns to
+            // plan order rather than keeping its last z (jas's #768 review).
+            else { el.ClearValue(Microsoft.UI.Xaml.Controls.Canvas.ZIndexProperty); }
             var off = leaf.Value("bind.disabled") == "true";
             var on = leaf.Value("bind.checked") == "true";
             var typing = false;

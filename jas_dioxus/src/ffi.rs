@@ -2200,6 +2200,9 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
         Ok(ran) => ran,
         Err(r) => return refuse(r),
     };
+    // A tool-alternates flyout's pick wrote `active_tool`; the pointer must
+    // now drive that tool, as after a toolbar click.
+    let tool = crate::ffi_pointer::sync_tool_to_state(engine);
     // A dialog's OK can write the colour slice's `state.*` keys (the picker's
     // fill/stroke targets), so the slice adopts them as after a panel click.
     if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow(), Some(&engine.model.borrow())) {
@@ -2207,7 +2210,9 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
     }
     let sync = engine.registry.borrow_mut().sync(&ws, &|pid| panel_ctx(engine, &ws, pid));
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
-    if ran.doc_changed || ran.state_changed || moved {
+    // A tool write that was REFUSED was also undone, so it changed nothing.
+    let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
+    if ran.doc_changed || state_changed || moved {
         *engine.last_error.borrow_mut() = None;
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
@@ -6990,6 +6995,30 @@ mod tests {
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
         let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
         assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "still pending on its own door");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A FLYOUT'S PICK DRIVES THE POINTER (found live on the Windows box, with
+    /// #786). A tool-alternates item `set`s `active_tool` through the DIALOG
+    /// door, and only the panel, action and key doors made the pointer follow.
+    /// So the toolbar checked Zoom while a canvas click still ran the
+    /// Selection tool (it deselected and did not zoom). The dialog door now
+    /// syncs the pointer as the panel door does.
+    #[test]
+    fn a_flyout_pick_makes_the_pointer_drive_that_tool() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
+        assert_eq!(slot_tool(e), Some("selection"), "the pointer starts on the Selection tool");
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_hand_slot"}"#);
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("hand_alternates"), "the flyout opened: {reply} {err}");
+        let zoom = dialog_leaf_path(e, "icon_button", "Zoom");
+        let (reply, err) = dialog_event(e, &serde_json::json!({"path": zoom, "event": "click"}).to_string());
+        assert!(!reply.is_empty(), "the pick ran: {err}");
+        assert_eq!(json(&reply)["dialog"], serde_json::Value::Null, "the pick closed the flyout: {reply}");
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("zoom"), "the toolbar checks Zoom");
+        assert_eq!(slot_tool(e), Some("zoom"), "and the pointer drives the Zoom tool");
         unsafe { jas_engine_free(e) };
     }
 
