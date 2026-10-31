@@ -722,6 +722,16 @@ internal static class PanelWire
     /// <summary>One part of a leaf (row 56), relative to the leaf's own origin, in DIPs.</summary>
     internal readonly record struct PartRect(double X, double Y, double W, double H);
 
+    /// <summary>
+    /// #803's LOW (jas, 10-31), measured on the box: the border a pane button
+    /// wears, applied on every refresh. A labelled face (row 56's parts) wears
+    /// none in either state: its parts are in the leaf's own coordinates and the
+    /// web's face draws no border, so the style's 1-DIP border put both parts
+    /// 1.33 DIP right and down of the plan. Any other button keeps its checked
+    /// edge (1); unchecked it takes the style's (null: clear the local value).
+    /// </summary>
+    internal static double? ButtonEdge(bool on, bool labelledFace) => labelledFace ? 0 : on ? 1 : null;
+
     /// <summary>A labelled icon_button's parts (row 56): its icon, and its label when the engine planned room for one.</summary>
     internal sealed record LeafParts(PartRect Icon, PartRect? Label);
 
