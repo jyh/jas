@@ -211,7 +211,7 @@ fn style(n: &Value) -> &Value {
     n.get("style").unwrap_or(&Value::Null)
 }
 
-fn style_i(n: &Value, key: &str) -> Option<i64> {
+pub(crate) fn style_i(n: &Value, key: &str) -> Option<i64> {
     style(n)
         .get(key)
         .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
@@ -395,7 +395,7 @@ fn resolve_dim(v: &Value, avail: i64) -> Option<i64> {
 }
 
 /// CSS 1/2/4-value shorthand -> (top, right, bottom, left), ints.
-fn parse_padding(v: &Value) -> (i64, i64, i64, i64) {
+pub(crate) fn parse_padding(v: &Value) -> (i64, i64, i64, i64) {
     if v.is_null() {
         return (0, 0, 0, 0);
     }

@@ -7176,6 +7176,50 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// ROW 56 at the object: the Hand slot's flyout, opened by its own
+    /// press-and-hold, plans each labelled row with `parts` whose rects come
+    /// from that row's OWN YAML numbers (its `padding`, `gap` and `size`, read
+    /// from the workspace here, not typed), in the same coordinates as its
+    /// `rect`: the icon at the left padding, centred in the inner height; the
+    /// label from the icon's right + gap to the right padding.
+    #[test]
+    fn a_shipped_flyout_row_plans_its_icon_and_label_parts_from_its_own_yaml() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
+        let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_hand_slot"}"#);
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("hand_alternates"), "{reply}");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace");
+        let spec = ws.dialog("hand_alternates").expect("the Hand flyout");
+        let width = spec["width"].as_i64().expect("the flyout declares its width (#791)");
+        let plan: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_dialog_plan(e, width, 640) })).unwrap();
+        let rows: Vec<&serde_json::Value> = spec["content"]["children"].as_array().unwrap().iter().collect();
+        let mut seen = 0;
+        for leaf in plan["plan"]["leaves"].as_array().unwrap() {
+            let Some(label) = leaf["static"]["label"].as_str() else { continue };
+            let node = rows.iter().find(|n| n["label"] == label).unwrap_or_else(|| panic!("no YAML row {label}"));
+            let style = &node["style"];
+            let pad: Vec<i64> = style["padding"].as_str().unwrap().split_whitespace()
+                .map(|p| p.parse().unwrap()).collect();
+            let (vertical, horizontal) = (pad[0], pad[1]);
+            let (gap, size) = (style["gap"].as_i64().unwrap(), style["size"].as_i64().unwrap());
+            let r = &leaf["rect"];
+            let (x, y, w, h) = (r["x"].as_i64().unwrap(), r["y"].as_i64().unwrap(),
+                                r["w"].as_i64().unwrap(), r["h"].as_i64().unwrap());
+            let inner_h = h - 2 * vertical;
+            assert_eq!(leaf["parts"]["icon"], serde_json::json!(
+                {"x": x + horizontal, "y": y + vertical + (inner_h - size) / 2, "w": size, "h": size}), "{label}");
+            let label_x = x + horizontal + size + gap;
+            assert_eq!(leaf["parts"]["label"], serde_json::json!(
+                {"x": label_x, "y": y + vertical, "w": x + w - horizontal - label_x, "h": inner_h}), "{label}");
+            assert!(leaf["parts"]["label"]["w"].as_i64().unwrap() > 0, "{label}: room for the label");
+            seen += 1;
+        }
+        assert_eq!(seen, 2, "the Hand flyout's two labelled rows (Hand, Zoom)");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A reply with no timer act carries no `timers` key, so every reply shape
     /// pinned before finding 1 is unchanged.
     #[test]

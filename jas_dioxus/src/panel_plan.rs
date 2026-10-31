@@ -42,7 +42,9 @@
 //!          "events": ["<event>", ...],  the events the node ANSWERS (see [`events_of`])
 //!          "display": {"<bind key>": "<the core-formatted display string>", ...},
 //!          "options": null | [{"kind": "option", "value", "label", "selected"[, "glyph"]}
-//!                             | {"kind": "separator"}, ...]}
+//!                             | {"kind": "separator"}, ...],
+//!          "parts": {"icon": {x,y,w,h}[, "label": {x,y,w,h}]}}  only on a labelled
+//!                             `icon_button` (see [`parts_of`])
 //! ```
 //!
 //! `options` is the node's declared list with its dividers told apart from its
@@ -518,6 +520,41 @@ fn icon_names(entry: &Value, out: &mut Vec<String>) {
     }
 }
 
+/// ROW 56 (STATUS-flask §692 (1), §700): the inner layout of an `icon_button`
+/// that carries a `label` (the tool-alternates flyout rows), so a native shell
+/// draws the icon, then the label, with no layout of its own. Plan
+/// coordinates, the same space as the entry's `rect`. The icon is `size` ×
+/// `size` (the inner height when there is no `size`) at the left padding,
+/// centred vertically in the inner height; the label runs from the icon's right
+/// edge + `gap` to the right padding, at the full inner height. Only for
+/// `justify: start` or none (no YAML uses `center` or `end`, so a shell falls
+/// back to icon-only rather than to a guess). A rect with no room for the
+/// label (its width ≤ 0) plans the `icon` part alone. `None` otherwise.
+fn parts_of(node: &Value, x: i64, y: i64, w: i64, h: i64) -> Option<Value> {
+    use crate::interpreter::panel_layout::{parse_padding, style_i};
+    if node.get("type").and_then(Value::as_str) != Some("icon_button") {
+        return None;
+    }
+    let labelled = node.get("label").and_then(Value::as_str).is_some_and(|l| !l.is_empty())
+        || node.get("bind").and_then(|b| b.get("label")).is_some();
+    let justify = node.get("style").and_then(|s| s.get("justify")).and_then(Value::as_str);
+    if !labelled || !matches!(justify, None | Some("start")) {
+        return None;
+    }
+    let (pt, pr, pb, pl) = parse_padding(node.get("style").and_then(|s| s.get("padding")).unwrap_or(&Value::Null));
+    let gap = style_i(node, "gap").unwrap_or(0);
+    let (ix, iy, ih) = (x + pl, y + pt, h - pt - pb);
+    let size = style_i(node, "size").unwrap_or(ih);
+    let mut parts = Map::new();
+    parts.insert("icon".into(), json!({"x": ix, "y": iy + (ih - size) / 2, "w": size, "h": size}));
+    let label_x = ix + size + gap;
+    let label_w = x + w - pr - label_x;
+    if label_w > 0 {
+        parts.insert("label".into(), json!({"x": label_x, "y": iy, "w": label_w, "h": ih}));
+    }
+    Some(Value::Object(parts))
+}
+
 fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, withheld: &mut Vec<Value>) -> Value {
     // A templated id is not resolved by any port and a foreach widget is not
     // addressable by id (D12), so it is sent empty and named, never raw.
@@ -531,7 +568,8 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
     let display = display_of(&item.node, &values, &item.ctx);
     let options = options_of(&item.node, &values, &item.ctx, &item.path, withheld);
     let items = items_of(&item.node, &item.ctx, &item.path, acts, withheld);
-    json!({
+    let parts = parts_of(&item.node, item.x, item.y, item.w, item.h);
+    let mut e = json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
         "type": item.node.get("type").and_then(Value::as_str).unwrap_or(""),
@@ -544,7 +582,11 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
         "display": display,
         "options": options,
         "items": items,
-    })
+    });
+    if let Some(parts) = parts {
+        e["parts"] = parts;
+    }
+    e
 }
 
 /// Build a panel's plan in `ctx` (see the module docs for the shape).
@@ -2759,6 +2801,67 @@ mod tests {
         assert_eq!(picture(&field(json!({"saturation": "dialog.s"}))), None, "no bind.hue");
         assert_eq!(picture(&field(json!({"hue": "dialog.word"}))), None, "a hue that is text");
         assert_eq!(picture(&field(json!({"hue": "dialog.missing"}))), None, "a hue that resolves to nothing");
+    }
+
+    /// ROW 56 (STATUS-flask §692 (1), §700): a labelled `icon_button` carries
+    /// `parts`, its icon and label rects in plan coordinates, so a shell draws
+    /// icon then label with no layout of its own. The geometry: the icon
+    /// `size` × `size` at the left padding, centred vertically in the inner
+    /// height; the label from the icon's right edge + `gap` to the right
+    /// padding, the full inner height. Asymmetric padding here, so a
+    /// left/right swap cannot pass.
+    #[test]
+    fn a_labelled_icon_button_carries_its_icon_and_label_parts() {
+        use super::parts_of;
+        use serde_json::json;
+        let row = json!({"type": "icon_button", "label": "Zoom",
+                         "style": {"justify": "start", "gap": 8, "padding": "4 6 4 10", "size": 28}});
+        // rect (100, 50) 200 × 36: inner (110, 54) 184 × 28.
+        assert_eq!(parts_of(&row, 100, 50, 200, 36), Some(json!({
+            "icon": {"x": 110, "y": 54, "w": 28, "h": 28},
+            "label": {"x": 146, "y": 54, "w": 148, "h": 28}})));
+        // A taller row centres the icon in the inner height.
+        assert_eq!(parts_of(&row, 0, 0, 200, 48).unwrap()["icon"], json!({"x": 10, "y": 10, "w": 28, "h": 28}));
+        // No `justify` is start.
+        let mut plain = row.clone();
+        plain["style"].as_object_mut().unwrap().remove("justify");
+        assert_eq!(parts_of(&plain, 100, 50, 200, 36), parts_of(&row, 100, 50, 200, 36));
+        // No `size`: the icon is the inner height square.
+        let mut sizeless = row.clone();
+        sizeless["style"].as_object_mut().unwrap().remove("size");
+        assert_eq!(parts_of(&sizeless, 0, 0, 200, 40).unwrap()["icon"], json!({"x": 10, "y": 4, "w": 32, "h": 32}));
+    }
+
+    /// No parts: `center` or `end` (no YAML uses them, so a shell falls back
+    /// to icon-only, never to a guess), no `label`, or not an `icon_button`.
+    #[test]
+    fn no_parts_off_start_without_a_label_or_on_another_kind() {
+        use super::parts_of;
+        use serde_json::json;
+        for justify in ["center", "end"] {
+            let row = json!({"type": "icon_button", "label": "Zoom", "style": {"justify": justify, "size": 28}});
+            assert_eq!(parts_of(&row, 0, 0, 200, 36), None, "{justify}");
+        }
+        assert_eq!(parts_of(&json!({"type": "icon_button", "style": {"size": 28}}), 0, 0, 200, 36), None, "no label");
+        assert_eq!(parts_of(&json!({"type": "icon_button", "label": "", "style": {}}), 0, 0, 200, 36), None, "an empty label");
+        assert_eq!(parts_of(&json!({"type": "button", "label": "OK"}), 0, 0, 200, 36), None, "a button");
+    }
+
+    /// §700's addition: a rect too narrow for any label (padding + icon + gap
+    /// fill it) plans the ICON part only, never a label of width ≤ 0.
+    #[test]
+    fn a_rect_with_no_room_for_the_label_plans_the_icon_only() {
+        use super::parts_of;
+        use serde_json::json;
+        let row = json!({"type": "icon_button", "label": "Zoom",
+                         "style": {"gap": 8, "padding": "4 6 4 10", "size": 28}});
+        // 10 + 28 + 8 + 6 = 52: at width 52 the label is 0 wide, at 40 negative.
+        for w in [52, 40] {
+            let parts = parts_of(&row, 0, 0, w, 36).unwrap();
+            assert!(parts.get("label").is_none(), "width {w}: {parts}");
+            assert_eq!(parts["icon"], json!({"x": 10, "y": 4, "w": 28, "h": 28}), "width {w}");
+        }
+        assert_eq!(parts_of(&row, 0, 0, 53, 36).unwrap()["label"]["w"], json!(1), "one pixel of label");
     }
 }
 
