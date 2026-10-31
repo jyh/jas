@@ -1197,11 +1197,17 @@ internal sealed unsafe class Canvas : IDisposable
 
     /// <summary>
     /// Finding 1 (#771): a reply's `timers`, handed to the UI thread to run. The
-    /// shell runs only the clock; the engine kept the effects.
+    /// shell runs only the clock; the engine kept the effects. A malformed act
+    /// is `RUSTFAIL TIMER REFUSED` with its own text, one row each: the engine
+    /// is the reply's only author, so it broke its contract (#778's review).
     /// </summary>
     private void ApplyTimers(string reply, PanelClickCmd click, string head)
     {
-        var acts = TimerWire.Parse(reply);
+        var (acts, refused) = TimerWire.Parse(reply);
+        foreach (var act in refused)
+        {
+            _report($"RUSTFAIL TIMER REFUSED {head} act={act} {Tids()}");
+        }
         if (acts.Count == 0) { return; }
         var named = string.Join(",", acts.Select(a => a.Cancel ? $"cancel:{a.Id}" : $"start:{a.Id}@{a.DelayMs}"));
         _report($"TIMERS {head} acts={named} {Tids()}");

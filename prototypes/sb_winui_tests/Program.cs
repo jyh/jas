@@ -772,18 +772,56 @@ static class Program
         // or `{"cancel"}`. The shell runs the clock; the ENGINE keeps the effects and
         // decides on the tick. `TimerWire.Parse` reads the list; an absent key is
         // an empty list, never a throw.
-        static string TP(string reply) => string.Join(",", TimerWire.Parse(reply).Select(a =>
+        static string TP(string reply) => string.Join(",", TimerWire.Parse(reply).Acts.Select(a =>
             a.Cancel ? $"cancel:{a.Id}" : $"start:{a.Id}@{a.DelayMs}"));
+        // #778's review: a malformed act is REFUSED BY NAME (its own JSON text),
+        // never dropped silently. The engine emits none; the arm is the shape.
+        static string TR(string reply) => string.Join(" | ", TimerWire.Parse(reply).Refused);
         Eq("timers: a start with its delay", "start:long_press_btn_hand_slot@250",
             TP("""{"doc_changed":false,"changed":[],"timers":[{"start":"long_press_btn_hand_slot","delay_ms":250}]}"""));
         Eq("timers: a cancel", "cancel:long_press_btn_hand_slot", TP("""{"timers":[{"cancel":"long_press_btn_hand_slot"}]}"""));
         Eq("timers: one reply can start one and cancel another, in order", "cancel:a,start:b@100",
             TP("""{"timers":[{"cancel":"a"},{"start":"b","delay_ms":100}]}"""));
+        Eq("timers: well-formed acts refuse nothing", "", TR("""{"timers":[{"cancel":"a"},{"start":"b","delay_ms":100}]}"""));
         Eq("timers: absent when no timer act happened", "", TP("""{"doc_changed":false,"changed":[]}"""));
+        Eq("timers: ...and an absent key refuses nothing", "", TR("""{"doc_changed":false,"changed":[]}"""));
         Eq("timers: a start with no delay is refused, not defaulted", "", TP("""{"timers":[{"start":"a"}]}"""));
-        Eq("timers: a negative delay is refused", "", TP("""{"timers":[{"start":"a","delay_ms":-5}]}"""));
-        Eq("timers: an entry with no id is skipped", "start:b@10", TP("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: ...and refused by name", """{"start":"a"}""", TR("""{"timers":[{"start":"a"}]}"""));
+        Eq("timers: a negative delay is refused by name", """{"start":"a","delay_ms":-5}""", TR("""{"timers":[{"start":"a","delay_ms":-5}]}"""));
+        Eq("timers: a fractional delay is refused by name", """{"start":"a","delay_ms":2.5}""", TR("""{"timers":[{"start":"a","delay_ms":2.5}]}"""));
+        Eq("timers: an entry with no id is refused, the rest read", "start:b@10", TP("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: ...and the refused entry is named", """{"delay_ms":10}""", TR("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: an empty cancel id is refused by name", """{"cancel":""}""", TR("""{"timers":[{"cancel":""}]}"""));
+        Eq("timers: an entry that is not an object is refused by name", "3", TR("""{"timers":[3]}"""));
+        Eq("timers: an act naming both start and cancel is refused, not read as either", "",
+            TP("""{"timers":[{"start":"a","delay_ms":5,"cancel":"a"}]}"""));
+        Eq("timers: ...and named", """{"start":"a","delay_ms":5,"cancel":"a"}""",
+            TR("""{"timers":[{"start":"a","delay_ms":5,"cancel":"a"}]}"""));
+        Eq("timers: a timers key that is not a list is refused by name", """{"start":"a","delay_ms":5}""",
+            TR("""{"timers":{"start":"a","delay_ms":5}}"""));
+        Eq("timers: each refusal is its own entry, in order", """3 | {"cancel":7}""", TR("""{"timers":[3,{"cancel":"ok"},{"cancel":7}]}"""));
         Eq("timers: text that is not JSON is no acts, never a throw", "", TP("not json"));
+        // #778's review: the shell's clocks are keyed as the engine keys its
+        // pending set, by (panel, timer id). Two panels may pend the same id;
+        // a cancel or a restart on one never stops the other's clock.
+        static string PT(params string[] steps)
+        {
+            var t = new PendingTimers<string>();
+            var taken = new List<string>();
+            foreach (var s in steps)
+            {
+                var p = s.Split(' ');
+                if (p[0] == "put") { t.Put(p[1], p[2], p[3]); }
+                else { taken.Add(t.Take(p[1], p[2]) ?? "-"); }
+            }
+            return string.Join(",", taken) + "/" + t.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        Eq("pending timers: one panel's clock is taken back by its key", "c1/0", PT("put tb x c1", "take tb x"));
+        Eq("pending timers: the same id on two panels is two clocks", "c2/1", PT("put tb x c1", "put lp x c2", "take lp x"));
+        Eq("pending timers: a cancel on one panel leaves the other's", "-/1", PT("put tb x c1", "take lp x"));
+        Eq("pending timers: a restart (take, then put) replaces only its own key", "c2,c1,c3/0",
+            PT("put tb x c1", "put lp x c2", "take lp x", "put lp x c3", "take tb x", "take lp x"));
+        Eq("pending timers: nothing pending takes nothing", "-/0", PT("take tb x"));
         // The CLICK after a long press (jas's ruling on point 4; the web, the port of
         // record, fires none): a press whose tick got a NON-EMPTY reply (the flyout
         // opened) drops the slot's click; a StaleTimer answer (cancelled or raced)

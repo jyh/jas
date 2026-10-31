@@ -2323,7 +2323,7 @@ public sealed partial class MainWindow : Window
     // that raced a release is its StaleTimer, a no-op.
     // =======================================================================
 
-    private readonly Dictionary<string, DispatcherQueueTimer> _behaviorTimers = new(StringComparer.Ordinal);
+    private readonly PendingTimers<DispatcherQueueTimer> _behaviorTimers = new();
     private readonly Dictionary<(string Panel, string Widget), LongPressGate> _longPress = new();
 
     /// <summary>The click gate of one press-and-hold button, made on first use.</summary>
@@ -2341,7 +2341,7 @@ public sealed partial class MainWindow : Window
     {
         foreach (var act in acts)
         {
-            if (_behaviorTimers.Remove(act.Id, out var running)) { running.Stop(); }
+            _behaviorTimers.Take(panel, act.Id)?.Stop();
             if (act.Cancel) { continue; }
             // Starting an id that is already pending REPLACES it (#771): the old
             // one was stopped above.
@@ -2352,7 +2352,7 @@ public sealed partial class MainWindow : Window
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
-                _behaviorTimers.Remove(id);
+                _behaviorTimers.Take(panel, id);
                 LongPress(panel, widget).TickSent();
                 Report($"TIMER TICK panel={panel} widget={widget} id={id}");
                 _canvas.PanelClick(new PanelClickCmd
@@ -2365,7 +2365,7 @@ public sealed partial class MainWindow : Window
                     Value = id,
                 });
             };
-            _behaviorTimers[id] = timer;
+            _behaviorTimers.Put(panel, id, timer);
             timer.Start();
         }
     }
