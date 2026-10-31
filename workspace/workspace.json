@@ -18004,7 +18004,8 @@
                     "type": "text",
                     "content": "Tolerance:",
                     "style": {
-                      "font_size": 11
+                      "font_size": 11,
+                      "min_width": 57
                     }
                   },
                   {
@@ -18096,7 +18097,8 @@
                     "type": "text",
                     "content": "Tolerance:",
                     "style": {
-                      "font_size": 11
+                      "font_size": 11,
+                      "min_width": 57
                     }
                   },
                   {
@@ -18188,14 +18190,15 @@
                     "type": "text",
                     "content": "Tolerance:",
                     "style": {
-                      "font_size": 11
+                      "font_size": 11,
+                      "min_width": 57
                     }
                   },
                   {
                     "id": "mwp_stroke_weight_tolerance",
                     "type": "number_input",
                     "style": {
-                      "min_width": 45
+                      "min_width": 41
                     },
                     "min": 0,
                     "max": 100,
@@ -18287,7 +18290,8 @@
                     "type": "text",
                     "content": "Tolerance:",
                     "style": {
-                      "font_size": 11
+                      "font_size": 11,
+                      "min_width": 57
                     }
                   },
                   {

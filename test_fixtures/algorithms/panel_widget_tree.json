@@ -4576,7 +4576,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4677,7 +4678,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4778,7 +4780,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
@@ -4894,7 +4897,8 @@
         "dyn_visible": false,
         "bind": [],
         "style": [
-          "font_size"
+          "font_size",
+          "min_width"
         ]
       },
       {
