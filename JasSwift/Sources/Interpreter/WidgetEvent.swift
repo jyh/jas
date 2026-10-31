@@ -34,7 +34,7 @@ enum WidgetEvent {
     static let inputKinds: Set<String> = [
         "number_input", "length_input", "text_input",
         "select", "icon_select", "icon_button_group", "reference_point_widget",
-        "combo_box", "slider", "color_bar",
+        "combo_box", "slider", "color_bar", "color_hue_bar", "color_gradient",
     ]
     static let booleanKinds: Set<String> = ["toggle", "checkbox"]
     /// A plain pick and an Alt pick of one declared item. NOT synonyms.
@@ -494,10 +494,16 @@ enum WidgetEvent {
             guard let v = numberInputCommit(text: text, min: lo, max: hi) else { return refused }
             return (true, clampToDeclared(snapToStep(v, min: lo, step: declaredBound(widget["step"])),
                                           min: lo, max: hi))
-        case "color_bar":
+        case "color_hue_bar":
+            // ONE number v, clamped (finding 13, step 2b): the Color Picker
+            // strip's pick (`stripValue`) never reads a u.
+            guard let v = numberInputCommit(text: text, min: 0, max: 1) else { return refused }
+            return (true, v)
+        case "color_bar", "color_gradient":
             // A point normalized to [0,1]² (fork B2): "u,v", each coordinate in
-            // the number grammar, each clamped. The colour is
-            // `colorBarRgb(u, v)`; the parse stops at the point.
+            // the number grammar, each clamped. The colour bar's colour is
+            // `colorBarRgb(u, v)` and the Color Picker field's pick is
+            // `gradientSB(u, v)`; the parse stops at the point.
             let parts = text.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
             guard parts.count == 2,
                   let u = numberInputCommit(text: parts[0], min: 0, max: 1),
