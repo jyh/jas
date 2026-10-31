@@ -103,9 +103,9 @@ pub fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
 
 /// The input kinds: a committed value is parsed, written, then its
 /// `commit`/`change` behaviors run.
-pub const INPUT_KINDS: [&str; 10] = [
+pub const INPUT_KINDS: [&str; 12] = [
     "number_input", "length_input", "text_input", "select", "icon_select", "icon_button_group",
-    "reference_point_widget", "combo_box", "slider", "color_bar",
+    "reference_point_widget", "combo_box", "slider", "color_bar", "color_hue_bar", "color_gradient",
 ];
 /// The nine anchors a `reference_point_widget` takes, row by row. The KIND
 /// owns them (WIDGET_EVENTS.md, Parsing); no YAML declares them.
@@ -265,10 +265,14 @@ pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json
         "slider" => number_input_commit(text, lo, hi).map(|v| {
             json!(clamp_to_declared(snap_to_step(v, lo, declared_bound(widget, "step")), lo, hi))
         }),
+        // ONE number v, clamped (finding 13, step 2b): the Color Picker strip's
+        // pick (`color_util::strip_value`) never reads a u.
+        "color_hue_bar" => number_input_commit(text, Some(0.0), Some(1.0)).map(|v| json!(v)),
         // A point normalized to [0,1]² (fork B2): "u,v", each coordinate in the
-        // number grammar, each clamped. The colour is
-        // `color_util::color_bar_rgb(u, v)`; the parse stops at the point.
-        "color_bar" => {
+        // number grammar, each clamped. The colour bar's colour is
+        // `color_util::color_bar_rgb(u, v)` and the Color Picker field's pick is
+        // `color_util::gradient_sb(u, v)`; the parse stops at the point.
+        "color_bar" | "color_gradient" => {
             let parts: Vec<&str> = text.split(',').collect();
             match parts.as_slice() {
                 [u, v] => match (number_input_commit(u, Some(0.0), Some(1.0)),
@@ -442,9 +446,13 @@ mod tests {
         // A kind outside the table has no events. `slider`, `color_bar`,
         // `radio_group` and `icon_button_group` were this control until each
         // joined (2026-10-13 forks A and B2; 2026-10-15 twice);
-        // `reference_point_widget` joined the same day; `color_hue_bar` is
-        // outside by the contract's own list.
-        assert!(allowed_events("color_hue_bar").is_empty());
+        // `reference_point_widget` joined the same day; `color_hue_bar` and
+        // `color_gradient` joined with finding 13's step 2b (2026-10-31), when
+        // the Color Picker's strip and field became pickable on a native
+        // shell. `color_swatch` is still outside by the contract's own list.
+        assert!(allowed_events("color_swatch").is_empty());
+        assert_eq!(allowed_events("color_hue_bar"), COMMIT_EVENTS.to_vec());
+        assert_eq!(allowed_events("color_gradient"), COMMIT_EVENTS.to_vec());
     }
 
     #[test]
@@ -533,6 +541,53 @@ mod tests {
         for text in ["0.5", "0.5,0.5,0.5", "0.5, 0.5", "a,b", ",0.5", "0.5,", "", ".5,.5"] {
             assert_eq!(parse(w.clone(), text), None, "{text:?}");
         }
+    }
+
+    /// The Color Picker's strip (finding 13, step 2b): ONE number `v`, clamped
+    /// to [0, 1]. Its pick never reads a `u`, so its text carries none. Mirrors
+    /// the reference's `test_a_hue_strip_*` lists.
+    #[test]
+    fn a_hue_strip_commit_is_one_clamped_number_or_refused() {
+        let w = json!({"type": "color_hue_bar"});
+        for (text, want) in [("0.25", 0.25), ("0", 0.0), ("1", 1.0), ("1.4", 1.0), ("-0.2", 0.0)] {
+            assert_eq!(parse(w.clone(), text), Some(json!(want)), "{text}");
+        }
+        for text in ["0.5,0.5", "a", "", ".5", "0.5 ", "+0.5"] {
+            assert_eq!(parse(w.clone(), text), None, "{text:?}");
+        }
+    }
+
+    /// The Color Picker's field (finding 13, step 2b): a point `u,v`, parsed
+    /// exactly as the colour bar's. Mirrors the reference's `test_a_field_*`.
+    #[test]
+    fn a_field_commit_is_a_clamped_point_as_the_colour_bars() {
+        let w = json!({"type": "color_gradient"});
+        for (text, want) in [("0.25,0.5", [0.25, 0.5]), ("1.4,-0.2", [1.0, 0.0]), ("-3,7", [0.0, 1.0])] {
+            assert_eq!(parse(w.clone(), text), Some(json!(want)), "{text}");
+        }
+        for text in ["0.5", "0.5,0.5,0.5", "0.5, 0.5", ",0.5", ""] {
+            assert_eq!(parse(w.clone(), text), None, "{text:?}");
+        }
+    }
+
+    /// `test_fixtures/algorithms/picker_commits.json` (finding 13, step 2b):
+    /// every vector's text parses to its `value`, or is refused when the
+    /// vector's refusal is `BadValue`.
+    #[test]
+    fn the_picker_kinds_parse_replays_picker_commits_json() {
+        let text = std::fs::read_to_string("../test_fixtures/algorithms/picker_commits.json").unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let vectors = doc["vectors"].as_array().unwrap();
+        for vec in vectors {
+            let w = json!({"type": vec["kind"]});
+            let got = parse(w, vec["text"].as_str().unwrap());
+            if vec["refusal"] == "BadValue" {
+                assert_eq!(got, None, "{}", vec["name"]);
+            } else {
+                assert_eq!(got, Some(vec["value"].clone()), "{}", vec["name"]);
+            }
+        }
+        assert!(vectors.len() >= 20, "the fixture reached the arm");
     }
 
     #[test]

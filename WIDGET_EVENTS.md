@@ -65,6 +65,8 @@ reference_point_widget: commit, change
 combo_box: commit, change
 slider: commit, change
 color_bar: commit, change
+color_hue_bar: commit, change
+color_gradient: commit, change
 toggle: click, change
 checkbox: click, change
 radio: click, change
@@ -77,7 +79,7 @@ gradient_slider: commit
 <!-- widget-event-table:end -->
 
 - **Input kinds** are `number_input`, `length_input`, `text_input`,
-  `select`, `icon_select`, `icon_button_group`, `reference_point_widget`, `combo_box`, `slider` and `color_bar`. `commit` and `change` are
+  `select`, `icon_select`, `icon_button_group`, `reference_point_widget`, `combo_box`, `slider`, `color_bar`, `color_hue_bar` and `color_gradient`. `commit` and `change` are
   synonyms on these kinds: both name "a value was committed".
 - **`text_input` has three more events: `input`, `blur` and `keydown`.**
   They are not commits. A commit never runs them. They carry search-as-
@@ -103,7 +105,8 @@ gradient_slider: commit
   values (see §The stops kind).
 
 **Outside this contract, deliberately:** every other widget kind. That
-includes the color widgets other than `color_bar`. Their events are not
+includes the color widgets other than `color_bar`, `color_hue_bar` and
+`color_gradient`. Their events are not
 ruled here, and there is nothing missing from this section: extending the
 contract to a kind is a change to this document, the module and the lint
 together.
@@ -230,7 +233,9 @@ Enter or focus loss, or the picked option's value for `select`,
 1. **Refuse, and do nothing at all, when any of these holds:**
    - the widget's `bind.disabled` expression is true (`Disabled`);
    - the commit carries no text (`MissingValue`);
-   - the kind's parse refuses the text (`BadValue`, see §Parsing).
+   - the kind's parse refuses the text (`BadValue`, see §Parsing);
+   - the kind is `color_hue_bar` or `color_gradient` and the dialog is not
+     in H mode (`WrongMode`, naming the mode; see §The bound target).
    A refused commit writes nothing and runs no behavior.
 2. **Write the parsed value to the bound target**, when the target is
    writable, together with the global it is two-way bound to (see §The
@@ -416,6 +421,8 @@ expression that reads another root, or that does not parse.
 | `combo_box` | a number (clamped as above) when the text is in the number grammar; otherwise the text | the text is blank |
 | `slider` | a number by the number grammar, clamped to `min:` / `max:` as `number_input` is, then SNAPPED to the declared `step:`: `min + floor((v − min) / step + 0.5) · step` (half up, offset from `min`, or from 0 with no `min`), then clamped again so a snap never leaves the range. No `step:`, or a step that is not a positive number, does not snap. A shell reports a drag as `change` (live) and the release as `commit`; both parse the same way. | the text is not in the grammar |
 | `color_bar` | a POINT normalized to [0, 1]²: the text is `u,v`, two numbers by the number grammar joined by one comma (no spaces), each clamped to `[0, 1]`; `u` runs left to right, `v` top to bottom. The value is the pair `[u, v]`; the colour it names is `color_util.color_bar_rgb(u, v)` (`test_fixtures/algorithms/color_bar.json`), which every view of the bar also calls, so a shell sends the point and never computes a colour. A shell reports a drag as `change` (live: the colour shows, nothing is committed) and the release as `commit` (the colour is committed once); both parse the same way. | the text is not two numbers joined by one comma |
+| `color_hue_bar` | ONE number `v` by the number grammar, clamped to `[0, 1]`: a point on the Color Picker's vertical strip, `v` running top to bottom. The value is `v`. The strip's pick never reads a `u`, so its text carries none. What a commit WRITES is the pick, not `v` (see §The bound target). A shell reports a drag as `change` and the release as `commit`; both parse and write the same way. Off H mode it is refused by the door; the Swift view's own channel write is outside the bind (deferred §5). `test_fixtures/algorithms/picker_commits.json` pins the parse, the refusals and the writes. | the text is not one number |
+| `color_gradient` | a POINT, exactly as `color_bar`'s: the text is `u,v`, two numbers by the number grammar joined by one comma (no spaces), each clamped to `[0, 1]`; `u` runs left to right, `v` top to bottom. The value is the pair `[u, v]`. What a commit WRITES is the pick (see §The bound target). `change` and `commit` both parse and write the same way. `test_fixtures/algorithms/picker_commits.json` pins the parse, the refusals and the writes. | the text is not two numbers joined by one comma |
 | `toggle`, `checkbox` | no text parse; see §Pressing | — |
 
 - **The number grammar** is `-?[0-9]+(\.[0-9]+)?`, matched against the
@@ -465,6 +472,20 @@ expression that reads another root, or that does not parse.
   - *(This clause was missing from the contract's first version, #169. The
     corpus (#170) and the engine's door (#171) were built without it, and
     all three are corrected together.)*
+- **The Color Picker's strip and field write their PICK, not their point**
+  (finding 13). Both are the dialog's, and both read `dialog.radio_channel`,
+  whose absence means `h`.
+  - In H mode, `color_hue_bar` writes its bound target (`bind.value`, the
+    dialog's `h`) with `strip_value(v, 359)`, and `color_gradient` writes
+    `bind.saturation` and `bind.brightness` with the two halves of
+    `gradient_sb(u, v)`. Each value is rounded half away from zero
+    (`color_util`; `test_fixtures/algorithms/picker_picks.json`, its
+    `written`). The pictures a native shell draws them from are the same
+    two functions (the plan's `display.picture`), so a pick lands on the
+    colour drawn under it.
+  - In any other mode the commit is REFUSED, `WrongMode`, naming the mode
+    (`radio_channel=<mode>`): nothing is written and no behavior runs. The other modes are deferred
+    (the finding 13 design, §4).
 - **Every other bind is read, never written, by this layer.** That
   covers a `state.` path, a `foreach` item's field (`ab.name`), an
   indexed path (`panel.stops[…].opacity`), an expression, and a name a

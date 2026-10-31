@@ -5559,6 +5559,117 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// FINDING 13, STEP 2b (WIDGET_EVENTS.md): at the dialog door, the Color
+    /// Picker's strip takes ONE number `v` and writes `dialog.h`, and its field
+    /// takes `u,v` and writes `dialog.s` and `dialog.b`, each the pick rounded
+    /// half away from zero. `commit` and `change` parse and write alike. Off H
+    /// mode a pick is refused `WrongMode`, naming the mode, and writes nothing.
+    /// The points are ones the dialog's 8-bit colour reads back exactly.
+    #[test]
+    fn the_color_pickers_strip_and_field_commit_their_pick_in_h_mode_and_refuse_off_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#ff0000"}}"##);
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("color_picker"));
+        let hsb = |e: *mut JasEngine| -> (f64, f64, f64) {
+            let ctx = engine_of(e).store.borrow().eval_context();
+            let n = |k: &str| match crate::interpreter::expr::eval(&format!("dialog.{k}"), &ctx) {
+                crate::interpreter::expr_types::Value::Number(n) => n,
+                other => panic!("dialog.{k} is {other:?}"),
+            };
+            (n("h"), n("s"), n("b"))
+        };
+        let commit = |e: *mut JasEngine, widget: &str, event: &str, text: &str| {
+            dialog_event(e, &serde_json::json!({"widget": widget, "event": event, "value": text}).to_string())
+        };
+        // The strip's middle: v = 1/6 picks magenta, 299.
+        let (reply, err) = commit(e, "cp_colorbar", "commit", "0.16666666666666666");
+        assert!(!reply.is_empty(), "the strip committed: {err}");
+        assert_eq!(hsb(e), (299.0, 100.0, 100.0));
+        // A drag's `change` writes alike: v = 2/3 picks green, 120.
+        let (reply, err) = commit(e, "cp_colorbar", "change", "0.6666666666666666");
+        assert!(!reply.is_empty(), "the strip changed: {err}");
+        assert_eq!(hsb(e), (120.0, 100.0, 100.0));
+        // The field writes s and b, never h.
+        let (reply, err) = commit(e, "cp_gradient", "commit", "1,0.27");
+        assert!(!reply.is_empty(), "the field committed: {err}");
+        assert_eq!(hsb(e), (120.0, 100.0, 73.0));
+        // The parse refusals.
+        for (widget, text) in [("cp_colorbar", "0.5,0.5"), ("cp_gradient", "0.5")] {
+            let (reply, err) = commit(e, widget, "commit", text);
+            assert!(reply.is_empty() && err.contains("BadValue"), "{widget} {text:?}: {reply} {err}");
+        }
+        // Off H mode: refused by name, nothing written.
+        let _ = dialog_event(e, r#"{"widget":"cp_radio_s","event":"toggle","value":"s"}"#);
+        for (widget, text) in [("cp_colorbar", "0.5"), ("cp_gradient", "0.1,0.1")] {
+            let (reply, err) = commit(e, widget, "commit", text);
+            assert!(reply.is_empty() && err.contains(r#""panel_event":"WrongMode""#)
+                    && err.contains("radio_channel=s"), "{widget}: {reply} {err}");
+        }
+        assert_eq!(hsb(e), (120.0, 100.0, 73.0), "off H mode nothing was written");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The dialog door replays `picker_commits.json` (finding 13, step 2b) on
+    /// the real Color Picker, opened fresh on red for each vector. A refusal is
+    /// pinned exactly (class, and `WrongMode`'s detail) with nothing written. A
+    /// write is read back through the dialog's getters, which round-trip ONE
+    /// 8-bit colour, so a read-back may sit 1 off the stored pick (s = 27 at
+    /// b = 27 reads 28); the exact picks are `picker_pick_writes`'s replay in
+    /// `panel_behavior`. Here the door's wiring is what is pinned: the mode,
+    /// the refusals, and each write landing in its own field.
+    #[test]
+    fn the_dialog_door_replays_picker_commits_json() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let text = std::fs::read_to_string("../test_fixtures/algorithms/picker_commits.json").unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let read = |e: *mut JasEngine, k: &str| -> f64 {
+            let ctx = engine_of(e).store.borrow().eval_context();
+            match crate::interpreter::expr::eval(&format!("dialog.{k}"), &ctx) {
+                crate::interpreter::expr_types::Value::Number(n) => n,
+                other => panic!("dialog.{k} is {other:?}"),
+            }
+        };
+        let mut seen = 0;
+        for vec in doc["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let e = engine_on("multi_layer.svg");
+            let _ = dispatch(e,
+                r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#ff0000"}}"##);
+            if let Some(mode) = vec["radio_channel"].as_str().filter(|m| *m != "h") {
+                let (reply, err) = dialog_event(e, &serde_json::json!(
+                    {"widget": format!("cp_radio_{mode}"), "event": "toggle", "value": mode}).to_string());
+                assert!(!reply.is_empty(), "{name}: mode {mode}: {err}");
+            }
+            let widget = if vec["kind"] == "color_hue_bar" { "cp_colorbar" } else { "cp_gradient" };
+            let before = (read(e, "h"), read(e, "s"), read(e, "b"));
+            let (reply, err) = dialog_event(e, &serde_json::json!(
+                {"widget": widget, "event": "commit", "value": vec["text"]}).to_string());
+            if let Some(class) = vec["refusal"].as_str() {
+                assert!(reply.is_empty() && err.contains(&format!(r#""panel_event":"{class}""#)), "{name}: {reply} {err}");
+                if let Some(detail) = vec["detail"].as_str() {
+                    assert!(err.contains(detail), "{name}: the refusal names the mode: {err}");
+                }
+                assert_eq!((read(e, "h"), read(e, "s"), read(e, "b")), before, "{name}: nothing written");
+            } else {
+                assert!(!reply.is_empty(), "{name}: {err}");
+                for (role, key) in [("value", "h"), ("saturation", "s"), ("brightness", "b")] {
+                    if let Some(want) = vec["writes"][role].as_f64() {
+                        let got = read(e, key);
+                        assert!((got - want).abs() <= 1.0, "{name}: dialog.{key} reads {got}, the pick is {want}");
+                    }
+                }
+                if vec["kind"] == "color_gradient" && vec["writes"]["saturation"].as_f64() != Some(0.0) {
+                    assert_eq!(read(e, "h"), 0.0, "{name}: the field never writes the hue");
+                }
+            }
+            seen += 1;
+            unsafe { jas_engine_free(e) };
+        }
+        assert!(seen >= 20, "the fixture reached the door ({seen})");
+    }
+
     /// A tool's resolved dialog params travel as literals that evaluate back
     /// to themselves, through the same evaluator the `open_dialog` effect uses.
     #[test]

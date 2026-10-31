@@ -496,11 +496,13 @@ def self_test() -> int:
     # 2026-10-13); the literal is here so a change to the kind set is a
     # deliberate edit, not a drift.
     # 17 since `button` and `icon_button` (the click kinds) joined, 2026-10-15;
-    # 18 since `gradient_slider` (the stops kind) joined, 2026-10-21.
+    # 18 since `gradient_slider` (the stops kind) joined, 2026-10-21;
+    # 20 since `color_hue_bar` and `color_gradient` (the Color Picker's strip
+    # and field, finding 13 step 2b) joined, 2026-10-31.
     arm("the module table is every value, boolean, item, check, option, click "
         "and stops kind",
         len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS | CHECK_KINDS
-                          | OPTION_KINDS | CLICK_KINDS | STOPS_KINDS) == 18)
+                          | OPTION_KINDS | CLICK_KINDS | STOPS_KINDS) == 20)
     # One widget per (kind, event), each with one expression: the counts this
     # fixture is BUILT to have.
     clean = [{"type": k, "id": f"{k}_{e}", "behavior": [

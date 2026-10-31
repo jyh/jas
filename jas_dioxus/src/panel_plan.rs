@@ -238,7 +238,7 @@ fn numbers_of(node: &Value) -> Map<String, Value> {
 /// The Color Picker's `color_hue_bar` and `color_gradient` are the same case
 /// (finding 13, step 2a): `picture` is the engine's own, each pixel the pick
 /// there ([`crate::color_picker_picture`]); the strip's is static, the field's
-/// is drawn at the leaf's `bind.hue`. Only in H mode (`dialog.radio_channel`,
+/// is drawn at the leaf's `bind.hue` (no picture when that is not a number). Only in H mode (`dialog.radio_channel`,
 /// read as the web reads it, absent meaning h): in another mode the two widgets
 /// mean other channels, and no picture a pick would contradict is sent
 /// (STATUS-flask §691, Q2 (b)).
@@ -277,15 +277,19 @@ fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<Str
         use crate::interpreter::expr_types::Value as Ev;
         let channel = match eval("dialog.radio_channel", ctx) { Ev::Str(s) => s, _ => "h".to_string() };
         if channel == "h" {
+            // A field whose `bind.hue` is absent or not a number carries NO
+            // picture (#792's review): a field drawn at hue 0 would read as a
+            // valid red picture over a broken bind.
             let picture = if kind == Some("color_hue_bar") {
-                crate::color_picker_picture::strip_data_uri()
+                Some(crate::color_picker_picture::strip_data_uri())
             } else {
-                let hue = node.get("bind").and_then(|b| b.get("hue")).and_then(Value::as_str)
-                    .map(|e| match eval(e, ctx) { Ev::Number(n) => n, _ => 0.0 })
-                    .unwrap_or(0.0);
-                crate::color_picker_picture::field_data_uri(hue)
+                node.get("bind").and_then(|b| b.get("hue")).and_then(Value::as_str)
+                    .and_then(|e| match eval(e, ctx) { Ev::Number(n) => Some(n), _ => None })
+                    .map(crate::color_picker_picture::field_data_uri)
             };
-            out.insert("picture".to_string(), Value::String(picture));
+            if let Some(picture) = picture {
+                out.insert("picture".to_string(), Value::String(picture));
+            }
         }
         return out;
     }
@@ -2737,6 +2741,25 @@ mod tests {
         assert_eq!(reached.len(), 2, "vacuous: reached {reached:?}");
     }
 
+
+    /// #792's review (jas, LOW): a field whose `bind.hue` is absent, or does not
+    /// evaluate to a number, carries NO picture, as off H mode, never a field
+    /// drawn at hue 0 (red) that a broken bind would hide behind. The control:
+    /// a numeric hue draws.
+    #[test]
+    fn a_field_with_no_numeric_hue_carries_no_picture() {
+        use super::display_of;
+        use serde_json::{json, Map, Value};
+        let field = |bind: Value| json!({"type": "color_gradient", "bind": bind});
+        let ctx = json!({"dialog": {"h": 240, "radio_channel": "h", "word": "blue"}});
+        let empty = Map::new();
+        let picture = |node: &Value| display_of(node, &empty, &ctx).get("picture").cloned();
+        assert_eq!(picture(&field(json!({"hue": "dialog.h"}))),
+                   Some(json!(crate::color_picker_picture::field_data_uri(240.0))), "CONTROL: a numeric hue draws");
+        assert_eq!(picture(&field(json!({"saturation": "dialog.s"}))), None, "no bind.hue");
+        assert_eq!(picture(&field(json!({"hue": "dialog.word"}))), None, "a hue that is text");
+        assert_eq!(picture(&field(json!({"hue": "dialog.missing"}))), None, "a hue that resolves to nothing");
+    }
 }
 
 /// `dock_layout` refuses rather than repairs: an `active` index outside its

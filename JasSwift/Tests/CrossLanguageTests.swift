@@ -3811,6 +3811,35 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(strips >= 8 && fields >= 8, "picker_picks.json has \(strips) strip and \(fields) field vectors")
 }
 
+/// The Color Picker's strip and field commits (finding 13, step 2b): every
+/// vector of `picker_commits.json` parses to its `value`, or is refused when
+/// its refusal is `BadValue`. Swift's dialog view writes its picks natively
+/// (`onDialogWrite`), never through `WidgetEvent`, so the parse is what this
+/// port is held to (STATUS-flask §697). Mirror of Rust's
+/// `the_picker_kinds_parse_replays_picker_commits_json` and the reference's
+/// `test_a_picker_commit_replays_picker_commits_json`.
+@Test func algorithmPickerCommitsParse() throws {
+    let json = readFixture("algorithms/picker_commits.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let widget: [String: Any] = ["type": tc["kind"] as! String]
+        let parsed = WidgetEvent.parseCommit(widget: widget, text: tc["text"] as! String)
+        if (tc["refusal"] as? String) == "BadValue" {
+            #expect(!parsed.accepted, "picker_commits '\(name)': refused")
+            continue
+        }
+        #expect(parsed.accepted, "picker_commits '\(name)': accepted")
+        if let want = tc["value"] as? [NSNumber] {
+            #expect((parsed.value as? [Double]) == want.map { $0.doubleValue }, "picker_commits '\(name)': the point")
+        } else {
+            #expect((parsed.value as? Double) == (tc["value"] as! NSNumber).doubleValue, "picker_commits '\(name)': v")
+        }
+    }
+    #expect(vectors.count >= 20, "picker_commits.json has \(vectors.count) vectors")
+}
+
 // MARK: - Option rows (SCHEMA.md `options`)
 
 /// The `options` corpus: how a literal list reads, and what a commit of each
