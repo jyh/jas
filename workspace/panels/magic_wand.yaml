@@ -129,6 +129,11 @@ content:
                 style: { font_size: 11 } }
             - id: mwp_fill_tolerance
               type: number_input
+              # The planner's text metric is a stub (10 per character), so
+              # "Tolerance:" plans 100 wide and an over-subscribed row would
+              # squeeze this input below the 45 an input plans at. The floor
+              # makes the row shrink the text instead (STATUS-jas row 65).
+              style: { min_width: 45 }
               min: 0
               max: 255
               step: 1
@@ -174,6 +179,7 @@ content:
                 style: { font_size: 11 } }
             - id: mwp_stroke_tolerance
               type: number_input
+              style: { min_width: 45 }
               min: 0
               max: 255
               step: 1
@@ -219,6 +225,7 @@ content:
                 style: { font_size: 11 } }
             - id: mwp_stroke_weight_tolerance
               type: number_input
+              style: { min_width: 45 }
               min: 0
               max: 100
               step: 0.1
@@ -270,6 +277,7 @@ content:
                 style: { font_size: 11 } }
             - id: mwp_opacity_tolerance
               type: number_input
+              style: { min_width: 45 }
               min: 0
               max: 100
               step: 1

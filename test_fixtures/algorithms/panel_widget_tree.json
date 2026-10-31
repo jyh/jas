@@ -4595,7 +4595,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
@@ -4694,7 +4696,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
@@ -4793,7 +4797,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
@@ -4907,7 +4913,9 @@
           "disabled",
           "value"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [
