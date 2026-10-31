@@ -268,12 +268,36 @@ pub struct EngineHost {
     /// The layout as lent, before the pre-flight acted on it
     /// ([`EffectHost::rewind`] restores it for the real run).
     layout_lent: Option<Option<crate::workspace::workspace::WorkspaceLayout>>,
+    /// This host claims `start_timer` / `cancel_timer` (finding 1 of the 10-30
+    /// sitting). Only a door that hands the timers on to its shell sets it
+    /// ([`EngineHost::accepting_timers`]); every other door still refuses the
+    /// effects by name rather than dropping a timer nobody will run.
+    accepts_timers: bool,
+    /// The timer acts this run asked for, in order. Cleared by
+    /// [`EffectHost::rewind`], so the pre-flight's copies are not kept.
+    pub timers: Vec<TimerOp>,
+}
+
+/// One timer act a behavior asked for (`start_timer` / `cancel_timer`). The
+/// engine holds the pending effects; the shell holds only the clock.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TimerOp {
+    /// Run `effects` after `delay_ms`, unless cancelled first. Starting an id
+    /// that is already pending replaces it.
+    Start { id: String, delay_ms: u64, effects: Vec<Value> },
+    Cancel(String),
 }
 
 impl EngineHost {
     /// A host lent the engine's layout, for a run whose `layout:` effects act on it.
     pub fn with_layout(layout: Option<crate::workspace::workspace::WorkspaceLayout>) -> EngineHost {
         EngineHost { layout_lent: Some(layout.clone()), layout, ..Default::default() }
+    }
+
+    /// A host that claims `start_timer` / `cancel_timer` and records them in
+    /// [`EngineHost::timers`], for a door that passes them on to its shell.
+    pub fn accepting_timers() -> EngineHost {
+        EngineHost { accepts_timers: true, ..Default::default() }
     }
 }
 
@@ -293,6 +317,7 @@ impl EffectHost for EngineHost {
     }
 
     fn rewind(&mut self) {
+        self.timers.clear();
         if let Some(lent) = &self.layout_lent {
             self.layout = lent.clone();
             self.layout_ran = false;
@@ -307,6 +332,24 @@ impl EffectHost for EngineHost {
         store: &mut StateStore,
         model: Option<&mut Model>,
     ) -> bool {
+        // `start_timer: {id, delay_ms, effects}` and `cancel_timer: <id>`, by
+        // the arguments as written (the id is a literal). A malformed one is
+        // not claimed, so the runner refuses it by name.
+        if self.accepts_timers && key == "start_timer" {
+            let id = arg.get("id").and_then(Value::as_str);
+            let delay_ms = arg.get("delay_ms").and_then(Value::as_u64);
+            let effects = arg.get("effects").and_then(Value::as_array);
+            let (Some(id), Some(delay_ms), Some(effects)) = (id, delay_ms, effects) else {
+                return false;
+            };
+            self.timers.push(TimerOp::Start { id: id.to_string(), delay_ms, effects: effects.clone() });
+            return true;
+        }
+        if self.accepts_timers && key == "cancel_timer" {
+            let Some(id) = arg.as_str() else { return false };
+            self.timers.push(TimerOp::Cancel(id.to_string()));
+            return true;
+        }
         let Some(model) = model else { return false };
         if key == "snapshot" {
             model.begin_txn();
@@ -674,6 +717,22 @@ pub fn run_dialog_widget_behavior(
     host: &mut dyn EffectHost,
 ) -> Result<Ran, Refusal> {
     run_widget_behavior_in(None, spec, ev, scope, store, model, actions, dialogs, host)
+}
+
+/// Run a fired timer's stored `effects` in panel `panel_id`'s scope, with the
+/// same pre-flight as any behavior: a refusal runs nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn run_timer_effects(
+    panel_id: &str,
+    effects: &[Value],
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    run_batch(Some(panel_id), effects, json!({}), scope, store, model, actions, dialogs, host)
 }
 
 /// The steps both doors share. `panel_id` is the widget's panel, or `None`

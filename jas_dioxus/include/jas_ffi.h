@@ -750,6 +750,19 @@ struct JasBytes jas_layout_apply(struct JasEngine *e, const uint8_t *op, uintptr
  * [`jas_panel_event`] delta row, tagged with its `panel`, across every open
  * panel. `doc_changed` says the document moved, so the shell repaints.
  *
+ * # A timer (`start_timer` / `cancel_timer`)
+ *
+ * A behavior that starts a timer (a tool slot's press-and-hold, `mouse_down`)
+ * makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>}]`, and
+ * one that cancels it (`mouse_up`) carries `{"cancel": <id>}`. The key is
+ * present only when the act started or cancelled one. The ENGINE keeps the
+ * timer's effects; the shell keeps only the clock and, when it fires, sends
+ * `{"event": "timer", "value": <id>}` through this door with the same panel
+ * id. That tick runs the kept effects (the reply is the act reply) if the
+ * timer is still pending; one cancelled, already fired or never started is
+ * the empty span with `StaleTimer`, so a tick that races a release runs
+ * nothing.
+ *
  * # ⛔ A refusal runs NOTHING
  *
  * A refused behavior returns the empty span, and [`jas_last_error_json`]
