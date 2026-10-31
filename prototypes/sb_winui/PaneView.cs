@@ -218,7 +218,11 @@ public sealed partial class MainWindow
             // NOW (a panel-selected row's highlight), applied every tick.
             foreach (var hit in hits)
             {
-                if (_paneSurfaces.TryGetValue(hit.Path, out var face)) { face.Background = SurfaceBrush(hit.Background); }
+                if (_paneSurfaces.TryGetValue(hit.Path, out var face))
+                {
+                    face.Background = SurfaceBrush(hit.Background);
+                    ApplySurfaceBorder(face, hit, report: false);
+                }
             }
 
             // §1.2: a dropdown's flyout is built at every OPEN from the newest
@@ -374,6 +378,7 @@ public sealed partial class MainWindow
                     Height = hit.H,
                     Background = SurfaceBrush(hit.Background),
                 };
+                ApplySurfaceBorder(surface, hit, report: true);
                 _paneSurfaces[hit.Path] = surface;
                 if (hit.Id.Length > 0) { Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(surface, hit.Id); }
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(surface, "surface " + hit.Path);
@@ -1682,6 +1687,27 @@ public sealed partial class MainWindow
             PanelWire.SurfaceFill(background) is { } c
                 ? new(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
                 : new(Microsoft.UI.Colors.Transparent);
+
+        /// <summary>
+        /// Finding 6: a surface's `bind.border` (the Layers select square's), drawn
+        /// as the Border's own stroke. A spelling <see cref="PanelWire.SurfaceBorder"/>
+        /// refuses draws no border and, at build, is named in a row.
+        /// </summary>
+        private void ApplySurfaceBorder(Border surface, PanelWire.HitBox hit, bool report)
+        {
+            if (PanelWire.SurfaceBorder(hit.Border) is { } b)
+            {
+                surface.BorderThickness = new Thickness(b.Width);
+                surface.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, b.R, b.G, b.B));
+                return;
+            }
+            surface.BorderThickness = new Thickness(0);
+            if (report && hit.Border is { } refused)
+            {
+                _w.Report($"SURFACE BORDER REFUSED '{refused}' widget={hit.Id} path={hit.Path}");
+            }
+        }
 
         /// <summary>
         /// Send one act on a pane control to the core, addressed to the panel the

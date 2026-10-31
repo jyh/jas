@@ -427,6 +427,28 @@ static class Program
             PanelWire.RoutesEvent(new[] { "double_click" }, "", "[3,0,2]", "double_click"), "");
         Check("§612: a text that answers only click does not route a double_click",
             !PanelWire.RoutesEvent(new[] { "click" }, "ap_name", null, "double_click"), "");
+        // The 10-30 sitting, finding 6 ("there is no select dot"): the Layers
+        // select square is a chrome surface; #769 binds its fill AND its border.
+        // A surface carries `bind.border`, and `SurfaceBorder` draws exactly
+        // "<w>px solid #rrggbb"; anything else is refused by name, never guessed.
+        const string BorderPlan = """
+            {"chrome": [{"path": [3, 0, 8], "rect": {"x": 212, "y": 35, "w": 12, "h": 12}, "type": "container", "id": "lp_select",
+                         "events": ["click"], "values": {"bind.background": "transparent", "bind.border": "1px solid #555555"}}],
+             "containers": [], "leaves": []}
+            """;
+        var bhits = PanelWire.HitBoxes(BorderPlan);
+        Eq("finding 6: a surface carries its bind.border",
+            "1px solid #555555", bhits is { Count: 1 } ? bhits[0].Border ?? "(null)" : "(none)");
+        static string SB(string? s) => PanelWire.SurfaceBorder(s) is { } b
+            ? FormattableString.Invariant($"{b.Width}/{b.R:X2}{b.G:X2}{b.B:X2}") : "(null)";
+        Eq("finding 6: '1px solid #555555' is a 1-DIP grey border", "1/555555", SB("1px solid #555555"));
+        Eq("finding 6: the light appearance's border", "1/D1D1D1", SB("1px solid #d1d1d1"));
+        Eq("finding 6: a fractional width", "1.5/6A6A6A", SB("1.5px solid #6a6a6a"));
+        Eq("finding 6: a colourless border (the corpus context, no theme) is refused", "(null)", SB("1px solid "));
+        Eq("finding 6: a style other than solid is refused by name", "(null)", SB("1px dashed #555555"));
+        Eq("finding 6: an unresolved template is refused", "(null)", SB("1px solid {{theme.colors.border}}"));
+        Eq("finding 6: a zero width draws nothing and is refused", "(null)", SB("0px solid #555555"));
+        Eq("finding 6: no border is no border", "(null)", SB(null));
 
         var token = PanelWire.RowValue("a b\tc");
         Check("W2b-2: a row value is one whitespace-free token",
