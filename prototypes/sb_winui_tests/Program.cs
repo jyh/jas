@@ -766,6 +766,64 @@ static class Program
         Eq("routes press: an empty list", "False", PanelWire.RoutesPress(System.Array.Empty<string>(), "t", null).ToString());
         Eq("routes press: no list, an older core, routes nothing", "False", PanelWire.RoutesPress(null, "t", null).ToString());
         Eq("routes press: the name is exact, not a prefix", "False", PanelWire.RoutesPress(new[] { "click_and_wait", "clicks" }, "t", null).ToString());
+        // -- PRESS-AND-HOLD (the 10-30 sitting, finding 1: "I can't see flyouts on
+        // the toolbar"; the engine half is #771) -----------------------------------
+        // A `mouse_down`/`mouse_up` reply carries `"timers"`: `{"start", "delay_ms"}`
+        // or `{"cancel"}`. The shell runs the clock; the ENGINE keeps the effects and
+        // decides on the tick. `TimerWire.Parse` reads the list; an absent key is
+        // an empty list, never a throw.
+        static string TP(string reply) => string.Join(",", TimerWire.Parse(reply).Select(a =>
+            a.Cancel ? $"cancel:{a.Id}" : $"start:{a.Id}@{a.DelayMs}"));
+        Eq("timers: a start with its delay", "start:long_press_btn_hand_slot@250",
+            TP("""{"doc_changed":false,"changed":[],"timers":[{"start":"long_press_btn_hand_slot","delay_ms":250}]}"""));
+        Eq("timers: a cancel", "cancel:long_press_btn_hand_slot", TP("""{"timers":[{"cancel":"long_press_btn_hand_slot"}]}"""));
+        Eq("timers: one reply can start one and cancel another, in order", "cancel:a,start:b@100",
+            TP("""{"timers":[{"cancel":"a"},{"start":"b","delay_ms":100}]}"""));
+        Eq("timers: absent when no timer act happened", "", TP("""{"doc_changed":false,"changed":[]}"""));
+        Eq("timers: a start with no delay is refused, not defaulted", "", TP("""{"timers":[{"start":"a"}]}"""));
+        Eq("timers: a negative delay is refused", "", TP("""{"timers":[{"start":"a","delay_ms":-5}]}"""));
+        Eq("timers: an entry with no id is skipped", "start:b@10", TP("""{"timers":[{"delay_ms":10},{"start":"b","delay_ms":10}]}"""));
+        Eq("timers: text that is not JSON is no acts, never a throw", "", TP("not json"));
+        // The CLICK after a long press (jas's ruling on point 4; the web, the port of
+        // record, fires none): a press whose tick got a NON-EMPTY reply (the flyout
+        // opened) drops the slot's click; a StaleTimer answer (cancelled or raced)
+        // leaves it; a click before the answer waits for it, then goes or drops once.
+        static string LP(params string[] steps)
+        {
+            var sent = 0;
+            var g = new LongPressGate();
+            foreach (var s in steps)
+            {
+                switch (s)
+                {
+                    case "press": g.Pressed(); break;
+                    case "tick": g.TickSent(); break;
+                    case "open": g.Answered(nonEmpty: true); break;
+                    case "stale": g.Answered(nonEmpty: false); break;
+                    case "click": g.Click(() => sent++); break;
+                }
+            }
+            return sent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        Eq("long press: a plain click (no tick) clicks", "1", LP("press", "click"));
+        Eq("long press: the flyout opened, so the release does not click", "0", LP("press", "tick", "open", "click"));
+        Eq("long press: a stale tick (released first) leaves the click", "1", LP("press", "tick", "stale", "click"));
+        Eq("long press: a click before the answer waits, then drops on open", "0", LP("press", "tick", "click", "open"));
+        Eq("long press: a click before the answer waits, then goes once on stale", "1", LP("press", "tick", "click", "stale"));
+        Eq("long press: a new press forgets the last one's flyout", "1", LP("press", "tick", "open", "click", "press", "click"));
+        Eq("long press: an answer with no click pending sends nothing", "0", LP("press", "tick", "stale"));
+        // An act reply's `dialog` is STATE (the dialog open after the act; jas's
+        // ruling on #771's (a)), so a `mouse_up` after the flyout opened names the
+        // same dialog again. The shell opens only when the reply names a dialog
+        // that is not the one it shows. It compares with what it SHOWS, never the
+        // last reply: a flyout closed by another door must open again.
+        static string RO(string? reply, bool open, string? shown) => DialogWire.Reopens(reply, open, shown) ? "open" : "skip";
+        Eq("dialog door: a dialog named while none is shown opens", "open", RO("hand_alternates", false, null));
+        Eq("dialog door: the dialog already shown is not shown again", "skip", RO("hand_alternates", true, "hand_alternates"));
+        Eq("dialog door: a different dialog opens", "open", RO("color_picker", true, "hand_alternates"));
+        Eq("dialog door: the same id after it was closed elsewhere opens again", "open", RO("hand_alternates", false, "hand_alternates"));
+        Eq("dialog door: no dialog named opens nothing", "skip", RO(null, false, null));
+        Eq("dialog door: an empty name opens nothing", "skip", RO("", true, "hand_alternates"));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

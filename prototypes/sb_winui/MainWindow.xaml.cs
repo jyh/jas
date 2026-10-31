@@ -905,6 +905,13 @@ public sealed partial class MainWindow : Window
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);
         _canvas.ExportPdfReady = SaveExportedPdf;
         _canvas.PanesChanged = OnPanesChanged;
+        _canvas.TimersRequested = OnTimersRequested;
+        _canvas.TimerAnswered = (panel, widget, opened) =>
+        {
+            var heldSent = LongPress(panel, widget).Answered(opened);
+            Report($"TIMER ANSWERED panel={panel} widget={widget} opened={(opened ? "true" : "false")}"
+                 + (heldSent ? " held-click=sent" : ""));
+        };
         _canvas.CloseApproved = () =>
         {
             _closeApproved = true;
@@ -2295,6 +2302,61 @@ public sealed partial class MainWindow : Window
     /// which cannot see session 1's titles. Both, because they answer different
     /// questions.
     /// </summary>
+    // =======================================================================
+    // FINDING 1 (the 10-30 sitting; the engine half is #771): PRESS-AND-HOLD.
+    // A slot's `mouse_down` reply asks for a timer; this side runs the clock
+    // and, on the tick, sends `{"event": "timer", "value": id}` back through
+    // the same panel door. The engine keeps the effects and decides; a tick
+    // that raced a release is its StaleTimer, a no-op.
+    // =======================================================================
+
+    private readonly Dictionary<string, DispatcherQueueTimer> _behaviorTimers = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string Panel, string Widget), LongPressGate> _longPress = new();
+
+    /// <summary>The click gate of one press-and-hold button, made on first use.</summary>
+    internal LongPressGate LongPress(string panel, string widget)
+    {
+        if (!_longPress.TryGetValue((panel, widget), out var gate))
+        {
+            gate = new LongPressGate();
+            _longPress[(panel, widget)] = gate;
+        }
+        return gate;
+    }
+
+    private void OnTimersRequested(string panel, string widget, string? path, IReadOnlyList<TimerWire.Act> acts)
+    {
+        foreach (var act in acts)
+        {
+            if (_behaviorTimers.Remove(act.Id, out var running)) { running.Stop(); }
+            if (act.Cancel) { continue; }
+            // Starting an id that is already pending REPLACES it (#771): the old
+            // one was stopped above.
+            var timer = _ui.CreateTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(act.DelayMs);
+            timer.IsRepeating = false;
+            var id = act.Id;
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                _behaviorTimers.Remove(id);
+                LongPress(panel, widget).TickSent();
+                Report($"TIMER TICK panel={panel} widget={widget} id={id}");
+                _canvas.PanelClick(new PanelClickCmd
+                {
+                    PanelId = panel,
+                    Widget = widget,
+                    Path = path,
+                    Via = "hand",
+                    Event = "timer",
+                    Value = id,
+                });
+            };
+            _behaviorTimers[id] = timer;
+            timer.Start();
+        }
+    }
+
     private void Report(string status)
     {
         string? lost = null;

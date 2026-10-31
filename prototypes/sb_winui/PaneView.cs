@@ -1276,7 +1276,10 @@ public sealed partial class MainWindow
 
             var id = leaf.Id;
             var path = leaf.Path;
-            if (sendsClick) { btn.Click += (_, _) => OnPaneClick(id, path); }
+            // Finding 1 (#771): a button that answers `mouse_down` is press-and-hold
+            // (a toolbar slot's alternates); its click goes through the gate.
+            if (PanelWire.RoutesEvent(leaf.Events, id, path, "mouse_down")) { WirePressAndHold(btn, id, path, sendsClick); }
+            else if (sendsClick) { btn.Click += (_, _) => OnPaneClick(id, path); }
 
             var name = leaf.IconName;
             if (name is not null && icons.TryGetValue(name, out var def))
@@ -1682,6 +1685,44 @@ public sealed partial class MainWindow
         /// writes is the receipt.
         /// </summary>
         private void OnPaneClick(string widget, string? path = null) => SendPane(widget, "click", null, path);
+
+        /// <summary>
+        /// Finding 1 (#771): `mouse_down` on press, `mouse_up` on release; the
+        /// engine answers with the timers to run. The pointer is CAPTURED, and a
+        /// lost capture ends the press too, so a press dragged off the slot
+        /// cannot leave a timer to open the flyout under nobody's finger. The
+        /// slot's click goes through its <see cref="LongPressGate"/>: none
+        /// after the flyout has opened, as on the web.
+        /// </summary>
+        private void WirePressAndHold(Button btn, string id, string? path, bool sendsClick)
+        {
+            var down = false;
+            void Up()
+            {
+                if (!down) { return; }
+                down = false;
+                SendPane(id, "mouse_up", null, path);
+            }
+            btn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
+            {
+                if (down) { return; }
+                down = true;
+                _w.LongPress(_paneDrawnPanel, id).Pressed();
+                btn.CapturePointer(e.Pointer);
+                SendPane(id, "mouse_down", null, path);
+            }), true);
+            btn.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => Up()), true);
+            btn.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((_, _) => Up()), true);
+            if (!sendsClick) { return; }
+            btn.Click += (_, _) =>
+            {
+                var fate = _w.LongPress(_paneDrawnPanel, id).Click(() => OnPaneClick(id, path));
+                if (fate != LongPressGate.Fate.Sent)
+                {
+                    _w.Report($"LONG PRESS CLICK {fate.ToString().ToUpperInvariant()} panel={_paneDrawnPanel} widget={id}");
+                }
+            };
+        }
 
         /// <summary>
         /// flask §656: a press on a row's surface, or on a leaf that passes its
