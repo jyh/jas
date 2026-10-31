@@ -138,6 +138,25 @@ def color_bar_hex(u: float, v: float) -> str:
     return rgb_to_hex(*color_bar_rgb(u, v))
 
 
+def strip_value(v: float, max_value: float) -> float:
+    """The Color Picker's vertical strip (``cp_colorbar``): the value of its
+    channel at ``v``, 0 at the top to 1 at the bottom, clamped. TOP IS MAX for
+    every channel (h 359, s and b 100, r g b 255), so the H-mode picture is
+    red, magenta, blue, cyan, green, yellow, red top to bottom and a pick lands
+    on the hue drawn under it. Held to test_fixtures/algorithms/picker_picks.json.
+    """
+    return (1.0 - min(max(v, 0.0), 1.0)) * max_value
+
+
+def gradient_sb(u: float, v: float) -> tuple[float, float]:
+    """The Color Picker's field (``cp_gradient``): the saturation and
+    brightness at a point normalized to [0, 1]^2, each clamped. ``u`` left to
+    right is saturation 0 -> 100; ``v`` top to bottom is brightness 100 -> 0.
+    Held to test_fixtures/algorithms/picker_picks.json.
+    """
+    return (100.0 * min(max(u, 0.0), 1.0), 100.0 * (1.0 - min(max(v, 0.0), 1.0)))
+
+
 def rgb_to_cmyk(r: int, g: int, b: int) -> tuple[int, int, int, int]:
     """Convert RGB (0-255) to CMYK (0-100 each)."""
     if r == 0 and g == 0 and b == 0:

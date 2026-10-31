@@ -118,6 +118,23 @@ public func colorBarHex(_ u: Double, _ v: Double) -> String {
     return rgbToHex(r, g, b)
 }
 
+/// The Color Picker's vertical strip (`cp_colorbar`): the value of its channel
+/// at `v`, 0 at the top to 1 at the bottom, clamped. TOP IS MAX for every
+/// channel (h 359, s and b 100, r g b 255), so the H-mode picture is red,
+/// magenta, blue, cyan, green, yellow, red top to bottom and a pick lands on
+/// the hue drawn under it. Held to `test_fixtures/algorithms/picker_picks.json`.
+public func stripValue(v: Double, max: Double) -> Double {
+    (1.0 - Swift.min(Swift.max(v, 0.0), 1.0)) * max
+}
+
+/// The Color Picker's field (`cp_gradient`): the saturation and brightness at
+/// a point normalized to [0, 1]², each clamped. `u` left to right is
+/// saturation 0 → 100; `v` top to bottom is brightness 100 → 0. Held to
+/// `test_fixtures/algorithms/picker_picks.json`.
+public func gradientSB(u: Double, v: Double) -> (Double, Double) {
+    (100.0 * Swift.min(Swift.max(u, 0.0), 1.0), 100.0 * (1.0 - Swift.min(Swift.max(v, 0.0), 1.0)))
+}
+
 /// Convert HSB (h: 0-360, s: 0-100, b: 0-100) to RGB (0-255).
 ///
 /// Channels outside those ranges are clamped (see ``clampChannel``). Hue's

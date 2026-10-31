@@ -1692,8 +1692,7 @@ struct YamlElementView: View {
         }()
         let onDialogWriteCb = onDialogWrite
         let writeAt: (CGFloat, CGFloat) -> Void = { x, y in
-            let s = max(0, min(100, Double(x) / Double(size) * 100))
-            let b = max(0, min(100, (1.0 - Double(y) / Double(size)) * 100))
+            let (s, b) = gradientSB(u: Double(x) / Double(size), v: Double(y) / Double(size))
             onDialogWriteCb?("s", s.rounded())
             onDialogWriteCb?("b", b.rounded())
         }
@@ -5186,5 +5185,5 @@ let hueBarHStops: [(Int, Int, Int)] = [
 /// A pointer `y` on the hue strip as its channel's value: top (`y = 0`) is
 /// `max`, the bottom is 0, for every channel. Twin of Rust's `hue_bar_value`.
 func hueBarValue(y: Double, height: Double, max: Double) -> Double {
-    Swift.max(0, Swift.min(max, max - y / height * max))
+    stripValue(v: y / height, max: max)
 }
