@@ -1999,6 +1999,9 @@ public sealed partial class MainWindow
             }
             else
             {
+                // Row 69: WinUI's own top padding (5) put the label's line below the
+                // toggle's 20-DIP bottom, cutting every descender; see the padding's doc.
+                var (padLeft, padTop, padRight, padBottom) = PanelWire.ToggleLabelPadding;
                 box = new CheckBox
                 {
                     Content = leaf.Literal("label") ?? leaf.Id,
@@ -2006,6 +2009,7 @@ public sealed partial class MainWindow
                     MinWidth = 0,
                     MinHeight = 0,
                     IsThreeState = false,
+                    Padding = new Thickness(padLeft, padTop, padRight, padBottom),
                 };
                 // An icon named but not defined (`icons_missing`) keeps the text
                 // face, and is counted as one, as `BuildIconButton` counts it.

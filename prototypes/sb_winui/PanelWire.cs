@@ -732,6 +732,17 @@ internal static class PanelWire
     /// </summary>
     internal static double? ButtonEdge(bool on, bool labelledFace) => labelledFace ? 0 : on ? 1 : null;
 
+    /// <summary>
+    /// Row 69 (flask 719-721, jas 722), measured on the box at 150%: the padding
+    /// around a text-faced toggle's label, in DIPs. WinUI's CheckBox template puts
+    /// its label 5 down (8,5,0,0), laid out at 5.33; the label's line at the
+    /// shell's font 12 is 15.96 high, so it ended at 21.29 inside a toggle the plan
+    /// draws 20 high, and the toggle cut the bottom two pixel rows off every
+    /// descender ("g", "p", "y"). A top of 3 ends the line at 19.29, a whole pixel
+    /// row to spare; 4 would clear by 0.04 DIP. The left 8 is the template's own.
+    /// </summary>
+    internal static (double Left, double Top, double Right, double Bottom) ToggleLabelPadding => (8, 3, 0, 0);
+
     /// <summary>A labelled icon_button's parts (row 56): its icon, and its label when the engine planned room for one.</summary>
     internal sealed record LeafParts(PartRect Icon, PartRect? Label);
 
