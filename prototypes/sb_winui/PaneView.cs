@@ -970,6 +970,13 @@ public sealed partial class MainWindow
             var id = leaf.Id;
             var path = leaf.Path;
             if (PanelWire.Addressable(id, path)) { swatch.Tapped += (_, _) => OnPaneClick(id, path); }
+            // The 10-30 sitting: a swatch tile's double-click (Swatch Options) and
+            // the toolbar fill/stroke swatch's (the Color Picker) sent only a click.
+            // Routed as hit-surfaces and labels already route it.
+            if (PanelWire.RoutesEvent(leaf.Events, id, path, "double_click"))
+            {
+                swatch.DoubleTapped += (_, _) => SendPane(id, "double_click", null, path);
+            }
             return swatch;
         }
 
