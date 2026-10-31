@@ -159,3 +159,13 @@ pub fn selection_outline_scale(doc: &Document, path: &[usize]) -> f64 {
     }
     scale
 }
+
+/// The selection outline's counter-scale AT A VIEW ZOOM: the element chain's
+/// [`selection_outline_scale`] times [`handle_zoom`]. A 1 px pen divided by
+/// this is 1 SCREEN px at every zoom, drawn under the element transform and the
+/// view transform. Finding 9's scope, ruled 2026-10-31 (the outline is chrome,
+/// like the squares): before it the pen was divided by the element scale only,
+/// so the edge band grew with the zoom.
+pub fn selection_outline_scale_at_zoom(doc: &Document, path: &[usize], zoom: f64) -> f64 {
+    selection_outline_scale(doc, path) * handle_zoom(zoom)
+}

@@ -18,7 +18,7 @@
 //! port owner's call; until then a change to either must be made to both.
 
 use crate::document::document::Document;
-use crate::document::selection_geometry::{handle_zoom, selection_handle_rects_at_zoom, selection_outline_scale};
+use crate::document::selection_geometry::{handle_zoom, selection_handle_rects_at_zoom, selection_outline_scale_at_zoom};
 use crate::geometry::element::{Element, PathCommand};
 use crate::painter::overlay_ctx::OverlayCtx;
 
@@ -43,8 +43,9 @@ pub fn draw_selection_overlays(ctx: &mut OverlayCtx, doc: &Document, zoom: f64) 
     for es in &doc.selection {
         let Some(elem) = doc.get_element(&es.path) else { continue };
 
-        // The outline is traced UNDER the element transform, with the pen
-        // counter-scaled so it stays 1 px; the squares below are drawn after
+        // The outline is traced UNDER the element transform and the view, with
+        // the pen counter-scaled by both so it stays 1 SCREEN px at every zoom
+        // (finding 9's scope, like the squares); the squares below are drawn after
         // the transform is undone.
         // The FULL local-to-document frame, not only the element's own
         // transform: a child of a transformed group or wrapper is drawn under
@@ -56,7 +57,7 @@ pub fn draw_selection_overlays(ctx: &mut OverlayCtx, doc: &Document, zoom: f64) 
         } else {
             false
         };
-        let outline_scale = selection_outline_scale(doc, &es.path);
+        let outline_scale = selection_outline_scale_at_zoom(doc, &es.path, zoom);
         ctx.set_line_width(if outline_scale > 1e-6 { 1.0 / outline_scale } else { 1.0 });
 
         let is_text_like = matches!(elem, Element::Text(_) | Element::TextPath(_));
@@ -237,6 +238,24 @@ mod tests {
         assert_eq!(edged, 4, "each square is also edged");
         assert!(cmds.iter().any(|c| matches!(c, Command::StrokePath { .. })),
                 "the element's own outline is traced");
+    }
+
+    /// Finding 9's scope, ruled 2026-10-31 (STATUS-flask 692): the OUTLINE is
+    /// selection chrome too, so its pen is 1 SCREEN px at every zoom. Drawn
+    /// under the view transform that is `1 / z` document units. Before this the
+    /// pen was 1 document unit, so the edge band grew with the zoom (flask
+    /// measured 7 px at 3.75x and 16 px at 7.8x on the Windows box).
+    #[test]
+    fn the_outline_is_one_screen_pixel_at_every_zoom() {
+        let m = model_with(vec![rect(20.0, 30.0, 100.0, 80.0)], &[0]);
+        for z in [0.25, 1.0, 2.0, 3.75, 7.8] {
+            let pens: Vec<f64> = drawn_at(m.document(), z).iter().filter_map(|c| match c {
+                Command::StrokePath { stroke, .. } => Some(stroke.width),
+                _ => None,
+            }).collect();
+            assert_eq!(pens.len(), 1, "zoom {z}: one outline trace");
+            assert!((pens[0] * z - 1.0).abs() < 1e-9, "zoom {z}: pen {}", pens[0]);
+        }
     }
 
     /// THE CAPTAIN'S RULING, 10-30 feel sitting (finding 9): the squares are a
