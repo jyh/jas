@@ -936,6 +936,16 @@ static class Program
         Eq("parts: an empty label is dropped, the icon kept", "icon 1,1 9x9 | no label",
             PR("""{"icon":{"x":1,"y":1,"w":9,"h":9},"label":{"x":12,"y":1,"w":0,"h":9}}""", 0, 0));
         Eq("parts: text that is not JSON is no parts", "(none)", PR("parts", 0, 0));
+        // #803's LOW (jas, 10-31), measured on the box: the refresh arm gave every
+        // pane button a 1-DIP border (set when checked, the style's default when
+        // cleared), so a labelled face's parts sat 1.33 DIP right and down of the
+        // plan. A labelled face wears no border in either state, as the web's draws
+        // none; an icon-only button keeps its checked edge.
+        static string BE(bool on, bool labelled) => PanelWire.ButtonEdge(on, labelled) is { } e ? $"{e}" : "(style default)";
+        Eq("edge: a labelled face, checked, has none", "0", BE(true, true));
+        Eq("edge: a labelled face, unchecked, has none", "0", BE(false, true));
+        Eq("edge: an icon-only button, checked, keeps its 1", "1", BE(true, false));
+        Eq("edge: an icon-only button, unchecked, takes the style's", "(style default)", BE(false, false));
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

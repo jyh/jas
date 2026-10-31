@@ -1256,6 +1256,15 @@ public sealed partial class MainWindow
             return btn;
         }
 
+        /// <summary>Row 56: the text a labelled face draws beside its icon, or null.</summary>
+        private static string? LabelledFaceText(PaneLeaf leaf) =>
+            (leaf.Value("bind.label") ?? leaf.Literal("label")) is { Length: > 0 } t ? t : null;
+
+        /// <summary>Row 56: the leaf is drawn as a labelled face (an icon and a
+        /// label in the engine's parts), not an icon-only button. The build and the
+        /// refresh read the same predicate.</summary>
+        private static bool HasLabelledFace(PaneLeaf leaf) => leaf.Parts is not null && LabelledFaceText(leaf) is not null;
+
         /// <summary>
         /// An `icon_button`: its tooltip is the core's `summary`, its click is the
         /// widget id, and its face is the named icon -- or, stop 4's fallback, the
@@ -1301,7 +1310,7 @@ public sealed partial class MainWindow
             // shell lays nothing out. With no parts it stays an icon-only face.
             ContentControl iconHost = btn;
             var iconBox = leaf.W < leaf.H ? leaf.W : leaf.H;
-            if (leaf.Parts is { } parts && (leaf.Value("bind.label") ?? leaf.Literal("label")) is { Length: > 0 } text)
+            if (HasLabelledFace(leaf) && leaf.Parts is { } parts && LabelledFaceText(leaf) is { } text)
             {
                 var face = new Microsoft.UI.Xaml.Controls.Canvas { Width = leaf.W, Height = leaf.H };
                 var icon = new ContentControl
@@ -1589,14 +1598,16 @@ public sealed partial class MainWindow
                     {
                         btn.Background = _paneCheckedFill;
                         btn.BorderBrush = _paneCheckedEdge;
-                        btn.BorderThickness = new Thickness(1);
                     }
                     else
                     {
                         btn.ClearValue(Control.BackgroundProperty);
                         btn.ClearValue(Control.BorderBrushProperty);
-                        btn.ClearValue(Control.BorderThicknessProperty);
                     }
+                    // #803's LOW: a labelled face wears no border, so its parts
+                    // sit where the plan put them, checked or not.
+                    if (PanelWire.ButtonEdge(on, HasLabelledFace(leaf)) is { } edge) { btn.BorderThickness = new Thickness(edge); }
+                    else { btn.ClearValue(Control.BorderThicknessProperty); }
                     break;
 
                 case TextBox box:
