@@ -13,15 +13,18 @@ Align is over-subscribed at 228 too, but nothing in it is cut: each of its
 texts plans at least as wide as the web renders it. Its arm below is the
 control that the floor is needed only where it bites.
 
-Windows draws "Tolerance:" wider than the web: WinUI needs 54-57 DIP
-(STATUS-flask 712, the Stroke Weight row cut to "Toleran..." in a 53 cell).
-So each "Tolerance:" text declares the upper bound, 57. In the Stroke Weight
-row, 57 + gap + 45 exceeds the cell (102 at 228), and a row whose floors do
-not fit drops them all. So that one input declares what is left, 41, which
-still shows "255" whole (it had 20 DIP to spare at 45, STATUS-flask 712).
+Windows draws "Tolerance:" wider than the web: WinUI needs 54.67 DIP
+(STATUS-flask 717; 712 bracketed it at 54-57), so each "Tolerance:" text
+declares 55. Windows draws the whole "Stroke Weight" toggle 104.67 wide
+(STATUS-flask 717), one DIP more than the 104 its cell planned at, and WinUI
+wraps the cut label, so it read "Stroke". The toggle declares 105, which a
+``col`` grid line now honours (STATUS-jas row 68). That leaves the row's
+right cell 101: 55 + gap + 45 exceeds it, and a row whose floors do not fit
+drops them all, so that one input declares what is left, 42 ("100", its
+max, had 18 DIP to spare at 41, STATUS-flask 715).
 
 The web's and Windows' widths are flask's measurements (STATUS-flask 710 and
-712), rounded up. They are the only typed numbers here.
+717), rounded up. They are the only typed numbers here.
 """
 
 import json
@@ -32,8 +35,9 @@ from workspace_interpreter.panel_layout import _KIND_FALLBACK_W, layout_panel
 
 PANEL_W = 228  # the dock's panel body (STATUS-flask 710); the corpus's seed width
 TOLERANCE_TEXT_ON_WEB = math.ceil(50.76)
-TOLERANCE_TEXT_ON_WINDOWS = 57  # WinUI needs 54-57 DIP (STATUS-flask 712); the bound
-TIGHT = "mwp_stroke_weight_tolerance"  # its cell cannot hold 57 + gap + 45 at 228
+TOLERANCE_TEXT_ON_WINDOWS = math.ceil(54.67)  # WinUI (STATUS-flask 717)
+STROKE_WEIGHT_TOGGLE_ON_WINDOWS = math.ceil(104.67)  # box + padding + label (STATUS-flask 717)
+TIGHT = "mwp_stroke_weight_tolerance"  # its cell cannot hold 55 + gap + 45 at 228
 ALIGN_TEXTS_ON_WEB = {"Distribute Spacing:": math.ceil(83.94), "Align To:": math.ceil(38.18)}
 INPUTS = ["mwp_fill_tolerance", "mwp_stroke_tolerance",
           "mwp_stroke_weight_tolerance", "mwp_opacity_tolerance"]
@@ -101,6 +105,15 @@ def test_each_tolerance_text_keeps_the_width_windows_draws_it_at():
         assert rects[text]["w"] >= TOLERANCE_TEXT_ON_WINDOWS, (i, rects[text])
         # The text and the input share their cell, the row's inner width.
         assert rects[text]["x"] + rects[text]["w"] <= rects[p]["x"], (i, rects[text], rects[p])
+
+
+def test_the_stroke_weight_toggle_keeps_the_width_windows_draws_it_at():
+    rects, nodes = _panel("magic_wand_panel_content")
+    p = _path_of(nodes, "mwp_stroke_weight")
+    assert nodes[p]["style"]["min_width"] == STROKE_WEIGHT_TOGGLE_ON_WINDOWS
+    assert rects[p]["w"] >= STROKE_WEIGHT_TOGGLE_ON_WINDOWS, rects[p]
+    # Its cell (the col-5 container) is what the grid line sizes.
+    assert rects[p[:-1]]["w"] >= STROKE_WEIGHT_TOGGLE_ON_WINDOWS, rects[p[:-1]]
 
 
 def test_align_needs_no_floor_its_texts_plan_wider_than_they_render():

@@ -4747,7 +4747,9 @@
         "bind": [
           "checked"
         ],
-        "style": []
+        "style": [
+          "min_width"
+        ]
       },
       {
         "path": [

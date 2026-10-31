@@ -125,10 +125,10 @@ content:
           layout: row
           style: { gap: 4, alignment: center }
           children:
-            # WinUI draws "Tolerance:" 54-57 wide (the web 51), so its
-            # floor is 57; the inputs beside it keep theirs (STATUS-jas row 65).
+            # WinUI draws "Tolerance:" 54.67 wide (the web 51), so its
+            # floor is 55; the inputs beside it keep theirs (STATUS-jas row 65).
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11, min_width: 57 } }
+                style: { font_size: 11, min_width: 55 } }
             - id: mwp_fill_tolerance
               type: number_input
               # The planner's text metric is a stub (10 per character), so
@@ -178,7 +178,7 @@ content:
           style: { gap: 4, alignment: center }
           children:
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11, min_width: 57 } }
+                style: { font_size: 11, min_width: 55 } }
             - id: mwp_stroke_tolerance
               type: number_input
               style: { min_width: 45 }
@@ -208,6 +208,9 @@ content:
             - id: mwp_stroke_weight
               type: toggle
               label: "Stroke Weight"
+              # WinUI draws this toggle 104.67 wide and wraps a cut label,
+              # so at 104 it read "Stroke" (STATUS-flask 717, STATUS-jas row 68).
+              style: { min_width: 105 }
               bind:
                 checked: "panel.stroke_weight"
               behavior:
@@ -224,14 +227,14 @@ content:
           style: { gap: 4, alignment: center }
           children:
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11, min_width: 57 } }
+                style: { font_size: 11, min_width: 55 } }
             - id: mwp_stroke_weight_tolerance
               type: number_input
-              # This row's cell is the narrowest (102 at the dock's 228): 57 +
-              # the gap + 45 would not fit, and a row whose floors do not fit
-              # drops them all. 41 is what the text's 57 leaves, and still
-              # shows "255" whole on Windows.
-              style: { min_width: 41 }
+              # This row's cell is the narrowest (101 at the dock's 228, after
+              # the toggle's 105): 55 + the gap + 45 would not fit, and a row
+              # whose floors do not fit drops them all. 42 is what the text's
+              # 55 leaves, and shows "100", the max, whole on Windows.
+              style: { min_width: 42 }
               min: 0
               max: 100
               step: 0.1
@@ -280,7 +283,7 @@ content:
           style: { gap: 4, alignment: center }
           children:
             - { type: text, content: "Tolerance:",
-                style: { font_size: 11, min_width: 57 } }
+                style: { font_size: 11, min_width: 55 } }
             - id: mwp_opacity_tolerance
               type: number_input
               style: { min_width: 45 }

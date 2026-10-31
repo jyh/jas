@@ -1064,6 +1064,13 @@ fn grid(
         let total: i64 = desired.iter().sum();
         let widths: Vec<i64> = if total <= avail || total <= 0 {
             desired
+        } else if avail > 0 {
+            // Over-subscribed row: shrink cells in proportion, never below a
+            // floor a cell declares, as `flow` does (STATUS-jas row 68). With
+            // no floor this is the proportional rule below, remainder order
+            // included.
+            let floors: Vec<i64> = line.iter().map(|&(_, c, _)| floor_w(c, ctx)).collect();
+            shrink(&desired, &floors, avail)
         } else {
             // Over-subscribed row: shrink cells proportionally to fit, then hand
             // the rounding remainder out one pixel at a time (deterministic so
@@ -1767,6 +1774,37 @@ mod row_floor_stretch_tests {
     fn a_row_that_fits_is_unchanged_by_a_floor() {
         let r = row(json!([leaf(json!({"width": 100, "min_width": 90})), leaf(json!({"width": 50}))]), 400, json!({}));
         assert_eq!((w(&r, &[0]), w(&r, &[1])), (100, 50));
+    }
+
+    // STATUS-jas row 68: a `col` grid line honours its cells' floors, the
+    // reference's `test_panel_layout_grid_floor.py` row for row.
+
+    fn grid_line(left: Value, right: Value) -> (i64, i64) {
+        let cell = |span: i64, c: Value| json!({"type": "container", "col": span, "children": [c]});
+        let r = row(json!([cell(5, left), cell(7, right)]), 200, json!({"gap": 6}));
+        (w(&r, &[0]), w(&r, &[1]))
+    }
+
+    #[test]
+    fn a_floor_in_a_col_cell_holds_when_the_line_is_over_subscribed() {
+        assert_eq!(grid_line(leaf(json!({"width": 150, "min_width": 105})), leaf(json!({"width": 149}))), (105, 89));
+    }
+
+    #[test]
+    fn a_col_lines_floor_freezes_only_the_cell_that_needs_it() {
+        assert_eq!(grid_line(leaf(json!({"width": 150, "min_width": 105})),
+                             leaf(json!({"width": 149, "min_width": 80}))), (105, 89));
+    }
+
+    #[test]
+    fn a_col_line_without_floors_shrinks_in_proportion_as_before() {
+        assert_eq!(grid_line(leaf(json!({"width": 150})), leaf(json!({"width": 149}))), (98, 96), "CONTROL");
+    }
+
+    #[test]
+    fn a_col_lines_floors_that_cannot_all_hold_are_dropped() {
+        assert_eq!(grid_line(leaf(json!({"width": 150, "min_width": 120})),
+                             leaf(json!({"width": 149, "min_width": 100}))), (98, 96));
     }
 
     // (2) the stretch
