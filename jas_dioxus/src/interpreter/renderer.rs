@@ -6968,6 +6968,19 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
 /// `dialog.radio_channel` (h / s / b / r / g / bl). For H the bar is a
 /// hue rainbow; for the other channels it ramps that one channel from
 /// 0 to its max while holding the others at their current values.
+/// The hue strip's H-mode picture, top to bottom: red, magenta, blue, cyan,
+/// green, yellow, red. TOP IS MAX, as the strip's pick reads every channel
+/// ([`hue_bar_value`]). Until 2026-10-30 it was drawn the other way up
+/// (red, yellow, ...), so a click on the drawn yellow picked magenta; only
+/// the two ends agreed, both being red.
+const HUE_BAR_H_GRADIENT: &str = "linear-gradient(to bottom, #f00, #f0f, #00f, #0ff, #0f0, #ff0, #f00)";
+
+/// A pointer `y` on the strip as its channel's value: top (`y = 0`) is `max`,
+/// the bottom is 0, for every channel.
+fn hue_bar_value(y: f64, height: f64, max: f64) -> f64 {
+    (max - y / height * max).clamp(0.0, max)
+}
+
 fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let style = build_style(el, ctx);
@@ -7025,12 +7038,9 @@ fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
         "bl" => {
             (format!("linear-gradient(to bottom, rgb({r},{g},255), rgb({r},{g},0))"), bl as f64, 255.0)
         }
-        // Default H: rainbow hue gradient, top=0° to bottom=360°.
-        _ => (
-            "linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)".to_string(),
-            h,
-            359.0,
-        ),
+        // Default H: the rainbow, TOP = MAX like every channel above, so the
+        // pick (`hue_bar_value`) lands on the hue drawn under it.
+        _ => (HUE_BAR_H_GRADIENT.to_string(), h, 359.0),
     };
 
     let mut dialog_signal = rctx.dialog_ctx.0;
@@ -7043,10 +7053,7 @@ fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
     let max_val_for_handler = max_value;
     let channel_for_down = channel_for_handler.clone();
     let channel_for_move = channel_for_handler.clone();
-    let y_to_val = move |y: f64, max: f64| -> f64 {
-        let height = 180.0_f64;
-        (max - y / height * max).clamp(0.0, max)
-    };
+    let y_to_val = move |y: f64, max: f64| -> f64 { hue_bar_value(y, 180.0, max) };
 
     let on_mousedown = move |evt: Event<MouseData>| {
         let new_val = y_to_val(evt.data().element_coordinates().y, max_val_for_handler);
@@ -9342,6 +9349,36 @@ fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 #[component]
 pub fn YamlPanelBody(content: serde_json::Value, eval_ctx: serde_json::Value) -> Element {
     render_element(&content, &eval_ctx)
+}
+
+#[cfg(test)]
+mod hue_strip_tests {
+    use super::{hue_bar_value, HUE_BAR_H_GRADIENT};
+
+    /// THE PICTURE AND THE PICK ARE ONE FUNCTION (the 10-30 finding-13 read):
+    /// at each of the H gradient's evenly spaced stops, the hue the pick
+    /// returns there draws as that stop's colour. Before the fix the stop one
+    /// sixth down was drawn yellow and picked magenta. A tolerance of 8 per
+    /// channel covers the pick's 359 maximum against the picture's 360.
+    #[test]
+    fn the_hue_strip_picks_the_hue_it_draws() {
+        let inner = HUE_BAR_H_GRADIENT.trim_start_matches("linear-gradient(to bottom, ")
+            .trim_end_matches(')');
+        let stops: Vec<(u8, u8, u8)> = inner.split(", ").map(|hex| {
+            let d = |c: char| u8::from_str_radix(&c.to_string(), 16).unwrap() * 17;
+            let c: Vec<char> = hex.trim_start_matches('#').chars().collect();
+            (d(c[0]), d(c[1]), d(c[2]))
+        }).collect();
+        assert_eq!(stops.len(), 7, "{HUE_BAR_H_GRADIENT}");
+        for (k, want) in stops.iter().enumerate() {
+            let y = k as f64 / 6.0 * 180.0;
+            let hue = hue_bar_value(y, 180.0, 359.0);
+            let got = crate::interpreter::color_util::hsb_to_rgb(hue, 100.0, 100.0);
+            let near = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 8;
+            assert!(near(got.0, want.0) && near(got.1, want.1) && near(got.2, want.2),
+                    "stop {k} at y {y}: drawn {want:?}, picked hue {hue:.1} = {got:?}");
+        }
+    }
 }
 
 #[cfg(test)]
