@@ -350,11 +350,15 @@ struct YamlDialogOverlay: View {
     /// The popover's content container: bare (no title bar), shadowed,
     /// width-constrained. Reuses ``dialogBody`` so flyout items render
     /// through the same YamlElementView path as every other dialog.
-    @ViewBuilder
     private func popoverContainer(_ ds: YamlDialogState) -> some View {
-        VStack(spacing: 0) {
+        // A DECLARED width wins (STATUS-flask 692 (2), 2026-10-31): the web and
+        // the Windows plan read the same `width`, so the shells agree. `nil`
+        // leaves the frame unconstrained and the popover intrinsic.
+        let declared = declaredDialogWidth(WorkspaceData.load()?.dialog(ds.id))
+        return VStack(spacing: 0) {
             dialogBody(ds)
         }
+        .frame(width: declared)
         .background(SwiftUI.Color(nsColor: theme.paneBg))
         .cornerRadius(8)
         .overlay(
@@ -366,8 +370,9 @@ struct YamlDialogOverlay: View {
         // rather than the 500pt default dialog width. The alternates
         // items are width:"100%", so a wide frame made the popover a
         // 500px box whose bulk read as ~300px to the right of the cursor
-        // even though its top-left was pinned at the press point.
-        .fixedSize()
+        // even though its top-left was pinned at the press point. With a
+        // declared width only the height stays intrinsic.
+        .fixedSize(horizontal: declared == nil, vertical: true)
     }
 
     private func titleBar(_ ds: YamlDialogState) -> some View {
@@ -473,10 +478,15 @@ struct YamlDialogOverlay: View {
     }
 
     private func dialogWidth(_ ds: YamlDialogState) -> CGFloat {
-        guard let ws = WorkspaceData.load(),
-              let dlgDef = ws.dialog(ds.id),
-              let w = dlgDef["width"] as? NSNumber else { return 500 }
-        return CGFloat(w.doubleValue)
+        declaredDialogWidth(WorkspaceData.load()?.dialog(ds.id)) ?? 500
     }
+}
+
+/// A dialog's DECLARED `width`, or nil when it declares none (or a value that
+/// is not a positive number). A modal dialog falls back to 500; a popover to
+/// its intrinsic size.
+func declaredDialogWidth(_ dlgDef: [String: Any]?) -> CGFloat? {
+    guard let w = dlgDef?["width"] as? NSNumber, w.doubleValue > 0 else { return nil }
+    return CGFloat(w.doubleValue)
 }
 

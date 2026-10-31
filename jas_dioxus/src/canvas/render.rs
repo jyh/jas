@@ -2744,6 +2744,7 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
 // and the tests below are unchanged.
 pub use crate::document::selection_geometry::{
     handle_zoom, selection_handle_rects, selection_handle_rects_at_zoom, selection_outline_scale,
+    selection_outline_scale_at_zoom,
 };
 
 // The transform-aware (EVALUATED) bboxes moved to the NATIVE module
@@ -2789,11 +2790,11 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document, zoom:
             apply_transform(ctx, frame.as_ref());
 
             // Counter-scale the fixed outline pen width by the element
-            // transform's scale (selection_outline_scale) so the outline trace
-            // — drawn UNDER that transform — renders at a constant width
-            // regardless of the element's scale (it stays zoom-scaled, like
-            // the handle squares).
-            let outline_scale = selection_outline_scale(doc, &es.path);
+            // transform's scale AND the view zoom
+            // (selection_outline_scale_at_zoom) so the outline trace, drawn
+            // UNDER both, is 1 screen px at every zoom and every element
+            // scale, like the handle squares (finding 9's scope, 2026-10-31).
+            let outline_scale = selection_outline_scale_at_zoom(doc, &es.path, zoom);
             let inv = if outline_scale > 1e-6 { 1.0 / outline_scale } else { 1.0 };
             ctx.set_line_width(inv);
 
@@ -4311,6 +4312,23 @@ mod tests {
         // Transform(2,0,0,8,0,0) -> det 16 -> sqrt = 4.0.
         let doc = hr_doc_with(hr_rect(Some(Transform::scale(2.0, 8.0))));
         assert_eq!(selection_outline_scale(&doc, &[0, 0]), 4.0);
+    }
+
+    /// Finding 9's scope (2026-10-31): the outline pen is ALSO divided by the
+    /// view zoom, so it is 1 screen px. The element scale and the zoom
+    /// multiply; a non-view zoom (0, negative, NaN) counts as 1, as the
+    /// squares' `handle_zoom` does.
+    #[test]
+    fn outline_scale_at_zoom_multiplies_element_scale_by_zoom() {
+        let plain = hr_doc_with(hr_rect(None));
+        let scaled = hr_doc_with(hr_rect(Some(Transform::scale(2.0, 2.0))));
+        assert_eq!(selection_outline_scale_at_zoom(&plain, &[0, 0], 1.0), 1.0);
+        assert_eq!(selection_outline_scale_at_zoom(&plain, &[0, 0], 4.0), 4.0);
+        assert_eq!(selection_outline_scale_at_zoom(&scaled, &[0, 0], 4.0), 8.0);
+        assert_eq!(selection_outline_scale_at_zoom(&scaled, &[0, 0], 0.5), 1.0);
+        for z in [0.0, -2.0, f64::NAN] {
+            assert_eq!(selection_outline_scale_at_zoom(&scaled, &[0, 0], z), 2.0, "zoom {z}");
+        }
     }
 }
 

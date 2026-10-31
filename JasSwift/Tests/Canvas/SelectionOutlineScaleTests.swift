@@ -38,3 +38,21 @@ private func docWith(_ elem: Element) -> Document {
         transform: Transform(a: 2, b: 0, c: 0, d: 8, e: 0, f: 0)))
     #expect(selectionOutlineScale(docWith(rect), [0, 0]) == 4.0)
 }
+
+// Finding 9's scope (2026-10-31): the outline pen and the tangent handles are
+// ALSO divided by the view zoom, so they are a fixed SCREEN size, like the
+// squares. The element scale and the zoom multiply; a non-view zoom counts as 1.
+// Mirrors Rust `outline_scale_at_zoom_multiplies_element_scale_by_zoom`.
+@Test func selectionOutlineScaleAtZoomMultipliesElementScaleByZoom() {
+    let plain = docWith(.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
+    let scaled = docWith(.rect(Rect(
+        x: 0, y: 0, width: 10, height: 10,
+        transform: Transform(a: 2, b: 0, c: 0, d: 2, e: 0, f: 0))))
+    #expect(selectionOutlineScaleAtZoom(plain, [0, 0], zoom: 1) == 1.0)
+    #expect(selectionOutlineScaleAtZoom(plain, [0, 0], zoom: 4) == 4.0)
+    #expect(selectionOutlineScaleAtZoom(scaled, [0, 0], zoom: 4) == 8.0)
+    #expect(selectionOutlineScaleAtZoom(scaled, [0, 0], zoom: 0.5) == 1.0)
+    for z: CGFloat in [0, -2, .nan] {
+        #expect(selectionOutlineScaleAtZoom(scaled, [0, 0], zoom: z) == 2.0, "zoom \(z)")
+    }
+}
