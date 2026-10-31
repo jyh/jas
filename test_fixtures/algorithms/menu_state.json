@@ -188,7 +188,7 @@
           6
         ],
         "action": "paste_in_place",
-        "label": "Paste in &Place",
+        "label": "Paste &in Place",
         "enabled": false,
         "checked": null
       },
@@ -238,7 +238,7 @@
           2
         ],
         "action": "ungroup_all",
-        "label": "Ungroup A&ll",
+        "label": "U&ngroup All",
         "enabled": false,
         "checked": null
       },
@@ -442,7 +442,7 @@
           8
         ],
         "action": "toggle_panel",
-        "label": "&Artboards",
+        "label": "Ali&gn",
         "enabled": true,
         "checked": false
       },
@@ -452,7 +452,7 @@
           9
         ],
         "action": "toggle_panel",
-        "label": "&Layers",
+        "label": "&Artboards",
         "enabled": true,
         "checked": false
       },
@@ -462,7 +462,7 @@
           10
         ],
         "action": "toggle_panel",
-        "label": "&Color",
+        "label": "&Boolean",
         "enabled": true,
         "checked": false
       },
@@ -472,7 +472,7 @@
           11
         ],
         "action": "toggle_panel",
-        "label": "S&watches",
+        "label": "Br&ushes",
         "enabled": true,
         "checked": false
       },
@@ -482,7 +482,7 @@
           12
         ],
         "action": "toggle_panel",
-        "label": "Br&ushes",
+        "label": "C&haracter",
         "enabled": true,
         "checked": false
       },
@@ -492,7 +492,7 @@
           13
         ],
         "action": "toggle_panel",
-        "label": "Gra&dient",
+        "label": "&Color",
         "enabled": true,
         "checked": false
       },
@@ -502,7 +502,7 @@
           14
         ],
         "action": "toggle_panel",
-        "label": "&Stroke",
+        "label": "Co&ncepts",
         "enabled": true,
         "checked": false
       },
@@ -512,7 +512,7 @@
           15
         ],
         "action": "toggle_panel",
-        "label": "&Properties",
+        "label": "Gra&dient",
         "enabled": true,
         "checked": false
       },
@@ -522,7 +522,7 @@
           16
         ],
         "action": "toggle_panel",
-        "label": "Ch&aracter",
+        "label": "&Layers",
         "enabled": true,
         "checked": false
       },
@@ -532,7 +532,7 @@
           17
         ],
         "action": "toggle_panel",
-        "label": "Para&graph",
+        "label": "&Magic Wand",
         "enabled": true,
         "checked": false
       },
@@ -542,7 +542,7 @@
           18
         ],
         "action": "toggle_panel",
-        "label": "Ali&gn",
+        "label": "&Opacity",
         "enabled": true,
         "checked": false
       },
@@ -552,7 +552,7 @@
           19
         ],
         "action": "toggle_panel",
-        "label": "&Boolean",
+        "label": "Parag&raph",
         "enabled": true,
         "checked": false
       },
@@ -562,7 +562,7 @@
           20
         ],
         "action": "toggle_panel",
-        "label": "&Magic Wand",
+        "label": "&Properties",
         "enabled": true,
         "checked": false
       },
@@ -572,7 +572,7 @@
           21
         ],
         "action": "toggle_panel",
-        "label": "&Opacity",
+        "label": "&Stroke",
         "enabled": true,
         "checked": false
       },
@@ -582,7 +582,7 @@
           22
         ],
         "action": "toggle_panel",
-        "label": "S&ymbols",
+        "label": "S&watches",
         "enabled": true,
         "checked": false
       },
@@ -592,7 +592,7 @@
           23
         ],
         "action": "toggle_panel",
-        "label": "Co&ncepts",
+        "label": "S&ymbols",
         "enabled": true,
         "checked": false
       }
@@ -787,7 +787,7 @@
           6
         ],
         "action": "paste_in_place",
-        "label": "Paste in &Place",
+        "label": "Paste &in Place",
         "enabled": true,
         "checked": null
       },
@@ -837,7 +837,7 @@
           2
         ],
         "action": "ungroup_all",
-        "label": "Ungroup A&ll",
+        "label": "U&ngroup All",
         "enabled": true,
         "checked": null
       },
@@ -1041,7 +1041,7 @@
           8
         ],
         "action": "toggle_panel",
-        "label": "&Artboards",
+        "label": "Ali&gn",
         "enabled": true,
         "checked": false
       },
@@ -1051,104 +1051,14 @@
           9
         ],
         "action": "toggle_panel",
-        "label": "&Layers",
+        "label": "&Artboards",
         "enabled": true,
-        "checked": true
+        "checked": false
       },
       {
         "path": [
           4,
           10
-        ],
-        "action": "toggle_panel",
-        "label": "&Color",
-        "enabled": true,
-        "checked": true
-      },
-      {
-        "path": [
-          4,
-          11
-        ],
-        "action": "toggle_panel",
-        "label": "S&watches",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          12
-        ],
-        "action": "toggle_panel",
-        "label": "Br&ushes",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          13
-        ],
-        "action": "toggle_panel",
-        "label": "Gra&dient",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          14
-        ],
-        "action": "toggle_panel",
-        "label": "&Stroke",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          15
-        ],
-        "action": "toggle_panel",
-        "label": "&Properties",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          16
-        ],
-        "action": "toggle_panel",
-        "label": "Ch&aracter",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          17
-        ],
-        "action": "toggle_panel",
-        "label": "Para&graph",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          18
-        ],
-        "action": "toggle_panel",
-        "label": "Ali&gn",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          19
         ],
         "action": "toggle_panel",
         "label": "&Boolean",
@@ -1158,7 +1068,67 @@
       {
         "path": [
           4,
-          20
+          11
+        ],
+        "action": "toggle_panel",
+        "label": "Br&ushes",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          12
+        ],
+        "action": "toggle_panel",
+        "label": "C&haracter",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          13
+        ],
+        "action": "toggle_panel",
+        "label": "&Color",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          14
+        ],
+        "action": "toggle_panel",
+        "label": "Co&ncepts",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          15
+        ],
+        "action": "toggle_panel",
+        "label": "Gra&dient",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          16
+        ],
+        "action": "toggle_panel",
+        "label": "&Layers",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          17
         ],
         "action": "toggle_panel",
         "label": "&Magic Wand",
@@ -1168,7 +1138,7 @@
       {
         "path": [
           4,
-          21
+          18
         ],
         "action": "toggle_panel",
         "label": "&Opacity",
@@ -1178,10 +1148,40 @@
       {
         "path": [
           4,
+          19
+        ],
+        "action": "toggle_panel",
+        "label": "Parag&raph",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          20
+        ],
+        "action": "toggle_panel",
+        "label": "&Properties",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          21
+        ],
+        "action": "toggle_panel",
+        "label": "&Stroke",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
           22
         ],
         "action": "toggle_panel",
-        "label": "S&ymbols",
+        "label": "S&watches",
         "enabled": true,
         "checked": false
       },
@@ -1191,7 +1191,7 @@
           23
         ],
         "action": "toggle_panel",
-        "label": "Co&ncepts",
+        "label": "S&ymbols",
         "enabled": true,
         "checked": false
       }
@@ -1386,7 +1386,7 @@
           6
         ],
         "action": "paste_in_place",
-        "label": "Paste in &Place",
+        "label": "Paste &in Place",
         "enabled": true,
         "checked": null
       },
@@ -1436,7 +1436,7 @@
           2
         ],
         "action": "ungroup_all",
-        "label": "Ungroup A&ll",
+        "label": "U&ngroup All",
         "enabled": true,
         "checked": null
       },
@@ -1640,106 +1640,6 @@
           8
         ],
         "action": "toggle_panel",
-        "label": "&Artboards",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          9
-        ],
-        "action": "toggle_panel",
-        "label": "&Layers",
-        "enabled": true,
-        "checked": true
-      },
-      {
-        "path": [
-          4,
-          10
-        ],
-        "action": "toggle_panel",
-        "label": "&Color",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          11
-        ],
-        "action": "toggle_panel",
-        "label": "S&watches",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          12
-        ],
-        "action": "toggle_panel",
-        "label": "Br&ushes",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          13
-        ],
-        "action": "toggle_panel",
-        "label": "Gra&dient",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          14
-        ],
-        "action": "toggle_panel",
-        "label": "&Stroke",
-        "enabled": true,
-        "checked": true
-      },
-      {
-        "path": [
-          4,
-          15
-        ],
-        "action": "toggle_panel",
-        "label": "&Properties",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          16
-        ],
-        "action": "toggle_panel",
-        "label": "Ch&aracter",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          17
-        ],
-        "action": "toggle_panel",
-        "label": "Para&graph",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          18
-        ],
-        "action": "toggle_panel",
         "label": "Ali&gn",
         "enabled": true,
         "checked": true
@@ -1747,7 +1647,17 @@
       {
         "path": [
           4,
-          19
+          9
+        ],
+        "action": "toggle_panel",
+        "label": "&Artboards",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          10
         ],
         "action": "toggle_panel",
         "label": "&Boolean",
@@ -1757,7 +1667,67 @@
       {
         "path": [
           4,
-          20
+          11
+        ],
+        "action": "toggle_panel",
+        "label": "Br&ushes",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          12
+        ],
+        "action": "toggle_panel",
+        "label": "C&haracter",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          13
+        ],
+        "action": "toggle_panel",
+        "label": "&Color",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          14
+        ],
+        "action": "toggle_panel",
+        "label": "Co&ncepts",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          15
+        ],
+        "action": "toggle_panel",
+        "label": "Gra&dient",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          16
+        ],
+        "action": "toggle_panel",
+        "label": "&Layers",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          17
         ],
         "action": "toggle_panel",
         "label": "&Magic Wand",
@@ -1767,7 +1737,7 @@
       {
         "path": [
           4,
-          21
+          18
         ],
         "action": "toggle_panel",
         "label": "&Opacity",
@@ -1777,10 +1747,40 @@
       {
         "path": [
           4,
+          19
+        ],
+        "action": "toggle_panel",
+        "label": "Parag&raph",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          20
+        ],
+        "action": "toggle_panel",
+        "label": "&Properties",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          21
+        ],
+        "action": "toggle_panel",
+        "label": "&Stroke",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
           22
         ],
         "action": "toggle_panel",
-        "label": "S&ymbols",
+        "label": "S&watches",
         "enabled": true,
         "checked": false
       },
@@ -1790,7 +1790,7 @@
           23
         ],
         "action": "toggle_panel",
-        "label": "Co&ncepts",
+        "label": "S&ymbols",
         "enabled": true,
         "checked": false
       }
@@ -1985,7 +1985,7 @@
           6
         ],
         "action": "paste_in_place",
-        "label": "Paste in &Place",
+        "label": "Paste &in Place",
         "enabled": true,
         "checked": null
       },
@@ -2035,7 +2035,7 @@
           2
         ],
         "action": "ungroup_all",
-        "label": "Ungroup A&ll",
+        "label": "U&ngroup All",
         "enabled": true,
         "checked": null
       },
@@ -2239,7 +2239,7 @@
           8
         ],
         "action": "toggle_panel",
-        "label": "&Artboards",
+        "label": "Ali&gn",
         "enabled": true,
         "checked": false
       },
@@ -2249,7 +2249,7 @@
           9
         ],
         "action": "toggle_panel",
-        "label": "&Layers",
+        "label": "&Artboards",
         "enabled": true,
         "checked": false
       },
@@ -2259,24 +2259,14 @@
           10
         ],
         "action": "toggle_panel",
-        "label": "&Color",
+        "label": "&Boolean",
         "enabled": true,
-        "checked": true
+        "checked": false
       },
       {
         "path": [
           4,
           11
-        ],
-        "action": "toggle_panel",
-        "label": "S&watches",
-        "enabled": true,
-        "checked": true
-      },
-      {
-        "path": [
-          4,
-          12
         ],
         "action": "toggle_panel",
         "label": "Br&ushes",
@@ -2286,7 +2276,37 @@
       {
         "path": [
           4,
+          12
+        ],
+        "action": "toggle_panel",
+        "label": "C&haracter",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
           13
+        ],
+        "action": "toggle_panel",
+        "label": "&Color",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          14
+        ],
+        "action": "toggle_panel",
+        "label": "Co&ncepts",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          15
         ],
         "action": "toggle_panel",
         "label": "Gra&dient",
@@ -2296,30 +2316,10 @@
       {
         "path": [
           4,
-          14
-        ],
-        "action": "toggle_panel",
-        "label": "&Stroke",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          15
-        ],
-        "action": "toggle_panel",
-        "label": "&Properties",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
           16
         ],
         "action": "toggle_panel",
-        "label": "Ch&aracter",
+        "label": "&Layers",
         "enabled": true,
         "checked": false
       },
@@ -2329,7 +2329,7 @@
           17
         ],
         "action": "toggle_panel",
-        "label": "Para&graph",
+        "label": "&Magic Wand",
         "enabled": true,
         "checked": false
       },
@@ -2339,7 +2339,7 @@
           18
         ],
         "action": "toggle_panel",
-        "label": "Ali&gn",
+        "label": "&Opacity",
         "enabled": true,
         "checked": false
       },
@@ -2349,7 +2349,7 @@
           19
         ],
         "action": "toggle_panel",
-        "label": "&Boolean",
+        "label": "Parag&raph",
         "enabled": true,
         "checked": false
       },
@@ -2359,7 +2359,7 @@
           20
         ],
         "action": "toggle_panel",
-        "label": "&Magic Wand",
+        "label": "&Properties",
         "enabled": true,
         "checked": false
       },
@@ -2369,7 +2369,7 @@
           21
         ],
         "action": "toggle_panel",
-        "label": "&Opacity",
+        "label": "&Stroke",
         "enabled": true,
         "checked": false
       },
@@ -2379,7 +2379,7 @@
           22
         ],
         "action": "toggle_panel",
-        "label": "S&ymbols",
+        "label": "S&watches",
         "enabled": true,
         "checked": true
       },
@@ -2389,7 +2389,7 @@
           23
         ],
         "action": "toggle_panel",
-        "label": "Co&ncepts",
+        "label": "S&ymbols",
         "enabled": true,
         "checked": true
       }
@@ -2584,7 +2584,7 @@
           6
         ],
         "action": "paste_in_place",
-        "label": "Paste in &Place",
+        "label": "Paste &in Place",
         "enabled": false,
         "checked": null
       },
@@ -2634,7 +2634,7 @@
           2
         ],
         "action": "ungroup_all",
-        "label": "Ungroup A&ll",
+        "label": "U&ngroup All",
         "enabled": true,
         "checked": null
       },
@@ -2838,7 +2838,7 @@
           8
         ],
         "action": "toggle_panel",
-        "label": "&Artboards",
+        "label": "Ali&gn",
         "enabled": true,
         "checked": false
       },
@@ -2848,7 +2848,7 @@
           9
         ],
         "action": "toggle_panel",
-        "label": "&Layers",
+        "label": "&Artboards",
         "enabled": true,
         "checked": false
       },
@@ -2858,24 +2858,14 @@
           10
         ],
         "action": "toggle_panel",
-        "label": "&Color",
+        "label": "&Boolean",
         "enabled": true,
-        "checked": true
+        "checked": false
       },
       {
         "path": [
           4,
           11
-        ],
-        "action": "toggle_panel",
-        "label": "S&watches",
-        "enabled": true,
-        "checked": true
-      },
-      {
-        "path": [
-          4,
-          12
         ],
         "action": "toggle_panel",
         "label": "Br&ushes",
@@ -2885,7 +2875,37 @@
       {
         "path": [
           4,
+          12
+        ],
+        "action": "toggle_panel",
+        "label": "C&haracter",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
           13
+        ],
+        "action": "toggle_panel",
+        "label": "&Color",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          14
+        ],
+        "action": "toggle_panel",
+        "label": "Co&ncepts",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          15
         ],
         "action": "toggle_panel",
         "label": "Gra&dient",
@@ -2895,30 +2915,10 @@
       {
         "path": [
           4,
-          14
-        ],
-        "action": "toggle_panel",
-        "label": "&Stroke",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
-          15
-        ],
-        "action": "toggle_panel",
-        "label": "&Properties",
-        "enabled": true,
-        "checked": false
-      },
-      {
-        "path": [
-          4,
           16
         ],
         "action": "toggle_panel",
-        "label": "Ch&aracter",
+        "label": "&Layers",
         "enabled": true,
         "checked": false
       },
@@ -2928,7 +2928,7 @@
           17
         ],
         "action": "toggle_panel",
-        "label": "Para&graph",
+        "label": "&Magic Wand",
         "enabled": true,
         "checked": false
       },
@@ -2938,7 +2938,7 @@
           18
         ],
         "action": "toggle_panel",
-        "label": "Ali&gn",
+        "label": "&Opacity",
         "enabled": true,
         "checked": false
       },
@@ -2948,7 +2948,7 @@
           19
         ],
         "action": "toggle_panel",
-        "label": "&Boolean",
+        "label": "Parag&raph",
         "enabled": true,
         "checked": false
       },
@@ -2958,7 +2958,7 @@
           20
         ],
         "action": "toggle_panel",
-        "label": "&Magic Wand",
+        "label": "&Properties",
         "enabled": true,
         "checked": false
       },
@@ -2968,7 +2968,7 @@
           21
         ],
         "action": "toggle_panel",
-        "label": "&Opacity",
+        "label": "&Stroke",
         "enabled": true,
         "checked": false
       },
@@ -2978,7 +2978,7 @@
           22
         ],
         "action": "toggle_panel",
-        "label": "S&ymbols",
+        "label": "S&watches",
         "enabled": true,
         "checked": true
       },
@@ -2988,7 +2988,7 @@
           23
         ],
         "action": "toggle_panel",
-        "label": "Co&ncepts",
+        "label": "S&ymbols",
         "enabled": true,
         "checked": true
       }

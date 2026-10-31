@@ -73,6 +73,78 @@ def project_menubar(menubar):
     }
 
 
+def _access_key(label):
+    """The letter after a lone `&` in a label, lower-cased, or None."""
+    i = 0
+    while i < len(label) - 1:
+        if label[i] == "&":
+            if label[i + 1] != "&":
+                return label[i + 1].lower()
+            i += 2
+            continue
+        i += 1
+    return None
+
+
+def _plain(label):
+    return label.replace("&&", "\0").replace("&", "").replace("\0", "&")
+
+
+def menu_law_findings(menubar):
+    """The two laws the snapshot cannot state, as (findings, items_read).
+
+    1. ACCESS KEYS ARE UNIQUE within one item list (a menu or a submenu),
+       compared case-insensitively: Windows cycles between two items that
+       share a letter instead of running either.
+    2. THE WINDOW MENU'S PANEL TOGGLES ARE IN ALPHABETICAL ORDER of their
+       plain label (the Captain's ruling at the 10-30 feel sitting). The run
+       of `toggle_panel` items is checked; the panes and submenus above it
+       keep their declared order.
+
+    `items_read` is the anti-vacuity count: a menubar this function walked
+    without reading a single item must not read as compliant.
+    """
+    findings = []
+    read = 0
+
+    def walk(where, items):
+        nonlocal read
+        seen = {}
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            read += 1
+            label = it.get("label", "")
+            key = _access_key(label)
+            if key is not None:
+                if key in seen:
+                    findings.append(f"{where}: {label!r} and {seen[key]!r} "
+                                    f"share the access key {key!r}")
+                else:
+                    seen[key] = label
+            if "items" in it:
+                walk(f"{where} > {_plain(label)}", it["items"])
+
+    for menu in menubar:
+        walk(_plain(menu.get("label", "")), menu.get("items", []))
+
+    window = [m for m in menubar if m.get("id") == "window_menu"]
+    if len(window) != 1:
+        findings.append(f"expected exactly one window_menu, found {len(window)}")
+    else:
+        panels = [_plain(it.get("label", "")) for it in window[0].get("items", [])
+                  if isinstance(it, dict) and it.get("action") == "toggle_panel"]
+        if not panels:
+            findings.append("the Window menu has no toggle_panel items")
+        want = sorted(panels, key=str.casefold)
+        if panels != want:
+            first = next(i for i, (a, b) in enumerate(zip(panels, want)) if a != b)
+            findings.append(f"Window menu panels are not alphabetical: item "
+                            f"{first + 1} is {panels[first]!r}, expected "
+                            f"{want[first]!r}")
+    return findings, read
+
+
 def _canonical(obj) -> str:
     # Same canonical discipline as document_to_test_json: sorted keys, compact,
     # UTF-8 preserved (labels carry & mnemonics and ... ellipses).
@@ -150,13 +222,59 @@ def _self_test() -> int:
         if mutate(fn) == base:
             failures.append(f"{what} did not change the snapshot")
 
+    # 4. The menu laws. Each arm names the finding it must produce, so an arm
+    #    that fires for a DIFFERENT reason does not pass.
+    def law_menubar():
+        return [
+            {"id": "file", "label": "&File", "items": [
+                {"action": "a", "label": "&New"},
+                {"label": "&Workspace", "items": [{"action": "b", "label": "&Reset"}]},
+            ]},
+            {"id": "window_menu", "label": "&Window", "items": [
+                {"action": "toggle_pane", "label": "Toolbar"},
+                {"action": "toggle_panel", "label": "&Align"},
+                {"action": "toggle_panel", "label": "&Brushes"},
+                {"action": "toggle_panel", "label": "&Color"},
+            ]},
+        ]
+    clean, read = menu_law_findings(law_menubar())
+    if clean:
+        failures.append(f"a clean menubar produced law findings: {clean}")
+    if read != 7:
+        failures.append(f"the law walk read {read} items of a menubar holding 7")
+    if menu_law_findings([])[1] != 0 or not menu_law_findings([])[0]:
+        failures.append("an EMPTY menubar did not produce a finding")
+    law_arms = {
+        "share the access key 'n'":
+            lambda mb: mb[0]["items"].append({"action": "c", "label": "Ope&n"}),
+        "share the access key 'r'":  # inside a submenu, other case
+            lambda mb: mb[0]["items"][1]["items"].append({"action": "c", "label": "&revert"}),
+        "not alphabetical":
+            lambda mb: mb[1]["items"].reverse(),
+        "has no toggle_panel items":
+            lambda mb: mb[1].__setitem__("items", mb[1]["items"][:1]),
+        "expected exactly one window_menu":
+            lambda mb: mb.pop(),
+    }
+    for want, fn in law_arms.items():
+        mb = law_menubar()
+        fn(mb)
+        got = menu_law_findings(mb)[0]
+        if not any(want in f for f in got):
+            failures.append(f"the law arm {want!r} did not fire (got {got})")
+    if menu_law_findings(law_menubar())[0]:
+        failures.append("a law arm mutated the shared probe")
+    if _access_key("Fish && &Chips") != "c" or _access_key("A && B") is not None:
+        failures.append("_access_key does not skip an escaped && ")
+
     for f in failures:
         print(f"SELF-TEST FAIL: {f}", file=sys.stderr)
     if failures:
         return 1
     print(f"check_menu_structure SELF-TEST: OK (empty projection fatal proven "
           f"FIRST; action/label/shortcut/separator/submenu all carried; "
-          f"{len(edits)} distinct drifts each move the snapshot).")
+          f"{len(edits)} distinct drifts each move the snapshot; "
+          f"{len(law_arms)} menu-law arms each fire their own finding).")
     return 0
 
 
@@ -172,6 +290,14 @@ def main() -> int:
 
     workspace = json.loads(_WORKSPACE_JSON.read_text(encoding="utf-8"))
     actual = _canonical(project_menubar(workspace["menubar"])) + "\n"
+
+    findings, read = menu_law_findings(workspace["menubar"])
+    for f in findings:
+        print(f"FAIL: {f}", file=sys.stderr)
+    if findings:
+        return 1
+    print(f"OK: menu laws hold over {read} items (access keys unique per "
+          f"list; Window menu panels alphabetical).")
 
     if args.regenerate:
         _GOLDEN.write_text(actual, encoding="utf-8", newline="")

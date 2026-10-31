@@ -9309,7 +9309,7 @@
         },
         {
           "id": "menu_paste_in_place",
-          "label": "Paste in &Place",
+          "label": "Paste &in Place",
           "action": "paste_in_place",
           "shortcut": "Ctrl+Shift+V",
           "enabled_when": "state.tab_count > 0 && !active_document.active_layer_locked"
@@ -9350,7 +9350,7 @@
         },
         {
           "id": "menu_ungroup_all",
-          "label": "Ungroup A&ll",
+          "label": "U&ngroup All",
           "action": "ungroup_all",
           "enabled_when": "state.tab_count > 0"
         },
@@ -9517,6 +9517,15 @@
         },
         "separator",
         {
+          "id": "menu_align",
+          "label": "Ali&gn",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "align"
+          },
+          "checked_when": "panels.align"
+        },
+        {
           "id": "menu_artboards",
           "label": "&Artboards",
           "action": "toggle_panel",
@@ -9526,31 +9535,13 @@
           "checked_when": "panels.artboards"
         },
         {
-          "id": "menu_layers",
-          "label": "&Layers",
+          "id": "menu_boolean",
+          "label": "&Boolean",
           "action": "toggle_panel",
           "params": {
-            "panel": "layers"
+            "panel": "boolean"
           },
-          "checked_when": "panels.layers"
-        },
-        {
-          "id": "menu_color",
-          "label": "&Color",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "color"
-          },
-          "checked_when": "panels.color"
-        },
-        {
-          "id": "menu_swatches",
-          "label": "S&watches",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "swatches"
-          },
-          "checked_when": "panels.swatches"
+          "checked_when": "panels.boolean"
         },
         {
           "id": "menu_brushes",
@@ -9562,6 +9553,33 @@
           "checked_when": "panels.brushes"
         },
         {
+          "id": "menu_character",
+          "label": "C&haracter",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "character"
+          },
+          "checked_when": "panels.character"
+        },
+        {
+          "id": "menu_color",
+          "label": "&Color",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "color"
+          },
+          "checked_when": "panels.color"
+        },
+        {
+          "id": "menu_concepts",
+          "label": "Co&ncepts",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "concepts"
+          },
+          "checked_when": "panels.concepts"
+        },
+        {
           "id": "menu_gradient",
           "label": "Gra&dient",
           "action": "toggle_panel",
@@ -9571,58 +9589,13 @@
           "checked_when": "panels.gradient"
         },
         {
-          "id": "menu_stroke",
-          "label": "&Stroke",
+          "id": "menu_layers",
+          "label": "&Layers",
           "action": "toggle_panel",
           "params": {
-            "panel": "stroke"
+            "panel": "layers"
           },
-          "checked_when": "panels.stroke"
-        },
-        {
-          "id": "menu_properties",
-          "label": "&Properties",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "properties"
-          },
-          "checked_when": "panels.properties"
-        },
-        {
-          "id": "menu_character",
-          "label": "Ch&aracter",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "character"
-          },
-          "checked_when": "panels.character"
-        },
-        {
-          "id": "menu_paragraph",
-          "label": "Para&graph",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "paragraph"
-          },
-          "checked_when": "panels.paragraph"
-        },
-        {
-          "id": "menu_align",
-          "label": "Ali&gn",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "align"
-          },
-          "checked_when": "panels.align"
-        },
-        {
-          "id": "menu_boolean",
-          "label": "&Boolean",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "boolean"
-          },
-          "checked_when": "panels.boolean"
+          "checked_when": "panels.layers"
         },
         {
           "id": "menu_magic_wand",
@@ -9643,6 +9616,42 @@
           "checked_when": "panels.opacity"
         },
         {
+          "id": "menu_paragraph",
+          "label": "Parag&raph",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "paragraph"
+          },
+          "checked_when": "panels.paragraph"
+        },
+        {
+          "id": "menu_properties",
+          "label": "&Properties",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "properties"
+          },
+          "checked_when": "panels.properties"
+        },
+        {
+          "id": "menu_stroke",
+          "label": "&Stroke",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "stroke"
+          },
+          "checked_when": "panels.stroke"
+        },
+        {
+          "id": "menu_swatches",
+          "label": "S&watches",
+          "action": "toggle_panel",
+          "params": {
+            "panel": "swatches"
+          },
+          "checked_when": "panels.swatches"
+        },
+        {
           "id": "menu_symbols",
           "label": "S&ymbols",
           "action": "toggle_panel",
@@ -9650,15 +9659,6 @@
             "panel": "symbols"
           },
           "checked_when": "panels.symbols"
-        },
-        {
-          "id": "menu_concepts",
-          "label": "Co&ncepts",
-          "action": "toggle_panel",
-          "params": {
-            "panel": "concepts"
-          },
-          "checked_when": "panels.concepts"
         }
       ]
     }
