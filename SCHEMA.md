@@ -650,7 +650,7 @@ recommended for every element.
 | `tabs` | Tabbed container; one child visible at a time | `active`: index or bind expression |
 | `panel` | Named content region within tabs | `panel_kind`, `menu` |
 | `button` | Clickable button | `label`, `action`, `params`, `variant`, `icon` |
-| `icon_button` | Small icon-only button | `icon`, `action`, `params` |
+| `icon_button` | Small icon button. With a `label` it draws the icon, then the label beside it, laid out by its `justify` and `gap` (the tool-alternates flyout's rows); without one it is icon-only, and `summary` is its tooltip | `icon`, `label`, `action`, `params` |
 | `dropdown` | Button that opens a menu of items | `icon`, `label`, `items`: list of `{label, action, params}` |
 | `toggle` | Toggle / checkbox | `label`, `bind` |
 | `radio_group` | Mutually exclusive options | `options`: `[{id, label}]`, `bind` |
