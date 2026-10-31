@@ -719,6 +719,17 @@ static class Program
         static string Ev(string? json) => PanelWire.ReadEvents(json) is { } ev ? string.Join(",", ev) : "(null)";
         Eq("events: the declared order, read as sent", "click,click_and_wait", Ev("""["click","click_and_wait"]"""));
         Eq("events: a node that answers nothing", "", Ev("[]"));
+        Eq("events: no channel, an older core, is no list", "(null)", Ev(null));
+        Eq("events: a channel that is not an array is no list", "(null)", Ev("""{"click":true}"""));
+        Eq("events: text that is not JSON is no list", "(null)", Ev("click"));
+        Eq("events: a non-string entry is skipped, the rest read", "click", Ev("""[3,"click",null]"""));
+        Eq("routes press: click with an id", "True", PanelWire.RoutesPress(new[] { "click" }, "ap_number", null).ToString());
+        Eq("routes press: click with only a plan path", "True", PanelWire.RoutesPress(new[] { "click" }, "", "[0,2,1]").ToString());
+        Eq("routes press: click with no address sends nothing", "False", PanelWire.RoutesPress(new[] { "click" }, "", null).ToString());
+        Eq("routes press: events without click", "False", PanelWire.RoutesPress(new[] { "click_and_wait" }, "ap_name", null).ToString());
+        Eq("routes press: an empty list", "False", PanelWire.RoutesPress(System.Array.Empty<string>(), "t", null).ToString());
+        Eq("routes press: no list, an older core, routes nothing", "False", PanelWire.RoutesPress(null, "t", null).ToString());
+        Eq("routes press: the name is exact, not a prefix", "False", PanelWire.RoutesPress(new[] { "click_and_wait", "clicks" }, "t", null).ToString());
         // -- bind.z_index (the 10-30 sitting, finding 12: "I cannot get the fill
         // swatch to come to the front") -------------------------------------------
         // The toolbar swatches bind `z_index: if state.fill_on_top then 2 else 1`;
@@ -733,17 +744,6 @@ static class Program
         Eq("z_index: a fraction names no order and is refused", "(null)", Z("1.5"));
         Eq("z_index: a word is refused", "(null)", Z("top"));
         Eq("z_index: absent is no z", "(null)", Z(null));
-        Eq("events: no channel, an older core, is no list", "(null)", Ev(null));
-        Eq("events: a channel that is not an array is no list", "(null)", Ev("""{"click":true}"""));
-        Eq("events: text that is not JSON is no list", "(null)", Ev("click"));
-        Eq("events: a non-string entry is skipped, the rest read", "click", Ev("""[3,"click",null]"""));
-        Eq("routes press: click with an id", "True", PanelWire.RoutesPress(new[] { "click" }, "ap_number", null).ToString());
-        Eq("routes press: click with only a plan path", "True", PanelWire.RoutesPress(new[] { "click" }, "", "[0,2,1]").ToString());
-        Eq("routes press: click with no address sends nothing", "False", PanelWire.RoutesPress(new[] { "click" }, "", null).ToString());
-        Eq("routes press: events without click", "False", PanelWire.RoutesPress(new[] { "click_and_wait" }, "ap_name", null).ToString());
-        Eq("routes press: an empty list", "False", PanelWire.RoutesPress(System.Array.Empty<string>(), "t", null).ToString());
-        Eq("routes press: no list, an older core, routes nothing", "False", PanelWire.RoutesPress(null, "t", null).ToString());
-        Eq("routes press: the name is exact, not a prefix", "False", PanelWire.RoutesPress(new[] { "click_and_wait", "clicks" }, "t", null).ToString());
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.
@@ -1618,6 +1618,11 @@ static class Program
         Eq("slider: the shell does NOT snap or clamp -- 359.7 on a 0..359 step-1 track is sent as dragged",
             "359.7", Show(PanelWire.SliderCommit(359.7, "359")));
         Eq("slider: a release where the core's value already is sends nothing", "(null)", Show(PanelWire.SliderCommit(50.0, "50")));
+        Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
+        Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
+        Eq("slider: a value within 1e-5 of 0 commits fixed-point, never an exponent", "0.0000025", Show(PanelWire.SliderCommit(0.0000025, "0")));
+        Eq("slider: a value below the 17th decimal commits as 0, still in the grammar", "0", Show(PanelWire.SliderCommit(1e-20, "1")));
+
         // -- CONTROLS BELOW THEIR TEMPLATE'S HEIGHT (the 10-30 sitting, findings
         // 14 and 15) ---------------------------------------------------------------
         // WinUI's Slider stacks a 14-DIP margin, an 18-DIP thumb and a 14-DIP
@@ -1634,7 +1639,7 @@ static class Program
         // no room for a thumb between its 1-DIP edges is REFUSED, never drawn
         // with a thumb it cannot hold.
         Eq("slider fit: a row with no room for a thumb is refused, never floored", "(null)", SF(2));
-        Eq("slider fit: a 20-DIP row holds the template's own 18-DIP thumb exactly", "18/12/1", SF(20));
+        Eq("slider fit: a 20.5-DIP row holds the template's 18-DIP thumb, centred by 1.25-DIP margins", "18/12/1.25", SF(20.5));
         Eq("slider fit: just under that, the thumb is the room the row has", "17.5/11.67/1", SF(19.5));
         Eq("slider fit: the template's own 46 DIP needs nothing", "(null)", SF(46));
         Eq("slider fit: taller than the template needs nothing", "(null)", SF(120));
@@ -1650,10 +1655,6 @@ static class Program
         Eq("radio scale: the template's 32 DIP needs no scale", "(null)", RS(32));
         Eq("radio scale: taller needs none", "(null)", RS(40));
         Eq("radio scale: no height is no scale, never a throw", "(null)", RS(0));
-        Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
-        Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
-        Eq("slider: a value within 1e-5 of 0 commits fixed-point, never an exponent", "0.0000025", Show(PanelWire.SliderCommit(0.0000025, "0")));
-        Eq("slider: a value below the 17th decimal commits as 0, still in the grammar", "0", Show(PanelWire.SliderCommit(1e-20, "1")));
 
         // FORK B2 (#394): the colour bar sends its POINT, u = x / width and
         // v = y / height from its own top-left, as invariant text with no space.
