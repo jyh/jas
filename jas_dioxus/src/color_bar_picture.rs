@@ -23,8 +23,17 @@ pub fn data_uri() -> String {
 }
 
 fn build() -> String {
-    // BMP: 54-byte header + W*H*3 pixel data (120*3=360, divisible by 4, no padding)
-    let pixel_data_size = WIDTH * 3 * HEIGHT;
+    bmp_data_uri(WIDTH, HEIGHT, color_bar_rgb)
+}
+
+/// A `width` × `height` 24-bit BMP as a data URI, each pixel `pixel(u, v)` at
+/// its top-left corner normalized (`u = x / width`, `v = y / height`, from the
+/// top-left). Shared with [`crate::color_picker_picture`]. `width * 3` must be
+/// a multiple of 4, since rows carry no padding.
+pub(crate) fn bmp_data_uri(width: usize, height: usize, pixel: impl Fn(f64, f64) -> (u8, u8, u8)) -> String {
+    debug_assert_eq!(width * 3 % 4, 0, "BMP rows here carry no padding");
+    // BMP: 54-byte header + W*H*3 pixel data
+    let pixel_data_size = width * 3 * height;
     let file_size = 54 + pixel_data_size;
 
     let mut bmp = Vec::with_capacity(file_size);
@@ -35,17 +44,17 @@ fn build() -> String {
     bmp.extend_from_slice(&54u32.to_le_bytes()); // pixel data offset
     // DIB header (40 bytes - BITMAPINFOHEADER)
     bmp.extend_from_slice(&40u32.to_le_bytes());
-    bmp.extend_from_slice(&(WIDTH as i32).to_le_bytes());
-    bmp.extend_from_slice(&(HEIGHT as i32).to_le_bytes());
+    bmp.extend_from_slice(&(width as i32).to_le_bytes());
+    bmp.extend_from_slice(&(height as i32).to_le_bytes());
     bmp.extend_from_slice(&1u16.to_le_bytes()); // color planes
     bmp.extend_from_slice(&24u16.to_le_bytes()); // bits per pixel
     bmp.extend_from_slice(&[0u8; 24]); // compression, sizes, resolution, colors
 
     // BMP rows are bottom-to-top, so row 0 in the file is the bottom of the image.
-    for bmp_row in 0..HEIGHT {
-        let y = (HEIGHT - 1 - bmp_row) as f64;
-        for x in 0..WIDTH {
-            let (r, g, b) = color_bar_rgb(x as f64 / WIDTH as f64, y / HEIGHT as f64);
+    for bmp_row in 0..height {
+        let y = (height - 1 - bmp_row) as f64;
+        for x in 0..width {
+            let (r, g, b) = pixel(x as f64 / width as f64, y / height as f64);
             // BMP pixel order is BGR
             bmp.extend_from_slice(&[b, g, r]);
         }
