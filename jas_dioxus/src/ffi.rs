@@ -3493,7 +3493,10 @@ mod tests {
         assert!(before.len() > 4, "fixture: too few library tiles: {}", before.len());
         let k = 3usize;
         let tile = &before[k];
-        assert_eq!(tile["id"], "", "fixture: a library tile has no id, which is the point");
+        // The template's one id (`sp_swatch_tile`, O96 72(a)) names EVERY tile,
+        // so it cannot pick the row: the PATH does, which is the point.
+        assert!(before.iter().all(|t| t["id"] == tile["id"]),
+                "fixture: every library tile shares the template's id: {tile}");
         assert_eq!(tile["path"].as_array().and_then(|p| p.last()), Some(&serde_json::json!(k)),
                    "fixture: the tile's last path index is its row: {tile}");
         let colour = tile["values"]["bind.color"].as_str().expect("the tile's colour").to_string();
@@ -3502,7 +3505,7 @@ mod tests {
         let lib = engine_of(e).store.borrow().get_panel(P, "open_libraries")[0]["id"].clone();
         assert!(lib.is_string(), "fixture: an open library: {lib}");
 
-        let ev = format!(r#"{{"widget":"","path":{},"event":"click"}}"#, tile["path"]);
+        let ev = format!(r#"{{"widget":{},"path":{},"event":"click"}}"#, tile["id"], tile["path"]);
         let (reply, err) = behave(e, P, &ev);
         assert!(!reply.is_empty(), "the tap was refused: {err}");
         {

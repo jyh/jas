@@ -272,8 +272,9 @@ layer_options:
         children:
           - type: spacer
             style: { flex: 1 }
-          - { type: button, label: "Cancel", action: dismiss_dialog }
-          - type: button
+          - { id: lo_cancel, type: button, label: "Cancel", action: dismiss_dialog }
+          - id: lo_ok
+            type: button
             label: "OK"
             action: layer_options_confirm
             variant: primary

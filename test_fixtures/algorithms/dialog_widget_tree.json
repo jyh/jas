@@ -6987,7 +6987,7 @@
           1
         ],
         "type": "button",
-        "id": "",
+        "id": "lo_cancel",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -7001,7 +7001,7 @@
           2
         ],
         "type": "button",
-        "id": "",
+        "id": "lo_ok",
         "kind": "button",
         "col": 0,
         "visible": true,

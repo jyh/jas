@@ -7695,7 +7695,7 @@
           0
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7714,7 +7714,7 @@
           1
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7733,7 +7733,7 @@
           2
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7752,7 +7752,7 @@
           3
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7771,7 +7771,7 @@
           4
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7790,7 +7790,7 @@
           5
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7809,7 +7809,7 @@
           6
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7828,7 +7828,7 @@
           7
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7847,7 +7847,7 @@
           8
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -7866,7 +7866,7 @@
           9
         ],
         "type": "color_swatch",
-        "id": "",
+        "id": "sp_swatch_tile",
         "kind": "color_swatch",
         "col": 0,
         "visible": true,
@@ -11165,7 +11165,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "lp_breadcrumb_exit_all",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -11236,7 +11236,7 @@
           1
         ],
         "type": "text",
-        "id": "",
+        "id": "lp_breadcrumb_segment",
         "kind": "text",
         "col": 0,
         "visible": true,
@@ -11291,7 +11291,7 @@
           1
         ],
         "type": "text",
-        "id": "",
+        "id": "lp_breadcrumb_segment",
         "kind": "text",
         "col": 0,
         "visible": true,
@@ -11346,7 +11346,7 @@
           1
         ],
         "type": "text",
-        "id": "",
+        "id": "lp_breadcrumb_segment",
         "kind": "text",
         "col": 0,
         "visible": true,

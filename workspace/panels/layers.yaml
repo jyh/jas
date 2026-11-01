@@ -217,10 +217,10 @@ description: >
   - Menu/context menu "Exit Isolation Mode" exits one level.
   - Click a breadcrumb segment exits to that level directly.
 
-  On entering each isolation level, the visibility state of every
-  element is saved. On exit, each element's visibility is restored. If
-  the user changes a visibility state while in isolation, that change
-  is preserved on exit (overwrites the saved value for that element).
+  NOT IMPLEMENTED (declared, not built): on entering each isolation
+  level, the visibility state of every element would be saved and, on
+  exit, restored, with a change made inside isolation preserved. Today
+  exit_isolation_mode only pops the level (see isolation_stack).
 
   Constraints during isolation:
   - Element selection constrained to the isolated container's
@@ -324,7 +324,16 @@ state:
     type: list
     item_type: object
     default: []
-    description: "Stack of isolation contexts; each entry has container_id and saved_visibility map"
+    description: >
+      Stack of isolation levels, outermost first. Each entry is the PATH of
+      the isolated container (enter_isolation_mode pushes a path; every
+      runner stores one). It is not a record: there is no container_id and
+      no saved_visibility map, and visibility save/restore is NOT
+      IMPLEMENTED (exit pops the level and restores nothing). The two
+      readers that still expect records (lp_breadcrumb's segment label and
+      lp_tree's isolation_root) read null and are owed a fix. (The line
+      this replaced described a record. item_type still reads `object`,
+      which is a separate question: the reference coerces list items by it.)
 
   collapsed_paths:
     type: list
@@ -457,7 +466,8 @@ content:
       bind:
         visible: "panel.isolation_stack.length > 0"
       children:
-        - type: icon_button
+        - id: lp_breadcrumb_exit_all
+          type: icon_button
           icon: chevron_left
           summary: "Exit all isolation"
           style: { size: 14 }
@@ -479,7 +489,8 @@ content:
               - type: text
                 content: ">"
                 style: { font_size: 9, color: "{{theme.colors.text_dim}}" }
-              - type: text
+              - id: lp_breadcrumb_segment
+                type: text
                 content: "{{level.container_name}}"
                 style: { font_size: 10, cursor: pointer }
                 behavior:
@@ -512,7 +523,10 @@ content:
           behavior:
             - event: input
               action: set_layers_search
-              params: { query: "panel.search_query" }
+              # event.value is the field's whole text after the change; an
+              # input writes no bind, so panel.search_query would read the
+              # OLD query (WIDGET_EVENTS.md, "Typing in a text field").
+              params: { query: "event.value" }
         - id: lp_filter_button
           type: dropdown
           icon: filter
