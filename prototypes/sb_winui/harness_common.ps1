@@ -3816,8 +3816,12 @@ $SbRebootKeys = [ordered]@{
 }
 
 # 'READY', or 'NOT RUN(box: <reason>; ...)' naming every reason in a fixed
-# order: no user, locked, reboot pending, then the window read's findings.
-function Get-SbBoxReadiness($Snapshot) {
+# order: no user, locked, reboot pending, the window read's findings, then the
+# quiet gate. -MinIdleSeconds is the nightly's: the run drives the console's
+# real mouse, so input within that many seconds means someone is at the box.
+# 0 (an on-demand run, started by someone who knows) never asks.
+function Get-SbBoxReadiness {
+    param($Snapshot, [int]$MinIdleSeconds = 0)
     $why = New-Object System.Collections.Generic.List[string]
     $console = [int]$Snapshot.ConsoleSession
     if (@($Snapshot.ExplorerSessions) -notcontains $console) {
@@ -3827,8 +3831,78 @@ function Get-SbBoxReadiness($Snapshot) {
     $reboot = @($Snapshot.RebootPending | Where-Object { $_ })
     if ($reboot.Count -gt 0) { $why.Add("reboot pending: $($reboot -join ', ')") }
     foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console)) { $why.Add($r) }
+    if ($MinIdleSeconds -gt 0) {
+        $idle = @(@($Snapshot.WindowRows) | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -cmatch '^BOX IDLE ' })
+        if ($idle.Count -eq 0) { $why.Add('the window read wrote no BOX IDLE row') }
+        elseif ($idle[0] -cnotmatch '^BOX IDLE seconds=(\d+)$') { $why.Add("unreadable window row: '$($idle[0])'") }
+        elseif ([long]$Matches[1] -lt $MinIdleSeconds) { $why.Add("in use: the last input was $($Matches[1]) s ago, under $MinIdleSeconds") }
+    }
     if ($why.Count -eq 0) { return 'READY' }
     return "NOT RUN(box: $($why -join '; '))"
+}
+
+# ---------------------------------------------------------------------------
+# The nightly run's verdict (O97; nightly.ps1)
+# ---------------------------------------------------------------------------
+# One run reads GREEN, RED or NOT RUN, and the three are kept apart because
+# they go to different places: RED to jas's queue, NOT RUN reported and paged
+# to no one. NOT RUN when:
+# * the box was not ready at the start (-Box);
+# * the box went not ready mid-run (-Stop: the runner re-reads the box after
+#   any failure and stops there);
+# * the run is torn (fewer results than the corpus holds), or the corpus is empty.
+# A build failure is RED: main that does not build on Windows is jas's to know.
+function Get-SbNightlyVerdict {
+    param(
+        [string]$Box,
+        [string]$Stop = '',
+        [string]$Build = '',
+        [string[]]$Items = @(),
+        [int]$ItemsWanted,
+        $Panels = @(),
+        [int]$PanelsWanted
+    )
+    if ($Box -ne 'READY') { return $Box }
+    if ($Stop) { return $Stop }
+    if ($Build) { return "RED(build: $Build)" }
+    if ($ItemsWanted + $PanelsWanted -eq 0) { return 'NOT RUN(empty: the corpus has 0 items and 0 panels)' }
+    $items = @($Items | Where-Object { $_ })
+    $panels = @($Panels | Where-Object { $null -ne $_ })
+    if ($items.Count -lt $ItemsWanted -or $panels.Count -lt $PanelsWanted) {
+        return "NOT RUN(torn: $($items.Count) of $ItemsWanted items and $($panels.Count) of $PanelsWanted panels ran)"
+    }
+    $certified = 0
+    $first = ''
+    foreach ($line in $items) {
+        if ($line -cmatch ' verdict=CERTIFIED( |$)') { $certified++; continue }
+        if (-not $first) {
+            $name = if ($line -cmatch ' item=(\S+)') { $Matches[1] } else { '(unnamed)' }
+            $v = if ($line -cmatch ' verdict=(.+?)(?= gaps=| screenshot=| date=|$)') { $Matches[1] } else { '(no verdict)' }
+            $first = "item $name $v"
+        }
+    }
+    $ok = 0
+    foreach ($p in $panels) {
+        if ([int]$p.Exit -eq 0) { $ok++; continue }
+        if (-not $first) { $first = "panel $($p.Panel) exit=$($p.Exit)" }
+    }
+    $counts = "items=$certified/$($items.Count) panels=$ok/$($panels.Count)"
+    if (-not $first) { return "GREEN($counts)" }
+    return "RED($counts; first: $first)"
+}
+
+# The panel ids the nightly walks, from the panel specs' texts (in file order):
+# each spec's top-level `id:`. A spec without one is REFUSED, never dropped,
+# so a panel can never leave the run silently.
+function Get-SbPanelIdsFromSpecs([string[]]$Texts) {
+    $ids = @()
+    for ($i = 0; $i -lt $Texts.Count; $i++) {
+        $hit = @(($Texts[$i] -split "`r?`n") | Where-Object { $_ -cmatch '^id:\s*(\S+)\s*$' } | Select-Object -First 1)
+        if ($hit.Count -eq 0) { return "REFUSED: spec $($i + 1) of $($Texts.Count) has no top-level id" }
+        $null = $hit[0] -cmatch '^id:\s*(\S+)\s*$'
+        $ids += $Matches[1]
+    }
+    return $ids
 }
 
 # The window half of the verdict, over the rows box_windows.ps1 writes:

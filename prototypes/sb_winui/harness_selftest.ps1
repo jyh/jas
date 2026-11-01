@@ -3070,6 +3070,56 @@ Test-Case 'box: an unreadable TOPMOST row is NOT RUN naming it, never skipped' {
 Test-Case 'box: no explorer in the console session is NOT RUN (no interactive user)' { Get-SbBoxReadiness (New-SbBoxSnap -Explorer @(2)) } 'NOT RUN(box: no interactive user: explorer is not running in console session 1)'
 Test-Case 'box: every reason is named, in a fixed order' {
     Get-SbBoxReadiness (New-SbBoxSnap -LogonUI $true -Reboot @('CBS RebootPending') -Rows @($boxHead, $boxTray, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) } 'NOT RUN(box: locked: LogonUI is running; reboot pending: CBS RebootPending; a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+# The nightly's quiet gate: the run drives the console's real mouse, so a box
+# someone used in the last -MinIdleSeconds is NOT RUN (in use), never driven.
+# box_windows.ps1 reads the console session's last input as a BOX IDLE row.
+# The gate is opt-in: 0 (the default, an on-demand run) never asks.
+$boxIdle = @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=1', $boxTray, 'BOX IDLE seconds=1800')
+Test-Case 'box quiet: idle past the floor is READY' { Get-SbBoxReadiness (New-SbBoxSnap -Rows $boxIdle) -MinIdleSeconds 600 } 'READY'
+Test-Case 'box quiet: input inside the floor is NOT RUN (in use), never driven' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxIdle[0], $boxTray, 'BOX IDLE seconds=42')) -MinIdleSeconds 600 } 'NOT RUN(box: in use: the last input was 42 s ago, under 600)'
+Test-Case 'box quiet: a floor with no BOX IDLE row is NOT RUN, never READY' {
+    Get-SbBoxReadiness (New-SbBoxSnap) -MinIdleSeconds 600 } 'NOT RUN(box: the window read wrote no BOX IDLE row)'
+Test-Case 'box quiet: an unreadable BOX IDLE row is NOT RUN naming it' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxIdle[0], $boxTray, 'BOX IDLE seconds=soon')) -MinIdleSeconds 600 } "NOT RUN(box: unreadable window row: 'BOX IDLE seconds=soon')"
+Test-Case 'box quiet: no floor (0) never asks, so a read without the row is READY' { Get-SbBoxReadiness (New-SbBoxSnap) -MinIdleSeconds 0 } 'READY'
+Test-Case 'box quiet: in use is named after the window findings' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Reboot @('WU RebootRequired') -Rows @($boxIdle[0], $boxTray, 'BOX IDLE seconds=5')) -MinIdleSeconds 600 } 'NOT RUN(box: reboot pending: WU RebootRequired; in use: the last input was 5 s ago, under 600)'
+
+# The nightly's verdict over one run: GREEN, RED, or NOT RUN, kept apart. NOT
+# RUN when the box was not ready at the start, or went not ready mid-run (the
+# runner re-reads the box after any failure and stops), or the run is torn.
+# RED names the counts and the first failure; a red goes to jas's queue.
+$cOk = 'E2E-CERT v1 item=a.drag verdict=CERTIFIED gaps=PASS screenshot=x date=2026-11-01'
+$cOk2 = 'E2E-CERT v1 item=b.drag verdict=CERTIFIED gaps=PASS screenshot=x date=2026-11-01'
+$cNo = 'E2E-CERT v1 item=c.drag verdict=REFUSED: the selection moved 0 px date=2026-11-01'
+$pOk = @{ Panel = 'align_panel_content'; Exit = 0 }
+$pBad = @{ Panel = 'color_panel_content'; Exit = 1 }
+Test-Case 'nightly: every item certified and every panel exit 0 is GREEN with the counts' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, $cOk2) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'GREEN(items=2/2 panels=1/1)'
+Test-Case 'nightly: a box not ready at the start is its NOT RUN, whatever else is passed' {
+    Get-SbNightlyVerdict -Box 'NOT RUN(box: locked: LogonUI is running)' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'NOT RUN(box: locked: LogonUI is running)'
+Test-Case 'nightly: a mid-run stop is NOT RUN, never red, though items failed' {
+    Get-SbNightlyVerdict -Box 'READY' -Stop 'NOT RUN(box went not ready after item c.drag: reboot pending: WU RebootRequired)' -Items @($cOk, $cNo) -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'NOT RUN(box went not ready after item c.drag: reboot pending: WU RebootRequired)'
+Test-Case 'nightly: a refused item is RED naming the first failure' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, $cNo) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=1/2 panels=1/1; first: item c.drag REFUSED: the selection moved 0 px)'
+Test-Case 'nightly: a panel exit 1 is RED naming the panel' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk, $pBad) -PanelsWanted 2 } 'RED(items=1/1 panels=1/2; first: panel color_panel_content exit=1)'
+Test-Case 'nightly: an item with no cert line is RED, never skipped' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, 'E2E-CERT (none) item=d.drag verdict=NO CERT LINE') -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=1/2 panels=1/1; first: item d.drag NO CERT LINE)'
+Test-Case 'nightly: fewer items than the corpus holds is NOT RUN (torn), never green' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'NOT RUN(torn: 1 of 2 items and 1 of 1 panels ran)'
+Test-Case 'nightly: an empty corpus is NOT RUN, never a vacuous green' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @() -ItemsWanted 0 -Panels @() -PanelsWanted 0 } 'NOT RUN(empty: the corpus has 0 items and 0 panels)'
+Test-Case 'nightly: a build that failed is RED before any item' {
+    Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
+
+# The nightly's panel list comes from the panel specs (workspace/panels/*.yaml,
+# the top-level id), not a list typed here, so a new panel joins the run.
+Test-Case 'nightly panels: each spec''s top-level id, in order' { (Get-SbPanelIdsFromSpecs @("id: a_panel_content`nsummary: x", "# c`nid: b_panel_content")) -join ',' } 'a_panel_content,b_panel_content'
+Test-Case 'nightly panels: a nested id is not the panel''s' { Get-SbPanelIdsFromSpecs @("content:`n  id: inner`nid: top_panel_content") } 'top_panel_content'
+Test-Case 'nightly panels: a spec with no top-level id is REFUSED, never dropped' { Get-SbPanelIdsFromSpecs @("id: a_panel_content", "summary: no id") } 'REFUSED: spec 2 of 2 has no top-level id'
+
 Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state can read as a FAIL' {
     @((New-SbBoxSnap), (New-SbBoxSnap -LogonUI $true), (New-SbBoxSnap -Rows $null)) | ForEach-Object { (Get-SbBoxReadiness $_) -match '^(READY|NOT RUN\(box: .+\))$' } | Sort-Object -Unique } 'True'
 

@@ -8,6 +8,7 @@
 # top-level window, in the rows Get-SbBoxWindowReasons reads:
 #   BOX WINDOWS session=<n> screen=<l>,<t>,<r>,<b> topmost=<count>
 #   TOPMOST process=<name> rect=<l>,<t>,<r>,<b> class=<class>
+#   BOX IDLE seconds=<since the console session's last input>
 # The screen is the primary monitor, read through GetSystemMetrics in this same
 # process, so it and every rect share one DPI context. The class goes last
 # because a class name may hold a space.
@@ -37,6 +38,17 @@ public static class SbBoxWindows {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int n);
+    [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO i);
+    [StructLayout(LayoutKind.Sequential)] struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+
+    // Seconds since the last keyboard or mouse input in THIS session; -1 if unreadable.
+    // The tick count wraps at 49.7 days, so the difference is taken in uint.
+    public static long IdleSeconds() {
+        var i = new LASTINPUTINFO();
+        i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+        if (!GetLastInputInfo(ref i)) return -1;
+        return (long)(unchecked((uint)Environment.TickCount - i.dwTime) / 1000);
+    }
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
     const int GWL_EXSTYLE = -20, WS_EX_TOPMOST = 0x8, DWMWA_CLOAKED = 14;
 
@@ -73,6 +85,10 @@ $session = (Get-Process -Id $PID).SessionId
 $cx = [SbBoxWindows]::GetSystemMetrics(0)
 $cy = [SbBoxWindows]::GetSystemMetrics(1)
 $text = @("BOX WINDOWS session=$session screen=0,0,$cx,$cy topmost=$($rows.Count)") + $rows
+# The quiet gate's reading. -1 (the call failed) is written as it is, and the
+# reader refuses it as unreadable rather than taking it as idle.
+$idle = [SbBoxWindows]::IdleSeconds()
+$text += $(if ($idle -ge 0) { "BOX IDLE seconds=$idle" } else { 'BOX IDLE seconds=unreadable' })
 $tmp = "$Out.tmp"
 [System.IO.File]::WriteAllLines($tmp, [string[]]$text, (New-Object System.Text.UTF8Encoding($false)))
 Move-Item -LiteralPath $tmp -Destination $Out -Force
