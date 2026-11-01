@@ -2064,6 +2064,36 @@ Test-Case 'rt: a reader that FAILED is a refusal, never a vacuous agreement' {
     $u = [ordered]@{ pid = 1; session = 0; error = 'no top-level UIA element'; count = 0; rows = @() } | ConvertTo-Json
     (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Verdict
 } 'REFUSED: uia error: no top-level UIA element'
+# O97 (flask STATUS 728): the shell draws a hit surface, carrying the entry's id,
+# for every `chrome` or `containers` entry whose `events` is non-empty, unless it
+# lies under a `hidden` path (PanelWire.HitBoxes, jas section 612). Layers'
+# select square (`lp_select`, a chrome entry answering click) is one, and the
+# compare read it as an extra because it read leaves only.
+$rtSurfPlan = Get-SbFixture { [ordered]@{
+    leaves = @((New-SbPlanLeaf 'a' @{ 'bind.disabled' = 'false' }))
+    chrome = @(
+        [ordered]@{ path = @(3, 0, 8); type = 'container'; id = 'sq'; events = @('click'); values = @{ 'bind.border' = '1px solid #555555' } },
+        [ordered]@{ path = @(3, 0); type = 'container'; id = ''; events = @('click'); values = @{} },
+        [ordered]@{ path = @(4); type = 'container'; id = 'deco'; events = @(); values = @{} })
+    containers = @([ordered]@{ path = @(5); type = 'container'; id = 'row'; events = @('double_click'); values = @{} })
+    hidden = @(,@(5))
+} | ConvertTo-Json -Depth 6 }
+Test-Case 'rt surfaces: an id-carrying chrome entry that answers events is a planned element, and its surface agrees' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'sq' $true $false))
+    (Compare-SbRenderedTree -Plan $rtSurfPlan -Uia $u).Verdict
+} 'compared=2 mismatches=0'
+Test-Case 'rt surfaces: ...and a missing surface is named ABSENT' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false))
+    (Compare-SbRenderedTree -Plan $rtSurfPlan -Uia $u).Mismatches -join ';'
+} 'sq visible: plan=true rendered=ABSENT'
+Test-Case 'rt surfaces: a chrome entry with NO events draws no surface, so its id on the tree is an extra' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'sq' $true $false), (New-SbUiaRow 'deco' $true $false))
+    (Compare-SbRenderedTree -Plan $rtSurfPlan -Uia $u).Mismatches -join ';'
+} 'deco extra: plan=ABSENT rendered=present'
+Test-Case 'rt surfaces: a container under a HIDDEN path draws no surface, so its id on the tree is an extra' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'sq' $true $false), (New-SbUiaRow 'row' $true $false))
+    (Compare-SbRenderedTree -Plan $rtSurfPlan -Uia $u).Mismatches -join ';'
+} 'row extra: plan=ABSENT rendered=present'
 Test-Case 'rt: an EMPTY plan is a refusal, never compared=0 mismatches=0' {
     (Compare-SbRenderedTree -Plan '{"leaves":[]}' -Uia $rtAgree).Verdict
 } 'REFUSED: the plan has no addressable leaf'

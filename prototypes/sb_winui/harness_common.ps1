@@ -3121,6 +3121,21 @@ function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
 
     $leaves = @($p.leaves | Where-Object { $null -ne $_ -and "$($_.id)" -ne '' })
     if ($leaves.Count -eq 0) { return (& $refuse 'the plan has no addressable leaf') }
+    # A hit surface is a rendered element the plan names too: the shell draws one,
+    # carrying the entry's id, for every `chrome` or `containers` entry whose
+    # `events` is non-empty, unless it lies under a `hidden` path
+    # (PanelWire.HitBoxes, jas section 612; Layers' select square, flask STATUS 728).
+    $hiddenPaths = @($p.hidden | Where-Object { $null -ne $_ } | ForEach-Object { ,@($_ | ForEach-Object { [long]$_ }) })
+    $underHidden = { param($path)
+        $pp = @($path | ForEach-Object { [long]$_ })
+        foreach ($h in $hiddenPaths) {
+            if ($h.Count -le $pp.Count -and (@(0..($h.Count - 1) | Where-Object { $h[$_] -ne $pp[$_] }).Count -eq 0)) { return $true }
+        }
+        return $false
+    }
+    $surfaces = @(@($p.chrome) + @($p.containers) | Where-Object {
+        $null -ne $_ -and "$($_.id)" -ne '' -and @($_.events | Where-Object { "$_" -ne '' }).Count -gt 0 -and -not (& $underHidden $_.path) })
+    $leaves = @($leaves + $surfaces)
 
     $rendered = @{}
     foreach ($r in @($u.rows)) {
