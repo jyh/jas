@@ -243,7 +243,9 @@ the harness reads the rows (`Get-SbPaneVerdicts`, Q6). A widget id the open plan
 does not hold is `RUSTFAIL PANEL SYNTH REFUSED`, naming the ids it does hold;
 the knob on any scene but `app` is refused the same way, never ignored.
 `sitting.ps1 -Scenes q6` is the route. **What it does not drive:** the Ctrl+Z
-key and a real mouse — those are the hands row's.
+key and a real mouse — those are the hands row's: `send_hand.ps1`, which
+`prove_e2e.ps1` drives with real `SendInput` and UI Automation for every input
+script (docs/TESTING.md §6). This sentence is about Q6's synthetic arm only.
 
 ### The magic_wand value replay (W2b-3)
 
