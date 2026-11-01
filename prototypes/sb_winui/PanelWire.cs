@@ -966,10 +966,12 @@ internal static class PanelWire
         foreach (var (x, y, bw, bh) in bounds)
         {
             if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(bw) || !double.IsFinite(bh)) { continue; }
-            l = Math.Max(l, -x);
-            t = Math.Max(t, -y);
-            r = Math.Max(r, x + bw - w);
-            b = Math.Max(b, y + bh - h);
+            // A running maximum per side, written out: the interaction-path gate
+            // refuses the clamp form, and this is a comparison, not a clamp.
+            if (-x > l) { l = -x; }
+            if (-y > t) { t = -y; }
+            if (x + bw - w > r) { r = x + bw - w; }
+            if (y + bh - h > b) { b = y + bh - h; }
         }
         return l > tol || t > tol || r > tol || b > tol ? (l, t, r, b) : null;
     }
