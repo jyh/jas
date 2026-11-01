@@ -203,6 +203,13 @@ marked PROPOSED and never gates.
 * **`"event": "double_click"` on a panel step** (a swatch double-click opens Swatch Options or the Color Picker).
 * **`"hold_ms": <n>` on a press step**: the press is held that long before the next step (a toolbar slot's alternates
   open on a press-and-hold).
+* **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
+  "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
+  hovering there that long.
+* **A dropdown item by value**: a `commit` on a `dropdown` names the item by its `value`, never its label, and carries the
+  same modifiers as any panel step.
+* **Typing into a per-row field**: a `commit` with `row` (an inline rename) types the value into that row's field, then
+  presses Enter.
 * **`{"read": "panel", "panel": "<content id>"}`** compares that panel's declared `state:` keys with the script's
   `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
   the panel selection, for one, is in no document.
