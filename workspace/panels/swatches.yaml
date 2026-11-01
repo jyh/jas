@@ -451,6 +451,7 @@ content:
               source: "data.swatch_libraries[lib.id].swatches"
               as: swatch
             do:
+              id: sp_swatch_tile
               type: color_swatch
               size: "{{panel.thumbnail_size}}"
               bind:

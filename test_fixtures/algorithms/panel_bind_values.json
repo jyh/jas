@@ -2268,7 +2268,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#ff0000"
@@ -2280,7 +2280,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[lib1:0]"
@@ -2292,7 +2292,7 @@
           0,
           1
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#00ff00"
@@ -2304,7 +2304,7 @@
           0,
           1
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[lib1:0]"
@@ -2336,7 +2336,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#808080"
@@ -2348,7 +2348,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[lib1:0]"
@@ -2993,7 +2993,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#ff0000"
@@ -3005,7 +3005,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[lib1:0,lib1:1,lib2:0]"
@@ -3017,7 +3017,7 @@
           0,
           1
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#00ff00"
@@ -3029,7 +3029,7 @@
           0,
           1
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[lib1:0,lib1:1,lib2:0]"
@@ -3061,7 +3061,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#808080"
@@ -3073,7 +3073,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[lib1:0,lib1:1,lib2:0]"
@@ -3302,7 +3302,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.color",
         "type": "color",
         "value": "#ff0000"
@@ -3314,7 +3314,7 @@
           0,
           0
         ],
-        "id": "",
+        "id": "sp_swatch_tile",
         "key": "bind.selected_in",
         "type": "list",
         "value": "[[lib1:0,lib1:1],[],[lib2:0,[deep]]]"
