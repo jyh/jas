@@ -3826,8 +3826,11 @@ function ConvertTo-SbParenSafe([string]$Text) { return $Text.Replace('(', '[').R
 # findings, then the quiet gate. -MinIdleSeconds is the nightly's: the run drives the console's
 # real mouse, so input within that many seconds means someone is at the box.
 # 0 (an on-demand run, started by someone who knows) never asks.
+# -IgnoreProcess is the nightly's stop re-read (jas's LOW on #826): the shell
+# launches topmost, so a shell that outlived a failed item is that item's RED,
+# never the box's NOT RUN. The start's read passes nothing and stays strict.
 function Get-SbBoxReadiness {
-    param($Snapshot, [int]$MinIdleSeconds = 0)
+    param($Snapshot, [int]$MinIdleSeconds = 0, [string[]]$IgnoreProcess = @())
     $why = New-Object System.Collections.Generic.List[string]
     $console = [int]$Snapshot.ConsoleSession
     if (@($Snapshot.ExplorerSessions) -notcontains $console) {
@@ -3842,7 +3845,7 @@ function Get-SbBoxReadiness {
     if (@($Snapshot.ConsentSessions) -contains $console) { $why.Add('a UAC prompt is up: consent.exe') }
     $reboot = @($Snapshot.RebootPending | Where-Object { $_ })
     if ($reboot.Count -gt 0) { $why.Add("reboot pending: $($reboot -join ', ')") }
-    foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console)) { $why.Add($r) }
+    foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console $IgnoreProcess)) { $why.Add($r) }
     if ($MinIdleSeconds -gt 0) {
         $idle = @(@($Snapshot.WindowRows) | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -cmatch '^BOX IDLE ' })
         if ($idle.Count -eq 0) { $why.Add('the window read wrote no BOX IDLE row') }
@@ -3927,7 +3930,7 @@ function Get-SbPanelIdsFromSpecs([string[]]$Texts) {
 # TOPMOST rows it counts. An unreadable row is named, never skipped. A topmost
 # window that is not the shell's and overlaps the screen is an intruder; one
 # wholly off it (a minimized window sits at -32000) cannot take a press.
-function Get-SbBoxWindowReasons($Rows, [int]$Console) {
+function Get-SbBoxWindowReasons($Rows, [int]$Console, [string[]]$IgnoreProcess = @()) {
     $rows = @($Rows | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -ne '' })
     $head = @($rows | Where-Object { $_ -cmatch '^BOX WINDOWS ' })
     if ($head.Count -eq 0) { return @('the session-1 window read wrote no BOX WINDOWS row') }
@@ -3950,6 +3953,7 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console) {
         $proc = $Matches[1]; $cls = $Matches[6]
         $wL = [int]$Matches[2]; $wT = [int]$Matches[3]; $wR = [int]$Matches[4]; $wB = [int]$Matches[5]
         if ($SbShellTopmostClasses -ccontains $cls) { continue }
+        if (@($IgnoreProcess) -contains $proc) { continue }
         if ($wR -le $sL -or $wL -ge $sR -or $wB -le $sT -or $wT -ge $sB) { continue }
         $out += "a topmost window is up: class=$(ConvertTo-SbParenSafe $cls) process=$(ConvertTo-SbParenSafe $proc)"
     }

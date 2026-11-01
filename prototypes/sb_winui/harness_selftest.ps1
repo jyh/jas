@@ -3082,6 +3082,18 @@ Test-Case 'box: a LogonUI in the console session is locked' { Get-SbBoxReadiness
 Test-Case 'box: a UAC prompt (consent.exe) in the console session is NOT RUN' { Get-SbBoxReadiness (New-SbBoxSnap -Consent @(1)) } 'NOT RUN(box: a UAC prompt is up: consent.exe)'
 Test-Case 'box: consent.exe in another session is not this console''s prompt' { Get-SbBoxReadiness (New-SbBoxSnap -Consent @(2)) } 'READY'
 
+# jas's LOW on #826: the shell launches TOPMOST, so if it outlives a failed
+# item, the stop re-read would see its own window and end the night NOT RUN,
+# though an app that will not quit is an app defect (RED). The re-read names
+# the shell to ignore; the start's read ignores nothing and stays strict.
+$boxShell = 'TOPMOST process=SbWinUi rect=0,0,1600,1000 class=WinUIDesktopWin32WindowClass'
+Test-Case 'box: the stop re-read ignores the shell''s own topmost window (an app that outlived its item stays RED)' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, $boxShell)) -IgnoreProcess @('SbWinUi') } 'READY'
+Test-Case 'box: with nothing ignored, the shell''s own topmost window is an intruder (the start stays strict)' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, $boxShell)) } 'NOT RUN(box: a topmost window is up: class=WinUIDesktopWin32WindowClass process=SbWinUi)'
+Test-Case 'box: ignoring the shell hides no other process''s window' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=3', $boxTray, $boxShell, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) -IgnoreProcess @('SbWinUi') } 'NOT RUN(box: a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+
 # The nightly's quiet gate: the run drives the console's real mouse, so a box
 # someone used in the last -MinIdleSeconds is NOT RUN (in use), never driven.
 # box_windows.ps1 reads the console session's last input as a BOX IDLE row.

@@ -109,9 +109,11 @@ if ($build) {
 
 # After a failure, the box is read again (with no quiet gate: this run's own
 # SendInput is the last input). A box that is no longer ready ends the run as
-# NOT RUN; one that is still ready leaves the failure standing.
+# NOT RUN; one that is still ready leaves the failure standing. The shell's own
+# windows are ignored here (jas's LOW on #826): it launches topmost, so a shell
+# that outlived its item would otherwise turn that item's RED into NOT RUN.
 function Get-SbStopAfter([string]$What) {
-    $again = Get-SbBoxReadiness (Read-SbBoxSnapshot)
+    $again = Get-SbBoxReadiness (Read-SbBoxSnapshot) -IgnoreProcess @(Get-SbProcessName 'SbWinUi.exe')
     if ($again -eq 'READY') { return '' }
     return ($again -replace '^NOT RUN\(box: ', "NOT RUN(box went not ready after $What`: ")
 }
