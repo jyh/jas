@@ -944,7 +944,7 @@ public sealed partial class MainWindow
         /// <summary>S3: a `separator`'s rule, centred in its rect (<see cref="PanelWire.SeparatorRule"/>).</summary>
         private Grid BuildSeparator(PaneLeaf leaf)
         {
-            var host = new Grid { IsHitTestVisible = false };
+            var host = new SeparatorRuleHost { IsHitTestVisible = false };
             var rule = PanelWire.SeparatorRule(leaf.Literal("orientation"), leaf.W, leaf.H);
             if (rule is null) { return host; }
             host.Children.Add(new Border
@@ -2532,6 +2532,27 @@ internal sealed partial class ColorBarSurface : Grid
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// O97 (flask STATUS 728): a `separator`'s host. A `Grid` has no automation peer,
+/// so the separator's AutomationId reached no reader, and the rendered tree read
+/// color_panel_content's `cp_swatch_rule` as ABSENT while the plan draws it. Its
+/// peer reports the Separator control type, the one UI Automation has for a rule.
+/// </summary>
+internal sealed partial class SeparatorRuleHost : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new SeparatorRulePeer(this);
+}
+
+/// <summary>The plain element peer, reporting <see cref="Microsoft.UI.Xaml.Automation.Peers.AutomationControlType.Separator"/>.</summary>
+internal sealed partial class SeparatorRulePeer : Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer
+{
+    internal SeparatorRulePeer(FrameworkElement owner) : base(owner) { }
+
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationControlType GetAutomationControlTypeCore() =>
+        Microsoft.UI.Xaml.Automation.Peers.AutomationControlType.Separator;
 }
 
 /// <summary>
