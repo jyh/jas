@@ -2894,6 +2894,22 @@ Test-Case 'kinds: a uia error is a REFUSAL, never an empty census' { Get-SbRende
 Test-Case 'kinds: a plan with no addressable leaf is a REFUSAL' { Get-SbRenderedKinds -Plan ([ordered]@{ leaves = @((New-SbKindLeaf '' 'text')) } | ConvertTo-Json -Depth 6) -Uia $kUia } 'REFUSED: the plan has no addressable leaf'
 Test-Case 'kinds: a repeated id counts every rendered copy against its kind' { Get-SbRenderedKinds -Plan ([ordered]@{ leaves = @((New-SbKindLeaf 'r' 'icon_button'), (New-SbKindLeaf 'r' 'icon_button')) } | ConvertTo-Json -Depth 6) -Uia ([ordered]@{ pid = 1; error = $null; rows = @((New-SbKindRow 'r' 'Button'), (New-SbKindRow 'r' 'Text')) } | ConvertTo-Json -Depth 4) } 'icon_button->Button:1 icon_button->Text:1'
 
+# O97 read=tree, step 2: the census judged against the MEASURED map
+# (e2e_baselines/uia_kinds.json, derived from flask STATUS 728's 16 KINDS
+# lines). A pair the map allows passes; a ledgered known-bad pair passes NAMED;
+# any other pair FAILS as new. One-way: a known pair absent from ONE panel's
+# census is not evidence it is fixed, so nothing is struck by this verdict.
+$kMap = '{"allowed": {"icon_button": ["Button"], "checkbox": ["Button", "CheckBox"], "text": ["Text"]}, "known": ["element_preview->Text"]}' | ConvertFrom-Json
+Test-Case 'kinds verdict: allowed pairs only -> PASS with the pair count' { Test-SbRenderedKinds 'checkbox->Button:12 checkbox->CheckBox:1 icon_button->Button:3' $kMap } 'PASS(pairs=3; known: none)'
+Test-Case 'kinds verdict: a ledgered known pair passes, NAMED' { Test-SbRenderedKinds 'element_preview->Text:1 icon_button->Button:3' $kMap } 'PASS(pairs=2; known: element_preview->Text)'
+Test-Case 'kinds verdict: a placeholder of a kind the map allows elsewhere FAILS as new' { Test-SbRenderedKinds 'icon_button->Text:1 icon_button->Button:2' $kMap } 'FAIL(new: icon_button->Text:1)'
+Test-Case 'kinds verdict: a kind the map has never seen FAILS as new' { Test-SbRenderedKinds 'tree_view->Custom:1' $kMap } 'FAIL(new: tree_view->Custom:1)'
+Test-Case 'kinds verdict: a visible leaf that did not render FAILS as new' { Test-SbRenderedKinds 'text->ABSENT:1' $kMap } 'FAIL(new: text->ABSENT:1)'
+Test-Case 'kinds verdict: a refused census is NOT RUN, never a pass' { Test-SbRenderedKinds 'REFUSED: the plan does not parse' $kMap } 'NOT RUN(REFUSED: the plan does not parse)'
+Test-Case 'kinds verdict: an empty census is NOT RUN, never a pass' { Test-SbRenderedKinds '' $kMap } 'NOT RUN(empty census)'
+Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRenderedKinds 'icon_button->Button:3' $null } 'NOT RUN(no map; census: icon_button->Button:3)'
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '16 3'
+
 # ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }

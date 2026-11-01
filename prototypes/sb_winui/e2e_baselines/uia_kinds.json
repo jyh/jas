@@ -1,0 +1,59 @@
+{
+  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815",
+  "allowed": {
+    "button": [
+      "Button"
+    ],
+    "checkbox": [
+      "Button",
+      "CheckBox"
+    ],
+    "color_bar": [
+      "Custom"
+    ],
+    "color_swatch": [
+      "Custom"
+    ],
+    "combo_box": [
+      "ComboBox"
+    ],
+    "dropdown": [
+      "Button"
+    ],
+    "gradient_slider": [
+      "Custom"
+    ],
+    "icon_button": [
+      "Button"
+    ],
+    "icon_select": [
+      "ComboBox"
+    ],
+    "length_input": [
+      "Edit"
+    ],
+    "number_input": [
+      "Edit"
+    ],
+    "select": [
+      "ComboBox"
+    ],
+    "slider": [
+      "Slider"
+    ],
+    "text": [
+      "Text"
+    ],
+    "text_input": [
+      "Edit"
+    ],
+    "toggle": [
+      "CheckBox"
+    ]
+  },
+  "known": [
+    "element_preview->Text",
+    "placeholder->Text",
+    "separator->ABSENT"
+  ]
+}

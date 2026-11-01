@@ -8,8 +8,8 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File rendered_tree.ps1 -Panel color_panel_content
 #
-# Exit 0 = mismatches=0 and GAPS PASS; 1 = a mismatch or a gap verdict that is
-# not PASS (O97 rung A); 2 = NOT RUN or REFUSED.
+# Exit 0 = mismatches=0, GAPS PASS and KINDS-VERDICT PASS; 1 = a mismatch, or a
+# gap or kinds verdict that is not PASS (O97); 2 = NOT RUN or REFUSED.
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script as cp1252.
 
 # -FreezeGaps writes e2e_baselines/shell_gaps.json as the old ledger plus this
@@ -70,8 +70,13 @@ if ((Test-Path $planOut) -and $owner -ne $Panel) { "VERDICT: REFUSED: the plan f
 if ((Test-Path $planOut) -and (Test-Path $uiaOut)) {
   $r = Compare-SbRenderedTree -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw)
   "VERDICT: $($r.Verdict)"; $r.Mismatches | ForEach-Object { "  $_" }
-  "KINDS: $(Get-SbRenderedKinds -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw))"
+  $kinds = Get-SbRenderedKinds -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw)
+  "KINDS: $kinds"
+  $kindsMapPath = Join-Path $dir 'e2e_baselines\uia_kinds.json'
+  $kindsMap = if (Test-Path $kindsMapPath) { Get-Content -Raw $kindsMapPath | ConvertFrom-Json } else { $null }
+  $kindsVerdict = Test-SbRenderedKinds $kinds $kindsMap
+  "KINDS-VERDICT: $kindsVerdict"
   if ($r.Verdict -like 'REFUSED*') { exit 2 }
-  if ($r.Mismatches.Count -gt 0 -or $gaps -notlike 'PASS*') { exit 1 }
+  if ($r.Mismatches.Count -gt 0 -or $gaps -notlike 'PASS*' -or $kindsVerdict -notlike 'PASS*') { exit 1 }
   exit 0
 } else { "VERDICT: NOT RUN (plan=$(Test-Path $planOut) uia=$(Test-Path $uiaOut))"; exit 2 }

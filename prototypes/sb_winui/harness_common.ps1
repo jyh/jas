@@ -3078,6 +3078,33 @@ function Get-SbRenderedKinds([string]$Plan, [string]$Uia) {
     return (@($count.Keys | Sort-Object | ForEach-Object { "${_}:$($count[$_])" }) -join ' ')
 }
 
+# O97 read=tree, step 2: a KINDS census judged against the measured map
+# (e2e_baselines/uia_kinds.json: `allowed` kind -> ControlTypes, `known` the
+# ledgered bad pairs). Returns PASS(...), FAIL(new: ...) or NOT RUN(...).
+# One-way by design: one panel's census cannot show a known pair is fixed.
+function Test-SbRenderedKinds([string]$Census, $Map) {
+    if ($Census -like 'REFUSED*') { return "NOT RUN($Census)" }
+    if ([string]::IsNullOrWhiteSpace($Census)) { return 'NOT RUN(empty census)' }
+    if ($null -eq $Map) { return "NOT RUN(no map; census: $Census)" }
+    $known = @($Map.known | ForEach-Object { "$_" })
+    $new = New-Object System.Collections.Generic.List[string]
+    $seenKnown = New-Object System.Collections.Generic.List[string]
+    $pairs = 0
+    foreach ($tok in ($Census -split '\s+')) {
+        if ($tok -eq '') { continue }
+        if ($tok -notmatch '^([a-z_]+)->([A-Za-z]+):(\d+)$') { return "NOT RUN(unreadable census token '$tok')" }
+        $kind = $Matches[1]; $type = $Matches[2]
+        $pairs++
+        $ok = @($Map.allowed.$kind | ForEach-Object { "$_" })
+        if ($ok -ccontains $type) { continue }
+        if ($known -ccontains "$kind->$type") { $seenKnown.Add("$kind->$type"); continue }
+        $new.Add($tok)
+    }
+    if ($new.Count -gt 0) { return 'FAIL(new: ' + ($new -join ' ') + ')' }
+    $k = if ($seenKnown.Count -gt 0) { $seenKnown -join ' ' } else { 'none' }
+    return "PASS(pairs=$pairs; known: $k)"
+}
+
 function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
     $refuse = { param($why) [pscustomobject]@{ Compared = 0; Mismatches = @(); Verdict = "REFUSED: $why" } }
     try { $p = $Plan | ConvertFrom-Json } catch { return (& $refuse 'the plan does not parse') }
