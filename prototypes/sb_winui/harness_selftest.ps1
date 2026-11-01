@@ -3032,6 +3032,47 @@ Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind
 Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
 Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
 
+# O97 nightly, the box preflight (flask STATUS 739; the helm's ruling on it):
+# a box that cannot take a run reads NOT RUN, never red, so a modal or a
+# pending reboot can never be tallied as failures. The snapshot is what
+# Read-SbBoxSnapshot gathers: session 0's half (console session, explorer's
+# sessions, LogonUI, the reboot keys) and the rows box_windows.ps1 writes from
+# session 1, the only session that can see the desktop.
+function New-SbBoxSnap {
+    param([int]$Console = 1, [int[]]$Explorer = @(1), [bool]$LogonUI = $false,
+          [string[]]$Reboot = @(), $Rows = @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=1',
+                                           'TOPMOST process=explorer rect=0,1392,2560,1440 class=Shell_TrayWnd'))
+    return @{ ConsoleSession = $Console; ExplorerSessions = $Explorer; LogonUI = $LogonUI;
+              RebootPending = $Reboot; WindowRows = $Rows }
+}
+$boxHead = 'BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=2'
+$boxTray = 'TOPMOST process=explorer rect=0,1392,2560,1440 class=Shell_TrayWnd'
+Test-Case 'box: an unlocked desktop with only the taskbar topmost is READY' { Get-SbBoxReadiness (New-SbBoxSnap) } 'READY'
+Test-Case 'box: LogonUI running is NOT RUN (locked), never red' { Get-SbBoxReadiness (New-SbBoxSnap -LogonUI $true) } 'NOT RUN(box: locked: LogonUI is running)'
+Test-Case 'box: a pending reboot is NOT RUN naming its source' { Get-SbBoxReadiness (New-SbBoxSnap -Reboot @('WU RebootRequired')) } 'NOT RUN(box: reboot pending: WU RebootRequired)'
+Test-Case 'box: two reboot sources are both named' { Get-SbBoxReadiness (New-SbBoxSnap -Reboot @('WU RebootRequired', 'CBS RebootPending')) } 'NOT RUN(box: reboot pending: WU RebootRequired, CBS RebootPending)'
+Test-Case 'box: a full-screen topmost modal (the 10-13 post-update dim) is NOT RUN naming it' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) } 'NOT RUN(box: a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+Test-Case 'box: a class name with a space is read whole (class is the last field)' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=setup rect=100,100,600,400 class=Some Dialog Class')) } 'NOT RUN(box: a topmost window is up: class=Some Dialog Class process=setup)'
+Test-Case 'box: a topmost window entirely off the screen (minimized) is not an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=tool rect=-32000,-32000,-31840,-31972 class=ToolWnd')) } 'READY'
+Test-Case 'box: a topmost window touching the screen by its edge only is not an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=tool rect=2560,0,2800,200 class=ToolWnd')) } 'READY'
+Test-Case 'box: no window rows at all is NOT RUN, never READY (the read did not run)' { Get-SbBoxReadiness (New-SbBoxSnap -Rows $null) } 'NOT RUN(box: the session-1 window read wrote no BOX WINDOWS row)'
+Test-Case 'box: TOPMOST rows without the header are NOT RUN, never READY' { Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxTray)) } 'NOT RUN(box: the session-1 window read wrote no BOX WINDOWS row)'
+Test-Case 'box: a window read from another session is NOT RUN (it saw another desktop)' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @('BOX WINDOWS session=0 screen=0,0,1024,768 topmost=0')) } 'NOT RUN(box: the window read ran in session 0, not console session 1)'
+Test-Case 'box: a torn read (fewer TOPMOST rows than its header counts) is NOT RUN' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray)) } 'NOT RUN(box: the window read is torn: topmost=2 but 1 TOPMOST row(s))'
+Test-Case 'box: an unreadable TOPMOST row is NOT RUN naming it, never skipped' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=x rect=a,b,c,d class=Y')) } "NOT RUN(box: unreadable window row: 'TOPMOST process=x rect=a,b,c,d class=Y')"
+Test-Case 'box: no explorer in the console session is NOT RUN (no interactive user)' { Get-SbBoxReadiness (New-SbBoxSnap -Explorer @(2)) } 'NOT RUN(box: no interactive user: explorer is not running in console session 1)'
+Test-Case 'box: every reason is named, in a fixed order' {
+    Get-SbBoxReadiness (New-SbBoxSnap -LogonUI $true -Reboot @('CBS RebootPending') -Rows @($boxHead, $boxTray, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) } 'NOT RUN(box: locked: LogonUI is running; reboot pending: CBS RebootPending; a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state can read as a FAIL' {
+    @((New-SbBoxSnap), (New-SbBoxSnap -LogonUI $true), (New-SbBoxSnap -Rows $null)) | ForEach-Object { (Get-SbBoxReadiness $_) -match '^(READY|NOT RUN\(box: .+\))$' } | Sort-Object -Unique } 'True'
+
 # ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
