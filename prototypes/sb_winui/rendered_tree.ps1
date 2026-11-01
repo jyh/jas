@@ -12,7 +12,9 @@
 # not PASS (O97 rung A); 2 = NOT RUN or REFUSED.
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script as cp1252.
 
-param([string]$Panel = 'align_panel_content', [int]$SettleSec = 4)
+# -FreezeGaps writes e2e_baselines/shell_gaps.json as the old ledger plus this
+# launch's gaps (New-SbShellGapLedger), then judges against it.
+param([string]$Panel = 'align_panel_content', [int]$SettleSec = 4, [switch]$FreezeGaps)
 $ErrorActionPreference = 'Stop'
 $dir = $PSScriptRoot
 . (Join-Path $dir 'harness_common.ps1')
@@ -55,6 +57,13 @@ $owner = Get-SbPlanOutOwner @(Read-SbRows $log $mark)
 # findings 4 and 5 can red. A gap verdict that is not PASS makes the exit 1.
 $gapLedgerPath = Join-Path $dir 'e2e_baselines\shell_gaps.json'
 $gapLedger = if (Test-Path $gapLedgerPath) { Get-Content -Raw $gapLedgerPath | ConvertFrom-Json } else { $null }
+if ($FreezeGaps) {
+    $g = Get-SbShellGaps @(Read-SbRows $log $mark)
+    if ($null -ne $g.Refusal) { "GAPS-FROZEN: REFUSED -- $($g.Refusal)"; exit 2 }
+    $gapLedger = New-SbShellGapLedger $g $gapLedger
+    ($gapLedger | ConvertTo-Json) | Set-Content -Path $gapLedgerPath -Encoding ascii
+    "GAPS-FROZEN: -> $gapLedgerPath (review it before committing it)"
+}
 $gaps = Get-SbShellGapVerdict @(Read-SbRows $log $mark) $gapLedger
 "GAPS: $gaps"
 if ((Test-Path $planOut) -and $owner -ne $Panel) { "VERDICT: REFUSED: the plan file is $owner's, not $Panel's (the last PLAN OUT row)"; exit 2 }
