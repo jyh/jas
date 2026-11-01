@@ -38,6 +38,9 @@
     "select": [
       "ComboBox"
     ],
+    "separator": [
+      "Separator"
+    ],
     "slider": [
       "Slider"
     ],
@@ -53,7 +56,6 @@
   },
   "known": [
     "element_preview->Text",
-    "placeholder->Text",
-    "separator->ABSENT"
+    "placeholder->Text"
   ]
 }
