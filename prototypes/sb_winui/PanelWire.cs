@@ -976,6 +976,36 @@ internal static class PanelWire
         return l > tol || t > tol || r > tol || b > tol ? (l, t, r, b) : null;
     }
 
+    /// <summary>
+    /// O97 rung B, THE RULE THE ARM JUDGES BY (flask STATUS 734–735, measured): a
+    /// drawing part is LOST when under <paramref name="minInside"/> of its area lies
+    /// inside the plan rect [0,w] × [0,h]. Spill alone is not a loss: a fixed
+    /// slider's thumb halo spills 2 DIP and draws, while finding 15's broken slider
+    /// has its track wholly outside and its ring 0.37 inside. The answer is
+    /// <see cref="ClipOverflow"/> over the LOST parts only, or null when none is
+    /// lost. A part with no area is never judged.
+    /// </summary>
+    internal static (double L, double T, double R, double B)? ClipLost(
+        double w, double h, IEnumerable<(double X, double Y, double W, double H)> parts, double minInside = 0.5)
+    {
+        static double Overlap(double a0, double a1, double b0, double b1)
+        {
+            var lo = a0 > b0 ? a0 : b0;
+            var hi = a1 < b1 ? a1 : b1;
+            return hi > lo ? hi - lo : 0;
+        }
+        var lost = new List<(double X, double Y, double W, double H)>();
+        foreach (var p in parts)
+        {
+            if (!double.IsFinite(p.X) || !double.IsFinite(p.Y) || !double.IsFinite(p.W) || !double.IsFinite(p.H)) { continue; }
+            var area = p.W * p.H;
+            if (!(area > 0)) { continue; }
+            var inside = Overlap(p.X, p.X + p.W, 0, w) * Overlap(p.Y, p.Y + p.H, 0, h);
+            if (inside / area < minInside) { lost.Add(p); }
+        }
+        return lost.Count == 0 ? null : ClipOverflow(w, h, lost, tol: 0);
+    }
+
     /// <summary>A clip's `over=` text: four invariant numbers, at most one decimal, so a comma culture cannot split the field.</summary>
     internal static string ClipOverText((double L, double T, double R, double B) o) =>
         string.Join(",", new[] { o.L, o.T, o.R, o.B }.Select(v => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));

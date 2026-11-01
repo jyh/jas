@@ -2012,6 +2012,19 @@ static class Program
         Eq("clip: a descendant with no layout (NaN or infinite bounds) is skipped, never read as a spill", "(null)",
             Over(PanelWire.ClipOverflow(10, 10, B((double.NaN, 0, 5, 5), (0, 0, double.PositiveInfinity, 5)))));
         Eq("clip: no descendants is not clipped (the walk's own count says whether it ran)", "(null)", Over(PanelWire.ClipOverflow(10, 10, B())));
+        // flask STATUS 735, measured on cp_h (plan 87x12): the parts that DRAW, as
+        // (x, y, w, h) in the leaf. A part is LOST when under half its area is
+        // inside the plan rect; the thumb's 2-DIP halo at value 0 is not a loss.
+        var cphFixed = B((0, 5.3, 87, 4), (-2, 0, 16, 14), (2, 0, 10, 10));
+        var cphBroken = B((0, 14, 87, 4), (-2, 5.3, 24, 16.7), (2, 12.7, 10, 10));
+        Eq("clip lost: finding 15 FIXED (SliderFit on): the halo spills 2 and nothing is lost", "(null)", Over(PanelWire.ClipLost(87, 12, cphFixed)));
+        Eq("clip lost: finding 15 BROKEN (SliderFit off): the track, the ring and the thumb are lost, over their bounds", "2,0,0,10.7", Over(PanelWire.ClipLost(87, 12, cphBroken)));
+        Eq("clip lost: a ComboBox's one drawing part, exactly its plan rect, is not lost", "(null)", Over(PanelWire.ClipLost(172, 20, B((0, 0, 172, 20)))));
+        Eq("clip lost: a part exactly half inside is kept, one just under half is lost", "(null)|0,0,0,5.2",
+            Over(PanelWire.ClipLost(10, 10, B((0, 5, 10, 10)))) + "|" + Over(PanelWire.ClipLost(10, 10, B((0, 5.2, 10, 10)))));
+        Eq("clip lost: a part with no area (a zero-height line) is never judged lost", "(null)", Over(PanelWire.ClipLost(10, 10, B((0, 20, 10, 0)))));
+        Eq("clip lost: one lost part among kept ones reports only the lost part's overflow", "0,0,0,8",
+            Over(PanelWire.ClipLost(10, 10, B((-1, 0, 5, 5), (0, 14, 10, 4)))));
         var savedCulture = System.Globalization.CultureInfo.CurrentCulture;
         System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
         Eq("clip: the over= text is invariant (a decimal POINT under a comma culture), so the row stays four fields", "0,0,0.6,12.2",

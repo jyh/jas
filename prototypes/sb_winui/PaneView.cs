@@ -775,12 +775,39 @@ public sealed partial class MainWindow
             // (sitting findings 14 and 15: a radio and a slider below their
             // templates' heights). Each descendant's rendered rect is transformed
             // into the leaf's own coordinates, so a Viewbox's scale counts (#770).
-            // `clip-walked=` counts the descendants examined: a walk run before the
-            // templates applied sees none, and the harness refuses that as NOT RUN
-            // rather than read it as "nothing clipped".
+            // ⛔ ONLY A DESCENDANT THAT DRAWS COUNTS (flask STATUS 734, measured):
+            // over EVERY descendant the arm flagged ~45 healthy leaves on all 16
+            // panels (a ComboBox's empty template margin, a CheckBox's invisible
+            // part) and read finding 15's regression BYTE-IDENTICAL to its fix,
+            // because the spilling part was an invisible body. A part draws when
+            // it paints a visible brush (a fill, a stroke with width, a border
+            // with thickness), is text, or is an image; a subtree at opacity 0 or
+            // not visible is skipped. `clip-walked=` counts the descendants
+            // examined: a walk run before the templates applied sees none, and the
+            // harness refuses that as NOT RUN rather than read it as "nothing
+            // clipped". `clip-drawn=` counts the parts whose bounds were judged.
+            // A leaf is CLIPPED when one drawing part is LOST: under half its area
+            // inside the plan rect (PanelWire.ClipLost, from flask STATUS 735's
+            // part measurements). Spill alone is not a loss: a fixed slider's
+            // thumb halo spills 2 DIP and draws whole.
             host.UpdateLayout();
             var clipRows = new List<string>();
             var clipWalked = 0;
+            var clipDrawn = 0;
+            static bool Shows(Microsoft.UI.Xaml.Media.Brush? b) =>
+                b is not null && b.Opacity > 0
+                && (b is not Microsoft.UI.Xaml.Media.SolidColorBrush sc || sc.Color.A > 0);
+            static bool AnySide(Thickness t) => t.Left > 0 || t.Top > 0 || t.Right > 0 || t.Bottom > 0;
+            static bool Draws(FrameworkElement fe) => fe switch
+            {
+                Microsoft.UI.Xaml.Shapes.Shape sh => Shows(sh.Fill) || (Shows(sh.Stroke) && sh.StrokeThickness > 0),
+                Border bd => Shows(bd.Background) || (Shows(bd.BorderBrush) && AnySide(bd.BorderThickness)),
+                Panel pn => Shows(pn.Background),
+                ContentPresenter cp => Shows(cp.Background) || (Shows(cp.BorderBrush) && AnySide(cp.BorderThickness)),
+                TextBlock tb => !string.IsNullOrEmpty(tb.Text),
+                Image => true,
+                _ => false,
+            };
             foreach (var leaf in leaves)
             {
                 if (!_paneControls.TryGetValue(leaf.Path, out var cel)) { continue; }
@@ -796,16 +823,20 @@ public sealed partial class MainWindow
                         var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node, i);
                         if (child is FrameworkElement fe)
                         {
-                            if (fe.Visibility != Visibility.Visible) { continue; }
+                            if (fe.Visibility != Visibility.Visible || fe.Opacity <= 0) { continue; }
                             clipWalked++;
-                            var r = fe.TransformToVisual(cel).TransformBounds(
-                                new Windows.Foundation.Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
-                            bounds.Add((r.X, r.Y, r.Width, r.Height));
+                            if (Draws(fe))
+                            {
+                                clipDrawn++;
+                                var r = fe.TransformToVisual(cel).TransformBounds(
+                                    new Windows.Foundation.Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
+                                bounds.Add((r.X, r.Y, r.Width, r.Height));
+                            }
                         }
                         pending.Push(child);
                     }
                 }
-                if (PanelWire.ClipOverflow(leaf.W, leaf.H, bounds) is { } over)
+                if (PanelWire.ClipLost(leaf.W, leaf.H, bounds) is { } over)
                 {
                     var who = leaf.Id.Length > 0 ? leaf.Id : leaf.Path;
                     clipRows.Add($"PANEL CLIPPED panel={_paneDrawnPanel} build={_paneBuild} id={who} "
@@ -822,7 +853,7 @@ public sealed partial class MainWindow
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused} surfaces={hits.Count} "
-                 + $"clipped={clipRows.Count} clip-walked={clipWalked}");
+                 + $"clipped={clipRows.Count} clip-walked={clipWalked} clip-drawn={clipDrawn}");
             foreach (var row in clipRows) { _w.Report(row); }
             if (_paneIconsPending == 0) { ReportPaneIcons(); }
         }
