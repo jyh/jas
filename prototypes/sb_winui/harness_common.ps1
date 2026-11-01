@@ -148,6 +148,114 @@ function Get-SbPaintVerdict($Rows) {
     return "PASS(ok=$ok)"
 }
 
+# O97 RUNG A, THE SHELL'S OWN GAP COUNTS (council 2026-10-31). The shell
+# already PRINTS three counts of what it could not build: `shortcuts-unparsed=`
+# on every MENU row (a menu shortcut with no accelerator: sitting finding 2),
+# `unmaterialized=` on every PANEL BUILT row (a leaf drawn as a placeholder:
+# findings 5 and 13), and `text=` + `failed=` on every PANEL ICONS row (an icon
+# drawn as its name: finding 4). Until this arm nothing asserted them, so the
+# whole corpus certified 116/116 on the build he found them on (c31178b9).
+#
+# A RATCHET BOTH WAYS against a LEDGER of known gaps (e2e_baselines/
+# shell_gaps.json): a gap the ledger does not name FAILS as new, and a ledgered
+# gap that reads zero FAILS as fixed, so the ledger only ever shrinks by an
+# edit someone reads. A panel this run did not build is not judged. With no
+# ledger the verdict is NOT RUN carrying the reading, never a pass: a missing
+# ledger must not switch the arm off.
+#
+# Per panel the LAST build decides (a rebuild after a click replaces the
+# controls). A count that cannot be read is NOT RUN naming the row, never 0.
+function Get-SbShellGaps($Rows) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why } }
+    $menus = @(Select-SbRows $Rows (Get-SbRowPattern 'MENU rebuilds=' '.*\sshortcuts-unparsed=\d'))
+    if ($menus.Count -eq 0) { return (& $no 'no MENU row with shortcuts-unparsed=') }
+    $unparsed = [int](Get-SbField $menus[-1] 'shortcuts-unparsed')
+    $built = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL BUILT' ' panel='))
+    if ($built.Count -eq 0) { return (& $no 'no PANEL BUILT row') }
+    $unmat = @{}
+    foreach ($r in $built) {
+        $panel = Get-SbField $r 'panel'
+        $n = Get-SbField $r 'unmaterialized'
+        if ($null -eq $n -or $n -notmatch '^\d+$') { return (& $no "PANEL BUILT panel=$panel carries no readable unmaterialized=") }
+        $unmat[$panel] = [int]$n
+    }
+    $iconText = @{}
+    foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL ICONS' ' panel='))) {
+        $panel = Get-SbField $r 'panel'
+        $t = Get-SbField $r 'text'; $f = Get-SbField $r 'failed'
+        if ($null -eq $t -or $t -notmatch '^\d+$' -or $null -eq $f -or $f -notmatch '^\d+$') { return (& $no "PANEL ICONS panel=$panel carries no readable text= and failed=") }
+        $iconText[$panel] = [int]$t + [int]$f
+    }
+    return [pscustomobject]@{ Refusal = $null; Unparsed = $unparsed; Unmat = $unmat; IconText = $iconText }
+}
+
+# The ledger a -FreezeGaps run writes: the OLD ledger's entries plus every gap
+# this run read. It never drops an entry (a panel this run did not build keeps
+# its line); striking a fixed gap is an edit by hand, which the verdict asks for.
+function New-SbShellGapLedger($Gaps, $Old) {
+    $um = New-Object System.Collections.Generic.List[string]
+    $it = New-Object System.Collections.Generic.List[string]
+    if ($null -ne $Old) {
+        foreach ($x in @($Old.unmaterialized)) { if ("$x" -ne '' -and -not $um.Contains("$x")) { $um.Add("$x") } }
+        foreach ($x in @($Old.icon_text)) { if ("$x" -ne '' -and -not $it.Contains("$x")) { $it.Add("$x") } }
+    }
+    foreach ($k in @($Gaps.Unmat.Keys)) { if ($Gaps.Unmat[$k] -gt 0 -and -not $um.Contains($k)) { $um.Add($k) } }
+    foreach ($k in @($Gaps.IconText.Keys)) { if ($Gaps.IconText[$k] -gt 0 -and -not $it.Contains($k)) { $it.Add($k) } }
+    $oldUnparsed = ($null -ne $Old -and [bool]$Old.unparsed)
+    return [pscustomobject]@{
+        unparsed = ($oldUnparsed -or $Gaps.Unparsed -gt 0)
+        unmaterialized = @($um | Sort-Object)
+        icon_text = @($it | Sort-Object)
+    }
+}
+
+# A ledger's TEXT, as committed: LF line ends and one trailing LF. Windows
+# PowerShell's ConvertTo-Json and Set-Content write CRLF, so a -FreezeGaps run on
+# the box wrote a file whose bytes differed from the committed blob (flask STATUS 730).
+function ConvertTo-SbLfText([string]$Text) {
+    return (($Text -replace "`r`n", "`n").TrimEnd("`n") + "`n")
+}
+
+function Get-SbShellGapVerdict($Rows, $Ledger) {
+    $g = Get-SbShellGaps $Rows
+    if ($null -ne $g.Refusal) { return "NOT RUN($($g.Refusal))" }
+    $unparsed = $g.Unparsed; $unmat = $g.Unmat; $iconText = $g.IconText
+    $reading = New-Object System.Collections.Generic.List[string]
+    if ($unparsed -gt 0) { $reading.Add("unparsed=$unparsed") }
+    $um = @($unmat.Keys | Where-Object { $unmat[$_] -gt 0 } | Sort-Object | ForEach-Object { "${_}:$($unmat[$_])" })
+    if ($um.Count -gt 0) { $reading.Add('unmaterialized=' + ($um -join ',')) }
+    $it = @($iconText.Keys | Where-Object { $iconText[$_] -gt 0 } | Sort-Object | ForEach-Object { "${_}:$($iconText[$_])" })
+    if ($it.Count -gt 0) { $reading.Add('icon-text=' + ($it -join ',')) }
+    if ($null -eq $Ledger) {
+        $shown = if ($reading.Count -gt 0) { $reading -join ' ' } else { 'none' }
+        return "NOT RUN(no ledger; reading: $shown)"
+    }
+    $knownUm = @($Ledger.unmaterialized | ForEach-Object { "$_" })
+    $knownIt = @($Ledger.icon_text | ForEach-Object { "$_" })
+    $new = New-Object System.Collections.Generic.List[string]
+    $fixed = New-Object System.Collections.Generic.List[string]
+    $known = New-Object System.Collections.Generic.List[string]
+    if ($unparsed -gt 0 -and -not $Ledger.unparsed) { $new.Add("unparsed=$unparsed") }
+    if ($unparsed -eq 0 -and $Ledger.unparsed) { $fixed.Add('unparsed') }
+    if ($unparsed -gt 0 -and $Ledger.unparsed) { $known.Add('unparsed') }
+    foreach ($cls in @(@{ Name = 'unmaterialized'; Map = $unmat; Known = $knownUm },
+                       @{ Name = 'icon-text'; Map = $iconText; Known = $knownIt })) {
+        $m = $cls.Map
+        $n = @($m.Keys | Where-Object { $m[$_] -gt 0 -and $cls.Known -notcontains $_ } | Sort-Object | ForEach-Object { "${_}:$($m[$_])" })
+        $f = @($m.Keys | Where-Object { $m[$_] -eq 0 -and $cls.Known -contains $_ } | Sort-Object)
+        $k = @($m.Keys | Where-Object { $m[$_] -gt 0 -and $cls.Known -contains $_ } | Sort-Object)
+        if ($n.Count -gt 0) { $new.Add("$($cls.Name)=" + ($n -join ',')) }
+        if ($f.Count -gt 0) { $fixed.Add("$($cls.Name)=" + ($f -join ',')) }
+        if ($k.Count -gt 0) { $known.Add("$($cls.Name)=" + ($k -join ',')) }
+    }
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($new.Count -gt 0) { $parts.Add('new: ' + ($new -join ' ')) }
+    if ($fixed.Count -gt 0) { $parts.Add('fixed, strike from the ledger: ' + ($fixed -join ' ')) }
+    if ($parts.Count -gt 0) { return 'FAIL(' + ($parts -join '; ') + ')' }
+    $shownKnown = if ($known.Count -gt 0) { $known -join ' ' } else { 'none' }
+    return "PASS(known: $shownKnown; panels=$($unmat.Count))"
+}
+
 # ---------------------------------------------------------------------------
 # Waiting on a row -- BOUNDED, with a NAMED refusal
 # ---------------------------------------------------------------------------
@@ -2941,6 +3049,68 @@ function Get-SbPlanOutOwner($Rows) {
         if ($m.Success) { $owner = $m.Groups[1].Value }
     }
     return $owner
+}
+
+# O97 read=tree, step 1: a CENSUS of what each plan kind renders as -- the
+# plan leaf's `type` (the widget kind) joined by id, copy by copy, to the UIA
+# row's `type` (the ControlType). A visible leaf with no rendered copy reads
+# ABSENT; a hidden leaf is left out (its absence is correct). Returns
+# "kind->Type:n ..." sorted, or "REFUSED: <why>". No expected map lives here:
+# the map is measured on the box over every panel, then frozen from that.
+function Get-SbRenderedKinds([string]$Plan, [string]$Uia) {
+    try { $p = $Plan | ConvertFrom-Json } catch { return 'REFUSED: the plan does not parse' }
+    try { $u = $Uia | ConvertFrom-Json } catch { return 'REFUSED: the uia dump does not parse' }
+    if ($null -ne $u.error -and "$($u.error)" -ne '') { return "REFUSED: uia error: $($u.error)" }
+    $leaves = @($p.leaves | Where-Object { $null -ne $_ -and "$($_.id)" -ne '' })
+    if ($leaves.Count -eq 0) { return 'REFUSED: the plan has no addressable leaf' }
+    $rendered = @{}
+    foreach ($r in @($u.rows)) {
+        if ($null -eq $r) { continue }
+        if (-not $rendered.ContainsKey("$($r.id)")) { $rendered["$($r.id)"] = New-Object System.Collections.ArrayList }
+        [void]$rendered["$($r.id)"].Add($r)
+    }
+    $seen = @{}
+    $count = @{}
+    foreach ($leaf in $leaves) {
+        $id = "$($leaf.id)"
+        $vis = $leaf.values.'bind.visible'
+        if ($null -eq $vis) { $vis = $leaf.values.visible }
+        $i = if ($seen.ContainsKey($id)) { $seen[$id] } else { 0 }
+        $seen[$id] = $i + 1
+        if ("$vis" -eq 'false') { continue }
+        $rows = $rendered[$id]
+        $type = if ($null -ne $rows -and $i -lt $rows.Count) { "$($rows[$i].type)" } else { 'ABSENT' }
+        $key = "$($leaf.type)->$type"
+        $count[$key] = 1 + $(if ($count.ContainsKey($key)) { $count[$key] } else { 0 })
+    }
+    return (@($count.Keys | Sort-Object | ForEach-Object { "${_}:$($count[$_])" }) -join ' ')
+}
+
+# O97 read=tree, step 2: a KINDS census judged against the measured map
+# (e2e_baselines/uia_kinds.json: `allowed` kind -> ControlTypes, `known` the
+# ledgered bad pairs). Returns PASS(...), FAIL(new: ...) or NOT RUN(...).
+# One-way by design: one panel's census cannot show a known pair is fixed.
+function Test-SbRenderedKinds([string]$Census, $Map) {
+    if ($Census -like 'REFUSED*') { return "NOT RUN($Census)" }
+    if ([string]::IsNullOrWhiteSpace($Census)) { return 'NOT RUN(empty census)' }
+    if ($null -eq $Map) { return "NOT RUN(no map; census: $Census)" }
+    $known = @($Map.known | ForEach-Object { "$_" })
+    $new = New-Object System.Collections.Generic.List[string]
+    $seenKnown = New-Object System.Collections.Generic.List[string]
+    $pairs = 0
+    foreach ($tok in ($Census -split '\s+')) {
+        if ($tok -eq '') { continue }
+        if ($tok -notmatch '^([a-z_]+)->([A-Za-z]+):(\d+)$') { return "NOT RUN(unreadable census token '$tok')" }
+        $kind = $Matches[1]; $type = $Matches[2]
+        $pairs++
+        $ok = @($Map.allowed.$kind | ForEach-Object { "$_" })
+        if ($ok -ccontains $type) { continue }
+        if ($known -ccontains "$kind->$type") { $seenKnown.Add("$kind->$type"); continue }
+        $new.Add($tok)
+    }
+    if ($new.Count -gt 0) { return 'FAIL(new: ' + ($new -join ' ') + ')' }
+    $k = if ($seenKnown.Count -gt 0) { $seenKnown -join ' ' } else { 'none' }
+    return "PASS(pairs=$pairs; known: $k)"
 }
 
 function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
