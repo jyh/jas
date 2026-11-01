@@ -2028,6 +2028,30 @@ Test-Case 'rt: a hidden leaf that is ON SCREEN is named' {
     $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'c' $true $false))
     (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
 } 'c visible: plan=false rendered=true'
+# O97 (flask STATUS 727): since e347004b (10-17) the panel's host carries the
+# panel content id as its AutomationId, so the hand can find a widget inside its
+# panel. uia_tree.ps1's walk stops at the first element with an AutomationId (a
+# plan widget is a leaf), so it read the host as the panel's only leaf and every
+# planned widget as ABSENT. The walk passes THROUGH exactly the one id it is told
+# to (rendered_tree.ps1 names its -Panel), and through nothing by guess.
+Test-Case 'rt walk: an element with no AutomationId is walked through' {
+    Test-SbUiaWalkThrough '' 'align_panel_content'
+} $true
+Test-Case 'rt walk: the panel host named by -Through is walked through' {
+    Test-SbUiaWalkThrough 'align_panel_content' 'align_panel_content'
+} $true
+Test-Case 'rt walk: a widget id is a leaf' {
+    Test-SbUiaWalkThrough 'align_left_button' 'align_panel_content'
+} $false
+Test-Case 'rt walk: ANOTHER panel host is a leaf, never walked through by its shape' {
+    Test-SbUiaWalkThrough 'layers_panel_content' 'align_panel_content'
+} $false
+Test-Case 'rt walk: with no -Through, a panel host is a leaf (the old walk, unchanged)' {
+    Test-SbUiaWalkThrough 'align_panel_content' ''
+} $false
+Test-Case 'rt walk: the match is exact, case included' {
+    Test-SbUiaWalkThrough 'Align_Panel_Content' 'align_panel_content'
+} $false
 Test-Case 'rt: a visible leaf missing from the tree is named' {
     $u = New-SbUiaDump @((New-SbUiaRow 'b' $false $false))
     (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'

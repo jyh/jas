@@ -17,8 +17,12 @@ param(
     # `PaneScroll`), so the shell's own XAML chrome -- Menu, PanePicker,
     # StatusLine, which surface their x:Name as an AutomationId -- is not read
     # as a widget the plan lacks. Empty reads the whole window.
-    [string]$Root = ''
+    [string]$Root = '',
+    # Walk THROUGH the element with this AutomationId instead of reading it as a
+    # leaf: the panel's host, which carries the panel content id (e347004b).
+    [string]$Through = ''
 )
+. (Join-Path $PSScriptRoot 'harness_common.ps1')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -47,7 +51,7 @@ function Read-SbUiaLeaves($Parent, $Walker, $Rows) {
     $child = $Walker.GetFirstChild($Parent)
     while ($null -ne $child) {
         $c = $child.Current
-        if ([string]::IsNullOrEmpty($c.AutomationId)) {
+        if (Test-SbUiaWalkThrough $c.AutomationId $Through) {
             Read-SbUiaLeaves $child $Walker $Rows
         } else {
             $Rows.Add([ordered]@{

@@ -958,6 +958,19 @@ static class Program
         var toggleSpare = 20 - (LaidOutAt150(padT) + 15.96);
         Check("toggle label: its 15.96 line ends a whole pixel row inside the 20-DIP toggle at 150%",
             toggleSpare >= 2.0 / 3.0 - 0.01, $"spare {toggleSpare:0.##} DIP (needs 0.67)");
+        // O97 (flask STATUS 727): every pane wrote its plan to the one SB_PLAN_OUT
+        // file, newest first, and since the canvas pane got a plan (dc9bceab, 10-13,
+        // its document tab) the canvas drew LAST. So rendered_tree.ps1 read the
+        // canvas's plan for every panel and refused each run by name. With SB_PANEL
+        // set, only that panel's pane writes the file; without it, every pane does.
+        Check("plan out: with SB_PANEL set, the canvas pane does not write the plan file",
+            !PanelWire.WritesPlanOut("canvas_pane", "layers_panel_content"), "canvas_pane wrote it");
+        Check("plan out: with SB_PANEL set, the toolbar pane does not write the plan file",
+            !PanelWire.WritesPlanOut("toolbar_pane", "layers_panel_content"), "toolbar_pane wrote it");
+        Check("plan out: with SB_PANEL set, the named panel writes the plan file",
+            PanelWire.WritesPlanOut("layers_panel_content", "layers_panel_content"), "the named panel did not");
+        Check("plan out: with SB_PANEL unset or empty, every pane writes it (unchanged)",
+            PanelWire.WritesPlanOut("canvas_pane", null) && PanelWire.WritesPlanOut("canvas_pane", ""), "a pane was silenced");
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.

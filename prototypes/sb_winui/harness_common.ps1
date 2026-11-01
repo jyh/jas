@@ -2930,8 +2930,9 @@ function Add-SbValueReplayVerdicts($Out, $Rows, [string]$Commit, [string]$Press,
 # ⛔ A FAILED READ OR AN EMPTY PLAN IS A REFUSAL, never `mismatches=0`: an
 # empty side agrees with everything, which is a vacuous green.
 # ---------------------------------------------------------------------------
-# Whose plan is in the SB_PLAN_OUT file? Every pane overwrites the one file,
-# newest wins, so it is the LAST `PLAN OUT` row's panel ('' when none wrote).
+# Whose plan is in the SB_PLAN_OUT file? It is the LAST `PLAN OUT` row's panel
+# ('' when none wrote). Without SB_PANEL every pane overwrites the one file and the
+# newest wins; with it, only that panel's pane writes (flask STATUS 727).
 # Anchored at the row's start so `RUSTFAIL PLAN OUT` (a failed write) never counts.
 function Get-SbPlanOutOwner($Rows) {
     $owner = ''
@@ -3006,6 +3007,16 @@ function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
         Mismatches = @($miss)
         Verdict    = "compared=$($leaves.Count) mismatches=$($miss.Count)"
     }
+}
+
+# uia_tree.ps1's walk stops at the first element carrying an AutomationId (a plan
+# widget is a leaf). Since e347004b (10-17) the panel's HOST carries the panel
+# content id, so the hand finds a widget inside its panel; the walk read that host
+# as the panel's only leaf and every planned widget as ABSENT (flask STATUS 727).
+# So the walk passes THROUGH an element with no AutomationId and through exactly
+# the one id the caller names (-Through), never through an id by its shape.
+function Test-SbUiaWalkThrough([string]$AutomationId, [string]$Through) {
+    return ([string]::IsNullOrEmpty($AutomationId) -or ($Through -ne '' -and $AutomationId -ceq $Through))
 }
 
 # ---------------------------------------------------------------------------
