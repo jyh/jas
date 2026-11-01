@@ -185,6 +185,37 @@ each live app:
 
   A script without a `read` step asserts nothing and is refused.
 
+**Ruled 2026-10-31 by the port owner, and not yet delivered by any runner or driver.** These forms come from three
+findings. The first is spec's: a panel step cannot name a row, carry a modifier or read panel state, so no claim about the
+Layers tree can be a level-2 gate. The second is the 10-30 Windows feel sitting: a press-and-hold and a double-click cannot be
+written. The third is the conversion pilot over `transcripts/SWATCHES_TESTS.md`: 4 of its 78 items change the document, and
+even those 4 click a repeated tile no step can name. **Until a runner or driver delivers a form, it refuses that form by name.** A script that uses one is
+marked PROPOSED and never gates.
+* **`"row": [i, j, …]` on a panel step** names the tree row the widget is on, by the element's document path, in the
+  index-array form `op_apply` takes. A widget that repeats once per row (every `lp_*` widget in the Layers tree) is
+  refused without it.
+* **`"at": [i, j, …]` on a panel step** names a widget inside the generic `foreach` repeat, by each enclosing repeat's
+  iteration index, outermost first. A swatch tile is `"at": [library, swatch]`. A widget a repeat stamps out needs an `id`
+  on its template to be named at all; the Swatches panel's `color_swatch` tile has none today, so its scripts wait on
+  that spec edit.
+* **`shift`, `alt`, `ctrl`, `meta` on a panel step**: booleans, `false` when absent, as on pointer and key steps (an
+  eye's Alt-click, a row's Shift- or Ctrl-click). `meta` is refused, as for keys; the Mac's Cmd-click is written `ctrl`.
+* **`"event": "double_click"` on a panel step** (a swatch double-click opens Swatch Options or the Color Picker).
+* **`"hold_ms": <n>` on a press step**: the press is held that long before the next step (a toolbar slot's alternates
+  open on a press-and-hold).
+* **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
+  "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
+  hovering there that long.
+* **A key step after a panel step** (spec's S1: the tree's arrows and Ctrl+A) is delivered to the widget that holds key
+  focus after that panel step, not to the canvas. Today a key after a panel step is refused by name, as above.
+* **A dropdown item by value**: a `commit` on a `dropdown` names the item by its `value`, never its label, and carries the
+  same modifiers as any panel step.
+* **Typing into a per-row field**: a `commit` with `row` (an inline rename) types the value into that row's field, then
+  presses Enter.
+* **`{"read": "panel", "panel": "<content id>"}`** compares that panel's declared `state:` keys with the script's
+  `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
+  the panel selection, for one, is in no document.
+
 **Who replays it:**
 1. **Level 1:** each port's core. This is the EXPECTED read-back.
    * **Rust** has two runners. The gesture runner (`script_corpus`, web build) replays the pointer and key scripts
