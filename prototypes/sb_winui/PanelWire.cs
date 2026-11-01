@@ -951,6 +951,39 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// O97 rung B: how far a leaf's content passes its plan rect. Each bound is a
+    /// descendant's rendered rect, already transformed into the LEAF's coordinates
+    /// (so a Viewbox's scale counts, as #770's radios need), and the leaf's rect is
+    /// [0,w] × [0,h]. The answer is the largest overflow on each side (left, top,
+    /// right, bottom), or null when none passes <paramref name="tol"/>. A bound that
+    /// is not finite (a descendant with no layout) is skipped, never read as a
+    /// spill. No bounds is null: whether the walk RAN is its own count, not this.
+    /// </summary>
+    internal static (double L, double T, double R, double B)? ClipOverflow(
+        double w, double h, IEnumerable<(double X, double Y, double W, double H)> bounds, double tol = 0.5)
+    {
+        double l = 0, t = 0, r = 0, b = 0;
+        foreach (var (x, y, bw, bh) in bounds)
+        {
+            if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(bw) || !double.IsFinite(bh)) { continue; }
+            l = Math.Max(l, -x);
+            t = Math.Max(t, -y);
+            r = Math.Max(r, x + bw - w);
+            b = Math.Max(b, y + bh - h);
+        }
+        return l > tol || t > tol || r > tol || b > tol ? (l, t, r, b) : null;
+    }
+
+    /// <summary>A clip's `over=` text: four invariant numbers, at most one decimal, so a comma culture cannot split the field.</summary>
+    internal static string ClipOverText((double L, double T, double R, double B) o) =>
+        string.Join(",", new[] { o.L, o.T, o.R, o.B }.Select(v => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));
+
+    /// <summary>A clipped leaf's `plan=` text, `<w>x<h>`, invariant like <see cref="ClipOverText"/>.</summary>
+    internal static string ClipSizeText(double w, double h) =>
+        w.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "x"
+        + h.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
     /// jas §612: the plan's layout containers (`chrome` and `containers`, in plan
     /// order) whose `events` is non-empty, with any under a `hidden` path
     /// skipped. Leaves are their own controls and never surfaces. Null when the

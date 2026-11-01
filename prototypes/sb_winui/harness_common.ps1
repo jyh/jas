@@ -179,6 +179,39 @@ function Get-SbShellGaps($Rows) {
         if ($null -eq $n -or $n -notmatch '^\d+$') { return (& $no "PANEL BUILT panel=$panel carries no readable unmaterialized=") }
         $unmat[$panel] = [int]$n
     }
+    # O97 RUNG B, THE CLIP ARM (design 2026-10-31): every PANEL BUILT row carries
+    # `clipped=` (its leaves whose content passes their plan rect) and
+    # `clip-walked=` (the descendants the walk examined), and each clipped leaf
+    # writes a `PANEL CLIPPED panel= build= id=` row. A clip is keyed `panel/id`,
+    # never by panel, so a second clip cannot hide behind a ledgered first. A
+    # build that walked nothing is NOT RUN (a walk before the templates applied
+    # sees no descendant and would read as "nothing clipped"), and a count that
+    # disagrees with its rows is NOT RUN: the producer's two witnesses disagree.
+    $clipBuild = @{}
+    $clipCount = @{}
+    foreach ($r in $built) {
+        $panel = Get-SbField $r 'panel'
+        $c = Get-SbField $r 'clipped'; $w = Get-SbField $r 'clip-walked'
+        if ($null -eq $c -or $c -notmatch '^\d+$' -or $null -eq $w -or $w -notmatch '^\d+$') { return (& $no "PANEL BUILT panel=$panel carries no readable clipped= and clip-walked=") }
+        $lv = Get-SbField $r 'leaves'; $b = Get-SbField $r 'build'
+        if ([int]$w -eq 0 -and "$lv" -match '^\d+$' -and [int]$lv -gt 0) { return (& $no "PANEL BUILT panel=$panel build=$b walked no descendant for its clip check (clip-walked=0, leaves=$lv)") }
+        $clipBuild[$panel] = "$b"
+        $clipCount[$panel] = [int]$c
+    }
+    $clipped = @{}
+    $clipSeen = @{}
+    foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL CLIPPED' ' panel='))) {
+        $panel = Get-SbField $r 'panel'
+        if (-not $clipBuild.ContainsKey($panel) -or "$(Get-SbField $r 'build')" -ne $clipBuild[$panel]) { continue }
+        $id = Get-SbField $r 'id'
+        if ([string]::IsNullOrEmpty($id)) { return (& $no "PANEL CLIPPED panel=$panel carries no id=") }
+        $clipped["$panel/$id"] = 1
+        $clipSeen[$panel] = 1 + [int]$clipSeen[$panel]
+    }
+    foreach ($panel in @($clipCount.Keys | Sort-Object)) {
+        $m = [int]$clipSeen[$panel]
+        if ($m -ne $clipCount[$panel]) { return (& $no "PANEL BUILT panel=$panel says clipped=$($clipCount[$panel]) but $m PANEL CLIPPED row(s) carry its build") }
+    }
     $iconText = @{}
     foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL ICONS' ' panel='))) {
         $panel = Get-SbField $r 'panel'
@@ -186,7 +219,7 @@ function Get-SbShellGaps($Rows) {
         if ($null -eq $t -or $t -notmatch '^\d+$' -or $null -eq $f -or $f -notmatch '^\d+$') { return (& $no "PANEL ICONS panel=$panel carries no readable text= and failed=") }
         $iconText[$panel] = [int]$t + [int]$f
     }
-    return [pscustomobject]@{ Refusal = $null; Unparsed = $unparsed; Unmat = $unmat; IconText = $iconText }
+    return [pscustomobject]@{ Refusal = $null; Unparsed = $unparsed; Unmat = $unmat; IconText = $iconText; Clipped = $clipped; ClipPanels = @($clipBuild.Keys) }
 }
 
 # The ledger a -FreezeGaps run writes: the OLD ledger's entries plus every gap
@@ -195,10 +228,13 @@ function Get-SbShellGaps($Rows) {
 function New-SbShellGapLedger($Gaps, $Old) {
     $um = New-Object System.Collections.Generic.List[string]
     $it = New-Object System.Collections.Generic.List[string]
+    $cl = New-Object System.Collections.Generic.List[string]
     if ($null -ne $Old) {
         foreach ($x in @($Old.unmaterialized)) { if ("$x" -ne '' -and -not $um.Contains("$x")) { $um.Add("$x") } }
         foreach ($x in @($Old.icon_text)) { if ("$x" -ne '' -and -not $it.Contains("$x")) { $it.Add("$x") } }
+        foreach ($x in @($Old.clipped)) { if ("$x" -ne '' -and -not $cl.Contains("$x")) { $cl.Add("$x") } }
     }
+    foreach ($k in @($Gaps.Clipped.Keys)) { if (-not $cl.Contains($k)) { $cl.Add($k) } }
     foreach ($k in @($Gaps.Unmat.Keys)) { if ($Gaps.Unmat[$k] -gt 0 -and -not $um.Contains($k)) { $um.Add($k) } }
     foreach ($k in @($Gaps.IconText.Keys)) { if ($Gaps.IconText[$k] -gt 0 -and -not $it.Contains($k)) { $it.Add($k) } }
     $oldUnparsed = ($null -ne $Old -and [bool]$Old.unparsed)
@@ -206,6 +242,7 @@ function New-SbShellGapLedger($Gaps, $Old) {
         unparsed = ($oldUnparsed -or $Gaps.Unparsed -gt 0)
         unmaterialized = @($um | Sort-Object)
         icon_text = @($it | Sort-Object)
+        clipped = @($cl | Sort-Object)
     }
 }
 
@@ -226,6 +263,8 @@ function Get-SbShellGapVerdict($Rows, $Ledger) {
     if ($um.Count -gt 0) { $reading.Add('unmaterialized=' + ($um -join ',')) }
     $it = @($iconText.Keys | Where-Object { $iconText[$_] -gt 0 } | Sort-Object | ForEach-Object { "${_}:$($iconText[$_])" })
     if ($it.Count -gt 0) { $reading.Add('icon-text=' + ($it -join ',')) }
+    $cl = @($g.Clipped.Keys | Sort-Object)
+    if ($cl.Count -gt 0) { $reading.Add('clipped=' + ($cl -join ',')) }
     if ($null -eq $Ledger) {
         $shown = if ($reading.Count -gt 0) { $reading -join ' ' } else { 'none' }
         return "NOT RUN(no ledger; reading: $shown)"
@@ -248,6 +287,14 @@ function Get-SbShellGapVerdict($Rows, $Ledger) {
         if ($f.Count -gt 0) { $fixed.Add("$($cls.Name)=" + ($f -join ',')) }
         if ($k.Count -gt 0) { $known.Add("$($cls.Name)=" + ($k -join ',')) }
     }
+    # Rung B: a ledgered clip is judged only when its panel was built this run.
+    $knownCl = @($Ledger.clipped | Where-Object { "$_" -ne '' } | ForEach-Object { "$_" })
+    $clN = @($cl | Where-Object { $knownCl -notcontains $_ })
+    $clF = @($knownCl | Where-Object { $g.ClipPanels -contains ($_ -split '/', 2)[0] -and -not $g.Clipped.ContainsKey($_) } | Sort-Object)
+    $clK = @($cl | Where-Object { $knownCl -contains $_ })
+    if ($clN.Count -gt 0) { $new.Add('clipped=' + ($clN -join ',')) }
+    if ($clF.Count -gt 0) { $fixed.Add('clipped=' + ($clF -join ',')) }
+    if ($clK.Count -gt 0) { $known.Add('clipped=' + ($clK -join ',')) }
     $parts = New-Object System.Collections.Generic.List[string]
     if ($new.Count -gt 0) { $parts.Add('new: ' + ($new -join ' ')) }
     if ($fixed.Count -gt 0) { $parts.Add('fixed, strike from the ledger: ' + ($fixed -join ' ')) }
