@@ -743,6 +743,18 @@ internal static class PanelWire
     /// </summary>
     internal static (double Left, double Top, double Right, double Bottom) ToggleLabelPadding => (8, 3, 0, 0);
 
+    /// <summary>
+    /// Whether a pane writes its plan to `SB_PLAN_OUT` (#323's file, which
+    /// rendered_tree.ps1 compares with the live window). Every pane writes the
+    /// ONE file, newest first, so with no owner the last pane to draw wins: since
+    /// the canvas pane got a plan (10-13, its document tab) it drew last, and
+    /// rendered_tree read the canvas's plan for every panel and refused each run
+    /// (flask STATUS 727). With `SB_PANEL` set, only that panel's pane writes it;
+    /// unset or empty, every pane does, as before.
+    /// </summary>
+    internal static bool WritesPlanOut(string paneId, string? panelKnob) =>
+        string.IsNullOrEmpty(panelKnob) || string.Equals(paneId, panelKnob, StringComparison.Ordinal);
+
     /// <summary>A labelled icon_button's parts (row 56): its icon, and its label when the engine planned room for one.</summary>
     internal sealed record LeafParts(PartRect Icon, PartRect? Label);
 
