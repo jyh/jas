@@ -33,7 +33,7 @@ if ($st.Pid -eq 0) { Remove-SbTask $task; exit 2 }
 $w = Wait-SbRow -Log $log -Mark $mark -Patterns @('PLAN OUT ', 'RUSTFAIL') -TimeoutSeconds 60
 "wait: waited=$($w.Waited) row=$($w.Row)"
 Start-Sleep -Seconds $SettleSec
-$arg = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $dir 'uia_tree.ps1') + '" -ProcessId ' + $st.Pid + ' -Root PaneScroll -Out "' + $uiaOut + '"'
+$arg = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $dir 'uia_tree.ps1') + '" -ProcessId ' + $st.Pid + ' -Root PaneScroll -Through ' + $Panel + ' -Out "' + $uiaOut + '"'
 $pr = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName $uTask -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg) -Principal $pr -Force | Out-Null
 Start-ScheduledTask -TaskName $uTask
