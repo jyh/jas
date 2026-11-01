@@ -2028,6 +2028,30 @@ Test-Case 'rt: a hidden leaf that is ON SCREEN is named' {
     $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'c' $true $false))
     (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
 } 'c visible: plan=false rendered=true'
+# O97 (flask STATUS 727): since e347004b (10-17) the panel's host carries the
+# panel content id as its AutomationId, so the hand can find a widget inside its
+# panel. uia_tree.ps1's walk stops at the first element with an AutomationId (a
+# plan widget is a leaf), so it read the host as the panel's only leaf and every
+# planned widget as ABSENT. The walk passes THROUGH exactly the one id it is told
+# to (rendered_tree.ps1 names its -Panel), and through nothing by guess.
+Test-Case 'rt walk: an element with no AutomationId is walked through' {
+    Test-SbUiaWalkThrough '' 'align_panel_content'
+} $true
+Test-Case 'rt walk: the panel host named by -Through is walked through' {
+    Test-SbUiaWalkThrough 'align_panel_content' 'align_panel_content'
+} $true
+Test-Case 'rt walk: a widget id is a leaf' {
+    Test-SbUiaWalkThrough 'align_left_button' 'align_panel_content'
+} $false
+Test-Case 'rt walk: ANOTHER panel host is a leaf, never walked through by its shape' {
+    Test-SbUiaWalkThrough 'layers_panel_content' 'align_panel_content'
+} $false
+Test-Case 'rt walk: with no -Through, a panel host is a leaf (the old walk, unchanged)' {
+    Test-SbUiaWalkThrough 'align_panel_content' ''
+} $false
+Test-Case 'rt walk: the match is exact, case included' {
+    Test-SbUiaWalkThrough 'Align_Panel_Content' 'align_panel_content'
+} $false
 Test-Case 'rt: a visible leaf missing from the tree is named' {
     $u = New-SbUiaDump @((New-SbUiaRow 'b' $false $false))
     (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
@@ -2840,6 +2864,78 @@ Test-Case 'paint: no rows -> FAIL' { Get-SbPaintVerdict @() } 'FAIL(no RUSTOK RE
 Test-Case 'paint: CONTROL -- a REPAINT-FAILED row is not counted as a drawn repaint' { @(Select-SbRows @($SbPaintFail) 'RUSTOK REPAINT ').Count } 0
 Test-Case 'paint: CONTROL -- the failure pattern matches the real row' { @(Select-SbRows @($SbPaintFail) 'RUSTFAIL REPAINT-FAILED ').Count } 1
 Test-Case 'paint: a failure with no reason field still FAILS' { Get-SbPaintVerdict @($SbPaintOk, 'RUSTFAIL REPAINT-FAILED events_total=1 frames=1') } 'FAIL(repaint-failed=1 ok=1 failure=UNNAMED)'
+
+# ---------------------------------------------------------------------------
+# O97 RUNG A (council 2026-10-31): THE SHELL'S OWN GAP COUNTS, ASSERTED.
+# The 10-30 sitting's findings 2, 4, 5 and 13 were each PRINTED by the shell on
+# the sitting build (MENU shortcuts-unparsed, PANEL ICONS text=, PANEL BUILT
+# unmaterialized=) and asserted by nothing, so 116/116 certified while he found
+# them. Fixtures are built from the Report format strings in MainWindow.xaml.cs
+# and PaneView.cs, field for field.
+# ---------------------------------------------------------------------------
+$SbGapMenu0  = 'SB_MODE=(default:offscreen)	MENU rebuilds=1 items=44 enabled=40 disabled=4 seq=1 state-age=0 missed=0 delivered=1 coalesced=0 shortcuts-unparsed=0'
+$SbGapMenu2  = 'SB_MODE=(default:offscreen)	MENU rebuilds=3 items=44 enabled=40 disabled=4 seq=3 state-age=0 missed=0 delivered=3 coalesced=0 shortcuts-unparsed=2'
+$SbGapBuiltL = 'SB_MODE=(default:offscreen)	PANEL BUILT panel=layers_panel_content build=1 leaves=20 texts=3 text-clicks=0 buttons=4 inputs=2 toggles=1 glyphs=0 swatches=0 spacers=0 separators=0 previews=0 preview-empty=0 gradients=0 unmaterialized=16 boxes=0 boxes-active=0 unaddressable=0 icon-loads=0 icon-text=0 options-refused=0 menus=0 items-refused=0 surfaces=0'
+$SbGapBuiltL0 = 'SB_MODE=(default:offscreen)	PANEL BUILT panel=layers_panel_content build=2 leaves=20 texts=3 text-clicks=0 buttons=4 inputs=2 toggles=1 glyphs=0 swatches=0 spacers=0 separators=0 previews=0 preview-empty=0 gradients=0 unmaterialized=0 boxes=0 boxes-active=0 unaddressable=0 icon-loads=0 icon-text=0 options-refused=0 menus=0 items-refused=0 surfaces=0'
+$SbGapBuiltA = 'SB_MODE=(default:offscreen)	PANEL BUILT panel=align_panel_content build=1 leaves=20 texts=3 text-clicks=0 buttons=4 inputs=2 toggles=1 glyphs=0 swatches=0 spacers=0 separators=0 previews=0 preview-empty=0 gradients=0 unmaterialized=0 boxes=0 boxes-active=0 unaddressable=0 icon-loads=0 icon-text=0 options-refused=0 menus=0 items-refused=0 surfaces=0'
+$SbGapBuiltC = 'SB_MODE=(default:offscreen)	PANEL BUILT panel=color_picker build=1 leaves=20 texts=3 text-clicks=0 buttons=4 inputs=2 toggles=1 glyphs=0 swatches=0 spacers=0 separators=0 previews=0 preview-empty=0 gradients=0 unmaterialized=2 boxes=0 boxes-active=0 unaddressable=0 icon-loads=0 icon-text=0 options-refused=0 menus=0 items-refused=0 surfaces=0'
+$SbGapIconsL = 'SB_MODE=(default:offscreen)	PANEL ICONS panel=layers_panel_content build=1 svg=2 text=36 failed=0 icon=TEXT preview-svg=0 preview-failed=0'
+$SbGapIconsL0 = 'SB_MODE=(default:offscreen)	PANEL ICONS panel=layers_panel_content build=2 svg=28 text=0 failed=0 icon=SVG preview-svg=0 preview-failed=0'
+$SbGapIconsA = 'SB_MODE=(default:offscreen)	PANEL ICONS panel=align_panel_content build=1 svg=9 text=0 failed=0 icon=SVG preview-svg=0 preview-failed=0'
+$SbGapLedgerSitting = [pscustomobject]@{ unparsed = $true; unmaterialized = @('color_picker', 'layers_panel_content'); icon_text = @('layers_panel_content') }
+$SbGapLedgerNone = [pscustomobject]@{ unparsed = $false; unmaterialized = @(); icon_text = @() }
+Test-Case 'gaps: CONTROL -- the PANEL BUILT fixture carries the field the reader reads' { Get-SbField $SbGapBuiltL 'unmaterialized' } '16'
+Test-Case 'gaps: CONTROL -- the MENU fixture carries the field the reader reads' { Get-SbField $SbGapMenu2 'shortcuts-unparsed' } '2'
+Test-Case 'gaps: the sitting build read with NO ledger -> the reading, never a pass' { Get-SbShellGapVerdict @($SbGapMenu2, $SbGapBuiltL, $SbGapBuiltA, $SbGapBuiltC, $SbGapIconsL, $SbGapIconsA) $null } 'NOT RUN(no ledger; reading: unparsed=2 unmaterialized=color_picker:2,layers_panel_content:16 icon-text=layers_panel_content:36)'
+Test-Case 'gaps: the sitting build against a ledger naming its gaps -> PASS listing them' { Get-SbShellGapVerdict @($SbGapMenu2, $SbGapBuiltL, $SbGapBuiltA, $SbGapBuiltC, $SbGapIconsL, $SbGapIconsA) $SbGapLedgerSitting } 'PASS(known: unparsed unmaterialized=color_picker,layers_panel_content icon-text=layers_panel_content; panels=3)'
+Test-Case 'gaps: the sitting build against an EMPTY ledger -> FAIL naming each new gap (findings 2, 4, 5, 13)' { Get-SbShellGapVerdict @($SbGapMenu2, $SbGapBuiltL, $SbGapBuiltA, $SbGapBuiltC, $SbGapIconsL, $SbGapIconsA) $SbGapLedgerNone } 'FAIL(new: unparsed=2 unmaterialized=color_picker:2,layers_panel_content:16 icon-text=layers_panel_content:36)'
+Test-Case 'gaps: a clean build against an empty ledger -> PASS' { Get-SbShellGapVerdict @($SbGapMenu0, $SbGapBuiltA, $SbGapIconsA) $SbGapLedgerNone } 'PASS(known: none; panels=1)'
+Test-Case 'gaps: a ledgered gap that is GONE -> FAIL, so the ledger shrinks (a ratchet both ways)' { Get-SbShellGapVerdict @($SbGapMenu0, $SbGapBuiltL0, $SbGapIconsL0) $SbGapLedgerSitting } 'FAIL(fixed, strike from the ledger: unparsed unmaterialized=layers_panel_content icon-text=layers_panel_content)'
+Test-Case 'gaps: a panel REBUILT clean is judged by its LAST build' { Get-SbShellGapVerdict @($SbGapMenu0, $SbGapBuiltL, $SbGapBuiltL0, $SbGapIconsL, $SbGapIconsL0) $SbGapLedgerNone } 'PASS(known: none; panels=1)'
+Test-Case 'gaps: a ledgered panel NOT BUILT this run is not judged' { Get-SbShellGapVerdict @($SbGapMenu2, $SbGapBuiltA, $SbGapIconsA) $SbGapLedgerSitting } 'PASS(known: unparsed; panels=1)'
+Test-Case 'gaps: no MENU row -> NOT RUN, the unparsed count was never read' { Get-SbShellGapVerdict @($SbGapBuiltA, $SbGapIconsA) $SbGapLedgerNone } 'NOT RUN(no MENU row with shortcuts-unparsed=)'
+Test-Case 'gaps: no PANEL BUILT row -> NOT RUN, nothing was built to count' { Get-SbShellGapVerdict @($SbGapMenu0) $SbGapLedgerNone } 'NOT RUN(no PANEL BUILT row)'
+Test-Case 'gaps: a PANEL BUILT row without unmaterialized= -> NOT RUN naming the panel, never a zero' { Get-SbShellGapVerdict @($SbGapMenu0, ($SbGapBuiltA -replace ' unmaterialized=0', '')) $SbGapLedgerNone } 'NOT RUN(PANEL BUILT panel=align_panel_content carries no readable unmaterialized=)'
+Test-Case 'gaps: icon failures count with icon text (an icon that failed to load drew as text)' { Get-SbShellGapVerdict @($SbGapMenu0, $SbGapBuiltA, ($SbGapIconsA -replace ' failed=0', ' failed=1')) $SbGapLedgerNone } 'FAIL(new: icon-text=align_panel_content:1)'
+Test-Case 'gaps: a RUSTOK-prefixed row reads the same (the verdict prefix is optional)' { Get-SbShellGapVerdict @(($SbGapMenu2 -replace "`tMENU ", "`tRUSTOK MENU "), $SbGapBuiltA, $SbGapIconsA) $SbGapLedgerNone } 'FAIL(new: unparsed=2)'
+Test-Case 'gaps: a frozen ledger is the old ledger plus this run, never minus a panel it did not build' { $l = New-SbShellGapLedger (Get-SbShellGaps @($SbGapMenu0, $SbGapBuiltL, $SbGapBuiltA, $SbGapIconsL)) ([pscustomobject]@{ unparsed = $true; unmaterialized = @('color_picker'); icon_text = @() }); "$($l.unparsed) $($l.unmaterialized -join ',') $($l.icon_text -join ',')" } 'True color_picker,layers_panel_content layers_panel_content'
+Test-Case 'gaps: a ledger frozen from the sitting build then judges that build PASS (seed, then ratchet)' { $rows = @($SbGapMenu2, $SbGapBuiltL, $SbGapBuiltA, $SbGapBuiltC, $SbGapIconsL, $SbGapIconsA); Get-SbShellGapVerdict $rows (New-SbShellGapLedger (Get-SbShellGaps $rows) $null) } 'PASS(known: unparsed unmaterialized=color_picker,layers_panel_content icon-text=layers_panel_content; panels=3)'
+Test-Case 'gaps: a ledger read from JSON with EMPTY lists judges a clean build PASS' { Get-SbShellGapVerdict @($SbGapMenu0, $SbGapBuiltA, $SbGapIconsA) ('{"unparsed": false, "unmaterialized": [], "icon_text": []}' | ConvertFrom-Json) } 'PASS(known: none; panels=1)'
+# O97 read=tree, step 1: the CENSUS of what each plan kind renders as. The plan
+# leaf carries `type` (the widget kind) and the UIA row carries `type` (the
+# ControlType), joined by id. No expected map is typed here: the map is MEASURED
+# on the box over every panel first, then frozen from that measurement. A
+# placeholder (an unbuilt kind) renders as a Text, so `element_preview->Text`
+# in the census is finding 5 read off the tree.
+# ---------------------------------------------------------------------------
+function New-SbKindLeaf([string]$Id, [string]$Type) { [ordered]@{ path = @(0); type = $Type; id = $Id; values = @{} } }
+function New-SbKindRow([string]$Id, [string]$Type) { [ordered]@{ id = $Id; type = $Type; enabled = $true; offscreen = $false; name = '' } }
+$kPlan = [ordered]@{ leaves = @((New-SbKindLeaf 'b1' 'button'), (New-SbKindLeaf 'b2' 'button'), (New-SbKindLeaf 'p1' 'element_preview'), (New-SbKindLeaf 't1' 'toggle'), (New-SbKindLeaf '' 'text')) } | ConvertTo-Json -Depth 6
+$kUia = [ordered]@{ pid = 1; session = 1; error = $null; count = 3; rows = @((New-SbKindRow 'b1' 'Button'), (New-SbKindRow 'b2' 'Button'), (New-SbKindRow 'p1' 'Text')) } | ConvertTo-Json -Depth 4
+Test-Case 'kinds: the census joins plan kind to UIA type by id, counted, sorted' { Get-SbRenderedKinds -Plan $kPlan -Uia $kUia } 'button->Button:2 element_preview->Text:1 toggle->ABSENT:1'
+Test-Case 'kinds: an id-less leaf is not in the census (it cannot be joined)' { (Get-SbRenderedKinds -Plan $kPlan -Uia $kUia) -match 'text->' } 'False'
+Test-Case 'kinds: a uia error is a REFUSAL, never an empty census' { Get-SbRenderedKinds -Plan $kPlan -Uia ([ordered]@{ pid = 1; error = 'no top-level UIA element'; rows = @() } | ConvertTo-Json) } 'REFUSED: uia error: no top-level UIA element'
+Test-Case 'kinds: a plan with no addressable leaf is a REFUSAL' { Get-SbRenderedKinds -Plan ([ordered]@{ leaves = @((New-SbKindLeaf '' 'text')) } | ConvertTo-Json -Depth 6) -Uia $kUia } 'REFUSED: the plan has no addressable leaf'
+Test-Case 'kinds: a repeated id counts every rendered copy against its kind' { Get-SbRenderedKinds -Plan ([ordered]@{ leaves = @((New-SbKindLeaf 'r' 'icon_button'), (New-SbKindLeaf 'r' 'icon_button')) } | ConvertTo-Json -Depth 6) -Uia ([ordered]@{ pid = 1; error = $null; rows = @((New-SbKindRow 'r' 'Button'), (New-SbKindRow 'r' 'Text')) } | ConvertTo-Json -Depth 4) } 'icon_button->Button:1 icon_button->Text:1'
+
+# O97 read=tree, step 2: the census judged against the MEASURED map
+# (e2e_baselines/uia_kinds.json, derived from flask STATUS 728's 16 KINDS
+# lines). A pair the map allows passes; a ledgered known-bad pair passes NAMED;
+# any other pair FAILS as new. One-way: a known pair absent from ONE panel's
+# census is not evidence it is fixed, so nothing is struck by this verdict.
+$kMap = '{"allowed": {"icon_button": ["Button"], "checkbox": ["Button", "CheckBox"], "text": ["Text"]}, "known": ["element_preview->Text"]}' | ConvertFrom-Json
+Test-Case 'kinds verdict: allowed pairs only -> PASS with the pair count' { Test-SbRenderedKinds 'checkbox->Button:12 checkbox->CheckBox:1 icon_button->Button:3' $kMap } 'PASS(pairs=3; known: none)'
+Test-Case 'kinds verdict: a ledgered known pair passes, NAMED' { Test-SbRenderedKinds 'element_preview->Text:1 icon_button->Button:3' $kMap } 'PASS(pairs=2; known: element_preview->Text)'
+Test-Case 'kinds verdict: a placeholder of a kind the map allows elsewhere FAILS as new' { Test-SbRenderedKinds 'icon_button->Text:1 icon_button->Button:2' $kMap } 'FAIL(new: icon_button->Text:1)'
+Test-Case 'kinds verdict: a kind the map has never seen FAILS as new' { Test-SbRenderedKinds 'tree_view->Custom:1' $kMap } 'FAIL(new: tree_view->Custom:1)'
+Test-Case 'kinds verdict: a visible leaf that did not render FAILS as new' { Test-SbRenderedKinds 'text->ABSENT:1' $kMap } 'FAIL(new: text->ABSENT:1)'
+Test-Case 'kinds verdict: a refused census is NOT RUN, never a pass' { Test-SbRenderedKinds 'REFUSED: the plan does not parse' $kMap } 'NOT RUN(REFUSED: the plan does not parse)'
+Test-Case 'kinds verdict: an empty census is NOT RUN, never a pass' { Test-SbRenderedKinds '' $kMap } 'NOT RUN(empty census)'
+Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRenderedKinds 'icon_button->Button:3' $null } 'NOT RUN(no map; census: icon_button->Button:3)'
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '16 3'
+
+Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
+Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
 
 # ---------------------------------------------------------------------------
 Write-Host ""

@@ -299,7 +299,9 @@ public sealed partial class MainWindow
             // #323: the plan bytes this tree was DRAWN from, so a UIA read of the
             // same window is compared against the same selection (the harness's
             // `Compare-SbRenderedTree`). Overwritten at every draw: the newest wins.
-            if (!_dialog && PlanOutPath is { } planOut)
+            // O97: with SB_PANEL set only that panel's pane writes, so the canvas
+            // and the toolbar, which draw after it, no longer overwrite its plan.
+            if (!_dialog && PlanOutPath is { } planOut && PanelWire.WritesPlanOut(snap.PanelId, PlanOutPanel))
             {
                 try
                 {
@@ -312,6 +314,9 @@ public sealed partial class MainWindow
                 }
             }
         }
+
+        /// <summary>`SB_PANEL`, the one pane whose plan `SB_PLAN_OUT` takes; null when unset.</summary>
+        private static readonly string? PlanOutPanel = Environment.GetEnvironmentVariable("SB_PANEL");
 
         /// <summary>`SB_PLAN_OUT`, resolved beside the exe when relative; null when unset.</summary>
         private static readonly string? PlanOutPath =

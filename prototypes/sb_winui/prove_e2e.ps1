@@ -56,6 +56,9 @@ param(
     [string]$Baseline = '',
     [string]$Script = '',
     [switch]$Freeze,
+    # O97 rung A: write e2e_baselines/shell_gaps.json as the old ledger plus
+    # every gap this run read (harness_common.ps1 New-SbShellGapLedger).
+    [switch]$FreezeGaps,
     [int]$TimeoutSeconds = 60
 )
 
@@ -381,6 +384,24 @@ $reading = [ordered]@{
 # picture of an earlier state. Read from this run's own rows, frozen or not.
 $paint = Get-SbPaintVerdict (Read-SbRows $log $mark)
 
+# The gap arm (O97 rung A, harness_common.ps1 Get-SbShellGapVerdict): the
+# shell's own counts of what it could not build, against the ledger of known
+# gaps. A new gap or a fixed one is NOT CERTIFIED; so is a missing ledger.
+$gapLedgerPath = Join-Path $PSScriptRoot 'e2e_baselines\shell_gaps.json'
+$gapRows = Read-SbRows $log $mark
+$gapLedger = if (Test-Path $gapLedgerPath) { Get-Content -Raw $gapLedgerPath | ConvertFrom-Json } else { $null }
+if ($FreezeGaps) {
+    $g = Get-SbShellGaps $gapRows
+    if ($null -ne $g.Refusal) {
+        Out-Line "E2E-GAPS-FROZEN v1 item=$item REFUSED -- $($g.Refusal)"
+        exit 7
+    }
+    $gapLedger = New-SbShellGapLedger $g $gapLedger
+    [System.IO.File]::WriteAllText($gapLedgerPath, (ConvertTo-SbLfText ($gapLedger | ConvertTo-Json)), [System.Text.Encoding]::ASCII)
+    Out-Line "E2E-GAPS-FROZEN v1 item=$item -> $gapLedgerPath (review it before committing it)"
+}
+$gaps = Get-SbShellGapVerdict $gapRows $gapLedger
+
 if ($Freeze) {
     if ($drive -notlike 'PASS*' -or ($dragOnly -and $moved -notlike 'PASS*') -or $readback -notlike 'PASS*' -or $paint -notlike 'PASS*') {
         Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback paint=$paint"
@@ -440,9 +461,9 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
         ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } else { "$($_.panel)/$($_.widget)" } })
     if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK or MENU ACTION RAN row for $($missing -join ','))" }
 }
-$verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS' -and $paint -like 'PASS*') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+$verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS' -and $paint -like 'PASS*' -and $gaps -like 'PASS*') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($lateCount -gt 0) { ",panels=$panelShow" })):$drive " +
-        "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) paint=$paint screenshot=$shotSha(archived,not compared) " +
+        "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) paint=$paint gaps=$gaps screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
 Add-Content -Path (Join-Path $exeDir 'e2e-certificates.log') -Value $line -Encoding ascii
