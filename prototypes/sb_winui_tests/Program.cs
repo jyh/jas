@@ -2032,6 +2032,56 @@ static class Program
         Eq("clip: the plan= text is <w>x<h>, invariant", "119.5x12", PanelWire.ClipSizeText(119.5, 12));
         System.Globalization.CultureInfo.CurrentCulture = savedCulture;
 
+        // O97 rung C (re-priced 10-31 on flask STATUS 737: no cross-renderer pixel
+        // threshold exists, so C reads STRUCTURE). Draw order, finding 12: for each
+        // pair of overlapping leaves where one carries `bind.z_index`, the EXPECTED
+        // top is the higher planned z (absent = 0), ties to the later plan order.
+        // The cases are the fill/stroke widget's real plan rects (30.8 at 5.04 and
+        // 18.48) in both `fill_on_top` states.
+        static string Probes(IReadOnlyList<PanelWire.ZProbe> ps) =>
+            ps.Count == 0 ? "(none)" : string.Join(";", ps.Select(p => $"{p.Upper}>{p.Lower}@{PanelWire.ClipSizeText(p.X, p.Y)}"));
+        static (string Who, double X, double Y, double W, double H, int? Z)[] L(params (string Who, double X, double Y, double W, double H, int? Z)[] l) => l;
+        Eq("zorder: fill_on_top (fill z 2, stroke z 1, stroke LATER in plan order) expects FILL on top, probed at the overlap's centre",
+            "fill>stroke@27.2x27.2", Probes(PanelWire.OverlapProbes(L(("fill", 5.04, 5.04, 30.8, 30.8, 2), ("stroke", 18.48, 18.48, 30.8, 30.8, 1)))));
+        Eq("zorder: fill_on_top false (fill z 1, stroke z 2) expects STROKE on top",
+            "stroke>fill@27.2x27.2", Probes(PanelWire.OverlapProbes(L(("fill", 5.04, 5.04, 30.8, 30.8, 1), ("stroke", 18.48, 18.48, 30.8, 30.8, 2)))));
+        Eq("zorder: the two states probe DIFFERENT tops (the table's two rows must not collapse)", "True",
+            (Probes(PanelWire.OverlapProbes(L(("fill", 5.04, 5.04, 30.8, 30.8, 2), ("stroke", 18.48, 18.48, 30.8, 30.8, 1))))
+             != Probes(PanelWire.OverlapProbes(L(("fill", 5.04, 5.04, 30.8, 30.8, 1), ("stroke", 18.48, 18.48, 30.8, 30.8, 2))))).ToString());
+        Eq("zorder: equal planned z ties to the LATER plan order (the Canvas's own rule)",
+            "b>a@5x5", Probes(PanelWire.OverlapProbes(L(("a", 0, 0, 10, 10, 1), ("b", 0, 0, 10, 10, 1)))));
+        Eq("zorder: an absent z is 0, so a planned z 1 on the EARLIER leaf still wins",
+            "a>b@5x5", Probes(PanelWire.OverlapProbes(L(("a", 0, 0, 10, 10, 1), ("b", 0, 0, 10, 10, null)))));
+        Eq("zorder: a pair with no planned z on either side is not probed (overlap alone is not this finding)",
+            "(none)", Probes(PanelWire.OverlapProbes(L(("a", 0, 0, 10, 10, null), ("b", 5, 5, 10, 10, null)))));
+        Eq("zorder: leaves that only touch, or overlap by no more than half a DIP, are not probed",
+            "(none)", Probes(PanelWire.OverlapProbes(L(("a", 0, 0, 10, 10, 2), ("b", 10, 0, 10, 10, 1), ("c", 0, 9.5, 10, 10, 1)))));
+        Eq("zorder: every overlapping pair is probed, in plan order",
+            "a>b@10x5;a>c@15x5;c>b@12.5x5", Probes(PanelWire.OverlapProbes(L(("a", 0, 0, 20, 10, 3), ("b", 5, 0, 10, 10, null), ("c", 10, 0, 10, 10, 1)))));
+        Eq("zorder: a leaf with no area (or no layout) is never probed",
+            "(none)", Probes(PanelWire.OverlapProbes(L(("a", 0, 0, 10, 10, 2), ("b", 2, 2, 0, 5, 1), ("c", double.NaN, 0, 5, 5, 1)))));
+
+        // Rung C, finding 6: a surface whose plan carries a `bind.border` must DRAW
+        // one, of the plan's width and colour. Null is a pass; the answer is the
+        // `why=` text of a PANEL MISDRAWN row. A spelling SurfaceBorder refuses is a
+        // miss too, so a parser that refuses everything cannot agree with itself.
+        static string Why(string? w) => w ?? "(null)";
+        (byte R, byte G, byte B) grey = (0x55, 0x55, 0x55);
+        Eq("border: the select square drawn as planned (1px #555555) passes", "(null)",
+            Why(PanelWire.BorderMiss("1px solid #555555", (1, 1, 1, 1), grey)));
+        Eq("border: a surface with no planned border is not judged, whatever it draws", "(null)|(null)",
+            Why(PanelWire.BorderMiss(null, (0, 0, 0, 0), null)) + "|" + Why(PanelWire.BorderMiss("", (2, 2, 2, 2), grey)));
+        Eq("border: finding 6 BROKEN, a planned border with no thickness drawn", "none",
+            Why(PanelWire.BorderMiss("1px solid #555555", (0, 0, 0, 0), grey)));
+        Eq("border: a thickness with no visible brush draws nothing", "none",
+            Why(PanelWire.BorderMiss("1px solid #555555", (1, 1, 1, 1), null)));
+        Eq("border: one side missing is a miss, named by its sides", "width:1,1,0,1/1",
+            Why(PanelWire.BorderMiss("1px solid #555555", (1, 1, 0, 1), grey)));
+        Eq("border: the wrong colour is a miss, both colours named", "colour:#000000/#555555",
+            Why(PanelWire.BorderMiss("1px solid #555555", (1, 1, 1, 1), ((byte)0, (byte)0, (byte)0))));
+        Eq("border: a planned spelling the shell refuses is a miss (it draws nothing), not a skip", "refused",
+            Why(PanelWire.BorderMiss("1px dashed #555555", (0, 0, 0, 0), null)));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
