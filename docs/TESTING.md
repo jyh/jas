@@ -185,6 +185,23 @@ each live app:
 
   A script without a `read` step asserts nothing and is refused.
 
+**Ruled 2026-10-31 by the port owner, and not yet delivered by any runner or driver.** These forms come from two
+findings. The first is spec's: a panel step cannot name a row, carry a modifier or read panel state, so no claim about the
+Layers tree can be a level-2 gate. The second is the 10-30 Windows feel sitting: a press-and-hold and a double-click cannot be
+written. **Until a runner or driver delivers a form, it refuses that form by name.** A script that uses one is
+marked PROPOSED and never gates.
+* **`"row": [i, j, …]` on a panel step** names the tree row the widget is on, by the element's document path, in the
+  index-array form `op_apply` takes. A widget that repeats once per row (every `lp_*` widget in the Layers tree) is
+  refused without it.
+* **`shift`, `alt`, `ctrl`, `meta` on a panel step**: booleans, `false` when absent, as on pointer and key steps (an
+  eye's Alt-click, a row's Shift- or Ctrl-click). `meta` is refused, as for keys; the Mac's Cmd-click is written `ctrl`.
+* **`"event": "double_click"` on a panel step** (a swatch double-click opens Swatch Options or the Color Picker).
+* **`"hold_ms": <n>` on a press step**: the press is held that long before the next step (a toolbar slot's alternates
+  open on a press-and-hold).
+* **`{"read": "panel", "panel": "<content id>"}`** compares that panel's declared `state:` keys with the script's
+  `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
+  the panel selection, for one, is in no document.
+
 **Who replays it:**
 1. **Level 1:** each port's core. This is the EXPECTED read-back.
    * **Rust** has two runners. The gesture runner (`script_corpus`, web build) replays the pointer and key scripts
