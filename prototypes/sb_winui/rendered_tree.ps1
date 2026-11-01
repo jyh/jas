@@ -8,7 +8,8 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File rendered_tree.ps1 -Panel color_panel_content
 #
-# Exit 0 = mismatches=0; 1 = a mismatch; 2 = NOT RUN or REFUSED.
+# Exit 0 = mismatches=0 and GAPS PASS; 1 = a mismatch or a gap verdict that is
+# not PASS (O97 rung A); 2 = NOT RUN or REFUSED.
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script as cp1252.
 
 param([string]$Panel = 'align_panel_content', [int]$SettleSec = 4)
@@ -48,11 +49,19 @@ Remove-SbTask $task; Remove-SbTask $uTask
 "tasks left: " + @(Get-ScheduledTask -TaskName 'jas-rt-*' -ErrorAction SilentlyContinue).Count
 $owner = Get-SbPlanOutOwner @(Read-SbRows $log $mark)
 "plan-out owner: $owner"
+# O97 rung A: the shell's own gap counts for THIS launch's panel (and every
+# other pane it built), against the committed ledger. The corpus opens Layers
+# 0 times in 116 launches (flask STATUS 726), so this per-panel launch is where
+# findings 4 and 5 can red. A gap verdict that is not PASS makes the exit 1.
+$gapLedgerPath = Join-Path $dir 'e2e_baselines\shell_gaps.json'
+$gapLedger = if (Test-Path $gapLedgerPath) { Get-Content -Raw $gapLedgerPath | ConvertFrom-Json } else { $null }
+$gaps = Get-SbShellGapVerdict @(Read-SbRows $log $mark) $gapLedger
+"GAPS: $gaps"
 if ((Test-Path $planOut) -and $owner -ne $Panel) { "VERDICT: REFUSED: the plan file is $owner's, not $Panel's (the last PLAN OUT row)"; exit 2 }
 if ((Test-Path $planOut) -and (Test-Path $uiaOut)) {
   $r = Compare-SbRenderedTree -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw)
   "VERDICT: $($r.Verdict)"; $r.Mismatches | ForEach-Object { "  $_" }
   if ($r.Verdict -like 'REFUSED*') { exit 2 }
-  if ($r.Mismatches.Count -gt 0) { exit 1 }
+  if ($r.Mismatches.Count -gt 0 -or $gaps -notlike 'PASS*') { exit 1 }
   exit 0
 } else { "VERDICT: NOT RUN (plan=$(Test-Path $planOut) uia=$(Test-Path $uiaOut))"; exit 2 }
