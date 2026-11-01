@@ -1995,6 +1995,43 @@ static class Program
         Eq("dirty: 255 (no engine) is no answer -- never read as saved", "(no answer)", Dirty(255));
         Eq("dirty: any other byte is no answer, never a guess", "(no answer)", Dirty(2));
 
+        // O97 rung B (design 2026-10-31): a leaf is CLIPPED when a descendant's
+        // bounds, transformed into the leaf's own coordinates, pass its plan rect
+        // by more than the tolerance on any side. The cases are the two sitting
+        // findings (14 radio, 15 slider) and #770's fixes for them.
+        static string Over((double L, double T, double R, double B)? o) => o is { } v ? PanelWire.ClipOverText(v) : "(null)";
+        static (double X, double Y, double W, double H)[] B(params (double X, double Y, double W, double H)[] b) => b;
+        Eq("clip: a descendant inside the plan rect is not clipped", "(null)", Over(PanelWire.ClipOverflow(119, 12, B((0, 0, 119, 12), (4, 2, 10, 8)))));
+        Eq("clip: finding 15, a 32-DIP slider body centred in a 12-DIP rect, spills 10 above and 10 below", "0,10,0,10", Over(PanelWire.ClipOverflow(119, 12, B((0, -10, 119, 32)))));
+        Eq("clip: finding 14, a 32-DIP radio row in a 12-DIP rect, spills 20 below", "0,0,0,20", Over(PanelWire.ClipOverflow(60, 12, B((0, 0, 60, 32)))));
+        Eq("clip: #770's radio, scaled whole by a Viewbox the plan's height, is not clipped", "(null)", Over(PanelWire.ClipOverflow(12, 12, B((0, 0, 12, 12), (0.4, 0.4, 11.2, 11.2)))));
+        Eq("clip: an overflow at the tolerance is not reported, one above it is", "(null)|0,0,0.6,0",
+            Over(PanelWire.ClipOverflow(10, 10, B((0, 0, 10.5, 10)))) + "|" + Over(PanelWire.ClipOverflow(10, 10, B((0, 0, 10.6, 10)))));
+        Eq("clip: each side reports its LARGEST overflow over all descendants", "3,1,2,4",
+            Over(PanelWire.ClipOverflow(10, 10, B((-1, -1, 5, 5), (-3, 0, 5, 5), (6, 6, 6, 8), (8, 0, 3, 5)))));
+        Eq("clip: a descendant with no layout (NaN or infinite bounds) is skipped, never read as a spill", "(null)",
+            Over(PanelWire.ClipOverflow(10, 10, B((double.NaN, 0, 5, 5), (0, 0, double.PositiveInfinity, 5)))));
+        Eq("clip: no descendants is not clipped (the walk's own count says whether it ran)", "(null)", Over(PanelWire.ClipOverflow(10, 10, B())));
+        // flask STATUS 735, measured on cp_h (plan 87x12): the parts that DRAW, as
+        // (x, y, w, h) in the leaf. A part is LOST when under half its area is
+        // inside the plan rect; the thumb's 2-DIP halo at value 0 is not a loss.
+        var cphFixed = B((0, 5.3, 87, 4), (-2, 0, 16, 14), (2, 0, 10, 10));
+        var cphBroken = B((0, 14, 87, 4), (-2, 5.3, 24, 16.7), (2, 12.7, 10, 10));
+        Eq("clip lost: finding 15 FIXED (SliderFit on): the halo spills 2 and nothing is lost", "(null)", Over(PanelWire.ClipLost(87, 12, cphFixed)));
+        Eq("clip lost: finding 15 BROKEN (SliderFit off): the track, the ring and the thumb are lost, over their bounds", "2,0,0,10.7", Over(PanelWire.ClipLost(87, 12, cphBroken)));
+        Eq("clip lost: a ComboBox's one drawing part, exactly its plan rect, is not lost", "(null)", Over(PanelWire.ClipLost(172, 20, B((0, 0, 172, 20)))));
+        Eq("clip lost: a part exactly half inside is kept, one just under half is lost", "(null)|0,0,0,5.2",
+            Over(PanelWire.ClipLost(10, 10, B((0, 5, 10, 10)))) + "|" + Over(PanelWire.ClipLost(10, 10, B((0, 5.2, 10, 10)))));
+        Eq("clip lost: a part with no area (a zero-height line) is never judged lost", "(null)", Over(PanelWire.ClipLost(10, 10, B((0, 20, 10, 0)))));
+        Eq("clip lost: one lost part among kept ones reports only the lost part's overflow", "0,0,0,8",
+            Over(PanelWire.ClipLost(10, 10, B((-1, 0, 5, 5), (0, 14, 10, 4)))));
+        var savedCulture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        Eq("clip: the over= text is invariant (a decimal POINT under a comma culture), so the row stays four fields", "0,0,0.6,12.2",
+            PanelWire.ClipOverText((0, 0, 0.6, 12.24)));
+        Eq("clip: the plan= text is <w>x<h>, invariant", "119.5x12", PanelWire.ClipSizeText(119.5, 12));
+        System.Globalization.CultureInfo.CurrentCulture = savedCulture;
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
