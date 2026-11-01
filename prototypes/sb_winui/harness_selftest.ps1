@@ -3039,11 +3039,14 @@ Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (Conv
 # sessions, LogonUI, the reboot keys) and the rows box_windows.ps1 writes from
 # session 1, the only session that can see the desktop.
 function New-SbBoxSnap {
-    param([int]$Console = 1, [int[]]$Explorer = @(1), [bool]$LogonUI = $false,
+    param([int]$Console = 1, [int[]]$Explorer = @(1), [bool]$LogonUI = $false, [int[]]$LogonUISessions = $null,
+          [int[]]$Consent = @(),
           [string[]]$Reboot = @(), $Rows = @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=1',
                                            'TOPMOST process=explorer rect=0,1392,2560,1440 class=Shell_TrayWnd'))
-    return @{ ConsoleSession = $Console; ExplorerSessions = $Explorer; LogonUI = $LogonUI;
-              RebootPending = $Reboot; WindowRows = $Rows }
+    # -LogonUI $true is shorthand for a LogonUI in the console session.
+    $lui = if ($null -ne $LogonUISessions) { $LogonUISessions } elseif ($LogonUI) { @($Console) } else { @() }
+    return @{ ConsoleSession = $Console; ExplorerSessions = $Explorer; LogonUISessions = $lui;
+              ConsentSessions = $Consent; RebootPending = $Reboot; WindowRows = $Rows }
 }
 $boxHead = 'BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=2'
 $boxTray = 'TOPMOST process=explorer rect=0,1392,2560,1440 class=Shell_TrayWnd'
@@ -3070,6 +3073,15 @@ Test-Case 'box: an unreadable TOPMOST row is NOT RUN naming it, never skipped' {
 Test-Case 'box: no explorer in the console session is NOT RUN (no interactive user)' { Get-SbBoxReadiness (New-SbBoxSnap -Explorer @(2)) } 'NOT RUN(box: no interactive user: explorer is not running in console session 1)'
 Test-Case 'box: every reason is named, in a fixed order' {
     Get-SbBoxReadiness (New-SbBoxSnap -LogonUI $true -Reboot @('CBS RebootPending') -Rows @($boxHead, $boxTray, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) } 'NOT RUN(box: locked: LogonUI is running; reboot pending: CBS RebootPending; a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+# jas's two LOWs on #825. LOW 1: LogonUI is judged by SESSION, so a login
+# screen in another session (RDP) is not the console's lock. LOW 2: a UAC
+# prompt is drawn on the secure desktop, which a session-1 window read cannot
+# see, but consent.exe runs in the session it prompts, so it is read there.
+Test-Case 'box: a LogonUI in another session (an RDP login screen) is not the console''s lock' { Get-SbBoxReadiness (New-SbBoxSnap -LogonUISessions @(2)) } 'READY'
+Test-Case 'box: a LogonUI in the console session is locked' { Get-SbBoxReadiness (New-SbBoxSnap -LogonUISessions @(2, 1)) } 'NOT RUN(box: locked: LogonUI is running)'
+Test-Case 'box: a UAC prompt (consent.exe) in the console session is NOT RUN' { Get-SbBoxReadiness (New-SbBoxSnap -Consent @(1)) } 'NOT RUN(box: a UAC prompt is up: consent.exe)'
+Test-Case 'box: consent.exe in another session is not this console''s prompt' { Get-SbBoxReadiness (New-SbBoxSnap -Consent @(2)) } 'READY'
+
 # The nightly's quiet gate: the run drives the console's real mouse, so a box
 # someone used in the last -MinIdleSeconds is NOT RUN (in use), never driven.
 # box_windows.ps1 reads the console session's last input as a BOX IDLE row.

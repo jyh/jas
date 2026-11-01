@@ -115,6 +115,11 @@ function Get-SbStopAfter([string]$What) {
     return ($again -replace '^NOT RUN\(box: ', "NOT RUN(box went not ready after $What`: ")
 }
 
+# CONTINUE from here, not Stop: under 5.1 a child's stderr, redirected by 2>&1,
+# arrives as error records, and with Stop the first one would kill the run torn
+# with no receipt. Each child is judged by its cert line or its exit code.
+$ErrorActionPreference = 'Continue'
+
 # ---- every input script ------------------------------------------------------
 $items = New-Object System.Collections.Generic.List[string]
 $stop = ''

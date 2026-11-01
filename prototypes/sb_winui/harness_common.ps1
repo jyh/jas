@@ -3816,8 +3816,8 @@ $SbRebootKeys = [ordered]@{
 }
 
 # 'READY', or 'NOT RUN(box: <reason>; ...)' naming every reason in a fixed
-# order: no user, locked, reboot pending, the window read's findings, then the
-# quiet gate. -MinIdleSeconds is the nightly's: the run drives the console's
+# order: no user, locked, a UAC prompt, reboot pending, the window read's
+# findings, then the quiet gate. -MinIdleSeconds is the nightly's: the run drives the console's
 # real mouse, so input within that many seconds means someone is at the box.
 # 0 (an on-demand run, started by someone who knows) never asks.
 function Get-SbBoxReadiness {
@@ -3827,7 +3827,13 @@ function Get-SbBoxReadiness {
     if (@($Snapshot.ExplorerSessions) -notcontains $console) {
         $why.Add("no interactive user: explorer is not running in console session $console")
     }
-    if ($Snapshot.LogonUI) { $why.Add('locked: LogonUI is running') }
+    # By session (jas's LOW 1 on #825): a LogonUI in another session, an RDP
+    # login screen, is not the console's lock.
+    if (@($Snapshot.LogonUISessions) -contains $console) { $why.Add('locked: LogonUI is running') }
+    # A UAC prompt is drawn on the secure desktop, which the session-1 window
+    # read cannot see (jas's LOW 2), but consent.exe runs in the session it
+    # prompts, so it is read there.
+    if (@($Snapshot.ConsentSessions) -contains $console) { $why.Add('a UAC prompt is up: consent.exe') }
     $reboot = @($Snapshot.RebootPending | Where-Object { $_ })
     if ($reboot.Count -gt 0) { $why.Add("reboot pending: $($reboot -join ', ')") }
     foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console)) { $why.Add($r) }
@@ -3964,7 +3970,8 @@ public static class SbBoxNative {
     }
     $console = [int][SbBoxNative]::WTSGetActiveConsoleSessionId()
     $explorer = @(Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
-    $logonUi = [bool](Get-Process LogonUI -ErrorAction SilentlyContinue)
+    $logonUi = @(Get-Process LogonUI -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
+    $consent = @(Get-Process consent -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
     $reboot = @($RebootKeys.Keys | Where-Object { Test-Path -LiteralPath $RebootKeys[$_] })
 
     Remove-Item -LiteralPath $WindowsOut -ErrorAction SilentlyContinue
@@ -3987,6 +3994,6 @@ public static class SbBoxNative {
     } finally {
         Remove-SbTask $task
     }
-    return @{ ConsoleSession = $console; ExplorerSessions = $explorer; LogonUI = $logonUi;
-              RebootPending = $reboot; WindowRows = $rows }
+    return @{ ConsoleSession = $console; ExplorerSessions = $explorer; LogonUISessions = $logonUi;
+              ConsentSessions = $consent; RebootPending = $reboot; WindowRows = $rows }
 }
