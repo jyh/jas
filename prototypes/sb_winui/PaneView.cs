@@ -253,6 +253,9 @@ public sealed partial class MainWindow
                 hidden += h;
                 editing += ed;
             }
+            // O97 rung C: measured AFTER the values apply, never in BuildPane: the
+            // z_index and visibility a tick sets are what the compositor stacks.
+            ReportStacking(leaves, hits, snap.Seq);
 
             // jas §647/#757: a text field this draw shows and the last one did not
             // (F2's rename field) takes the keyboard, as the web's and the Mac's
@@ -1601,6 +1604,104 @@ public sealed partial class MainWindow
                     if (_paneIconsPending == 0) { ReportPaneIcons(); }
                 }
             }
+        }
+
+        /// <summary>
+        /// O97 rung C (design 2026-10-31 §3, re-priced on flask STATUS 737: no pixel
+        /// threshold exists between two renderers, so C reads STRUCTURE). Two arms,
+        /// run every draw after the values apply, so a `fill_on_top` toggle that
+        /// moves no leaf is read in its new state too.
+        ///
+        /// DRAW ORDER (finding 12): for each pair of shown leaves that overlap where
+        /// one carries `bind.z_index`, <see cref="PanelWire.OverlapProbes"/> names the
+        /// leaf the PLAN puts on top; the shell then asks the compositor which of the
+        /// two is met first at the overlap's centre
+        /// (`VisualTreeHelper.FindElementsInHostCoordinates`, topmost first). That is
+        /// what is stacked, not the property this file set. A probe where neither is
+        /// met is `z-unresolved`, which the harness refuses as NOT RUN rather than
+        /// read as "nothing wrong". `z-planned=` counts the leaves whose plan carries
+        /// the key and `z-read=` those whose value the shell could read, so a reader
+        /// that read none is not a silent pass.
+        ///
+        /// BORDER (finding 6): each surface whose plan carries a `bind.border` must
+        /// draw one of that width and colour (<see cref="PanelWire.BorderMiss"/>).
+        ///
+        /// One `PANEL STACKED` row per draw; one `PANEL MISDRAWN` row per miss,
+        /// carrying the same `seq=`, so the harness reads the last draw's rows only.
+        /// </summary>
+        private void ReportStacking(List<PaneLeaf> leaves, List<PanelWire.HitBox> hits, long seq)
+        {
+            if (_scroll.Content is not FrameworkElement host) { return; }
+            host.UpdateLayout();
+            var rows = new List<string>();
+            var zPlanned = 0;
+            var zRead = 0;
+            var shown = new List<(string Who, double X, double Y, double W, double H, int? Z)>();
+            var byWho = new Dictionary<string, FrameworkElement>(StringComparer.Ordinal);
+            foreach (var leaf in leaves)
+            {
+                var raw = leaf.Value("bind.z_index");
+                int? z = null;
+                if (raw is not null)
+                {
+                    zPlanned++;
+                    z = PanelWire.ZIndex(raw);
+                    if (z is not null) { zRead++; }
+                }
+                if (!_paneControls.TryGetValue(leaf.Path, out var el) || el.Visibility != Visibility.Visible) { continue; }
+                var who = leaf.Id.Length > 0 ? leaf.Id : leaf.Path;
+                // A repeated id (a repeater's rows) keys by path, so two rows never share a control.
+                if (byWho.ContainsKey(who)) { who = leaf.Path; }
+                byWho[who] = el;
+                shown.Add((who, leaf.X, leaf.Y, leaf.W, leaf.H, z));
+            }
+            var probes = PanelWire.OverlapProbes(shown);
+            var unresolved = 0;
+            var origin = host.TransformToVisual(null);
+            foreach (var p in probes)
+            {
+                var upper = byWho[p.Upper];
+                var lower = byWho[p.Lower];
+                string? drawn = null;
+                var at = origin.TransformPoint(new Windows.Foundation.Point(p.X, p.Y));
+                foreach (var hitEl in Microsoft.UI.Xaml.Media.VisualTreeHelper.FindElementsInHostCoordinates(at, host))
+                {
+                    DependencyObject? up = hitEl;
+                    while (up is not null && up != host && up != upper && up != lower)
+                    {
+                        up = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(up);
+                    }
+                    if (up == upper) { drawn = p.Upper; break; }
+                    if (up == lower) { drawn = p.Lower; break; }
+                }
+                var point = PanelWire.ClipSizeText(p.X, p.Y);
+                if (drawn is null) { unresolved++; continue; }
+                if (drawn != p.Upper)
+                {
+                    rows.Add($"PANEL MISDRAWN panel={_paneDrawnPanel} seq={seq} kind=zorder id={p.Upper} "
+                        + $"under={p.Lower} drawn={drawn} at={point}");
+                }
+            }
+            var bordersJudged = 0;
+            foreach (var hit in hits)
+            {
+                if (string.IsNullOrWhiteSpace(hit.Border)) { continue; }
+                bordersJudged++;
+                _paneSurfaces.TryGetValue(hit.Path, out var face);
+                var t = face?.BorderThickness ?? new Thickness(0);
+                (byte R, byte G, byte B)? colour =
+                    face?.BorderBrush is Microsoft.UI.Xaml.Media.SolidColorBrush sc && sc.Opacity > 0 && sc.Color.A > 0
+                    && face.Visibility == Visibility.Visible
+                        ? (sc.Color.R, sc.Color.G, sc.Color.B) : null;
+                if (PanelWire.BorderMiss(hit.Border, (t.Left, t.Top, t.Right, t.Bottom), colour) is { } why)
+                {
+                    var who = hit.Id.Length > 0 ? hit.Id : hit.Path;
+                    rows.Add($"PANEL MISDRAWN panel={_paneDrawnPanel} seq={seq} kind=border id={who} path={hit.Path} why={why}");
+                }
+            }
+            _w.Report($"PANEL STACKED panel={_paneDrawnPanel} seq={seq} build={_paneBuild} z-planned={zPlanned} z-read={zRead} "
+                 + $"z-probes={probes.Count} z-unresolved={unresolved} borders-judged={bordersJudged} misdrawn={rows.Count}");
+            foreach (var row in rows) { _w.Report(row); }
         }
 
         /// <summary>Stop 4's receipt: how each icon_button's face was drawn, once every load settled.</summary>

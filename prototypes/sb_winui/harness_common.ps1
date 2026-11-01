@@ -212,6 +212,51 @@ function Get-SbShellGaps($Rows) {
         $m = [int]$clipSeen[$panel]
         if ($m -ne $clipCount[$panel]) { return (& $no "PANEL BUILT panel=$panel says clipped=$($clipCount[$panel]) but $m PANEL CLIPPED row(s) carry its build") }
     }
+    # O97 RUNG C, THE STRUCTURAL READ (design 2026-10-31 §3; flask STATUS 737
+    # priced the pixel route and refused it). Every draw writes one `PANEL
+    # STACKED panel= seq=` row and one `PANEL MISDRAWN panel= seq= kind= id=` row
+    # per miss: `zorder` (a leaf the plan puts on top is drawn under: finding 12)
+    # or `border` (a planned surface border not drawn as planned: finding 6). Per
+    # panel the LAST STACKED row decides, and only MISDRAWN rows carrying its seq
+    # count. Keyed `panel/kind/id`. NOT RUN, naming the row: a built panel with no
+    # STACKED row; a probe the compositor could not resolve (z-unresolved > 0); a
+    # planned z the shell could not read (z-planned != z-read); a count that
+    # disagrees with its rows.
+    $stackSeq = @{}
+    $stackCount = @{}
+    foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL STACKED' ' panel='))) {
+        $panel = Get-SbField $r 'panel'
+        $vals = @{}
+        foreach ($f in 'seq', 'z-planned', 'z-read', 'z-probes', 'z-unresolved', 'borders-judged', 'misdrawn') {
+            $v = Get-SbField $r $f
+            if ($null -eq $v -or $v -notmatch '^\d+$') { return (& $no "PANEL STACKED panel=$panel carries no readable $f=") }
+            $vals[$f] = [int64]$v
+        }
+        $stackSeq[$panel] = "$($vals['seq'])"
+        $stackCount[$panel] = $vals
+    }
+    foreach ($panel in @($clipBuild.Keys | Sort-Object)) {
+        if (-not $stackCount.ContainsKey($panel)) { return (& $no "PANEL BUILT panel=$panel has no PANEL STACKED row (the structural read did not run)") }
+        $v = $stackCount[$panel]
+        if ($v['z-unresolved'] -gt 0) { return (& $no "PANEL STACKED panel=$panel seq=$($stackSeq[$panel]) has z-unresolved=$($v['z-unresolved']): a draw-order probe met neither leaf") }
+        if ($v['z-planned'] -ne $v['z-read']) { return (& $no "PANEL STACKED panel=$panel seq=$($stackSeq[$panel]) read $($v['z-read']) of $($v['z-planned']) planned z_index value(s)") }
+    }
+    $misdrawn = @{}
+    $misSeen = @{}
+    foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL MISDRAWN' ' panel='))) {
+        $panel = Get-SbField $r 'panel'
+        if (-not $stackSeq.ContainsKey($panel) -or "$(Get-SbField $r 'seq')" -ne $stackSeq[$panel]) { continue }
+        $kind = Get-SbField $r 'kind'; $id = Get-SbField $r 'id'
+        if ($kind -notin @('zorder', 'border')) { return (& $no "PANEL MISDRAWN panel=$panel carries no known kind= (read '$kind')") }
+        if ([string]::IsNullOrEmpty($id)) { return (& $no "PANEL MISDRAWN panel=$panel kind=$kind carries no id=") }
+        $misdrawn["$panel/$kind/$id"] = 1
+        $misSeen[$panel] = 1 + [int]$misSeen[$panel]
+    }
+    foreach ($panel in @($stackCount.Keys | Sort-Object)) {
+        $m = [int]$misSeen[$panel]
+        $n = $stackCount[$panel]['misdrawn']
+        if ($m -ne $n) { return (& $no "PANEL STACKED panel=$panel says misdrawn=$n but $m PANEL MISDRAWN row(s) carry its seq") }
+    }
     $iconText = @{}
     foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL ICONS' ' panel='))) {
         $panel = Get-SbField $r 'panel'
@@ -219,7 +264,7 @@ function Get-SbShellGaps($Rows) {
         if ($null -eq $t -or $t -notmatch '^\d+$' -or $null -eq $f -or $f -notmatch '^\d+$') { return (& $no "PANEL ICONS panel=$panel carries no readable text= and failed=") }
         $iconText[$panel] = [int]$t + [int]$f
     }
-    return [pscustomobject]@{ Refusal = $null; Unparsed = $unparsed; Unmat = $unmat; IconText = $iconText; Clipped = $clipped; ClipPanels = @($clipBuild.Keys) }
+    return [pscustomobject]@{ Refusal = $null; Unparsed = $unparsed; Unmat = $unmat; IconText = $iconText; Clipped = $clipped; ClipPanels = @($clipBuild.Keys); Misdrawn = $misdrawn; StackPanels = @($stackCount.Keys) }
 }
 
 # The ledger a -FreezeGaps run writes: the OLD ledger's entries plus every gap
@@ -229,11 +274,14 @@ function New-SbShellGapLedger($Gaps, $Old) {
     $um = New-Object System.Collections.Generic.List[string]
     $it = New-Object System.Collections.Generic.List[string]
     $cl = New-Object System.Collections.Generic.List[string]
+    $md = New-Object System.Collections.Generic.List[string]
     if ($null -ne $Old) {
         foreach ($x in @($Old.unmaterialized)) { if ("$x" -ne '' -and -not $um.Contains("$x")) { $um.Add("$x") } }
         foreach ($x in @($Old.icon_text)) { if ("$x" -ne '' -and -not $it.Contains("$x")) { $it.Add("$x") } }
         foreach ($x in @($Old.clipped)) { if ("$x" -ne '' -and -not $cl.Contains("$x")) { $cl.Add("$x") } }
+        foreach ($x in @($Old.misdrawn)) { if ("$x" -ne '' -and -not $md.Contains("$x")) { $md.Add("$x") } }
     }
+    foreach ($k in @($Gaps.Misdrawn.Keys)) { if (-not $md.Contains($k)) { $md.Add($k) } }
     foreach ($k in @($Gaps.Clipped.Keys)) { if (-not $cl.Contains($k)) { $cl.Add($k) } }
     foreach ($k in @($Gaps.Unmat.Keys)) { if ($Gaps.Unmat[$k] -gt 0 -and -not $um.Contains($k)) { $um.Add($k) } }
     foreach ($k in @($Gaps.IconText.Keys)) { if ($Gaps.IconText[$k] -gt 0 -and -not $it.Contains($k)) { $it.Add($k) } }
@@ -243,6 +291,7 @@ function New-SbShellGapLedger($Gaps, $Old) {
         unmaterialized = @($um | Sort-Object)
         icon_text = @($it | Sort-Object)
         clipped = @($cl | Sort-Object)
+        misdrawn = @($md | Sort-Object)
     }
 }
 
@@ -265,6 +314,8 @@ function Get-SbShellGapVerdict($Rows, $Ledger) {
     if ($it.Count -gt 0) { $reading.Add('icon-text=' + ($it -join ',')) }
     $cl = @($g.Clipped.Keys | Sort-Object)
     if ($cl.Count -gt 0) { $reading.Add('clipped=' + ($cl -join ',')) }
+    $md = @($g.Misdrawn.Keys | Sort-Object)
+    if ($md.Count -gt 0) { $reading.Add('misdrawn=' + ($md -join ',')) }
     if ($null -eq $Ledger) {
         $shown = if ($reading.Count -gt 0) { $reading -join ' ' } else { 'none' }
         return "NOT RUN(no ledger; reading: $shown)"
@@ -295,6 +346,14 @@ function Get-SbShellGapVerdict($Rows, $Ledger) {
     if ($clN.Count -gt 0) { $new.Add('clipped=' + ($clN -join ',')) }
     if ($clF.Count -gt 0) { $fixed.Add('clipped=' + ($clF -join ',')) }
     if ($clK.Count -gt 0) { $known.Add('clipped=' + ($clK -join ',')) }
+    # Rung C: a ledgered misdraw is judged only when its panel drew this run.
+    $knownMd = @($Ledger.misdrawn | Where-Object { "$_" -ne '' } | ForEach-Object { "$_" })
+    $mdN = @($md | Where-Object { $knownMd -notcontains $_ })
+    $mdF = @($knownMd | Where-Object { $g.StackPanels -contains ($_ -split '/', 2)[0] -and -not $g.Misdrawn.ContainsKey($_) } | Sort-Object)
+    $mdK = @($md | Where-Object { $knownMd -contains $_ })
+    if ($mdN.Count -gt 0) { $new.Add('misdrawn=' + ($mdN -join ',')) }
+    if ($mdF.Count -gt 0) { $fixed.Add('misdrawn=' + ($mdF -join ',')) }
+    if ($mdK.Count -gt 0) { $known.Add('misdrawn=' + ($mdK -join ',')) }
     $parts = New-Object System.Collections.Generic.List[string]
     if ($new.Count -gt 0) { $parts.Add('new: ' + ($new -join ' ')) }
     if ($fixed.Count -gt 0) { $parts.Add('fixed, strike from the ledger: ' + ($fixed -join ' ')) }

@@ -1016,6 +1016,81 @@ internal static class PanelWire
         + h.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
+    /// O97 rung C, one draw-order probe: at (<see cref="X"/>, <see cref="Y"/>), the
+    /// centre of two leaves' overlap in pane coordinates, <see cref="Upper"/> must be
+    /// drawn over <see cref="Lower"/>. Names are the leaves' ids (or plan paths).
+    /// </summary>
+    internal sealed record ZProbe(string Upper, string Lower, double X, double Y);
+
+    /// <summary>
+    /// O97 rung C, the draw-order arm (the 10-30 sitting, finding 12: the stroke
+    /// swatch was always drawn over the fill). For each pair of leaves, in plan
+    /// order, whose rects overlap by more than <paramref name="minSide"/> on both
+    /// axes and where at least one carries a planned `bind.z_index`, the EXPECTED
+    /// top: the higher planned z (absent = 0, as `Canvas.ZIndex` defaults), ties to
+    /// the LATER leaf (the Canvas draws later children over earlier ones). This is
+    /// the plan's answer only; what the compositor stacks is measured by the shell
+    /// at the probe point. Overlap alone is not this finding, so a pair with no
+    /// planned z is never probed, and a leaf with no area or no layout never is.
+    /// </summary>
+    internal static IReadOnlyList<ZProbe> OverlapProbes(
+        IReadOnlyList<(string Who, double X, double Y, double W, double H, int? Z)> leaves, double minSide = 0.5)
+    {
+        static bool Laid((string Who, double X, double Y, double W, double H, int? Z) l) =>
+            double.IsFinite(l.X) && double.IsFinite(l.Y) && double.IsFinite(l.W) && double.IsFinite(l.H) && l.W > 0 && l.H > 0;
+        var probes = new List<ZProbe>();
+        for (var i = 0; i < leaves.Count; i++)
+        {
+            var a = leaves[i];
+            if (!Laid(a)) { continue; }
+            for (var j = i + 1; j < leaves.Count; j++)
+            {
+                var b = leaves[j];
+                if (!Laid(b) || (a.Z is null && b.Z is null)) { continue; }
+                var x0 = a.X > b.X ? a.X : b.X;
+                var x1 = a.X + a.W < b.X + b.W ? a.X + a.W : b.X + b.W;
+                var y0 = a.Y > b.Y ? a.Y : b.Y;
+                var y1 = a.Y + a.H < b.Y + b.H ? a.Y + a.H : b.Y + b.H;
+                if (!(x1 - x0 > minSide) || !(y1 - y0 > minSide)) { continue; }
+                var aOnTop = (a.Z ?? 0) > (b.Z ?? 0);
+                var (upper, lower) = aOnTop ? (a.Who, b.Who) : (b.Who, a.Who);
+                probes.Add(new ZProbe(upper, lower, (x0 + x1) / 2, (y0 + y1) / 2));
+            }
+        }
+        return probes;
+    }
+
+    /// <summary>
+    /// O97 rung C, the border arm (the 10-30 sitting, finding 6: the Layers select
+    /// square drew no border). A surface whose plan carries a non-empty
+    /// `bind.border` must DRAW one: <paramref name="drawn"/> is the Border's
+    /// thickness per side (left, top, right, bottom) and <paramref name="colour"/>
+    /// its brush's colour, or null when the brush shows nothing. Null is a pass
+    /// (or no border planned); otherwise the `why=` text of a PANEL MISDRAWN row:
+    /// `none`, `width:&lt;l,t,r,b&gt;/&lt;planned&gt;`, `colour:#drawn/#planned`, or
+    /// `refused` for a planned spelling <see cref="SurfaceBorder"/> does not draw.
+    /// Whether a border is PLANNED is the string's presence, never the parser's
+    /// answer, so a parser that refuses everything is a miss on every surface.
+    /// </summary>
+    internal static string? BorderMiss(string? planned, (double L, double T, double R, double B) drawn,
+                                       (byte R, byte G, byte B)? colour)
+    {
+        if (string.IsNullOrWhiteSpace(planned)) { return null; }
+        if (SurfaceBorder(planned) is not { } want) { return "refused"; }
+        if (colour is not { } got || !(drawn.L > 0 || drawn.T > 0 || drawn.R > 0 || drawn.B > 0)) { return "none"; }
+        static string N(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+        if (drawn.L != want.Width || drawn.T != want.Width || drawn.R != want.Width || drawn.B != want.Width)
+        {
+            return $"width:{N(drawn.L)},{N(drawn.T)},{N(drawn.R)},{N(drawn.B)}/{N(want.Width)}";
+        }
+        if (got.R != want.R || got.G != want.G || got.B != want.B)
+        {
+            return $"colour:#{got.R:x2}{got.G:x2}{got.B:x2}/#{want.R:x2}{want.G:x2}{want.B:x2}";
+        }
+        return null;
+    }
+
+    /// <summary>
     /// jas §612: the plan's layout containers (`chrome` and `containers`, in plan
     /// order) whose `events` is non-empty, with any under a `hidden` path
     /// skipped. Leaves are their own controls and never surfaces. Null when the
