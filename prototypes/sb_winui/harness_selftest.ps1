@@ -2910,6 +2910,9 @@ Test-Case 'kinds verdict: an empty census is NOT RUN, never a pass' { Test-SbRen
 Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRenderedKinds 'icon_button->Button:3' $null } 'NOT RUN(no map; census: icon_button->Button:3)'
 Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '16 3'
 
+Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
+Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
+
 # ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }

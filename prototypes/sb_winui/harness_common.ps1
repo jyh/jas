@@ -209,6 +209,13 @@ function New-SbShellGapLedger($Gaps, $Old) {
     }
 }
 
+# A ledger's TEXT, as committed: LF line ends and one trailing LF. Windows
+# PowerShell's ConvertTo-Json and Set-Content write CRLF, so a -FreezeGaps run on
+# the box wrote a file whose bytes differed from the committed blob (flask STATUS 730).
+function ConvertTo-SbLfText([string]$Text) {
+    return (($Text -replace "`r`n", "`n").TrimEnd("`n") + "`n")
+}
+
 function Get-SbShellGapVerdict($Rows, $Ledger) {
     $g = Get-SbShellGaps $Rows
     if ($null -ne $g.Refusal) { return "NOT RUN($($g.Refusal))" }

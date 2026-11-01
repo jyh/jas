@@ -397,7 +397,7 @@ if ($FreezeGaps) {
         exit 7
     }
     $gapLedger = New-SbShellGapLedger $g $gapLedger
-    ($gapLedger | ConvertTo-Json) | Set-Content -Path $gapLedgerPath -Encoding ascii
+    [System.IO.File]::WriteAllText($gapLedgerPath, (ConvertTo-SbLfText ($gapLedger | ConvertTo-Json)), [System.Text.Encoding]::ASCII)
     Out-Line "E2E-GAPS-FROZEN v1 item=$item -> $gapLedgerPath (review it before committing it)"
 }
 $gaps = Get-SbShellGapVerdict $gapRows $gapLedger

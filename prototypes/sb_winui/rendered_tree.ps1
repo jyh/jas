@@ -61,7 +61,7 @@ if ($FreezeGaps) {
     $g = Get-SbShellGaps @(Read-SbRows $log $mark)
     if ($null -ne $g.Refusal) { "GAPS-FROZEN: REFUSED -- $($g.Refusal)"; exit 2 }
     $gapLedger = New-SbShellGapLedger $g $gapLedger
-    ($gapLedger | ConvertTo-Json) | Set-Content -Path $gapLedgerPath -Encoding ascii
+    [System.IO.File]::WriteAllText($gapLedgerPath, (ConvertTo-SbLfText ($gapLedger | ConvertTo-Json)), [System.Text.Encoding]::ASCII)
     "GAPS-FROZEN: -> $gapLedgerPath (review it before committing it)"
 }
 $gaps = Get-SbShellGapVerdict @(Read-SbRows $log $mark) $gapLedger
