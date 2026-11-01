@@ -20,6 +20,7 @@
 #
 # Receipt: line 1 is
 #   O97-NIGHTLY v1 verdict=<V> head=<sha8> scope=<full|only(x)> date=<iso> minutes=<m> apps-left=<n>
+# where <V> is `GREEN items=<c>/<n> panels=<k>/<m>`, `RED(...)` or `NOT RUN(...)`.
 # then BOX, and one ITEM or PANEL line per failure. apps-left is a MACHINE READ
 # of SbWinUi processes after the run; it should be 0.
 #

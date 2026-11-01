@@ -3107,8 +3107,11 @@ $cOk2 = 'E2E-CERT v1 item=b.drag verdict=CERTIFIED gaps=PASS screenshot=x date=2
 $cNo = 'E2E-CERT v1 item=c.drag verdict=REFUSED: the selection moved 0 px date=2026-11-01'
 $pOk = @{ Panel = 'align_panel_content'; Exit = 0 }
 $pBad = @{ Panel = 'color_panel_content'; Exit = 1 }
-Test-Case 'nightly: every item certified and every panel exit 0 is GREEN with the counts' {
-    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, $cOk2) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'GREEN(items=2/2 panels=1/1)'
+# GREEN is the bare word, then a space, then the counts: the dashboard's reader
+# (seat 096a73fa6) takes `verdict=GREEN` followed by a space or the end, and a
+# parenthesis only after RED or NOT RUN.
+Test-Case 'nightly: every item certified and every panel exit 0 is GREEN, a space, then the counts' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, $cOk2) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'GREEN items=2/2 panels=1/1'
 Test-Case 'nightly: a box not ready at the start is its NOT RUN, whatever else is passed' {
     Get-SbNightlyVerdict -Box 'NOT RUN(box: locked: LogonUI is running)' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'NOT RUN(box: locked: LogonUI is running)'
 Test-Case 'nightly: a mid-run stop is NOT RUN, never red, though items failed' {
@@ -3123,6 +3126,13 @@ Test-Case 'nightly: fewer items than the corpus holds is NOT RUN (torn), never g
     Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'NOT RUN(torn: 1 of 2 items and 1 of 1 panels ran)'
 Test-Case 'nightly: an empty corpus is NOT RUN, never a vacuous green' {
     Get-SbNightlyVerdict -Box 'READY' -Items @() -ItemsWanted 0 -Panels @() -PanelsWanted 0 } 'NOT RUN(empty: the corpus has 0 items and 0 panels)'
+# The dashboard's reader takes RED( and NOT RUN( only with a BALANCED
+# parenthesis, so text from outside the verdict (an item's own verdict, a
+# window's class or process) has its parentheses turned to brackets.
+Test-Case 'nightly: an item''s unbalanced parenthesis is bracketed, so RED(...) stays balanced' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @('E2E-CERT v1 item=e.drag verdict=NOT RUN -- no PROBE row (did the hand press? keys=') -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=0/1 panels=1/1; first: item e.drag NOT RUN -- no PROBE row [did the hand press? keys=)'
+Test-Case 'box: a window class with a parenthesis is bracketed, so NOT RUN(...) stays balanced' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=odd) rect=0,0,10,10 class=Odd(Class')) } 'NOT RUN(box: a topmost window is up: class=Odd[Class process=odd])'
 Test-Case 'nightly: a build that failed is RED before any item' {
     Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
 

@@ -3815,6 +3815,12 @@ $SbRebootKeys = [ordered]@{
     'CBS RebootPending' = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
 }
 
+# Text from outside a verdict (a window's class or process, an unreadable row,
+# an item's own verdict) goes inside RED(...) or NOT RUN(...), and the
+# dashboard's reader takes those only with a BALANCED parenthesis. So its
+# parentheses become brackets.
+function ConvertTo-SbParenSafe([string]$Text) { return $Text.Replace('(', '[').Replace(')', ']') }
+
 # 'READY', or 'NOT RUN(box: <reason>; ...)' naming every reason in a fixed
 # order: no user, locked, a UAC prompt, reboot pending, the window read's
 # findings, then the quiet gate. -MinIdleSeconds is the nightly's: the run drives the console's
@@ -3840,7 +3846,7 @@ function Get-SbBoxReadiness {
     if ($MinIdleSeconds -gt 0) {
         $idle = @(@($Snapshot.WindowRows) | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -cmatch '^BOX IDLE ' })
         if ($idle.Count -eq 0) { $why.Add('the window read wrote no BOX IDLE row') }
-        elseif ($idle[0] -cnotmatch '^BOX IDLE seconds=(\d+)$') { $why.Add("unreadable window row: '$($idle[0])'") }
+        elseif ($idle[0] -cnotmatch '^BOX IDLE seconds=(\d+)$') { $why.Add("unreadable window row: '$(ConvertTo-SbParenSafe $idle[0])'") }
         elseif ([long]$Matches[1] -lt $MinIdleSeconds) { $why.Add("in use: the last input was $($Matches[1]) s ago, under $MinIdleSeconds") }
     }
     if ($why.Count -eq 0) { return 'READY' }
@@ -3884,7 +3890,7 @@ function Get-SbNightlyVerdict {
         if (-not $first) {
             $name = if ($line -cmatch ' item=(\S+)') { $Matches[1] } else { '(unnamed)' }
             $v = if ($line -cmatch ' verdict=(.+?)(?= gaps=| screenshot=| date=|$)') { $Matches[1] } else { '(no verdict)' }
-            $first = "item $name $v"
+            $first = "item $(ConvertTo-SbParenSafe $name) $(ConvertTo-SbParenSafe $v)"
         }
     }
     $ok = 0
@@ -3893,7 +3899,9 @@ function Get-SbNightlyVerdict {
         if (-not $first) { $first = "panel $($p.Panel) exit=$($p.Exit)" }
     }
     $counts = "items=$certified/$($items.Count) panels=$ok/$($panels.Count)"
-    if (-not $first) { return "GREEN($counts)" }
+    # GREEN takes no parenthesis: the word, a space, the counts (the dashboard's
+    # reader takes a parenthesis only after RED or NOT RUN).
+    if (-not $first) { return "GREEN $counts" }
     return "RED($counts; first: $first)"
 }
 
@@ -3925,7 +3933,7 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console) {
     if ($head.Count -eq 0) { return @('the session-1 window read wrote no BOX WINDOWS row') }
     if ($head.Count -gt 1) { return @("the window read is torn: $($head.Count) BOX WINDOWS rows") }
     if ($head[0] -cnotmatch '^BOX WINDOWS session=(\d+) screen=(-?\d+),(-?\d+),(-?\d+),(-?\d+) topmost=(\d+)$') {
-        return @("unreadable window row: '$($head[0])'")
+        return @("unreadable window row: '$(ConvertTo-SbParenSafe $head[0])'")
     }
     $session = [int]$Matches[1]
     $sL = [int]$Matches[2]; $sT = [int]$Matches[3]; $sR = [int]$Matches[4]; $sB = [int]$Matches[5]
@@ -3936,14 +3944,14 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console) {
     $out = @()
     foreach ($row in $tops) {
         if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) class=(.+)$') {
-            $out += "unreadable window row: '$row'"
+            $out += "unreadable window row: '$(ConvertTo-SbParenSafe $row)'"
             continue
         }
         $proc = $Matches[1]; $cls = $Matches[6]
         $wL = [int]$Matches[2]; $wT = [int]$Matches[3]; $wR = [int]$Matches[4]; $wB = [int]$Matches[5]
         if ($SbShellTopmostClasses -ccontains $cls) { continue }
         if ($wR -le $sL -or $wL -ge $sR -or $wB -le $sT -or $wT -ge $sB) { continue }
-        $out += "a topmost window is up: class=$cls process=$proc"
+        $out += "a topmost window is up: class=$(ConvertTo-SbParenSafe $cls) process=$(ConvertTo-SbParenSafe $proc)"
     }
     return $out
 }
