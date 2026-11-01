@@ -61,6 +61,7 @@ if ((Test-Path $planOut) -and $owner -ne $Panel) { "VERDICT: REFUSED: the plan f
 if ((Test-Path $planOut) -and (Test-Path $uiaOut)) {
   $r = Compare-SbRenderedTree -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw)
   "VERDICT: $($r.Verdict)"; $r.Mismatches | ForEach-Object { "  $_" }
+  "KINDS: $(Get-SbRenderedKinds -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw))"
   if ($r.Verdict -like 'REFUSED*') { exit 2 }
   if ($r.Mismatches.Count -gt 0 -or $gaps -notlike 'PASS*') { exit 1 }
   exit 0

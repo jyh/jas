@@ -3043,6 +3043,41 @@ function Get-SbPlanOutOwner($Rows) {
     return $owner
 }
 
+# O97 read=tree, step 1: a CENSUS of what each plan kind renders as -- the
+# plan leaf's `type` (the widget kind) joined by id, copy by copy, to the UIA
+# row's `type` (the ControlType). A visible leaf with no rendered copy reads
+# ABSENT; a hidden leaf is left out (its absence is correct). Returns
+# "kind->Type:n ..." sorted, or "REFUSED: <why>". No expected map lives here:
+# the map is measured on the box over every panel, then frozen from that.
+function Get-SbRenderedKinds([string]$Plan, [string]$Uia) {
+    try { $p = $Plan | ConvertFrom-Json } catch { return 'REFUSED: the plan does not parse' }
+    try { $u = $Uia | ConvertFrom-Json } catch { return 'REFUSED: the uia dump does not parse' }
+    if ($null -ne $u.error -and "$($u.error)" -ne '') { return "REFUSED: uia error: $($u.error)" }
+    $leaves = @($p.leaves | Where-Object { $null -ne $_ -and "$($_.id)" -ne '' })
+    if ($leaves.Count -eq 0) { return 'REFUSED: the plan has no addressable leaf' }
+    $rendered = @{}
+    foreach ($r in @($u.rows)) {
+        if ($null -eq $r) { continue }
+        if (-not $rendered.ContainsKey("$($r.id)")) { $rendered["$($r.id)"] = New-Object System.Collections.ArrayList }
+        [void]$rendered["$($r.id)"].Add($r)
+    }
+    $seen = @{}
+    $count = @{}
+    foreach ($leaf in $leaves) {
+        $id = "$($leaf.id)"
+        $vis = $leaf.values.'bind.visible'
+        if ($null -eq $vis) { $vis = $leaf.values.visible }
+        $i = if ($seen.ContainsKey($id)) { $seen[$id] } else { 0 }
+        $seen[$id] = $i + 1
+        if ("$vis" -eq 'false') { continue }
+        $rows = $rendered[$id]
+        $type = if ($null -ne $rows -and $i -lt $rows.Count) { "$($rows[$i].type)" } else { 'ABSENT' }
+        $key = "$($leaf.type)->$type"
+        $count[$key] = 1 + $(if ($count.ContainsKey($key)) { $count[$key] } else { 0 })
+    }
+    return (@($count.Keys | Sort-Object | ForEach-Object { "${_}:$($count[$_])" }) -join ' ')
+}
+
 function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
     $refuse = { param($why) [pscustomobject]@{ Compared = 0; Mismatches = @(); Verdict = "REFUSED: $why" } }
     try { $p = $Plan | ConvertFrom-Json } catch { return (& $refuse 'the plan does not parse') }

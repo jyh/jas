@@ -2877,6 +2877,22 @@ Test-Case 'gaps: a RUSTOK-prefixed row reads the same (the verdict prefix is opt
 Test-Case 'gaps: a frozen ledger is the old ledger plus this run, never minus a panel it did not build' { $l = New-SbShellGapLedger (Get-SbShellGaps @($SbGapMenu0, $SbGapBuiltL, $SbGapBuiltA, $SbGapIconsL)) ([pscustomobject]@{ unparsed = $true; unmaterialized = @('color_picker_dialog'); icon_text = @() }); "$($l.unparsed) $($l.unmaterialized -join ',') $($l.icon_text -join ',')" } 'True color_picker_dialog,layers_panel_content layers_panel_content'
 Test-Case 'gaps: a ledger frozen from the sitting build then judges that build PASS (seed, then ratchet)' { $rows = @($SbGapMenu2, $SbGapBuiltL, $SbGapBuiltA, $SbGapBuiltC, $SbGapIconsL, $SbGapIconsA); Get-SbShellGapVerdict $rows (New-SbShellGapLedger (Get-SbShellGaps $rows) $null) } 'PASS(known: unparsed unmaterialized=color_picker_dialog,layers_panel_content icon-text=layers_panel_content; panels=3)'
 Test-Case 'gaps: a ledger read from JSON with EMPTY lists judges a clean build PASS' { Get-SbShellGapVerdict @($SbGapMenu0, $SbGapBuiltA, $SbGapIconsA) ('{"unparsed": false, "unmaterialized": [], "icon_text": []}' | ConvertFrom-Json) } 'PASS(known: none; panels=1)'
+# O97 read=tree, step 1: the CENSUS of what each plan kind renders as. The plan
+# leaf carries `type` (the widget kind) and the UIA row carries `type` (the
+# ControlType), joined by id. No expected map is typed here: the map is MEASURED
+# on the box over every panel first, then frozen from that measurement. A
+# placeholder (an unbuilt kind) renders as a Text, so `element_preview->Text`
+# in the census is finding 5 read off the tree.
+# ---------------------------------------------------------------------------
+function New-SbKindLeaf([string]$Id, [string]$Type) { [ordered]@{ path = @(0); type = $Type; id = $Id; values = @{} } }
+function New-SbKindRow([string]$Id, [string]$Type) { [ordered]@{ id = $Id; type = $Type; enabled = $true; offscreen = $false; name = '' } }
+$kPlan = [ordered]@{ leaves = @((New-SbKindLeaf 'b1' 'button'), (New-SbKindLeaf 'b2' 'button'), (New-SbKindLeaf 'p1' 'element_preview'), (New-SbKindLeaf 't1' 'toggle'), (New-SbKindLeaf '' 'text')) } | ConvertTo-Json -Depth 6
+$kUia = [ordered]@{ pid = 1; session = 1; error = $null; count = 3; rows = @((New-SbKindRow 'b1' 'Button'), (New-SbKindRow 'b2' 'Button'), (New-SbKindRow 'p1' 'Text')) } | ConvertTo-Json -Depth 4
+Test-Case 'kinds: the census joins plan kind to UIA type by id, counted, sorted' { Get-SbRenderedKinds -Plan $kPlan -Uia $kUia } 'button->Button:2 element_preview->Text:1 toggle->ABSENT:1'
+Test-Case 'kinds: an id-less leaf is not in the census (it cannot be joined)' { (Get-SbRenderedKinds -Plan $kPlan -Uia $kUia) -match 'text->' } 'False'
+Test-Case 'kinds: a uia error is a REFUSAL, never an empty census' { Get-SbRenderedKinds -Plan $kPlan -Uia ([ordered]@{ pid = 1; error = 'no top-level UIA element'; rows = @() } | ConvertTo-Json) } 'REFUSED: uia error: no top-level UIA element'
+Test-Case 'kinds: a plan with no addressable leaf is a REFUSAL' { Get-SbRenderedKinds -Plan ([ordered]@{ leaves = @((New-SbKindLeaf '' 'text')) } | ConvertTo-Json -Depth 6) -Uia $kUia } 'REFUSED: the plan has no addressable leaf'
+Test-Case 'kinds: a repeated id counts every rendered copy against its kind' { Get-SbRenderedKinds -Plan ([ordered]@{ leaves = @((New-SbKindLeaf 'r' 'icon_button'), (New-SbKindLeaf 'r' 'icon_button')) } | ConvertTo-Json -Depth 6) -Uia ([ordered]@{ pid = 1; error = $null; rows = @((New-SbKindRow 'r' 'Button'), (New-SbKindRow 'r' 'Text')) } | ConvertTo-Json -Depth 4) } 'icon_button->Button:1 icon_button->Text:1'
 
 # ---------------------------------------------------------------------------
 Write-Host ""
