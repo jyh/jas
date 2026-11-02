@@ -11027,13 +11027,22 @@
         "panel": {
           "isolation_stack": [
             {
-              "container_name": "Layer 1"
+              "__path__": [
+                0
+              ]
             },
             {
-              "container_name": "Group A"
+              "__path__": [
+                0,
+                1
+              ]
             },
             {
-              "container_name": "Path 3"
+              "__path__": [
+                0,
+                1,
+                0
+              ]
             }
           ],
           "layers_panel_selection": [

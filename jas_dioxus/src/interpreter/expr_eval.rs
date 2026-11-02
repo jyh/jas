@@ -745,6 +745,33 @@ fn eval_func(
             }
         }
 
+        "tree_rows_at" => {
+            // The rows of `element_tree` at the given paths, IN THE ORDER OF
+            // THE PATHS; a path with no row is skipped (row 72(a): `layers.yaml`
+            // `lp_breadcrumb`'s foreach source, over `panel.isolation_stack`).
+            // Paths arrive as lists or path markers. Twin of the reference's.
+            if args.len() != 2 { return Value::Null; }
+            let rows = eval_inner(&args[0], ctx, scope, store_cb);
+            let ps = eval_inner(&args[1], ctx, scope, store_cb);
+            fn json_path(v: &serde_json::Value) -> Option<Vec<usize>> {
+                let v = v.get("__path__").unwrap_or(v);
+                v.as_array()?.iter().map(|i| i.as_u64().map(|i| i as usize)).collect()
+            }
+            let Value::List(rows) = rows else { return Value::Null };
+            let mut by_path: std::collections::HashMap<Vec<usize>, serde_json::Value> =
+                std::collections::HashMap::new();
+            for r in &rows {
+                if let Some(p) = r.get("path").and_then(json_path) {
+                    by_path.entry(p).or_insert_with(|| r.clone());
+                }
+            }
+            let wanted: Vec<Vec<usize>> = match ps {
+                Value::List(l) => l.iter().filter_map(json_path).collect(),
+                _ => Vec::new(),
+            };
+            Value::List(wanted.iter().filter_map(|p| by_path.get(p).cloned()).collect())
+        }
+
         "tree_visible_rows" => {
             // The Layers tree's rows to draw (STATUS-jas item 38): `layers.yaml`
             // `lp_tree`'s foreach source. Paths arrive as lists or path markers.

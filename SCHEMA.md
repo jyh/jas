@@ -902,7 +902,8 @@ variables are available for the current row's tree node:
 
 | Variable | Type | Description |
 |---|---|---|
-| `node.id` | string | Unique element ID |
+| `node.path` | list | The element's path (child indices from the document root). **This is what names the element**: an action that resolves a `*_id` with `path_from_id` is passed `'' + as_path(node.path)` |
+| `node.id` | string or null | The element's own `id` field, **null on an element that was never given one**, so it never names the row's element (G6: Options for Layer passed it, and OK on an id-less layer created a new layer) |
 | `node.name` | string | Element name (empty string if unnamed) |
 | `node.type` | string | Element type identifier (e.g., `path`, `layer`) |
 | `node.type_label` | string | Human-readable type name (e.g., `Path`, `Layer`) |

@@ -271,6 +271,43 @@ mod tests {
         }
     }
 
+    /// Row 72(a): the Layers breadcrumb's foreach source, `tree_rows_at`, over
+    /// the isolation stack as path markers and as plain lists (the fixture's
+    /// `rows_at_cases`). Twin of the reference's and Swift's.
+    #[test]
+    fn tree_rows_at_through_the_evaluator() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["rows_at_cases"].as_array().unwrap();
+        assert!(cases.len() >= 4, "the fixture is not vacuous");
+        let doc = crate::geometry::test_json::test_json_to_document(&fx["cases"][0]["document"].to_string());
+        let tree = element_tree(&doc);
+        let mut compared = 0;
+        for marker in [true, false] {
+            for case in cases {
+                let paths: Vec<Value> = case["paths"].as_array().unwrap().iter()
+                    .map(|p| if marker { json!({"__path__": p}) } else { p.clone() }).collect();
+                let ctx = json!({
+                    "active_document": {"element_tree": tree.clone()},
+                    "panel": {"isolation_stack": paths},
+                });
+                let got = crate::interpreter::expr::eval(
+                    "tree_rows_at(active_document.element_tree, panel.isolation_stack)", &ctx);
+                let want = case["expected"].as_array().unwrap().clone();
+                compared += want.len();
+                assert_eq!(got, crate::interpreter::expr_types::Value::List(want),
+                    "{} marker={marker}", case["name"]);
+            }
+        }
+        assert!(compared >= 10, "rows compared: {compared}");
+        let empty = json!({"active_document": {"element_tree": tree}});
+        use crate::interpreter::expr_types::Value as EV;
+        assert_eq!(crate::interpreter::expr::eval("tree_rows_at(active_document.element_tree, null)", &empty),
+            EV::List(vec![]));
+        assert_eq!(crate::interpreter::expr::eval("tree_rows_at(5, null)", &empty), EV::Null);
+        assert_eq!(crate::interpreter::expr::eval("tree_rows_at(active_document.element_tree)", &empty), EV::Null);
+    }
+
     /// Step 1b: the rows to draw, resolved from `element_tree` and the
     /// widget's binds (the fixture's `visible_cases`, flask §591).
     #[test]

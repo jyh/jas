@@ -123,10 +123,15 @@ fn symbols(n: usize) -> serde_json::Value {
 /// the count. If this fails, every "does not grow" result below is unreadable.
 #[test]
 fn the_probe_can_see_growth_at_all() {
+    // Row 72(a): the stack holds PATHS (as every runner stores it) and the
+    // breadcrumb reads their rows from `element_tree` (`tree_rows_at`). The
+    // tree is the same three rows at every stack size, so only the stack moves.
     let stack = |n: usize| {
-        serde_json::json!({ "panel": { "isolation_stack":
-            (0..n).map(|i| serde_json::json!({ "container_name": format!("L{i}") }))
-                  .collect::<Vec<_>>() } })
+        serde_json::json!({
+            "active_document": { "element_tree": element_tree(3) },
+            "panel": { "isolation_stack":
+                (0..n).map(|i| serde_json::json!({ "__path__": [i] }))
+                      .collect::<Vec<_>>() } })
     };
     let none = records("layers_panel_content", &stack(0));
     let three = records("layers_panel_content", &stack(3));

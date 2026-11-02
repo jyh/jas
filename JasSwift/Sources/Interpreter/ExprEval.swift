@@ -1319,6 +1319,25 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
                                   renaming: asPath(vals[3]))
         return .list(out.map { AnyJSON($0) })
 
+    // The rows of `element_tree` at the given paths, IN THE ORDER OF THE
+    // PATHS; a path with no row is skipped (row 72(a): `layers.yaml`
+    // `lp_breadcrumb`'s foreach source, over `panel.isolation_stack`).
+    // Paths arrive as lists or path markers. Twin of the reference's.
+    case "tree_rows_at":
+        guard args.count == 2 else { return .null }
+        let vals = args.map { evalNode($0, ctx) }
+        func jsonPath(_ v: Any?) -> [Int]? {
+            let v = (v as? [String: Any])?["__path__"] ?? v
+            return v as? [Int]
+        }
+        guard case .list(let rows) = vals[0] else { return .null }
+        var byPath: [[Int]: AnyJSON] = [:]
+        for r in rows {
+            if let p = jsonPath((r.value as? [String: Any])?["path"]), byPath[p] == nil { byPath[p] = r }
+        }
+        guard case .list(let ps) = vals[1] else { return .list([]) }
+        return .list(ps.compactMap { jsonPath($0.value).flatMap { byPath[$0] } })
+
     case "path_from_id":
         guard args.count == 1 else { return .null }
         let s = evalNode(args[0], ctx)
