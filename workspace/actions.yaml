@@ -1965,8 +1965,9 @@ actions:
     description: >
       Enter isolation mode for a container (layer or group). All content
       outside the isolated container is dimmed to 10% opacity and becomes
-      non-interactive. The current visibility state of every element is
-      saved before entering. Isolation is a stack: entering isolation
+      non-interactive. (Saving every element's visibility on entry is
+      declared and NOT IMPLEMENTED; see layers.yaml, isolation_stack.)
+      Isolation is a stack: entering isolation
       while already in isolation pushes a new level. Panel selection and
       element selection are constrained to descendants of the isolated
       container. New Layer and Collect in New Layer are disabled.
@@ -1994,9 +1995,10 @@ actions:
 
   exit_isolation_mode:
     description: >
-      Exit one level of isolation mode. The visibility states saved on
-      entry to the current level are restored. If at the outermost
-      isolation level, isolation mode is fully exited.
+      Exit one level of isolation mode. If at the outermost isolation
+      level, isolation mode is fully exited. Visibility save/restore is
+      declared and NOT IMPLEMENTED: this pops the level and restores
+      nothing (layers.yaml, isolation_stack).
     category: layers
     tier: 3
     enabled_when: "panel.isolation_stack.length > 0"
