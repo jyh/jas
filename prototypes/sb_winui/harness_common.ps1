@@ -3785,3 +3785,134 @@ function New-SbBuildLog([string]$Dir, [string]$Name) {
   New-Item -ItemType Directory -Force -Path $Dir | Out-Null
   Join-Path $Dir $Name
 }
+
+# ---------------------------------------------------------------------------
+# The box preflight (O97's nightly run; flask STATUS 739 and the helm's ruling)
+# ---------------------------------------------------------------------------
+# An unattended run can meet a box that cannot take it:
+# * the console is locked;
+# * a reboot is pending. Windows Update restarted the box once with a user logged
+#   on, and a topmost post-update dim then swallowed every press until a hand
+#   cleared it;
+# * a topmost window sits over the desktop.
+# Each of those turns every script into a failure that says nothing about the
+# app. So the run asks first, and a box that is not ready reads NOT RUN. Never
+# red, and never READY by default: a read that did not happen is NOT RUN too.
+#
+# The verdict is a PURE function over a snapshot, so every refusal has a
+# self-test arm. Read-SbBoxSnapshot gathers the snapshot. Only the window half
+# needs session 1 (session 0 sees no desktop), and box_windows.ps1 writes it.
+
+# The topmost windows the shell keeps up on a healthy desktop. Measured in
+# session 1 on the Windows box, 2026-11-01: the taskbar was the only one.
+$SbShellTopmostClasses = @('Shell_TrayWnd', 'Shell_SecondaryTrayWnd')
+
+# The reboot-pending markers the snapshot reads, as label -> registry key. The
+# key's existence is the signal; servicing writes both, and this harness never
+# writes either.
+$SbRebootKeys = [ordered]@{
+    'WU RebootRequired' = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+    'CBS RebootPending' = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+}
+
+# 'READY', or 'NOT RUN(box: <reason>; ...)' naming every reason in a fixed
+# order: no user, locked, reboot pending, then the window read's findings.
+function Get-SbBoxReadiness($Snapshot) {
+    $why = New-Object System.Collections.Generic.List[string]
+    $console = [int]$Snapshot.ConsoleSession
+    if (@($Snapshot.ExplorerSessions) -notcontains $console) {
+        $why.Add("no interactive user: explorer is not running in console session $console")
+    }
+    if ($Snapshot.LogonUI) { $why.Add('locked: LogonUI is running') }
+    $reboot = @($Snapshot.RebootPending | Where-Object { $_ })
+    if ($reboot.Count -gt 0) { $why.Add("reboot pending: $($reboot -join ', ')") }
+    foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console)) { $why.Add($r) }
+    if ($why.Count -eq 0) { return 'READY' }
+    return "NOT RUN(box: $($why -join '; '))"
+}
+
+# The window half of the verdict, over the rows box_windows.ps1 writes:
+#   BOX WINDOWS session=<n> screen=<l>,<t>,<r>,<b> topmost=<count>
+#   TOPMOST process=<name> rect=<l>,<t>,<r>,<b> class=<class, to end of line>
+# The header is the artifact only a real read emits, so its absence is NOT RUN.
+# The read must come from the console session and must carry exactly the
+# TOPMOST rows it counts. An unreadable row is named, never skipped. A topmost
+# window that is not the shell's and overlaps the screen is an intruder; one
+# wholly off it (a minimized window sits at -32000) cannot take a press.
+function Get-SbBoxWindowReasons($Rows, [int]$Console) {
+    $rows = @($Rows | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -ne '' })
+    $head = @($rows | Where-Object { $_ -cmatch '^BOX WINDOWS ' })
+    if ($head.Count -eq 0) { return @('the session-1 window read wrote no BOX WINDOWS row') }
+    if ($head.Count -gt 1) { return @("the window read is torn: $($head.Count) BOX WINDOWS rows") }
+    if ($head[0] -cnotmatch '^BOX WINDOWS session=(\d+) screen=(-?\d+),(-?\d+),(-?\d+),(-?\d+) topmost=(\d+)$') {
+        return @("unreadable window row: '$($head[0])'")
+    }
+    $session = [int]$Matches[1]
+    $sL = [int]$Matches[2]; $sT = [int]$Matches[3]; $sR = [int]$Matches[4]; $sB = [int]$Matches[5]
+    $want = [int]$Matches[6]
+    if ($session -ne $Console) { return @("the window read ran in session $session, not console session $Console") }
+    $tops = @($rows | Where-Object { $_ -cmatch '^TOPMOST ' })
+    if ($tops.Count -ne $want) { return @("the window read is torn: topmost=$want but $($tops.Count) TOPMOST row(s)") }
+    $out = @()
+    foreach ($row in $tops) {
+        if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) class=(.+)$') {
+            $out += "unreadable window row: '$row'"
+            continue
+        }
+        $proc = $Matches[1]; $cls = $Matches[6]
+        $wL = [int]$Matches[2]; $wT = [int]$Matches[3]; $wR = [int]$Matches[4]; $wB = [int]$Matches[5]
+        if ($SbShellTopmostClasses -ccontains $cls) { continue }
+        if ($wR -le $sL -or $wL -ge $sR -or $wB -le $sT -or $wT -ge $sB) { continue }
+        $out += "a topmost window is up: class=$cls process=$proc"
+    }
+    return $out
+}
+
+# Gather the snapshot Get-SbBoxReadiness judges. Session 0's half is read here;
+# the window rows come from box_windows.ps1, run in the console session through
+# an Interactive scheduled task, the same route the app is launched by. No
+# interactive user means the task never runs and no header is written, which
+# the verdict reads as NOT RUN. -RebootKeys exists for the live arm: the real
+# keys cannot be set without telling Windows a reboot is owed.
+function Read-SbBoxSnapshot {
+    param(
+        [string]$WindowsOut = (Join-Path $env:TEMP "jas-sb-box-windows-$PID.txt"),
+        [int]$TimeoutSeconds = 20,
+        $RebootKeys = $SbRebootKeys
+    )
+    if (-not ('SbBoxNative' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class SbBoxNative {
+    [DllImport("kernel32.dll")] public static extern uint WTSGetActiveConsoleSessionId();
+}
+'@
+    }
+    $console = [int][SbBoxNative]::WTSGetActiveConsoleSessionId()
+    $explorer = @(Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
+    $logonUi = [bool](Get-Process LogonUI -ErrorAction SilentlyContinue)
+    $reboot = @($RebootKeys.Keys | Where-Object { Test-Path -LiteralPath $RebootKeys[$_] })
+
+    Remove-Item -LiteralPath $WindowsOut -ErrorAction SilentlyContinue
+    $task = 'jas-sb-box-windows'
+    $arg = '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' +
+        (Join-Path $PSScriptRoot 'box_windows.ps1') + '" -Out "' + $WindowsOut + '"'
+    $rows = $null
+    try {
+        $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $task -Principal $principal -Force -ErrorAction Stop `
+            -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg) | Out-Null
+        Start-ScheduledTask -TaskName $task -ErrorAction Stop
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        while (-not (Test-Path -LiteralPath $WindowsOut) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-Path -LiteralPath $WindowsOut) { $rows = @(Get-Content -LiteralPath $WindowsOut) }
+    } catch {
+        $rows = $null
+    } finally {
+        Remove-SbTask $task
+    }
+    return @{ ConsoleSession = $console; ExplorerSessions = $explorer; LogonUI = $logonUi;
+              RebootPending = $reboot; WindowRows = $rows }
+}
