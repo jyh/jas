@@ -17161,7 +17161,7 @@
           "type": "list",
           "item_type": "object",
           "default": [],
-          "description": "Stack of isolation levels, outermost first. Each entry is the PATH of the isolated container (enter_isolation_mode pushes a path; every runner stores one). It is not a record: there is no container_id and no saved_visibility map, and visibility save/restore is NOT IMPLEMENTED (exit pops the level and restores nothing). The two readers that still expect records (lp_breadcrumb's segment label and lp_tree's isolation_root) read null and are owed a fix. (The line this replaced described a record. item_type still reads `object`, which is a separate question: the reference coerces list items by it.)\n"
+          "description": "Stack of isolation levels, outermost first. Each entry is the PATH of the isolated container (enter_isolation_mode pushes a path; every runner stores one). It is not a record: there is no container_id and no saved_visibility map, and visibility save/restore is NOT IMPLEMENTED (exit pops the level and restores nothing). Its readers take the path as it is: lp_breadcrumb draws one segment per level from the level's element_tree row (tree_rows_at), and lp_tree's isolation_root is the last entry. (The line this replaced described a record, and then the two readers that still expected one. item_type still reads `object`, which is a separate question: the reference coerces list items by it.)\n"
         },
         "collapsed_paths": {
           "type": "list",
@@ -17317,7 +17317,7 @@
                   "flex": 1
                 },
                 "foreach": {
-                  "source": "panel.isolation_stack",
+                  "source": "tree_rows_at(active_document.element_tree, panel.isolation_stack)",
                   "as": "level"
                 },
                 "do": {
@@ -17338,7 +17338,7 @@
                     {
                       "id": "lp_breadcrumb_segment",
                       "type": "text",
-                      "content": "{{level.container_name}}",
+                      "content": "{{if level.name != '' then level.name else '<' + level.type_label + '>'}}",
                       "style": {
                         "font_size": 10,
                         "cursor": "pointer"
@@ -17518,7 +17518,7 @@
               "element_selection": "active_document.element_selection",
               "search_query": "panel.search_query",
               "type_filter": "panel.type_filter",
-              "isolation_root": "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1].container_id else null",
+              "isolation_root": "if panel.isolation_stack.length > 0 then panel.isolation_stack[panel.isolation_stack.length - 1] else null",
               "collapsed_paths": "panel.collapsed_paths",
               "renaming_element": "panel.renaming_element",
               "drag_active": "panel.drag_active"

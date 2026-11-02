@@ -111,10 +111,14 @@ def _element_tree_rows() -> list:
 
 _LAYERS_CTX = {
     "panel": {
+        # Row 72(a): the stack holds PATHS, as every runner stores it, and the
+        # breadcrumb draws each level's element_tree row (`tree_rows_at`):
+        # "Back" > "G" > "<Circle>". The third level is the group's unnamed
+        # child, so the segment's '<' + type_label + '>' arm is exercised.
         "isolation_stack": [
-            {"container_name": "Layer 1"},
-            {"container_name": "Group A"},
-            {"container_name": "Path 3"},
+            {"__path__": [0]},
+            {"__path__": [0, 1]},
+            {"__path__": [0, 1, 0]},
         ],
         "layers_panel_selection": [{"__path__": [0, 1]}],
     },

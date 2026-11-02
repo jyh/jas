@@ -7,7 +7,8 @@
     "NOT in this first cut, by design: collapse, panel selection, renaming, filters and isolation (the",
     "tree_view widget applies those from its own binds, layers.yaml lp_tree), colours, thumbnails.",
     "The documents are written by the reference codec; the expected rows are authored.",
-    "visible_cases (item 38 step 1b): the ROWS TO DRAW, resolved in the core from element_tree and the widget's binds: binds.collapsed (paths), binds.panel_selection (paths), binds.renaming (a path or null). A row under a collapsed CONTAINER is hidden; collapsed is true only on a container; panel_selected and renaming are exact path matches. Expected rows are case 0's authored rows plus the three marks."
+    "visible_cases (item 38 step 1b): the ROWS TO DRAW, resolved in the core from element_tree and the widget's binds: binds.collapsed (paths), binds.panel_selection (paths), binds.renaming (a path or null). A row under a collapsed CONTAINER is hidden; collapsed is true only on a container; panel_selected and renaming are exact path matches. Expected rows are case 0's authored rows plus the three marks.",
+    "rows_at_cases (row 72(a), the Layers breadcrumb): tree_rows_at(element_tree, paths) is the row whose path equals each path, IN THE ORDER OF paths; a path with no row is skipped. The document is cases[0]'s; the expected rows are cases[0]'s authored rows, looked up by path."
   ],
   "cases": [
     {
@@ -832,6 +833,156 @@
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
+        }
+      ]
+    }
+  ],
+  "rows_at_cases": [
+    {
+      "name": "an_isolation_chain_reads_its_rows_outermost_first",
+      "paths": [
+        [
+          0
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "expected": [
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true
+        }
+      ]
+    },
+    {
+      "name": "the_order_is_the_paths_not_the_tree",
+      "paths": [
+        [
+          0,
+          1
+        ],
+        [
+          0
+        ]
+      ],
+      "expected": [
+        {
+          "path": [
+            0,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": true
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false
+        }
+      ]
+    },
+    {
+      "name": "an_empty_stack_is_no_rows",
+      "paths": [],
+      "expected": []
+    },
+    {
+      "name": "a_path_with_no_row_is_skipped",
+      "paths": [
+        [
+          0
+        ],
+        [
+          9
+        ],
+        [
+          0,
+          7
+        ]
+      ],
+      "expected": [
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Back",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false
+        }
+      ]
+    },
+    {
+      "name": "a_leaf_path_reads_its_row_too",
+      "paths": [
+        [
+          0,
+          0
+        ]
+      ],
+      "expected": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false
         }
       ]
     }

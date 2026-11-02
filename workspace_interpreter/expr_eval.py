@@ -507,6 +507,32 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             return Value.null()
         return Value.list_(tree_visible_rows(rows.value, paths(collapsed), paths(psel), as_path(ren)))
 
+    if name == "tree_rows_at":
+        # The rows of `element_tree` at the given paths, IN THE ORDER OF THE
+        # PATHS; a path with no row is skipped (row 72(a): `layers.yaml`
+        # `lp_breadcrumb`'s foreach source, over `panel.isolation_stack`).
+        # Paths arrive as lists or path markers.
+        if len(node.args) != 2:
+            return Value.null()
+        rows, ps = (eval_node(a, ctx) for a in node.args)
+        if rows.type != ValueType.LIST:
+            return Value.null()
+
+        def as_path(v):
+            if isinstance(v, Value):
+                v = v.value
+            if isinstance(v, dict) and "__path__" in v:
+                v = v["__path__"]
+            return tuple(v) if isinstance(v, (list, tuple)) else None
+
+        by_path = {}
+        for r in rows.value:
+            p = as_path(r.get("path")) if isinstance(r, dict) else None
+            if p is not None and p not in by_path:
+                by_path[p] = r
+        wanted = (as_path(x) for x in (ps.value if ps.type == ValueType.LIST else []))
+        return Value.list_([by_path[p] for p in wanted if p in by_path])
+
     if name == "path_from_id":
         if len(node.args) != 1:
             return Value.null()

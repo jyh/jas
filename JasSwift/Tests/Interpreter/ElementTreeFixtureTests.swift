@@ -28,6 +28,54 @@ import Foundation
         return cases
     }
 
+    private static func rowsAtCases() -> [[String: Any]] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("test_fixtures").appendingPathComponent("layers/element_tree.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cases = json["rows_at_cases"] as? [[String: Any]] else { return [] }
+        return cases
+    }
+
+    /// Row 72(a): the Layers breadcrumb's foreach source, `tree_rows_at`, over
+    /// the isolation stack as path markers and as plain lists. Twin of the
+    /// reference's `test_tree_rows_at_through_the_evaluator`.
+    @Test func treeRowsAtThroughTheEvaluator() throws {
+        let cases = Self.rowsAtCases()
+        #expect(cases.count >= 4, "the fixture is not vacuous")
+        let docData = try JSONSerialization.data(withJSONObject: Self.cases()[0]["document"] as Any, options: [.sortedKeys])
+        let tree = elementTree(testJsonToDocument(String(data: docData, encoding: .utf8)!))
+        var compared = 0
+        for marker in [true, false] {
+            for c in cases {
+                let raw = c["paths"] as? [[Int]] ?? []
+                let paths: [Any] = marker ? raw.map { ["__path__": $0] } : raw
+                let ctx: [String: Any] = [
+                    "active_document": ["element_tree": tree],
+                    "panel": ["isolation_stack": paths],
+                ]
+                let got = evaluate("tree_rows_at(active_document.element_tree, panel.isolation_stack)", context: ctx)
+                guard case .list(let items) = got else {
+                    Issue.record("\(c["name"] ?? ""): not a list: \(got)"); continue
+                }
+                let want = c["expected"] as? [[String: Any]] ?? []
+                #expect(items.count == want.count, "\(c["name"] ?? "") marker=\(marker)")
+                for (g, w) in zip(items, want) {
+                    #expect(NSDictionary(dictionary: g.value as? [String: Any] ?? [:]).isEqual(to: w),
+                            "\(c["name"] ?? ""): \(g.value) vs \(w)")
+                    compared += 1
+                }
+            }
+        }
+        #expect(compared >= 10)
+        let empty: [String: Any] = ["active_document": ["element_tree": tree]]
+        #expect(evaluate("tree_rows_at(active_document.element_tree, null)", context: empty) == .list([]))
+        #expect(evaluate("tree_rows_at(5, null)", context: empty) == .null)
+        #expect(evaluate("tree_rows_at(active_document.element_tree)", context: empty) == .null)
+    }
+
     @Test func elementTreeRowsMatchTheSharedFixture() throws {
         let cases = Self.cases()
         #expect(cases.count >= 2, "the fixture is not vacuous")
