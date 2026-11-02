@@ -17576,7 +17576,7 @@
                   "condition": "node.is_container and event.target_id != 'lp_name'",
                   "action": "enter_isolation_mode",
                   "params": {
-                    "container_id": "node.id"
+                    "container_id": "'' + as_path(node.path)"
                   }
                 },
                 {
@@ -17784,7 +17784,7 @@
                 "action": "open_layer_options",
                 "params": {
                   "mode": "edit",
-                  "layer_id": "node.id"
+                  "layer_id": "'' + as_path(node.path)"
                 },
                 "enabled_when": "node.type == 'layer'"
               },
@@ -17801,7 +17801,7 @@
                 "label": "{{if panel.isolation_stack.length > 0 then 'Exit Isolation Mode' else 'Enter Isolation Mode'}}",
                 "action": "{{if panel.isolation_stack.length > 0 then 'exit_isolation_mode' else 'enter_isolation_mode'}}",
                 "params": {
-                  "container_id": "node.id"
+                  "container_id": "'' + as_path(node.path)"
                 },
                 "enabled_when": "node.is_container or panel.isolation_stack.length > 0"
               },

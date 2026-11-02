@@ -672,7 +672,9 @@ content:
           - event: double_click
             condition: "node.is_container and event.target_id != 'lp_name'"
             action: enter_isolation_mode
-            params: { container_id: "node.id" }
+            # The row's PATH as the dotted id path_from_id reads; node.id is
+            # the element's own id, null on most elements (G6).
+            params: { container_id: "'' + as_path(node.path)" }
           - event: drag_start
             action: layers_panel_select
             params: { path: "node.path" }
@@ -798,7 +800,10 @@ content:
       context_menu:
         - label: "Options for Layer..."
           action: open_layer_options
-          params: { mode: edit, layer_id: "node.id" }
+          # The row's PATH as the dotted id path_from_id reads. node.id is the
+          # element's own id, null on an id-less layer, which made OK CREATE
+          # a layer instead of editing this one (G6).
+          params: { mode: edit, layer_id: "'' + as_path(node.path)" }
           enabled_when: "node.type == 'layer'"
         - label: "Duplicate"
           action: duplicate_layer_selection
@@ -807,7 +812,7 @@ content:
         - separator
         - label: "{{if panel.isolation_stack.length > 0 then 'Exit Isolation Mode' else 'Enter Isolation Mode'}}"
           action: "{{if panel.isolation_stack.length > 0 then 'exit_isolation_mode' else 'enter_isolation_mode'}}"
-          params: { container_id: "node.id" }
+          params: { container_id: "'' + as_path(node.path)" }
           enabled_when: "node.is_container or panel.isolation_stack.length > 0"
         - separator
         - label: "Flatten Artwork"
