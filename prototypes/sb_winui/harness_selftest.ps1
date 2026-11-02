@@ -3039,11 +3039,14 @@ Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (Conv
 # sessions, LogonUI, the reboot keys) and the rows box_windows.ps1 writes from
 # session 1, the only session that can see the desktop.
 function New-SbBoxSnap {
-    param([int]$Console = 1, [int[]]$Explorer = @(1), [bool]$LogonUI = $false,
+    param([int]$Console = 1, [int[]]$Explorer = @(1), [bool]$LogonUI = $false, [int[]]$LogonUISessions = $null,
+          [int[]]$Consent = @(),
           [string[]]$Reboot = @(), $Rows = @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=1',
                                            'TOPMOST process=explorer rect=0,1392,2560,1440 class=Shell_TrayWnd'))
-    return @{ ConsoleSession = $Console; ExplorerSessions = $Explorer; LogonUI = $LogonUI;
-              RebootPending = $Reboot; WindowRows = $Rows }
+    # -LogonUI $true is shorthand for a LogonUI in the console session.
+    $lui = if ($null -ne $LogonUISessions) { $LogonUISessions } elseif ($LogonUI) { @($Console) } else { @() }
+    return @{ ConsoleSession = $Console; ExplorerSessions = $Explorer; LogonUISessions = $lui;
+              ConsentSessions = $Consent; RebootPending = $Reboot; WindowRows = $Rows }
 }
 $boxHead = 'BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=2'
 $boxTray = 'TOPMOST process=explorer rect=0,1392,2560,1440 class=Shell_TrayWnd'
@@ -3070,6 +3073,87 @@ Test-Case 'box: an unreadable TOPMOST row is NOT RUN naming it, never skipped' {
 Test-Case 'box: no explorer in the console session is NOT RUN (no interactive user)' { Get-SbBoxReadiness (New-SbBoxSnap -Explorer @(2)) } 'NOT RUN(box: no interactive user: explorer is not running in console session 1)'
 Test-Case 'box: every reason is named, in a fixed order' {
     Get-SbBoxReadiness (New-SbBoxSnap -LogonUI $true -Reboot @('CBS RebootPending') -Rows @($boxHead, $boxTray, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) } 'NOT RUN(box: locked: LogonUI is running; reboot pending: CBS RebootPending; a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+# jas's two LOWs on #825. LOW 1: LogonUI is judged by SESSION, so a login
+# screen in another session (RDP) is not the console's lock. LOW 2: a UAC
+# prompt is drawn on the secure desktop, which a session-1 window read cannot
+# see, but consent.exe runs in the session it prompts, so it is read there.
+Test-Case 'box: a LogonUI in another session (an RDP login screen) is not the console''s lock' { Get-SbBoxReadiness (New-SbBoxSnap -LogonUISessions @(2)) } 'READY'
+Test-Case 'box: a LogonUI in the console session is locked' { Get-SbBoxReadiness (New-SbBoxSnap -LogonUISessions @(2, 1)) } 'NOT RUN(box: locked: LogonUI is running)'
+Test-Case 'box: a UAC prompt (consent.exe) in the console session is NOT RUN' { Get-SbBoxReadiness (New-SbBoxSnap -Consent @(1)) } 'NOT RUN(box: a UAC prompt is up: consent.exe)'
+Test-Case 'box: consent.exe in another session is not this console''s prompt' { Get-SbBoxReadiness (New-SbBoxSnap -Consent @(2)) } 'READY'
+
+# jas's LOW on #826: the shell launches TOPMOST, so if it outlives a failed
+# item, the stop re-read would see its own window and end the night NOT RUN,
+# though an app that will not quit is an app defect (RED). The re-read names
+# the shell to ignore; the start's read ignores nothing and stays strict.
+$boxShell = 'TOPMOST process=SbWinUi rect=0,0,1600,1000 class=WinUIDesktopWin32WindowClass'
+Test-Case 'box: the stop re-read ignores the shell''s own topmost window (an app that outlived its item stays RED)' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, $boxShell)) -IgnoreProcess @('SbWinUi') } 'READY'
+Test-Case 'box: with nothing ignored, the shell''s own topmost window is an intruder (the start stays strict)' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, $boxShell)) } 'NOT RUN(box: a topmost window is up: class=WinUIDesktopWin32WindowClass process=SbWinUi)'
+Test-Case 'box: ignoring the shell hides no other process''s window' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=3', $boxTray, $boxShell, 'TOPMOST process=PickerHost rect=0,0,2560,1440 class=Shell_SystemDim')) -IgnoreProcess @('SbWinUi') } 'NOT RUN(box: a topmost window is up: class=Shell_SystemDim process=PickerHost)'
+
+# The nightly's quiet gate: the run drives the console's real mouse, so a box
+# someone used in the last -MinIdleSeconds is NOT RUN (in use), never driven.
+# box_windows.ps1 reads the console session's last input as a BOX IDLE row.
+# The gate is opt-in: 0 (the default, an on-demand run) never asks.
+$boxIdle = @('BOX WINDOWS session=1 screen=0,0,2560,1440 topmost=1', $boxTray, 'BOX IDLE seconds=1800')
+Test-Case 'box quiet: idle past the floor is READY' { Get-SbBoxReadiness (New-SbBoxSnap -Rows $boxIdle) -MinIdleSeconds 600 } 'READY'
+Test-Case 'box quiet: input inside the floor is NOT RUN (in use), never driven' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxIdle[0], $boxTray, 'BOX IDLE seconds=42')) -MinIdleSeconds 600 } 'NOT RUN(box: in use: the last input was 42 s ago, under 600)'
+Test-Case 'box quiet: a floor with no BOX IDLE row is NOT RUN, never READY' {
+    Get-SbBoxReadiness (New-SbBoxSnap) -MinIdleSeconds 600 } 'NOT RUN(box: the window read wrote no BOX IDLE row)'
+Test-Case 'box quiet: an unreadable BOX IDLE row is NOT RUN naming it' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxIdle[0], $boxTray, 'BOX IDLE seconds=soon')) -MinIdleSeconds 600 } "NOT RUN(box: unreadable window row: 'BOX IDLE seconds=soon')"
+Test-Case 'box quiet: no floor (0) never asks, so a read without the row is READY' { Get-SbBoxReadiness (New-SbBoxSnap) -MinIdleSeconds 0 } 'READY'
+Test-Case 'box quiet: in use is named after the window findings' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Reboot @('WU RebootRequired') -Rows @($boxIdle[0], $boxTray, 'BOX IDLE seconds=5')) -MinIdleSeconds 600 } 'NOT RUN(box: reboot pending: WU RebootRequired; in use: the last input was 5 s ago, under 600)'
+
+# The nightly's verdict over one run: GREEN, RED, or NOT RUN, kept apart. NOT
+# RUN when the box was not ready at the start, or went not ready mid-run (the
+# runner re-reads the box after any failure and stops), or the run is torn.
+# RED names the counts and the first failure; a red goes to jas's queue.
+$cOk = 'E2E-CERT v1 item=a.drag verdict=CERTIFIED gaps=PASS screenshot=x date=2026-11-01'
+$cOk2 = 'E2E-CERT v1 item=b.drag verdict=CERTIFIED gaps=PASS screenshot=x date=2026-11-01'
+$cNo = 'E2E-CERT v1 item=c.drag verdict=REFUSED: the selection moved 0 px date=2026-11-01'
+$pOk = @{ Panel = 'align_panel_content'; Exit = 0 }
+$pBad = @{ Panel = 'color_panel_content'; Exit = 1 }
+# GREEN is the bare word, then a space, then the counts: the dashboard's reader
+# (seat 096a73fa6) takes `verdict=GREEN` followed by a space or the end, and a
+# parenthesis only after RED or NOT RUN.
+Test-Case 'nightly: every item certified and every panel exit 0 is GREEN, a space, then the counts' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, $cOk2) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'GREEN items=2/2 panels=1/1'
+Test-Case 'nightly: a box not ready at the start is its NOT RUN, whatever else is passed' {
+    Get-SbNightlyVerdict -Box 'NOT RUN(box: locked: LogonUI is running)' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'NOT RUN(box: locked: LogonUI is running)'
+Test-Case 'nightly: a mid-run stop is NOT RUN, never red, though items failed' {
+    Get-SbNightlyVerdict -Box 'READY' -Stop 'NOT RUN(box went not ready after item c.drag: reboot pending: WU RebootRequired)' -Items @($cOk, $cNo) -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'NOT RUN(box went not ready after item c.drag: reboot pending: WU RebootRequired)'
+Test-Case 'nightly: a refused item is RED naming the first failure' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, $cNo) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=1/2 panels=1/1; first: item c.drag REFUSED: the selection moved 0 px)'
+Test-Case 'nightly: a panel exit 1 is RED naming the panel' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk, $pBad) -PanelsWanted 2 } 'RED(items=1/1 panels=1/2; first: panel color_panel_content exit=1)'
+Test-Case 'nightly: an item with no cert line is RED, never skipped' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk, 'E2E-CERT (none) item=d.drag verdict=NO CERT LINE') -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=1/2 panels=1/1; first: item d.drag NO CERT LINE)'
+Test-Case 'nightly: fewer items than the corpus holds is NOT RUN (torn), never green' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 2 -Panels @($pOk) -PanelsWanted 1 } 'NOT RUN(torn: 1 of 2 items and 1 of 1 panels ran)'
+Test-Case 'nightly: an empty corpus is NOT RUN, never a vacuous green' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @() -ItemsWanted 0 -Panels @() -PanelsWanted 0 } 'NOT RUN(empty: the corpus has 0 items and 0 panels)'
+# The dashboard's reader takes RED( and NOT RUN( only with a BALANCED
+# parenthesis, so text from outside the verdict (an item's own verdict, a
+# window's class or process) has its parentheses turned to brackets.
+Test-Case 'nightly: an item''s unbalanced parenthesis is bracketed, so RED(...) stays balanced' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @('E2E-CERT v1 item=e.drag verdict=NOT RUN -- no PROBE row (did the hand press? keys=') -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=0/1 panels=1/1; first: item e.drag NOT RUN -- no PROBE row [did the hand press? keys=)'
+Test-Case 'box: a window class with a parenthesis is bracketed, so NOT RUN(...) stays balanced' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=odd) rect=0,0,10,10 class=Odd(Class')) } 'NOT RUN(box: a topmost window is up: class=Odd[Class process=odd])'
+Test-Case 'nightly: a build that failed is RED before any item' {
+    Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
+
+# The nightly's panel list comes from the panel specs (workspace/panels/*.yaml,
+# the top-level id), not a list typed here, so a new panel joins the run.
+Test-Case 'nightly panels: each spec''s top-level id, in order' { (Get-SbPanelIdsFromSpecs @("id: a_panel_content`nsummary: x", "# c`nid: b_panel_content")) -join ',' } 'a_panel_content,b_panel_content'
+Test-Case 'nightly panels: a nested id is not the panel''s' { Get-SbPanelIdsFromSpecs @("content:`n  id: inner`nid: top_panel_content") } 'top_panel_content'
+Test-Case 'nightly panels: a spec with no top-level id is REFUSED, never dropped' { Get-SbPanelIdsFromSpecs @("id: a_panel_content", "summary: no id") } 'REFUSED: spec 2 of 2 has no top-level id'
+
 Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state can read as a FAIL' {
     @((New-SbBoxSnap), (New-SbBoxSnap -LogonUI $true), (New-SbBoxSnap -Rows $null)) | ForEach-Object { (Get-SbBoxReadiness $_) -match '^(READY|NOT RUN\(box: .+\))$' } | Sort-Object -Unique } 'True'
 

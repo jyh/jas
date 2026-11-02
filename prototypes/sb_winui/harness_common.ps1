@@ -3815,20 +3815,111 @@ $SbRebootKeys = [ordered]@{
     'CBS RebootPending' = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
 }
 
+# Text from outside a verdict (a window's class or process, an unreadable row,
+# an item's own verdict) goes inside RED(...) or NOT RUN(...), and the
+# dashboard's reader takes those only with a BALANCED parenthesis. So its
+# parentheses become brackets.
+function ConvertTo-SbParenSafe([string]$Text) { return $Text.Replace('(', '[').Replace(')', ']') }
+
 # 'READY', or 'NOT RUN(box: <reason>; ...)' naming every reason in a fixed
-# order: no user, locked, reboot pending, then the window read's findings.
-function Get-SbBoxReadiness($Snapshot) {
+# order: no user, locked, a UAC prompt, reboot pending, the window read's
+# findings, then the quiet gate. -MinIdleSeconds is the nightly's: the run drives the console's
+# real mouse, so input within that many seconds means someone is at the box.
+# 0 (an on-demand run, started by someone who knows) never asks.
+# -IgnoreProcess is the nightly's stop re-read (jas's LOW on #826): the shell
+# launches topmost, so a shell that outlived a failed item is that item's RED,
+# never the box's NOT RUN. The start's read passes nothing and stays strict.
+function Get-SbBoxReadiness {
+    param($Snapshot, [int]$MinIdleSeconds = 0, [string[]]$IgnoreProcess = @())
     $why = New-Object System.Collections.Generic.List[string]
     $console = [int]$Snapshot.ConsoleSession
     if (@($Snapshot.ExplorerSessions) -notcontains $console) {
         $why.Add("no interactive user: explorer is not running in console session $console")
     }
-    if ($Snapshot.LogonUI) { $why.Add('locked: LogonUI is running') }
+    # By session (jas's LOW 1 on #825): a LogonUI in another session, an RDP
+    # login screen, is not the console's lock.
+    if (@($Snapshot.LogonUISessions) -contains $console) { $why.Add('locked: LogonUI is running') }
+    # A UAC prompt is drawn on the secure desktop, which the session-1 window
+    # read cannot see (jas's LOW 2), but consent.exe runs in the session it
+    # prompts, so it is read there.
+    if (@($Snapshot.ConsentSessions) -contains $console) { $why.Add('a UAC prompt is up: consent.exe') }
     $reboot = @($Snapshot.RebootPending | Where-Object { $_ })
     if ($reboot.Count -gt 0) { $why.Add("reboot pending: $($reboot -join ', ')") }
-    foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console)) { $why.Add($r) }
+    foreach ($r in @(Get-SbBoxWindowReasons $Snapshot.WindowRows $console $IgnoreProcess)) { $why.Add($r) }
+    if ($MinIdleSeconds -gt 0) {
+        $idle = @(@($Snapshot.WindowRows) | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -cmatch '^BOX IDLE ' })
+        if ($idle.Count -eq 0) { $why.Add('the window read wrote no BOX IDLE row') }
+        elseif ($idle[0] -cnotmatch '^BOX IDLE seconds=(\d+)$') { $why.Add("unreadable window row: '$(ConvertTo-SbParenSafe $idle[0])'") }
+        elseif ([long]$Matches[1] -lt $MinIdleSeconds) { $why.Add("in use: the last input was $($Matches[1]) s ago, under $MinIdleSeconds") }
+    }
     if ($why.Count -eq 0) { return 'READY' }
     return "NOT RUN(box: $($why -join '; '))"
+}
+
+# ---------------------------------------------------------------------------
+# The nightly run's verdict (O97; nightly.ps1)
+# ---------------------------------------------------------------------------
+# One run reads GREEN, RED or NOT RUN, and the three are kept apart because
+# they go to different places: RED to jas's queue, NOT RUN reported and paged
+# to no one. NOT RUN when:
+# * the box was not ready at the start (-Box);
+# * the box went not ready mid-run (-Stop: the runner re-reads the box after
+#   any failure and stops there);
+# * the run is torn (fewer results than the corpus holds), or the corpus is empty.
+# A build failure is RED: main that does not build on Windows is jas's to know.
+function Get-SbNightlyVerdict {
+    param(
+        [string]$Box,
+        [string]$Stop = '',
+        [string]$Build = '',
+        [string[]]$Items = @(),
+        [int]$ItemsWanted,
+        $Panels = @(),
+        [int]$PanelsWanted
+    )
+    if ($Box -ne 'READY') { return $Box }
+    if ($Stop) { return $Stop }
+    if ($Build) { return "RED(build: $Build)" }
+    if ($ItemsWanted + $PanelsWanted -eq 0) { return 'NOT RUN(empty: the corpus has 0 items and 0 panels)' }
+    $items = @($Items | Where-Object { $_ })
+    $panels = @($Panels | Where-Object { $null -ne $_ })
+    if ($items.Count -lt $ItemsWanted -or $panels.Count -lt $PanelsWanted) {
+        return "NOT RUN(torn: $($items.Count) of $ItemsWanted items and $($panels.Count) of $PanelsWanted panels ran)"
+    }
+    $certified = 0
+    $first = ''
+    foreach ($line in $items) {
+        if ($line -cmatch ' verdict=CERTIFIED( |$)') { $certified++; continue }
+        if (-not $first) {
+            $name = if ($line -cmatch ' item=(\S+)') { $Matches[1] } else { '(unnamed)' }
+            $v = if ($line -cmatch ' verdict=(.+?)(?= gaps=| screenshot=| date=|$)') { $Matches[1] } else { '(no verdict)' }
+            $first = "item $(ConvertTo-SbParenSafe $name) $(ConvertTo-SbParenSafe $v)"
+        }
+    }
+    $ok = 0
+    foreach ($p in $panels) {
+        if ([int]$p.Exit -eq 0) { $ok++; continue }
+        if (-not $first) { $first = "panel $($p.Panel) exit=$($p.Exit)" }
+    }
+    $counts = "items=$certified/$($items.Count) panels=$ok/$($panels.Count)"
+    # GREEN takes no parenthesis: the word, a space, the counts (the dashboard's
+    # reader takes a parenthesis only after RED or NOT RUN).
+    if (-not $first) { return "GREEN $counts" }
+    return "RED($counts; first: $first)"
+}
+
+# The panel ids the nightly walks, from the panel specs' texts (in file order):
+# each spec's top-level `id:`. A spec without one is REFUSED, never dropped,
+# so a panel can never leave the run silently.
+function Get-SbPanelIdsFromSpecs([string[]]$Texts) {
+    $ids = @()
+    for ($i = 0; $i -lt $Texts.Count; $i++) {
+        $hit = @(($Texts[$i] -split "`r?`n") | Where-Object { $_ -cmatch '^id:\s*(\S+)\s*$' } | Select-Object -First 1)
+        if ($hit.Count -eq 0) { return "REFUSED: spec $($i + 1) of $($Texts.Count) has no top-level id" }
+        $null = $hit[0] -cmatch '^id:\s*(\S+)\s*$'
+        $ids += $Matches[1]
+    }
+    return $ids
 }
 
 # The window half of the verdict, over the rows box_windows.ps1 writes:
@@ -3839,13 +3930,13 @@ function Get-SbBoxReadiness($Snapshot) {
 # TOPMOST rows it counts. An unreadable row is named, never skipped. A topmost
 # window that is not the shell's and overlaps the screen is an intruder; one
 # wholly off it (a minimized window sits at -32000) cannot take a press.
-function Get-SbBoxWindowReasons($Rows, [int]$Console) {
+function Get-SbBoxWindowReasons($Rows, [int]$Console, [string[]]$IgnoreProcess = @()) {
     $rows = @($Rows | Where-Object { $null -ne $_ } | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -ne '' })
     $head = @($rows | Where-Object { $_ -cmatch '^BOX WINDOWS ' })
     if ($head.Count -eq 0) { return @('the session-1 window read wrote no BOX WINDOWS row') }
     if ($head.Count -gt 1) { return @("the window read is torn: $($head.Count) BOX WINDOWS rows") }
     if ($head[0] -cnotmatch '^BOX WINDOWS session=(\d+) screen=(-?\d+),(-?\d+),(-?\d+),(-?\d+) topmost=(\d+)$') {
-        return @("unreadable window row: '$($head[0])'")
+        return @("unreadable window row: '$(ConvertTo-SbParenSafe $head[0])'")
     }
     $session = [int]$Matches[1]
     $sL = [int]$Matches[2]; $sT = [int]$Matches[3]; $sR = [int]$Matches[4]; $sB = [int]$Matches[5]
@@ -3856,14 +3947,15 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console) {
     $out = @()
     foreach ($row in $tops) {
         if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) class=(.+)$') {
-            $out += "unreadable window row: '$row'"
+            $out += "unreadable window row: '$(ConvertTo-SbParenSafe $row)'"
             continue
         }
         $proc = $Matches[1]; $cls = $Matches[6]
         $wL = [int]$Matches[2]; $wT = [int]$Matches[3]; $wR = [int]$Matches[4]; $wB = [int]$Matches[5]
         if ($SbShellTopmostClasses -ccontains $cls) { continue }
+        if (@($IgnoreProcess) -contains $proc) { continue }
         if ($wR -le $sL -or $wL -ge $sR -or $wB -le $sT -or $wT -ge $sB) { continue }
-        $out += "a topmost window is up: class=$cls process=$proc"
+        $out += "a topmost window is up: class=$(ConvertTo-SbParenSafe $cls) process=$(ConvertTo-SbParenSafe $proc)"
     }
     return $out
 }
@@ -3890,7 +3982,8 @@ public static class SbBoxNative {
     }
     $console = [int][SbBoxNative]::WTSGetActiveConsoleSessionId()
     $explorer = @(Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
-    $logonUi = [bool](Get-Process LogonUI -ErrorAction SilentlyContinue)
+    $logonUi = @(Get-Process LogonUI -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
+    $consent = @(Get-Process consent -ErrorAction SilentlyContinue | ForEach-Object { $_.SessionId })
     $reboot = @($RebootKeys.Keys | Where-Object { Test-Path -LiteralPath $RebootKeys[$_] })
 
     Remove-Item -LiteralPath $WindowsOut -ErrorAction SilentlyContinue
@@ -3913,6 +4006,6 @@ public static class SbBoxNative {
     } finally {
         Remove-SbTask $task
     }
-    return @{ ConsoleSession = $console; ExplorerSessions = $explorer; LogonUI = $logonUi;
-              RebootPending = $reboot; WindowRows = $rows }
+    return @{ ConsoleSession = $console; ExplorerSessions = $explorer; LogonUISessions = $logonUi;
+              ConsentSessions = $consent; RebootPending = $reboot; WindowRows = $rows }
 }
