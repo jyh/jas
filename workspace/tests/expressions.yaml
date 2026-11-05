@@ -675,6 +675,25 @@ tests:
     type: number
     note: "filter keeps [3, 4]; fold sums to 7"
 
+  - expr: "reverse([1, 2, 3])[0]"
+    expected: 3
+    type: number
+    note: "reverse: the last item comes first (SCHEMA.md, List functions)"
+
+  - expr: "fold(reverse([1, 2, 3]), 0, fun (acc, x) -> acc * 10 + x)"
+    expected: 321
+    type: number
+    note: "reverse keeps every item, in reverse order"
+
+  - expr: "reverse([]).length"
+    expected: 0
+    type: number
+
+  - expr: "reverse(5) == null"
+    expected: true
+    type: bool
+    note: "reverse of a non-list is null"
+
   # Misuse of the higher-order builtins returns null — the same null-on-misuse
   # convention every other builtin follows (grayscale, path, ...). Pins finding
   # #19: all / any wrongly returned a bool on the arity / type-mismatch branch

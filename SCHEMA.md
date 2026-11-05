@@ -1806,6 +1806,20 @@ expression language are pinned across the active interpreters (Rust, Swift)
 plus the `workspace_interpreter/` reference; the frozen ports hold the
 tag-pinned corpus (`POLICY.md` §1).
 
+**Path, tree and selection functions.** `tree_row_range` is pinned by the
+conformance corpus. `path_child`, `selection_contains` and `selection_empty`
+read the live document, so the corpus does not reach them. Each active port's
+own arms pin those three, and the reference agrees except where the table says
+otherwise. (`as_path` and `tree_rows_at` are under "`node.*` — Row Template Scope
+Variables".)
+
+| Function | Returns | Description |
+|---|---|---|
+| `path_child(p, i)` | `path` | The path `p` with the child index `i` appended. `null` unless `p` is a PATH and `i` a number `≥ 0`. (The reference does not refuse a negative `i`.) |
+| `selection_contains(p)` | `bool` | Whether the path `p` is in the document's element selection; `false` for a non-path. |
+| `selection_empty()` | `bool` | Whether the document's element selection is empty. |
+| `tree_row_range(rows, from, to)` | `list` | The paths of the rows of `rows` from the row at `from` to the row at `to`, inclusive, in ROW order whichever end comes first, as path markers. Each end is read as `as_path` reads it. The empty list when either end is not a row. With a fourth argument, the element tree's full row list, a row in the range marked `collapsed` brings every row under it from that list, right after it, in its order (selecting a collapsed group includes its descendants). `null` unless there are 3 or 4 arguments and `rows` is a list. |
+
 #### Comparison Operators
 
 **`==` and `!=`** — strict typed equality.

@@ -798,6 +798,26 @@
     "type": "number"
   },
   {
+    "expr": "reverse([1, 2, 3])[0]",
+    "expected": 3,
+    "type": "number"
+  },
+  {
+    "expr": "fold(reverse([1, 2, 3]), 0, fun (acc, x) -> acc * 10 + x)",
+    "expected": 321,
+    "type": "number"
+  },
+  {
+    "expr": "reverse([]).length",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "reverse(5) == null",
+    "expected": true,
+    "type": "bool"
+  },
+  {
     "expr": "all([true, false])",
     "expected": null,
     "type": "null"

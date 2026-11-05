@@ -158,8 +158,7 @@ UNDEFINED_IN_SCHEMA = frozenset({
     # takes a map, Swift parses a JSON STRING, Rust defines no `keys` at all.
     # No yaml calls it. It is defined here only once the ports agree.
     "keys",
-    "hit_test", "hit_test_deep", "path_child", "selection_contains",
-    "selection_empty", "tree_row_range",
+    "hit_test", "hit_test_deep",
 })
 
 
