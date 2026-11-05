@@ -907,6 +907,15 @@ isolation breadcrumb (`lp_breadcrumb`) uses it as its foreach source over
 `panel.isolation_stack`, so each segment draws the row of its own level,
 outermost first (`rows_at_cases` in `test_fixtures/layers/element_tree.json`).
 
+`as_path(v)` turns a row's `node.path` (a list) into a PATH value. It accepts
+a PATH, a list of non-negative whole numbers, or a path marker. It returns
+`null` for anything else, including a list with a negative or fractional
+entry, or a string. The empty list gives the root path, `path()`. A path
+converts to its dotted string with `'' + as_path(p)` (`[1, 0]` reads `1.0`).
+That string is the form `path_from_id` resolves, so it is how a row action
+names its element (the `as_path` cases in
+`test_fixtures/expressions/conformance.json`).
+
 Within `do` (or `row_template`), `behavior`, and `context_menu`, the following
 variables are available for the current row's tree node:
 
