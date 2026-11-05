@@ -64,6 +64,20 @@ struct PanelWidgetEvents {
 
     /// Click a button or icon button (WIDGET_EVENTS.md, "Clicking a button").
     /// `modifiers` are the click's `shift`/`ctrl`/`meta`/`alt`.
+    /// Any node's declared entries for `event` (``WidgetEvent/behaviorEvent``),
+    /// in this route's scope: a Layers row's container reached by a script's
+    /// `row` step, with the row's `node` in ``scope``.
+    @discardableResult
+    func behavior(_ widget: [String: Any], event: String,
+                  modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
+        run { host, _, ws in
+            WidgetEvent.behaviorEvent(widget: widget, event: event, store: model.stateStore,
+                                      modifiers: modifiers, actions: ws?.actions(),
+                                      dialogs: ws?.dialogs(), platformEffects: platformEffects,
+                                      model: model, host: host)
+        }
+    }
+
     @discardableResult
     func click(_ widget: [String: Any], modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
         run { host, panel, ws in

@@ -195,6 +195,36 @@ enum WidgetEvent {
 
     /// The three text-entry events a `text_input` takes besides its commit
     /// (the reference's `TEXT_ENTRY_EVENTS`).
+    /// Any node's declared `behavior:` entries for `event`, run as ``click``
+    /// runs a click kind's: a `condition` reads `event.shift/alt/meta/ctrl`,
+    /// and one whose condition is false does not run. It is the route for a
+    /// node that is NOT a click kind, a Layers row's container, say, which
+    /// the level-1 input-script runner reaches by a `row` step (TESTING.md
+    /// section 6; the Rust engine's `run_widget_behavior` click path). A
+    /// node declaring no entry for `event` is refused `wrongEvent`.
+    @discardableResult
+    static func behaviorEvent(
+        widget: [String: Any], event: String, store: StateStore,
+        modifiers: [String: Any] = [:],
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        let owners = declared(widget, events: [event])
+        guard !owners.isEmpty else {
+            return Result(outcome: "refused", reason: wrongEvent)
+        }
+        var mods: [String: Any] = [:]
+        for k in clickModifiers { mods[k] = (modifiers[k] as? Bool) ?? false }
+        let ran = runBehaviors(owners, value: nil, store: store, actions: actions,
+                               dialogs: dialogs, platformEffects: platformEffects,
+                               model: model, host: host, event: mods)
+        return Result(outcome: ran > 0 ? "committed" : "inert", behaviorsRun: ran)
+    }
+
     static let textEntryEvents = ["input", "blur", "keydown"]
 
     /// Deliver `input`, `keydown` or `blur` to a `text_input`: the reference's
