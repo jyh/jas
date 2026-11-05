@@ -617,8 +617,11 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         out.push(json!({"step": i, "read": "panel", "panel": pid,
                                         "value": canonical_panel_value(&Value::Object(state))}));
                     }
-                    "tree" if st.get("drawn_rows").is_some() => {
-                        out.push(json!({"step": i, "read": "tree", "value": "NOT APPLICABLE (drawn_rows is level 2 only)"}));
+                    // Form (e): `read: tree` reads `drawn_rows`, the rows the
+                    // tree DRAWS in its visible area, which only a level-2
+                    // driver can see.
+                    "tree" => {
+                        out.push(json!({"step": i, "read": "tree", "value": "NOT APPLICABLE (read: tree is level 2 only)"}));
                     }
                     other => {
                         refuse(&mut out, format!("read: {other} is not delivered by this runner"));

@@ -7581,3 +7581,401 @@ private func wireUnhex(_ s: String) -> Data {
     }
     #expect(resolved >= 10, "positive control: only \(resolved) cases resolved to an action")
 }
+
+// MARK: - THE §6 PANEL FORMS (O96 72(b), Swift half; Rust first in `ffi_script_replay::replay_forms`)
+//
+// `row`, the modifiers on a panel step, `double_click` (a click, then the
+// double), a key after a panel step, `read: panel`, reads at any step, and
+// `app_state.panels`. Every read-back in step order; a step that changes
+// nothing is recorded `unchanged`, a refusal ends the replay and keeps the
+// reads before it. A `row` step's event BUBBLES to the nearest node on its path
+// that declares it (TESTING.md section 6), exactly as the Rust runner's.
+
+/// A path from a row item, a plain index list or a `__path__` marker.
+private func formsPath(_ v: Any?) -> [Int]? {
+    let v = (v as? [String: Any])?["__path__"] ?? v
+    guard let a = v as? [Any] else { return nil }
+    var out: [Int] = []
+    for x in a {
+        guard let n = x as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.intValue >= 0,
+              Double(n.intValue) == n.doubleValue else { return nil }
+        out.append(n.intValue)
+    }
+    return out
+}
+
+/// The node an event on `widget` in row `row` goes to, and the scope it runs
+/// in: the rows come from the enclosing `foreach.source`, evaluated in `scope`
+/// by the app's evaluator; the event bubbles to the nearest node on the path,
+/// the widget first, that declares it. `bubbledTo` names that node when it is
+/// not the widget. Refusals mirror the Rust runner's, by name.
+private func formsRowTarget(_ content: Any?, widget: String, event: String, row: [Int],
+                            scope: [String: Any])
+    -> Result<(node: [String: Any], scope: [String: Any], bubbledTo: String?), FormsRefusal> {
+    func contains(_ n: Any?) -> Bool {
+        guard let d = n as? [String: Any] else { return false }
+        if d["id"] as? String == widget { return true }
+        for k in ["children", "do"] {
+            if let a = d[k] as? [Any], a.contains(where: contains) { return true }
+            if let c = d[k] as? [String: Any], contains(c) { return true }
+        }
+        return false
+    }
+    var chain: [([String: Any], [String: Any])] = []
+    var repeats = 0
+    var node = content as? [String: Any] ?? [:]
+    var sc = scope
+    while true {
+        chain.append((node, sc))
+        if node["id"] as? String == widget { break }
+        if let spec = node["foreach"] as? [String: Any], let template = node["do"] as? [String: Any] {
+            guard contains(template) else { return .failure(FormsRefusal("widget `\(widget)` is not in the panel")) }
+            repeats += 1
+            let varName = spec["as"] as? String ?? "item"
+            var items: [Any] = []
+            if case .list(let arr) = evaluate(spec["source"] as? String ?? "", context: sc) {
+                items = arr.map { $0.value }
+            }
+            let hits = items.indices.filter { formsPath(((items[$0] as? [String: Any]) ?? [:])["path"]) == row }
+            guard hits.count == 1 else {
+                return .failure(FormsRefusal("row \(row) is \(hits.count) row(s) of `\(spec["source"] as? String ?? "?")`, not one"))
+            }
+            var data = items[hits[0]] as? [String: Any] ?? ["_value": items[hits[0]]]
+            data["_index"] = hits[0]
+            sc[varName] = data
+            node = template
+            continue
+        }
+        guard let next = (node["children"] as? [Any])?.compactMap({ $0 as? [String: Any] }).first(where: contains) else {
+            return .failure(FormsRefusal("widget `\(widget)` is not in the panel"))
+        }
+        node = next
+    }
+    if repeats == 0 { return .failure(FormsRefusal("`row` on `\(widget)`, which no foreach repeats")) }
+    if repeats > 1 { return .failure(FormsRefusal("`\(widget)` sits under \(repeats) foreach repeats; that address is `at`, not delivered")) }
+    func declares(_ n: [String: Any]) -> Bool {
+        ((n["behavior"] as? [Any]) ?? []).contains { (($0 as? [String: Any])?["event"] as? String ?? "click") == event }
+    }
+    guard let at = chain.lastIndex(where: { declares($0.0) }) else {
+        return .failure(FormsRefusal("no node on `\(widget)`'s path in row \(row) declares `\(event)`"))
+    }
+    let target = chain[at]
+    let bubbled = at == chain.count - 1 ? nil : ((target.0["id"] as? String) ?? "the row's container")
+    // The scope is the innermost one: every row binding the walk made.
+    return .success((target.0, chain.last!.1, bubbled))
+}
+
+private struct FormsRefusal: Error { let why: String; init(_ w: String) { why = w } }
+
+/// A panel's declared `state:` keys from the store, canonical: paths as index
+/// arrays at any depth. The panel is seeded with its defaults first, as the
+/// dock opens it.
+private func formsPanelState(_ pid: String, model: Model) -> [String: Any]? {
+    guard let ws = WorkspaceData.load(), ws.panel(pid) != nil else { return nil }
+    let defaults = ws.panelStateDefaults(pid)
+    if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: defaults) }
+    func canon(_ v: Any?) -> Any {
+        if let d = v as? [String: Any] {
+            if d.count == 1, let p = d["__path__"] { return canon(p) }
+            return d.mapValues { canon($0) }
+        }
+        if let a = v as? [Any] { return a.map { canon($0) } }
+        return v ?? NSNull()
+    }
+    var out: [String: Any] = [:]
+    for k in defaults.keys { out[k] = canon(model.stateStore.getPanel(pid, k)) }
+    return out
+}
+
+/// Replay `script` with the §6 panel forms. Mirrors Rust `replay_forms`.
+private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], FormsRefusal> {
+    guard let steps = script["steps"] as? [[String: Any]] else { return .failure(FormsRefusal("a script has steps")) }
+    var seeds: [(String, String, Any)] = []
+    if let app = script["app_state"] {
+        guard let app = app as? [String: Any] else { return .failure(FormsRefusal("app_state is not an object")) }
+        for (k, v) in app {
+            guard k == "panels" else {
+                return .failure(FormsRefusal("app_state.\(k) is not a ruled form; seed a panel's declared state as app_state.panels.<content id>.<key>"))
+            }
+            for (pid, keys) in (v as? [String: Any]) ?? [:] {
+                let declared = WorkspaceData.load()?.panelStateDefaults(pid) ?? [:]
+                for (key, val) in (keys as? [String: Any]) ?? [:] {
+                    guard declared[key] != nil else {
+                        return .failure(FormsRefusal("app_state.panels.\(pid).\(key): UndeclaredPanelKey \(pid).\(key)"))
+                    }
+                    // In a list, an index array is a PATH (the ruled form).
+                    let seeded: Any = (val as? [Any]).map { items in
+                        items.map { item -> Any in formsPath(item).map { p in ["__path__": p] as Any } ?? item }
+                    } ?? val
+                    seeds.append((pid, key, seeded))
+                }
+            }
+        }
+    }
+    var out: [[String: Any]] = []
+    var stopped = false
+    var focus: String? = nil
+    // The focus is a fact of step ORDER (a panel step takes it, a pointer or
+    // menu step gives it to the canvas), so a key with no panel focus goes to
+    // the gesture runner as a canvas key, as the Rust runner sends it.
+    var events: [[String: Any]] = [["kind": "script_step", "index": -1, "step": [:] as [String: Any]]]
+    var focused = false
+    for (i, st) in steps.enumerated() {
+        if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+            focused = false
+            events.append(["kind": "script_step", "index": i, "step": ["__pointer": true]])
+            events.append(st)
+        } else if st["key"] != nil, !focused {
+            if (st["meta"] as? Bool) ?? false {
+                events.append(["kind": "script_step", "index": i, "step": ["__refuse": "meta on a key the canvas route does not take"]])
+                continue
+            }
+            var ev: [String: Any] = ["kind": "key", "key": st["key"]!]
+            for m in ["ctrl", "shift", "alt"] { if let v = st[m] { ev[m] = v } }
+            events.append(ev)
+        } else {
+            if st["panel"] != nil { focused = true }
+            if st["menu"] != nil { focused = false }
+            events.append(["kind": "script_step", "index": i, "step": st])
+        }
+    }
+    let tc: [String: Any] = ["name": script["item"] ?? "forms", "setup_svg": script["setup_svg"]!,
+                             "tool": script["tool"]!, "app_state": [:] as [String: Any], "events": events]
+    _ = runGestureModel(tc, opening: true) { ev, model in
+        let i = ev["index"] as! Int
+        let st = ev["step"] as! [String: Any]
+        if stopped { return }
+        func refuse(_ why: String) { out.append(["step": i, "refused": why]); stopped = true }
+        if i == -1 {
+            for (pid, key, val) in seeds {
+                if !model.stateStore.hasPanel(pid) {
+                    model.stateStore.initPanel(pid, defaults: WorkspaceData.load()!.panelStateDefaults(pid))
+                }
+                model.stateStore.setPanel(pid, key, val)
+            }
+            return
+        }
+        if st["__pointer"] != nil { focus = nil; return }
+        if let why = st["__refuse"] as? String { return refuse(why) }
+        let flag = { (k: String) in (st[k] as? Bool) ?? false }
+        if let kind = st["read"] as? String {
+            switch kind {
+            case "document":
+                out.append(["step": i, "read": "document", "value": documentToTestJson(model.document)])
+            case "panel":
+                let pid = st["panel"] as? String ?? ""
+                guard let state = formsPanelState(pid, model: model) else { return refuse("UnknownPanel \(pid)") }
+                out.append(["step": i, "read": "panel", "panel": pid, "value": state])
+            case "tree":
+                // Form (e): the rows the tree DRAWS, level 2 only.
+                out.append(["step": i, "read": "tree", "value": "NOT APPLICABLE (read: tree is level 2 only)"])
+            default:
+                refuse("read: \(kind) is not delivered by this runner")
+            }
+        } else if let key = st["key"] as? String {
+            guard let pid = focus else {
+                return refuse("a key with no panel focus is a gesture key; this runner takes keys after a panel step only")
+            }
+            guard pid == "layers_panel_content" else { return refuse("no panel key route for \(pid)") }
+            let chord = KeyChord(key: key, ctrl: flag("ctrl") || flag("meta"), shift: flag("shift"), alt: flag("alt"))
+            if !LayersPanel.treeKey(chord, model: model) { refuse("UnboundPanelKey \(pid): \(key)") }
+        } else if let menuId = st["menu"] as? String {
+            focus = nil
+            if !runScriptMenuStep(menuId, model: model) { refuse("the menu item did not run") }
+        } else if let pid = st["panel"] as? String {
+            guard let widget = st["widget"] as? String, let event = st["event"] as? String else {
+                return refuse("a panel step names a widget and an event")
+            }
+            if flag("meta") { return refuse("meta on a panel step is refused (TESTING.md section 6)") }
+            if st["at"] != nil { return refuse("`at` is not delivered by this runner") }
+            guard let row = st["row"] else {
+                // Addressed by id: the existing level-1 route, which refuses a
+                // repeated widget as the engine does.
+                if !runScriptPanelStep(st, model: model) { refuse("the panel act did not run (NotAddressable or refused)") }
+                focus = pid
+                return
+            }
+            guard let rowPath = formsPath(row) else { return refuse("row \(row) is not a path") }
+            let ws = WorkspaceData.load()!
+            guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
+            if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+            let mods: [String: Any] = ["shift": flag("shift"), "alt": flag("alt"), "ctrl": flag("ctrl"), "meta": false]
+            for name in event == "double_click" ? ["click", "double_click"] : [event] {
+                let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+                switch formsRowTarget(panel["content"], widget: widget, event: name, row: rowPath, scope: scope) {
+                case .failure(let r): return refuse(r.why)
+                case .success(let t):
+                    if let to = t.bubbledTo { out.append(["step": i, "event": name, "bubbled_to": to]) }
+                    let route = PanelWidgetEvents(model: model, panelId: pid, scope: t.scope)
+                    let kind = t.node["type"] as? String ?? ""
+                    let result = WidgetEvent.clickKinds.contains(kind) && name == "click"
+                        ? route.click(t.node, modifiers: mods) : route.behavior(t.node, event: name, modifiers: mods)
+                    switch result.outcome {
+                    case "committed": break
+                    case "inert": out.append(["step": i, "unchanged": true])
+                    default: return refuse("\(result.outcome): \(result.reason ?? "")")
+                    }
+                }
+            }
+            focus = pid
+        } else {
+            let form = ["dialog", "context_menu", "panel_menu"].first { st[$0] != nil }
+            refuse(form.map { "the `\($0)` form is not delivered by this runner" } ?? "\(st) is not a step this runner knows")
+        }
+    }
+    return .success(out)
+}
+
+private let formsLayers = "layers_panel_content"
+
+private func formsLayersScript(_ steps: [[String: Any]], appState: [String: Any]? = nil) -> [String: Any] {
+    var s: [String: Any] = ["item": "forms.arm", "setup_svg": "complex_document.svg", "tool": "selection", "steps": steps]
+    if let a = appState { s["app_state"] = a }
+    return s
+}
+
+private func formsClickRow(_ row: [Int], _ mods: [String] = []) -> [String: Any] {
+    var st: [String: Any] = ["panel": formsLayers, "widget": "lp_name", "row": row, "event": "click"]
+    for m in mods { st[m] = true }
+    return st
+}
+
+private let formsReadLayers: [String: Any] = ["read": "panel", "panel": formsLayers]
+
+private func formsPanelReads(_ out: [[String: Any]]) -> [[String: Any]] {
+    out.filter { $0["read"] as? String == "panel" }.compactMap { $0["value"] as? [String: Any] }
+}
+
+private func formsRefusal(_ out: [[String: Any]]) -> String? {
+    out.compactMap { $0["refused"] as? String }.first
+}
+
+private func formsSelection(_ read: [String: Any]) -> [[Int]] {
+    ((read["layers_panel_selection"] as? [Any]) ?? []).compactMap { formsPath($0) }
+}
+
+private func formsRun(_ script: [String: Any]) -> [[String: Any]] {
+    switch replayForms(script) {
+    case .success(let out): return out
+    case .failure(let r): Issue.record("did not start: \(r.why)"); return []
+    }
+}
+
+/// The tree's row paths in draw order, from the app's own `element_tree`.
+private func formsTreeOrder() -> [[Int]] {
+    let model = Model(document: documentForOpen(readFixture("svg/complex_document.svg")))
+    let ws = WorkspaceData.load()!
+    let scope = buildPanelBodyContext(ws: ws, model: model, contentId: formsLayers, opacityPanel: OpacityPanelState())
+    let rows = ((scope["active_document"] as? [String: Any])?["element_tree"] as? [Any]) ?? []
+    return rows.compactMap { formsPath(($0 as? [String: Any])?["path"]) }
+}
+
+@Test func formsARowClickOnTheNameSelectsThatRowByBubbling() {
+    for row in [[0, 1], [1]] {
+        let out = formsRun(formsLayersScript([formsClickRow(row), formsReadLayers]))
+        #expect(formsRefusal(out) == nil, "\(out)")
+        #expect(out.contains { $0["bubbled_to"] is String }, "lp_name declares no click: \(out)")
+        #expect(formsPanelReads(out).first.map(formsSelection) == [row], "\(out)")
+    }
+}
+
+@Test func formsAShiftClickExtendsAndAPlainClickAfterItReplaces() {
+    let out = formsRun(formsLayersScript([
+        formsClickRow([0, 1]), formsClickRow([0, 0], ["shift"]), formsReadLayers,
+        formsClickRow([1]), formsReadLayers,
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let reads = formsPanelReads(out)
+    #expect(reads.count == 2)
+    let extended = reads.first.map(formsSelection) ?? []
+    #expect(extended.count >= 2 && extended.contains([0, 1]) && extended.contains([0, 0]), "Shift extends: \(extended)")
+    #expect(reads.last.map(formsSelection) == [[1]], "a plain click replaces")
+}
+
+@Test func formsAnEyeClickRunsOnTheEyeWithoutBubbling() {
+    let out = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_eye", "row": [1], "event": "click"], formsReadLayers, ["read": "document"],
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    #expect(!out.contains { $0["bubbled_to"] is String }, "\(out)")
+    #expect(out.compactMap { $0["read"] as? String } == ["panel", "document"])
+}
+
+@Test func formsAKeyAfterAPanelStepGoesToThePanelsKeyboardRows() {
+    let order = formsTreeOrder()
+    #expect(order.count >= 7, "\(order)")
+    guard let at = order.firstIndex(of: [0, 1]), at + 1 < order.count else {
+        Issue.record("[0,1] has no row below it: \(order)"); return
+    }
+    let out = formsRun(formsLayersScript([formsClickRow([0, 1]), ["key": "ArrowDown"], formsReadLayers]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    #expect(formsPanelReads(out).first.map(formsSelection) == [order[at + 1]], "\(out)")
+}
+
+@Test func formsReadPanelReadsExactlyTheDeclaredStateKeys() {
+    let declared = WorkspaceData.load()!.panelStateDefaults(formsLayers).keys.sorted()
+    #expect(declared.contains("layers_panel_selection"))
+    let out = formsRun(formsLayersScript([formsClickRow([0, 2]), formsReadLayers]))
+    let read = formsPanelReads(out).first ?? [:]
+    #expect(read.keys.sorted() == declared)
+    let bytes = (try? JSONSerialization.data(withJSONObject: read, options: [.sortedKeys])) ?? Data()
+    #expect(!String(decoding: bytes, as: UTF8.self).contains("__path__"), "a path reads as an index array")
+}
+
+@Test func formsAppStateSeedsADeclaredPanelKeyAsPaths() {
+    let seeded = formsRun(formsLayersScript([formsReadLayers],
+        appState: ["panels": [formsLayers: ["collapsed_paths": [[0]]]]]))
+    #expect(((formsPanelReads(seeded).first?["collapsed_paths"] as? [Any]) ?? []).compactMap(formsPath) == [[0]], "\(seeded)")
+    let control = formsRun(formsLayersScript([formsReadLayers]))
+    #expect(((formsPanelReads(control).first?["collapsed_paths"] as? [Any]) ?? []).isEmpty, "\(control)")
+}
+
+@Test func formsEachUnrunnableFormIsRefusedByName() {
+    if case .failure(let r) = replayForms(formsLayersScript([formsReadLayers], appState: ["collapsed_paths": [] as [Any]])) {
+        #expect(r.why.contains("app_state.collapsed_paths is not a ruled form"))
+    } else { Issue.record("a top-level app_state key started") }
+    if case .failure(let r) = replayForms(formsLayersScript([formsReadLayers], appState: ["panels": [formsLayers: ["no_such_key": 1]]])) {
+        #expect(r.why.contains("UndeclaredPanelKey"))
+    } else { Issue.record("an undeclared key started") }
+    let cases: [([String: Any], String)] = [
+        (formsClickRow([9]), "0 row(s)"),
+        (formsClickRow([0, 1], ["meta"]), "meta on a panel step"),
+        (["panel": formsLayers, "widget": "lp_search_input", "row": [0], "event": "click"], "which no foreach repeats"),
+        (["panel": formsLayers, "widget": "lp_name", "event": "click"], "NotAddressable"),
+        (["panel": formsLayers, "widget": "lp_name", "at": [0], "event": "click"], "`at` is not delivered"),
+        (["context_menu": "x", "params": [:] as [String: Any]], "the `context_menu` form is not delivered"),
+        (["read": "panel_menu", "panel": formsLayers], "read: panel_menu is not delivered"),
+    ]
+    for (step, needle) in cases {
+        let out = formsRun(formsLayersScript([step, formsReadLayers]))
+        #expect((formsRefusal(out) ?? "").contains(needle), "\(step): wanted `\(needle)`, got \(out)")
+        #expect(formsPanelReads(out).isEmpty, "a refusal ends the replay: \(out)")
+    }
+}
+
+/// THE M3 DOOR, Swift's twin of Rust's `forms_replay_of_a_named_script_directory`:
+/// `JAS_FORMS_DIR=<dir>` replays every `*.json` there that is not an
+/// `.expected.json` and writes the read-backs to `JAS_FORMS_OUT` (default
+/// `<dir>/forms-readbacks-swift.json`), stamped with `JAS_FORMS_SHA`. Without
+/// `JAS_FORMS_DIR` it does nothing. A settling day runs it; it is not a gate.
+@Test func formsReplayOfANamedScriptDirectory() throws {
+    let env = ProcessInfo.processInfo.environment
+    guard let dir = env["JAS_FORMS_DIR"] else { return }
+    let names = try FileManager.default.contentsOfDirectory(atPath: dir)
+        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".expected.json") && !$0.hasPrefix("forms-readbacks") }
+        .sorted()
+    #expect(!names.isEmpty, "JAS_FORMS_DIR=\(dir) holds no script")
+    var all: [String: Any] = [:]
+    for n in names {
+        let data = try Data(contentsOf: URL(fileURLWithPath: "\(dir)/\(n)"))
+        let script = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        switch replayForms(script) {
+        case .success(let out): all[n] = out
+        case .failure(let r): all[n] = ["not_started": r.why]
+        }
+    }
+    let doc: [String: Any] = ["control-sha": env["JAS_FORMS_SHA"] ?? "UNNAMED", "scripts": all]
+    let out = env["JAS_FORMS_OUT"] ?? "\(dir)/forms-readbacks-swift.json"
+    try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
+        .write(to: URL(fileURLWithPath: out))
+}
