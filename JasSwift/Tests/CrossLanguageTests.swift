@@ -7766,8 +7766,9 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 let pid = st["panel"] as? String ?? ""
                 guard let state = formsPanelState(pid, model: model) else { return refuse("UnknownPanel \(pid)") }
                 out.append(["step": i, "read": "panel", "panel": pid, "value": state])
-            case "tree" where st["drawn_rows"] != nil:
-                out.append(["step": i, "read": "tree", "value": "NOT APPLICABLE (drawn_rows is level 2 only)"])
+            case "tree":
+                // Form (e): the rows the tree DRAWS, level 2 only.
+                out.append(["step": i, "read": "tree", "value": "NOT APPLICABLE (read: tree is level 2 only)"])
             default:
                 refuse("read: \(kind) is not delivered by this runner")
             }
@@ -7950,4 +7951,31 @@ private func formsTreeOrder() -> [[Int]] {
         #expect((formsRefusal(out) ?? "").contains(needle), "\(step): wanted `\(needle)`, got \(out)")
         #expect(formsPanelReads(out).isEmpty, "a refusal ends the replay: \(out)")
     }
+}
+
+/// THE M3 DOOR, Swift's twin of Rust's `forms_replay_of_a_named_script_directory`:
+/// `JAS_FORMS_DIR=<dir>` replays every `*.json` there that is not an
+/// `.expected.json` and writes the read-backs to `JAS_FORMS_OUT` (default
+/// `<dir>/forms-readbacks-swift.json`), stamped with `JAS_FORMS_SHA`. Without
+/// `JAS_FORMS_DIR` it does nothing. A settling day runs it; it is not a gate.
+@Test func formsReplayOfANamedScriptDirectory() throws {
+    let env = ProcessInfo.processInfo.environment
+    guard let dir = env["JAS_FORMS_DIR"] else { return }
+    let names = try FileManager.default.contentsOfDirectory(atPath: dir)
+        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".expected.json") && !$0.hasPrefix("forms-readbacks") }
+        .sorted()
+    #expect(!names.isEmpty, "JAS_FORMS_DIR=\(dir) holds no script")
+    var all: [String: Any] = [:]
+    for n in names {
+        let data = try Data(contentsOf: URL(fileURLWithPath: "\(dir)/\(n)"))
+        let script = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        switch replayForms(script) {
+        case .success(let out): all[n] = out
+        case .failure(let r): all[n] = ["not_started": r.why]
+        }
+    }
+    let doc: [String: Any] = ["control-sha": env["JAS_FORMS_SHA"] ?? "UNNAMED", "scripts": all]
+    let out = env["JAS_FORMS_OUT"] ?? "\(dir)/forms-readbacks-swift.json"
+    try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
+        .write(to: URL(fileURLWithPath: out))
 }

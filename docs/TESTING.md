@@ -212,6 +212,14 @@ marked PROPOSED and never gates.
   same modifiers as any panel step.
 * **Typing into a per-row field**: a `commit` with `row` (an inline rename) types the value into that row's field, then
   presses Enter.
+* **`{"read": "tree"}` (form (e), level 2 only)** reads `drawn_rows: {"first": [path], "last": [path]}`, the first and
+  last tree rows drawn WHOLLY inside the tree's visible area. A script that reads it pins its window size,
+  `"window": {"w": <px>, "h": <px>}`, because the visible rows depend on it. The Mac driver reads the AX frames, and Windows
+  reads each row's UIA BoundingRectangle against the tree's rect. A level-1 runner reads it NOT APPLICABLE, never a value.
+* **`"event": "input"` with `"value"`** sets a field's text and fires its declared `input` behaviour once, with the final
+  value (`lp_search_input`). It fires nothing when the field declares no `input` (`lp_name_edit`, which can still be typed
+  into and then left by Escape or blur). **`"event": "blur"`** (optionally with `row`) fires the declared `blur`
+  behaviour (the rename field). A step names the event the widget DECLARES, and `commit` is never a stand-in for `input`.
 * **`{"read": "panel", "panel": "<content id>"}`** compares that panel's declared `state:` keys with the script's
   `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
   the panel selection, for one, is in no document.
@@ -226,7 +234,7 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   container, so a click on `lp_name` selects the row. `lp_eye` declares its own `click`, so an eye click never reaches the
   row. The runner records where a step bubbled to. A step addressed by id alone does not bubble.
 * **Still refused by name there:** `at`, `hold_ms`, a row drag, the `dialog` / `context_menu` / `panel_menu` steps,
-  `{"read": "panel_menu"}`, and `meta` on a panel step. `drawn_rows` reads NOT APPLICABLE (level 2 only).
+  `{"read": "panel_menu"}`, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
 * `JAS_FORMS_DIR=<dir>` (with `JAS_FORMS_SHA=<sha>`) replays a directory of PROPOSED scripts. It writes their read-backs
   to one JSON file for a settling day to read, and it is not a gate. Swift's runner follows (Rust first).
 
