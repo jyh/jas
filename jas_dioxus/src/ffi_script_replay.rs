@@ -654,7 +654,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 let req = match &focus {
                     // A key on the focused panel runs its `keyboard:` rows
                     // (`mods.ctrl` or `mods.meta` is a row's Ctrl).
-                    Some(pid) => json!({"panel": pid, "key": key, "mods": mods}),
+                    Some(_pid) => json!({"key": key, "mods": mods}),
                     None if flag(st, "meta") => {
                         refuse(&mut out, "meta on a key the canvas route does not take".to_string());
                         break;
