@@ -26,6 +26,10 @@ parse failures for the strings that read state). The receipt counts what was
 examined, and a run that examined fewer calls than the floor refuses: a parse
 that stopped matching would otherwise read as a clean zero.
 
+THE SCHEMA ARM (2026-11-05) checks the other direction: every function the
+evaluator defines is DEFINED in SCHEMA.md (``UNDEFINED_IN_SCHEMA`` is the
+shrinking ratchet of the ones that were not when it landed).
+
     python3 scripts/check_expr_functions.py              # the gate
     python3 scripts/check_expr_functions.py --self-test  # can it fail?
 """
@@ -135,6 +139,48 @@ def scan(root_dir: str):
     return examined, findings
 
 
+SCHEMA = os.path.join(ROOT, "SCHEMA.md")
+# THE SCHEMA ARM (STATUS-jas row 75, 2026-11-05): the other direction. Every
+# function the reference evaluator defines must be DEFINED in SCHEMA.md, the
+# spec's own layer, or a yaml author (and a blinded reader) meets a call the
+# specification never describes (`tree_rows_at`, #827: spec's O96 read).
+# Defined = a backticked span in SCHEMA.md that OPENS with the name, `name(` or
+# `name` (the function tables' cells). A mention inside another span, such as
+# `'' + as_path(node.path)`, is not a definition.
+# A RATCHET, not a pin: these are the functions SCHEMA.md did not define when
+# the arm landed. A new undefined function reds; so does a name here that
+# SCHEMA.md now defines, so the list can only shrink. `__apply__` is the
+# parser's own form and is exempt.
+UNDEFINED_IN_SCHEMA = frozenset({
+    "anchor_buffer_close_hit", "anchor_buffer_length",
+    "brush_type_of", "buffer_length",
+    # `element_at` differs by port (jas bank 2026-11-01): Rust's
+    # `top_level_layers` view carries no `children`, so a group path reads
+    # null in Rust only. Defined here once the ports agree.
+    "element_at",
+    # `keys` is NOT one function across the ports (2026-11-05): the reference
+    # takes a map, Swift parses a JSON STRING, Rust defines no `keys` at all.
+    # No yaml calls it. It is defined here only once the ports agree.
+    "keys",
+    "hit_test", "hit_test_deep",
+})
+
+
+def schema_findings(names: set[str], schema_text: str, debt: frozenset) -> list[str]:
+    def defines(n: str) -> bool:
+        return re.search(r"`" + re.escape(n) + r"[`(]", schema_text) is not None
+    out = []
+    for n in sorted(names - {"__apply__"}):
+        if not defines(n) and n not in debt:
+            out.append(f"`{n}(` is defined by the reference evaluator and NOT in SCHEMA.md: "
+                       "add its definition (or, never, its name to the ratchet)")
+        if defines(n) and n in debt:
+            out.append(f"`{n}` is now defined in SCHEMA.md: remove it from UNDEFINED_IN_SCHEMA")
+    for n in sorted(debt - names):
+        out.append(f"`{n}` is in UNDEFINED_IN_SCHEMA but the evaluator no longer defines it: remove it")
+    return out
+
+
 def self_test() -> int:
     import tempfile
     failures = []
@@ -162,6 +208,19 @@ def self_test() -> int:
         if names != ["len", "nope"]:
             failures.append(f"found {names}, expected exactly ['len', 'nope'] "
                             "(the interpolated `nope` is found; CSS and prose are not)")
+    # The schema arm: a missing definition, a stale ratchet entry, a gone
+    # function, and a mention inside another span that is NOT a definition.
+    sch = schema_findings({"alpha", "beta", "gamma", "__apply__"},
+                          "| `alpha(x)` | ... |\n`beta` is ... and `'' + gamma(p)` names it",
+                          frozenset({"beta", "delta"}))
+    joined = "\n".join(sch)
+    for want in ("`gamma(` is defined by the reference evaluator and NOT in SCHEMA.md",
+                 "`beta` is now defined in SCHEMA.md",
+                 "`delta` is in UNDEFINED_IN_SCHEMA but the evaluator no longer defines it"):
+        if want not in joined:
+            failures.append(f"schema arm missed: {want}")
+    if len(sch) != 3:
+        failures.append(f"schema arm: {len(sch)} findings, expected exactly 3: {sch}")
     if failures:
         print("SELF-TEST FAILED -- the gate does not read what it claims:")
         print("\n".join(f"  {x}" for x in failures))
@@ -186,9 +245,18 @@ def main() -> int:
         print(f"FAIL: {len(findings)} call(s) to a function the evaluator does not define:")
         print("\n".join(f"  {x}" for x in findings))
         return 1
+    known = defined_functions()
+    sch = schema_findings(known, open(SCHEMA, encoding="utf-8").read(), UNDEFINED_IN_SCHEMA)
+    if sch:
+        print(f"FAIL: {len(sch)} SCHEMA.md finding(s):")
+        print("\n".join(f"  {x}" for x in sch))
+        return 1
     print(f"check_expr_functions: OK ({examined} calls examined across workspace/*.yaml, "
           f"every one to a function the reference evaluator defines; strings that do not "
-          f"parse are not judged here)")
+          f"parse are not judged here); SCHEMA.md defines {len(known) - 1 - len(UNDEFINED_IN_SCHEMA)} "
+          f"of the evaluator's {len(known) - 1} functions, {len(UNDEFINED_IN_SCHEMA)} owed (the ratchet; "
+          f"`__apply__` exempt). LIMIT: a definition is a backticked span opening with the name, so a "
+          f"same-named span about something else reads as defined")
     return 0
 
 

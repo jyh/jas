@@ -1722,6 +1722,8 @@ function names are an evaluation error (return `null`).
 |-----------|---------------------|------------------------------------|
 | `rgb`     | `r, g, b`  (0–255)  | Construct color from RGB           |
 | `hsb`     | `h, s, b`           | Construct from HSB (h:0–359, s/b:0–100) |
+| `cmyk`    | `c, m, y, k` (0–100) | Construct from CMYK: each channel is clamped to 0–100 first, then `r = round((1 − c)(1 − k)·255)` and likewise for g (m) and b (y); a non-number channel reads 0; `null` unless exactly four arguments |
+| `grayscale` | `k` (0–100)       | A grey of `k` % black, `v = round((1 − k/100)·255)` on all three channels; `k` is clamped to 0–100 and a non-number reads 0; `null` unless exactly one argument |
 
 **Color transformation functions** — take a single `color` argument,
 return `color`:
@@ -1762,6 +1764,7 @@ type/arity mismatch or a non-finite result):
 | `sqrt(x)`         | Square root (`null` if `x < 0`).                  |
 | `pow(base, exp)`  | `base` raised to `exp`.                           |
 | `hypot(x, y)`     | Euclidean distance `√(x² + y²)`.                  |
+| `atan2(y, x)`     | Inverse tangent of `y / x` in the correct quadrant, **in degrees** (the dual of `sin` / `cos`). Note the argument order, `y` first. `null` unless both are numbers. |
 | `sin(deg)`        | Sine. **Argument is in degrees.**                 |
 | `cos(deg)`        | Cosine. **Argument is in degrees.**               |
 | `tan(deg)`        | Tangent. **Argument is in degrees.**              |
@@ -1783,6 +1786,7 @@ parametric/concept geometry generators:
 | `any(list, pred)`         | `bool`  | True if `pred` is truthy for any item.                        |
 | `all(list, pred)`         | `bool`  | True if `pred` is truthy for every item.                      |
 | `fold(list, init, fn)`    | any     | Left fold: `fn(acc, item)` across the list, starting at `init`. |
+| `reverse(list)`           | `list`  | The items in reverse order; `null` when the argument is not a list. |
 
 The list functions all take the **list first**, then the closure; `fold`'s
 closure receives the accumulator first (`fun (acc, item) -> …`). Composed, they
@@ -1795,12 +1799,37 @@ map(range(0, n), fun i ->
   [r * cos(a), r * sin(a)])
 ```
 
+**Reference-point functions** convert between top-left storage and a
+reference point's display (the 3×3 anchor of the Artboard Options dialog;
+`ARTBOARDS.md` §Coordinates and units). Each takes `(anchor, size)` and returns
+the anchor's offset from the top-left along one axis. They return `null` unless
+the anchor is a string and the size a number.
+
+| Function | Offset |
+|---|---|
+| `anchor_offset_x(anchor, width)` | `0` for a `*_left` anchor, `width / 2` for `top_center`, `center` or `bottom_center`, `width` for a `*_right` anchor; `0` for any other string |
+| `anchor_offset_y(anchor, height)` | `0` for a `top_*` anchor, `height / 2` for `middle_left`, `center` or `middle_right`, `height` for a `bottom_*` anchor; `0` for any other string |
+
 Every function above is pinned across all five interpreters by the conformance
 corpus (`workspace/tests/expressions.yaml`; see "Expression Conformance Tests"
 below) as of the `five-port-parity` tag. Post-freeze additions to the
 expression language are pinned across the active interpreters (Rust, Swift)
 plus the `workspace_interpreter/` reference; the frozen ports hold the
 tag-pinned corpus (`POLICY.md` §1).
+
+**Path, tree and selection functions.** `tree_row_range` is pinned by the
+conformance corpus. `path_child`, `selection_contains` and `selection_empty`
+read the live document, so the corpus does not reach them. Each active port's
+own arms pin those three, and the reference agrees except where the table says
+otherwise. (`as_path` and `tree_rows_at` are under "`node.*` — Row Template Scope
+Variables".)
+
+| Function | Returns | Description |
+|---|---|---|
+| `path_child(p, i)` | `path` | The path `p` with the child index `i` appended. `null` unless `p` is a PATH and `i` a number `≥ 0`. (The reference does not refuse a negative `i`.) |
+| `selection_contains(p)` | `bool` | Whether the path `p` is in the document's element selection; `false` for a non-path. |
+| `selection_empty()` | `bool` | Whether the document's element selection is empty. |
+| `tree_row_range(rows, from, to)` | `list` | The paths of the rows of `rows` from the row at `from` to the row at `to`, inclusive, in ROW order whichever end comes first, as path markers. Each end is read as `as_path` reads it. The empty list when either end is not a row. With a fourth argument, the element tree's full row list, a row in the range marked `collapsed` brings every row under it from that list, right after it, in its order (selecting a collapsed group includes its descendants). `null` unless there are 3 or 4 arguments and `rows` is a list. |
 
 #### Comparison Operators
 
