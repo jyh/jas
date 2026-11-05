@@ -507,7 +507,7 @@ fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope:
     let declares = |node: &Value| node.get("behavior").and_then(Value::as_array).is_some_and(|b| b.iter()
         .any(|entry| entry.get("event").and_then(Value::as_str).unwrap_or("click") == event));
     // The walk ends on the widget, so the chain's last node is the widget.
-    let Some(at) = chain.iter().rposition(|(_, node)| declares(node)) else {
+    let Some(at) = chain.last().filter(|(_, n)| declares(n)).map(|_| chain.len() - 1) else {
         return Err(format!("no node on `{widget}`'s path in row {row:?} declares `{event}`"));
     };
     let (len, node) = &chain[at];
