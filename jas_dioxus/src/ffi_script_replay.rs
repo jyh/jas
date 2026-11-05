@@ -480,7 +480,7 @@ fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope:
                 return Err(format!("row {row:?} is {} row(s) of `{}`, not one", hits.len(),
                     node["foreach"]["source"].as_str().unwrap_or("?")));
             };
-            path.push(i);
+            path.push(0);
             return walk(template, widget, row, &rows[i], path, repeats, chain);
         }
         if let Some(Value::Array(children)) = node.get("children") {
