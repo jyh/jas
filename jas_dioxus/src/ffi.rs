@@ -308,6 +308,43 @@ impl JasEngine {
         self.store.borrow_mut().set("active_tool", serde_json::Value::String(name.to_string()));
     }
 
+    /// The scope a panel behaviour runs in, as [`jas_panel_behavior`] assembles
+    /// it (the panel seeded first). For the input-script runner's `row` form
+    /// (TESTING.md §6), which evaluates a `foreach.source` in this scope with
+    /// the engine's own evaluator rather than building a row by hand.
+    pub(crate) fn script_panel_scope(&self, panel_id: &str) -> Option<serde_json::Value> {
+        let ws = Workspace::load()?;
+        ws.panel(panel_id)?;
+        Some(panel_ctx(self, &ws, panel_id))
+    }
+
+    /// A panel's DECLARED `state:` keys and their store values, for the
+    /// runner's `read: panel` and its `app_state` seed. A key the panel does
+    /// not declare is never returned, so a port's private store keys never
+    /// enter a script. `None` when the workspace does not hold the panel.
+    pub(crate) fn script_panel_state(&self, panel_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+        let ws = Workspace::load()?;
+        ws.panel(panel_id)?;
+        seed_panel(self, &ws, panel_id);
+        let store = self.store.borrow();
+        Some(ws.panel_state_defaults(panel_id).into_keys()
+            .map(|k| { let v = store.get_panel(panel_id, &k).clone(); (k, v) })
+            .collect())
+    }
+
+    /// Write one DECLARED `state:` key of a panel (the runner's `app_state`
+    /// seed). `Err` names an undeclared key or a panel the workspace lacks.
+    pub(crate) fn script_seed_panel(&self, panel_id: &str, key: &str, value: serde_json::Value) -> Result<(), String> {
+        let ws = Workspace::load().ok_or("no workspace")?;
+        ws.panel(panel_id).ok_or_else(|| format!("UnknownPanel {panel_id}"))?;
+        if !ws.panel_state_defaults(panel_id).contains_key(key) {
+            return Err(format!("UndeclaredPanelKey {panel_id}.{key}"));
+        }
+        seed_panel(self, &ws, panel_id);
+        self.store.borrow_mut().set_panel(panel_id, key, value);
+        Ok(())
+    }
+
     pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
         *self.model.borrow_mut() = Model::new(doc, None);
         self.document_open.set(true);

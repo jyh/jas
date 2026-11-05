@@ -216,6 +216,20 @@ marked PROPOSED and never gates.
   `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
   the panel selection, for one, is in no document.
 
+**Delivered by the Rust engine replay's forms runner (`ffi_script_replay::replay_forms`, 2026-11-05).** It delivers `row`,
+the modifiers on a panel step, `double_click` (one `click`, then the double), a key after a panel step,
+`{"read": "panel"}`, and reads at any step. It also seeds `"app_state": {"panels": {"<content id>": {...}}}`: declared keys
+only, and inside a list an index array is a path. It returns every read-back in step order. A step that changes nothing is
+recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps the reads before it.
+* **A `row` step's event BUBBLES, as a pointer's does in every shell.** It goes to the nearest node on the widget's path,
+  starting with the widget, whose `behavior:` declares that event. A Layers row's `click` is declared on the row's
+  container, so a click on `lp_name` selects the row. `lp_eye` declares its own `click`, so an eye click never reaches the
+  row. The runner records where a step bubbled to. A step addressed by id alone does not bubble.
+* **Still refused by name there:** `at`, `hold_ms`, a row drag, the `dialog` / `context_menu` / `panel_menu` steps,
+  `{"read": "panel_menu"}`, and `meta` on a panel step. `drawn_rows` reads NOT APPLICABLE (level 2 only).
+* `JAS_FORMS_DIR=<dir>` (with `JAS_FORMS_SHA=<sha>`) replays a directory of PROPOSED scripts. It writes their read-backs
+  to one JSON file for a settling day to read, and it is not a gate. Swift's runner follows (Rust first).
+
 **Who replays it:**
 1. **Level 1:** each port's core. This is the EXPECTED read-back.
    * **Rust** has two runners. The gesture runner (`script_corpus`, web build) replays the pointer and key scripts
