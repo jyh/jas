@@ -1799,6 +1799,17 @@ map(range(0, n), fun i ->
   [r * cos(a), r * sin(a)])
 ```
 
+**Reference-point functions** convert between top-left storage and a
+reference point's display (the 3×3 anchor of the Artboard Options dialog;
+`ARTBOARDS.md` §Coordinates and units). Each takes `(anchor, size)` and returns
+the anchor's offset from the top-left along one axis. They return `null` unless
+the anchor is a string and the size a number.
+
+| Function | Offset |
+|---|---|
+| `anchor_offset_x(anchor, width)` | `0` for a `*_left` anchor, `width / 2` for `top_center`, `center` or `bottom_center`, `width` for a `*_right` anchor; `0` for any other string |
+| `anchor_offset_y(anchor, height)` | `0` for a `top_*` anchor, `height / 2` for `middle_left`, `center` or `middle_right`, `height` for a `bottom_*` anchor; `0` for any other string |
+
 Every function above is pinned across all five interpreters by the conformance
 corpus (`workspace/tests/expressions.yaml`; see "Expression Conformance Tests"
 below) as of the `five-port-parity` tag. Post-freeze additions to the

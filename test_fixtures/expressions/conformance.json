@@ -818,6 +818,41 @@
     "type": "bool"
   },
   {
+    "expr": "anchor_offset_x('top_right', 100)",
+    "expected": 100,
+    "type": "number"
+  },
+  {
+    "expr": "anchor_offset_x('center', 100)",
+    "expected": 50,
+    "type": "number"
+  },
+  {
+    "expr": "anchor_offset_x('nowhere', 100)",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "anchor_offset_y('bottom_center', 80)",
+    "expected": 80,
+    "type": "number"
+  },
+  {
+    "expr": "anchor_offset_y('middle_left', 80)",
+    "expected": 40,
+    "type": "number"
+  },
+  {
+    "expr": "anchor_offset_y('top_right', 80)",
+    "expected": 0,
+    "type": "number"
+  },
+  {
+    "expr": "anchor_offset_x(5, 10) == null",
+    "expected": true,
+    "type": "bool"
+  },
+  {
     "expr": "all([true, false])",
     "expected": null,
     "type": "null"

@@ -152,7 +152,7 @@ SCHEMA = os.path.join(ROOT, "SCHEMA.md")
 # SCHEMA.md now defines, so the list can only shrink. `__apply__` is the
 # parser's own form and is exempt.
 UNDEFINED_IN_SCHEMA = frozenset({
-    "anchor_buffer_close_hit", "anchor_buffer_length", "anchor_offset_x", "anchor_offset_y",
+    "anchor_buffer_close_hit", "anchor_buffer_length",
     "brush_type_of", "buffer_length", "element_at",
     # `keys` is NOT one function across the ports (2026-11-05): the reference
     # takes a map, Swift parses a JSON STRING, Rust defines no `keys` at all.
