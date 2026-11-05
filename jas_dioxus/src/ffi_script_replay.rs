@@ -417,3 +417,513 @@ fn every_area_text_paragraph_script_moves_the_legacy_layout_and_no_two_move_it_a
     }
     assert!(wrong.is_empty(), "{} finding(s) over {n} scripts:\n{}", wrong.len(), wrong.join("\n"));
 }
+
+// ---------------------------------------------------------------------------
+// THE §6 PANEL FORMS (design 2026-10-31 "script forms runners", O96 M3): `row`,
+// modifiers on a panel step, a key after a panel step, `read: panel`, reads
+// anywhere in the script, and `app_state.panels`. [`replay_forms`] returns
+// EVERY read-back in step order, so a script whose expected file does not
+// exist yet (the M3 settling day writes them from the control) still yields
+// its read-backs, and a refusal keeps the reads before it.
+// ---------------------------------------------------------------------------
+
+/// The plan path of `widget` in the row of the ONE `foreach` enclosing it whose
+/// item's `path` equals `row`: declared children by index, and at a `foreach`
+/// the row's index, as `panel_behavior::resolve_path` walks it. The rows come
+/// from the panel's own `foreach.source`, evaluated in `scope` by the engine's
+/// evaluator (`interpreter::foreach::row_scopes`), never from runner code.
+/// Refused by name: a widget not found · a widget under no `foreach` · under
+/// two or more (that address is `at`, not delivered) · a row path found 0 or
+/// 2+ times.
+///
+/// THE EVENT BUBBLES, as a pointer's does in every shell: the step's event goes
+/// to the NEAREST node on that path, the widget first, whose `behavior:`
+/// declares it. A Layers row's click is declared on the row's container, not
+/// on `lp_name`, so a click on the name selects the row; an eye's click is
+/// declared on `lp_eye` itself and never reaches the row. The second value is
+/// the node the event went to, when it is not the widget. A node declaring no
+/// such event on the whole path is refused by name.
+fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope: &Value)
+    -> Result<(Vec<usize>, Option<String>), String> {
+    fn contains(node: &Value, widget: &str) -> bool {
+        if node.get("id").and_then(Value::as_str) == Some(widget) {
+            return true;
+        }
+        ["children", "do"].iter().any(|k| match node.get(*k) {
+            Some(Value::Array(items)) => items.iter().any(|c| contains(c, widget)),
+            Some(c @ Value::Object(_)) => contains(c, widget),
+            _ => false,
+        })
+    }
+    fn walk(node: &Value, widget: &str, row: &[u64], scope: &Value, path: &mut Vec<usize>, repeats: &mut usize,
+            chain: &mut Vec<(usize, Value)>) -> Result<bool, String> {
+        chain.push((path.len(), node.clone()));
+        if node.get("id").and_then(Value::as_str) == Some(widget) {
+            return Ok(true);
+        }
+        if let Some(rows) = crate::interpreter::foreach::row_scopes(node, scope) {
+            let template = &node["do"];
+            if !contains(template, widget) {
+                return Ok(false);
+            }
+            *repeats += 1;
+            let var = node["foreach"].get("as").and_then(Value::as_str).unwrap_or("item");
+            let as_path = |v: &Value| -> Option<Vec<u64>> {
+                let v = v.get("__path__").unwrap_or(v);
+                v.as_array()?.iter().map(Value::as_u64).collect()
+            };
+            let hits: Vec<usize> = rows.iter().enumerate()
+                .filter(|(_, r)| r[var].get("path").and_then(as_path).as_deref() == Some(row))
+                .map(|(i, _)| i)
+                .collect();
+            let &[i] = hits.as_slice() else {
+                return Err(format!("row {row:?} is {} row(s) of `{}`, not one", hits.len(),
+                    node["foreach"]["source"].as_str().unwrap_or("?")));
+            };
+            path.push(i);
+            return walk(template, widget, row, &rows[i], path, repeats, chain);
+        }
+        if let Some(Value::Array(children)) = node.get("children") {
+            for (i, c) in children.iter().enumerate() {
+                if contains(c, widget) {
+                    path.push(i);
+                    return walk(c, widget, row, scope, path, repeats, chain);
+                }
+            }
+        }
+        Ok(false)
+    }
+    let mut path = vec![];
+    let mut repeats = 0;
+    let mut chain = vec![];
+    if !walk(content, widget, row, scope, &mut path, &mut repeats, &mut chain)? {
+        return Err(format!("widget `{widget}` is not in the panel"));
+    }
+    match repeats {
+        0 => return Err(format!("`row` on `{widget}`, which no foreach repeats")),
+        1 => {}
+        n => return Err(format!("`{widget}` sits under {n} foreach repeats; that address is `at`, not delivered")),
+    }
+    let declares = |node: &Value| node.get("behavior").and_then(Value::as_array).is_some_and(|b| b.iter()
+        .any(|entry| entry.get("event").and_then(Value::as_str).unwrap_or("click") == event));
+    // The walk ends on the widget, so the chain's last node is the widget.
+    let Some(at) = chain.iter().rposition(|(_, node)| declares(node)) else {
+        return Err(format!("no node on `{widget}`'s path in row {row:?} declares `{event}`"));
+    };
+    let (len, node) = &chain[at];
+    let to = (at + 1 != chain.len()).then(|| node.get("id").and_then(Value::as_str)
+        .map_or_else(|| format!("{:?}", &path[..*len]), str::to_string));
+    Ok((path[..*len].to_vec(), to))
+}
+
+/// A store value in the canonical form `read: panel` emits: path markers as
+/// index arrays, at any depth, and every object's keys sorted. Sorted HERE,
+/// never by trusting serde_json's map: a dependency can switch on its
+/// `preserve_order` feature, and then the map keeps insertion order.
+fn canonical_panel_value(v: &Value) -> Value {
+    match v {
+        Value::Object(m) if m.len() == 1 && m.contains_key("__path__") => canonical_panel_value(&m["__path__"]),
+        Value::Object(m) => {
+            let sorted: std::collections::BTreeMap<&String, Value> =
+                m.iter().map(|(k, v)| (k, canonical_panel_value(v))).collect();
+            Value::Object(sorted.into_iter().map(|(k, v)| (k.clone(), v)).collect())
+        }
+        Value::Array(a) => Value::Array(a.iter().map(canonical_panel_value).collect()),
+        other => other.clone(),
+    }
+}
+
+/// A seeded value in the store's form: in a list, an item that is a list of
+/// non-negative integers is a PATH (the ruled form: "entries are PATHS").
+fn seed_value(v: &Value) -> Value {
+    let is_path = |x: &Value| x.as_array().is_some_and(|a| a.iter().all(|i| i.as_u64().is_some()));
+    match v {
+        Value::Array(items) => Value::Array(items.iter()
+            .map(|x| if is_path(x) { serde_json::json!({"__path__": x}) } else { x.clone() })
+            .collect()),
+        other => other.clone(),
+    }
+}
+
+/// Replay a script with the §6 panel forms; every read-back in step order, as
+/// `{"step": i, "read": kind, "value": ...}`. A step that ran and changed
+/// nothing adds `{"step": i, "unchanged": true}` and the replay goes on. A
+/// refused step adds `{"step": i, "refused": why}` and ends it, keeping every
+/// read before it. `Err` is a script the runner cannot start.
+fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
+    use serde_json::json;
+    let item = script["item"].as_str().ok_or("a script names its spec item")?;
+    let steps = script["steps"].as_array().ok_or("a script has steps")?;
+    let tool = script["tool"].as_str().unwrap_or("");
+    let tool_index = TOOL_IDS.iter().position(|t| *t == tool)
+        .ok_or_else(|| format!("script {item}: tool '{tool}' is not a shell tool"))?;
+    let svg = read(&format!("svg/{}", script["setup_svg"].as_str().ok_or("a script names its setup_svg")?));
+    let e = jas_engine_new();
+    let result = (|| {
+        let engine = unsafe { e.as_ref() }.unwrap();
+        let doc = crate::geometry::svg::try_open_svg_document(&svg)
+            .ok_or_else(|| format!("script {item}: the setup SVG did not open"))?;
+        engine.replace_document(doc);
+        if unsafe { jas_set_tool(e, tool_index) } != JasStatus::Ok {
+            return Err(format!("script {item}: jas_set_tool({tool}) refused"));
+        }
+        // `app_state.panels.<content id>.<declared key>`, and nothing else.
+        if let Some(app) = script.get("app_state") {
+            let app = app.as_object().ok_or_else(|| format!("script {item}: app_state is not an object"))?;
+            for (k, v) in app {
+                if k != "panels" {
+                    return Err(format!("script {item}: app_state.{k} is not a ruled form; \
+                        seed a panel's declared state as app_state.panels.<content id>.<key>"));
+                }
+                let panels = v.as_object().ok_or_else(|| format!("script {item}: app_state.panels is not an object"))?;
+                for (pid, keys) in panels {
+                    let keys = keys.as_object().ok_or_else(|| format!("script {item}: app_state.panels.{pid} is not an object"))?;
+                    for (key, val) in keys {
+                        engine.script_seed_panel(pid, key, seed_value(val))
+                            .map_err(|why| format!("script {item}: app_state.panels.{pid}.{key}: {why}"))?;
+                    }
+                }
+            }
+        }
+        let mut out = vec![];
+        // The panel a key goes to: the last panel step's, until a pointer or
+        // menu step moves the focus to the canvas or the menubar.
+        let mut focus: Option<String> = None;
+        for (i, st) in steps.iter().enumerate() {
+            let refuse = |out: &mut Vec<Value>, why: String| out.push(json!({"step": i, "refused": why}));
+            let ran = |out: &mut Vec<Value>, reply: Option<String>, err: String| -> bool {
+                if reply.is_none() {
+                    out.push(json!({"step": i, "refused": err}));
+                    return false;
+                }
+                if err.contains("Unchanged") {
+                    out.push(json!({"step": i, "unchanged": true}));
+                }
+                true
+            };
+            if let Some(kind) = st.get("read").and_then(Value::as_str) {
+                match kind {
+                    "document" => {
+                        let doc = take(unsafe { jas_document_json(e) }).ok_or_else(|| format!("script {item}: step {i}: no read-back"))?;
+                        let doc: Value = serde_json::from_str(&doc).map_err(|x| x.to_string())?;
+                        out.push(json!({"step": i, "read": "document", "value": doc}));
+                    }
+                    "panel" => {
+                        let pid = st["panel"].as_str().ok_or_else(|| format!("script {item}: step {i}: read panel names no panel"))?;
+                        let Some(state) = engine.script_panel_state(pid) else {
+                            refuse(&mut out, format!("UnknownPanel {pid}"));
+                            break;
+                        };
+                        out.push(json!({"step": i, "read": "panel", "panel": pid,
+                                        "value": canonical_panel_value(&Value::Object(state))}));
+                    }
+                    "tree" if st.get("drawn_rows").is_some() => {
+                        out.push(json!({"step": i, "read": "tree", "value": "NOT APPLICABLE (drawn_rows is level 2 only)"}));
+                    }
+                    other => {
+                        refuse(&mut out, format!("read: {other} is not delivered by this runner"));
+                        break;
+                    }
+                }
+            } else if let Some(kind) = st.get("kind").and_then(Value::as_str) {
+                focus = None;
+                let k = match kind {
+                    "press" => KIND_PRESS,
+                    "move" => KIND_MOVE,
+                    "release" => KIND_RELEASE,
+                    _ => { refuse(&mut out, format!("pointer kind '{kind}' is not delivered")); break; }
+                };
+                if flag(st, "ctrl") || flag(st, "meta") {
+                    refuse(&mut out, "the pointer takes no ctrl or meta".to_string());
+                    break;
+                }
+                let mods = if flag(st, "shift") { MOD_SHIFT } else { 0 }
+                    | if flag(st, "alt") { MOD_ALT } else { 0 }
+                    | if flag(st, "dragging") { MOD_DRAGGING } else { 0 };
+                let (Some(x), Some(y)) = (st["x"].as_f64(), st["y"].as_f64()) else {
+                    refuse(&mut out, "a pointer step without x, y".to_string());
+                    break;
+                };
+                if unsafe { jas_pointer_event(e, k, x, y, mods) } != JasStatus::Ok {
+                    refuse(&mut out, format!("the pointer was refused: {}", last_error(e)));
+                    break;
+                }
+            } else if let Some(key) = st.get("key").and_then(Value::as_str) {
+                let mods = json!({"shift": flag(st, "shift"), "alt": flag(st, "alt"),
+                                  "ctrl": flag(st, "ctrl"), "meta": flag(st, "meta")});
+                let req = match &focus {
+                    // A key on the focused panel runs its `keyboard:` rows
+                    // (`mods.ctrl` or `mods.meta` is a row's Ctrl).
+                    Some(pid) => json!({"panel": pid, "key": key, "mods": mods}),
+                    None if flag(st, "meta") => {
+                        refuse(&mut out, "meta on a key the canvas route does not take".to_string());
+                        break;
+                    }
+                    None => json!({"key": key, "mods": mods}),
+                }.to_string();
+                let reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
+                if !ran(&mut out, reply, last_error(e)) {
+                    break;
+                }
+            } else if let Some(menu_id) = st.get("menu").and_then(Value::as_str) {
+                focus = None;
+                let req = json!({"menu_item": menu_id}).to_string();
+                let reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
+                if !ran(&mut out, reply, last_error(e)) {
+                    break;
+                }
+            } else if let Some(panel) = st.get("panel").and_then(Value::as_str) {
+                let (Some(widget), Some(event)) = (st["widget"].as_str(), st["event"].as_str()) else {
+                    refuse(&mut out, "a panel step names a widget and an event".to_string());
+                    break;
+                };
+                if flag(st, "meta") {
+                    refuse(&mut out, "meta on a panel step is refused (TESTING.md section 6)".to_string());
+                    break;
+                }
+                if st.get("at").is_some() {
+                    refuse(&mut out, "`at` is not delivered by this runner".to_string());
+                    break;
+                }
+                let row = match st.get("row") {
+                    None => None,
+                    Some(r) => match r.as_array().and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()) {
+                        Some(r) => Some(r),
+                        None => { refuse(&mut out, format!("row {r} is not a path")); break; }
+                    },
+                };
+                // Form 6: a double click delivers ONE click, then the double.
+                let events: &[&str] = if event == "double_click" { &["click", "double_click"] } else { &[event] };
+                let mut ok = true;
+                for &name in events {
+                    let mut ev = json!({"widget": widget, "event": name,
+                        "shift": flag(st, "shift"), "alt": flag(st, "alt"), "ctrl": flag(st, "ctrl")});
+                    if let Some(v) = st.get("value") {
+                        ev["value"] = v.clone();
+                    }
+                    if let Some(row) = &row {
+                        // The rows are re-read for each event, in the scope it
+                        // runs in, since the click before a double can change it.
+                        let (Some(spec), Some(scope)) = (
+                            crate::interpreter::workspace::Workspace::load().and_then(|ws| ws.panel(panel).cloned()),
+                            engine.script_panel_scope(panel)) else {
+                            refuse(&mut out, format!("UnknownPanel {panel}"));
+                            ok = false;
+                            break;
+                        };
+                        let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
+                        match row_plan_path(spec.get("content").unwrap_or(&Value::Null), widget, name, row, &scope) {
+                            Ok((p, to)) => {
+                                ev["path"] = json!(p);
+                                if let Some(to) = to {
+                                    out.push(json!({"step": i, "event": name, "bubbled_to": to}));
+                                }
+                            }
+                            Err(why) => { refuse(&mut out, why); ok = false; break; }
+                        }
+                    }
+                    let ev = ev.to_string();
+                    let reply = take(unsafe { jas_panel_behavior(e, panel.as_ptr(), panel.len(), ev.as_ptr(), ev.len()) });
+                    if !ran(&mut out, reply, last_error(e)) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if !ok {
+                    break;
+                }
+                focus = Some(panel.to_string());
+            } else {
+                let form = ["dialog", "context_menu", "panel_menu"].into_iter().find(|k| st.get(*k).is_some());
+                refuse(&mut out, match form {
+                    Some(f) => format!("the `{f}` form is not delivered by this runner"),
+                    None => format!("{st} is not a step this runner knows"),
+                });
+                break;
+            }
+        }
+        Ok(out)
+    })();
+    unsafe { jas_engine_free(e) };
+    result
+}
+
+/// A Layers script over `complex_document.svg` (tree: `[0]` Shapes holding a
+/// rect, a circle and a group `[0,2]` around a line; `[1]` Text holding a
+/// text), with the selection tool and the given steps.
+fn layers_script(steps: Value) -> Value {
+    serde_json::json!({"item": "forms.arm", "setup_svg": "complex_document.svg", "tool": "selection", "steps": steps})
+}
+
+const LAYERS: &str = "layers_panel_content";
+
+/// The `read: panel` values of a replay, in order.
+fn panel_reads(out: &[Value]) -> Vec<Value> {
+    out.iter().filter(|r| r["read"] == "panel").map(|r| r["value"].clone()).collect()
+}
+
+fn refusal(out: &[Value]) -> Option<String> {
+    out.iter().find_map(|r| r["refused"].as_str().map(str::to_string))
+}
+
+fn click_row(row: Value, mods: &[&str]) -> Value {
+    let mut st = serde_json::json!({"panel": LAYERS, "widget": "lp_name", "row": row, "event": "click"});
+    for m in mods {
+        st[*m] = Value::Bool(true);
+    }
+    st
+}
+
+fn read_layers() -> Value {
+    serde_json::json!({"read": "panel", "panel": LAYERS})
+}
+
+/// The tree's row paths in draw order, from the engine's own `element_tree`
+/// (nothing collapsed), so an arm's expected row is derived, never typed.
+fn tree_order() -> Vec<Value> {
+    let e = jas_engine_new();
+    let engine = unsafe { e.as_ref() }.unwrap();
+    engine.replace_document(crate::geometry::svg::try_open_svg_document(&read("svg/complex_document.svg")).unwrap());
+    let scope = engine.script_panel_scope(LAYERS).unwrap();
+    unsafe { jas_engine_free(e) };
+    let rows = scope["active_document"]["element_tree"].as_array().cloned().unwrap_or_default();
+    assert!(rows.len() >= 7, "the tree has the setup's seven elements: {rows:?}");
+    rows.iter().map(|r| r["path"].clone()).collect()
+}
+
+#[test]
+fn a_row_click_on_the_name_selects_that_row_by_bubbling_to_the_row() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    // Two rows, so an arm that ignored `row` (or took row 0) reds one of them.
+    for row in [serde_json::json!([0, 1]), serde_json::json!([1])] {
+        let out = replay_forms(&layers_script(serde_json::json!([click_row(row.clone(), &[]), read_layers()]))).unwrap();
+        assert_eq!(refusal(&out), None, "{out:?}");
+        assert!(out.iter().any(|r| r["bubbled_to"].is_string()), "lp_name declares no click, so it bubbles: {out:?}");
+        assert_eq!(panel_reads(&out)[0]["layers_panel_selection"], serde_json::json!([row]), "{out:?}");
+    }
+}
+
+#[test]
+fn a_shift_click_extends_and_a_plain_click_after_it_replaces() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        click_row(serde_json::json!([0, 1]), &[]), click_row(serde_json::json!([0, 0]), &["shift"]), read_layers(),
+        click_row(serde_json::json!([1]), &[]), read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    let reads = panel_reads(&out);
+    let extended = reads[0]["layers_panel_selection"].as_array().cloned().unwrap_or_default();
+    assert!(extended.len() >= 2 && extended.contains(&serde_json::json!([0, 1])) && extended.contains(&serde_json::json!([0, 0])),
+        "Shift extends: {extended:?}");
+    assert_eq!(reads[1]["layers_panel_selection"], serde_json::json!([[1]]), "a plain click replaces");
+}
+
+#[test]
+fn an_eye_click_runs_on_the_eye_without_bubbling() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"panel": LAYERS, "widget": "lp_eye", "row": [1], "event": "click"}, read_layers(), {"read": "document"},
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert!(!out.iter().any(|r| r["bubbled_to"].is_string()), "lp_eye declares its own click: {out:?}");
+    // The read is anywhere in the script, and the document read comes after it.
+    assert_eq!(out.iter().filter(|r| r["read"].is_string()).map(|r| r["read"].clone()).collect::<Vec<_>>(),
+        vec![serde_json::json!("panel"), serde_json::json!("document")]);
+}
+
+#[test]
+fn a_key_after_a_panel_step_goes_to_the_panels_keyboard_rows() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let order = tree_order();
+    let at = order.iter().position(|p| *p == serde_json::json!([0, 1])).expect("[0,1] is a row");
+    let next = order.get(at + 1).cloned().expect("a row below [0,1]");
+    let out = replay_forms(&layers_script(serde_json::json!([
+        click_row(serde_json::json!([0, 1]), &[]), {"key": "ArrowDown"}, read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(panel_reads(&out)[0]["layers_panel_selection"], serde_json::json!([next]), "{out:?}");
+}
+
+#[test]
+fn read_panel_reads_exactly_the_declared_state_keys_with_paths_as_arrays() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+    let mut declared: Vec<String> = ws.panel_state_defaults(LAYERS).into_keys().collect();
+    declared.sort();
+    assert!(declared.iter().any(|k| k == "layers_panel_selection"), "{declared:?}");
+    let out = replay_forms(&layers_script(serde_json::json!([click_row(serde_json::json!([0, 2]), &[]), read_layers()]))).unwrap();
+    let read = &panel_reads(&out)[0];
+    let got: Vec<String> = read.as_object().unwrap().keys().cloned().collect();
+    assert_eq!(got, declared, "declared keys only, sorted");
+    assert!(!read.to_string().contains("__path__"), "a path reads as an index array: {read}");
+}
+
+#[test]
+fn app_state_seeds_a_declared_panel_key_as_paths() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let mut script = layers_script(serde_json::json!([read_layers()]));
+    script["app_state"] = serde_json::json!({"panels": {LAYERS: {"collapsed_paths": [[0]]}}});
+    let out = replay_forms(&script).unwrap();
+    assert_eq!(panel_reads(&out)[0]["collapsed_paths"], serde_json::json!([[0]]), "{out:?}");
+    // Control: without the seed the key reads its declared default.
+    let out = replay_forms(&layers_script(serde_json::json!([read_layers()]))).unwrap();
+    assert_eq!(panel_reads(&out)[0]["collapsed_paths"], serde_json::json!([]), "{out:?}");
+}
+
+#[test]
+fn each_unrunnable_form_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let mut top = layers_script(serde_json::json!([read_layers()]));
+    top["app_state"] = serde_json::json!({"collapsed_paths": []});
+    assert!(replay_forms(&top).unwrap_err().contains("app_state.collapsed_paths is not a ruled form"));
+    let mut undeclared = layers_script(serde_json::json!([read_layers()]));
+    undeclared["app_state"] = serde_json::json!({"panels": {LAYERS: {"no_such_key": 1}}});
+    assert!(replay_forms(&undeclared).unwrap_err().contains("UndeclaredPanelKey"));
+    for (step, needle) in [
+        (click_row(serde_json::json!([9]), &[]), "0 row(s)"),
+        (click_row(serde_json::json!([0, 1]), &["meta"]), "meta on a panel step"),
+        (serde_json::json!({"panel": LAYERS, "widget": "lp_search_input", "row": [0], "event": "click"}), "which no foreach repeats"),
+        (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "event": "click"}), "NotAddressable"),
+        (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "at": [0], "event": "click"}), "`at` is not delivered"),
+        (serde_json::json!({"context_menu": "x", "params": {}}), "the `context_menu` form is not delivered"),
+        (serde_json::json!({"read": "panel_menu", "panel": LAYERS}), "read: panel_menu is not delivered"),
+    ] {
+        let out = replay_forms(&layers_script(serde_json::json!([step.clone(), read_layers()]))).unwrap();
+        let why = refusal(&out).unwrap_or_default();
+        assert!(why.contains(needle), "{step}: wanted a refusal naming `{needle}`, got {out:?}");
+        assert!(panel_reads(&out).is_empty(), "a refusal ends the replay: {out:?}");
+    }
+}
+
+/// THE M3 DOOR: `JAS_FORMS_DIR=<dir>` replays every `*.json` script there that
+/// is not an `.expected.json`, and writes each one's read-backs to
+/// `JAS_FORMS_OUT` (default `<dir>/forms-readbacks.json`), stamped with the
+/// sha the caller passes in `JAS_FORMS_SHA`. Without `JAS_FORMS_DIR` it does
+/// nothing and says so. A settling day runs it on the control; it is not a gate.
+#[test]
+fn forms_replay_of_a_named_script_directory() {
+    let Ok(dir) = std::env::var("JAS_FORMS_DIR") else {
+        eprintln!("forms_replay: JAS_FORMS_DIR unset, nothing replayed");
+        return;
+    };
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap()
+        .map(|d| d.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.ends_with(".json") && !n.ends_with(".expected.json") && n != "forms-readbacks.json")
+        .collect();
+    names.sort();
+    assert!(!names.is_empty(), "JAS_FORMS_DIR={dir} holds no script");
+    let mut all = serde_json::Map::new();
+    for n in &names {
+        let script: Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{n}")).unwrap()).unwrap();
+        all.insert(n.clone(), match replay_forms(&script) {
+            Ok(out) => Value::Array(out),
+            Err(why) => serde_json::json!({"not_started": why}),
+        });
+    }
+    let doc = serde_json::json!({"control-sha": std::env::var("JAS_FORMS_SHA").unwrap_or_else(|_| "UNNAMED".into()),
+                                 "scripts": all});
+    let path = std::env::var("JAS_FORMS_OUT").unwrap_or_else(|_| format!("{dir}/forms-readbacks.json"));
+    std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    eprintln!("forms_replay: {} script(s) -> {path}", names.len());
+}
