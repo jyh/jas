@@ -1722,6 +1722,8 @@ function names are an evaluation error (return `null`).
 |-----------|---------------------|------------------------------------|
 | `rgb`     | `r, g, b`  (0–255)  | Construct color from RGB           |
 | `hsb`     | `h, s, b`           | Construct from HSB (h:0–359, s/b:0–100) |
+| `cmyk`    | `c, m, y, k` (0–100) | Construct from CMYK: each channel is clamped to 0–100 first, then `r = round((1 − c)(1 − k)·255)` and likewise for g (m) and b (y); a non-number channel reads 0; `null` unless exactly four arguments |
+| `grayscale` | `k` (0–100)       | A grey of `k` % black, `v = round((1 − k/100)·255)` on all three channels; `k` is clamped to 0–100 and a non-number reads 0; `null` unless exactly one argument |
 
 **Color transformation functions** — take a single `color` argument,
 return `color`:
@@ -1762,6 +1764,7 @@ type/arity mismatch or a non-finite result):
 | `sqrt(x)`         | Square root (`null` if `x < 0`).                  |
 | `pow(base, exp)`  | `base` raised to `exp`.                           |
 | `hypot(x, y)`     | Euclidean distance `√(x² + y²)`.                  |
+| `atan2(y, x)`     | Inverse tangent of `y / x` in the correct quadrant, **in degrees** (the dual of `sin` / `cos`). Note the argument order, `y` first. `null` unless both are numbers. |
 | `sin(deg)`        | Sine. **Argument is in degrees.**                 |
 | `cos(deg)`        | Cosine. **Argument is in degrees.**               |
 | `tan(deg)`        | Tangent. **Argument is in degrees.**              |
@@ -1783,6 +1786,7 @@ parametric/concept geometry generators:
 | `any(list, pred)`         | `bool`  | True if `pred` is truthy for any item.                        |
 | `all(list, pred)`         | `bool`  | True if `pred` is truthy for every item.                      |
 | `fold(list, init, fn)`    | any     | Left fold: `fn(acc, item)` across the list, starting at `init`. |
+| `reverse(list)`           | `list`  | The items in reverse order; `null` when the argument is not a list. |
 
 The list functions all take the **list first**, then the closure; `fold`'s
 closure receives the accumulator first (`fun (acc, item) -> …`). Composed, they

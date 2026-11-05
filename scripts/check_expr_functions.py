@@ -153,8 +153,12 @@ SCHEMA = os.path.join(ROOT, "SCHEMA.md")
 # parser's own form and is exempt.
 UNDEFINED_IN_SCHEMA = frozenset({
     "anchor_buffer_close_hit", "anchor_buffer_length", "anchor_offset_x", "anchor_offset_y",
-    "atan2", "brush_type_of", "buffer_length", "cmyk", "element_at", "grayscale",
-    "hit_test", "hit_test_deep", "keys", "path_child", "reverse", "selection_contains",
+    "brush_type_of", "buffer_length", "element_at",
+    # `keys` is NOT one function across the ports (2026-11-05): the reference
+    # takes a map, Swift parses a JSON STRING, Rust defines no `keys` at all.
+    # No yaml calls it. It is defined here only once the ports agree.
+    "keys",
+    "hit_test", "hit_test_deep", "path_child", "selection_contains",
     "selection_empty", "tree_row_range",
 })
 
