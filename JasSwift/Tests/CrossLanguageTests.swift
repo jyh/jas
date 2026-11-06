@@ -7901,6 +7901,59 @@ private func formsTreeOrder() -> [[Int]] {
     #expect(out.compactMap { $0["read"] as? String } == ["panel", "document"])
 }
 
+/// The element at `path` in a `document` read-back, and the read's selection.
+private func formsDocElement(_ json: String?, _ path: [Int]) -> [String: Any]? {
+    guard let data = json?.data(using: .utf8),
+          let doc = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+    var level = doc["layers"] as? [Any] ?? []
+    var node: [String: Any]? = nil
+    for i in path {
+        guard i < level.count, let n = level[i] as? [String: Any] else { return nil }
+        node = n
+        level = n["children"] as? [Any] ?? []
+    }
+    return node
+}
+
+private func formsDocReads(_ out: [[String: Any]]) -> [String] {
+    out.compactMap { $0["read"] as? String == "document" ? $0["value"] as? String : nil }
+}
+
+/// A Layers row widget's action writes the DOCUMENT, not only the panel: its
+/// `doc.op` and `snapshot` effects run through the dispatcher that holds
+/// them, as the Mac tree's own clicks do (``LayersPanel/eyeClick``). Until
+/// 2026-11-06 this route ran them with Align's table alone, which has no
+/// `doc.op`, so every document read in M3's control read the setup (the
+/// panel half moved, the document did not, and no arm asked).
+@Test func formsALayersRowActionWritesTheDocument() {
+    let cases: [(widget: String, row: [Int], field: String, want: String)] = [
+        ("lp_eye", [0, 1], "visibility", "outline"),
+        ("lp_lock", [0, 0], "locked", "1"),  // JSONSerialization reads `true` back as 1
+    ]
+    for c in cases {
+        let out = formsRun(formsLayersScript([
+            ["panel": formsLayers, "widget": c.widget, "row": c.row, "event": "click"], ["read": "document"],
+        ]))
+        #expect(formsRefusal(out) == nil, "\(c.widget): \(out)")
+        let el = formsDocElement(formsDocReads(out).first, c.row)
+        #expect(el.map { "\($0[c.field] ?? "nil")" } == c.want, "\(c.widget) on \(c.row): \(el.map { "\($0[c.field] ?? "nil")" } ?? "no element")")
+    }
+    // The select square selects its element (doc.op select_path).
+    let out = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_select", "row": [0, 1], "event": "click"], ["read": "document"],
+    ]))
+    let sel = formsDocReads(out).first.flatMap { $0.data(using: .utf8) }
+        .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?["selection"] as? [Any]
+    #expect((sel ?? []).count == 1, "lp_select on [0,1] selects one element: \(String(describing: sel))")
+    // And one undo step: undo restores the setup (the snapshot opened a transaction).
+    let undo = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_eye", "row": [0, 1], "event": "click"], ["read": "document"],
+        ["menu": "menu_undo"], ["read": "document"],
+    ]))
+    let vis = formsDocReads(undo).map { formsDocElement($0, [0, 1])?["visibility"] as? String ?? "nil" }
+    #expect(vis == ["outline", "preview"], "the click writes, undo restores: \(vis) \(undo)")
+}
+
 @Test func formsAKeyAfterAPanelStepGoesToThePanelsKeyboardRows() {
     let order = formsTreeOrder()
     #expect(order.count >= 7, "\(order)")
