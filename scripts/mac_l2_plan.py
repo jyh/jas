@@ -14,6 +14,12 @@ window lives here, so it runs (and self-tests) on any machine:
   set_aside_the_opens_artboard(got, want)
                               the Windows oracle's rule, and the Rust engine
                               replay's (`ffi_script_replay.rs`), here in Python
+  accept_minted_ids(got, want)
+                              the minted-id law (Rust `accept_minted_ids`,
+                              Swift `acceptMintedIds`, Windows
+                              `Compare-SbReadBack`), here in Python
+  read_back(got, want)        both laws, artboard first: THE comparator of
+                              the Mac and web channels (one law, never two)
   receipt_line(...)           the run's `UI-NIGHTLY v1` receipt line (O100)
 
 The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a script
@@ -276,6 +282,62 @@ def set_aside_the_opens_artboard(got, want):
     return "{" + got[end + 2:]
 
 
+
+MINTED = "<minted>"
+
+
+def accept_minted_ids(got, want):
+    """The minted-id law, Rust's `accept_minted_ids` (`ffi_script_replay.rs`)
+    line for line. At each `"id":"<minted>"` in the expected, the read-back
+    must carry an 8-character base-36 id, and those ids must be pairwise
+    distinct (fresh, not one id stamped twice). Every other id is left for the
+    byte comparison, and the counts of `"id":` must agree, so a dropped or an
+    extra id is refused. Each accepted id is replaced by the token."""
+    key = '"id":"'
+    if key + MINTED + '"' not in want:
+        return got
+
+    def ids(s):
+        out, frm = [], 0
+        while True:
+            i = s.find(key, frm)
+            if i < 0:
+                return out
+            start = i + len(key)
+            end = s.find('"', start)
+            end = start if end < 0 else end
+            out.append((start, end))
+            frm = end
+
+    g, w = ids(got), ids(want)
+    if len(g) != len(w):
+        raise Refused(f"the read-back carries {len(g)} ids where the expected names {len(w)}")
+    out, seen, at = [], set(), 0
+    for (gs, ge), (ws, we) in zip(g, w):
+        if want[ws:we] != MINTED:
+            continue
+        mid = got[gs:ge]
+        if not _AB_ID.match(mid):
+            raise Refused(f'a minted id is not an 8-character base-36 id: "{mid}"')
+        if mid in seen:
+            raise Refused(f'the minted id "{mid}" is carried twice; a mint is fresh')
+        seen.add(mid)
+        out.append(got[at:gs])
+        out.append(MINTED)
+        at = ge
+    out.append(got[at:])
+    return "".join(out)
+
+
+
+def read_back(got, want):
+    """The app's read as the expected is written: the open's artboard set
+    aside, then each fresh id where the expected names `<minted>` accepted as
+    the token. The Mac harness (`jas_gui_harness.py`) and the web driver
+    (`scripts/web_l2_driver.py`) both compare through this one function."""
+    return accept_minted_ids(set_aside_the_opens_artboard(got, want), want)
+
+
 RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
 
 
@@ -436,6 +498,32 @@ def self_test():
         '{"artboards":[%s],%s' % (ab("pfj2j82z", "Artboard 9"), rest), want), "not the one the open adds"))
     check("an upper-case id refused", refused(lambda: set_aside_the_opens_artboard(
         '{"artboards":[%s],%s' % (ab("PFJ2J82Z", "Artboard 1"), rest), want), "not the one the open adds"))
+
+    # The minted-id law, Rust's arms (ffi_script_replay.rs) one for one:
+    # boolean.divide gives each fragment a FRESH id, so its expected writes
+    # "<minted>" there; the read-back must carry a fresh 8-character base-36 id.
+    el = lambda i: '{"id":"%s","type":"polygon"}' % i
+    mdoc = lambda a, b: '{"layers":[%s,%s]}' % (el(a), el(b))
+    mwant = mdoc(MINTED, MINTED)
+    check("minted: two fresh ids are accepted as the token", accept_minted_ids(mdoc("l006y7om", "7xkxpudp"), mwant) == mwant)
+    check("minted: no token, the read-back is untouched",
+          accept_minted_ids(mdoc("l006y7om", "7xkxpudp"), mdoc("aaaaaaaa", "bbbbbbbb")) == mdoc("l006y7om", "7xkxpudp"))
+    mixed_ids = mdoc("keepthis", MINTED)
+    check("minted: a literal id beside a token is left for the byte comparison",
+          accept_minted_ids(mdoc("keepthis", "7xkxpudp"), mixed_ids) == mixed_ids
+          and accept_minted_ids(mdoc("changed1", "7xkxpudp"), mixed_ids) != mixed_ids)
+    check("minted: one id stamped twice is refused", refused(lambda: accept_minted_ids(mdoc("l006y7om", "l006y7om"), mwant), "carried twice"))
+    check("minted: an upper-case id is refused", refused(lambda: accept_minted_ids(mdoc("L006Y7OM", "7xkxpudp"), mwant), "not an 8-character"))
+    check("minted: a 7-character id is refused", refused(lambda: accept_minted_ids(mdoc("l006y7o", "7xkxpudp"), mwant), "not an 8-character"))
+    check("minted: a missing id is refused by count",
+          refused(lambda: accept_minted_ids('{"layers":[%s,{"type":"polygon"}]}' % el("l006y7om"), mwant),
+                  "carries 1 ids where the expected names 2"))
+
+    # read_back: both laws in one read, the artboard first (its id would
+    # otherwise be counted among the minted ids and the counts would differ).
+    rb_want = '{"layers":[%s,%s]}' % (el(MINTED), el("keepthis"))
+    rb_got = '{"artboards":[%s],"layers":[%s,%s]}' % (ab("pfj2j82z", "Artboard 1"), el("l006y7om"), el("keepthis"))
+    check("read_back: the open's artboard AND a fresh id, read as the expected", read_back(rb_got, rb_want) == rb_want)
 
     # The receipt (O100): one UI-NIGHTLY v1 line, the form the board parses.
     corpus = ["a.json", "b.json", "c.json"]
