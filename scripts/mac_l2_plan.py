@@ -14,6 +14,7 @@ window lives here, so it runs (and self-tests) on any machine:
   set_aside_the_opens_artboard(got, want)
                               the Windows oracle's rule, and the Rust engine
                               replay's (`ffi_script_replay.rs`), here in Python
+  receipt_line(...)           the run's `UI-NIGHTLY v1` receipt line (O100)
 
 The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a script
 with no `read`; and, for this channel, a `read` other than `document` (the tree
@@ -275,6 +276,41 @@ def set_aside_the_opens_artboard(got, want):
     return "{" + got[end + 2:]
 
 
+RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
+
+
+def receipt_line(outcomes, corpus, head, date, not_run=None):
+    """The run's receipt, one `UI-NIGHTLY v1` line (O100's board grammar).
+
+    `outcomes` maps a script's file name to PASS, FAIL or REFUSED; `corpus` is
+    every script name in `test_fixtures/input_scripts`. `items` counts passes
+    over the scripts RUN; `scope` is `full` only when every corpus script ran.
+    `not_run` is the reason a run was refused before any script (a locked
+    screen, a person at the console): the line says NOT RUN over the whole
+    corpus, so a refused night is a row, never a missing one. `panels=-` until
+    this channel reads the tree. A call with no outcome and no reason is
+    refused: it would read as a 0/0 run."""
+    unknown = sorted(set(outcomes) - set(corpus))
+    if unknown:
+        raise ValueError("not in the corpus: " + ", ".join(unknown))
+    bad = sorted(n for n, o in outcomes.items() if o not in RECEIPT_OUTCOMES)
+    if bad:
+        raise ValueError("an outcome is not PASS, FAIL or REFUSED: " + ", ".join(bad))
+    if not_run is not None:
+        verdict, items = "NOT RUN(%s)" % str(not_run).replace(")", "]"), "0/%d" % len(corpus)
+        scope = "full"
+    else:
+        if not outcomes:
+            raise ValueError("no script ran and no refusal was given")
+        n = {o: sum(1 for v in outcomes.values() if v == o) for o in RECEIPT_OUTCOMES}
+        verdict = ("GREEN" if n["PASS"] == len(outcomes)
+                   else "RED(fail=%d refused=%d)" % (n["FAIL"], n["REFUSED"]))
+        items = "%d/%d" % (n["PASS"], len(outcomes))
+        scope = "full" if set(outcomes) == set(corpus) else "partial"
+    return ("UI-NIGHTLY v1 suite=mac.live verdict=%s items=%s panels=- head=%s scope=%s date=%s"
+            % (verdict, items, head, scope, date))
+
+
 def load_spec(script):
     import yaml
     path = os.path.join(REPO, script.get("spec", ""))
@@ -399,6 +435,40 @@ def self_test():
         '{"artboards":[%s],%s' % (ab("pfj2j82z", "Artboard 9"), rest), want), "not the one the open adds"))
     check("an upper-case id refused", refused(lambda: set_aside_the_opens_artboard(
         '{"artboards":[%s],%s' % (ab("PFJ2J82Z", "Artboard 1"), rest), want), "not the one the open adds"))
+
+    # The receipt (O100): one UI-NIGHTLY v1 line, the form the board parses.
+    corpus = ["a.json", "b.json", "c.json"]
+    D, H = "2026-11-06T12:00:00-08:00", "0123abcd"
+    check("receipt: all pass over the corpus is GREEN, scope=full",
+          receipt_line({"a.json": "PASS", "b.json": "PASS", "c.json": "PASS"}, corpus, H, D)
+          == "UI-NIGHTLY v1 suite=mac.live verdict=GREEN items=3/3 panels=- head=0123abcd scope=full date=" + D)
+    # Distinct counts (2 FAIL, 1 REFUSED), so a swap of the two cannot pass.
+    check("receipt: FAILs and REFUSEDs are RED, counted apart, items counts passes",
+          receipt_line({"a.json": "FAIL", "b.json": "FAIL", "c.json": "REFUSED", "d.json": "PASS"},
+                       corpus + ["d.json"], H, D)
+          == "UI-NIGHTLY v1 suite=mac.live verdict=RED(fail=2 refused=1) items=1/4 panels=- head=0123abcd scope=full date=" + D)
+    check("receipt: a run refused before any script is NOT RUN, over the whole corpus",
+          receipt_line({}, corpus, H, D, not_run="the screen is locked")
+          == "UI-NIGHTLY v1 suite=mac.live verdict=NOT RUN(the screen is locked) items=0/3 panels=- head=0123abcd scope=full date=" + D)
+    check("receipt: a subset of the corpus is scope=partial, never full",
+          " scope=partial " in receipt_line({"a.json": "PASS"}, corpus, H, D))
+    check("receipt: a reason cannot close the parenthesis early",
+          "verdict=NOT RUN(x] y) items" in receipt_line({}, corpus, H, D, not_run="x) y"))
+    try:
+        receipt_line({}, corpus, H, D)
+        check("receipt: no outcome and no refusal is refused, never GREEN 0/0", False)
+    except ValueError:
+        check("receipt: no outcome and no refusal is refused, never GREEN 0/0", True)
+    try:
+        receipt_line({"zzz.json": "PASS"}, corpus, H, D)
+        check("receipt: a script outside the corpus is refused by name", False)
+    except ValueError as e:
+        check("receipt: a script outside the corpus is refused by name", "zzz.json" in str(e))
+    try:
+        receipt_line({"a.json": "OK"}, corpus, H, D)
+        check("receipt: an unknown outcome is refused", False)
+    except ValueError:
+        check("receipt: an unknown outcome is refused", True)
 
     # The real artifacts: every shipped script plans, and every menu and panel
     # path it needs exists in the real menubar. This is the population check:
