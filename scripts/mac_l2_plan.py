@@ -21,6 +21,7 @@ window lives here, so it runs (and self-tests) on any machine:
   read_back(got, want)        both laws, artboard first: THE comparator of
                               the Mac and web channels (one law, never two)
   receipt_line(...)           the run's `UI-NIGHTLY v1` receipt line (O100)
+  launch_env_problem(env)     why the launch environment cannot run, or None
 
 The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a script
 with no `read`; and, for this channel, a `read` other than `document` (the tree
@@ -338,6 +339,18 @@ def read_back(got, want):
     return accept_minted_ids(set_aside_the_opens_artboard(got, want), want)
 
 
+def launch_env_problem(env):
+    """Why `jas_gui_harness.py script` cannot start under `env`, or None. The
+    driver talks to the app through `JAS_FIFO`, and finds its window by
+    `JAS_TITLE`, which `JAS_APP` launches it with (`--title`). Without the title
+    the launch crashed in `Popen` on a Mac run box (2026-11-06) instead of refusing."""
+    if not env.get("JAS_FIFO"):
+        return "JAS_FIFO is not set: the driver reaches the app's --test-fifo through it"
+    if env.get("JAS_APP") and not env.get("JAS_TITLE"):
+        return "JAS_APP is set without JAS_TITLE: the app is launched with --title JAS_TITLE and found by it"
+    return None
+
+
 RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
 
 
@@ -524,6 +537,19 @@ def self_test():
     rb_want = '{"layers":[%s,%s]}' % (el(MINTED), el("keepthis"))
     rb_got = '{"artboards":[%s],"layers":[%s,%s]}' % (ab("pfj2j82z", "Artboard 1"), el("l006y7om"), el("keepthis"))
     check("read_back: the open's artboard AND a fresh id, read as the expected", read_back(rb_got, rb_want) == rb_want)
+
+    # The launch environment is refused BY NAME before anything drives the
+    # console (a Mac run box, 2026-11-06: JAS_APP without JAS_TITLE crashed in Popen).
+    ok = {"JAS_FIFO": "/tmp/f", "JAS_TITLE": "JasHarness", "JAS_APP": "/x/Jas"}
+    check("env: a full launch environment passes", launch_env_problem(ok) is None)
+    check("env: no JAS_APP (an app already open) passes with a FIFO and title",
+          launch_env_problem({"JAS_FIFO": "/tmp/f", "JAS_TITLE": "T"}) is None)
+    check("env: JAS_APP without JAS_TITLE is refused by name",
+          "JAS_TITLE" in (launch_env_problem({"JAS_FIFO": "/tmp/f", "JAS_APP": "/x/Jas"}) or ""))
+    check("env: no JAS_FIFO is refused by name",
+          "JAS_FIFO" in (launch_env_problem({"JAS_TITLE": "T", "JAS_APP": "/x/Jas"}) or ""))
+    check("env: an EMPTY JAS_TITLE is refused like a missing one",
+          "JAS_TITLE" in (launch_env_problem(dict(ok, JAS_TITLE="")) or ""))
 
     # The receipt (O100): one UI-NIGHTLY v1 line, the form the board parses.
     corpus = ["a.json", "b.json", "c.json"]

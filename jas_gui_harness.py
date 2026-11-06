@@ -526,6 +526,12 @@ def _write_receipt(path, outcomes, not_run=None):
 def do_script(paths, receipt=None):
     global _plan
     import mac_l2_plan as _plan
+    problem = _plan.launch_env_problem(os.environ)
+    if problem:
+        print("REFUSED: " + problem)
+        if receipt:
+            _write_receipt(receipt, {}, not_run=problem)
+        return 3
     if _screen_locked():
         print("REFUSED: the screen is locked; a key event would type into the login window")
         if receipt:
