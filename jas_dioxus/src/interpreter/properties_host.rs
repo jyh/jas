@@ -188,6 +188,23 @@ fn prop_shear_about_pivot(deg: f64, _px: f64, py: f64) -> crate::geometry::eleme
     Transform { a: 1.0, b: 0.0, c: k, d: 1.0, e: -k * py, f: 0.0 }
 }
 
+/// The Opacity panel's two document-writing keys, mapped onto the Properties
+/// law that already implements them. Returns `None` for the panel's other four
+/// declared keys, which reach no element attribute: `thumbnails_hidden` and
+/// `options_shown` are panel-local UI, and `new_masks_clipping` /
+/// `new_masks_inverted` are document PREFERENCES parked on panel state until
+/// the document model grows somewhere to keep them. A write to any of the four
+/// must not push an undo step that changes nothing. The engine's panel door
+/// (`panel_behavior.rs`) and the web view (`renderer.rs` `commit_panel_field`)
+/// both map through this one function.
+pub fn opacity_prop_key(key: &str) -> Option<&'static str> {
+    match key {
+        "opacity" => Some("prop_opacity"),
+        "blend_mode" => Some("prop_blend"),
+        _ => None,
+    }
+}
+
 /// Apply a Properties-panel field edit to the selection (decision-5 Part B.2):
 /// the reference's `apply_properties_field`. `key` is the panel key
 /// (`prop_x` …). x/y move (any selection); w/h scale local axes (single) or
