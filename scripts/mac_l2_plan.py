@@ -285,8 +285,46 @@ MINTED = "<minted>"
 
 
 def accept_minted_ids(got, want):
-    """STUB (red first): today's behaviour, no minted-id law at all."""
-    return got
+    """The minted-id law, Rust's `accept_minted_ids` (`ffi_script_replay.rs`)
+    line for line. At each `"id":"<minted>"` in the expected, the read-back
+    must carry an 8-character base-36 id, and those ids must be pairwise
+    distinct (fresh, not one id stamped twice). Every other id is left for the
+    byte comparison, and the counts of `"id":` must agree, so a dropped or an
+    extra id is refused. Each accepted id is replaced by the token."""
+    key = '"id":"'
+    if key + MINTED + '"' not in want:
+        return got
+
+    def ids(s):
+        out, frm = [], 0
+        while True:
+            i = s.find(key, frm)
+            if i < 0:
+                return out
+            start = i + len(key)
+            end = s.find('"', start)
+            end = start if end < 0 else end
+            out.append((start, end))
+            frm = end
+
+    g, w = ids(got), ids(want)
+    if len(g) != len(w):
+        raise Refused(f"the read-back carries {len(g)} ids where the expected names {len(w)}")
+    out, seen, at = [], set(), 0
+    for (gs, ge), (ws, we) in zip(g, w):
+        if want[ws:we] != MINTED:
+            continue
+        mid = got[gs:ge]
+        if not _AB_ID.match(mid):
+            raise Refused(f'a minted id is not an 8-character base-36 id: "{mid}"')
+        if mid in seen:
+            raise Refused(f'the minted id "{mid}" is carried twice; a mint is fresh')
+        seen.add(mid)
+        out.append(got[at:gs])
+        out.append(MINTED)
+        at = ge
+    out.append(got[at:])
+    return "".join(out)
 
 
 RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
