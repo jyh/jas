@@ -119,6 +119,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
@@ -129,7 +130,9 @@ jobs:
       - name: Install the pinned driver dependencies and their browser
         run: |
           python -m pip install -r scripts/web_l2_requirements.txt
-          python -m playwright install --with-deps chromium
+          # No --with-deps: the runner already carries the browser's system
+          # libraries, and the apt step took 11 of the first run's 11.5 minutes.
+          python -m playwright install chromium
       - name: The driver's pure half
         run: python scripts/web_l2_driver.py --self-test
       - name: Fetch the bundle the build job made
