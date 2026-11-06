@@ -391,8 +391,8 @@ def self_test():
     # the app's read is that file with a fresh id at each token and the open's
     # artboard in front, built from the file's bytes, never typed.
     import re as _re
-    minted_files = sorted(p for p in glob.glob(os.path.join(SCRIPTS, "*.expected.json"))
-                          if '"id":"<minted>"' in open(p, encoding="utf-8").read())
+    minted_files = sorted(ef for ef in glob.glob(os.path.join(SCRIPTS, "*.expected.json"))
+                          if '"id":"<minted>"' in open(ef, encoding="utf-8").read())
     check(len(minted_files) >= 1, "the corpus has an expected that names a minted id (boolean.divide)")
     for mf in minted_files:
         mwant = open(mf, encoding="utf-8").read().strip()
