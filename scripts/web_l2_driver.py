@@ -134,13 +134,6 @@ class Browser:
             ctx.close()
 
 
-def read_back(got, want):
-    """The app's read as the expected is written: the open's artboard set
-    aside, then each fresh id where the expected names `<minted>` accepted as
-    the token. Both laws are mac_l2_plan's, shared with the Mac channel."""
-    return _plan.accept_minted_ids(_plan.set_aside_the_opens_artboard(got, want), want)
-
-
 def run_script(br, path, menubar, menu_ids, artifacts=None):
     """-> (status, detail, moved). status is PASS, FAIL or REFUSED."""
     with open(path, encoding="utf-8") as f:
@@ -272,7 +265,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         elif k == "read":
             release_mods()
             page.wait_for_timeout(150)
-            return read_back(page.evaluate("() => window.__jasTest.read()").strip(), want)
+            return _plan.read_back(page.evaluate("() => window.__jasTest.read()").strip(), want)
         return None
 
     try:
@@ -405,7 +398,7 @@ def self_test():
             + _re.sub(r'"id":"<minted>"', fresh, mwant)[1:]
         check(k[0] >= 2 and app_read != mwant, f"{os.path.basename(mf)}: the synthetic read differs from the expected")
         try:
-            check(read_back(app_read, mwant) == mwant, f"{os.path.basename(mf)}: fresh ids read back as the expected")
+            check(_plan.read_back(app_read, mwant) == mwant, f"{os.path.basename(mf)}: fresh ids read back as the expected")
         except _plan.Refused as e:
             fails.append(f"{os.path.basename(mf)}: fresh ids refused: {e}")
     D = "2026-11-06T00:00:00Z"

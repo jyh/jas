@@ -465,7 +465,7 @@ def _run_script(path, menubar):
             else:
                 raise _plan.Refused("the app wrote no read-back (is --test-fifo the same path as JAS_FIFO?)")
             got = open(out, encoding="utf-8").read().strip()
-            got = _plan.set_aside_the_opens_artboard(got, want)
+            got = _plan.read_back(got, want)
             return got == want, got, want
 
     return _plan.run_guarded(acts, blocked, do_act)

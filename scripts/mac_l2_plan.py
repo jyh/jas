@@ -18,6 +18,8 @@ window lives here, so it runs (and self-tests) on any machine:
                               the minted-id law (Rust `accept_minted_ids`,
                               Swift `acceptMintedIds`, Windows
                               `Compare-SbReadBack`), here in Python
+  read_back(got, want)        both laws, artboard first: THE comparator of
+                              the Mac and web channels (one law, never two)
   receipt_line(...)           the run's `UI-NIGHTLY v1` receipt line (O100)
 
 The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a script
@@ -327,6 +329,15 @@ def accept_minted_ids(got, want):
     return "".join(out)
 
 
+
+def read_back(got, want):
+    """The app's read as the expected is written: the open's artboard set
+    aside, then each fresh id where the expected names `<minted>` accepted as
+    the token. The Mac harness (`jas_gui_harness.py`) and the web driver
+    (`scripts/web_l2_driver.py`) both compare through this one function."""
+    return accept_minted_ids(set_aside_the_opens_artboard(got, want), want)
+
+
 RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
 
 
@@ -507,6 +518,12 @@ def self_test():
     check("minted: a missing id is refused by count",
           refused(lambda: accept_minted_ids('{"layers":[%s,{"type":"polygon"}]}' % el("l006y7om"), mwant),
                   "carries 1 ids where the expected names 2"))
+
+    # read_back: both laws in one read, the artboard first (its id would
+    # otherwise be counted among the minted ids and the counts would differ).
+    rb_want = '{"layers":[%s,%s]}' % (el(MINTED), el("keepthis"))
+    rb_got = '{"artboards":[%s],"layers":[%s,%s]}' % (ab("pfj2j82z", "Artboard 1"), el("l006y7om"), el("keepthis"))
+    check("read_back: the open's artboard AND a fresh id, read as the expected", read_back(rb_got, rb_want) == rb_want)
 
     # The receipt (O100): one UI-NIGHTLY v1 line, the form the board parses.
     corpus = ["a.json", "b.json", "c.json"]
