@@ -117,6 +117,8 @@ jobs:
   web-l2:
     name: Web level 2 (input scripts through the live app, advisory)
     needs: build
+    # A red build leaves this job RED (no bundle to fetch), never skipped.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 40
