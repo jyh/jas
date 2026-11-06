@@ -1,4 +1,5 @@
 id: properties_panel_content
+type: panel
 summary: "Object properties"
 description: >
   Transform properties for the selected object(s). This increment shows
