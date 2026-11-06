@@ -6,6 +6,7 @@
   "type": "object",
   "required": [
     "id",
+    "type",
     "summary",
     "description",
     "state",
