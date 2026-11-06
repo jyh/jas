@@ -14,6 +14,10 @@ window lives here, so it runs (and self-tests) on any machine:
   set_aside_the_opens_artboard(got, want)
                               the Windows oracle's rule, and the Rust engine
                               replay's (`ffi_script_replay.rs`), here in Python
+  accept_minted_ids(got, want)
+                              the minted-id law (Rust `accept_minted_ids`,
+                              Swift `acceptMintedIds`, Windows
+                              `Compare-SbReadBack`), here in Python
   receipt_line(...)           the run's `UI-NIGHTLY v1` receipt line (O100)
 
 The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a script
@@ -276,6 +280,15 @@ def set_aside_the_opens_artboard(got, want):
     return "{" + got[end + 2:]
 
 
+
+MINTED = "<minted>"
+
+
+def accept_minted_ids(got, want):
+    """STUB (red first): today's behaviour, no minted-id law at all."""
+    return got
+
+
 RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
 
 
@@ -436,6 +449,26 @@ def self_test():
         '{"artboards":[%s],%s' % (ab("pfj2j82z", "Artboard 9"), rest), want), "not the one the open adds"))
     check("an upper-case id refused", refused(lambda: set_aside_the_opens_artboard(
         '{"artboards":[%s],%s' % (ab("PFJ2J82Z", "Artboard 1"), rest), want), "not the one the open adds"))
+
+    # The minted-id law, Rust's arms (ffi_script_replay.rs) one for one:
+    # boolean.divide gives each fragment a FRESH id, so its expected writes
+    # "<minted>" there; the read-back must carry a fresh 8-character base-36 id.
+    el = lambda i: '{"id":"%s","type":"polygon"}' % i
+    mdoc = lambda a, b: '{"layers":[%s,%s]}' % (el(a), el(b))
+    mwant = mdoc(MINTED, MINTED)
+    check("minted: two fresh ids are accepted as the token", accept_minted_ids(mdoc("l006y7om", "7xkxpudp"), mwant) == mwant)
+    check("minted: no token, the read-back is untouched",
+          accept_minted_ids(mdoc("l006y7om", "7xkxpudp"), mdoc("aaaaaaaa", "bbbbbbbb")) == mdoc("l006y7om", "7xkxpudp"))
+    mixed_ids = mdoc("keepthis", MINTED)
+    check("minted: a literal id beside a token is left for the byte comparison",
+          accept_minted_ids(mdoc("keepthis", "7xkxpudp"), mixed_ids) == mixed_ids
+          and accept_minted_ids(mdoc("changed1", "7xkxpudp"), mixed_ids) != mixed_ids)
+    check("minted: one id stamped twice is refused", refused(lambda: accept_minted_ids(mdoc("l006y7om", "l006y7om"), mwant), "carried twice"))
+    check("minted: an upper-case id is refused", refused(lambda: accept_minted_ids(mdoc("L006Y7OM", "7xkxpudp"), mwant), "not an 8-character"))
+    check("minted: a 7-character id is refused", refused(lambda: accept_minted_ids(mdoc("l006y7o", "7xkxpudp"), mwant), "not an 8-character"))
+    check("minted: a missing id is refused by count",
+          refused(lambda: accept_minted_ids('{"layers":[%s,{"type":"polygon"}]}' % el("l006y7om"), mwant),
+                  "carries 1 ids where the expected names 2"))
 
     # The receipt (O100): one UI-NIGHTLY v1 line, the form the board parses.
     corpus = ["a.json", "b.json", "c.json"]

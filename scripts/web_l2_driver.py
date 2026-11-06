@@ -134,6 +134,13 @@ class Browser:
             ctx.close()
 
 
+def read_back(got, want):
+    """The app's read as the expected is written: the open's artboard set
+    aside, then each fresh id where the expected names `<minted>` accepted as
+    the token. Both laws are mac_l2_plan's, shared with the Mac channel."""
+    return _plan.accept_minted_ids(_plan.set_aside_the_opens_artboard(got, want), want)
+
+
 def run_script(br, path, menubar, menu_ids, artifacts=None):
     """-> (status, detail, moved). status is PASS, FAIL or REFUSED."""
     with open(path, encoding="utf-8") as f:
@@ -265,9 +272,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         elif k == "read":
             release_mods()
             page.wait_for_timeout(150)
-            got = page.evaluate("() => window.__jasTest.read()").strip()
-            got = _plan.set_aside_the_opens_artboard(got, want)
-            return got
+            return read_back(page.evaluate("() => window.__jasTest.read()").strip(), want)
         return None
 
     try:
@@ -382,6 +387,27 @@ def self_test():
         fails.append("an unnamed key is refused")
     except _plan.Refused:
         pass
+    # The read-back over a REAL expected that names minted ids (boolean.divide):
+    # the app's read is that file with a fresh id at each token and the open's
+    # artboard in front, built from the file's bytes, never typed.
+    import re as _re
+    minted_files = sorted(p for p in glob.glob(os.path.join(SCRIPTS, "*.expected.json"))
+                          if '"id":"<minted>"' in open(p, encoding="utf-8").read())
+    check(len(minted_files) >= 1, "the corpus has an expected that names a minted id (boolean.divide)")
+    for mf in minted_files:
+        mwant = open(mf, encoding="utf-8").read().strip()
+        k = [0]
+
+        def fresh(_m):
+            k[0] += 1
+            return '"id":"%s"' % ("m%07d" % k[0])
+        app_read = '{"artboards":[{"fill":"transparent","id":"pfj2j82z","name":"Artboard 1","x":0.0}],' \
+            + _re.sub(r'"id":"<minted>"', fresh, mwant)[1:]
+        check(k[0] >= 2 and app_read != mwant, f"{os.path.basename(mf)}: the synthetic read differs from the expected")
+        try:
+            check(read_back(app_read, mwant) == mwant, f"{os.path.basename(mf)}: fresh ids read back as the expected")
+        except _plan.Refused as e:
+            fails.append(f"{os.path.basename(mf)}: fresh ids refused: {e}")
     D = "2026-11-06T00:00:00Z"
     names = [os.path.basename(p)[:-5] for p in paths]
     allpass = [(n, "PASS", "") for n in names]
