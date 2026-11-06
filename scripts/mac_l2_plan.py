@@ -279,7 +279,7 @@ def set_aside_the_opens_artboard(got, want):
 RECEIPT_OUTCOMES = ("PASS", "FAIL", "REFUSED")
 
 
-def receipt_line(outcomes, corpus, head, date, not_run=None):
+def receipt_line(outcomes, corpus, head, date, not_run=None, suite="mac.live"):
     """The run's receipt, one `UI-NIGHTLY v1` line (O100's board grammar).
 
     `outcomes` maps a script's file name to PASS, FAIL or REFUSED; `corpus` is
@@ -289,7 +289,8 @@ def receipt_line(outcomes, corpus, head, date, not_run=None):
     screen, a person at the console): the line says NOT RUN over the whole
     corpus, so a refused night is a row, never a missing one. `panels=-` until
     this channel reads the tree. A call with no outcome and no reason is
-    refused: it would read as a 0/0 run."""
+    refused: it would read as a 0/0 run. `suite` names the channel (the web
+    driver passes `web.live`), so every channel writes ONE grammar."""
     unknown = sorted(set(outcomes) - set(corpus))
     if unknown:
         raise ValueError("not in the corpus: " + ", ".join(unknown))
@@ -307,8 +308,8 @@ def receipt_line(outcomes, corpus, head, date, not_run=None):
                    else "RED(fail=%d refused=%d)" % (n["FAIL"], n["REFUSED"]))
         items = "%d/%d" % (n["PASS"], len(outcomes))
         scope = "full" if set(outcomes) == set(corpus) else "partial"
-    return ("UI-NIGHTLY v1 suite=mac.live verdict=%s items=%s panels=- head=%s scope=%s date=%s"
-            % (verdict, items, head, scope, date))
+    return ("UI-NIGHTLY v1 suite=%s verdict=%s items=%s panels=- head=%s scope=%s date=%s"
+            % (suite, verdict, items, head, scope, date))
 
 
 def load_spec(script):
@@ -452,6 +453,9 @@ def self_test():
           == "UI-NIGHTLY v1 suite=mac.live verdict=NOT RUN(the screen is locked) items=0/3 panels=- head=0123abcd scope=full date=" + D)
     check("receipt: a subset of the corpus is scope=partial, never full",
           " scope=partial " in receipt_line({"a.json": "PASS"}, corpus, H, D))
+    check("the suite token is the caller's (default mac.live)",
+          " suite=web.live " in receipt_line({"a.json": "PASS"}, corpus, H, D, suite="web.live")
+          and " suite=mac.live " in receipt_line({"a.json": "PASS"}, corpus, H, D))
     check("receipt: a reason cannot close the parenthesis early",
           "verdict=NOT RUN(x] y) items" in receipt_line({}, corpus, H, D, not_run="x) y"))
     try:

@@ -93,24 +93,13 @@ def key_chord(key, mods):
     return "+".join([MODKEY[m] for m in mods] + [name])
 
 
-def verdict(results):
-    """(results: [(name, status, detail)]) -> (verdict, passed, total).
-    GREEN only when every script PASSes. RED names its counts by status."""
-    total = len(results)
-    passed = sum(1 for _, s, _ in results if s == "PASS")
-    if total and passed == total:
-        return "GREEN", passed, total
-    counts = {}
-    for _, s, _ in results:
-        if s != "PASS":
-            counts[s] = counts.get(s, 0) + 1
-    why = ", ".join(f"{n} {s}" for s, n in sorted(counts.items())) or "no scripts"
-    return f"RED({why})", passed, total
-
-
-def receipt_line(v, passed, total, head, date):
-    return (f"UI-NIGHTLY v1 suite={SUITE} verdict={v} items={passed}/{total} panels=- "
-            f"head={(head or 'unknown')[:8]} scope=full date={date}")
+def receipt(results, head, date, not_run=None):
+    """The receipt line, in the ONE grammar every channel writes: mac_l2_plan.receipt_line with suite=web.live.
+    `results` is [(name, status, detail)]; items count passes over the scripts RUN, and scope is full only
+    when every corpus script ran."""
+    corpus = [os.path.basename(p) for p in script_paths()]
+    outcomes = {n + ".json": s for n, s, _ in results}
+    return _plan.receipt_line(outcomes, corpus, (head or "unknown")[:8], date, not_run=not_run, suite=SUITE)
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +307,10 @@ def run(args):
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
+        not_run = None
         if absent or not present:
-            results = [(os.path.basename(p)[:-5], "REFUSED", "the hook check failed") for p in paths]
-            unmoved = 0
+            results, unmoved = [], 0
+            not_run = "the hook check failed: " + lines[-1]
         else:
             results, unmoved, moved_by = [], 0, {}
             for p in paths:
@@ -340,15 +330,16 @@ def run(args):
                     lines.append(f"WITNESS REFUSED: {WITNESS} did not pass with a moved read-back, so no PASS in this run is counted")
     finally:
         br.close()
-    v, passed, total = verdict(results)
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    first = receipt_line(v, passed, total, args.head, date)
+    first = receipt(results, args.head, date, not_run=not_run)
     body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"] + lines
     print("\n".join(body))
     if args.receipt:
         with open(args.receipt, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(body) + "\n")
-    return 0 if v == "GREEN" else 1
+    if args.advisory and args.receipt:
+        return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
+    return 0 if " verdict=GREEN " in first else 1
 
 
 # ---------------------------------------------------------------------------
@@ -391,13 +382,21 @@ def self_test():
         fails.append("an unnamed key is refused")
     except _plan.Refused:
         pass
-    check(verdict([("a", "PASS", ""), ("b", "PASS", "")]) == ("GREEN", 2, 2), "all pass is GREEN")
-    check(verdict([("a", "PASS", ""), ("b", "FAIL", ""), ("c", "REFUSED", "")])
-          == ("RED(1 FAIL, 1 REFUSED)", 1, 3), "RED names its counts")
-    check(verdict([])[0].startswith("RED"), "an empty run is RED, never GREEN")
-    line = receipt_line("GREEN", 116, 116, "7f78b29c0000", "2026-11-06T00:00:00Z")
-    check(line == "UI-NIGHTLY v1 suite=web.live verdict=GREEN items=116/116 panels=- head=7f78b29c "
-                  "scope=full date=2026-11-06T00:00:00Z", "the receipt line has the board's grammar")
+    D = "2026-11-06T00:00:00Z"
+    names = [os.path.basename(p)[:-5] for p in paths]
+    allpass = [(n, "PASS", "") for n in names]
+    check(receipt(allpass, "7f78b29c0000", D) == f"UI-NIGHTLY v1 suite=web.live verdict=GREEN items={len(names)}/{len(names)} panels=- "
+          f"head=7f78b29c scope=full date={D}", "every script passing is GREEN over the full corpus, in the shared grammar")
+    mixed = [(names[0], "PASS", ""), (names[1], "FAIL", ""), (names[2], "REFUSED", "")]
+    check(" verdict=RED(fail=1 refused=1) items=1/3 " in receipt(mixed, "7f78b29c", D) and " scope=partial " in receipt(mixed, "7f78b29c", D),
+          "a partial run is RED with its counts and scope=partial")
+    check(" verdict=NOT RUN(the hook check failed] x) " in receipt([], "7f78b29c", D, not_run="the hook check failed) x")
+          and f" items=0/{len(names)} " in receipt([], "7f78b29c", D, not_run="x"), "a refused run is NOT RUN over the corpus, never 0/0")
+    try:
+        receipt([], "7f78b29c", D)
+        fails.append("an empty run with no reason is refused")
+    except ValueError:
+        pass
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:
@@ -413,6 +412,8 @@ def main(argv):
     ap.add_argument("--head")
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--artifacts")
+    ap.add_argument("--advisory", action="store_true",
+                    help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)
     if args.self_test:
         return self_test()
