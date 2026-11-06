@@ -50,6 +50,10 @@ pub mod fill_stroke_widget;
 // Keyboard event plumbing bound to web_sys KeyboardEvent.
 #[cfg(feature = "web")]
 pub(crate) mod keyboard;
+// The level-2 test hook (`window.__jasTest`, installed only under `?jas_test=1`).
+// Gated: its commands operate on AppState/TabState.
+#[cfg(feature = "web")]
+pub(crate) mod test_hook;
 // The single runtime LAYOUT-op dispatcher (OP_LOG.md §12, Fork 5, Increment
 // 3d-2): production layout mutations and the cross-language harness share this
 // one per-verb body. Promoted from the web-gated harness `apply_workspace_op`.
