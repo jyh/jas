@@ -26,11 +26,13 @@ use super::app_state::{AppState, TabState};
 use crate::document::model::Model;
 
 /// The query parameter that installs the hook.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm binding
 pub const TEST_FLAG: &str = "jas_test=1";
 
 /// True when a `location.search` string carries the flag as one whole
 /// parameter (`?jas_test=1`, `?a=b&jas_test=1`), never as a substring of
 /// another parameter (`?xjas_test=1`, `?jas_test=10`).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm binding
 pub fn test_flag(search: &str) -> bool {
     search.trim_start_matches('?').split('&').any(|kv| kv == TEST_FLAG)
 }
@@ -201,10 +203,23 @@ mod tests {
         let mut st = AppState::new();
         assert_eq!(read(&st), "", "no tab reads empty");
         open(&mut st, FIXTURE, "three_rects.svg");
+        // An open mints a fresh 8-character artboard id, so two opens differ
+        // there and nowhere else: compare with that one id normalised (the
+        // level-2 comparator sets the open's artboard aside the same way).
         let engine = crate::geometry::test_json::document_to_test_json(
             &crate::geometry::svg::open_svg_document(FIXTURE),
         );
-        assert_eq!(read(&st), engine);
+        let norm = |s: &str| {
+            let i = s.find("\"id\":\"").expect("the open's artboard has an id") + 6;
+            format!("{}XXXXXXXX{}", &s[..i], &s[i + 8..])
+        };
+        assert_ne!(read(&st), engine, "the two opens mint different artboard ids");
+        assert_eq!(norm(&read(&st)), norm(&engine));
+        assert_eq!(
+            read(&st),
+            crate::geometry::test_json::document_to_test_json(st.tab().unwrap().model.document()),
+            "read() is document_to_test_json of the active document"
+        );
         assert!(read(&st).contains("\"type\":\"rect\""), "the fixture's rects are read back");
     }
 

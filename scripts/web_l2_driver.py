@@ -157,6 +157,12 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
     with open(os.path.join(SCRIPTS, script["expected_json"]), encoding="utf-8") as f:
         want = f.read().strip()
     ctx, page = br.page(True)
+    try:
+        # The wasm app mounts after the page loads; the hook exists only then.
+        page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+    except Exception:
+        ctx.close()
+        return "REFUSED", f"window.__jasTest did not appear within {HOOK_TIMEOUT_MS} ms", None
     held = set()
     st = {"origin": None, "view": None, "opened": None}
 
@@ -168,6 +174,22 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
 
     def release_mods():
         sync_mods(())
+
+    def menu_click(path):
+        """Open the top menu titled path[0], then click the item whose DOM id
+        is the menubar.yaml id of that title path."""
+        mid = menu_ids.get(tuple(path))
+        if mid is None:
+            raise _plan.Refused(f"menu path {list(path)} has no id")
+        tops = page.locator(".jas-menu-title")
+        exact = [i for i in range(tops.count()) if tops.nth(i).inner_text().strip() == path[0]]
+        if len(exact) != 1:
+            raise _plan.Refused(f"{len(exact)} menubar titles read {path[0]!r}")
+        tops.nth(exact[0]).dispatch_event("mousedown")
+        item = page.locator(f"#{mid}")
+        item.wait_for(timeout=5000)
+        item.click()
+        page.wait_for_timeout(200)
 
     def canvas_origin():
         loc = page.locator("#jas-canvas")
@@ -212,12 +234,19 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             page.wait_for_timeout(100)
         elif k == "panel":
             release_mods()
-            _, pid, tab, _wpath, widget, event, value, _label = act
+            _, pid, tab, wpath, widget, event, value, _label = act
             if page.locator(f"#{pid}").count() == 0:
+                # Show it as a person does: its dock tab, or, for a panel in no
+                # dock group, its Window menu item.
                 tabs = page.locator(f"#{tab}")
-                if tabs.count() != 1:
-                    raise _plan.Refused(f"{tabs.count()} dock tabs carry id {tab!r}; panel {pid!r} is not shown")
-                tabs.click()
+                if tabs.count() > 1:
+                    raise _plan.Refused(f"{tabs.count()} dock tabs carry id {tab!r}")
+                if tabs.count() == 1:
+                    tabs.click()
+                elif wpath:
+                    menu_click(wpath)
+                else:
+                    raise _plan.Refused(f"panel {pid!r} has no dock tab and no unique Window item")
                 page.wait_for_timeout(300)
             panels = page.locator(f"#{pid}")
             if panels.count() != 1:
@@ -243,19 +272,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             page.wait_for_timeout(200)
         elif k == "menu":
             release_mods()
-            path = tuple(act[1])
-            mid = menu_ids.get(path)
-            if mid is None:
-                raise _plan.Refused(f"menu path {list(path)} has no id")
-            tops = page.locator(".jas-menu-title", has_text=path[0])
-            exact = [i for i in range(tops.count()) if tops.nth(i).inner_text().strip() == path[0]]
-            if len(exact) != 1:
-                raise _plan.Refused(f"{len(exact)} menubar titles read {path[0]!r}")
-            tops.nth(exact[0]).dispatch_event("mousedown")
-            item = page.locator(f"#{mid}")
-            item.wait_for(timeout=5000)
-            item.click()
-            page.wait_for_timeout(200)
+            menu_click(act[1])
         elif k == "read":
             release_mods()
             page.wait_for_timeout(150)
