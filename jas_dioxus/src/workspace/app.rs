@@ -1557,6 +1557,14 @@ pub fn App() -> Element {
                         canvas {
                             id: "jas-canvas",
                             style: "display:block; width:100%; height:100%; cursor:{canvas_cursor};",
+                            // Capture the pointer at the press, so a drag that ends
+                            // over the pane's 4 px edge handle (below, on top of the
+                            // canvas's edge) still delivers its moves and its release
+                            // HERE. Without it a marquee dragged to the window's edge
+                            // lost its release (web level 2, jyh/jas #836: 47 scripts).
+                            onpointerdown: move |evt: Event<PointerData>| {
+                                crate::interpreter::renderer::capture_pointer_on("jas-canvas", evt.data().pointer_id());
+                            },
                             onmousedown: on_mousedown,
                             onmousemove: on_mousemove,
                             onmouseup: on_mouseup,

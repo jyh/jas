@@ -6603,9 +6603,11 @@ fn slider_box(dom_id: &str) -> (f64, f64, f64) {
     }
 }
 
-/// Capture the pointer on the slider, so a drag off the 44 px widget keeps
-/// reporting until its release.
-fn slider_capture(dom_id: &str, pointer_id: i32) {
+/// Capture the pointer on the element with DOM id `dom_id`, so a drag that
+/// leaves it keeps reporting to it until its release: the slider's drag off
+/// its 44 px widget, and the canvas's drag over a pane's edge handle
+/// (`workspace/app.rs`).
+pub(crate) fn capture_pointer_on(dom_id: &str, pointer_id: i32) {
     #[cfg(target_arch = "wasm32")]
     if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id(dom_id)) {
         let _ = el.set_pointer_capture(pointer_id);
@@ -6735,7 +6737,7 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
         let (left, top, width) = slider_box(&dom_band);
         let Some(pair) = slider_midpoint_at(c.x - left, c.y - top, width, &midpoints) else { return };
         evt.stop_propagation();
-        slider_capture(&dom_band, evt.data().pointer_id());
+        capture_pointer_on(&dom_band, evt.data().pointer_id());
         let (location, _) = slider_point(c.x, c.y, left, top, width);
         slider_send(&app_band, revision, "press_midpoint", serde_json::json!({"pair": pair, "location": location}));
     };
@@ -6753,7 +6755,7 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
                 "data-stop-index": "{i}",
                 onpointerdown: move |evt: Event<PointerData>| {
                     evt.stop_propagation();
-                    slider_capture(&dom_s, evt.data().pointer_id());
+                    capture_pointer_on(&dom_s, evt.data().pointer_id());
                     let c = evt.data().client_coordinates();
                     let (left, top, width) = slider_box(&dom_s);
                     let (location, _) = slider_point(c.x, c.y, left, top, width);
