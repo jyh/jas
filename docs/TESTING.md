@@ -254,6 +254,12 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
    * Every decision is made by `scripts/mac_l2_plan.py`, which needs no window and self-tests in CI: the act list,
      the refusals, the document-to-screen mapping and the open's artboard. Its self-test plans every shipped script
      against the real `workspace/menubar.yaml`.
+   * `script --receipt FILE <file>...` also writes the run's receipt, one line in the fleet board's grammar:
+     `UI-NIGHTLY v1 suite=mac.live verdict=GREEN|RED(fail=N refused=M)|NOT RUN(<why>) items=<pass>/<run> panels=-
+     head=<sha8> scope=full|partial date=<iso>`. `scope=full` means every script in `test_fixtures/input_scripts`
+     ran. A run refused before any script (a locked screen, a person at the console) still writes a receipt, as
+     NOT RUN over the whole corpus. A script outside that corpus writes no receipt. `head` is the tree's HEAD
+     unless `JAS_HEAD` names the sha the app was built from. `receipt_line` in `mac_l2_plan.py` makes the line.
    * The app side is three test-only FIFO commands. `open <path>` opens the setup file as File > Open does, without
      the dialog. `view 1 0 0` sets zoom 1 and no pan, so a document unit is one canvas point, as in the Windows shell.
      `read <path>` writes the document's test JSON byte for byte. (`jas://document` re-encodes that JSON, which

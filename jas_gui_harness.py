@@ -499,18 +499,46 @@ def _front_is_jas():
     app = NSWorkspace.sharedWorkspace().frontmostApplication()
     return app is not None and app.localizedName() == PROC
 
-def do_script(paths):
+def _write_receipt(path, outcomes, not_run=None):
+    """`--receipt FILE`: the run's UI-NIGHTLY v1 line (O100), written whole or
+    not at all. The corpus is `test_fixtures/input_scripts`; `head` is this
+    tree's HEAD (JAS_HEAD overrides it, for an app built from another sha)."""
+    import datetime
+    repo = os.path.dirname(os.path.abspath(__file__))
+    d = os.path.join(repo, "test_fixtures", "input_scripts")
+    corpus = sorted(f for f in os.listdir(d) if f.endswith(".json") and not f.endswith(".expected.json"))
+    head = os.environ.get("JAS_HEAD") or subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--short=8", "HEAD"], capture_output=True, text=True).stdout.strip()
+    date = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    try:
+        line = _plan.receipt_line(outcomes, corpus, head or "unknown", date, not_run=not_run)
+    except ValueError as e:
+        print(f"RECEIPT NOT WRITTEN: {e}")
+        return False
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(line + "\n")
+    os.replace(tmp, path)
+    print("RECEIPT " + line)
+    return True
+
+def do_script(paths, receipt=None):
     global _plan
     import mac_l2_plan as _plan
     if _screen_locked():
         print("REFUSED: the screen is locked; a key event would type into the login window")
+        if receipt:
+            _write_receipt(receipt, {}, not_run="the screen is locked")
         return 3
     busy, idle = _console_in_use()
     if busy:
         print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s); a person may be using it")
+        if receipt:
+            _write_receipt(receipt, {}, not_run=f"console input {idle:.0f} s ago")
         return 3
     menubar = _plan.load_menubar()
     bad = 0
+    outcomes = {}
     for p in paths:
         name = os.path.basename(p)
         proc = None
@@ -522,11 +550,13 @@ def do_script(paths):
                 proc = _launch()
             ok, got, want = _run_script(p, menubar)
             print(("PASS " if ok else "FAIL ") + name)
+            outcomes[name] = "PASS" if ok else "FAIL"
             if not ok:
                 bad += 1
                 print("  got  ", got); print("  want ", want)
         except _plan.Refused as e:
             bad += 1
+            outcomes[name] = "REFUSED"
             print("REFUSED " + name + ": " + str(e))
         finally:
             if not _screen_locked():
@@ -541,6 +571,8 @@ def do_script(paths):
     with open(_lastpost_file(), "w", encoding="utf-8", newline="") as f:
         f.write(str(time.time()))
     print(f"{len(paths) - bad} of {len(paths)} scripts passed")
+    if receipt and not _write_receipt(receipt, outcomes):
+        return 4
     return 1 if bad else 0
 
 if __name__=="__main__":
@@ -556,8 +588,13 @@ if __name__=="__main__":
     if v=="clearmods":
         clear_mods(); print("mods cleared"); sys.exit(0)
     if v=="script":
-        paths=[a for a in sys.argv[2:] if not a.endswith(".expected.json")]
-        sys.exit(do_script(paths))
+        args=sys.argv[2:]
+        receipt=None
+        if args[:1]==["--receipt"]:
+            if len(args)<2: print("--receipt names a file"); sys.exit(2)
+            receipt, args = args[1], args[2:]
+        paths=[a for a in args if not a.endswith(".expected.json")]
+        sys.exit(do_script(paths, receipt))
     if not WIN: print("WINDOW NOT FOUND"); sys.exit(1)
     if v=="geom": print(WIN)
     elif v=="shot": do_shot(sys.argv[2]); print("shot",sys.argv[2])
