@@ -2038,6 +2038,22 @@ fn run_input_commit_behavior(
     run_input_behavior(el, field, committed, render_ctx, st, "commit");
 }
 
+/// Whether `el` is a boolean kind (`toggle`, `checkbox`), whose press runs the
+/// behaviors declared under any of `PRESS_EVENTS`.
+fn is_boolean_kind(el: &serde_json::Value) -> bool {
+    el.get("type").and_then(|t| t.as_str())
+        .is_some_and(|t| crate::interpreter::widget_commit::BOOLEAN_KINDS.contains(&t))
+}
+
+/// Whether `el` declares a behavior that a commit runs: `commit` or its synonym
+/// `change` (`widget_commit::COMMIT_EVENTS`).
+fn declares_commit_behavior(el: &serde_json::Value) -> bool {
+    el.get("behavior").and_then(|b| b.as_array()).is_some_and(|arr| arr.iter().any(|b| {
+        b.get("event").and_then(|e| e.as_str())
+            .is_some_and(|e| crate::interpreter::widget_commit::COMMIT_EVENTS.contains(&e))
+    }))
+}
+
 /// Run a text input's declared behavior for `event`, against a context in which
 /// the widget's own bound field already holds the value being committed.
 ///
@@ -2073,7 +2089,17 @@ fn run_input_behavior(
         .and_then(|b| b.as_array())
         .map(|arr| {
             arr.iter()
-                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some(event))
+                .filter(|b| {
+                    let e = b.get("event").and_then(|e| e.as_str());
+                    // A commit runs the behaviors declared under either
+                    // synonym, `commit` or `change`, in declared order
+                    // (`widget_commit::COMMIT_EVENTS`). The Gradient panel's
+                    // value widgets declare `change`, and before 2026-11-06
+                    // this hook ran none of them (web level 2, 6 scripts).
+                    e == Some(event)
+                        || (event == "commit" && e.is_some_and(|e|
+                            crate::interpreter::widget_commit::COMMIT_EVENTS.contains(&e)))
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -3076,6 +3102,11 @@ pub(crate) fn resolve_click_behaviors(
             let evt = b.get("event").and_then(|e| e.as_str()).unwrap_or("click");
             evt == event_name
                 || (event_name == "double_click" && evt == "click_and_wait")
+                // On a boolean kind, `click` and `change` are synonyms for the
+                // press (WIDGET_EVENTS.md; `widget_commit::PRESS_EVENTS`). The
+                // Gradient panel's dither checkbox declares `change`.
+                || (event_name == "click" && is_boolean_kind(el)
+                    && crate::interpreter::widget_commit::PRESS_EVENTS.contains(&evt))
         })
         .map(|b| {
             let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
@@ -5372,6 +5403,11 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let mut revision = rctx.revision;
     let cv = current_value.clone();
     let panel_kind = rctx.panel_kind;
+    // The widget's declared commit behaviors (`commit` or `change`), run after
+    // the bind write, as `render_combo_box` runs them. The Gradient panel's
+    // method select reaches the selection only through its `change`.
+    let ctx_snapshot = ctx.clone();
+    let el_for_commit = if declares_commit_behavior(el) { el.clone() } else { serde_json::Value::Null };
 
     rsx! {
         select {
@@ -5392,10 +5428,23 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         let f = field.clone();
                         let v = new_val.clone();
                         let app = app.clone();
+                        let ctx_snapshot = ctx_snapshot.clone();
+                        let el_for_commit = el_for_commit.clone();
+                        let mut revision = revision;
                         spawn(async move {
-                            let mut st = app.borrow_mut();
-                            commit_panel_field(&mut st, panel_kind, &f, &serde_json::json!(v));
+                            {
+                                let mut st = app.borrow_mut();
+                                let json_val = serde_json::json!(v);
+                                commit_panel_field(&mut st, panel_kind, &f, &json_val);
+                                if !el_for_commit.is_null() {
+                                    run_input_commit_behavior(&el_for_commit, &f, &json_val, &ctx_snapshot, &mut st);
+                                }
+                            }
+                            // After the write and the behavior, as the combo box does
+                            // (LINKHILITE): a bump before the async write repaints stale.
+                            revision += 1;
                         });
+                        return;
                     }
                     BindTarget::None => { return; }
                 }
@@ -5598,12 +5647,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // linked arrowhead-scale mirror). No-op unless the combo declares
     // commit behavior.
     let ctx_snapshot = ctx.clone();
-    let has_commit_behavior = el
-        .get("behavior")
-        .and_then(|b| b.as_array())
-        .map(|arr| arr.iter().any(|b| b.get("event").and_then(|e| e.as_str()) == Some("commit")))
-        .unwrap_or(false);
-    let el_for_commit = if has_commit_behavior { el.clone() } else { serde_json::Value::Null };
+    let el_for_commit = if declares_commit_behavior(el) { el.clone() } else { serde_json::Value::Null };
 
     rsx! {
         span {
@@ -10057,6 +10101,53 @@ mod tests {
         // The chain highlight must survive a scale edit (feature 2).
         assert!(st.stroke_panel.link_arrowhead_scale,
                 "the UI-only link flag is not clobbered by the mirror");
+    }
+
+    /// A commit runs a behavior declared under `change`, the synonym
+    /// (`widget_commit::COMMIT_EVENTS`): the same mirror, renamed. Before
+    /// 2026-11-06 this hook ran `commit` alone, so the Gradient panel's value
+    /// widgets, which declare `change`, changed nothing on the web.
+    #[test]
+    fn a_commit_runs_a_behavior_declared_under_change() {
+        let mut el = start_scale_combo();
+        for b in el["behavior"].as_array_mut().expect("the combo declares behavior") {
+            assert_eq!(b["event"], "commit", "the fixture's own event, so the rename below is a real change");
+            b["event"] = serde_json::json!("change");
+        }
+        assert!(declares_commit_behavior(&el));
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.stroke_panel.start_arrowhead_scale = 200.0;
+        st.stroke_panel.end_arrowhead_scale = 100.0;
+        st.stroke_panel.link_arrowhead_scale = true;
+        let render_ctx = serde_json::json!({
+            "panel": {"link_arrowhead_scale": true,
+                      "start_arrowhead_scale": 100.0,
+                      "end_arrowhead_scale": 100.0},
+            "state": {},
+        });
+        run_input_commit_behavior(&el, "start_arrowhead_scale",
+                                  &serde_json::json!(200.0), &render_ctx, &mut st);
+        assert_eq!(st.stroke_panel.end_arrowhead_scale, 200.0,
+                   "a `change` behavior runs on a commit, as a `commit` one does");
+    }
+
+    /// On a boolean kind a click runs a behavior declared under `change`
+    /// (`PRESS_EVENTS`), and on any other kind it does not.
+    #[test]
+    fn a_boolean_kinds_click_answers_change_and_no_other_kinds_does() {
+        let behavior = serde_json::json!([{"event": "change", "action": "noop_for_test"}]);
+        let ctx = serde_json::json!({});
+        for kind in ["checkbox", "toggle"] {
+            let el = serde_json::json!({"type": kind, "behavior": behavior});
+            assert_eq!(resolve_click_behaviors(&el, &ctx, "click").len(), 1, "{kind}");
+        }
+        for kind in ["button", "icon_button"] {
+            let el = serde_json::json!({"type": kind, "behavior": behavior});
+            assert_eq!(resolve_click_behaviors(&el, &ctx, "click").len(), 0, "{kind}");
+        }
+        // The control: a declared click answers on every kind.
+        let el = serde_json::json!({"type": "button", "behavior": [{"event": "click", "action": "x"}]});
+        assert_eq!(resolve_click_behaviors(&el, &ctx, "click").len(), 1);
     }
 
     #[test]
