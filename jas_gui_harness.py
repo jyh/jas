@@ -508,7 +508,8 @@ def _write_receipt(path, outcomes, not_run=None):
     d = os.path.join(repo, "test_fixtures", "input_scripts")
     corpus = sorted(f for f in os.listdir(d) if f.endswith(".json") and not f.endswith(".expected.json"))
     head = os.environ.get("JAS_HEAD") or subprocess.run(
-        ["git", "-C", repo, "rev-parse", "--short=8", "HEAD"], capture_output=True, text=True).stdout.strip()
+        ["git", "-C", repo, "rev-parse", "--short=8", "HEAD"], capture_output=True, text=True,
+        encoding="utf-8").stdout.strip()
     date = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     try:
         line = _plan.receipt_line(outcomes, corpus, head or "unknown", date, not_run=not_run)
@@ -516,7 +517,7 @@ def _write_receipt(path, outcomes, not_run=None):
         print(f"RECEIPT NOT WRITTEN: {e}")
         return False
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
         f.write(line + "\n")
     os.replace(tmp, path)
     print("RECEIPT " + line)
