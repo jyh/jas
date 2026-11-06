@@ -2038,6 +2038,40 @@ fn run_input_commit_behavior(
     run_input_behavior(el, field, committed, render_ctx, st, "commit");
 }
 
+/// Put a click's modifier state into `ctx`'s `event` object, KEEPING what the
+/// render put there: a boolean kind's press carries `event.value`, the new
+/// checked state, and its behavior reads it (the Gradient panel's dither
+/// checkbox). This used to REPLACE `event`, so `event.value` read null at
+/// click time.
+fn merge_event_modifiers(ctx: &mut serde_json::Value, alt: bool, shift: bool, meta: bool, ctrl: bool) {
+    let serde_json::Value::Object(obj) = ctx else { return };
+    let ev = obj.entry("event".to_string()).or_insert_with(|| serde_json::json!({}));
+    if !ev.is_object() {
+        *ev = serde_json::json!({});
+    }
+    let e = ev.as_object_mut().expect("an object");
+    for (k, v) in [("alt", alt), ("shift", shift), ("meta", meta), ("ctrl", ctrl)] {
+        e.insert(k.to_string(), serde_json::Value::Bool(v));
+    }
+}
+
+/// The context a boolean kind's press runs in: the render context with
+/// `event.value` set to the NEW checked state (WIDGET_EVENTS.md: the declared
+/// press behavior owns the write, and `event.value` is what it writes).
+fn boolean_press_ctx(ctx: &serde_json::Value, checked: bool) -> serde_json::Value {
+    let mut c = ctx.clone();
+    if !c.is_object() {
+        c = serde_json::json!({});
+    }
+    let obj = c.as_object_mut().expect("an object");
+    let ev = obj.entry("event".to_string()).or_insert_with(|| serde_json::json!({}));
+    if !ev.is_object() {
+        *ev = serde_json::json!({});
+    }
+    ev.as_object_mut().expect("an object").insert("value".to_string(), serde_json::Value::Bool(!checked));
+    c
+}
+
 /// Whether `el` is a boolean kind (`toggle`, `checkbox`), whose press runs the
 /// behaviors declared under any of `PRESS_EVENTS`.
 fn is_boolean_kind(el: &serde_json::Value) -> bool {
@@ -3185,14 +3219,7 @@ fn build_mouse_event_handler(
         // Shape Mode buttons between destructive and compound-creating
         // dispatches; future panels can consume the same namespace.
         let mods = evt.data().modifiers();
-        if let serde_json::Value::Object(obj) = &mut ctx_snap {
-            obj.insert("event".to_string(), serde_json::json!({
-                "alt": mods.alt(),
-                "shift": mods.shift(),
-                "meta": mods.meta(),
-                "ctrl": mods.ctrl(),
-            }));
-        }
+        merge_event_modifiers(&mut ctx_snap, mods.alt(), mods.shift(), mods.meta(), mods.ctrl());
         spawn(async move {
             let mut deferred_dialog_effects = Vec::new();
             {
@@ -5792,7 +5819,7 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
-    let on_click = build_click_handler(el, ctx, rctx);
+    let on_click = build_click_handler(el, &boolean_press_ctx(ctx, checked), rctx);
     let panel_kind = rctx.panel_kind;
 
     // Optional icon field: when present the toggle renders as a
@@ -10141,6 +10168,30 @@ mod tests {
                                   &serde_json::json!(200.0), &render_ctx, &mut st);
         assert_eq!(st.stroke_panel.end_arrowhead_scale, 200.0,
                    "a `change` behavior runs on a commit, as a `commit` one does");
+    }
+
+    /// A boolean kind's press context carries the NEW checked state as
+    /// `event.value`, and the click's modifiers are merged in without
+    /// dropping it. Both halves were missing: the dither checkbox wrote null.
+    #[test]
+    fn a_boolean_press_carries_event_value_through_the_modifiers() {
+        let ctx = serde_json::json!({"panel": {"dither": false}});
+        let mut c = boolean_press_ctx(&ctx, false);
+        assert_eq!(c["event"]["value"], serde_json::json!(true), "unchecked → the press checks");
+        assert_eq!(boolean_press_ctx(&ctx, true)["event"]["value"], serde_json::json!(false));
+        merge_event_modifiers(&mut c, true, false, false, false);
+        assert_eq!(c["event"]["value"], serde_json::json!(true), "the modifiers keep event.value");
+        assert_eq!(c["event"]["alt"], serde_json::json!(true));
+        assert_eq!(c["panel"]["dither"], serde_json::json!(false), "the rest of the context is untouched");
+        let mut bare = serde_json::json!({});
+        merge_event_modifiers(&mut bare, false, true, false, false);
+        assert_eq!(bare["event"]["shift"], serde_json::json!(true), "no event object: one is made");
+        // And the declared param resolves to it at render time.
+        let el = serde_json::json!({"type": "checkbox", "behavior": [
+            {"event": "change", "action": "x", "params": {"v": "event.value"}}]});
+        let r = resolve_click_behaviors(&el, &boolean_press_ctx(&ctx, false), "click");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].1.get("v"), Some(&serde_json::json!(true)));
     }
 
     /// On a boolean kind a click runs a behavior declared under `change`
