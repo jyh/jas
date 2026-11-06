@@ -3,6 +3,17 @@ name: Deploy web demo to GitHub Pages
 on:
   push:
     branches: [main]
+  # A pull request that touches the web app, the level-2 driver or its corpus
+  # builds the bundle and runs the web-l2 job against it. It never deploys.
+  pull_request:
+    paths:
+      - "jas_dioxus/**"
+      - "workspace/**"
+      - "scripts/web_l2_*"
+      - "scripts/mac_l2_plan.py"
+      - "test_fixtures/input_scripts/**"
+      - "test_fixtures/svg/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 # Least-privilege token for the Pages deployment: read the repo, write the
@@ -11,11 +22,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-
-# Only one Pages deployment at a time; a newer push supersedes an in-flight run.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -104,9 +110,72 @@ jobs:
         with:
           path: jas_dioxus/target/dx/jas_dioxus/release/web/public
 
+  # The web app's level-2 suite (docs/TESTING.md section 6): every input script
+  # through the bundle built above, served on localhost, in a headless browser.
+  # ADVISORY: `deploy` does not need this job, so a red never stops a deploy.
+  # Its first log line is the board's receipt (UI-NIGHTLY v1 suite=web.live).
+  web-l2:
+    name: Web level 2 (input scripts through the live app, advisory)
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned driver dependencies and their browser
+        run: |
+          python -m pip install -r scripts/web_l2_requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: The driver's pure half
+        run: python scripts/web_l2_driver.py --self-test
+      - name: Fetch the bundle the build job made
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: bundle
+      - name: Serve it at the Pages path, on localhost
+        run: |
+          mkdir -p site/jas
+          tar -xf bundle/artifact.tar -C site/jas
+          python -m http.server 8080 --bind 127.0.0.1 --directory site > http.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/jas/ > /dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:8080/jas/ > /dev/null
+      - name: Every input script through the live web app
+        run: |
+          python scripts/web_l2_driver.py --url http://127.0.0.1:8080/jas/ \
+            --head "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts
+      - name: The receipt in the run summary
+        if: always()
+        run: |
+          if [ -f web-l2-receipt.txt ]; then
+            { echo '```'; cat web-l2-receipt.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'no receipt was written' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Keep the receipt and any failure's screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-l2
+          path: |
+            web-l2-receipt.txt
+            web-l2-artifacts
+          if-no-files-found: warn
+
   deploy:
     name: Deploy to GitHub Pages
     needs: build
+    # A pull request builds and tests; only main and a dispatch deploy.
+    if: github.event_name != 'pull_request'
+    # Only one Pages deployment at a time; a newer push supersedes an in-flight run.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: github-pages
