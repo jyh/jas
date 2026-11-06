@@ -427,9 +427,17 @@ func dispatchPanelAction(
     let ws = WorkspaceData.load()
     let dialogs = ws?.data["dialogs"] as? [String: Any]
     let beforeDlg = store.getDialogId()
-    runEffects(effects, ctx: ctxWithParams, store: store,
-               actions: actions, dialogs: dialogs,
-               platformEffects: platformEffects)
+    if actionDef["category"] as? String == "layers" {
+        // A Layers action writes the document (`snapshot`, `doc.op`), and
+        // Align's table holds no `doc.*` handler, so run it through the
+        // Layers registry, in this caller's scope (the row it was pressed in).
+        LayersPanel.runEffectsInScope(actionName: name, effects: effects, ctx: ctxWithParams,
+                                      model: model, actions: actions, dialogs: dialogs)
+    } else {
+        runEffects(effects, ctx: ctxWithParams, store: store,
+                   actions: actions, dialogs: dialogs,
+                   platformEffects: platformEffects)
+    }
     // Bridge a store-level dialog transition to the SwiftUI
     // overlay — without this, open_dialog effects from widget
     // clicks left the dialog state in the store but nothing
