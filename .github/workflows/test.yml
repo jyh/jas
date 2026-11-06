@@ -116,6 +116,9 @@ jobs:
       # The Mac level-2 driver's pure half: plans every shipped input script
       # against the real menubar, with no window (docs/TESTING.md section 6).
       - run: python scripts/mac_l2_plan.py --self-test
+      # The web level-2 driver's pure half (no browser): the same plan, plus
+      # its key names and receipt grammar (pages.yml runs the browser half).
+      - run: python scripts/web_l2_driver.py --self-test
       - run: python scripts/check_swift_copy_sites.py --self-test && python scripts/check_swift_copy_sites.py
       # Asserts every check_*.py runs on BOTH platform families. The list of
       # steps in each lane is hand-maintained, so a gate added after a lane was
@@ -1016,6 +1019,7 @@ jobs:
           python scripts/check_corpus_manifest.py --self-test
           python scripts/check_corpus_manifest.py
           python scripts/mac_l2_plan.py --self-test
+          python scripts/web_l2_driver.py --self-test
           # The reference's own corpus harness at HEAD, per case, against a
           # ratcheted baseline (POLICY.md section 1). It runs here as well as
           # in the reference lane because the harness opens its fixtures with

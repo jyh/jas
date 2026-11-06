@@ -1,5 +1,7 @@
 name: Deploy web demo to GitHub Pages
 
+# Push and dispatch only. Pull requests run the same build and level-2 suite in
+# web-l2.yml, which has no deploy job, so no PR carries a skipped Deploy check.
 on:
   push:
     branches: [main]
@@ -12,101 +14,28 @@ permissions:
   pages: write
   id-token: write
 
-# Only one Pages deployment at a time; a newer push supersedes an in-flight run.
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
   build:
-    name: Build WASM bundle
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    uses: ./.github/workflows/web-build.yml
+    permissions:
+      contents: read
 
-      - name: Install Rust (wasm32 target)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: jas_dioxus
-
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      # Pin dioxus-cli to the version the bundle was verified against. Prefer
-      # a prebuilt binary via binstall (seconds); fall back to compiling from
-      # source with the crate's own lockfile if no prebuilt artifact matches.
-      #
-      # --force + the `dx --version` guard matter: the restored cargo cache
-      # carries install METADATA (.crates2.json) from the first cold run, so
-      # a plain `cargo binstall -y` exits 0 in ~0s believing dioxus-cli is
-      # already installed — but rust-cache never caches ~/.cargo/bin, so the
-      # dx binary itself is absent and the build dies with `dx: command not
-      # found`. Trust only a real binary check, never the metadata.
-      - name: Install dioxus-cli 0.7.9
-        run: |
-          if dx --version 2>/dev/null | grep -q '0\.7\.9'; then
-            echo "dx 0.7.9 already present"
-          else
-            cargo binstall -y --force dioxus-cli@0.7.9 \
-              || cargo install dioxus-cli --version 0.7.9 --locked --force
-          fi
-
-      - name: Build the web bundle
-        working-directory: jas_dioxus
-        run: dx build --release --web --base-path jas
-
-      # Post-build injection: dx owns index.html during the build, so the
-      # social-preview tags are spliced in afterwards, anchored on the
-      # literal </head>. The preview image ships under an UNHASHED root
-      # name so the absolute og:image URL stays stable across deploys.
-      - name: Inject social meta + preview image
-        working-directory: jas_dioxus
-        run: |
-          cp assets/og-preview.png target/dx/jas_dioxus/release/web/public/og-preview.png
-          python3 - <<'EOF'
-          import pathlib
-          import sys
-
-          index = pathlib.Path("target/dx/jas_dioxus/release/web/public/index.html")
-          html = index.read_text(encoding="utf-8")
-          if "</head>" not in html:
-              sys.exit("inject: no </head> anchor in index.html")
-          title = "Jas — a vector illustration application in your browser"
-          desc = (
-              "A free in-browser vector editor built as parallel "
-              "implementations of one executable spec, with cross-language "
-              "differential testing."
-          )
-          url = "https://jyh.github.io/jas/"
-          image = "https://jyh.github.io/jas/og-preview.png"
-          tags = "\n".join([
-              f'<meta property="og:title" content="{title}">',
-              f'<meta property="og:description" content="{desc}">',
-              f'<meta property="og:url" content="{url}">',
-              f'<meta property="og:image" content="{image}">',
-              '<meta property="og:type" content="website">',
-              '<meta name="twitter:card" content="summary_large_image">',
-              f'<meta name="twitter:title" content="{title}">',
-              f'<meta name="twitter:description" content="{desc}">',
-              f'<meta name="twitter:image" content="{image}">',
-          ]) + "\n"
-          index.write_text(html.replace("</head>", tags + "</head>", 1), encoding="utf-8")
-          print("inject: social meta written before </head>")
-          EOF
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: jas_dioxus/target/dx/jas_dioxus/release/web/public
+  # ADVISORY: deploy does not need this job, so a red never stops a deploy.
+  web-l2:
+    needs: build
+    # A red build leaves this job RED (no bundle to fetch), never skipped.
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/web-l2-run.yml
+    permissions:
+      contents: read
 
   deploy:
     name: Deploy to GitHub Pages
     needs: build
+    # Only one Pages deployment at a time; a newer push supersedes an in-flight run.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: github-pages

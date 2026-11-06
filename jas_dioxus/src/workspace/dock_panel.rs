@@ -1160,9 +1160,13 @@ pub(crate) fn build_dock_groups(
                     }
                 });
             }
+            // The tab's DOM id derives from the panel's YAML content id,
+            // as the Mac tab's accessibility identifier does (test_hook.rs).
+            let tab_id = crate::workspace::test_hook::tab_dom_id(panel_kind_to_content_id(kind));
             nodes.push(rsx! {
                 div {
                     key: "dock-tab-{gi}-{pi}",
+                    id: "{tab_id}",
                     style: "padding:3px 8px; cursor:pointer; font-size:11px; color:{THEME_TEXT}; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}",
                     draggable: "true",
                     ondragstart: move |evt: Event<DragData>| {
@@ -1423,7 +1427,7 @@ pub(crate) fn build_dock_groups(
 
                 if !group_collapsed {
                     {
-                        let panel_body: Option<(serde_json::Value, serde_json::Value)> = group.active_panel().and_then(|kind| {
+                        let panel_body: Option<(&'static str, serde_json::Value, serde_json::Value)> = group.active_panel().and_then(|kind| {
                             let content_id = panel_kind_to_content_id(kind);
                             let ws = Workspace::load()?;
                             // Pass the whole panel object (type: panel, id, content)
@@ -1436,9 +1440,9 @@ pub(crate) fn build_dock_groups(
                             let eval_ctx = panel_body_eval_ctx(
                                 content_id, &ws, live_panel_overrides, panel_state_table,
                                 live_state_map, selection_preds, active_doc_view);
-                            Some((content, eval_ctx))
+                            Some((content_id, content, eval_ctx))
                         });
-                        if let Some((content, eval_ctx)) = panel_body {
+                        if let Some((content_id, content, eval_ctx)) = panel_body {
                             // Explicit dark background on the panel
                             // body wrapper. Without this, areas without
                             // an explicit background (e.g. the
@@ -1446,8 +1450,11 @@ pub(crate) fn build_dock_groups(
                             // the Swatches grid) render transparent and
                             // show the canvas through when the dock is
                             // floating.
+                            // The body's DOM id is the panel's YAML content id, as
+                            // on the Mac (AXIdentifier) and WinUI (AutomationId).
                             rsx! {
                                 div {
+                                    id: "{content_id}",
                                     style: "background:{THEME_BG};",
                                     crate::interpreter::renderer::MemoYamlElement {
                                         el: content,
