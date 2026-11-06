@@ -1,0 +1,5 @@
+# The web level-2 driver (scripts/web_l2_driver.py), pinned, and used ONLY by the
+# web-l2 job in .github/workflows/pages.yml. Not the reference interpreter's or
+# jas_flask's requirements.
+playwright==1.49.1
+pyyaml==6.0.2
