@@ -152,8 +152,6 @@ SCHEMA = os.path.join(ROOT, "SCHEMA.md")
 # SCHEMA.md now defines, so the list can only shrink. `__apply__` is the
 # parser's own form and is exempt.
 UNDEFINED_IN_SCHEMA = frozenset({
-    "anchor_buffer_close_hit", "anchor_buffer_length",
-    "brush_type_of", "buffer_length",
     # `element_at` differs by port (jas bank 2026-11-01): Rust's
     # `top_level_layers` view carries no `children`, so a group path reads
     # null in Rust only. Defined here once the ports agree.
@@ -162,7 +160,6 @@ UNDEFINED_IN_SCHEMA = frozenset({
     # takes a map, Swift parses a JSON STRING, Rust defines no `keys` at all.
     # No yaml calls it. It is defined here only once the ports agree.
     "keys",
-    "hit_test", "hit_test_deep",
 })
 
 

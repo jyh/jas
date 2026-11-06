@@ -1827,9 +1827,24 @@ Variables".)
 | Function | Returns | Description |
 |---|---|---|
 | `path_child(p, i)` | `path` | The path `p` with the child index `i` appended. `null` unless `p` is a PATH and `i` a number `≥ 0`. (The reference does not refuse a negative `i`.) |
+| `hit_test(x, y)` | `path` | The `[layer, child]` path of the topmost child of a top-level layer whose PAINTED geometry is under the document point `(x, y)` (`SELECTION_TOOL.md` § Hit test); layers and children are scanned topmost first, a hidden or locked layer or element cannot be hit, and a group is hit when any of its children is. `null` on a miss, when no document is registered (outside a tool dispatch), or unless both arguments are numbers. |
+| `hit_test_deep(x, y)` | `path` | As `hit_test`, but recursing into groups: the path of the deepest painted leaf under the point, at any depth (the Interior Selection tool's pick). `null` on the same terms. |
 | `selection_contains(p)` | `bool` | Whether the path `p` is in the document's element selection; `false` for a non-path. |
 | `selection_empty()` | `bool` | Whether the document's element selection is empty. |
 | `tree_row_range(rows, from, to)` | `list` | The paths of the rows of `rows` from the row at `from` to the row at `to`, inclusive, in ROW order whichever end comes first, as path markers. Each end is read as `as_path` reads it. The empty list when either end is not a row. With a fourth argument, the element tree's full row list, a row in the range marked `collapsed` brings every row under it from that list, right after it, in its order (selecting a collapsed group includes its descendants). `null` unless there are 3 or 4 arguments and `rows` is a list. |
+
+**Tool-state and library functions.** These read state a tool or a dialog
+holds, not the expression's arguments alone: a named point or anchor buffer
+(the gesture a tool is building), or the brush libraries in the context. The
+conformance corpus does not reach them, and this paragraph does not claim that
+any port pins them. A wrong argument count or type returns the fallback shown.
+
+| Function | Returns | Description |
+|---|---|---|
+| `buffer_length(name)` | `number` | The number of points in the named point buffer (the Lasso's "at least three points" guard); `0` for an empty or unknown buffer, or a non-string name. |
+| `anchor_buffer_length(name)` | `number` | The number of anchors in the named anchor buffer (the Pen's path so far); `0` on the same terms. |
+| `anchor_buffer_close_hit(name, x, y, r)` | `bool` | Whether the named anchor buffer holds at least two anchors and `(x, y)` lies within distance `r` of its FIRST anchor (the Pen's click-near-start to close), measured with `hypot`; `false` otherwise, or unless the name is a string and the rest numbers. |
+| `brush_type_of(slug)` | `string` | The `type` of the brush a `"<library id>/<brush slug>"` slug names in the context's `brush_libraries` (the Blob Brush dialog's Calligraphic gate); the slug splits at its first `/`. `null` when the slug has no `/`, the library or brush is absent, or the brush has no string `type`. (Swift answers `null` for the whole library when any entry in its `brushes` is not a map; the reference and Rust skip that entry.) |
 
 #### Comparison Operators
 
