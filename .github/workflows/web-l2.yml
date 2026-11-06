@@ -1,0 +1,34 @@
+name: Web level 2 (pull request)
+
+# A pull request that touches the web app, the level-2 driver or its corpus
+# builds the bundle and runs the level-2 suite against it. There is no deploy
+# job here, so a PR's checks are build and suite, never a skipped deploy.
+on:
+  pull_request:
+    paths:
+      - "jas_dioxus/**"
+      - "workspace/**"
+      - "scripts/web_l2_*"
+      - "scripts/mac_l2_plan.py"
+      - "test_fixtures/input_scripts/**"
+      - "test_fixtures/svg/**"
+      - ".github/workflows/web-l2.yml"
+      - ".github/workflows/web-l2-run.yml"
+      - ".github/workflows/web-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/web-build.yml
+    permissions:
+      contents: read
+
+  web-l2:
+    needs: build
+    # A red build leaves this job RED (no bundle to fetch), never skipped.
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/web-l2-run.yml
+    permissions:
+      contents: read

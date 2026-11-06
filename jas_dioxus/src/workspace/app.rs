@@ -355,6 +355,21 @@ pub fn App() -> Element {
     }
 
     let mut revision = use_signal(|| 0u64);
+    // The level-2 test hook: window.__jasTest, installed only when the
+    // page's query carries ?jas_test=1 (see test_hook.rs). Absent otherwise.
+    {
+        let app_test = app.clone();
+        use_hook(move || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                crate::workspace::test_hook::install(app_test.clone(), revision);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let _ = &app_test;
+            }
+        });
+    }
     let mut layout_revision = use_signal(|| 0u64);
     // Drag-frame signal — bumped by tool mousemove handlers that only
     // need a canvas repaint (overlay update). Avoids re-rendering the
