@@ -442,9 +442,11 @@ def self_test():
     check("receipt: all pass over the corpus is GREEN, scope=full",
           receipt_line({"a.json": "PASS", "b.json": "PASS", "c.json": "PASS"}, corpus, H, D)
           == "UI-NIGHTLY v1 suite=mac.live verdict=GREEN items=3/3 panels=- head=0123abcd scope=full date=" + D)
-    check("receipt: a FAIL and a REFUSED are RED, counted apart, items counts passes",
-          receipt_line({"a.json": "PASS", "b.json": "FAIL", "c.json": "REFUSED"}, corpus, H, D)
-          == "UI-NIGHTLY v1 suite=mac.live verdict=RED(fail=1 refused=1) items=1/3 panels=- head=0123abcd scope=full date=" + D)
+    # Distinct counts (2 FAIL, 1 REFUSED), so a swap of the two cannot pass.
+    check("receipt: FAILs and REFUSEDs are RED, counted apart, items counts passes",
+          receipt_line({"a.json": "FAIL", "b.json": "FAIL", "c.json": "REFUSED", "d.json": "PASS"},
+                       corpus + ["d.json"], H, D)
+          == "UI-NIGHTLY v1 suite=mac.live verdict=RED(fail=2 refused=1) items=1/4 panels=- head=0123abcd scope=full date=" + D)
     check("receipt: a run refused before any script is NOT RUN, over the whole corpus",
           receipt_line({}, corpus, H, D, not_run="the screen is locked")
           == "UI-NIGHTLY v1 suite=mac.live verdict=NOT RUN(the screen is locked) items=0/3 panels=- head=0123abcd scope=full date=" + D)
