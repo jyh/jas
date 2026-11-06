@@ -834,6 +834,52 @@ fn an_eye_click_runs_on_the_eye_without_bubbling() {
         vec![serde_json::json!("panel"), serde_json::json!("document")]);
 }
 
+/// The element at `path` in a `document` read-back.
+fn doc_element<'a>(doc: &'a Value, path: &[usize]) -> &'a Value {
+    let mut level = &doc["layers"];
+    let mut node = &Value::Null;
+    for &i in path {
+        node = &level[i];
+        level = &node["children"];
+    }
+    node
+}
+
+fn doc_reads(out: &[Value]) -> Vec<Value> {
+    out.iter().filter(|r| r["read"] == "document").map(|r| r["value"].clone()).collect()
+}
+
+/// A Layers row widget's action writes the DOCUMENT, not only the panel (its
+/// `snapshot` and `doc.op` effects). Swift's twin
+/// `formsALayersRowActionWritesTheDocument` was red on all four checks until
+/// 2026-11-06: that route dropped `doc.op`, and M3's control read every
+/// document read back as the setup. This pins the same four here.
+#[test]
+fn a_layers_row_action_writes_the_document() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    for (widget, row, field, want) in [
+        ("lp_eye", [0usize, 1], "visibility", serde_json::json!("outline")),
+        ("lp_lock", [0, 0], "locked", serde_json::json!(true)),
+    ] {
+        let out = replay_forms(&layers_script(serde_json::json!([
+            {"panel": LAYERS, "widget": widget, "row": row, "event": "click"}, {"read": "document"},
+        ]))).unwrap();
+        assert_eq!(refusal(&out), None, "{widget}: {out:?}");
+        let docs = doc_reads(&out);
+        assert_eq!(doc_element(&docs[0], &row)[field], want, "{widget} on {row:?}: {out:?}");
+    }
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"panel": LAYERS, "widget": "lp_select", "row": [0, 1], "event": "click"}, {"read": "document"},
+    ]))).unwrap();
+    assert_eq!(doc_reads(&out)[0]["selection"].as_array().map(Vec::len), Some(1), "lp_select on [0,1]: {out:?}");
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"panel": LAYERS, "widget": "lp_eye", "row": [0, 1], "event": "click"}, {"read": "document"},
+        {"menu": "menu_undo"}, {"read": "document"},
+    ]))).unwrap();
+    let vis: Vec<Value> = doc_reads(&out).iter().map(|d| doc_element(d, &[0, 1])["visibility"].clone()).collect();
+    assert_eq!(vis, vec![serde_json::json!("outline"), serde_json::json!("preview")], "the click writes, undo restores: {out:?}");
+}
+
 #[test]
 fn a_key_after_a_panel_step_goes_to_the_panels_keyboard_rows() {
     let _counters = crate::ffi_instr::test_lock::lock();

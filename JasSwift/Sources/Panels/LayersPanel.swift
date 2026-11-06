@@ -256,6 +256,19 @@ public enum LayersPanel {
         model.panelStateVersion &+= 1
     }
 
+    /// Run a `category: layers` action's `effects` in the CALLER's scope
+    /// through this panel's registry (`snapshot`, `doc.op`, `doc.set`, …).
+    /// ``dispatchPanelAction`` uses it for a Layers widget rendered from the
+    /// YAML (a script's `row` step, a body view), whose scope carries the row
+    /// it was pressed in; the generic table it ran with before (Align's) has
+    /// no `doc.op`, so those effects were dropped without a word.
+    static func runEffectsInScope(actionName: String, effects: [Any], ctx: [String: Any],
+                                  model: Model, actions: [String: Any]?,
+                                  dialogs: [String: Any]?) {
+        runLayersPanelEffects(effects, actionName: actionName, ctx: ctx, model: model,
+                              actions: actions, dialogs: dialogs, onCloseDialog: nil)
+    }
+
     /// Build the LayersPanel platform-effect registry and run `effects` through
     /// the shared `runEffects` pipeline, naming the owning transaction
     /// `actionName` (OP_LOG.md §9). Extracted from ``dispatchYamlAction`` so the
