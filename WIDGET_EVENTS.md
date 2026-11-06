@@ -540,20 +540,23 @@ entry, so only a declared option's value can be committed. A combo whose
 options are computed offers none.
 
 **The Rust web app does not call the door yet**, so the Rust lines below
-still describe what its view does. Until it routes through its tested
-module, none of them is a measured failure.
+still describe what its view does. Since 2026-11-06 some of them are
+MEASURED failures: the web level-2 suite (`web_l2_driver.py`) drives the
+input scripts through the live web app, and it found the `change` and
+Opacity lines below on 8 scripts.
 
 - **Rust, `number_input`: no declared behavior runs.** The panel write is
   a per-panel match whose fallthrough is `_ => {}`
   (`jas_dioxus/src/interpreter/renderer.rs:6341`), so a Magic Wand
   tolerance commit writes nothing and runs nothing.
-- **Rust, `change` is dispatched only by `icon_button_group` and
-  `reference_point_widget`** (`render_icon_button_group`,
-  `render_reference_point_widget`), each from its own loop, which reads a
-  behavior's `condition` (2026-10-15).
-- **Rust, `toggle`: a declared `click` behavior replaces the write**
-  (`renderer.rs:7405-7406`), which conforms. A declared `change` behavior
-  does not run.
+- **Rust, `change`: a commit runs the behaviors declared under `commit`
+  or `change` on `combo_box` and `select`, and a press runs `click` or
+  `change` on `toggle` and `checkbox`** (the synonyms, `COMMIT_EVENTS` and
+  `PRESS_EVENTS`; 2026-11-06, found by web level 2 on 6 Gradient
+  scripts). `icon_button_group` and `reference_point_widget` run `change`
+  from their own loops (2026-10-15).
+- **Rust, `toggle`: a declared `click` or `change` behavior replaces the
+  write**, which conforms.
 - **Rust, `combo_box`:** the widget is a free-entry input with an option
   list. The value is parsed with `str::parse::<f64>` (the same wide
   grammar as Swift's), with no clamp, and a blank entry is written as the
