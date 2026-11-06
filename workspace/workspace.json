@@ -18408,12 +18408,12 @@
             "luminosity"
           ],
           "default": "normal",
-          "description": "Working blend mode. Phase-1 is panel-local (not yet applied to elements); later phases persist as element.mode on the selection. Named `blend_mode` rather than `mode` to avoid a collision with the Color panel's state.mode in the shared panel-overrides map.\n"
+          "description": "Working blend mode. A commit writes it to the selection as each element's mode, through the Properties panel's law (prop_blend). Named `blend_mode` rather than `mode` to avoid a collision with the Color panel's state.mode in the shared panel-overrides map.\n"
         },
         "opacity": {
           "type": "number",
           "default": 100,
-          "description": "Working opacity value (0-100). Phase-1 is panel-local (not yet applied to elements); later phases persist as element.opacity on the selection.\n"
+          "description": "Working opacity value (0-100, percent). A commit writes it to the selection as each element's opacity (value / 100), through the Properties panel's law (prop_opacity).\n"
         },
         "thumbnails_hidden": {
           "type": "bool",

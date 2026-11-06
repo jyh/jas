@@ -89,20 +89,6 @@ use crate::interpreter::paragraph_host::{self, PARAGRAPH_PANEL};
 /// The Opacity panel's id: `workspace/panels/opacity.yaml`'s own top-level id.
 const OPACITY_PANEL: &str = "opacity_panel_content";
 
-/// The Opacity panel's two document-writing keys, mapped onto the Properties
-/// law that already implements them. Returns `None` for the panel's other four
-/// declared keys, which reach no element attribute: `thumbnails_hidden` and
-/// `options_shown` are panel-local UI, and `new_masks_clipping` /
-/// `new_masks_inverted` are document PREFERENCES parked on panel state until
-/// the document model grows somewhere to keep them. A write to any of the four
-/// must not push an undo step that changes nothing.
-fn opacity_prop_key(key: &str) -> Option<&'static str> {
-    match key {
-        "opacity" => Some("prop_opacity"),
-        "blend_mode" => Some("prop_blend"),
-        _ => None,
-    }
-}
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
@@ -572,7 +558,7 @@ impl EffectHost for EngineHost {
         // `properties_host` divides by 100 and clamps. Passing the percent
         // through unconverted is correct, and an arm pins it.
         if panel_id == OPACITY_PANEL {
-            if let Some(prop) = opacity_prop_key(key) {
+            if let Some(prop) = properties_host::opacity_prop_key(key) {
                 if !model.in_txn() {
                     model.begin_txn();
                 }

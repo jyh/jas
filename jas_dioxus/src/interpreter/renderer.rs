@@ -4694,7 +4694,17 @@ fn commit_panel_field(
         }
         Some(PanelKind::Opacity) => {
             set_opacity_field(&mut st.opacity_panel, f, v);
-            // Phase 1: panel-local only; selection sync deferred.
+            // Opacity and blend mode write the SELECTION through the Properties
+            // law, the mapping the engine's panel door uses (`panel_behavior.rs`,
+            // since W2b-8). The value passes through as the panel holds it
+            // (PERCENT for opacity; `properties_host` divides by 100). Until
+            // 2026-11-06 this arm was panel-local, so on the web an Opacity edit
+            // changed nothing on the canvas (web level 2: 2 scripts).
+            if let Some(prop) = super::properties_host::opacity_prop_key(f) {
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                    super::properties_host::apply_field(&mut tab.model, prop, v, false);
+                }
+            }
         }
         // The fields are derived from the selection, so there is no struct to
         // write: the edit goes to the selection (W2b-P).
@@ -12066,6 +12076,29 @@ mod tests {
         let e = doc.get_element(&vec![0, 0]).unwrap();
         assert!((e.opacity() - 0.4).abs() < 1e-6, "opacity {}", e.opacity());
         assert_eq!(e.mode(), BlendMode::Multiply);
+    }
+
+    /// An Opacity panel commit reaches the SELECTION, through the mapping the
+    /// engine's panel door uses (`properties_host::opacity_prop_key`). The web
+    /// arm was panel-local until 2026-11-06 (web level 2: the 2 opacity scripts).
+    /// The panel's other keys reach no element, so a write to one changes nothing.
+    #[test]
+    fn opacity_fields_commit_to_the_selection() {
+        use crate::geometry::element::BlendMode;
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None);
+        let before = st.tab().unwrap().model.document().get_element(&vec![0, 0]).unwrap().opacity();
+        assert!((before - 1.0).abs() < 1e-6, "the fixture starts opaque, so the edit below is a change");
+        commit_panel_field(&mut st, Some(PanelKind::Opacity), "opacity", &serde_json::json!(40.0));
+        commit_panel_field(&mut st, Some(PanelKind::Opacity), "blend_mode", &serde_json::json!("multiply"));
+        let doc = st.tab().unwrap().model.document();
+        let e = doc.get_element(&vec![0, 0]).unwrap();
+        assert!((e.opacity() - 0.4).abs() < 1e-6, "opacity PERCENT 40 reads 0.4 on the element: {}", e.opacity());
+        assert_eq!(e.mode(), BlendMode::Multiply);
+        let snapshot = crate::geometry::test_json::document_to_test_json(doc);
+        commit_panel_field(&mut st, Some(PanelKind::Opacity), "thumbnails_hidden", &serde_json::json!(true));
+        assert_eq!(crate::geometry::test_json::document_to_test_json(st.tab().unwrap().model.document()), snapshot,
+                   "a panel-local key writes no element");
     }
 
     // ── Part B.2: Properties panel field editing ──────────────────────
