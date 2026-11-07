@@ -1799,6 +1799,7 @@ parametric/concept geometry generators:
 | `all(list, pred)`         | `bool`  | True if `pred` is truthy for every item.                      |
 | `fold(list, init, fn)`    | any     | Left fold: `fn(acc, item)` across the list, starting at `init`. |
 | `reverse(list)`           | `list`  | The items in reverse order; `null` when the argument is not a list. |
+| `keys(map)`               | `list`  | The map's keys as strings, sorted by code point (`B` before `a`); the empty list for anything that is not a map, and for a call without exactly one argument. Swift and Rust hold a map as its JSON text and parse it back, so in those two ports a STRING that is JSON object text also reads as a map; no workspace yaml passes one. |
 
 The list functions all take the **list first**, then the closure; `fold`'s
 closure receives the accumulator first (`fun (acc, item) -> …`). Composed, they

@@ -1657,5 +1657,69 @@
     },
     "expected": 1,
     "type": "number"
+  },
+  {
+    "expr": "keys(state.m)",
+    "state": {
+      "m": {
+        "b": 1,
+        "a": 2,
+        "B": 3
+      }
+    },
+    "expected": [
+      "B",
+      "a",
+      "b"
+    ],
+    "type": "list"
+  },
+  {
+    "expr": "keys(state.m)",
+    "state": {
+      "m": {}
+    },
+    "expected": [],
+    "type": "list"
+  },
+  {
+    "expr": "keys(state.xs)",
+    "state": {
+      "xs": [
+        1,
+        2
+      ]
+    },
+    "expected": [],
+    "type": "list"
+  },
+  {
+    "expr": "keys(state.missing)",
+    "state": {
+      "x": 1
+    },
+    "expected": [],
+    "type": "list"
+  },
+  {
+    "expr": "keys(state.m, state.m)",
+    "state": {
+      "m": {
+        "a": 1
+      }
+    },
+    "expected": [],
+    "type": "list"
+  },
+  {
+    "expr": "keys(state.m).length",
+    "state": {
+      "m": {
+        "a": 1,
+        "b": 2
+      }
+    },
+    "expected": 2,
+    "type": "number"
   }
 ]
