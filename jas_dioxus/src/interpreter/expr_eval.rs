@@ -783,24 +783,11 @@ fn eval_func(
             if args.len() != 2 { return Value::Null; }
             let collapsed = eval_inner(&args[0], ctx, scope, store_cb);
             let selection = eval_inner(&args[1], ctx, scope, store_cb);
-            fn json_path(v: &serde_json::Value) -> Option<Vec<usize>> {
-                let v = match v.as_object() {
-                    Some(o) if o.len() == 1 => o.get("__path__")?,
-                    _ => v,
-                };
-                v.as_array()?.iter().map(|i| {
-                    let f = i.as_f64()?;
-                    if i.is_boolean() || f < 0.0 || f.fract() != 0.0 { None } else { Some(f as usize) }
-                }).collect()
-            }
             let (Value::List(collapsed), Value::List(selection)) = (collapsed, selection) else {
                 return Value::Null;
             };
-            let selected: Vec<Vec<usize>> = selection.iter().filter_map(json_path).collect();
-            let opens = |e: &serde_json::Value| json_path(e).is_some_and(|c| {
-                selected.iter().any(|q| c.len() < q.len() && q[..c.len()] == c[..])
-            });
-            Value::List(collapsed.into_iter().filter(|e| !opens(e)).collect())
+            let selected: Vec<Vec<usize>> = selection.iter().filter_map(reveal_index_path).collect();
+            Value::List(tree_reveal_keep(collapsed, &selected))
         }
 
         "tree_visible_rows" => {
@@ -1519,6 +1506,29 @@ fn numeric_cmp(left: &Value, right: &Value, f: fn(f64, f64) -> bool) -> Value {
 
 // -- Tests -------------------------------------------------------------------
 
+
+/// A path as `tree_reveal` reads one: a list of non-negative whole numbers, or
+/// a `{"__path__": [..]}` marker; `None` for anything else.
+fn reveal_index_path(v: &serde_json::Value) -> Option<Vec<usize>> {
+    let v = match v.as_object() {
+        Some(o) if o.len() == 1 => o.get("__path__")?,
+        _ => v,
+    };
+    v.as_array()?.iter().map(|i| {
+        let f = i.as_f64()?;
+        if i.is_boolean() || f < 0.0 || f.fract() != 0.0 { None } else { Some(f as usize) }
+    }).collect()
+}
+
+/// The law of `tree_reveal` (row 78), shared by the evaluator's arm and the FFI
+/// engine's selection-change reveal: the `collapsed` entries that are NOT a
+/// strict ancestor of a `selected` path, in stored order and stored form.
+pub(crate) fn tree_reveal_keep(collapsed: Vec<serde_json::Value>, selected: &[Vec<usize>]) -> Vec<serde_json::Value> {
+    let opens = |e: &serde_json::Value| reveal_index_path(e).is_some_and(|c| {
+        selected.iter().any(|q| c.len() < q.len() && q[..c.len()] == c[..])
+    });
+    collapsed.into_iter().filter(|e| !opens(e)).collect()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
