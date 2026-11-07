@@ -204,7 +204,11 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # 10 the same day: `solo_element_visibility` runs its YAML (`set_element_visibility`
 # ops, the saved siblings in `solo_path`/`solo_saved`); both trees' Option-click on
 # the eye dispatches it, and both native solo arms are gone.
-MIN_LOG_ONLY = 10
+# 9 on 2026-11-07: `scroll_to_selected` runs its YAML (row 78: a
+# `set_panel_state` of the Layers panel's `collapsed_paths` through
+# `tree_reveal`). No port dispatches it yet; both still reveal in the tree's
+# draw until the trigger lands (row 78 step 2).
+MIN_LOG_ONLY = 9
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
@@ -451,6 +455,17 @@ def load_ledger():
     return json.loads(LEDGER.read_text(encoding="utf-8")).get("bypassed", {})
 
 
+def stale_bypass_rows(declared_bypassed, log_only):
+    """Ledger `bypassed` rows naming an action that is no longer log-only.
+
+    A bypass row classifies a `- log:` stub. When the stub becomes real
+    effects the row describes nothing this gate reads, and `classify` never
+    looks at it again, so it would sit there asserting a bypass forever
+    (scroll_to_selected, 2026-11-07, row 78). Twin of the retired-divergence
+    check below."""
+    return sorted(set(declared_bypassed) - set(log_only))
+
+
 def load_known_divergences():
     if not LEDGER.exists():
         return {}
@@ -674,6 +689,15 @@ def self_test() -> int:
         failures.append(f"  c: only {len(swift)} swift dispatch labels parsed "
                         f"(floor {MIN_SWIFT_ARMS}) -- the extraction is broken")
 
+    # (s) A bypass row outlives its stub: the row names an action whose YAML
+    # became real effects, and nothing else would ever re-read it.
+    if stale_bypass_rows({"gone": "x", "kept": "y"}, {"kept", "other"}) != ["gone"]:
+        failures.append("  s: a bypass row whose action is no longer log-only must be reported")
+    if stale_bypass_rows({"kept": "y"}, {"kept"}) != []:
+        failures.append("  s: a bypass row for a log-only action must not be reported")
+    if stale_bypass_rows(load_ledger(), log_only_actions(yaml.safe_load(ACTIONS.read_text(encoding="utf-8")))):
+        failures.append("  s: the live ledger carries a bypass row for an action that is not log-only")
+
     if failures:
         print("SELF-TEST FAILED -- the gate does not read what it claims:")
         print("\n".join(failures))
@@ -733,6 +757,13 @@ def main() -> int:
               f"not hold:", file=sys.stderr)
         for line in false_decl:
             print(f"  {line}", file=sys.stderr)
+        return 1
+
+    stale_byp = stale_bypass_rows(load_ledger(), lo)
+    if stale_byp:
+        print(f"ERROR: {len(stale_byp)} ledger `bypassed` row(s) name an action "
+              f"that is no longer log-only: {', '.join(stale_byp)}. Delete them "
+              f"(its YAML runs now).", file=sys.stderr)
         return 1
 
     divergent = {a: v for a, v in rows.items() if v.startswith("DIVERGENT")}

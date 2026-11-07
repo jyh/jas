@@ -772,6 +772,37 @@ fn eval_func(
             Value::List(wanted.iter().filter_map(|p| by_path.get(p).cloned()).collect())
         }
 
+        "tree_reveal" => {
+            // The Layers reveal (row 78, layers.yaml "When an element is
+            // selected on the canvas ..."): `scroll_to_selected`'s value for
+            // collapsed_paths. The collapsed entries that are NOT a strict
+            // ancestor of a selected path, in stored order and stored form; a
+            // selected container itself stays collapsed, and an entry that is
+            // not a path is kept. Twin of the reference's and Swift's
+            // (`element_tree.json` `reveal_cases`).
+            if args.len() != 2 { return Value::Null; }
+            let collapsed = eval_inner(&args[0], ctx, scope, store_cb);
+            let selection = eval_inner(&args[1], ctx, scope, store_cb);
+            fn json_path(v: &serde_json::Value) -> Option<Vec<usize>> {
+                let v = match v.as_object() {
+                    Some(o) if o.len() == 1 => o.get("__path__")?,
+                    _ => v,
+                };
+                v.as_array()?.iter().map(|i| {
+                    let f = i.as_f64()?;
+                    if i.is_boolean() || f < 0.0 || f.fract() != 0.0 { None } else { Some(f as usize) }
+                }).collect()
+            }
+            let (Value::List(collapsed), Value::List(selection)) = (collapsed, selection) else {
+                return Value::Null;
+            };
+            let selected: Vec<Vec<usize>> = selection.iter().filter_map(json_path).collect();
+            let opens = |e: &serde_json::Value| json_path(e).is_some_and(|c| {
+                selected.iter().any(|q| c.len() < q.len() && q[..c.len()] == c[..])
+            });
+            Value::List(collapsed.into_iter().filter(|e| !opens(e)).collect())
+        }
+
         "tree_visible_rows" => {
             // The Layers tree's rows to draw (STATUS-jas item 38): `layers.yaml`
             // `lp_tree`'s foreach source. Paths arrive as lists or path markers.

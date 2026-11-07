@@ -271,6 +271,42 @@ mod tests {
         }
     }
 
+    /// Row 78: `scroll_to_selected`'s value, `tree_reveal`, over collapsed
+    /// entries as path markers and as plain lists, with the selection as the
+    /// path markers `element_selection` publishes (the fixture's
+    /// `reveal_cases`). Twin of the reference's and Swift's.
+    #[test]
+    fn tree_reveal_through_the_evaluator() {
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["reveal_cases"].as_array().unwrap();
+        assert!(cases.len() >= 5, "the fixture is not vacuous");
+        let mut compared = 0;
+        for marker in [true, false] {
+            let wrap = |p: &Value| if marker { json!({"__path__": p}) } else { p.clone() };
+            for case in cases {
+                let ctx = json!({
+                    "panel": {"collapsed_paths": case["collapsed"].as_array().unwrap().iter().map(wrap).collect::<Vec<_>>()},
+                    "active_document": {"element_selection": case["selection"].as_array().unwrap().iter()
+                        .map(|p| json!({"__path__": p})).collect::<Vec<_>>()},
+                });
+                let got = crate::interpreter::expr::eval(
+                    "tree_reveal(panel.collapsed_paths, active_document.element_selection)", &ctx);
+                let want: Vec<Value> = case["expected"].as_array().unwrap().iter().map(wrap).collect();
+                compared += 1;
+                assert_eq!(got, crate::interpreter::expr_types::Value::List(want),
+                    "{} marker={marker}", case["name"]);
+            }
+        }
+        assert!(compared >= 10, "cases compared: {compared}");
+        use crate::interpreter::expr_types::Value as EV;
+        let ctx = json!({"panel": {"collapsed_paths": ["junk", [0]], "sel": [[0, 1]]}});
+        assert_eq!(crate::interpreter::expr::eval("tree_reveal(panel.collapsed_paths, panel.sel)", &ctx),
+            EV::List(vec![json!("junk")]), "an entry that is not a path is kept");
+        assert_eq!(crate::interpreter::expr::eval("tree_reveal(panel.collapsed_paths)", &ctx), EV::Null);
+        assert_eq!(crate::interpreter::expr::eval("tree_reveal(5, panel.sel)", &ctx), EV::Null);
+    }
+
     /// Row 72(a): the Layers breadcrumb's foreach source, `tree_rows_at`, over
     /// the isolation stack as path markers and as plain lists (the fixture's
     /// `rows_at_cases`). Twin of the reference's and Swift's.
