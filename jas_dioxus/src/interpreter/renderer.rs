@@ -7526,6 +7526,17 @@ fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {
     (format!("<{}>", tree_type_label(elem)), false)
 }
 
+/// The isolation breadcrumb's segments: one per isolation-stack path that
+/// resolves, labelled as its tree row is (`tree_elem_display_name`: the
+/// element's own name, else `<Type>`). A NAMED group showed `<Group>` here
+/// while its row, Swift's native bar and the YAML segment (#827) showed its
+/// name (STATUS-jas row 74).
+fn tree_breadcrumb(doc: &crate::document::document::Document, stack: &[Vec<usize>]) -> Vec<(Vec<usize>, String)> {
+    stack.iter()
+        .filter_map(|p| doc.get_element(p).map(|elem| (p.clone(), tree_elem_display_name(elem).0)))
+        .collect()
+}
+
 fn tree_flatten_rc_children(
     children: &[std::rc::Rc<GeoElement>],
     depth: usize,
@@ -7773,23 +7784,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         let st = rctx.app.borrow();
         let stack = st.isolation_stack().to_vec();
         let doc = st.tab().map(|t| t.model.document().clone());
-        let mut out = Vec::new();
-        if let Some(doc) = doc {
-            for p in &stack {
-                if let Some(elem) = doc.get_element(p) {
-                    let label = match elem {
-                        crate::geometry::element::Element::Layer(le) if !le.name().is_empty() => le.name().to_string(),
-                        _ => format!("<{}>", match elem {
-                            crate::geometry::element::Element::Group(_) => "Group",
-                            crate::geometry::element::Element::Layer(_) => "Layer",
-                            _ => "?",
-                        }),
-                    };
-                    out.push((p.clone(), label));
-                }
-            }
-        }
-        out
+        doc.map(|d| tree_breadcrumb(&d, &stack)).unwrap_or_default()
     };
 
     // Auto-expand ancestors of element-selected paths so selected elements
@@ -14797,6 +14792,29 @@ mod tests {
         reveal_layers_selection_if_changed(&mut st, &[vec![0, 0, 3]]);
         assert!(!st.layers_collapsed.contains(&vec![0]), "a new selection under [0] opens it");
         assert!(st.layers_collapsed.contains(&vec![1]));
+    }
+
+    /// Row 74: a breadcrumb segment is labelled as its tree row: a named
+    /// group shows its name (it showed `<Group>`), an unnamed one `<Group>`,
+    /// a named layer its name; a path with no element has no segment.
+    #[test]
+    fn the_isolation_breadcrumb_names_a_named_group() {
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, GroupElem, LayerElem};
+        use std::rc::Rc;
+        let named = |n: &str| CommonProps { name: Some(n.into()), ..Default::default() };
+        let group = |c: CommonProps| Element::Group(GroupElem {
+            children: Vec::new(), isolated_blending: false, knockout_group: false, common: c,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group(named("Wheels"))), Rc::new(group(CommonProps::default()))],
+            isolated_blending: false, knockout_group: false, common: named("Car"),
+        });
+        let doc = Document { layers: vec![layer], ..Document::default() };
+        let got = tree_breadcrumb(&doc, &[vec![0], vec![0, 0], vec![0, 1], vec![0, 9]]);
+        let labels: Vec<&str> = got.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels, vec!["Car", "Wheels", "<Group>"]);
+        assert_eq!(got[1].0, vec![0, 0]);
     }
 
     #[test]
