@@ -2508,11 +2508,22 @@ actions:
       selected on the canvas. If the element is inside a collapsed
       group, the group and all ancestor groups are auto-expanded first.
       If multiple elements are selected, scrolls to the first selected
-      element in document order.
+      element in document order. Every selected element's collapsed
+      ancestors open, not only the first one's; a selected container
+      itself stays collapsed, and every other collapsed container keeps
+      its state. It runs when the canvas selection changes, never while
+      the tree draws. The scroll is the view's: the store holds no
+      scroll position.
     category: layers
     tier: 3
     effects:
-      - log: "scroll_to_selected"
+      # Row 78: the reveal as a store effect. tree_reveal keeps the entries
+      # that are not a strict ancestor of a selected path, in stored order
+      # and form (element_tree.json reveal_cases).
+      - set_panel_state:
+          panel: layers
+          key: collapsed_paths
+          value: "tree_reveal(panel.collapsed_paths, active_document.element_selection)"
 
   # ── Paragraph panel ───────────────────────────────────────
   toggle_hanging_punctuation:

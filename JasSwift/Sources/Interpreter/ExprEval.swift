@@ -1293,6 +1293,33 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         indices.append(saturatingInt(n))
         return .path(indices)
 
+    // The Layers reveal (row 78, layers.yaml "When an element is selected on
+    // the canvas ..."): `scroll_to_selected`'s value for collapsed_paths. The
+    // collapsed entries that are NOT a strict ancestor of a selected path, in
+    // stored order and stored form; a selected container itself stays
+    // collapsed, and an entry that is not a path is kept. Twin of the
+    // reference's and Rust's (`element_tree.json` `reveal_cases`).
+    case "tree_reveal":
+        guard args.count == 2 else { return .null }
+        let vals = args.map { evalNode($0, ctx) }
+        guard case .list(let collapsed) = vals[0], case .list(let selection) = vals[1] else { return .null }
+        func indexPath(_ v: Any) -> [Int]? {
+            let v = (v as? [String: Any]).flatMap { $0.count == 1 ? $0["__path__"] : nil } ?? v
+            guard let l = v as? [Any] else { return nil }
+            var out: [Int] = []
+            for i in l {
+                guard let n = i as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+                      n.doubleValue >= 0, n.doubleValue == n.doubleValue.rounded() else { return nil }
+                out.append(n.intValue)
+            }
+            return out
+        }
+        let selected = selection.compactMap { indexPath($0.value) }
+        return .list(collapsed.filter { e in
+            guard let c = indexPath(e.value) else { return true }
+            return !selected.contains { q in c.count < q.count && Array(q.prefix(c.count)) == c }
+        })
+
     // The Layers tree's rows to draw (STATUS-jas item 38): `layers.yaml`
     // `lp_tree`'s foreach source. Paths arrive as lists or path markers.
     case "tree_visible_rows":

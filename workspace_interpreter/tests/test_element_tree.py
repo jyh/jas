@@ -117,3 +117,90 @@ def test_tree_rows_at_a_non_list_of_paths_is_no_rows():
     store = StateStore(document=json.loads(json.dumps(_cases()[0]["document"])))
     ctx = {"active_document": store.eval_context()["active_document"]}
     assert evaluate("tree_rows_at(active_document.element_tree, null)", ctx).value == []
+
+
+# ── tree_reveal (row 78): the Layers reveal as a store effect ─────────────
+
+
+def _reveal_cases():
+    with open(_FIXTURE, encoding="utf-8") as f:
+        return json.load(f)["reveal_cases"]
+
+
+def test_the_reveal_cases_are_not_vacuous():
+    cases = _reveal_cases()
+    assert len(cases) >= 5
+    assert any(c["expected"] == [] and c["collapsed"] for c in cases), "an entry removed"
+    assert any(c["expected"] == c["collapsed"] and c["selection"] for c in cases), \
+        "a selection that opens nothing"
+    assert any(c["expected"] and c["expected"] != c["collapsed"] for c in cases), "a partial removal"
+
+
+def _marker(p):
+    return {"__path__": p}
+
+
+@pytest.mark.parametrize("marker", [True, False], ids=["path_markers", "plain_lists"])
+@pytest.mark.parametrize("case", _reveal_cases(), ids=lambda c: c["name"])
+def test_tree_reveal_through_the_evaluator(case, marker):
+    """`scroll_to_selected`'s effect value: the collapsed entries that are not a
+    strict ancestor of any selected path, each in the form the store holds it."""
+    from workspace_interpreter.expr import evaluate
+    wrap = _marker if marker else (lambda p: p)
+    ctx = {"panel": {"collapsed_paths": [wrap(p) for p in case["collapsed"]]},
+           "active_document": {"element_selection": [_marker(p) for p in case["selection"]]}}
+    got = evaluate("tree_reveal(panel.collapsed_paths, active_document.element_selection)", ctx)
+    assert got.value == [wrap(p) for p in case["expected"]]
+
+
+def test_tree_reveal_reads_the_selection_as_path_values():
+    """The live context holds `element_selection` as PATH values, not markers."""
+    from workspace_interpreter.expr import evaluate
+    from workspace_interpreter.expr_types import Value
+    ctx = {"panel": {"collapsed_paths": [[0], [1]]},
+           "active_document": {"element_selection": [Value.path((0, 3))]}}
+    got = evaluate("tree_reveal(panel.collapsed_paths, active_document.element_selection)", ctx)
+    assert got.value == [[1]]
+
+
+@pytest.mark.parametrize("expr", [
+    "tree_reveal(panel.collapsed_paths)",
+    "tree_reveal(5, panel.sel)",
+])
+def test_tree_reveal_refuses_a_malformed_call_with_null(expr):
+    from workspace_interpreter.expr import evaluate
+    ctx = {"panel": {"collapsed_paths": [[0]], "sel": [[0, 1]]}}
+    assert evaluate(expr, ctx).value is None
+
+
+def test_tree_reveal_keeps_an_entry_that_is_not_a_path():
+    """It removes ancestors and nothing else; it does not tidy the list."""
+    from workspace_interpreter.expr import evaluate
+    ctx = {"panel": {"collapsed_paths": ["junk", [0]], "sel": [[0, 1]]}}
+    assert evaluate("tree_reveal(panel.collapsed_paths, panel.sel)", ctx).value == ["junk"]
+
+
+def _scroll_to_selected_effects():
+    import yaml
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "actions.yaml")
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)["actions"]["scroll_to_selected"]["effects"]
+
+
+def test_scroll_to_selected_opens_the_selections_collapsed_ancestors():
+    """Row 78: actions.yaml's scroll_to_selected writes the reveal to the
+    Layers panel's collapsed_paths. The fixture document selects [0,1] (a
+    group): its ancestor [0] opens, the selected group itself stays collapsed,
+    and an unrelated [1] keeps its state.
+
+    THE CALLER'S CONTRACT: the action reads `panel.collapsed_paths`, so it runs
+    in the LAYERS scope, as every Layers action does through its port's Layers
+    dispatcher (Swift `LayersPanel.actionContext`, Rust `build_appstate_ctx`).
+    The canvas trigger dispatches it the same way; with another panel active
+    and no such dispatcher, `panel` is that panel's scope."""
+    from workspace_interpreter.effects import run_effects
+    store = StateStore(document=json.loads(json.dumps(_cases()[0]["document"])))
+    store.init_panel("layers", {"collapsed_paths": [{"__path__": [1]}, {"__path__": [0]}, {"__path__": [0, 1]}]})
+    store.set_active_panel("layers")
+    run_effects(_scroll_to_selected_effects(), store.eval_context(), store)
+    assert store.get_panel("layers", "collapsed_paths") == [{"__path__": [1]}, {"__path__": [0, 1]}]

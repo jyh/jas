@@ -7526,6 +7526,17 @@ fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {
     (format!("<{}>", tree_type_label(elem)), false)
 }
 
+/// The isolation breadcrumb's segments: one per isolation-stack path that
+/// resolves, labelled as its tree row is (`tree_elem_display_name`: the
+/// element's own name, else `<Type>`). A NAMED group showed `<Group>` here
+/// while its row, Swift's native bar and the YAML segment (#827) showed its
+/// name (STATUS-jas row 74).
+fn tree_breadcrumb(doc: &crate::document::document::Document, stack: &[Vec<usize>]) -> Vec<(Vec<usize>, String)> {
+    stack.iter()
+        .filter_map(|p| doc.get_element(p).map(|elem| (p.clone(), tree_elem_display_name(elem).0)))
+        .collect()
+}
+
 fn tree_flatten_rc_children(
     children: &[std::rc::Rc<GeoElement>],
     depth: usize,
@@ -7773,23 +7784,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         let st = rctx.app.borrow();
         let stack = st.isolation_stack().to_vec();
         let doc = st.tab().map(|t| t.model.document().clone());
-        let mut out = Vec::new();
-        if let Some(doc) = doc {
-            for p in &stack {
-                if let Some(elem) = doc.get_element(p) {
-                    let label = match elem {
-                        crate::geometry::element::Element::Layer(le) if !le.name().is_empty() => le.name().to_string(),
-                        _ => format!("<{}>", match elem {
-                            crate::geometry::element::Element::Group(_) => "Group",
-                            crate::geometry::element::Element::Layer(_) => "Layer",
-                            _ => "?",
-                        }),
-                    };
-                    out.push((p.clone(), label));
-                }
-            }
-        }
-        out
+        doc.map(|d| tree_breadcrumb(&d, &stack)).unwrap_or_default()
     };
 
     // Auto-expand ancestors of element-selected paths so selected elements
@@ -7805,12 +7800,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 paths
             })
             .unwrap_or_default();
-        for p in &selected_paths {
-            for i in 1..p.len() {
-                let ancestor = p[..i].to_vec();
-                st.layers_collapsed.remove(&ancestor);
-            }
-        }
+        reveal_layers_selection_if_changed(&mut st, &selected_paths);
         selected_paths.into_iter().next()
     };
 
@@ -9462,6 +9452,25 @@ mod hue_strip_tests {
     }
 }
 
+
+/// Row 78: the Layers reveal, run only when the canvas selection CHANGED
+/// since it last ran (`AppState::layers_reveal_seen`). The law is actions.yaml
+/// `scroll_to_selected`'s: every strict ancestor of a selected path opens, a
+/// selected container itself stays collapsed. Re-running it on every render
+/// reopened a group the user had just collapsed. Swift runs the same law from
+/// its Model's document setter; moving this call out of the render is row 78
+/// step 3.
+pub(crate) fn reveal_layers_selection_if_changed(st: &mut crate::workspace::app_state::AppState, selected_paths: &[Vec<usize>]) {
+    if st.layers_reveal_seen.as_deref() == Some(selected_paths) {
+        return;
+    }
+    for p in selected_paths {
+        for i in 1..p.len() {
+            st.layers_collapsed.remove(&p[..i].to_vec());
+        }
+    }
+    st.layers_reveal_seen = Some(selected_paths.to_vec());
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -14758,6 +14767,54 @@ mod tests {
         assert!(matches!(expr::eval("\"\" + as_path(panel.collapsed_paths[0])", &ctx), Value::Str(ref s) if s == "0.2"),
                 "sorted, as markers");
         assert!(matches!(expr::eval("\"\" + as_path(panel.renaming_element)", &ctx), Value::Str(ref s) if s == "0.1"));
+    }
+
+    /// Row 78: the reveal runs when the selection CHANGES. A user's collapse
+    /// of a container holding an unchanged selection sticks (it reopened on
+    /// every render before), and a selected container itself stays collapsed.
+    /// Twin of Swift's LayersRevealTests.
+    #[test]
+    fn the_layers_reveal_runs_on_a_selection_change_only() {
+        let mut st = AppState::new();
+        st.layers_collapsed.insert(vec![0]);
+        st.layers_collapsed.insert(vec![1]);
+        st.layers_collapsed.insert(vec![0, 1]);
+        let sel = vec![vec![0, 1]];
+        reveal_layers_selection_if_changed(&mut st, &sel);
+        let mut got: Vec<Vec<usize>> = st.layers_collapsed.iter().cloned().collect();
+        got.sort();
+        assert_eq!(got, vec![vec![0, 1], vec![1]], "[0] opens; the selected [0,1] and the unrelated [1] stay");
+        // The user collapses [0] again; the same selection does not reopen it.
+        st.layers_collapsed.insert(vec![0]);
+        reveal_layers_selection_if_changed(&mut st, &sel);
+        assert!(st.layers_collapsed.contains(&vec![0]), "an unchanged selection does not reveal");
+        // A changed selection does.
+        reveal_layers_selection_if_changed(&mut st, &[vec![0, 0, 3]]);
+        assert!(!st.layers_collapsed.contains(&vec![0]), "a new selection under [0] opens it");
+        assert!(st.layers_collapsed.contains(&vec![1]));
+    }
+
+    /// Row 74: a breadcrumb segment is labelled as its tree row: a named
+    /// group shows its name (it showed `<Group>`), an unnamed one `<Group>`,
+    /// a named layer its name; a path with no element has no segment.
+    #[test]
+    fn the_isolation_breadcrumb_names_a_named_group() {
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, GroupElem, LayerElem};
+        use std::rc::Rc;
+        let named = |n: &str| CommonProps { name: Some(n.into()), ..Default::default() };
+        let group = |c: CommonProps| Element::Group(GroupElem {
+            children: Vec::new(), isolated_blending: false, knockout_group: false, common: c,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group(named("Wheels"))), Rc::new(group(CommonProps::default()))],
+            isolated_blending: false, knockout_group: false, common: named("Car"),
+        });
+        let doc = Document { layers: vec![layer], ..Document::default() };
+        let got = tree_breadcrumb(&doc, &[vec![0], vec![0, 0], vec![0, 1], vec![0, 9]]);
+        let labels: Vec<&str> = got.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels, vec!["Car", "Wheels", "<Group>"]);
+        assert_eq!(got[1].0, vec![0, 0]);
     }
 
     #[test]

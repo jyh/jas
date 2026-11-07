@@ -507,6 +507,27 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             return Value.null()
         return Value.list_(tree_visible_rows(rows.value, paths(collapsed), paths(psel), as_path(ren)))
 
+    if name == "tree_reveal":
+        # The Layers reveal (row 78, layers.yaml "When an element is selected
+        # on the canvas ..."): `scroll_to_selected`'s value for collapsed_paths.
+        # The collapsed entries that are NOT a strict ancestor of a selected
+        # path, in stored order and stored form; a selected container itself
+        # stays collapsed, and an entry that is not a path is kept. Paths
+        # arrive as path values, lists or markers (`as_path`'s reading).
+        if len(node.args) != 2:
+            return Value.null()
+        collapsed, selection = (eval_node(a, ctx) for a in node.args)
+        if collapsed.type != ValueType.LIST or selection.type != ValueType.LIST:
+            return Value.null()
+        selected = [p for p in (_index_path(Value.from_python(x) if not isinstance(x, Value) else x)
+                                for x in selection.value) if p is not None]
+
+        def opens(entry):
+            c = _index_path(Value.from_python(entry) if not isinstance(entry, Value) else entry)
+            return c is not None and any(len(c) < len(q) and q[:len(c)] == c for q in selected)
+
+        return Value.list_([e for e in collapsed.value if not opens(e)])
+
     if name == "tree_rows_at":
         # The rows of `element_tree` at the given paths, IN THE ORDER OF THE
         # PATHS; a path with no row is skipped (row 72(a): `layers.yaml`
