@@ -259,6 +259,13 @@ pub(crate) struct AppState {
     /// Collapsed element paths in the layers panel. Elements not in this
     /// set are expanded (open) by default.
     pub(crate) layers_collapsed: std::collections::HashSet<Vec<usize>>,
+    /// The canvas selection the Layers reveal last ran for (row 78): the
+    /// reveal runs when the selection CHANGES, never on every render, so a
+    /// container holding the selection can be collapsed and stays collapsed.
+    /// `None` until the first render. Swift runs the same law from its
+    /// Model's document setter; moving this one out of the render too is
+    /// row 78 step 3.
+    pub(crate) layers_reveal_seen: Option<Vec<Vec<usize>>>,
     /// Panel-selected element paths in the layers panel. Independent of
     /// element selection (select square). Used for menu operations and drag.
     pub(crate) layers_panel_selection: Vec<Vec<usize>>,
@@ -671,6 +678,7 @@ impl AppState {
             layers_renaming: None,
             layers_rename_draft: None,
             layers_collapsed: std::collections::HashSet::new(),
+            layers_reveal_seen: None,
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,
             layers_drag_source: None,

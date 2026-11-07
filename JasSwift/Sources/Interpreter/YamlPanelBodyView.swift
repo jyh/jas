@@ -4089,19 +4089,10 @@ struct TreeViewContent: View {
     var body: some View {
         let doc = model.document
         let selectedPaths = doc.selectedPaths
-        // Auto-expand ancestors of selected paths
-        for p in selectedPaths where p.count > 1 {
-            for i in 1..<p.count {
-                let anc = Array(p.prefix(i))
-                if collapsed.contains(anc) {
-                    // Note: mutating @State during body is discouraged; use a
-                    // DispatchQueue hop to defer the change
-                    DispatchQueue.main.async {
-                        collapsed.remove(anc)
-                    }
-                }
-            }
-        }
+        // The reveal (a selection inside a collapsed group opens its
+        // ancestors) is NOT done here: the draw never writes the store. A
+        // selection change runs actions.yaml's `scroll_to_selected` from
+        // `Model.document`'s setter (row 78, `revealLayersSelection`).
         let rows = applyFilters(flatten(doc))
         let firstSelected = selectedPaths.sorted(by: { $0.lexicographicallyPrecedes($1) }).first
         return VStack(spacing: 0) {

@@ -8,7 +8,8 @@
     "tree_view widget applies those from its own binds, layers.yaml lp_tree), colours, thumbnails.",
     "The documents are written by the reference codec; the expected rows are authored.",
     "visible_cases (item 38 step 1b): the ROWS TO DRAW, resolved in the core from element_tree and the widget's binds: binds.collapsed (paths), binds.panel_selection (paths), binds.renaming (a path or null). A row under a collapsed CONTAINER is hidden; collapsed is true only on a container; panel_selected and renaming are exact path matches. Expected rows are case 0's authored rows plus the three marks.",
-    "rows_at_cases (row 72(a), the Layers breadcrumb): tree_rows_at(element_tree, paths) is the row whose path equals each path, IN THE ORDER OF paths; a path with no row is skipped. The document is cases[0]'s; the expected rows are cases[0]'s authored rows, looked up by path."
+    "rows_at_cases (row 72(a), the Layers breadcrumb): tree_rows_at(element_tree, paths) is the row whose path equals each path, IN THE ORDER OF paths; a path with no row is skipped. The document is cases[0]'s; the expected rows are cases[0]'s authored rows, looked up by path.",
+    "reveal_cases (row 78): tree_reveal(collapsed, selection) is `collapsed` minus every STRICT ancestor of a selected path, the rest kept in stored order and stored form; the selection's own paths are never expanded. Every selected path is revealed, not only the first (layers.yaml's 'the first selected element' names the SCROLL target)."
   ],
   "cases": [
     {
@@ -984,6 +985,148 @@
           "is_container": false,
           "element_selected": false
         }
+      ]
+    }
+  ],
+  "reveal_cases": [
+    {
+      "name": "every_collapsed_ancestor_of_a_selection_opens",
+      "collapsed": [
+        [
+          0
+        ],
+        [
+          0,
+          2
+        ]
+      ],
+      "selection": [
+        [
+          0,
+          2,
+          0
+        ]
+      ],
+      "expected": []
+    },
+    {
+      "name": "a_selected_container_itself_stays_collapsed",
+      "collapsed": [
+        [
+          0,
+          2
+        ]
+      ],
+      "selection": [
+        [
+          0,
+          2
+        ]
+      ],
+      "expected": [
+        [
+          0,
+          2
+        ]
+      ]
+    },
+    {
+      "name": "unrelated_entries_keep_their_stored_order",
+      "collapsed": [
+        [
+          1
+        ],
+        [
+          0
+        ],
+        [
+          2,
+          0
+        ]
+      ],
+      "selection": [
+        [
+          0,
+          1
+        ]
+      ],
+      "expected": [
+        [
+          1
+        ],
+        [
+          2,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "every_selected_path_is_revealed",
+      "collapsed": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          1,
+          3
+        ]
+      ],
+      "selection": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          3,
+          2
+        ]
+      ],
+      "expected": []
+    },
+    {
+      "name": "an_index_prefix_is_not_an_ancestor",
+      "collapsed": [
+        [
+          1
+        ],
+        [
+          10
+        ]
+      ],
+      "selection": [
+        [
+          10,
+          0
+        ]
+      ],
+      "expected": [
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "name": "an_empty_selection_changes_nothing",
+      "collapsed": [
+        [
+          2
+        ],
+        [
+          0
+        ]
+      ],
+      "selection": [],
+      "expected": [
+        [
+          2
+        ],
+        [
+          0
+        ]
       ]
     }
   ]

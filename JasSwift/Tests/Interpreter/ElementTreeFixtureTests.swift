@@ -76,6 +76,53 @@ import Foundation
         #expect(evaluate("tree_rows_at(active_document.element_tree)", context: empty) == .null)
     }
 
+    static func revealCases() -> [[String: Any]] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("test_fixtures").appendingPathComponent("layers/element_tree.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cases = json["reveal_cases"] as? [[String: Any]] else { return [] }
+        return cases
+    }
+
+    /// Row 78: `scroll_to_selected`'s value, `tree_reveal`, over collapsed
+    /// entries as path markers and as plain lists, with the selection as path
+    /// markers. Twin of the reference's `test_tree_reveal_through_the_evaluator`.
+    @Test func treeRevealThroughTheEvaluator() {
+        let cases = Self.revealCases()
+        #expect(cases.count >= 5, "the fixture is not vacuous")
+        var compared = 0
+        for marker in [true, false] {
+            for c in cases {
+                let wrap: ([Int]) -> Any = { marker ? ["__path__": $0] : $0 }
+                let collapsed = (c["collapsed"] as? [[Int]] ?? []).map(wrap)
+                let selection = (c["selection"] as? [[Int]] ?? []).map { ["__path__": $0] }
+                let ctx: [String: Any] = [
+                    "panel": ["collapsed_paths": collapsed],
+                    "active_document": ["element_selection": selection],
+                ]
+                let got = evaluate("tree_reveal(panel.collapsed_paths, active_document.element_selection)", context: ctx)
+                let want = (c["expected"] as? [[Int]] ?? []).map(wrap)
+                guard case .list(let items) = got else {
+                    Issue.record("\(c["name"] ?? ""): not a list: \(got)"); continue
+                }
+                #expect(NSArray(array: items.map { $0.value }).isEqual(to: want),
+                        "\(c["name"] ?? "") marker=\(marker): \(items.map { $0.value }) vs \(want)")
+                compared += 1
+            }
+        }
+        #expect(compared >= 10)
+        let ctx: [String: Any] = ["panel": ["collapsed_paths": ["junk", [0]], "sel": [[0, 1]]]]
+        guard case .list(let kept) = evaluate("tree_reveal(panel.collapsed_paths, panel.sel)", context: ctx) else {
+            Issue.record("not a list"); return
+        }
+        #expect(kept.map { $0.value as? String } == ["junk"], "an entry that is not a path is kept")
+        #expect(evaluate("tree_reveal(panel.collapsed_paths)", context: ctx) == .null)
+        #expect(evaluate("tree_reveal(5, panel.sel)", context: ctx) == .null)
+    }
+
     @Test func elementTreeRowsMatchTheSharedFixture() throws {
         let cases = Self.cases()
         #expect(cases.count >= 2, "the fixture is not vacuous")

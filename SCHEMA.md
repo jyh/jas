@@ -907,6 +907,18 @@ isolation breadcrumb (`lp_breadcrumb`) uses it as its foreach source over
 `panel.isolation_stack`, so each segment draws the row of its own level,
 outermost first (`rows_at_cases` in `test_fixtures/layers/element_tree.json`).
 
+`tree_reveal(collapsed, selection)` returns the entries of `collapsed` that
+are **not a strict ancestor of any path in `selection`**, in their stored
+order and stored form. A selected container itself is kept, and so is an
+entry that is not a path. The ancestor test compares indices, so `[1]` is not
+an ancestor of `[10, 0]`. Every selected path is revealed, not only the first.
+Each entry and each selected path may be a PATH value, a list or a path marker.
+If either argument is not a list, or the call does not have exactly two
+arguments, the result is `null`. `scroll_to_selected` (actions.yaml) writes it
+to the Layers panel's `collapsed_paths` over
+`active_document.element_selection`: the Layers reveal (`reveal_cases` in
+`test_fixtures/layers/element_tree.json`).
+
 `as_path(v)` turns a row's `node.path` (a list) into a PATH value. It accepts
 a PATH, a list of non-negative whole numbers, or a path marker. It returns
 `null` for anything else, including a list with a negative or fractional
@@ -1822,8 +1834,8 @@ tag-pinned corpus (`POLICY.md` §1).
 conformance corpus. `path_child`, `selection_contains` and `selection_empty`
 read the live document, so the corpus does not reach them. Each active port's
 own arms pin those three, and the reference agrees except where the table says
-otherwise. (`as_path` and `tree_rows_at` are under "`node.*` — Row Template Scope
-Variables".)
+otherwise. (`as_path`, `tree_rows_at` and `tree_reveal` are under "`node.*` — Row
+Template Scope Variables".)
 
 | Function | Returns | Description |
 |---|---|---|

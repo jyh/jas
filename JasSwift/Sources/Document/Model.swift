@@ -278,6 +278,11 @@ public class Model: ObservableObject {
             // reference-geometry recompute cache: any edit changes the
             // generation and drops the cache. Mirrors Rust `Model.generation`.
             generation &+= 1
+            // Row 78: a selection change reveals the selection in the Layers
+            // tree (collapsed ancestors open). Here, at the chokepoint, so a
+            // canvas click, an undo and a script step all reach it, and the
+            // tree's draw never writes the store.
+            if oldValue.selection != document.selection { revealLayersSelection(model: self) }
             notify()
         }
     }
