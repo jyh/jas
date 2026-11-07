@@ -112,6 +112,7 @@ mod tests {
             layers_renaming: None,
             layers_rename_draft: None,
             layers_collapsed: std::collections::HashSet::new(),
+            layers_reveal_seen: None,
             layers_panel_selection: Vec::new(),
             layers_drag_target: None,
             layers_drag_source: None,

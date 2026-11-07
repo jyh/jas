@@ -423,6 +423,19 @@ func layersCollapsedPaths(model: Model?) -> Set<[Int]> {
     return Set(raw.compactMap(layersStoredPath))
 }
 
+/// Row 78: the Layers reveal, run when the canvas selection CHANGES
+/// (`Model.document`'s setter calls it): layers.yaml's "a selected element
+/// inside a collapsed group auto-expands its ancestors" as actions.yaml's
+/// `scroll_to_selected`, never a write from the tree's draw. With nothing
+/// collapsed there is nothing to open, so the dispatch is skipped.
+func revealLayersSelection(model: Model) {
+    guard let raw = model.stateStore.getPanel("layers_panel_content", "collapsed_paths") as? [Any],
+          !raw.isEmpty else { return }
+    LayersPanel.dispatchYamlAction("scroll_to_selected", model: model, params: [:])
+    // The panel write publishes nothing; the tree draws from the store.
+    model.panelStateVersion &+= 1
+}
+
 func setLayersCollapsedPaths(model: Model, _ paths: Set<[Int]>) {
     setLayersPanelKey(model: model, "collapsed_paths", layersPathMarkers(paths))
 }

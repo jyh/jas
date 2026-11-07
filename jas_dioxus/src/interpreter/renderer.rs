@@ -7805,12 +7805,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 paths
             })
             .unwrap_or_default();
-        for p in &selected_paths {
-            for i in 1..p.len() {
-                let ancestor = p[..i].to_vec();
-                st.layers_collapsed.remove(&ancestor);
-            }
-        }
+        reveal_layers_selection_if_changed(&mut st, &selected_paths);
         selected_paths.into_iter().next()
     };
 
@@ -9462,6 +9457,25 @@ mod hue_strip_tests {
     }
 }
 
+
+/// Row 78: the Layers reveal, run only when the canvas selection CHANGED
+/// since it last ran (`AppState::layers_reveal_seen`). The law is actions.yaml
+/// `scroll_to_selected`'s: every strict ancestor of a selected path opens, a
+/// selected container itself stays collapsed. Re-running it on every render
+/// reopened a group the user had just collapsed. Swift runs the same law from
+/// its Model's document setter; moving this call out of the render is row 78
+/// step 3.
+pub(crate) fn reveal_layers_selection_if_changed(st: &mut crate::workspace::app_state::AppState, selected_paths: &[Vec<usize>]) {
+    if st.layers_reveal_seen.as_deref() == Some(selected_paths) {
+        return;
+    }
+    for p in selected_paths {
+        for i in 1..p.len() {
+            st.layers_collapsed.remove(&p[..i].to_vec());
+        }
+    }
+    st.layers_reveal_seen = Some(selected_paths.to_vec());
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -14758,6 +14772,31 @@ mod tests {
         assert!(matches!(expr::eval("\"\" + as_path(panel.collapsed_paths[0])", &ctx), Value::Str(ref s) if s == "0.2"),
                 "sorted, as markers");
         assert!(matches!(expr::eval("\"\" + as_path(panel.renaming_element)", &ctx), Value::Str(ref s) if s == "0.1"));
+    }
+
+    /// Row 78: the reveal runs when the selection CHANGES. A user's collapse
+    /// of a container holding an unchanged selection sticks (it reopened on
+    /// every render before), and a selected container itself stays collapsed.
+    /// Twin of Swift's LayersRevealTests.
+    #[test]
+    fn the_layers_reveal_runs_on_a_selection_change_only() {
+        let mut st = AppState::new();
+        st.layers_collapsed.insert(vec![0]);
+        st.layers_collapsed.insert(vec![1]);
+        st.layers_collapsed.insert(vec![0, 1]);
+        let sel = vec![vec![0, 1]];
+        reveal_layers_selection_if_changed(&mut st, &sel);
+        let mut got: Vec<Vec<usize>> = st.layers_collapsed.iter().cloned().collect();
+        got.sort();
+        assert_eq!(got, vec![vec![0, 1], vec![1]], "[0] opens; the selected [0,1] and the unrelated [1] stay");
+        // The user collapses [0] again; the same selection does not reopen it.
+        st.layers_collapsed.insert(vec![0]);
+        reveal_layers_selection_if_changed(&mut st, &sel);
+        assert!(st.layers_collapsed.contains(&vec![0]), "an unchanged selection does not reveal");
+        // A changed selection does.
+        reveal_layers_selection_if_changed(&mut st, &[vec![0, 0, 3]]);
+        assert!(!st.layers_collapsed.contains(&vec![0]), "a new selection under [0] opens it");
+        assert!(st.layers_collapsed.contains(&vec![1]));
     }
 
     #[test]
