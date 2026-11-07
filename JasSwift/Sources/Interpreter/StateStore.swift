@@ -519,12 +519,31 @@ public class StateStore {
                 item[keyField] = value
                 lst.append(item)
             }
-        } else if let i = lst.firstIndex(where: { ($0 as? NSObject)?.isEqual(value) ?? false }) {
+        } else if let i = lst.firstIndex(where: { Self.sameMember($0, value) }) {
             lst.remove(at: i)
         } else {
             lst.append(value)
         }
         panels[panelId]?[key] = lst
+    }
+
+    /// Set membership for `listToggle`. Equal values match; so do two forms of
+    /// ONE index path, the `{"__path__": [..]}` marker and a bare list of
+    /// child indices. The Layers tree's native writer stores markers while a
+    /// row's `path` is a list, so with plain equality ArrowRight on a
+    /// container the tree collapsed appended a second entry and left it
+    /// collapsed (layers.yaml R-2). Rust reads `collapsed_paths` back into a
+    /// set of index paths, which identifies the two forms the same way; the
+    /// reference never holds both.
+    static func sameMember(_ a: Any, _ b: Any) -> Bool {
+        if let x = a as? NSObject, x.isEqual(b) { return true }
+        func indexPath(_ v: Any) -> [Int]? {
+            let v = (v as? [String: Any]).flatMap { $0.count == 1 ? $0["__path__"] : nil } ?? v
+            guard let l = v as? [Any], l.allSatisfy({ $0 is Int || $0 is NSNumber }) else { return nil }
+            return l.compactMap { ($0 as? NSNumber)?.intValue ?? ($0 as? Int) }
+        }
+        guard let pa = indexPath(a), let pb = indexPath(b) else { return false }
+        return pa == pb
     }
 
     // MARK: - Context for expression evaluation

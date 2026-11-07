@@ -58,6 +58,21 @@ private func twoLayers() -> Model {
     #expect(layersCollapsedPaths(model: model) == [], "Right expands what Left collapsed")
 }
 
+@Test func arrowRightExpandsAContainerTheTreeCollapsed() {
+    // The tree's own write (a twirl click on the native row) stores markers;
+    // ArrowRight's list_toggle must remove that entry, not append a second one
+    // (layers.yaml R-2: one entry per collapsed path). The arm above drives
+    // Left then Right, so both of its writes take the YAML form and agree by
+    // construction; this one crosses the two writers.
+    let model = twoLayers()
+    setLayersCollapsedPaths(model: model, [[1]])
+    setLayersPanelSelection(model: model, [[1]])
+    #expect(LayersPanel.treeKey(KeyChord(key: "ArrowRight"), model: model))
+    let raw = model.stateStore.getPanel("layers_panel_content", "collapsed_paths") as? [Any]
+    #expect(raw?.count == 0, "one toggle removes the tree's entry; got \(String(describing: raw))")
+    #expect(layersCollapsedPaths(model: model) == [])
+}
+
 @Test func aCollapsedContainerTheTreeWroteHidesItsRowsFromTheKeys() {
     // [1] collapsed: the visible rows are [1] [0] [0,0], so Down from [1] lands
     // on [0], not on the hidden [1,0].
