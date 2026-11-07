@@ -1129,5 +1129,583 @@
         ]
       ]
     }
-  ]
+  ],
+  "element_at_cases": [
+    {
+      "name": "top-level layer",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "path": [
+        0
+      ],
+      "expected": {
+        "kind": "Layer",
+        "name": "Back",
+        "locked": false,
+        "visibility": "preview"
+      }
+    },
+    {
+      "name": "second top-level layer, locked and invisible",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "path": [
+        1
+      ],
+      "expected": {
+        "kind": "Layer",
+        "name": "Front",
+        "locked": true,
+        "visibility": "invisible"
+      }
+    },
+    {
+      "name": "a group inside a layer",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "path": [
+        0,
+        1
+      ],
+      "expected": {
+        "kind": "Group",
+        "name": "G",
+        "locked": false,
+        "visibility": "preview"
+      }
+    },
+    {
+      "name": "a sublayer (Layer Options on a nested layer)",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "fill": null,
+                    "height": 10.0,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 0.0,
+                    "ry": 0.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "rect",
+                    "visibility": "preview",
+                    "width": 10.0,
+                    "x": 0.0,
+                    "y": 0.0
+                  }
+                ],
+                "locked": true,
+                "name": "Inner",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "layer",
+                "visibility": "outline"
+              }
+            ],
+            "locked": false,
+            "name": "Outer",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": []
+      },
+      "path": [
+        0,
+        0
+      ],
+      "expected": {
+        "kind": "Layer",
+        "name": "Inner",
+        "locked": true,
+        "visibility": "outline"
+      }
+    },
+    {
+      "name": "a group inside a group (the descent passes through a group)",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "locked": true,
+                    "name": "Deep",
+                    "opacity": 1.0,
+                    "transform": null,
+                    "type": "group",
+                    "visibility": "outline"
+                  }
+                ],
+                "locked": false,
+                "name": "Mid",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "L",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": []
+      },
+      "path": [
+        0,
+        0,
+        0
+      ],
+      "expected": {
+        "kind": "Group",
+        "name": "Deep",
+        "locked": true,
+        "visibility": "outline"
+      }
+    },
+    {
+      "name": "the sublayer's parent",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "fill": null,
+                    "height": 10.0,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 0.0,
+                    "ry": 0.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "rect",
+                    "visibility": "preview",
+                    "width": 10.0,
+                    "x": 0.0,
+                    "y": 0.0
+                  }
+                ],
+                "locked": true,
+                "name": "Inner",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "layer",
+                "visibility": "outline"
+              }
+            ],
+            "locked": false,
+            "name": "Outer",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": []
+      },
+      "path": [
+        0
+      ],
+      "expected": {
+        "kind": "Layer",
+        "name": "Outer",
+        "locked": false,
+        "visibility": "preview"
+      }
+    },
+    {
+      "name": "a child index past the end",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "path": [
+        0,
+        5
+      ],
+      "expected": null
+    },
+    {
+      "name": "a top-level index past the end",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": null,
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "children": [
+                  {
+                    "cx": 5.0,
+                    "cy": 5.0,
+                    "fill": null,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 3.0,
+                    "ry": 3.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "ellipse",
+                    "visibility": "preview"
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Back",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [],
+            "locked": true,
+            "name": "Front",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "invisible"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": [
+          {
+            "kind": "all",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      "path": [
+        2
+      ],
+      "expected": null
+    }
+  ],
+  "_comment_element_at": "element_at_cases (STATUS-jas row 75): each port builds its OWN active_document view from `document` and evaluates element_at(path) through it. `expected` is the four fields Layer Options reads (kind, name, common.locked, common.visibility), or null. The divergence was in the VIEW builders, not the evaluators: a nested path read null wherever the view carried no children."
 }

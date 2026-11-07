@@ -56,6 +56,28 @@ private func treeTypeName(_ elem: Element) -> String {
     }
 }
 
+/// One element as `element_at` reads it below a top-level layer (STATUS-jas
+/// row 75): `kind`, `name`, `common` {visibility, locked}, and a container's
+/// `children`, recursively. The reference's view carries the document's own
+/// subtree; without `children` here a sublayer's Layer Options read null.
+/// The shared fixture is `element_tree.json`'s `element_at_cases`.
+func elementNodeView(_ elem: Element) -> [String: Any] {
+    let vis: String
+    switch elem.visibility {
+    case .invisible: vis = "invisible"
+    case .outline: vis = "outline"
+    case .preview: vis = "preview"
+    }
+    var view: [String: Any] = [
+        "kind": treeTypeLabel(elem),
+        "name": elem.name as Any? ?? NSNull(),
+        "common": ["visibility": vis, "locked": elem.isLocked],
+    ]
+    if case .group(let g) = elem { view["children"] = g.children.map(elementNodeView) }
+    if case .layer(let l) = elem { view["children"] = l.children.map(elementNodeView) }
+    return view
+}
+
 /// `active_document.element_tree` (STATUS-jas item 38): the document's rows
 /// for the Layers panel's `tree_view`, topmost first (REVERSE z) and depth
 /// first. A row is selected when its path is at or under a selected path.
@@ -196,6 +218,7 @@ public func buildActiveDocumentView(
                 "locked": layer.locked,
             ],
             "path": pathJson,
+            "children": layer.children.map(elementNodeView),
         ])
         topLevelLayerPaths.append(pathJson)
         if let n = layer.name { layerNames.insert(n) }

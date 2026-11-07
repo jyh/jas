@@ -282,6 +282,18 @@ def _native_view(elem):
     return view
 
 
+def _native_tree(elem):
+    """``_native_view`` applied to an element AND every descendant, so a path
+    into the tree (``element_at``) reads native ``kind`` / ``common`` at any
+    depth, not only at the top level (STATUS-jas row 75: a sublayer's Layer
+    Options read ``common.locked`` as null). Copies; never mutates the store."""
+    view = _native_view(elem)
+    if isinstance(view, dict) and isinstance(view.get("children"), list):
+        view = dict(view)
+        view["children"] = [_native_tree(c) for c in view["children"]]
+    return view
+
+
 def _promote_bridged_for_brush(elem: dict) -> bool:
     """``StateStore.promote_element_for_brush`` on an element in the op
     bridge's test-JSON shape (``type: line``, ``d`` as ``{cmd, x, y}``), which
@@ -1626,7 +1638,7 @@ class StateStore:
         top_level_layer_paths = []
         layer_names = set()
         for i, elem in enumerate(layers):
-            elem = _native_view(elem)
+            elem = _native_tree(elem)
             if isinstance(elem, dict) and elem.get("kind") == "Layer":
                 # Expose layer with its path for HOF predicates
                 view = dict(elem)
