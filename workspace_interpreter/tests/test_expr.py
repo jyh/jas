@@ -77,6 +77,12 @@ def test_conformance(case):
         assert result.value == expected
     elif expected_type == ValueType.COLOR:
         assert result.value == expected
+    elif expected_type == ValueType.LIST:
+        # The VALUE, not only the type: until 2026-11-07 a list case passed on
+        # any list in every runner (row 75, keys).
+        assert result.value == expected, (
+            f"Value mismatch for {case['expr']!r}: expected {expected}, got {result.value}"
+        )
 
 
 # ── Additional unit tests beyond the YAML fixture ──

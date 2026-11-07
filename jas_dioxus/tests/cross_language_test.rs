@@ -266,7 +266,9 @@ fn expression_conformance() {
             },
             "string" => matches!(&result, Value::Str(s) if s == expected.as_str().unwrap()),
             "color" => matches!(&result, Value::Color(c) if c == expected.as_str().unwrap()),
-            "list" => matches!(&result, Value::List(_)),
+            // The VALUE, not only the type (row 75): a list case passed on any
+            // list until 2026-11-07, in every runner.
+            "list" => matches!(&result, Value::List(l) if Some(l) == expected.as_array()),
             other => panic!("unknown expected type {other:?} for expr {src:?}"),
         };
         if !ok {
