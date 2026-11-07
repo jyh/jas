@@ -151,12 +151,7 @@ SCHEMA = os.path.join(ROOT, "SCHEMA.md")
 # the arm landed. A new undefined function reds; so does a name here that
 # SCHEMA.md now defines, so the list can only shrink. `__apply__` is the
 # parser's own form and is exempt.
-UNDEFINED_IN_SCHEMA = frozenset({
-    # `element_at` differs by port (jas bank 2026-11-01): Rust's
-    # `top_level_layers` view carries no `children`, so a group path reads
-    # null in Rust only. Defined here once the ports agree.
-    "element_at",
-})
+UNDEFINED_IN_SCHEMA = frozenset()   # emptied 2026-11-07: `element_at`, the last, defined once the views agreed (#853)
 
 
 def schema_findings(names: set[str], schema_text: str, debt: frozenset) -> list[str]:
