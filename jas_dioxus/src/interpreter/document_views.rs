@@ -176,6 +176,43 @@ mod tests {
         }
     }
 
+    /// STATUS-jas row 75: `element_at` through Rust's OWN active_document
+    /// view, the four fields Layer Options reads (actions.yaml
+    /// `open_layer_options`). Twin of the reference's
+    /// `test_element_at_through_the_view` and Swift's
+    /// `elementAtThroughTheView`: a sublayer read null while the view carried
+    /// no `children`.
+    #[test]
+    fn element_at_through_the_view() {
+        use crate::interpreter::expr_types::Value as EV;
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fx: Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["element_at_cases"].as_array().unwrap();
+        assert!(cases.len() >= 6, "the fixture is not vacuous");
+        let mut compared = 0;
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            let doc = crate::geometry::test_json::test_json_to_document(&c["document"].to_string());
+            let model = crate::document::model::Model::new(doc, None);
+            let ctx = json!({"active_document": active_document_view(&model, &[], &[], None)});
+            let at = format!("element_at(path({}))", c["path"].as_array().unwrap().iter()
+                .map(|i| i.to_string()).collect::<Vec<_>>().join(", "));
+            let ev = |e: &str| crate::interpreter::expr::eval(&format!("{at}{e}"), &ctx);
+            let want = &c["expected"];
+            if want.is_null() {
+                assert_eq!(ev(" == null"), EV::Bool(true), "{name}: want null");
+            } else {
+                assert_eq!(ev(" != null"), EV::Bool(true), "{name}: want an element");
+                assert_eq!(ev(".kind"), EV::Str(want["kind"].as_str().unwrap().into()), "{name}: kind");
+                assert_eq!(ev(".name"), EV::Str(want["name"].as_str().unwrap().into()), "{name}: name");
+                assert_eq!(ev(".common.locked"), EV::Bool(want["locked"].as_bool().unwrap()), "{name}: locked");
+                assert_eq!(ev(".common.visibility"), EV::Str(want["visibility"].as_str().unwrap().into()), "{name}: visibility");
+            }
+            compared += 1;
+        }
+        assert_eq!(compared, cases.len());
+    }
+
     /// `lp_tree`'s row template keys its binds by PATH (item 38 step 3). flask
     /// §602 measured every row showing its rename box when they compared
     /// `node.id` (null on every row) with a null `panel.renaming_element`.
@@ -569,6 +606,30 @@ pub fn tree_visible_rows(
     Value::Array(out)
 }
 
+/// One element as `element_at` reads it below a top-level layer (STATUS-jas
+/// row 75): `kind`, `name`, `common` {visibility, locked}, and a container's
+/// `children`, recursively. The reference's view carries the document's own
+/// subtree; without `children` here a sublayer's Layer Options read null.
+/// The shared fixture is `element_tree.json`'s `element_at_cases`.
+fn element_node_view(elem: &Element) -> Value {
+    use crate::geometry::element::Visibility;
+    let c = elem.common();
+    let visibility = match c.visibility {
+        Visibility::Invisible => "invisible",
+        Visibility::Outline => "outline",
+        Visibility::Preview => "preview",
+    };
+    let mut view = json!({
+        "kind": tree_type_label(elem),
+        "name": c.name.clone(),
+        "common": {"visibility": visibility, "locked": c.locked},
+    });
+    if let Some(kids) = elem.children() {
+        view["children"] = Value::Array(kids.iter().map(|k| element_node_view(k)).collect());
+    }
+    view
+}
+
 pub fn active_document_view(
     model: &crate::document::model::Model,
     layers_sel: &[Vec<usize>],
@@ -597,6 +658,8 @@ pub fn active_document_view(
                     "opacity": le.common.opacity,
                 },
                 "path": path_json.clone(),
+                "children": elem.children().map(|k| k.iter().map(|c| element_node_view(c)).collect::<Vec<_>>())
+                    .unwrap_or_default(),
             }));
             top_level_layer_paths.push(path_json);
             layer_names.insert(le.name().to_string());

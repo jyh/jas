@@ -204,3 +204,36 @@ def test_scroll_to_selected_opens_the_selections_collapsed_ancestors():
     store.set_active_panel("layers")
     run_effects(_scroll_to_selected_effects(), store.eval_context(), store)
     assert store.get_panel("layers", "collapsed_paths") == [{"__path__": [1]}, {"__path__": [0, 1]}]
+
+
+def _element_at_cases():
+    with open(_FIXTURE, encoding="utf-8") as f:
+        return json.load(f)["element_at_cases"]
+
+
+def test_the_element_at_cases_are_not_vacuous():
+    """A nested hit and a null are both present, or the cases cannot tell a
+    view that carries children from one that does not."""
+    cases = _element_at_cases()
+    assert any(len(c["path"]) > 1 and c["expected"] is not None for c in cases)
+    assert any(c["expected"] is None for c in cases)
+    assert any(c["expected"] and c["expected"]["kind"] == "Layer" and len(c["path"]) > 1 for c in cases)
+
+
+@pytest.mark.parametrize("case", _element_at_cases(), ids=lambda c: c["name"])
+def test_element_at_through_the_view(case):
+    """STATUS-jas row 75: `element_at` read through the store's OWN
+    active_document view, the four fields Layer Options reads (actions.yaml
+    `open_layer_options`)."""
+    from workspace_interpreter.expr import evaluate
+    store = StateStore(document=json.loads(json.dumps(case["document"])))
+    ctx = store.eval_context()
+    at = "element_at(path(" + ", ".join(str(i) for i in case["path"]) + "))"
+    want = case["expected"]
+    if want is None:
+        assert evaluate(f"{at} == null", ctx).value is True
+        return
+    assert evaluate(f"{at} != null", ctx).value is True
+    got = {k: evaluate(f"{at}.{e}", ctx).value for k, e in
+           (("kind", "kind"), ("name", "name"), ("locked", "common.locked"), ("visibility", "common.visibility"))}
+    assert got == want

@@ -39,6 +39,47 @@ import Foundation
         return cases
     }
 
+    private static func elementAtCases() -> [[String: Any]] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("test_fixtures").appendingPathComponent("layers/element_tree.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cases = json["element_at_cases"] as? [[String: Any]] else { return [] }
+        return cases
+    }
+
+    /// STATUS-jas row 75: `element_at` through Swift's OWN active_document
+    /// view, the four fields Layer Options reads (actions.yaml
+    /// `open_layer_options`). Twin of the reference's
+    /// `test_element_at_through_the_view`: a sublayer read null here while the
+    /// view carried no `children`.
+    @Test func elementAtThroughTheView() throws {
+        let cases = Self.elementAtCases()
+        #expect(cases.count >= 6, "the fixture is not vacuous")
+        var compared = 0
+        for c in cases {
+            let name = c["name"] as? String ?? "?"
+            let docData = try JSONSerialization.data(withJSONObject: c["document"] as Any, options: [.sortedKeys])
+            let model = Model(document: testJsonToDocument(String(data: docData, encoding: .utf8)!))
+            let ctx: [String: Any] = ["active_document": buildActiveDocumentView(model: model)]
+            let at = "element_at(path(" + ((c["path"] as? [Int]) ?? []).map(String.init).joined(separator: ", ") + "))"
+            guard let want = c["expected"] as? [String: Any] else {
+                #expect(evaluate("\(at) == null", context: ctx) == .bool(true), "\(name): want null")
+                compared += 1
+                continue
+            }
+            #expect(evaluate("\(at) != null", context: ctx) == .bool(true), "\(name): want an element")
+            #expect(evaluate("\(at).kind", context: ctx) == .string(want["kind"] as! String), "\(name): kind")
+            #expect(evaluate("\(at).name", context: ctx) == .string(want["name"] as! String), "\(name): name")
+            #expect(evaluate("\(at).common.locked", context: ctx) == .bool(want["locked"] as! Bool), "\(name): locked")
+            #expect(evaluate("\(at).common.visibility", context: ctx) == .string(want["visibility"] as! String), "\(name): visibility")
+            compared += 1
+        }
+        #expect(compared == cases.count && compared >= 6)
+    }
+
     /// Row 72(a): the Layers breadcrumb's foreach source, `tree_rows_at`, over
     /// the isolation stack as path markers and as plain lists. Twin of the
     /// reference's `test_tree_rows_at_through_the_evaluator`.
