@@ -1101,3 +1101,39 @@ tests:
     expected: 1
     type: number
     note: "a range of one open row stays one row"
+
+  # keys(m): a map's keys, sorted by code point; anything else (and a call
+  # with the wrong arity) is the empty list (row 75). A LIST case compares the
+  # VALUE in every runner, not only the type.
+  - expr: "keys(state.m)"
+    state: {m: {b: 1, a: 2, B: 3}}
+    expected: ["B", "a", "b"]
+    type: list
+    note: "sorted by code point: an upper-case key sorts before every lower-case one"
+
+  - expr: "keys(state.m)"
+    state: {m: {}}
+    expected: []
+    type: list
+
+  - expr: "keys(state.xs)"
+    state: {xs: [1, 2]}
+    expected: []
+    type: list
+    note: "a list is not a map"
+
+  - expr: "keys(state.missing)"
+    state: {x: 1}
+    expected: []
+    type: list
+
+  - expr: "keys(state.m, state.m)"
+    state: {m: {a: 1}}
+    expected: []
+    type: list
+    note: "the wrong arity is the empty list, not null"
+
+  - expr: "keys(state.m).length"
+    state: {m: {a: 1, b: 2}}
+    expected: 2
+    type: number

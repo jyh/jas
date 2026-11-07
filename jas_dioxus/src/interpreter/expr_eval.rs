@@ -860,6 +860,23 @@ fn eval_func(
         }
 
         // reverse: list -> list
+        "keys" => {
+            // A map's keys, sorted by code point; anything else, and the wrong
+            // arity, is the empty list (row 75). A map reaches the evaluator
+            // as its JSON text (`Value::from_json`), so it is parsed back, as
+            // Swift's arm does; the reference holds the dict itself.
+            if args.len() != 1 { return Value::List(Vec::new()); }
+            let Value::Str(s) = eval_inner(&args[0], ctx, scope, store_cb) else {
+                return Value::List(Vec::new());
+            };
+            let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&s) else {
+                return Value::List(Vec::new());
+            };
+            let mut keys: Vec<String> = map.keys().cloned().collect();
+            keys.sort();
+            Value::List(keys.into_iter().map(serde_json::Value::String).collect())
+        }
+
         "reverse" => {
             if args.len() != 1 { return Value::Null; }
             let v = eval_inner(&args[0], ctx, scope, store_cb);

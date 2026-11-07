@@ -4103,7 +4103,11 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         case "color":
             if case .color(let c) = result { ok = c == (expected as! String) } else { ok = false }
         case "list":
-            if case .list = result { ok = true } else { ok = false }
+            // The VALUE, not only the type (row 75): a list case passed on any
+            // list until 2026-11-07, in every runner.
+            if case .list(let items) = result {
+                ok = NSArray(array: items.map { $0.value }).isEqual(to: expected as? [Any] ?? [])
+            } else { ok = false }
         default:
             Issue.record("Unknown expected type \(ty) for expr \(expr)")
             continue
