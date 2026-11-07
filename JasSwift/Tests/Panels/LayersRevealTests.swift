@@ -42,3 +42,36 @@ private func fixtureModel() throws -> Model {
     LayersPanel.dispatchYamlAction("scroll_to_selected", model: model, params: [:])
     #expect(layersCollapsedPaths(model: model) == [])
 }
+
+// MARK: - the trigger (row 78 step 2): a selection CHANGE runs the reveal
+
+private func reselect(_ model: Model, _ paths: [[Int]]) {
+    model.setDocumentUnbracketed(model.document.replacing(selection: paths.map { ElementSelection(path: $0) }),
+                                 intent: .selection)
+}
+
+@Test func aSelectionChangeOpensItsCollapsedAncestorsWithNoDraw() throws {
+    // No view exists here: if this opens, the reveal is the model's, not the draw's.
+    let model = try fixtureModel()
+    reselect(model, [])
+    setLayersCollapsedPaths(model: model, [[1], [0]])
+    reselect(model, [[0, 1, 0]])
+    #expect(layersCollapsedPaths(model: model) == [[1]], "the selection's ancestor [0] opened; [1] kept")
+}
+
+@Test func collapsingAnAncestorOfAnUnchangedSelectionSticks() throws {
+    // The draw-time reveal re-expanded on every draw, so a group holding the
+    // selection could not be collapsed. Only a selection CHANGE reveals.
+    let model = try fixtureModel()
+    reselect(model, [[0, 1, 0]])
+    LayersPanel.dispatchYamlAction("toggle_element_twirl", model: model, params: ["path": ["__path__": [0]]])
+    #expect(layersCollapsedPaths(model: model) == [[0]], "the user's collapse holds")
+}
+
+@Test func aDocumentEditThatKeepsTheSelectionDoesNotReveal() throws {
+    let model = try fixtureModel()
+    setLayersCollapsedPaths(model: model, [[0]])
+    let d = model.document
+    model.setDocumentUnbracketed(d, intent: .selection)
+    #expect(layersCollapsedPaths(model: model) == [[0]], "same selection, no reveal")
+}
