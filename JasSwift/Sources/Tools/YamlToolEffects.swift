@@ -1649,6 +1649,11 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // G11 (STATUS-jas row 73): an isolation action dispatched from a tool
+    // writes panel.isolation_stack, which is the DOCUMENT's stack. The routes
+    // are shared with the Layers panel's table (`layersStackEffects`).
+    effects.merge(layersStackEffects(model: model)) { mine, _ in mine }
+
     return effects
 }
 

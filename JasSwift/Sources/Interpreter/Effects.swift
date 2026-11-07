@@ -489,20 +489,7 @@ private func runOne(
 
     // pop: panel.field_name  or  pop: global_field_name
     if let target = effect["pop"] as? String {
-        let parts = target.split(separator: ".", maxSplits: 1).map(String.init)
-        if parts.count == 2 && parts[0] == "panel" {
-            if let panelId = store.getActivePanelId() {
-                if var lst = store.getPanel(panelId, parts[1]) as? [Any], !lst.isEmpty {
-                    lst.removeLast()
-                    store.setPanel(panelId, parts[1], lst)
-                }
-            }
-        } else {
-            if var lst = store.get(target) as? [Any], !lst.isEmpty {
-                lst.removeLast()
-                store.set(target, lst)
-            }
-        }
+        genericPop(target, store: store)
         return
     }
 
@@ -3489,4 +3476,25 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         effects[key] = handler
     }
     return effects
+}
+
+/// The store's own `pop:` (the last item of a list key, in the active panel's
+/// scope for `panel.<k>`, else a global key). Shared so a platform `pop`
+/// handler that routes one target elsewhere (`layersStackEffects`) runs this
+/// for every other target instead of dropping it.
+func genericPop(_ target: String, store: StateStore) {
+    let parts = target.split(separator: ".", maxSplits: 1).map(String.init)
+    if parts.count == 2 && parts[0] == "panel" {
+        if let panelId = store.getActivePanelId() {
+            if var lst = store.getPanel(panelId, parts[1]) as? [Any], !lst.isEmpty {
+                lst.removeLast()
+                store.setPanel(panelId, parts[1], lst)
+            }
+        }
+    } else {
+        if var lst = store.get(target) as? [Any], !lst.isEmpty {
+            lst.removeLast()
+            store.set(target, lst)
+        }
+    }
 }
