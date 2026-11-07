@@ -7731,6 +7731,25 @@ mod tests {
         engine_of(e).store.borrow_mut().set_panel("layers_panel_content", "layers_panel_selection", paths);
     }
 
+    /// G11 (STATUS-jas row 73): Enter Isolation Mode in the ENGINE must reach
+    /// the MODEL's stack, which the anchor tools read (Partial / Interior
+    /// Selection's hit, `effects.rs`), not only the Layers panel's store bucket.
+    /// Read 2026-11-07: nothing copies the bucket to the model, so the Windows
+    /// app could show the breadcrumb while its tools ignore isolation. This
+    /// arm is that measurement (STATUS-flask §744 asks the same of the app).
+    #[test]
+    fn enter_isolation_in_the_engine_reaches_the_models_stack() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        with_layers_selection(e, serde_json::json!([{"__path__": [1]}]));
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","action":"enter_isolation_mode"}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "Enter Isolation Mode ran: {err}");
+        let bucket = engine_of(e).store.borrow().get_panel("layers_panel_content", "isolation_stack").clone();
+        let model = engine_of(e).model.borrow().isolation_stack.clone();
+        assert_eq!(model, vec![vec![1usize]], "the MODEL's stack; the panel bucket reads {bucket}");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_panel_key_runs_the_panels_keyboard_row() {
         let _counters = crate::ffi_instr::test_lock::lock();
