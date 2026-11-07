@@ -184,6 +184,11 @@ pub struct JasEngine {
     /// every colour tick (`panel_scope::sync_colour_state`), so an effect that
     /// reads them reads what the panels show.
     store: RefCell<StateStore>,
+    /// The canvas selection the Layers reveal last ran for (row 78 step 3).
+    /// Each pointer, action and event crossing ends by running the reveal if
+    /// the selection CHANGED since, so the level-1 runner sees it as the
+    /// shell does. `None` until the first crossing.
+    layers_reveal_seen: RefCell<Option<Vec<Vec<usize>>>>,
     /// ⭐ ROW DU: physical pixels per DIP, as the shell's display reports it.
     ///
     /// ⛔ IT LIVES HERE, NOT IN THE SHELL. The shell sends the physical pixels
@@ -269,6 +274,29 @@ impl JasEngine {
     /// key-object intercept reads and writes the Align panel's scope).
     pub(crate) fn with_store_mut<R>(&self, f: impl FnOnce(&mut StateStore) -> R) -> R {
         f(&mut self.store.borrow_mut())
+    }
+
+    /// Row 78: the Layers reveal, when the canvas selection CHANGED since it
+    /// last ran: actions.yaml `scroll_to_selected`'s law
+    /// (`tree_reveal_keep`) over the Layers panel's `collapsed_paths`. Run at
+    /// the end of every pointer, action and event crossing, never from a draw.
+    pub(crate) fn reveal_layers_selection_if_changed(&self) {
+        let mut sel: Vec<Vec<usize>> = self.model.borrow().document().selection
+            .iter().map(|es| es.path.clone()).collect();
+        sel.sort();
+        if self.layers_reveal_seen.borrow().as_ref() == Some(&sel) {
+            return;
+        }
+        *self.layers_reveal_seen.borrow_mut() = Some(sel.clone());
+        let mut store = self.store.borrow_mut();
+        let Some(items) = store.get_panel("layers_panel_content", "collapsed_paths").as_array().cloned() else {
+            return;
+        };
+        let before = items.len();
+        let kept = crate::interpreter::expr_eval::tree_reveal_keep(items, &sel);
+        if kept.len() != before {
+            store.set_panel("layers_panel_content", "collapsed_paths", serde_json::Value::Array(kept));
+        }
     }
 
     /// Name a refusal for [`jas_last_error_json`] from a sibling module.
@@ -397,6 +425,7 @@ impl JasEngine {
         crate::panel_scope::seed_library_data(&mut store);
         JasEngine {
             model: RefCell::new(Model::default()),
+            layers_reveal_seen: RefCell::new(None),
             document_open: std::cell::Cell::new(true),
             saved_svg: RefCell::new(None),
             last_error: RefCell::new(None),
@@ -1825,6 +1854,18 @@ pub unsafe extern "C" fn jas_dispatch_action(
     action_json: *const u8,
     action_len: usize,
 ) -> JasBytes {
+    // Row 78 step 3: the crossing, then the Layers reveal if it moved the selection.
+    let out = unsafe { jas_dispatch_action_inner(e, action_json, action_len) };
+    if let Some(engine) = unsafe { e.as_ref() } { engine.reveal_layers_selection_if_changed(); }
+    out
+}
+
+/// [`jas_dispatch_action`]'s body; the extern wraps it with the Layers reveal.
+unsafe fn jas_dispatch_action_inner(
+    e: *mut JasEngine,
+    action_json: *const u8,
+    action_len: usize,
+) -> JasBytes {
     ffi_instr::record(Crossing::DispatchAction, action_len, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasBytes::empty();
@@ -2467,6 +2508,18 @@ pub extern "C" fn jas_instr_counters_json() -> JasBytes {
 /// `op_json` must be NULL or valid for `len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_dispatch_event(
+    e: *mut JasEngine,
+    op_json: *const u8,
+    len: usize,
+) -> JasStatus {
+    // Row 78 step 3: the crossing, then the Layers reveal if it moved the selection.
+    let out = unsafe { jas_dispatch_event_inner(e, op_json, len) };
+    if let Some(engine) = unsafe { e.as_ref() } { engine.reveal_layers_selection_if_changed(); }
+    out
+}
+
+/// [`jas_dispatch_event`]'s body; the extern wraps it with the Layers reveal.
+unsafe fn jas_dispatch_event_inner(
     e: *mut JasEngine,
     op_json: *const u8,
     len: usize,

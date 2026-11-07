@@ -285,6 +285,20 @@ pub unsafe extern "C" fn jas_pointer_event(
     y: f64,
     mods: u32,
 ) -> JasStatus {
+    // Row 78 step 3: the pointer, then the Layers reveal if it moved the selection.
+    let out = unsafe { jas_pointer_event_inner(e, kind, x, y, mods) };
+    if let Some(engine) = unsafe { e.as_ref() } { engine.reveal_layers_selection_if_changed(); }
+    out
+}
+
+/// [`jas_pointer_event`]'s body; the extern wraps it with the Layers reveal.
+unsafe fn jas_pointer_event_inner(
+    e: *mut JasEngine,
+    kind: u32,
+    x: f64,
+    y: f64,
+    mods: u32,
+) -> JasStatus {
     // Recorded BEFORE the null check: a refused call still crossed, and at
     // mousemove rates the refused ones are exactly the ones worth counting.
     crate::ffi_instr::record(crate::ffi_instr::Crossing::PointerEvent, 0, 0);

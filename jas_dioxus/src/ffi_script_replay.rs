@@ -919,6 +919,28 @@ fn app_state_seeds_a_declared_panel_key_as_paths() {
     assert_eq!(panel_reads(&out)[0]["collapsed_paths"], serde_json::json!([]), "{out:?}");
 }
 
+/// Row 78 step 3: a canvas selection inside a collapsed group opens it, at
+/// LEVEL 1, through the engine's own crossing (the spec's
+/// `layers.reveal_uncollapse` script: complex_document.svg, the point at
+/// (136, 48) selects [0,2,0]). Control: the same seed with no gesture keeps it.
+#[test]
+fn a_canvas_selection_inside_a_collapsed_group_reveals_it() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = |steps: Value| {
+        let mut s = serde_json::json!({"item": "forms.reveal", "setup_svg": "complex_document.svg",
+                                       "tool": "interior_selection", "steps": steps});
+        s["app_state"] = serde_json::json!({"panels": {LAYERS: {"collapsed_paths": [[0, 2]]}}});
+        s
+    };
+    let control = replay_forms(&script(serde_json::json!([read_layers()]))).unwrap();
+    assert_eq!(panel_reads(&control)[0]["collapsed_paths"], serde_json::json!([[0, 2]]), "{control:?}");
+    let out = replay_forms(&script(serde_json::json!([
+        {"kind": "press", "x": 136, "y": 48}, {"kind": "release", "x": 136, "y": 48}, read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(panel_reads(&out)[0]["collapsed_paths"], serde_json::json!([]), "the reveal opened [0,2]: {out:?}");
+}
+
 #[test]
 fn each_unrunnable_form_is_refused_by_name() {
     let _counters = crate::ffi_instr::test_lock::lock();
