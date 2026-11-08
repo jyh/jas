@@ -23,9 +23,14 @@ def _rect(x):
     return Rect(x=x, y=0, width=10, height=10, fill=Fill(color=RgbColor(1, 0, 0)))
 
 
-def _doc(*, r1_locked=False, g_hidden=False):
+def _doc(*, r1_locked=False, g_hidden=False, sub=False, g_locked=False):
     r1 = dataclasses.replace(_rect(0), locked=r1_locked)
-    g = Group(children=(r1, _rect(20)))
+    kids = (r1, _rect(20))
+    if sub:  # a group INSIDE the root: S[0,0,2] = {R5 at 60-70, R6 at 80-90}
+        kids += (Group(children=(_rect(60), _rect(80))),)
+    g = Group(children=kids)
+    if g_locked:
+        g = dataclasses.replace(g, locked=True)
     if g_hidden:
         g = dataclasses.replace(g, visibility=Visibility.INVISIBLE)
     return Document(layers=(Layer(children=(g, _rect(40)), name="L"),))
@@ -59,6 +64,14 @@ class SelectRectRootTest(absltest.TestCase):
         c.select_rect(0, 0, 30, 10, root=(0, 0))
         self.assertEqual(_paths(c), [(0, 0, 0), (0, 0, 1)])
 
+    def test_3b_a_group_inside_the_root_answers_alone(self):
+        # The section 16.4 law one level down: a band over R5 answers S, never R5.
+        c = _ctrl(_doc(sub=True))
+        c.select_rect(62, 2, 1, 1, root=(0, 0))
+        self.assertEqual(_paths(c), [(0, 0, 2)])
+        c.select_rect(62, 2, 1, 1, root=(0, 0, 2))
+        self.assertEqual(_paths(c), [(0, 0, 2, 0)], "isolating S reaches R5")
+
     def test_6_no_root_is_the_layer_walk(self):
         for root in (None, ()):
             c = _ctrl()
@@ -80,6 +93,12 @@ class SelectRectRootTest(absltest.TestCase):
         self.assertEqual(_paths(c), [])
         c.select_rect(22, 2, 1, 1, root=(0, 0))
         self.assertEqual(_paths(c), [(0, 0, 1)], "the control: R2 is free")
+
+    def test_8b_a_locked_root_selects_nothing(self):
+        # The lock is read DOWN the path from each child, never from its own flag.
+        c = _ctrl(_doc(g_locked=True))
+        c.select_rect(0, 0, 30, 10, root=(0, 0))
+        self.assertEqual(_paths(c), [])
 
     def test_9_a_hidden_root_selects_nothing(self):
         c = _ctrl(_doc(g_hidden=True))

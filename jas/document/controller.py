@@ -1267,8 +1267,11 @@ class Controller:
                     break
                 node = node.children[idx]
                 vis = min(vis, node.visibility, key=lambda v: v.value)
-        if (isinstance(node, Group) and vis != Visibility.INVISIBLE
-                and not doc.effective_locked(root)):
+        # No guard on the root's own lock or visibility: each child's
+        # ``effective_locked`` reads the root's lock down the path and its
+        # visibility folds ``vis``, so a root-level guard would be expressive
+        # only (measured: deleting it left every arm green).
+        if isinstance(node, Group):
             for ci, child in enumerate(node.children):
                 path = root + (ci,)
                 if doc.effective_locked(path):
