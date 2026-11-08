@@ -287,6 +287,9 @@ impl YamlTool {
             "view_offset_x": model.view_offset_x,
             "view_offset_y": model.view_offset_y,
             "zoom_level":    model.zoom_level,
+            // G11: the innermost isolation entry, which the selection tool's
+            // `hit_test(x, y, root)` scans inside (null when not isolated).
+            "isolation_root": model.isolation_stack.last(),
             "selection_orphan_count":
                 crate::interpreter::document_views::selection_orphan_count(model.document()),
         })
@@ -590,10 +593,15 @@ impl CanvasTool for YamlTool {
         // YAML handler key is `on_dblclick` to match the tool schema
         // (schema/tool.schema.json) — DOM / native frameworks also
         // use the shorter spelling.
+        // `doc_x` / `doc_y` as a press carries them (`pointer_event_payload`):
+        // the selection tool's double-click hit-tests in document space (G11).
+        let z = model.zoom_level;
         let payload = serde_json::json!({
             "type": "dblclick",
             "x": x,
             "y": y,
+            "doc_x": if z == 0.0 { x } else { (x - model.view_offset_x) / z },
+            "doc_y": if z == 0.0 { y } else { (y - model.view_offset_y) / z },
         });
         self.dispatch("on_dblclick", payload, model);
     }
@@ -4159,6 +4167,54 @@ mod tests {
         tool_with(serde_json::json!({"dispatch": {"action": "exit_isolation_mode"}}))
             .on_double_click(&mut model, 5.0, 5.0);
         assert!(model.isolation_stack.is_empty(), "a tool-dispatched exit left {:?}", model.isolation_stack);
+    }
+
+    /// G11 (STATUS-jas row 73), twin of Swift's `YamlSelectionIsolationTests`:
+    /// the SHIPPED selection tool on the shared hit-test fixture's document.
+    /// Double-click a group enters isolation, inside it a click selects the
+    /// group's child, double-click on empty canvas exits one level, a nested
+    /// group stacks, a leaf enters nothing. ⚠️ DECLARED, NOT BUILT: the miss's
+    /// zero-size marquee (`doc.select_in_rect`) is not yet scoped to isolation,
+    /// so a click outside the root is asserted only to select nothing INSIDE it.
+    #[test]
+    fn g11_the_selection_tool_enters_and_exits_isolation_from_the_canvas() {
+        let ws: serde_json::Value = serde_json::from_str(
+            include_str!(concat!("../../../workspace/", "workspace.json"))).unwrap();
+        let tool = || YamlTool::from_workspace_tool(&ws["tools"]["selection"]).expect("selection");
+        let fx: serde_json::Value = serde_json::from_str(
+            include_str!(concat!("../../../test_fixtures/", "layers/hit_test_root.json"))).unwrap();
+        let fresh = || Model::new(crate::geometry::test_json::test_json_to_document(&fx["document"].to_string()), None);
+        fn click(t: &mut YamlTool, m: &mut Model, x: f64, y: f64) {
+            t.on_press(m, x, y, false, false);
+            t.on_release(m, x, y, false, false);
+        }
+        fn dbl(t: &mut YamlTool, m: &mut Model, x: f64, y: f64) {
+            click(t, m, x, y); click(t, m, x, y);
+            t.on_double_click(m, x, y);
+        }
+        let sel = |m: &Model| { let mut p: Vec<Vec<usize>> = m.document().selection.iter().map(|e| e.path.clone()).collect(); p.sort(); p };
+
+        let (mut t, mut m) = (tool(), fresh());
+        dbl(&mut t, &mut m, 5.0, 5.0);
+        assert_eq!(m.isolation_stack, vec![vec![0usize, 0]], "double-click on G enters it");
+        click(&mut t, &mut m, 25.0, 5.0);
+        assert_eq!(sel(&m), vec![vec![0usize, 0, 1]], "inside isolation a click selects the group's child");
+        click(&mut t, &mut m, 45.0, 5.0);
+        assert!(!sel(&m).iter().any(|p| p.starts_with(&[0, 0])), "a click outside selects nothing inside it: {:?}", sel(&m));
+        dbl(&mut t, &mut m, 15.0, 50.0);
+        assert!(m.isolation_stack.is_empty(), "empty canvas exits: {:?}", m.isolation_stack);
+        click(&mut t, &mut m, 25.0, 5.0);
+        assert_eq!(sel(&m), vec![vec![0usize, 0]], "after exit a click selects the group again");
+
+        let (mut t, mut m) = (tool(), fresh());
+        dbl(&mut t, &mut m, 45.0, 5.0);
+        assert!(m.isolation_stack.is_empty(), "a leaf enters nothing");
+        dbl(&mut t, &mut m, 105.0, 5.0);
+        assert_eq!(m.isolation_stack, vec![vec![0usize, 2]], "the transformed group enters");
+        dbl(&mut t, &mut m, 105.0, 5.0);
+        assert_eq!(m.isolation_stack, vec![vec![0usize, 2], vec![0, 2, 0]], "a nested group stacks");
+        dbl(&mut t, &mut m, 150.0, 50.0);
+        assert_eq!(m.isolation_stack, vec![vec![0usize, 2]], "empty canvas exits ONE level");
     }
 
     #[test]

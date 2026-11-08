@@ -1199,8 +1199,12 @@ fn eval_func(
         // panicking, mirroring Flask's lenient-mode behavior.
 
         // hit_test(x, y) -> Path | null
+        // hit_test(x, y[, root]) — the third argument, the isolation root
+        // (G11, STATUS-jas row 73), scopes the scan to that container's
+        // children. null (or an empty path) is the plain scan; a non-path
+        // reads as null. Pinned by `test_fixtures/layers/hit_test_root.json`.
         "hit_test" => {
-            if args.len() != 2 {
+            if args.len() != 2 && args.len() != 3 {
                 return Value::Null;
             }
             let x = match eval_inner(&args[0], ctx, scope, store_cb) {
@@ -1211,7 +1215,21 @@ fn eval_func(
                 Value::Number(n) => n,
                 _ => return Value::Null,
             };
-            super::doc_primitives::hit_test(x, y)
+            let mut root = Vec::new();
+            if args.len() == 3 {
+                let r = eval_inner(&args[2], ctx, scope, store_cb);
+                if r != Value::Null {
+                    match index_path(&r) {
+                        Some(p) => root = p,
+                        None => return Value::Null,
+                    }
+                }
+            }
+            if root.is_empty() {
+                super::doc_primitives::hit_test(x, y)
+            } else {
+                super::doc_primitives::hit_test_root(x, y, &root)
+            }
         }
 
         // hit_test_deep(x, y) -> Path | null
@@ -1233,6 +1251,16 @@ fn eval_func(
         }
 
         // selection_contains(path) -> bool
+        // is_group(path) -> bool: whether the registered document resolves the
+        // path to a Group (G11; a Layer is not one). False otherwise.
+        "is_group" => {
+            if args.len() != 1 {
+                return Value::Bool(false);
+            }
+            let arg = eval_inner(&args[0], ctx, scope, store_cb);
+            super::doc_primitives::is_group(&arg)
+        }
+
         "selection_contains" => {
             if args.is_empty() {
                 return Value::Bool(false);

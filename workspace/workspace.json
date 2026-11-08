@@ -26389,7 +26389,7 @@
         "on_mousedown": [
           {
             "let": {
-              "hit": "hit_test(event.doc_x, event.doc_y)"
+              "hit": "hit_test(event.doc_x, event.doc_y, active_document.isolation_root)"
             },
             "in": [
               {
@@ -26516,6 +26516,45 @@
                     "set": {
                       "tool.selection.snapshotted": "false"
                     }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "on_dblclick": [
+          {
+            "let": {
+              "hit": "hit_test(event.doc_x, event.doc_y, active_document.isolation_root)"
+            },
+            "in": [
+              {
+                "if": "hit != null",
+                "then": [
+                  {
+                    "if": "is_group(hit)",
+                    "then": [
+                      {
+                        "dispatch": {
+                          "action": "enter_isolation_mode",
+                          "params": {
+                            "container_id": "'' + hit"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "else": [
+                  {
+                    "if": "active_document.isolation_root != null",
+                    "then": [
+                      {
+                        "dispatch": {
+                          "action": "exit_isolation_mode"
+                        }
+                      }
+                    ]
                   }
                 ]
               }

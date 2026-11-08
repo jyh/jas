@@ -100,8 +100,14 @@ handlers:
     - set: { tool.selection.copied: "false" }
 
   on_mousedown:
+    # While isolated (G11, STATUS-jas row 73), the hit is scoped to the
+    # innermost isolation entry: a click inside it selects the isolated
+    # container's CHILD, and a click outside it hits nothing (layers.yaml:
+    # "element selection constrained to the isolated container's
+    # descendants"). Not isolated, the root is null and the scan is the
+    # plain top-level one.
     - let:
-        hit: "hit_test(event.doc_x, event.doc_y)"
+        hit: "hit_test(event.doc_x, event.doc_y, active_document.isolation_root)"
       in:
         - if: "hit == null"
           then:
@@ -149,6 +155,31 @@ handlers:
             - set: { tool.selection.alt_held: "event.modifiers.alt" }
             - set: { tool.selection.copied: "false" }
             - set: { tool.selection.snapshotted: "false" }
+
+  on_dblclick:
+    # G11 (STATUS-jas row 73). The two presses before a double-click have
+    # already selected what is under the cursor; the double-click itself
+    # only moves isolation. On a GROUP: enter it, one level (layers.yaml's
+    # row double-click, from the canvas). On empty canvas while isolated:
+    # exit one level (layers.yaml: "Double-click an empty area of the canvas
+    # exits one level"). On anything else, nothing. Layers are never entered
+    # from the canvas: a layer is not hit, its child is.
+    - let:
+        hit: "hit_test(event.doc_x, event.doc_y, active_document.isolation_root)"
+      in:
+        - if: "hit != null"
+          then:
+            - if: "is_group(hit)"
+              then:
+                - dispatch:
+                    action: enter_isolation_mode
+                    params:
+                      container_id: "'' + hit"
+          else:
+            - if: "active_document.isolation_root != null"
+              then:
+                - dispatch:
+                    action: exit_isolation_mode
 
   on_mousemove:
     - if: "tool.selection.mode == 'marquee'"

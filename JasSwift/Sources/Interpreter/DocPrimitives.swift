@@ -96,6 +96,60 @@ func docHitTest(_ x: Double, _ y: Double) -> Value {
     }
 }
 
+/// `hit_test(x, y, root)` — the same scan over the children of the container
+/// AT `root` (the innermost isolation entry, G11), returning `root + [i]`. The
+/// descent composes each ancestor's visibility cap and transform as the layer
+/// step does. `.null` outside the root, on a non-container, or when `root`
+/// does not resolve. Pinned by `test_fixtures/layers/hit_test_root.json`.
+func docHitTest(_ x: Double, _ y: Double, root: [Int]) -> Value {
+    withDoc(.null) { doc in
+        func kids(_ e: Element) -> [Element]? {
+            switch e {
+            case .group(let g): return g.children
+            case .layer(let l): return l.children
+            default: return nil
+            }
+        }
+        guard let first = root.first, first >= 0, first < doc.layers.count else { return .null }
+        var cur = Element.layer(doc.layers[first])
+        guard var vis = hitLawBlocksHit(cur, .preview), var local = hitLawToLocal(cur, x, y) else { return .null }
+        for idx in root.dropFirst() {
+            guard let k = kids(cur), idx >= 0, idx < k.count else { return .null }
+            cur = k[idx]
+            guard let v = hitLawBlocksHit(cur, vis), let l = hitLawToLocal(cur, local.0, local.1) else { return .null }
+            vis = v
+            local = l
+        }
+        guard let children = kids(cur) else { return .null }
+        for (ci, child) in children.enumerated().reversed() where hitLawPaintedHit(child, local.0, local.1, vis) {
+            return .path(root + [ci])
+        }
+        return .null
+    }
+}
+
+/// `is_group(path)` — whether the registered document resolves `path` to a
+/// Group (G11; a Layer is not one). Pinned by `hit_test_root.json`'s
+/// `is_group_cases`.
+func docIsGroup(_ path: [Int]) -> Value {
+    withDoc(.bool(false)) { doc in
+        guard let first = path.first, first >= 0, first < doc.layers.count else { return .bool(false) }
+        var cur = Element.layer(doc.layers[first])
+        for idx in path.dropFirst() {
+            let kids: [Element]
+            switch cur {
+            case .group(let g): kids = g.children
+            case .layer(let l): kids = l.children
+            default: return .bool(false)
+            }
+            guard idx >= 0, idx < kids.count else { return .bool(false) }
+            cur = kids[idx]
+        }
+        if case .group = cur { return .bool(true) }
+        return .bool(false)
+    }
+}
+
 /// `hit_test_deep(x, y)` — recurses into groups so the returned path
 /// points at the deepest PAINTED leaf.
 func docHitTestDeep(_ x: Double, _ y: Double) -> Value {

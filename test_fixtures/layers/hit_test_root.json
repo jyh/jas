@@ -1,0 +1,363 @@
+{
+  "_comment": [
+    "G11 (STATUS-jas row 73): hit_test(x, y, root). With a root (the innermost isolation entry), the topmost",
+    "painted child OF THE ROOT under the point, as root + [i]; null outside the root, on a non-container or a bad",
+    "root. The descent composes each ancestor's visibility cap and transform as the top-level scan does for a layer.",
+    "Without a root (null or absent), the unchanged top-level scan. Every port evaluates hit_test(x, y, <root>)",
+    "with this document registered.",
+    "is_group_cases: is_group(path), true iff the REGISTERED document resolves path to a Group (the selection tool's double-click enters only a group)."
+  ],
+  "document": {
+    "layers": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "fill": {
+                  "color": {
+                    "a": 1.0,
+                    "b": 0.0,
+                    "g": 0.0,
+                    "r": 1.0,
+                    "space": "rgb"
+                  },
+                  "opacity": 1.0
+                },
+                "height": 10.0,
+                "locked": false,
+                "name": "R1",
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              },
+              {
+                "fill": {
+                  "color": {
+                    "a": 1.0,
+                    "b": 0.0,
+                    "g": 0.0,
+                    "r": 1.0,
+                    "space": "rgb"
+                  },
+                  "opacity": 1.0
+                },
+                "height": 10.0,
+                "locked": false,
+                "name": "R2",
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 20.0,
+                "y": 0.0
+              }
+            ],
+            "locked": false,
+            "name": "G",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "group",
+            "visibility": "preview"
+          },
+          {
+            "fill": {
+              "color": {
+                "a": 1.0,
+                "b": 0.0,
+                "g": 0.0,
+                "r": 1.0,
+                "space": "rgb"
+              },
+              "opacity": 1.0
+            },
+            "height": 10.0,
+            "locked": false,
+            "name": "R3",
+            "opacity": 1.0,
+            "rx": 0.0,
+            "ry": 0.0,
+            "stroke": null,
+            "transform": null,
+            "type": "rect",
+            "visibility": "preview",
+            "width": 10.0,
+            "x": 40.0,
+            "y": 0.0
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "fill": {
+                      "color": {
+                        "a": 1.0,
+                        "b": 0.0,
+                        "g": 0.0,
+                        "r": 1.0,
+                        "space": "rgb"
+                      },
+                      "opacity": 1.0
+                    },
+                    "height": 10.0,
+                    "locked": false,
+                    "name": "R4",
+                    "opacity": 1.0,
+                    "rx": 0.0,
+                    "ry": 0.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "rect",
+                    "visibility": "preview",
+                    "width": 10.0,
+                    "x": 0.0,
+                    "y": 0.0
+                  }
+                ],
+                "locked": false,
+                "name": "Inner",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              }
+            ],
+            "locked": false,
+            "name": "Moved",
+            "opacity": 1.0,
+            "transform": {
+              "a": 1.0,
+              "b": 0.0,
+              "c": 0.0,
+              "d": 1.0,
+              "e": 100.0,
+              "f": 0.0
+            },
+            "type": "group",
+            "visibility": "preview"
+          }
+        ],
+        "locked": false,
+        "name": "L",
+        "opacity": 1.0,
+        "transform": null,
+        "type": "layer",
+        "visibility": "preview"
+      }
+    ],
+    "selected_layer": 0,
+    "selection": []
+  },
+  "cases": [
+    {
+      "name": "no root: a group is hit whole",
+      "x": 5.0,
+      "y": 5.0,
+      "root": null,
+      "expected": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "no root: a top-level leaf",
+      "x": 45.0,
+      "y": 5.0,
+      "root": null,
+      "expected": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "root G: its first child",
+      "x": 5.0,
+      "y": 5.0,
+      "root": [
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "root G: its second child",
+      "x": 25.0,
+      "y": 5.0,
+      "root": [
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "root G: a hit OUTSIDE the root is null",
+      "x": 45.0,
+      "y": 5.0,
+      "root": [
+        0,
+        0
+      ],
+      "expected": null
+    },
+    {
+      "name": "root G: empty canvas is null",
+      "x": 15.0,
+      "y": 50.0,
+      "root": [
+        0,
+        0
+      ],
+      "expected": null
+    },
+    {
+      "name": "root the layer: as without a root",
+      "x": 45.0,
+      "y": 5.0,
+      "root": [
+        0
+      ],
+      "expected": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "root a TRANSFORMED group: the descent composes its transform",
+      "x": 105.0,
+      "y": 5.0,
+      "root": [
+        0,
+        2
+      ],
+      "expected": [
+        0,
+        2,
+        0
+      ]
+    },
+    {
+      "name": "root two levels down a transformed group",
+      "x": 105.0,
+      "y": 5.0,
+      "root": [
+        0,
+        2,
+        0
+      ],
+      "expected": [
+        0,
+        2,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "root a transformed group: its untransformed position misses",
+      "x": 5.0,
+      "y": 5.0,
+      "root": [
+        0,
+        2
+      ],
+      "expected": null
+    },
+    {
+      "name": "root a LEAF is null (not a container)",
+      "x": 45.0,
+      "y": 5.0,
+      "root": [
+        0,
+        1
+      ],
+      "expected": null
+    },
+    {
+      "name": "root past the end is null",
+      "x": 5.0,
+      "y": 5.0,
+      "root": [
+        0,
+        9
+      ],
+      "expected": null
+    }
+  ],
+  "is_group_cases": [
+    {
+      "path": [
+        0,
+        0
+      ],
+      "expected": true,
+      "name": "a group"
+    },
+    {
+      "path": [
+        0,
+        2,
+        0
+      ],
+      "expected": true,
+      "name": "a nested group under a transform"
+    },
+    {
+      "path": [
+        0
+      ],
+      "expected": false,
+      "name": "a layer is not a group"
+    },
+    {
+      "path": [
+        0,
+        1
+      ],
+      "expected": false,
+      "name": "a leaf"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0
+      ],
+      "expected": false,
+      "name": "a leaf inside a group"
+    },
+    {
+      "path": [
+        0,
+        9
+      ],
+      "expected": false,
+      "name": "past the end"
+    },
+    {
+      "path": [
+        3
+      ],
+      "expected": false,
+      "name": "a top-level index past the end"
+    }
+  ]
+}

@@ -1632,14 +1632,25 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     // Document via registerDocument(). Outside dispatch they degrade
     // to .null / .bool(false).
 
+    // hit_test(x, y[, root]) — the third argument, the isolation root (G11,
+    // STATUS-jas row 73), scopes the scan to that container's children. null
+    // (or an empty path) is the plain scan; a non-path reads as null.
     case "hit_test":
-        guard args.count == 2 else { return .null }
+        guard args.count == 2 || args.count == 3 else { return .null }
         let vx = evalNode(args[0], ctx)
         let vy = evalNode(args[1], ctx)
         guard case .number(let x) = vx, case .number(let y) = vy else {
             return .null
         }
-        return docHitTest(x, y)
+        var root: [Int] = []
+        if args.count == 3 {
+            let vr = evalNode(args[2], ctx)
+            if vr != .null {
+                guard let p = indexPath(vr) else { return .null }
+                root = p
+            }
+        }
+        return root.isEmpty ? docHitTest(x, y) : docHitTest(x, y, root: root)
 
     case "hit_test_deep":
         guard args.count == 2 else { return .null }
@@ -1649,6 +1660,12 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
             return .null
         }
         return docHitTestDeep(x, y)
+
+    // is_group(path) — true iff the registered document resolves the path to
+    // a Group (G11). False for a non-path, no document, or no such element.
+    case "is_group":
+        guard args.count == 1, case .path(let p) = evalNode(args[0], ctx) else { return .bool(false) }
+        return docIsGroup(p)
 
     case "selection_contains":
         guard args.count == 1 else { return .bool(false) }
