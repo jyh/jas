@@ -144,6 +144,26 @@ def select_label(widget, value):
     return None
 
 
+def _option_text(v):
+    """Swift's `WidgetEvent.optionText`: a string as is, a bool as True/False,
+    a number by its own text (Python's str agrees for int and float)."""
+    return v if isinstance(v, str) else str(v)
+
+
+def combo_label(widget, value):
+    """A combo_box's menu title for `value` when `value` is one of its options
+    (the label of a labelled option, else the option's text), else None: the
+    Swift combo is a Menu of its options with no free entry, so a value that is
+    not an option cannot be committed through it at all."""
+    for o in widget.get("options") or []:
+        v = o.get("value") if isinstance(o, dict) else o
+        if v is None or (isinstance(o, str) and o == "separator"):
+            continue
+        if _option_text(v) == str(value):
+            return (o.get("label") or _option_text(v)) if isinstance(o, dict) else _option_text(v)
+    return None
+
+
 def plan(script, menubar, spec=None):
     """The script as acts: ("open", svg) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
@@ -189,6 +209,8 @@ def plan(script, menubar, spec=None):
                 label = select_label(w, st.get("value"))
                 if label is None:
                     raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of select {st['widget']!r}")
+            elif w is not None and w.get("type") == "combo_box" and st["event"] == "commit":
+                label = combo_label(w, st.get("value"))
             acts.append(("panel", pid, pid + TAB_SUFFIX, panels.get(pid[: -len(PANEL_SUFFIX)]),
                          st["widget"], st["event"], st.get("value"), label))
             continue
@@ -455,6 +477,23 @@ def self_test():
           plan(dict(base, steps=[sstep, read]), mb, sel)[2][7] == "Multiply")
     check("a select value that is not an option is refused",
           refused(lambda: plan(dict(base, steps=[dict(sstep, value="nope"), read]), mb, sel), "not an option"))
+    # A combo_box in JasSwift is a Menu of its options with NO free entry
+    # (YamlPanelBodyView.renderComboBox), so a commit to an OPTION is made the
+    # way a person makes it: choose the menu item. Its title is the option's
+    # label, or the value's text (WidgetEvent.optionText) for a bare option.
+    combo = {"content": [{"id": "angle", "type": "combo_box",
+                          "options": [-45, 0, 45, 0.5, {"value": 150, "label": "150%"}]}]}
+    cstep = {"panel": "gradient_panel_content", "widget": "angle", "event": "commit", "value": "45"}
+    check("a combo commit to a bare option carries the option's text",
+          plan(dict(base, steps=[cstep, read]), mb, combo)[2][7] == "45")
+    check("a negative bare option reads with its sign",
+          plan(dict(base, steps=[dict(cstep, value="-45"), read]), mb, combo)[2][7] == "-45")
+    check("a fractional bare option reads as Swift's optionText does",
+          plan(dict(base, steps=[dict(cstep, value="0.5"), read]), mb, combo)[2][7] == "0.5")
+    check("a combo commit to a labelled option carries the label",
+          plan(dict(base, steps=[dict(cstep, value="150"), read]), mb, combo)[2][7] == "150%")
+    check("a combo value that is not an option plans with no label (the driver refuses: no free entry)",
+          plan(dict(base, steps=[dict(cstep, value="30"), read]), mb, combo)[2][7] is None)
     check("a click carries no label", acts[4][7] is None)
     check("modifiers are carried", plan(dict(base, steps=[dict(press, shift=True), read]), mb)[2][5] == ("shift",))
     check("no read is refused", refused(lambda: plan(dict(base, steps=[press]), mb), "without a read"))
