@@ -89,6 +89,12 @@ impl EffectsReport {
     }
 }
 
+/// The Layers isolation stack's effect target. It is the DOCUMENT's
+/// (`Model::isolation_stack`) wherever a model is present: the engine's Layers
+/// scope publishes it back as `panel.isolation_stack` (`panel_scope`), and the
+/// web's renderer routes it to the same stack before reaching here.
+pub(crate) const ISOLATION_STACK: &str = "panel.isolation_stack";
+
 /// Execute a list of effects, and report what was not done.
 ///
 /// `model` is optional. When supplied, `doc.*` effects dispatch to
@@ -937,7 +943,16 @@ fn run_one<'h>(
         let max_length = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
 
         let parts: Vec<&str> = target.splitn(2, '.').collect();
-        if parts.len() == 2 && parts[0] == "panel" {
+        if target == ISOLATION_STACK && model.is_some() {
+            // G11 (STATUS-jas row 73): the isolation stack is the DOCUMENT's
+            // (`Model::isolation_stack`), which the anchor tools read. Until
+            // 2026-11-07 this landed in the active panel's store bucket, so the
+            // engine's Enter Isolation Mode filled the breadcrumb and no tool saw
+            // it, and a TOOL's dispatch (no active panel) reached nothing.
+            if let (Some(m), crate::interpreter::expr_types::Value::Path(p)) = (model.as_deref_mut(), &value) {
+                m.isolation_stack.push(p.clone());
+            }
+        } else if parts.len() == 2 && parts[0] == "panel" {
             if let Some(active) = store.active_panel_id().map(|s| s.to_string()) {
                 store.list_push(&active, parts[1], value_to_json(&value), unique, max_length);
             }
@@ -1204,7 +1219,10 @@ fn run_one<'h>(
             Some(a) if !a.is_empty() => Some(serde_json::Value::Array(a[..a.len() - 1].to_vec())),
             _ => None,
         };
-        if let Some(key) = target.strip_prefix("panel.") {
+        if target == ISOLATION_STACK && model.is_some() {
+            // G11: the document's stack, as `list_push` above.
+            if let Some(m) = model.as_deref_mut() { m.isolation_stack.pop(); }
+        } else if let Some(key) = target.strip_prefix("panel.") {
             if let Some(pid) = store.active_panel_id().map(str::to_string) {
                 if let Some(v) = popped(store.get_panel(&pid, key)) {
                     store.set_panel(&pid, key, v);

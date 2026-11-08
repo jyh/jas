@@ -4137,6 +4137,30 @@ mod tests {
         YamlTool::from_workspace_tool(spec_json)
     }
 
+    /// G11 (STATUS-jas row 73), twin of Swift's `YamlToolIsolationProbeTests`:
+    /// an isolation action DISPATCHED FROM A TOOL's `on_dblclick` reaches the
+    /// document's stack (`Model::isolation_stack`), through
+    /// `effects::ISOLATION_STACK`. The control (`zoom_in`, zoom.yaml's form)
+    /// proves the handler ran, so a red here cannot be "on_dblclick never fired".
+    #[test]
+    fn a_tool_dispatched_isolation_action_reaches_the_models_stack() {
+        let tool_with = |effect: serde_json::Value| YamlTool::from_workspace_tool(&serde_json::json!({
+            "id": "g11_probe", "handlers": {"on_dblclick": [effect]}})).expect("probe spec");
+        let mut model = empty_layer_model();
+        let before = model.zoom_level;
+        tool_with(serde_json::json!({"dispatch": {"action": "zoom_in",
+            "params": {"anchor_x": "event.x", "anchor_y": "event.y"}}}))
+            .on_double_click(&mut model, 5.0, 5.0);
+        assert!(model.zoom_level > before, "CONTROL: zoom_in from a tool left zoom {before} -> {}", model.zoom_level);
+        tool_with(serde_json::json!({"dispatch": {"action": "enter_isolation_mode",
+            "params": {"container_id": "'0.0'"}}}))
+            .on_double_click(&mut model, 5.0, 5.0);
+        assert_eq!(model.isolation_stack, vec![vec![0usize, 0]], "a tool-dispatched enter");
+        tool_with(serde_json::json!({"dispatch": {"action": "exit_isolation_mode"}}))
+            .on_double_click(&mut model, 5.0, 5.0);
+        assert!(model.isolation_stack.is_empty(), "a tool-dispatched exit left {:?}", model.isolation_stack);
+    }
+
     #[test]
     fn pen_parity_three_clicks_then_double_click_creates_polyline() {
         use crate::geometry::element::PathCommand;
