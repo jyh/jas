@@ -87,3 +87,21 @@ private func selected(_ m: Model) -> [[Int]] {
     doubleClick(tool, c, 150, 50)
     #expect(model.layersIsolationStack == [[0, 2]], "empty canvas exits ONE level")
 }
+
+/// G11 step 4's FRAME arms (seat design 2026-11-08 §4 arms 4/5), which only
+/// the ports carry: `Moved` [0, 2] is translated by (100, 0), so `Inner` answers
+/// for R4 where R4 is DRAWN, and a walk dropping the root's frame would answer
+/// where its raw geometry sits instead. Twin of Rust
+/// `g11_marquee_composes_the_root_frame_both_directions`.
+@Test func g11MarqueeComposesTheRootFrameBothDirections() throws {
+    let model = try fixtureModel()
+    let controller = Controller(model: model)
+    controller.selectRect(x: 102, y: 2, width: 1, height: 1, root: [0, 2])
+    #expect(selected(model) == [[0, 2, 0]], "Inner answers for R4 where it is drawn")
+    controller.selectRect(x: 2, y: 2, width: 1, height: 1, root: [0, 2])
+    #expect(selected(model) == [], "R4's untransformed geometry is not where it is drawn")
+    controller.selectRect(x: 45, y: 5, width: 0, height: 0, root: [0, 0])
+    #expect(selected(model) == [], "a band outside the root selects nothing")
+    controller.selectRect(x: 2, y: 2, width: 1, height: 1, root: [0, 1])
+    #expect(selected(model) == [], "a leaf root selects nothing, never the layer walk")
+}
