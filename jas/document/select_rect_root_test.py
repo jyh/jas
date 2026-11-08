@@ -101,6 +101,22 @@ class SelectRectRootTest(absltest.TestCase):
                      "height": 1, "extend": False, "root": [0, 0]})
         self.assertEqual(sorted(es.path for es in m.document.selection), [(0, 0, 0)])
 
+    def test_a_negative_root_index_selects_nothing(self):
+        # Python would read (-1,) as the LAST layer.
+        c = _ctrl()
+        c.select_rect(2, 2, 1, 1, root=(-1, 0))
+        self.assertEqual(_paths(c), [])
+
+    def test_op_apply_skips_a_malformed_root(self):
+        # Never an unscoped marquee: the prior selection stands.
+        m = Model(document=_doc())
+        Controller(model=m).select_rect(22, 2, 1, 1, root=(0, 0))
+        for bad in ("0,0", [0, "a"], [True], None):
+            op_apply(m, {"op": "select_rect", "x": 45, "y": 5, "width": 0,
+                         "height": 0, "extend": False, "root": bad})
+            self.assertEqual(sorted(es.path for es in m.document.selection),
+                             [(0, 0, 1)], f"root={bad!r}")
+
     def test_op_apply_without_root_is_unchanged(self):
         m = Model(document=_doc())
         op_apply(m, {"op": "select_rect", "x": 45, "y": 5, "width": 0,
