@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 200 100" width="200" height="100">
+  <g inkscape:groupmode="layer" inkscape:label="Stage">
+    <g>
+      <rect x="0" y="0" width="16" height="16" fill="rgb(255,0,0)" stroke="none"/>
+      <rect x="32" y="0" width="16" height="16" fill="rgb(0,255,0)" stroke="none"/>
+      <g>
+        <rect x="96" y="0" width="16" height="16" fill="rgb(0,0,255)" stroke="none"/>
+      </g>
+    </g>
+    <rect x="64" y="0" width="16" height="16" fill="rgb(0,0,0)" stroke="none"/>
+  </g>
+</svg>

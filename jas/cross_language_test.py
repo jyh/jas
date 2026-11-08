@@ -910,6 +910,11 @@ class CrossLanguageTest(absltest.TestCase):
         # _select_flat's guards and the group-alone producers had landed.
         self._run_operation_fixture("lock_inheritance.json")
 
+    def test_operation_isolation_marquee(self):
+        # G11 step 4: `select_rect` with `root` walks the isolation root's
+        # children; without `root` it is the layer walk.
+        self._run_operation_fixture("isolation_marquee.json")
+
     def test_operation_lock_toggle_no_materialization(self):
         # The Layers-panel lock toggle writes the target's OWN flag only
         # (section 13's repeal of materialization) and prunes the selection
