@@ -5074,6 +5074,15 @@ mod tests {
             for (pid, keys) in tc.get("panel_state").and_then(|v| v.as_object()).into_iter().flatten() {
                 seed_panel(engine_of(e), &ws, pid);
                 for (k, v) in keys.as_object().into_iter().flatten() {
+                    // The Layers isolation stack is the MODEL's (G11,
+                    // `effects::ISOLATION_STACK`), as Swift's runner seeds it; the
+                    // panel bucket is seeded too (the mirror that route keeps).
+                    if pid == "layers_panel_content" && k == "isolation_stack" {
+                        engine_of(e).model.borrow_mut().isolation_stack = v.as_array().into_iter().flatten()
+                            .filter_map(|p| p.get("__path__").unwrap_or(p).as_array()
+                                .map(|a| a.iter().filter_map(|i| i.as_u64().map(|n| n as usize)).collect()))
+                            .collect();
+                    }
                     engine_of(e).store.borrow_mut().set_panel(pid, k, v.clone());
                 }
             }
@@ -5271,7 +5280,12 @@ mod tests {
             // step. A key the panel does not hold is a failure, never a null.
             for (pid, keys) in tc.get("expected_panel").and_then(|v| v.as_object()).into_iter().flatten() {
                 for (key, value) in keys.as_object().into_iter().flatten() {
-                    let have = store.get_panel(pid, key);
+                    // The isolation stack is read where it lives (the model), as Swift's runner does.
+                    let iso;
+                    let have = if pid == "layers_panel_content" && key == "isolation_stack" {
+                        iso = serde_json::json!(en.model.borrow().isolation_stack);
+                        &iso
+                    } else { store.get_panel(pid, key) };
                     if have.is_null() || !crate::cross_language_test::tests::json_value_eq(have, value) {
                         failures.push(format!("{name}: panel {pid}.{key} is {have}, the corpus pins {value}"));
                     }
@@ -7729,6 +7743,25 @@ mod tests {
     fn with_layers_selection(e: *mut JasEngine, paths: serde_json::Value) {
         let _ = panel_menu(e, "layers_panel_content");
         engine_of(e).store.borrow_mut().set_panel("layers_panel_content", "layers_panel_selection", paths);
+    }
+
+    /// G11 (STATUS-jas row 73): Enter Isolation Mode in the ENGINE must reach
+    /// the MODEL's stack, which the anchor tools read (Partial / Interior
+    /// Selection's hit, `effects.rs`), not only the Layers panel's store bucket.
+    /// Read 2026-11-07: nothing copies the bucket to the model, so the Windows
+    /// app could show the breadcrumb while its tools ignore isolation. This
+    /// arm is that measurement (STATUS-flask §744 asks the same of the app).
+    #[test]
+    fn enter_isolation_in_the_engine_reaches_the_models_stack() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        with_layers_selection(e, serde_json::json!([{"__path__": [1]}]));
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","action":"enter_isolation_mode"}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "Enter Isolation Mode ran: {err}");
+        let bucket = engine_of(e).store.borrow().get_panel("layers_panel_content", "isolation_stack").clone();
+        let model = engine_of(e).model.borrow().isolation_stack.clone();
+        assert_eq!(model, vec![vec![1usize]], "the MODEL's stack; the panel bucket reads {bucket}");
+        unsafe { jas_engine_free(e) };
     }
 
     #[test]

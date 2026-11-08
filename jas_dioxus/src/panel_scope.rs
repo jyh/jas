@@ -508,6 +508,13 @@ pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, 
         if panel_id == crate::interpreter::properties_host::PROPERTIES_PANEL {
             panel.extend(crate::interpreter::properties_host::live_values(model.document()));
         }
+        // G11 (STATUS-jas row 73): the Layers isolation stack is the MODEL's
+        // (`effects::ISOLATION_STACK` writes it there), published here as the
+        // `panel.isolation_stack` the breadcrumb and `exit_isolation_mode` read.
+        if panel_id == "layers_panel_content" {
+            panel.insert("isolation_stack".into(), Value::Array(model.isolation_stack.iter()
+                .map(|p| json!({"__path__": p})).collect()));
+        }
         // W2b-7. The Paragraph panel's fields describe the SELECTION, so the
         // scope must be derived from the document exactly as Properties' is.
         // A store-backed scope makes a boolean press read a stale sibling and

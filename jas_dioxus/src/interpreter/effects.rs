@@ -89,6 +89,22 @@ impl EffectsReport {
     }
 }
 
+/// The Layers isolation stack's effect target. It is the DOCUMENT's
+/// (`Model::isolation_stack`) wherever a model is present: the engine's Layers
+/// scope publishes it back as `panel.isolation_stack` (`panel_scope`), and the
+/// web's renderer routes it to the same stack before reaching here.
+pub(crate) const ISOLATION_STACK: &str = "panel.isolation_stack";
+
+/// A path value as indices: a PATH, or a list of non-negative integers (a
+/// panel selection seeded as plain lists evaluates to a list). `None` otherwise.
+fn index_path(v: &Value) -> Option<Vec<usize>> {
+    match v {
+        Value::Path(p) => Some(p.clone()),
+        Value::List(items) => items.iter().map(|i| i.as_u64().map(|n| n as usize)).collect(),
+        _ => None,
+    }
+}
+
 /// Execute a list of effects, and report what was not done.
 ///
 /// `model` is optional. When supplied, `doc.*` effects dispatch to
@@ -937,6 +953,18 @@ fn run_one<'h>(
         let max_length = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
 
         let parts: Vec<&str> = target.splitn(2, '.').collect();
+        if target == ISOLATION_STACK {
+            // G11 (STATUS-jas row 73): the isolation stack is the DOCUMENT's
+            // (`Model::isolation_stack`), which the anchor tools read. Until
+            // 2026-11-07 it landed ONLY in the active panel's store bucket, so
+            // the engine's Enter Isolation Mode filled the breadcrumb and no tool
+            // saw it, and a TOOL's dispatch (no active panel) reached nothing.
+            // The bucket below is still written, as a mirror kept by this one
+            // writer, for the readers that evaluate against the store.
+            if let (Some(m), Some(p)) = (model.as_deref_mut(), index_path(&value)) {
+                m.isolation_stack.push(p);
+            }
+        }
         if parts.len() == 2 && parts[0] == "panel" {
             if let Some(active) = store.active_panel_id().map(|s| s.to_string()) {
                 store.list_push(&active, parts[1], value_to_json(&value), unique, max_length);
@@ -1204,6 +1232,11 @@ fn run_one<'h>(
             Some(a) if !a.is_empty() => Some(serde_json::Value::Array(a[..a.len() - 1].to_vec())),
             _ => None,
         };
+        if target == ISOLATION_STACK {
+            // G11: the document's stack, as `list_push` above; the bucket
+            // below is popped too (the mirror).
+            if let Some(m) = model.as_deref_mut() { m.isolation_stack.pop(); }
+        }
         if let Some(key) = target.strip_prefix("panel.") {
             if let Some(pid) = store.active_panel_id().map(str::to_string) {
                 if let Some(v) = popped(store.get_panel(&pid, key)) {

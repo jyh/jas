@@ -961,10 +961,12 @@ fn run_batch(
 /// new-element defaults (`colour_host`). Neither is the document, so the
 /// generation does not see them, and neither is the store. Without this a
 /// swatch that only moved the recent strip reported `Unchanged` (2026-10-12,
-/// the white swatch on an engine already at white).
+/// the white swatch on an engine already at white). The Layers isolation stack
+/// too (G11, 2026-11-07): it moved to the model (`effects::ISOLATION_STACK`),
+/// and Enter Isolation Mode then read as `Unchanged`.
 fn model_state(model: &Model) -> (Vec<String>, Option<crate::geometry::element::Fill>,
-                                   Option<crate::geometry::element::Stroke>) {
-    (model.recent_colors.clone(), model.default_fill, model.default_stroke)
+                                   Option<crate::geometry::element::Stroke>, Vec<Vec<usize>>) {
+    (model.recent_colors.clone(), model.default_fill, model.default_stroke, model.isolation_stack.clone())
 }
 
 /// A value event's behaviors, in declaration order: each one's effects and
