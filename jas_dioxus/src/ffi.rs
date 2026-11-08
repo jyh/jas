@@ -5074,6 +5074,15 @@ mod tests {
             for (pid, keys) in tc.get("panel_state").and_then(|v| v.as_object()).into_iter().flatten() {
                 seed_panel(engine_of(e), &ws, pid);
                 for (k, v) in keys.as_object().into_iter().flatten() {
+                    // The Layers isolation stack is the MODEL's (G11,
+                    // `effects::ISOLATION_STACK`), as Swift's runner seeds it.
+                    if pid == "layers_panel_content" && k == "isolation_stack" {
+                        engine_of(e).model.borrow_mut().isolation_stack = v.as_array().into_iter().flatten()
+                            .filter_map(|p| p.get("__path__").unwrap_or(p).as_array()
+                                .map(|a| a.iter().filter_map(|i| i.as_u64().map(|n| n as usize)).collect()))
+                            .collect();
+                        continue;
+                    }
                     engine_of(e).store.borrow_mut().set_panel(pid, k, v.clone());
                 }
             }
@@ -5271,7 +5280,12 @@ mod tests {
             // step. A key the panel does not hold is a failure, never a null.
             for (pid, keys) in tc.get("expected_panel").and_then(|v| v.as_object()).into_iter().flatten() {
                 for (key, value) in keys.as_object().into_iter().flatten() {
-                    let have = store.get_panel(pid, key);
+                    // The isolation stack is read where it lives (the model), as Swift's runner does.
+                    let iso;
+                    let have = if pid == "layers_panel_content" && key == "isolation_stack" {
+                        iso = serde_json::json!(en.model.borrow().isolation_stack);
+                        &iso
+                    } else { store.get_panel(pid, key) };
                     if have.is_null() || !crate::cross_language_test::tests::json_value_eq(have, value) {
                         failures.push(format!("{name}: panel {pid}.{key} is {have}, the corpus pins {value}"));
                     }
