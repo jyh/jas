@@ -1753,6 +1753,22 @@ public func opApply(
         targets = applySelectByIds(model, controller, from)
         controller.copySelection(dx: numField(op, "dx"), dy: numField(op, "dy"))
     case "select_rect":
+        // `root` (G11): the innermost isolation entry, written by the marquee
+        // effect ONLY while isolated. A present root must be an array of
+        // non-negative integers, or the op is BadParamType and does not run
+        // unscoped. Twin of Rust op_apply's "select_rect".
+        var root: ElementPath? = nil
+        if let raw = op["root"] {
+            let arr = raw as? [Any] ?? []
+            let parsed = arr.compactMap { v -> Int? in
+                guard let n = v as? NSNumber, !n.isBool, n.intValue >= 0 else { return nil }
+                return n.intValue
+            }
+            guard raw is [Any], parsed.count == arr.count else {
+                return .badParamType(name: "root")
+            }
+            root = parsed
+        }
         controller.selectRect(
             x: numField(op, "x"),
             y: numField(op, "y"),
@@ -1760,7 +1776,8 @@ public func opApply(
             height: numField(op, "height"),
             extend: (op["extend"] as? NSNumber)?.isBool == true
                 ? (op["extend"] as! NSNumber).boolValue
-                : (op["extend"] as? Bool ?? false))
+                : (op["extend"] as? Bool ?? false),
+            root: root)
         // Keystone: the resolved selection is this op's targets, so
         // captureRecipe can seed its working set (empty targets ⇒ empty
         // recipe). Resolved AFTER the Controller call.

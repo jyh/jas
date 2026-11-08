@@ -889,6 +889,22 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
+        Self::select_rect_in(model, x, y, width, height, extend, None);
+    }
+
+    /// `select_rect` scoped to an isolation ROOT (G11): with `Some(root)` the
+    /// units are that container's children and a band outside it selects
+    /// nothing (`select_flat_in`); `None` or an empty root is the layer walk.
+    /// Twin of JasSwift `selectRect(…root:)` and the reference `select_rect`.
+    pub fn select_rect_in(
+        model: &mut Model,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        extend: bool,
+        root: Option<&[usize]>,
+    ) {
         // RESOLVEDHIT: resolve through the Model's index, so an element whose
         // geometry lives behind a stable id (a symbol instance, a recorded or
         // generated element) is caught where it is DRAWN. The index is an rpds
@@ -901,15 +917,15 @@ impl Controller {
         // parent space and tested as a polygon (which applies the element's
         // own transform). With none this is exactly the old call.
         let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)];
-        select_flat(
-            model,
-            |elem, parent| match parent {
-                None => element_intersects_rect_with(elem, x, y, width, height, &resolver),
-                Some(p) => polygon_in_parent_space(&corners, p)
-                    .is_some_and(|poly| element_intersects_polygon_with(elem, &poly, &resolver)),
-            },
-            extend,
-        );
+        let predicate = |elem: &Element, parent: Option<crate::geometry::element::Transform>| match parent {
+            None => element_intersects_rect_with(elem, x, y, width, height, &resolver),
+            Some(p) => polygon_in_parent_space(&corners, p)
+                .is_some_and(|poly| element_intersects_polygon_with(elem, &poly, &resolver)),
+        };
+        match root {
+            Some(r) if !r.is_empty() => select_flat_in(model, r, predicate, extend),
+            _ => select_flat(model, predicate, extend),
+        }
     }
 
     /// Select all elements whose bounds intersect the given polygon.
@@ -3647,6 +3663,88 @@ fn select_flat(
                 } else if predicate(child, layer_frame) {
                     entries.push(ElementSelection::all(vec![li, ci]));
                 }
+            }
+        }
+    }
+    let new_sel = if extend {
+        toggle_selection(&doc.selection, &entries)
+    } else {
+        entries
+    };
+    let mut new_doc = doc;
+    new_doc.selection = new_sel;
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
+}
+
+/// `select_flat` with the isolation ROOT's children as the units (G11 step 4;
+/// seat design 2026-11-08 g11-marquee-scope). The descent to `root` composes
+/// each ancestor's visibility cap and transform, as `select_flat`'s layer and
+/// group steps do; a root that does not resolve to a container selects
+/// NOTHING, never the layer walk (a root naming nothing is a defect, and a
+/// fallback would hide it). Each child then answers as a layer child does: a
+/// group with the group alone (section 16.4), a leaf on the predicate in the
+/// root's frame. There is no guard on the root's own lock or visibility: each
+/// child's `effective_locked` reads the root's lock down the path and its
+/// visibility folds the root's, so such a guard would be expressive only (the
+/// reference measured it by mutant). Twin of JasSwift `selectFlatIn` and the
+/// reference `_select_flat_in`.
+fn select_flat_in(
+    model: &mut Model,
+    root: &[usize],
+    predicate: impl Fn(&Element, Option<crate::geometry::element::Transform>) -> bool,
+    extend: bool,
+) {
+    use crate::geometry::element::Visibility;
+    let doc = model.document().clone();
+    let mut entries: Selection = Vec::new();
+    // Walk to the root: (the container, its visibility cap, its frame).
+    let mut found: Option<(&Element, Visibility, Option<crate::geometry::element::Transform>)> =
+        doc.layers.get(root[0]).map(|l| (l, l.visibility(), l.transform().copied()));
+    for &idx in &root[1..] {
+        found = found.and_then(|(node, vis, frame)| {
+            if !node.is_group_or_layer() {
+                return None;
+            }
+            let kid: &Element = node.children()?.get(idx)?;
+            let kid_frame = match (frame, kid.transform()) {
+                (Some(f), Some(t)) => Some(f.multiply(t)),
+                (f, t) => f.or(t.copied()),
+            };
+            Some((kid, std::cmp::min(vis, kid.visibility()), kid_frame))
+        });
+    }
+    if let Some((node, vis, frame)) = found
+        && node.is_group_or_layer()
+        && let Some(children) = node.children()
+    {
+        for (ci, child) in children.iter().enumerate() {
+            let mut path = root.to_vec();
+            path.push(ci);
+            if doc.effective_locked(&path) {
+                continue;
+            }
+            let child_vis = std::cmp::min(vis, child.visibility());
+            if child_vis == Visibility::Invisible {
+                continue;
+            }
+            if child.is_group() {
+                let group_frame = match (frame, child.transform()) {
+                    (Some(f), Some(g)) => Some(f.multiply(g)),
+                    (f, g) => f.or(g.copied()),
+                };
+                if let Some(grandchildren) = child.children()
+                    && grandchildren.iter().enumerate().any(|(gi, gc)| {
+                        let mut gpath = path.clone();
+                        gpath.push(gi);
+                        !doc.effective_locked(&gpath)
+                            && std::cmp::min(child_vis, gc.visibility()) != Visibility::Invisible
+                            && predicate(gc, group_frame)
+                    })
+                {
+                    entries.push(ElementSelection::all(path));
+                }
+            } else if predicate(child, frame) {
+                entries.push(ElementSelection::all(path));
             }
         }
     }

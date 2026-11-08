@@ -58,13 +58,16 @@ private func selected(_ m: Model) -> [[Int]] {
     click(tool, c, 45, 5)
     #expect(!selected(model).contains([0, 0]) && !selected(model).contains { $0.count > 2 },
             "a click outside the isolated group selects nothing inside it")
-    // ⚠️ DECLARED, NOT BUILT: the miss starts a zero-size marquee, and
-    // `doc.select_in_rect` is not yet scoped to isolation, so its release
-    // selects R3 ([0, 1]) OUTSIDE the isolated group. G11's next step; this
-    // known issue reds the day the marquee is scoped.
-    withKnownIssue("the marquee is not yet scoped to isolation (G11 next step)") {
-        #expect(selected(model) == [], "a click outside the isolated group selects nothing")
-    }
+    // The miss starts a zero-size marquee; G11 step 4 scoped `doc.select_in_rect`
+    // to the isolation root, so its release selects nothing. (Until then this
+    // was a `withKnownIssue`: the release selected R3 [0, 1] outside G.)
+    #expect(selected(model) == [], "a click outside the isolated group selects nothing")
+    let band = ctx(model)
+    tool.onPress(band, x: -1, y: -1, shift: false, alt: false)
+    tool.onMove(band, x: 31, y: 11, shift: false, alt: false, dragging: true)
+    tool.onRelease(band, x: 31, y: 11, shift: false, alt: false)
+    #expect(selected(model) == [[0, 0, 0], [0, 0, 1]],
+            "a marquee over G's members while G is isolated selects the members, never G")
     doubleClick(tool, c, 15, 50)
     #expect(model.layersIsolationStack == [], "double-click on empty canvas exits one level")
     click(tool, c, 25, 5)

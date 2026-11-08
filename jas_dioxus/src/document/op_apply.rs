@@ -2100,13 +2100,27 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             Controller::copy_selection(model, num_field(op, "dx"), num_field(op, "dy"));
         }
         "select_rect" => {
-            Controller::select_rect(
+            // `root` (G11): the innermost isolation entry, written by the
+            // marquee effect ONLY while isolated, so every op recorded outside
+            // isolation carries no key. A present root must be an array of
+            // non-negative integers; anything else is BadParamType and the op
+            // does not run unscoped (the reference skips it the same way).
+            let root: Option<Vec<usize>> = match op.get("root") {
+                None => None,
+                Some(v) => Some(
+                    v.as_array()
+                        .and_then(|a| a.iter().map(|i| i.as_u64().map(|n| n as usize)).collect())
+                        .ok_or(OpError::BadParamType { name: "root" })?,
+                ),
+            };
+            Controller::select_rect_in(
                 model,
                 num_field(op, "x"),
                 num_field(op, "y"),
                 num_field(op, "width"),
                 num_field(op, "height"),
                 op["extend"].as_bool().unwrap_or(false),
+                root.as_deref(),
             );
             // Keystone: the resolved selection is this op's targets, so
             // `capture_recipe` can seed its working set (empty targets ⇒

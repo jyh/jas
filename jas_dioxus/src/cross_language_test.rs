@@ -5798,6 +5798,13 @@ pub(crate) mod tests {
         run_operation_fixture("operations/lock_inheritance.json");
     }
 
+    /// G11 step 4: `select_rect` with `root` walks the isolation root's
+    /// children; without `root` it is the layer walk. Goldens from the reference.
+    #[test]
+    fn operation_isolation_marquee() {
+        run_operation_fixture("operations/isolation_marquee.json");
+    }
+
     /// MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13.
     ///
     /// The shipped spec (`workspace/panels/layers.yaml`, `workspace/actions.yaml`
