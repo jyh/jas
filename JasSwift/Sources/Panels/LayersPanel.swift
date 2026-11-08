@@ -556,46 +556,12 @@ public enum LayersPanel {
             return nil
         }
 
-        // list_push: { target, value } — special-case routing.
-        // - panel.isolation_stack — Phase 3 Group D enter_isolation_mode;
-        //   writes the evaluated Path value to model.layersIsolationStack.
-        // - active_document.recent_colors — set_active_color's push
-        //   (`runtime_contexts.yaml`); routes the hex through
-        //   ColorPanel.pushRecentColor, so model.recentColors is the one
-        //   list, which buildActiveDocumentView publishes to both panels.
-        let listPushHandler: PlatformEffect = { value, callCtx, store in
-            guard let spec = value as? [String: Any] else { return nil }
-            let target = (spec["target"] as? String) ?? ""
-            let valueExpr: String
-            if let s = spec["value"] as? String { valueExpr = s }
-            else { return nil }
-            if target == "panel.isolation_stack" {
-                let val = evaluate(valueExpr, context: callCtx)
-                guard case .path(let indices) = val else { return nil }
-                model.layersIsolationStack.append(indices)
-            } else if target == "active_document.recent_colors" {
-                let val = evaluate(valueExpr, context: callCtx)
-                let hex: String?
-                switch val {
-                case .color(let c): hex = c
-                case .string(let s) where s.hasPrefix("#"): hex = s
-                default: hex = nil
-                }
-                if let h = hex, !h.isEmpty {
-                    ColorPanel.pushRecentColor(h, model: model)
-                }
-            }
-            return nil
-        }
-        // pop: "panel.isolation_stack" — Phase 3 Group D: exit_isolation_mode.
-        let popHandler: PlatformEffect = { value, _, _ in
-            guard let target = value as? String else { return nil }
-            guard target == "panel.isolation_stack" else { return nil }
-            if !model.layersIsolationStack.isEmpty {
-                _ = model.layersIsolationStack.removeLast()
-            }
-            return nil
-        }
+        // list_push / pop on panel.isolation_stack (and recent_colors): the
+        // SHARED routes, so a tool-dispatched isolation action reaches the
+        // same stack (G11, STATUS-jas row 73).
+        let stackEffects = layersStackEffects(model: model)
+        let listPushHandler = stackEffects["list_push"]!
+        let popHandler = stackEffects["pop"]!
 
         // close_dialog: invoke the onCloseDialog callback if supplied.
         // Layer Options uses this to dismiss the SwiftUI sheet after
