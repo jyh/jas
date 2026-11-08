@@ -358,6 +358,9 @@ final class YamlTool: CanvasTool {
             "view_offset_x": model.viewOffsetX,
             "view_offset_y": model.viewOffsetY,
             "zoom_level": model.zoomLevel,
+            // G11: the innermost isolation entry, which the selection tool's
+            // `hit_test(x, y, root)` scans inside (null when not isolated).
+            "isolation_root": model.layersIsolationStack.last.map { $0 as Any } ?? NSNull(),
         ]
         activeDocument.merge(documentFacts) { _, fact in fact }
         let ctx: [String: Any] = [
@@ -435,8 +438,13 @@ final class YamlTool: CanvasTool {
     }
 
     func onDoubleClick(_ ctx: ToolContext, x: Double, y: Double) {
+        // `doc_x` / `doc_y` as a press carries them (`pointerPayload`): the
+        // selection tool's double-click hit-tests in document space (G11).
+        let m = ctx.model, z = m.zoomLevel
         dispatch("on_dblclick",
-                 payload: ["type": "dblclick", "x": x, "y": y],
+                 payload: ["type": "dblclick", "x": x, "y": y,
+                           "doc_x": z == 0 ? x : (x - m.viewOffsetX) / z,
+                           "doc_y": z == 0 ? y : (y - m.viewOffsetY) / z],
                  model: ctx.model)
         ctx.requestUpdate()
     }

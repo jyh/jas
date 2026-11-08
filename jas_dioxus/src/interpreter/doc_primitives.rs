@@ -103,6 +103,41 @@ pub fn hit_test(x: f64, y: f64) -> Value {
     })
 }
 
+/// `hit_test(x, y, root)`: the same scan over the children of the container
+/// AT `root` (the innermost isolation entry, G11, STATUS-jas row 73),
+/// returning `root + [i]`. The descent composes each ancestor's visibility cap
+/// and transform as the layer step does. `Null` outside the root, on a
+/// non-container, or when `root` does not resolve. Twin of the reference's
+/// `doc_primitives.hit_test(x, y, root)` and Swift's `docHitTest(_:_:root:)`;
+/// pinned by `test_fixtures/layers/hit_test_root.json`.
+pub fn hit_test_root(x: f64, y: f64, root: &[usize]) -> Value {
+    use super::hit_law;
+    use crate::geometry::element::Visibility;
+    with_doc(Value::Null, |doc| {
+        let Some(&first) = root.first() else { return Value::Null };
+        let Some(mut cur) = doc.layers.get(first) else { return Value::Null };
+        let Some(mut vis) = hit_law::blocks_hit(cur, Visibility::Preview) else { return Value::Null };
+        let Some(mut local) = hit_law::to_local(cur, x, y) else { return Value::Null };
+        for &idx in &root[1..] {
+            let Some(next) = cur.children().and_then(|k| k.get(idx)) else { return Value::Null };
+            cur = next.as_ref();
+            let Some(v) = hit_law::blocks_hit(cur, vis) else { return Value::Null };
+            let Some(l) = hit_law::to_local(cur, local.0, local.1) else { return Value::Null };
+            vis = v;
+            local = l;
+        }
+        let Some(children) = cur.children() else { return Value::Null };
+        for (ci, child) in children.iter().enumerate().rev() {
+            if hit_law::painted_hit(child, local.0, local.1, vis) {
+                let mut p = root.to_vec();
+                p.push(ci);
+                return Value::Path(p);
+            }
+        }
+        Value::Null
+    })
+}
+
 /// `hit_test_deep(x, y)` → `Path | null`. Recurses into groups so the
 /// returned path points at the deepest PAINTED leaf under the cursor.
 pub fn hit_test_deep(x: f64, y: f64) -> Value {
@@ -121,6 +156,22 @@ pub fn hit_test_deep(x: f64, y: f64) -> Value {
 
 /// `selection_contains(path)` → `bool`. True iff the given path is
 /// currently selected.
+/// `is_group(path)`: whether the registered document resolves `path` to a
+/// Group (G11; a Layer is not one). Pinned by `hit_test_root.json`'s
+/// `is_group_cases`.
+pub fn is_group(arg: &Value) -> Value {
+    let Value::Path(path) = arg else { return Value::Bool(false) };
+    with_doc(Value::Bool(false), |doc| {
+        let Some(&first) = path.first() else { return Value::Bool(false) };
+        let Some(mut cur) = doc.layers.get(first) else { return Value::Bool(false) };
+        for &idx in &path[1..] {
+            let Some(next) = cur.children().and_then(|k| k.get(idx)) else { return Value::Bool(false) };
+            cur = next.as_ref();
+        }
+        Value::Bool(matches!(cur, crate::geometry::element::Element::Group(_)))
+    })
+}
+
 pub fn selection_contains(arg: &Value) -> Value {
     let target: Vec<usize> = match arg {
         Value::Path(p) => p.clone(),
@@ -145,6 +196,50 @@ mod tests {
     use crate::geometry::element::{
         Color, CommonProps, Element, Fill, LayerElem, RectElem,
     };
+
+    /// G11 (STATUS-jas row 73): `hit_test(x, y, root)` against the shared
+    /// fixture the reference and Swift read
+    /// (`test_fixtures/layers/hit_test_root.json`), through the expression.
+    #[test]
+    fn hit_test_with_a_root_matches_the_shared_fixture() {
+        use crate::interpreter::expr_types::Value as EV;
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/hit_test_root.json"));
+        let fx: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10, "the fixture is not vacuous");
+        let doc = crate::geometry::test_json::test_json_to_document(&fx["document"].to_string());
+        let _g = register_document(doc);
+        let empty = serde_json::json!({});
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            let root = match c["root"].as_array() {
+                Some(r) => format!("path({})", r.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")),
+                None => "null".to_string(),
+            };
+            let got = crate::interpreter::expr::eval(&format!("hit_test({}, {}, {root})", c["x"], c["y"]), &empty);
+            let want = match c["expected"].as_array() {
+                Some(p) => EV::Path(p.iter().map(|i| i.as_u64().unwrap() as usize).collect()),
+                None => EV::Null,
+            };
+            assert_eq!(got, want, "{name}");
+        }
+    }
+
+    #[test]
+    fn is_group_matches_the_shared_fixture() {
+        use crate::interpreter::expr_types::Value as EV;
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/hit_test_root.json"));
+        let fx: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let cases = fx["is_group_cases"].as_array().unwrap();
+        assert!(cases.len() >= 5, "the fixture is not vacuous");
+        let doc = crate::geometry::test_json::test_json_to_document(&fx["document"].to_string());
+        let _g = register_document(doc);
+        for c in cases {
+            let p = c["path"].as_array().unwrap().iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+            let got = crate::interpreter::expr::eval(&format!("is_group(path({p}))"), &serde_json::json!({}));
+            assert_eq!(got, EV::Bool(c["expected"].as_bool().unwrap()), "{}", c["name"]);
+        }
+    }
 
     fn doc_with_rect() -> Document {
         let rect = Element::Rect(RectElem {

@@ -852,15 +852,26 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
 
     # ── Doc-aware primitives ──────────────────────────────────
 
+    # hit_test(x, y[, root]) — a third argument, the isolation root (G11,
+    # STATUS-jas row 73), scopes the scan to that container's children: null
+    # (or an empty path) is the plain top-level scan; anything that is not a
+    # path reads as null, as a bad coordinate does.
     if name == "hit_test":
-        if len(node.args) != 2:
+        if len(node.args) not in (2, 3):
             return Value.null()
         from workspace_interpreter import doc_primitives
         vx = eval_node(node.args[0], ctx)
         vy = eval_node(node.args[1], ctx)
         if vx.type != ValueType.NUMBER or vy.type != ValueType.NUMBER:
             return Value.null()
-        path = doc_primitives.hit_test(vx.value, vy.value)
+        root = None
+        if len(node.args) == 3:
+            vr = eval_node(node.args[2], ctx)
+            if vr.type != ValueType.NULL:
+                root = _index_path(vr)
+                if root is None:
+                    return Value.null()
+        path = doc_primitives.hit_test(vx.value, vy.value, list(root) if root else None)
         return Value.path(path) if path is not None else Value.null()
 
     if name == "hit_test_deep":
@@ -873,6 +884,18 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             return Value.null()
         path = doc_primitives.hit_test_deep(vx.value, vy.value)
         return Value.path(path) if path is not None else Value.null()
+
+    # is_group(path) — true iff the registered document resolves the path to a
+    # Group (G11: the selection tool's double-click enters only a group).
+    # False for a non-path, no document, or a path that does not resolve.
+    if name == "is_group":
+        if len(node.args) != 1:
+            return Value.bool_(False)
+        from workspace_interpreter import doc_primitives
+        v = eval_node(node.args[0], ctx)
+        if v.type != ValueType.PATH:
+            return Value.bool_(False)
+        return Value.bool_(doc_primitives.is_group(v.value))
 
     if name == "selection_contains":
         if len(node.args) != 1:

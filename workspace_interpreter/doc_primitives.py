@@ -66,13 +66,42 @@ class with_doc:
         return False
 
 
-def hit_test(x: float, y: float):
+def hit_test(x: float, y: float, root=None):
     """Top-level layer-child scan. Returns ``[li, ci]`` of the topmost
     child whose PAINTED geometry is under the point, or ``None`` on
     miss / no registered doc. The law is ``hit_law`` (SELECTION_TOOL.md
-    § Hit test: painted geometry); a group is hit when any child is."""
+    § Hit test: painted geometry); a group is hit when any child is.
+
+    With ``root`` (a non-empty index path: the innermost isolation entry,
+    G11), the same scan over the children of the container AT ``root``,
+    returning ``root + [i]``; the descent composes each ancestor's visibility
+    cap and transform as the layer step does. ``None`` outside the root, on a
+    non-container root, or on a root that does not resolve."""
     from workspace_interpreter import hit_law
     if _current is None:
+        return None
+    if root:
+        layers = _current.layers
+        if not (0 <= root[0] < len(layers)):
+            return None
+        cur = layers[root[0]]
+        vis = hit_law.blocks_hit(cur, _layer_cap())
+        local = hit_law.to_local(cur, x, y) if vis is not None else None
+        for idx in root[1:]:
+            if local is None:
+                return None
+            kids = getattr(cur, "children", None)
+            if not hit_law.is_container(cur) or kids is None or not (0 <= idx < len(kids)):
+                return None
+            cur = kids[idx]
+            vis = hit_law.blocks_hit(cur, vis)
+            local = hit_law.to_local(cur, local[0], local[1]) if vis is not None else None
+        if local is None or not hit_law.is_container(cur):
+            return None
+        children = cur.children
+        for ci in range(len(children) - 1, -1, -1):
+            if hit_law.painted_hit(children[ci], local[0], local[1], vis):
+                return list(root) + [ci]
         return None
     layers = _current.layers
     for li in range(len(layers) - 1, -1, -1):
@@ -106,6 +135,24 @@ def hit_test_deep(x: float, y: float):
 def _layer_cap():
     from geometry.element import Visibility
     return Visibility.PREVIEW
+
+
+def is_group(path) -> bool:
+    """True when ``path`` resolves, in the current doc, to a Group (G11)."""
+    from geometry.element import Group
+    if _current is None or not path:
+        return False
+    layers = _current.layers
+    if not (0 <= path[0] < len(layers)):
+        return False
+    cur = layers[path[0]]
+    for idx in path[1:]:
+        kids = getattr(cur, "children", None)
+        if kids is None or not (0 <= idx < len(kids)):
+            return False
+        cur = kids[idx]
+    # EXACT type: a Layer subclasses Group here, and a layer is not a group.
+    return type(cur) is Group
 
 
 def selection_contains(path) -> bool:
