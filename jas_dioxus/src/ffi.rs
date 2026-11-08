@@ -5075,13 +5075,13 @@ mod tests {
                 seed_panel(engine_of(e), &ws, pid);
                 for (k, v) in keys.as_object().into_iter().flatten() {
                     // The Layers isolation stack is the MODEL's (G11,
-                    // `effects::ISOLATION_STACK`), as Swift's runner seeds it.
+                    // `effects::ISOLATION_STACK`), as Swift's runner seeds it; the
+                    // panel bucket is seeded too (the mirror that route keeps).
                     if pid == "layers_panel_content" && k == "isolation_stack" {
                         engine_of(e).model.borrow_mut().isolation_stack = v.as_array().into_iter().flatten()
                             .filter_map(|p| p.get("__path__").unwrap_or(p).as_array()
                                 .map(|a| a.iter().filter_map(|i| i.as_u64().map(|n| n as usize)).collect()))
                             .collect();
-                        continue;
                     }
                     engine_of(e).store.borrow_mut().set_panel(pid, k, v.clone());
                 }
