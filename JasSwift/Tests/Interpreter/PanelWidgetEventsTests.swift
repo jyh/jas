@@ -257,6 +257,23 @@ private let gradient = "gradient_panel_content"
     #expect(number(model.stateStore.get("gradient_angle")) == 180)
 }
 
+// The combo's free entry (YamlPanelBodyView.renderComboBox's text field) commits
+// the typed text through this same door, so a value that is NOT an option must
+// commit here. Until 2026-11-09 the Swift combo was a menu of its options only,
+// and the shipped Location combo declares none: 30 could not be committed in the
+// Mac app at all (WIDGET_EVENTS.md, the Swift lines; level-2 gradient.stop_location).
+@Test func aComboCommitsAValueThatIsNotOneOfItsOptions() {
+    let model = Model()
+    let combo = shipped(gradient, "grad_stop_location_combo")
+    let options = (combo["options"] as? [Any]) ?? []
+    #expect(!options.contains { "\(($0 as? [String: Any])?["value"] ?? $0)" == "30" },
+            "the arm needs a value outside the options: \(options)")
+    let r = events(model, gradient).commit(combo, text: "30")
+    #expect(r.outcome == "committed" && r.behaviorsRun == 1, "\(r)")
+    #expect(number(r.value) == 30)
+    #expect(number(model.stateStore.get("gradient_stop_location")) == 30)
+}
+
 @Test func theGradientDitherPressFlipsTheBox() {
     let model = modelWithSelectedRect(stroke: nil)
     for expected in [true, false] {
