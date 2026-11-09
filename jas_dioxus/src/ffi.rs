@@ -2151,6 +2151,28 @@ pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
 ///
 /// # Safety
 /// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+/// Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
+/// the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
+/// a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
+/// object whose values are strings, numbers, booleans or null, each passed
+/// as a literal. A test seam: a shell opens a dialog through its own opener.
+///
+/// `Ok` only when the named dialog is then the TOP open dialog. Every refusal
+/// is named in [`jas_last_error_json`] and opens nothing: `MissingTarget` (no
+/// spec defines the id), `BadParamType` (params not an object, or a value no
+/// literal carries: the detail names `dialog.param`), `BadUtf8`, `BadJson`,
+/// and `NullHandle`.
+///
+/// # Safety
+/// `e` must be NULL or a live engine; `id` and `params_json` must be readable
+/// for `id_len` and `params_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_dialog_open(e: *mut JasEngine, id: *const u8, id_len: usize,
+                                         params_json: *const u8, params_len: usize) -> JasStatus {
+    let _ = (e, id, id_len, params_json, params_len);
+    JasStatus::MissingTarget
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_h: i64) -> JasBytes {
     let Some(engine) = (unsafe { e.as_ref() }) else {
@@ -6232,6 +6254,61 @@ mod tests {
         assert_eq!(read(e), serde_json::json!(true));
         let _ = dispatch(e, r#"{"action":"toggle_use_preview_bounds"}"#);
         assert_eq!(read(e), serde_json::json!(false), "the second press turns it off");
+        unsafe { jas_engine_free(e) };
+    }
+
+    fn dialog_plan_of(e: *mut JasEngine) -> serde_json::Value {
+        let b = unsafe { jas_dialog_plan(e, 380, 640) };
+        // An empty span may carry a NULL pointer, and `from_raw_parts` on NULL
+        // aborts the whole test process (measured 11-09: it hid a sibling's red).
+        assert!(!b.ptr.is_null() && b.len > 0, "jas_dialog_plan answered the empty span");
+        let v = serde_json::from_slice(unsafe { std::slice::from_raw_parts(b.ptr, b.len) }).unwrap();
+        unsafe { jas_free(b) };
+        v
+    }
+
+    fn last_error_of(e: *mut JasEngine) -> String {
+        let b = unsafe { jas_last_error_json(e) };
+        if b.ptr.is_null() || b.len == 0 { unsafe { jas_free(b) }; return String::new(); }
+        let t = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(b.ptr, b.len) }).into_owned();
+        unsafe { jas_free(b) };
+        t
+    }
+
+    fn dialog_open(e: *mut JasEngine, id: &str, params: &str) -> JasStatus {
+        unsafe { jas_dialog_open(e, id.as_ptr(), id.len(), params.as_ptr(), params.len()) }
+    }
+
+    /// `jas_dialog_open` (jas STATUS-flask 756, piece 2): the test seam that
+    /// opens a dialog BY ID through the same `open_dialog` effect a tool's
+    /// dialog takes, so a level-2 run can read any dialog's live tree with no
+    /// person. Its plan then reads OPEN, with that id.
+    #[test]
+    fn jas_dialog_open_opens_a_dialog_by_id_and_its_plan_reads_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        assert_eq!(dialog_plan_of(e)["open"], false, "the control: nothing is open before");
+        assert_eq!(dialog_open(e, "layer_options", "{}"), JasStatus::Ok);
+        let plan = dialog_plan_of(e);
+        assert_eq!((plan["open"].clone(), plan["id"].clone()), (serde_json::json!(true), serde_json::json!("layer_options")), "{plan}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Every refusal is NAMED, and nothing opens: an id no spec defines, a
+    /// param no literal can carry (it names `dialog.param`), params that are
+    /// not JSON or not an object, and a null engine.
+    #[test]
+    fn jas_dialog_open_refuses_by_name_and_opens_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        assert_eq!(dialog_open(e, "no_such_dialog", "{}"), JasStatus::MissingTarget);
+        assert!(last_error_of(e).contains("no_such_dialog"), "{}", last_error_of(e));
+        assert_eq!(dialog_open(e, "layer_options", r#"{"name": ["x"]}"#), JasStatus::BadParamType);
+        assert!(last_error_of(e).contains("layer_options.name"), "{}", last_error_of(e));
+        assert_eq!(dialog_open(e, "layer_options", "{not json"), JasStatus::BadJson);
+        assert_eq!(dialog_open(e, "layer_options", "[1]"), JasStatus::BadParamType);
+        assert_eq!(dialog_plan_of(e)["open"], false, "no refusal opened anything");
+        assert_eq!(unsafe { jas_dialog_open(std::ptr::null_mut(), "x".as_ptr(), 1, "{}".as_ptr(), 2) }, JasStatus::NullHandle);
         unsafe { jas_engine_free(e) };
     }
 
