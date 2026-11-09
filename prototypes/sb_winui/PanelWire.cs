@@ -1,4 +1,4 @@
-﻿namespace SbWinUi;
+namespace SbWinUi;
 
 /// <summary>
 /// W2b-2: what a panel control SENDS the core, what a row SAYS it sent, and
