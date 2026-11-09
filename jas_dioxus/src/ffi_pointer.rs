@@ -27,6 +27,10 @@ use crate::panel_behavior::ALIGN_PANEL;
 pub const KIND_PRESS: u32 = 0;
 pub const KIND_MOVE: u32 = 1;
 pub const KIND_RELEASE: u32 = 2;
+/// A double-click, sent AFTER the second press/release pair (a browser's
+/// `dblclick` order; docs/TESTING.md section 6). It reaches the active tool's
+/// `on_double_click` and nothing else (jas STATUS-flask 750, 756: G11).
+pub const KIND_DOUBLE_CLICK: u32 = 3;
 
 /// Modifier bit flags. ABI, like the kinds above.
 pub const MOD_SHIFT: u32 = 1 << 0;
@@ -747,6 +751,81 @@ mod tests {
 
         assert_eq!(selection_len(e), 1,
                    "the marquee enclosed the rect, so the tool selected it");
+        unsafe { jas_engine_free(e) };
+    }
+
+    fn engine_on_fixture(fixture: &str) -> *mut JasEngine {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/{fixture}")).unwrap();
+        let e = jas_engine_new();
+        unsafe { &*e }.replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        e
+    }
+
+    fn selected_paths(e: *mut JasEngine) -> Vec<Vec<usize>> {
+        unsafe { &*e }.with_document(|d| d.selection.iter().map(|s| s.path.to_vec()).collect())
+    }
+
+    /// The midpoint of the line inside complex_document.svg's group `[0, 2]`,
+    /// read from the document, never typed (jas STATUS-flask 756).
+    fn grouped_line_midpoint(e: *mut JasEngine) -> (f64, f64) {
+        unsafe { &*e }.with_document(|d| match d.get_element(&vec![0, 2, 0].into()) {
+            Some(Element::Line(l)) => ((l.x1 + l.x2) / 2.0, (l.y1 + l.y2) / 2.0),
+            other => panic!("the fixture's [0, 2, 0] is not a line: {other:?}"),
+        })
+    }
+
+    /// G11 THROUGH THE C ABI (jas STATUS-flask 750, 756): press, release, press,
+    /// release, then KIND_DOUBLE_CLICK on a group enters it, so the next click
+    /// on the same point selects the group's CHILD. The grammar's order, a
+    /// browser's `dblclick` order. Mirrors jas's Swift arm.
+    #[test]
+    fn a_double_click_on_a_group_enters_it_so_a_click_selects_its_child() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on_fixture("complex_document.svg");
+        let (x, y) = grouped_line_midpoint(e);
+        unsafe {
+            assert_eq!(jas_set_tool(e, 0), JasStatus::Ok, "index 0 is 'selection'");
+            for _ in 0..2 {
+                assert_eq!(jas_pointer_event(e, KIND_PRESS, x, y, 0), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_RELEASE, x, y, 0), JasStatus::Ok);
+            }
+            assert_eq!(jas_pointer_event(e, KIND_DOUBLE_CLICK, x, y, 0), JasStatus::Ok,
+                       "the double-click kind is accepted");
+            assert_eq!(jas_pointer_event(e, KIND_PRESS, x, y, 0), JasStatus::Ok);
+            assert_eq!(jas_pointer_event(e, KIND_RELEASE, x, y, 0), JasStatus::Ok);
+        }
+        assert_eq!(selected_paths(e), vec![vec![0, 2, 0]],
+                   "inside the isolated group, a click selects the child");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The CONTROL: the same clicks with no double-click select the GROUP, so
+    /// the arm above is decided by the double-click and nothing else.
+    #[test]
+    fn the_same_clicks_without_the_double_click_select_the_group() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on_fixture("complex_document.svg");
+        let (x, y) = grouped_line_midpoint(e);
+        unsafe {
+            assert_eq!(jas_set_tool(e, 0), JasStatus::Ok);
+            for _ in 0..3 {
+                assert_eq!(jas_pointer_event(e, KIND_PRESS, x, y, 0), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_RELEASE, x, y, 0), JasStatus::Ok);
+            }
+        }
+        assert_eq!(selected_paths(e), vec![vec![0, 2]], "not isolated: a click selects the group");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The kinds are ABI and APPENDED: 3 is the double-click, and the next
+    /// integer is still refused by name, never read as a release.
+    #[test]
+    fn the_double_click_kind_is_three_and_four_is_still_unknown() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        assert_eq!((KIND_PRESS, KIND_MOVE, KIND_RELEASE, KIND_DOUBLE_CLICK), (0, 1, 2, 3));
+        let e = engine_on_fixture("complex_document.svg");
+        assert_eq!(unsafe { jas_pointer_event(e, 4, 1.0, 1.0, 0) }, JasStatus::UnknownVerb);
         unsafe { jas_engine_free(e) };
     }
 
