@@ -2225,7 +2225,8 @@ internal sealed class FloatTour
                 return null;
             }
         }
-        return idx[0] == idx[1] ? null : new FloatTour(Math.Max(idx[0], idx[1]), Math.Min(idx[0], idx[1]));
+        if (idx[0] == idx[1]) { return null; }
+        return idx[0] > idx[1] ? new FloatTour(idx[0], idx[1]) : new FloatTour(idx[1], idx[0]);
     }
 
     /// <summary>One step: the op to send (null when refused), the pane group it names, and its row.</summary>
