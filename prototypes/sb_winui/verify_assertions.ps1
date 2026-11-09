@@ -1626,6 +1626,13 @@ if ($qdc.Verdict -eq 'NOT RUN') {
 } else {
     Add-Assert -Name $qdc.Name -Verdict $qdc.Verdict -Detail $qdc.Detail -Row $qdc.Row
 }
+# Q6.FL -- two groups float, move, raise and redock, replayed by SB_DOCK_FLOAT_TOUR (FP-6).
+$qfl = Get-SbDockFloatTourVerdict $rows $Scene $env:SB_DOCK $env:SB_DOCK_FLOAT_TOUR
+if ($qfl.Verdict -eq 'NOT RUN') {
+    Add-NotRun $qfl.Name $qfl.Detail -Row $qfl.Row
+} else {
+    Add-Assert -Name $qfl.Name -Verdict $qfl.Verdict -Detail $qfl.Detail -Row $qfl.Row
+}
 # Q6.PM -- a dock group's panel menu, replayed by SB_PANEL_MENU_SYNTH (note 3).
 $qpm = Get-SbPanelMenuVerdict $rows $Scene $env:SB_DOCK $env:SB_PANEL_MENU_SYNTH
 if ($qpm.Verdict -eq 'NOT RUN') {

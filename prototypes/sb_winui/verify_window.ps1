@@ -789,6 +789,18 @@ if ($sceneOutcome.Verdict -eq 'DONE') {
             if (& $done $rows) { $verdicts += "ok  : the dock-collapse replay finished after $([math]::Round($cw.Elapsed.TotalSeconds, 1))s more" }
             else { $verdicts += "note: the dock-collapse replay did not finish within $([math]::Round($cw.Elapsed.TotalSeconds, 1))s; Q6.DC judges what arrived" }
         }
+        # SB_DOCK_FLOAT_TOUR's replay (Q6.FL): six layout ops, each issued on the
+        # previous answer; its last row is DONE, or a refusal that ends it.
+        if (-not [string]::IsNullOrWhiteSpace($env:SB_DOCK_FLOAT_TOUR)) {
+            $fw = [System.Diagnostics.Stopwatch]::StartNew()
+            $done = { param($r) $null -ne (Select-SbRow $r 'FLOAT TOUR DONE |RUSTFAIL (FLOAT TOUR |DOCK OP |FLOAT DOCK DRAW )') }
+            while (-not (& $done $rows) -and $fw.Elapsed.TotalSeconds -lt 30) {
+                Start-Sleep -Milliseconds 250
+                $rows = Read-SbRows $log $logMark
+            }
+            if (& $done $rows) { $verdicts += "ok  : the floating tour finished after $([math]::Round($fw.Elapsed.TotalSeconds, 1))s more" }
+            else { $verdicts += "note: the floating tour did not finish within $([math]::Round($fw.Elapsed.TotalSeconds, 1))s; Q6.FL judges what arrived" }
+        }
         # SB_PANEL_MENU_SYNTH's replay (Q6.PM): a read, then the run; its last
         # row is the run's answer, or the shell's refusal.
         if (-not [string]::IsNullOrWhiteSpace($env:SB_PANEL_MENU_SYNTH)) {
