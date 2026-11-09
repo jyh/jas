@@ -57,8 +57,8 @@ public sealed partial class MainWindow
 
         /// <summary>
         /// S2: this view draws the OPEN DIALOG's plan. Its acts go to
-        /// `jas_dialog_event` instead of a panel, and it writes no `SB_PLAN_OUT`
-        /// (that file is the dock panel's, which the harness compares).
+        /// `jas_dialog_event` instead of a panel. It writes `SB_PLAN_OUT` only when
+        /// `SB_PANEL` names the dialog (`DialogWritesPlanOut`), never over the dock's file.
         /// </summary>
         private readonly bool _dialog;
 
@@ -304,7 +304,9 @@ public sealed partial class MainWindow
             // `Compare-SbRenderedTree`). Overwritten at every draw: the newest wins.
             // O97: with SB_PANEL set only that panel's pane writes, so the canvas
             // and the toolbar, which draw after it, no longer overwrite its plan.
-            if (!_dialog && PlanOutPath is { } planOut && PanelWire.WritesPlanOut(snap.PanelId, PlanOutPanel))
+            if (PlanOutPath is { } planOut && (_dialog
+                    ? PanelWire.DialogWritesPlanOut(snap.PanelId, PlanOutPanel)
+                    : PanelWire.WritesPlanOut(snap.PanelId, PlanOutPanel)))
             {
                 try
                 {

@@ -1,4 +1,4 @@
-namespace SbWinUi;
+﻿namespace SbWinUi;
 
 /// <summary>
 /// W2b-2: what a panel control SENDS the core, what a row SAYS it sent, and
@@ -754,6 +754,14 @@ internal static class PanelWire
     /// </summary>
     internal static bool WritesPlanOut(string paneId, string? panelKnob) =>
         string.IsNullOrEmpty(panelKnob) || string.Equals(paneId, panelKnob, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether the open dialog's plan goes to `SB_PLAN_OUT` (dialogs at level 2,
+    /// flask STATUS 749): only when `SB_PANEL` names THAT dialog. Unset means
+    /// "every pane" for the dock, and a dialog never overwrites the dock's file.
+    /// </summary>
+    internal static bool DialogWritesPlanOut(string dialogId, string? panelKnob) =>
+        !string.IsNullOrEmpty(panelKnob) && string.Equals(dialogId, panelKnob, StringComparison.Ordinal);
 
     /// <summary>A labelled icon_button's parts (row 56): its icon, and its label when the engine planned room for one.</summary>
     internal sealed record LeafParts(PartRect Icon, PartRect? Label);
