@@ -1455,6 +1455,24 @@ static class Program
         Eq("float tour: a second detach that floated no NEW dock is refused at step 3",
             "RUSTFAIL FLOAT TOUR REFUSED step=3 -- step 2 left 1 floating dock(s), not 2",
             noB.Next(0)?.Row ?? "(null)");
+        // jas §750 (1): a raise reorders the z-sorted floating list and keeps every
+        // key's panels, so it is drawn in place; a panel that changes group, a
+        // detach and a redock change the map and republish.
+        static List<(string Key, List<string> Panels)> Kp(params (string, string[])[] g) =>
+            g.Select(x => (x.Item1, x.Item2.ToList())).ToList();
+        var twoFloats = Kp(("dock0", new[] { "a" }), ("float1g0", new[] { "b" }), ("float2g0", new[] { "c" }));
+        Eq("structure: a raise (the floats reordered by z) keeps the structure",
+            "True", LayoutWire.SameStructure(twoFloats, Kp(("dock0", new[] { "a" }), ("float2g0", new[] { "c" }), ("float1g0", new[] { "b" }))).ToString());
+        Eq("structure: the identical list keeps it", "True", LayoutWire.SameStructure(twoFloats, twoFloats).ToString());
+        Eq("structure: a panel moved between two groups (same keys) changes it",
+            "False", LayoutWire.SameStructure(Kp(("dock0", new[] { "a", "b" }), ("dock1", new[] { "c" })),
+                                              Kp(("dock0", new[] { "a" }), ("dock1", new[] { "b", "c" }))).ToString());
+        Eq("structure: a group's own tab order changing changes it",
+            "False", LayoutWire.SameStructure(Kp(("dock0", new[] { "a", "b" })), Kp(("dock0", new[] { "b", "a" }))).ToString());
+        Eq("structure: a detach (a key gone, a key new) changes it",
+            "False", LayoutWire.SameStructure(Kp(("dock0", new[] { "a" }), ("dock1", new[] { "b" })),
+                                              Kp(("dock0", new[] { "a" }), ("float1g0", new[] { "b" }))).ToString());
+        Eq("structure: an unreadable answer (null) is never the same", "False", LayoutWire.SameStructure(twoFloats, null).ToString());
         Eq("float at: the engine's docks as one row field, fractions kept", "[1@300.5,40z0;2@-20,0z3]",
             FloatTour.At(new[] { Fd(1, 300.5, 40, 0), Fd(2, -20, 0, 3) }));
         Eq("layout: the chevron's op is the engine's toggle verb, addressed by dock and group",
