@@ -3228,6 +3228,11 @@ struct YamlElementView: View {
             // once and does not spread onto both children: the level-2 driver
             // requires a unique identifier and types into the one text field.
             .accessibilityElement(children: .contain)
+            // `bind.disabled`, read as Rust's render_combo_box reads it. The
+            // commit door refuses a disabled widget either way
+            // (WidgetEvent.disabled); this makes the field say so, and the
+            // level-2 driver reads AXEnabled.
+            .disabled(evalBindDisabled())
         if fillsParent {
             combo.frame(maxWidth: .infinity).padding(.trailing, 24)
         } else {
