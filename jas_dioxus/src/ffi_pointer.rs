@@ -307,7 +307,7 @@ unsafe fn jas_pointer_event_inner(
     // mousemove rates the refused ones are exactly the ones worth counting.
     crate::ffi_instr::record(crate::ffi_instr::Crossing::PointerEvent, 0, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
-    if !matches!(kind, KIND_PRESS | KIND_MOVE | KIND_RELEASE) {
+    if !matches!(kind, KIND_PRESS | KIND_MOVE | KIND_RELEASE | KIND_DOUBLE_CLICK) {
         return JasStatus::UnknownVerb;
     }
 
@@ -364,6 +364,10 @@ unsafe fn jas_pointer_event_inner(
     engine.with_model_mut(|m| match kind {
         KIND_PRESS => tool.on_press(m, dx, dy, shift, alt),
         KIND_MOVE => tool.on_move(m, dx, dy, shift, alt, dragging),
+        // The web's `dblclick` (workspace/app.rs, on_dblclick): the tool's
+        // double-click handler and nothing else. The two clicks before it were
+        // their own press/release pairs.
+        KIND_DOUBLE_CLICK => tool.on_double_click(m, dx, dy),
         _ => tool.on_release(m, dx, dy, shift, alt),
     });
     // A dialog the tool opened (Scale's Alt-click) moves to the engine's store,
@@ -379,7 +383,9 @@ unsafe fn jas_pointer_event_inner(
     engine.with_store_mut(|store| for (k, v) in owned { store.set(&k, v) });
     // A key that the tool's event deselected is cleared, as the web canvas
     // clears it after every press and release (ALIGN.md §Panel state).
-    if kind != KIND_MOVE {
+    // The web clears the key after a press and a release; its `dblclick`
+    // clears nothing, so neither does a double-click here.
+    if matches!(kind, KIND_PRESS | KIND_RELEASE) {
         engine.with_store_mut(|store| {
             let key = align_host::path_value(store.get_panel(ALIGN_PANEL, "key_object_path"));
             if key.is_some() {
