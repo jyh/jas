@@ -2169,8 +2169,39 @@ pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_dialog_open(e: *mut JasEngine, id: *const u8, id_len: usize,
                                          params_json: *const u8, params_len: usize) -> JasStatus {
-    let _ = (e, id, id_len, params_json, params_len);
-    JasStatus::MissingTarget
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
+    let (Ok(id), Ok(raw)) = (unsafe { utf8(id, id_len) }, unsafe { utf8(params_json, params_len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasStatus::BadUtf8;
+    };
+    let Ok(params) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasStatus::BadJson;
+    };
+    let Some(params) = params.as_object() else {
+        set_panel_event_error(engine, "BadParamType", "params_json is not an object");
+        return JasStatus::BadParamType;
+    };
+    let Some(ws) = Workspace::load() else { return JasStatus::MissingTarget };
+    if ws.dialog(id).is_none() {
+        set_panel_event_error(engine, "MissingTarget", &format!("no dialog spec defines `{id}`"));
+        return JasStatus::MissingTarget;
+    }
+    // A value no literal carries is refused BEFORE anything opens, by name.
+    if let Some((k, _)) = params.iter().find(|(_, v)| tool_param_literal(v).is_none()) {
+        set_panel_event_error(engine, "UnliteralParam", &format!("{id}.{k}"));
+        return JasStatus::BadParamType;
+    }
+    open_tool_dialog(engine, id, params);
+    // Ok is a READING, never assumed: the named dialog must now be on top.
+    if engine.store.borrow().dialog_id() == Some(id) {
+        JasStatus::Ok
+    } else {
+        if engine.last_error.borrow().is_none() {
+            set_panel_event_error(engine, "MissingTarget", &format!("`{id}` did not open"));
+        }
+        JasStatus::MissingTarget
+    }
 }
 
 #[unsafe(no_mangle)]
