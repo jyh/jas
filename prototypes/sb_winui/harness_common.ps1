@@ -2751,6 +2751,23 @@ function Get-SbDockFloatTourVerdict($Rows, [string]$Scene, [string]$Dock, [strin
         }
         $reads[$n] = @{ Row = $read; At = $at }
     }
+    # A move and a raise keep every key's panels, so they are drawn IN PLACE: a
+    # whole-dock republish between their STEP and READ is the zip-in-list-order
+    # defect (jas STATUS-flask 750; its mutant, run live, wrote one at step 4).
+    $all = @($Rows)
+    foreach ($n in 3, 4) {
+        $s = -1; $r = -1
+        for ($i = 0; $i -lt $all.Count; $i++) {
+            if ($s -lt 0 -and $all[$i] -match (Get-SbRowPattern 'FLOAT TOUR STEP' " n=$n ")) { $s = $i }
+            if ($s -ge 0 -and $all[$i] -match (Get-SbRowPattern 'FLOAT TOUR READ' " n=$n ")) { $r = $i; break }
+        }
+        if ($s -ge 0 -and $r -gt $s) {
+            $re = @($all[($s + 1)..($r - 1)] | Where-Object { $_ -match (Get-SbRowPattern 'DOCK LAYOUT' ' name=') })
+            if ($r -gt $s + 1 -and $re.Count -gt 0) {
+                return New-SbVerdict $name 'FAIL' "step $n kept every key's panels and the shell republished the whole dock for it (a DOCK LAYOUT row between its STEP and READ): it should be drawn in place" $re[0]
+            }
+        }
+    }
     # Step 1 floats one dock (A), step 2 a second (B).
     if ($reads[1].At.Count -ne 1) { return New-SbVerdict $name 'FAIL' "step 1's detach left $($reads[1].At.Count) floating dock(s), not 1" $reads[1].Row }
     $a = @($reads[1].At.Keys)[0]

@@ -2848,6 +2848,19 @@ Test-Case 'Q6.FL: an unreadable at= list FAILS, never reads as no docks' {
 Test-Case 'Q6.FL: docks= disagreeing with the at= list FAILS' {
     (Get-SbFl (Set-SbFlRow 3 'FLOAT TOUR READ n=2 docks=2 at=[1@300,40z0]')).Verdict
 } 'FAIL'
+# jas STATUS-flask 750: a move and a raise keep every key's panels, so they are
+# drawn IN PLACE; a whole-dock republish between their STEP and READ is the
+# zip-in-list-order defect, measured live (the mutant's run wrote DOCK LAYOUT at step 4).
+$flRepublish = 'DOCK LAYOUT name=Default groups=3 floating=2 floating-groups=2 cause=op ' + $q6Tids
+function Add-SbFlRowAfter([int]$Index, [string]$Row) { $s = @($flSteps); return @($s[0..$Index]) + $Row + @($s[($Index + 1)..($s.Count - 1)]) }
+Test-Case 'Q6.FL: a RAISE that republished the whole dock FAILS -- the zip-in-list-order mutant, live 11-09' {
+    $v = Get-SbFl (Add-SbFlRowAfter 6 $flRepublish)
+    "$($v.Verdict) $($v.Detail -match 'step 4')"
+} 'FAIL True'
+Test-Case 'Q6.FL: a MOVE that republished the whole dock FAILS' { (Get-SbFl (Add-SbFlRowAfter 4 $flRepublish)).Verdict } 'FAIL'
+Test-Case 'Q6.FL: CONTROL -- a detach''s republish is its own, and still PASSES' {
+    (Get-SbFl (Add-SbFlRowAfter 0 ($flRepublish -replace 'floating=2', 'floating=1'))).Verdict
+} 'PASS'
 Test-Case 'Q6.D: a refused FLOAT TOUR knob is Q6.FL''s, not a broken dock -- Q6.D still PASSES' {
     (Get-SbDk ($dkHealthy + 'RUSTFAIL FLOAT TOUR REFUSED value=dock9,dock1 -- x')).Verdict
 } 'PASS'
