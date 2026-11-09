@@ -2770,6 +2770,87 @@ Test-Case 'Q6.D: CONTROL -- a refused DOCK itself still FAILS beside it' {
 } 'FAIL'
 Test-Case 'Q6.DC: CONTROL -- a HAND chevron row is not the replay' { (Get-SbDc @(($dcDown -replace 'synth', 'hand'), ($dcUp -replace 'synth', 'hand'))).Verdict } 'FAIL'
 Test-Case 'Q6.D: SB_DOCK set on a scene that opens no pane FAILS -- the shell ignores the knob there' { (Get-SbDk @() 'retained').Verdict } 'FAIL'
+
+# ---- Q6.FL: TWO GROUPS FLOAT, ONE MOVES AND IS RAISED, BOTH REDOCK (FP-6's
+# scene, the floating-panels freeze 10-21 section 2). `SB_DOCK_FLOAT_TOUR=<a>,<b>`
+# detaches two anchored groups (the higher index first, so the lower key stays
+# valid), moves the FIRST float to (300, 260), raises it over the second, then
+# redocks the first and the second, each step through the gesture's own method
+# and each issued only once the previous answer is PLACED. Every READ row is the
+# engine's floating state after that step, as the shell drew it.
+$flSteps = @(
+    'FLOAT TOUR STEP n=1 op=detach_group group=dock3 x=300 y=40 via=synth',
+    'FLOAT TOUR READ n=1 docks=1 at=[1@300,40z0]',
+    'FLOAT TOUR STEP n=2 op=detach_group group=dock1 x=520 y=40 via=synth',
+    'FLOAT TOUR READ n=2 docks=2 at=[1@300,40z0;2@520,40z1]',
+    'FLOAT TOUR STEP n=3 op=set_floating_position dock=1 x=300 y=260 via=synth',
+    'FLOAT TOUR READ n=3 docks=2 at=[1@300,260z0;2@520,40z1]',
+    'FLOAT TOUR STEP n=4 op=bring_to_front dock=1 via=synth',
+    'FLOAT TOUR READ n=4 docks=2 at=[1@300,260z2;2@520,40z1]',
+    'FLOAT TOUR STEP n=5 op=redock dock=1 via=synth',
+    'FLOAT TOUR READ n=5 docks=1 at=[2@520,40z1]',
+    'FLOAT TOUR STEP n=6 op=redock dock=2 via=synth',
+    'FLOAT TOUR READ n=6 docks=0 at=[]',
+    'FLOAT TOUR DONE steps=6 groups=5 tabs=11')
+function Get-SbFl([string[]]$Extra, [string]$Tour = 'dock1,dock3', [string]$Dock = 'Default', [string]$Scene = 'app') {
+    return (Get-SbDockFloatTourVerdict (New-SbDockRows ($dkHealthy + $Extra)) $Scene $Dock $Tour)
+}
+function Set-SbFlRow([int]$Index, [string]$Row) { $s = @($flSteps); $s[$Index] = $Row; return $s }
+Test-Case 'Q6.FL: the whole tour, every step read off the engine, PASSES' { (Get-SbFl $flSteps).Verdict } 'PASS'
+Test-Case 'Q6.FL: ...and the detail names both docks and the raise' {
+    $d = (Get-SbFl $flSteps).Detail
+    if ($d -match 'dock 1' -and $d -match 'dock 2' -and $d -match 'z2 over z1') { 'named' } else { $d }
+} 'named'
+Test-Case 'Q6.FL: SB_DOCK_FLOAT_TOUR unset is NOT RUN, by name' { (Get-SbFl @() '').Verdict } 'NOT RUN'
+Test-Case 'Q6.FL: the knob with no dock FAILS -- there is nothing to float' { (Get-SbFl $flSteps 'dock1,dock3' '').Verdict } 'FAIL'
+Test-Case 'Q6.FL: the knob off app FAILS' { (Get-SbFl $flSteps 'dock1,dock3' 'Default' 'document').Verdict } 'FAIL'
+Test-Case 'Q6.FL: no tour row at all FAILS -- the tour was never driven' { (Get-SbFl @()).Verdict } 'FAIL'
+Test-Case 'Q6.FL: a tour that stopped after step 4 FAILS and names step 5' {
+    $v = Get-SbFl $flSteps[0..7]
+    "$($v.Verdict) $($v.Detail -match 'step 5')"
+} 'FAIL True'
+Test-Case 'Q6.FL: a detach that floated nothing FAILS' { (Get-SbFl (Set-SbFlRow 1 'FLOAT TOUR READ n=1 docks=0 at=[]')).Verdict } 'FAIL'
+Test-Case 'Q6.FL: a move the engine did not take FAILS -- the dock stayed at (300, 40)' {
+    (Get-SbFl (Set-SbFlRow 5 'FLOAT TOUR READ n=3 docks=2 at=[1@300,40z0;2@520,40z1]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: a move that moved the OTHER dock FAILS' {
+    (Get-SbFl (Set-SbFlRow 5 'FLOAT TOUR READ n=3 docks=2 at=[1@300,40z0;2@300,260z1]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: a raise that left the dock UNDER the other FAILS' {
+    (Get-SbFl (Set-SbFlRow 7 'FLOAT TOUR READ n=4 docks=2 at=[1@300,260z0;2@520,40z1]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: a redock that removed the WRONG dock FAILS' {
+    (Get-SbFl (Set-SbFlRow 9 'FLOAT TOUR READ n=5 docks=1 at=[1@300,260z2]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: a dock still floating at the end FAILS' {
+    (Get-SbFl (Set-SbFlRow 11 'FLOAT TOUR READ n=6 docks=1 at=[2@520,40z1]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: a redocked dock short of a group FAILS -- a group the tour lost' {
+    (Get-SbFl (Set-SbFlRow 12 'FLOAT TOUR DONE steps=6 groups=4 tabs=9')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: a redocked dock short of a TAB FAILS' {
+    (Get-SbFl (Set-SbFlRow 12 'FLOAT TOUR DONE steps=6 groups=5 tabs=10')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: an engine refusal of a step FAILS and is quoted' {
+    $v = Get-SbFl ($flSteps[0..5] + 'RUSTFAIL DOCK OP REFUSED group=float1 via=synth channel={"layout_op":"BadLayoutOp"}')
+    "$($v.Verdict) $($v.Row -match 'BadLayoutOp')"
+} 'FAIL True'
+Test-Case 'Q6.FL: the shell''s refusal of the knob FAILS and is quoted' {
+    $v = Get-SbFl @('RUSTFAIL FLOAT TOUR REFUSED value=dock9,dock1 -- want two distinct keys of the 5 anchored group(s)') 'dock9,dock1'
+    "$($v.Verdict) $($v.Row -match 'dock9')"
+} 'FAIL True'
+Test-Case 'Q6.FL: CONTROL -- a HAND drag of the same dock is not the tour' {
+    (Get-SbFl ($flSteps[0..3] + 'FLOAT DOCK DRAG id=1 x=300 y=260 via=hand')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: an unreadable at= list FAILS, never reads as no docks' {
+    (Get-SbFl (Set-SbFlRow 3 'FLOAT TOUR READ n=2 docks=2 at=[garbage]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.FL: docks= disagreeing with the at= list FAILS' {
+    (Get-SbFl (Set-SbFlRow 3 'FLOAT TOUR READ n=2 docks=2 at=[1@300,40z0]')).Verdict
+} 'FAIL'
+Test-Case 'Q6.D: a refused FLOAT TOUR knob is Q6.FL''s, not a broken dock -- Q6.D still PASSES' {
+    (Get-SbDk ($dkHealthy + 'RUSTFAIL FLOAT TOUR REFUSED value=dock9,dock1 -- x')).Verdict
+} 'PASS'
 # ---------------------------------------------------------------------------
 # Q6.PM -- A DOCK GROUP'S PANEL MENU, READ AND RUN IN THE ENGINE (2026-10-12)
 # ---------------------------------------------------------------------------
