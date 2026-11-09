@@ -1,4 +1,4 @@
-namespace SbWinUi;
+﻿namespace SbWinUi;
 
 /// <summary>
 /// W2b-2: what a panel control SENDS the core, what a row SAYS it sent, and
@@ -2181,6 +2181,24 @@ internal static class LayoutWire
 
     internal static string DetachGroup(int dockId, int groupIdx, double x, double y) =>
         Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["x"] = x, ["y"] = y });
+
+    /// <summary>
+    /// Whether a layout answer kept the dock's STRUCTURE: the same pane keys, each
+    /// showing the same panels in the same order. Compared as a map from key to
+    /// panels, never in list order: the floating docks arrive sorted by `z`, so a
+    /// raise reorders the list and keeps every key (jas STATUS-flask 750). A panel
+    /// moving between groups keeps the keys and changes the map, so it is a change.
+    /// An unreadable answer (null) is never the same.
+    /// </summary>
+    internal static bool SameStructure(IReadOnlyList<(string Key, List<string> Panels)> before,
+                                       IReadOnlyList<(string Key, List<string> Panels)>? after)
+    {
+        if (after is null || after.Count != before.Count) { return false; }
+        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (key, panels) in before) { map[key] = panels; }
+        return map.Count == before.Count
+            && after.All(a => map.TryGetValue(a.Key, out var p) && p.SequenceEqual(a.Panels));
+    }
 }
 
 /// <summary>
