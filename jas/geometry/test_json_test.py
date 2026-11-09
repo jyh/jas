@@ -148,5 +148,21 @@ class TspanParagraphAttributesTest(absltest.TestCase):
         self.assertEqual(default, fields, f"writer only {default - fields}, struct only {fields - default}")
 
 
+
+class SelectionJsonOrderTest(absltest.TestCase):
+    """D6: the canonical JSON emits a selection in ITS order and never dedups,
+    so a missing insertion guard shows in every multi-entry golden. Twin of
+    Rust `selection_json_preserves_emission_order` (`test_json.rs`)."""
+
+    def test_selection_json_preserves_emission_order(self):
+        from document.document import ElementSelection, Selection
+        from geometry.test_json import _selection_json
+        sel = Selection((ElementSelection.all((1, 0)), ElementSelection.all((0, 1)),
+                         ElementSelection.partial((0, 0), (2, 0, 4))))
+        out = _selection_json(sel)
+        self.assertLess(out.index("[1,0]"), out.index("[0,1]"), out)
+        self.assertLess(out.index("[0,1]"), out.index("[0,0]"), out)
+
+
 if __name__ == "__main__":
     absltest.main()
