@@ -7762,7 +7762,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
     var events: [[String: Any]] = [["kind": "script_step", "index": -1, "step": [:] as [String: Any]]]
     var focused = false
     for (i, st) in steps.enumerated() {
-        if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+        if let kind = st["kind"] as? String, ["press", "move", "release", "double_click"].contains(kind) {
             focused = false
             events.append(["kind": "script_step", "index": i, "step": ["__pointer": true]])
             events.append(st)
@@ -8072,4 +8072,38 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
     let out = env["JAS_FORMS_OUT"] ?? "\(dir)/forms-readbacks-swift.json"
     try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
         .write(to: URL(fileURLWithPath: out))
+}
+
+/// The forms runner's twin of Rust `the_forms_replay_delivers_a_double_click_step`
+/// (flask's §757 wired `replay_forms`): G11's script, press, release, press,
+/// release, `double_click` on complex_document.svg's group `[0, 2]`, then a
+/// click, read back, selects `[0, 2, 0]`; the CONTROL without the double
+/// selects `[0, 2]`. The point is the group's line's midpoint, from the fixture.
+@Test func formsReplayDeliversADoubleClickStep() throws {
+    let probe = svgToDocument(readFixture("svg/complex_document.svg"))
+    guard case .group(let g) = probe.getElement([0, 2]), case .line(let ln) = g.children[0] else {
+        Issue.record("complex_document.svg no longer has a group holding a line at [0, 2]")
+        return
+    }
+    let x = (ln.x1 + ln.x2) / 2, y = (ln.y1 + ln.y2) / 2
+    func selected(_ double: Bool) -> [[Int]]? {
+        func click(_ k: String) -> [String: Any] { ["kind": k, "x": x, "y": y] }
+        var steps = [click("press"), click("release"), click("press"), click("release")]
+        if double { steps.append(click("double_click")) }
+        steps += [click("press"), click("release"), ["read": "document"]]
+        switch replayForms(["item": "g11", "setup_svg": "complex_document.svg", "tool": "selection",
+                            "app_state": [String: Any](), "steps": steps]) {
+        case .failure(let r):
+            Issue.record("forms replay refused: \(r.why)"); return nil
+        case .success(let out):
+            if let why = formsRefusal(out) { Issue.record("forms replay refused: \(why)"); return nil }
+            guard let text = formsDocReads(out).last,
+                  let v = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+                Issue.record("no document read"); return nil
+            }
+            return ((v["selection"] as? [[String: Any]]) ?? []).compactMap { ($0["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } }
+        }
+    }
+    #expect(selected(true) == [[0, 2, 0]], "isolated: the click selects the child")
+    #expect(selected(false) == [[0, 2]], "no double: the click selects the group")
 }
