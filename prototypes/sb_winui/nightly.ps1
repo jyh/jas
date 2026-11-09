@@ -1,4 +1,4 @@
-﻿# nightly.ps1 -- O97's unattended Windows UI run: the box preflight, every input
+# nightly.ps1 -- O97's unattended Windows UI run: the box preflight, every input
 # script through prove_e2e.ps1, every panel through rendered_tree.ps1, and ONE
 # receipt.
 #
