@@ -2132,25 +2132,7 @@ pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
     JasBytes::from_vec(crate::geometry::pdf::document_to_pdf(engine.model.borrow().document()))
 }
 
-/// **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
-/// planner over the dialog's `content`, so the shell materializes a dialog
-/// body with the code that materializes a panel. The context is the engine's
-/// scope plus the dialog's own (`dialog.*`, its state; `param.*`, its params).
-///
-/// # The reply
-///
-/// `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
-/// "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
-/// are open (2 when the Color Picker sits over Layer Options), `width` is the
-/// dialog's declared width or null (the web sizes an undeclared one to its
-/// content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
-/// planned at the caller's `avail_w`.
-///
-/// A null engine is the empty span. **BL4**: copy the span, then release with
-/// [`jas_free`].
-///
-/// # Safety
-/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+
 /// Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
 /// the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
 /// a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
@@ -2170,6 +2152,8 @@ pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
 pub unsafe extern "C" fn jas_dialog_open(e: *mut JasEngine, id: *const u8, id_len: usize,
                                          params_json: *const u8, params_len: usize) -> JasStatus {
     let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
+    // A success leaves no error readable, as every other success here (jas §759).
+    *engine.last_error.borrow_mut() = None;
     let (Ok(id), Ok(raw)) = (unsafe { utf8(id, id_len) }, unsafe { utf8(params_json, params_len) }) else {
         set_panel_event_error(engine, "BadUtf8", "");
         return JasStatus::BadUtf8;
@@ -2182,7 +2166,10 @@ pub unsafe extern "C" fn jas_dialog_open(e: *mut JasEngine, id: *const u8, id_le
         set_panel_event_error(engine, "BadParamType", "params_json is not an object");
         return JasStatus::BadParamType;
     };
-    let Some(ws) = Workspace::load() else { return JasStatus::MissingTarget };
+    let Some(ws) = Workspace::load() else {
+        set_panel_event_error(engine, "MissingTarget", "the workspace spec did not load");
+        return JasStatus::MissingTarget;
+    };
     if ws.dialog(id).is_none() {
         set_panel_event_error(engine, "MissingTarget", &format!("no dialog spec defines `{id}`"));
         return JasStatus::MissingTarget;
@@ -2197,6 +2184,7 @@ pub unsafe extern "C" fn jas_dialog_open(e: *mut JasEngine, id: *const u8, id_le
     if engine.store.borrow().dialog_id() == Some(id) {
         JasStatus::Ok
     } else {
+        // Cleared at entry, so an error here is THIS call's (open_tool_dialog's own).
         if engine.last_error.borrow().is_none() {
             set_panel_event_error(engine, "MissingTarget", &format!("`{id}` did not open"));
         }
@@ -2204,6 +2192,25 @@ pub unsafe extern "C" fn jas_dialog_open(e: *mut JasEngine, id: *const u8, id_le
     }
 }
 
+/// **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
+/// planner over the dialog's `content`, so the shell materializes a dialog
+/// body with the code that materializes a panel. The context is the engine's
+/// scope plus the dialog's own (`dialog.*`, its state; `param.*`, its params).
+///
+/// # The reply
+///
+/// `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
+/// "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
+/// are open (2 when the Color Picker sits over Layer Options), `width` is the
+/// dialog's declared width or null (the web sizes an undeclared one to its
+/// content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
+/// planned at the caller's `avail_w`.
+///
+/// A null engine is the empty span. **BL4**: copy the span, then release with
+/// [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_h: i64) -> JasBytes {
     let Some(engine) = (unsafe { e.as_ref() }) else {
@@ -6340,6 +6347,19 @@ mod tests {
         assert_eq!(dialog_open(e, "layer_options", "[1]"), JasStatus::BadParamType);
         assert_eq!(dialog_plan_of(e)["open"], false, "no refusal opened anything");
         assert_eq!(unsafe { jas_dialog_open(std::ptr::null_mut(), "x".as_ptr(), 1, "{}".as_ptr(), 2) }, JasStatus::NullHandle);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A success CLEARS the last error, as every other success in this file
+    /// does (jas STATUS-flask 759): a refusal, then an Ok, reads no error.
+    #[test]
+    fn jas_dialog_open_success_clears_the_last_error() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        assert_eq!(dialog_open(e, "no_such_dialog", "{}"), JasStatus::MissingTarget);
+        assert!(!last_error_of(e).is_empty(), "the control: the refusal left an error");
+        assert_eq!(dialog_open(e, "layer_options", "{}"), JasStatus::Ok);
+        assert_eq!(last_error_of(e), "", "the Ok cleared the stale error");
         unsafe { jas_engine_free(e) };
     }
 

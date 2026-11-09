@@ -914,25 +914,6 @@ uint8_t jas_dialog_dismiss(struct JasEngine *e);
 struct JasBytes jas_document_pdf(struct JasEngine *e);
 
 /**
- * **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
- * planner over the dialog's `content`, so the shell materializes a dialog
- * body with the code that materializes a panel. The context is the engine's
- * scope plus the dialog's own (`dialog.*`, its state; `param.*`, its params).
- *
- * # The reply
- *
- * `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
- * "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
- * are open (2 when the Color Picker sits over Layer Options), `width` is the
- * dialog's declared width or null (the web sizes an undeclared one to its
- * content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
- * planned at the caller's `avail_w`.
- *
- * A null engine is the empty span. **BL4**: copy the span, then release with
- * [`jas_free`].
- *
- * # Safety
- * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
  * Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
  * the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
  * a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
@@ -955,6 +936,27 @@ JasStatus jas_dialog_open(struct JasEngine *e,
                           const uint8_t *params_json,
                           uintptr_t params_len);
 
+/**
+ * **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
+ * planner over the dialog's `content`, so the shell materializes a dialog
+ * body with the code that materializes a panel. The context is the engine's
+ * scope plus the dialog's own (`dialog.*`, its state; `param.*`, its params).
+ *
+ * # The reply
+ *
+ * `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
+ * "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
+ * are open (2 when the Color Picker sits over Layer Options), `width` is the
+ * dialog's declared width or null (the web sizes an undeclared one to its
+ * content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
+ * planned at the caller's `avail_w`.
+ *
+ * A null engine is the empty span. **BL4**: copy the span, then release with
+ * [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
 struct JasBytes jas_dialog_plan(struct JasEngine *e, int64_t avail_w, int64_t avail_h);
 
 /**
