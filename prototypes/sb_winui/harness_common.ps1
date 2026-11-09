@@ -3875,7 +3875,11 @@ function Get-SbNightlyVerdict {
         [string[]]$Items = @(),
         [int]$ItemsWanted,
         $Panels = @(),
-        [int]$PanelsWanted
+        [int]$PanelsWanted,
+        # Dialogs at level 2 (flask STATUS 749), as panels are: @{Panel; Exit}.
+        # With none wanted the receipt is today's, byte for byte.
+        $Dialogs = @(),
+        [int]$DialogsWanted = 0
     )
     if ($Box -ne 'READY') { return $Box }
     if ($Stop) { return $Stop }
@@ -3883,7 +3887,11 @@ function Get-SbNightlyVerdict {
     if ($ItemsWanted + $PanelsWanted -eq 0) { return 'NOT RUN(empty: the corpus has 0 items and 0 panels)' }
     $items = @($Items | Where-Object { $_ })
     $panels = @($Panels | Where-Object { $null -ne $_ })
-    if ($items.Count -lt $ItemsWanted -or $panels.Count -lt $PanelsWanted) {
+    $dialogs = @($Dialogs | Where-Object { $null -ne $_ })
+    if ($items.Count -lt $ItemsWanted -or $panels.Count -lt $PanelsWanted -or $dialogs.Count -lt $DialogsWanted) {
+        if ($DialogsWanted -gt 0) {
+            return "NOT RUN(torn: $($items.Count) of $ItemsWanted items, $($panels.Count) of $PanelsWanted panels and $($dialogs.Count) of $DialogsWanted dialogs ran)"
+        }
         return "NOT RUN(torn: $($items.Count) of $ItemsWanted items and $($panels.Count) of $PanelsWanted panels ran)"
     }
     $certified = 0
@@ -3901,7 +3909,13 @@ function Get-SbNightlyVerdict {
         if ([int]$p.Exit -eq 0) { $ok++; continue }
         if (-not $first) { $first = "panel $($p.Panel) exit=$($p.Exit)" }
     }
+    $dok = 0
+    foreach ($d in $dialogs) {
+        if ([int]$d.Exit -eq 0) { $dok++; continue }
+        if (-not $first) { $first = "dialog $($d.Panel) exit=$($d.Exit)" }
+    }
     $counts = "items=$certified/$($items.Count) panels=$ok/$($panels.Count)"
+    if ($DialogsWanted -gt 0) { $counts += " dialogs=$dok/$($dialogs.Count)" }
     # GREEN takes no parenthesis: the word, a space, the counts (the dashboard's
     # reader takes a parenthesis only after RED or NOT RUN).
     if (-not $first) { return "GREEN $counts" }

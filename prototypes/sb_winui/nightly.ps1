@@ -1,4 +1,4 @@
-# nightly.ps1 -- O97's unattended Windows UI run: the box preflight, every input
+﻿# nightly.ps1 -- O97's unattended Windows UI run: the box preflight, every input
 # script through prove_e2e.ps1, every panel through rendered_tree.ps1, and ONE
 # receipt.
 #
@@ -21,6 +21,9 @@
 # Receipt: line 1 is
 #   O97-NIGHTLY v1 verdict=<V> head=<sha8> scope=<full|only(x)> date=<iso> minutes=<m> apps-left=<n>
 # where <V> is `GREEN items=<c>/<n> panels=<k>/<m>`, `RED(...)` or `NOT RUN(...)`.
+# With covered dialogs (scripts/dialog_openers.py), the counts end `dialogs=<k>/<m>`;
+# CORPUS names the dialogs run and the uncovered count. systems' reader takes the
+# extra field unchanged (flask STATUS 754, measured on its own code).
 # then BOX, and one ITEM or PANEL line per failure. apps-left is a MACHINE READ
 # of SbWinUi processes after the run; it should be 0.
 #
@@ -78,11 +81,28 @@ $scripts = @(Get-ChildItem (Join-Path $repo 'test_fixtures\input_scripts\*.json'
 $specs = @(Get-ChildItem (Join-Path $repo 'workspace\panels\*.yaml') | Sort-Object Name)
 $panelIds = @(Get-SbPanelIdsFromSpecs @($specs | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }))
 if ($panelIds.Count -eq 1 -and "$($panelIds[0])" -like 'REFUSED*') { Complete-Night "NOT RUN(corpus: $($panelIds[0]))" }
+# The dialogs (flask STATUS 749): scripts/dialog_openers.py's COVERED list, each
+# with the menubar item that opens it, derived from the spec and never typed
+# here. Its uncovered count rides the receipt so a dialog is never silently out.
+$dialogs = @()
+$uncoveredDialogs = 0
+Push-Location $repo
+try {
+    $dj = (& python scripts\dialog_openers.py --json) -join "`n"
+    $derived = $dj | ConvertFrom-Json
+    $dialogs = @($derived.covered | ForEach-Object { @{ Dialog = "$($_.dialog)"; Opener = "$($_.opener)" } })
+    $uncoveredDialogs = @($derived.uncovered).Count
+} catch {
+    Pop-Location
+    Complete-Night "NOT RUN(corpus: dialog_openers.py gave no list: $(ConvertTo-SbParenSafe "$($_.Exception.Message)"))"
+}
+Pop-Location
 if ($Only) {
     $scripts = @($scripts | Where-Object { $_.BaseName -like "*$Only*" })
     $panelIds = @($panelIds | Where-Object { $_ -like "*$Only*" })
+    $dialogs = @($dialogs | Where-Object { $_.Dialog -like "*$Only*" })
 }
-$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count)")
+$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs")
 
 # ---- build once: capture_desktop, then the cdylib lane LAST (the last lane to
 # touch target/ decides what the shell loads), then the shell. prove_e2e.ps1
@@ -104,7 +124,7 @@ if (-not $build) {
 }
 if ($build) {
     $lines.Add("BUILD $build (log: $buildLog)")
-    Complete-Night (Get-SbNightlyVerdict -Box $box -Build $build -ItemsWanted $scripts.Count -PanelsWanted $panelIds.Count)
+    Complete-Night (Get-SbNightlyVerdict -Box $box -Build $build -ItemsWanted $scripts.Count -PanelsWanted $panelIds.Count -DialogsWanted $dialogs.Count)
 }
 
 # After a failure, the box is read again (with no quiet gate: this run's own
@@ -160,5 +180,21 @@ if (-not $stop) {
     }
 }
 
+# ---- every covered dialog, opened by its menubar item ----------------------
+$dialogRuns = @()
+if (-not $stop) {
+    foreach ($d in $dialogs) {
+        $o = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'rendered_tree.ps1') -Panel $d.Dialog -Opener $d.Opener 2>&1
+        $rc = $LASTEXITCODE
+        $dialogRuns += @{ Panel = $d.Dialog; Exit = $rc }
+        if ($rc -ne 0) {
+            $why = @($o | ForEach-Object { "$_" } | Where-Object { $_ -match '^(VERDICT|GAPS|KINDS-VERDICT):' -and $_ -notmatch ': PASS' }) -join ' | '
+            $lines.Add("DIALOG $($d.Dialog) opener=$($d.Opener) exit=$rc $why")
+            $stop = Get-SbStopAfter "dialog $($d.Dialog)"
+            if ($stop) { break }
+        }
+    }
+}
+
 Complete-Night (Get-SbNightlyVerdict -Box $box -Stop $stop -Items $items.ToArray() -ItemsWanted $scripts.Count `
-    -Panels $panels -PanelsWanted $panelIds.Count)
+    -Panels $panels -PanelsWanted $panelIds.Count -Dialogs $dialogRuns -DialogsWanted $dialogs.Count)
