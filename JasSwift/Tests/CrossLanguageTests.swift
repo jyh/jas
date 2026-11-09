@@ -4869,6 +4869,11 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false,
         case "release":
             tool.onRelease(ctx, x: x, y: y, shift: shift, alt: alt)
             syncAlignKeyObjectFromSelection(model: model, store: model.stateStore)
+        case "double_click":
+            // TESTING.md section 6: the double is its own step, after the
+            // second press/release pair (the browser's `dblclick`), and goes
+            // to the active tool's `onDoubleClick`, the canvas's call.
+            tool.onDoubleClick(ctx, x: x, y: y)
         default:
             Issue.record("unknown gesture event kind: \(ev["kind"] ?? "nil")")
         }
@@ -5206,6 +5211,38 @@ private struct MintRefusal: Error, Equatable {
     #expect(why(acceptMintedIds(one, want)).contains("carries 1 ids where the expected names 2"))
 }
 
+/// Row 85's Swift half (G11 from the canvas): the replay delivers a
+/// `{"kind": "double_click"}` pointer step to the active tool's
+/// `onDoubleClick`, after the second press/release pair, as the browser's
+/// `dblclick` comes (TESTING.md section 6). The selection tool's double-click
+/// on a group enters isolation, so a click on the group's child then selects
+/// the CHILD. The control is the same clicks with the double removed: they
+/// select the group. The point is derived from the fixture's own line (its
+/// midpoint, clear of the rect and the circle), never typed.
+/// Swift lands this first while cargo is frozen (O54); Rust's
+/// `ffi_script_replay` conforms to the same grammar, not to this runner.
+@Test func doubleClickStepEntersIsolationThenAClickSelectsTheChild() throws {
+    let probe = svgToDocument(readFixture("svg/complex_document.svg"))
+    guard case .group(let g) = probe.getElement([0, 2]), case .line(let ln) = g.children[0] else {
+        Issue.record("complex_document.svg no longer has a group holding a line at [0, 2]")
+        return
+    }
+    let x = (ln.x1 + ln.x2) / 2, y = (ln.y1 + ln.y2) / 2
+    func click() -> [[String: Any]] {
+        [["kind": "press", "x": x, "y": y], ["kind": "release", "x": x, "y": y]]
+    }
+    func run(_ events: [[String: Any]]) -> Model {
+        runGestureModel(["name": "g11.double_click", "setup_svg": "complex_document.svg",
+                         "tool": "selection", "app_state": [:], "events": events])
+    }
+    let withDouble = run(click() + click() + [["kind": "double_click", "x": x, "y": y]] + click())
+    #expect(withDouble.layersIsolationStack == [[0, 2]])
+    #expect(withDouble.document.selection.map(\.path) == [[0, 2, 0]])
+    let control = run(click() + click() + click())
+    #expect(control.layersIsolationStack == [])
+    #expect(control.document.selection.map(\.path) == [[0, 2]])
+}
+
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
     for fixture in scriptFixtures {
@@ -5224,7 +5261,7 @@ private struct MintRefusal: Error, Equatable {
         for (i, st) in steps.dropLast().enumerated() {
             if st["panel"] != nil || st["menu"] != nil {
                 events.append(["kind": "script_step", "index": i, "step": st])
-            } else if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+            } else if let kind = st["kind"] as? String, ["press", "move", "release", "double_click"].contains(kind) {
                 events.append(st)
             } else if st["kind"] == nil, let key = st["key"] as? String {
                 // A KEY step (the key corpus's chord form). Mirrors Rust
