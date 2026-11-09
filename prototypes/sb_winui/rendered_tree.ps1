@@ -1,4 +1,4 @@
-﻿# rendered_tree.ps1 -- #323: the RENDERED widget tree's STATE against the plan
+# rendered_tree.ps1 -- #323: the RENDERED widget tree's STATE against the plan
 # it was drawn from, one panel per launch, the same selection on both sides.
 #
 # Launches the app in session 1 with SB_SCENE=app, SB_PANEL=<panel> and
