@@ -3884,7 +3884,7 @@ function Get-SbNightlyVerdict {
     if ($Box -ne 'READY') { return $Box }
     if ($Stop) { return $Stop }
     if ($Build) { return "RED(build: $Build)" }
-    if ($ItemsWanted + $PanelsWanted -eq 0) { return 'NOT RUN(empty: the corpus has 0 items and 0 panels)' }
+    if ($ItemsWanted + $PanelsWanted + $DialogsWanted -eq 0) { return 'NOT RUN(empty: the corpus has 0 items and 0 panels)' }
     $items = @($Items | Where-Object { $_ })
     $panels = @($Panels | Where-Object { $null -ne $_ })
     $dialogs = @($Dialogs | Where-Object { $null -ne $_ })

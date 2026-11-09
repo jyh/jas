@@ -3161,6 +3161,10 @@ Test-Case 'nightly: an item failure is still named first, before a dialog''s' {
     Get-SbNightlyVerdict -Box 'READY' -Items @($cNo) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 -Dialogs @($dBad) -DialogsWanted 1 } 'RED(items=0/1 panels=1/1 dialogs=0/1; first: item c.drag REFUSED: the selection moved 0 px)'
 Test-Case 'nightly: fewer dialogs than wanted is NOT RUN (torn), and the torn line names them' {
     Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 -Dialogs @() -DialogsWanted 2 } 'NOT RUN(torn: 1 of 1 items, 1 of 1 panels and 0 of 2 dialogs ran)'
+# Found live 11-09 by `nightly.ps1 -Only document_setup`: a run with only dialogs
+# read NOT RUN(empty), because the empty check counted items and panels alone.
+Test-Case 'nightly: a run with only dialogs wanted is not empty -- live 11-09' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @() -ItemsWanted 0 -Panels @() -PanelsWanted 0 -Dialogs @($dOk) -DialogsWanted 1 } 'GREEN items=0/0 panels=0/0 dialogs=1/1'
 Test-Case 'nightly: a build that failed is RED before any item' {
     Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
 
