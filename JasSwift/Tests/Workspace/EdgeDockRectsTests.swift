@@ -127,3 +127,47 @@ private func rects(left: Dock? = nil, bottom: Dock? = nil,
     #expect(r.bottom == EdgeRect(x: 272, y: 620, w: 688, h: 180))
     #expect(r.canvas == EdgeRect(x: 272, y: 0, w: 688, h: 620))
 }
+
+// The gesture side: a dock-tab or grip dropped on the canvas within
+// SNAP_DISTANCE of a window edge snaps to that edge ("Snapping onto an
+// edge"), as Rust's dock-tab dragend does (`is_near_edge`, then
+// `snap_to_edge`). Without it no gesture in this port reaches a Left or
+// Bottom dock.
+private func dropLayout() -> WorkspaceLayout {
+    WorkspaceLayout.fromParts(
+        version: layoutVersion, name: "T",
+        anchored: [(.right, Dock(id: DockId(0), groups: [
+            PanelGroup(panels: [.color, .swatches]),
+            PanelGroup(panels: [.layers]),
+        ], width: 240))],
+        floating: [], hiddenPanels: [], zOrder: [], focusedPanel: nil,
+        appearance: "",
+        paneLayout: PaneLayout.defaultThreePane(viewportW: 1200, viewportH: 800),
+        nextId: 1)
+}
+
+@Test func edgeDockCanvasDropNearLeftSnapsLeft() {
+    var l = dropLayout()
+    let g = GroupAddr(dockId: DockId(0), groupIdx: 0)
+    let fid = detachDroppedOnCanvas(&l, .group(g), x: 3, y: 400)
+    #expect(fid != nil)
+    #expect(l.floating.isEmpty)
+    #expect(l.anchoredDock(.left)?.groups.map(\.panels) == [[.color, .swatches]])
+}
+
+@Test func edgeDockCanvasDropNearBottomSnapsBottom() {
+    var l = dropLayout()
+    let p = PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 1), panelIdx: 0)
+    _ = detachDroppedOnCanvas(&l, .panel(p), x: 600, y: 797)
+    #expect(l.floating.isEmpty)
+    #expect(l.anchoredDock(.bottom)?.groups.map(\.panels) == [[.layers]])
+}
+
+@Test func edgeDockCanvasDropAwayFromEdgesFloats() {
+    var l = dropLayout()
+    let g = GroupAddr(dockId: DockId(0), groupIdx: 0)
+    _ = detachDroppedOnCanvas(&l, .group(g), x: 600, y: 400)
+    #expect(l.floating.count == 1)
+    #expect(l.anchoredDock(.left) == nil)
+    #expect(l.anchoredDock(.bottom) == nil)
+}
