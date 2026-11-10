@@ -1763,6 +1763,31 @@ static class Program
         Eq("snap: a pen's sub-pixel position is kept", "54.25", PointerWire.Snap(54.25).ToString("R"));
         Eq("snap: just outside the window is kept", "54.002", PointerWire.Snap(54.002).ToString("R"));
         Eq("snap: a negative position (a drag off the canvas) snaps too", "-3", PointerWire.Snap(-3.000004).ToString("R"));
+        // -- G11 STEP 3: THE CANVAS DOUBLE-CLICK (jas sections 756, 758) --------
+        // WinUI raises DoubleTapped ON THE SECOND PRESS (measured on the Windows
+        // box at 60 and 150 ms gaps), and the corpus's order is press, release,
+        // press, release, double_click. So a DoubleTapped inside an open gesture
+        // only marks the double, and the release that closes that gesture sends
+        // it, after the release. A DoubleTapped with no gesture open (raised
+        // after the release) sends it at once.
+        {
+            var g = new DoubleClickGate();
+            Check("double: DoubleTapped inside a gesture sends nothing yet", !g.OnDoubleTapped(gestureOpen: true), "sent at the press");
+            Check("double: ...the real release that closes it sends the double", g.TakeOnRelease(real: true), "not sent at the release");
+            Check("double: ...once: the next release sends none", !g.TakeOnRelease(real: true), "sent twice");
+        }
+        {
+            var g = new DoubleClickGate();
+            Check("double: DoubleTapped after the release sends at once", g.OnDoubleTapped(gestureOpen: false), "held with no gesture to close");
+            Check("double: ...and leaves nothing for the next release", !g.TakeOnRelease(real: true), "sent again at the next release");
+        }
+        {
+            var g = new DoubleClickGate();
+            g.OnDoubleTapped(gestureOpen: true);
+            Check("double: a lost capture drops the pending double", !g.TakeOnRelease(real: false), "sent on a capture-lost release");
+            Check("double: ...and it stays dropped", !g.TakeOnRelease(real: true), "a dropped double came back");
+        }
+        Check("double: a release with no DoubleTapped sends none", !new DoubleClickGate().TakeOnRelease(real: true), "a plain click sent a double");
         // -- STEP 3: THE TOOLBAR IS ON BY DEFAULT under `app` (2026-10-11) -----
         // `SB_TOOLBAR=0` is the one way off; any other value, or none, is on.
         // Off `app` the old refusal stands for a value that ASKS for it, and
