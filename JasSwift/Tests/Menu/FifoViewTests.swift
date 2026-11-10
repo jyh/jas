@@ -101,6 +101,31 @@ private func viewModel() -> Model {
     #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == bytes)
 }
 
+@Test func fifoLayoutWritesTheWorkspaceLayoutsCanonicalBytes() throws {
+    // `layout <path>`: the harness's --dock check reads where a dragged dock
+    // tab was anchored, so it needs the layout in the shared corpus's form
+    // (test_fixtures/workspace_operations/), byte for byte, as `read` does
+    // for the document. The web hook's layout() is the same bytes.
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("fifo-layout-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    var layout = WorkspaceLayout.defaultLayout()
+    let path = dir.appendingPathComponent("layout.json").path
+    try FifoLayout.write(layout, to: path)
+    let bytes = try Data(contentsOf: URL(fileURLWithPath: path))
+    #expect(bytes == Data(workspaceToTestJson(layout).utf8))
+    #expect(String(decoding: bytes, as: UTF8.self).contains("\"anchored\":"))
+    // A changed layout writes changed bytes, replacing the first file.
+    let fid = layout.detachPanel(
+        PanelAddr(group: GroupAddr(dockId: layout.anchored[0].1.id, groupIdx: 0), panelIdx: 0), x: 300, y: 150)
+    #expect(fid != nil)
+    try FifoLayout.write(layout, to: path)
+    let after = try Data(contentsOf: URL(fileURLWithPath: path))
+    #expect(after == Data(workspaceToTestJson(layout).utf8))
+    #expect(after != bytes)
+}
+
 @Test func aTestFifoLaunchNeverTouchesTheSession() {
     // A level-2 harness launches and quits the app once per script. The app
     // saves its open tabs on quit and restores them on launch, so a harness

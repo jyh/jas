@@ -648,6 +648,10 @@ public struct ContentView: View {
         )
         .frame(width: rect.w, height: rect.h)
         .border(SwiftUI.Color(nsColor: workspace.theme.border), width: 1)
+        // One AX container per edge dock, so a harness finds the dock's tabs
+        // as its descendants (the --dock check's drawing half).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(edgeDockAccessibilityId(edge))
         .position(x: rect.x + rect.w / 2, y: rect.y + rect.h / 2)
         .zIndex(800)
     }
