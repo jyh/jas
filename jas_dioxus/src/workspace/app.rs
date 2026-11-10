@@ -1365,14 +1365,19 @@ pub fn App() -> Element {
                 // Track drag position and detect edge snapping
                 let coords = evt.data().page_coordinates();
                 last_drag_pos.set((coords.x, coords.y));
-                // Check if near a screen edge for snap-to-dock
+                // Snap-to-dock: near a screen edge the target is that edge;
+                // away from every edge an edge target is cleared, so only a
+                // DROP in the band snaps (root_dragover_target).
                 #[cfg(target_arch = "wasm32")]
                 {
                     if let Some(win) = web_sys::window() {
                         let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
                         let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
-                        if let Some(edge) = WorkspaceLayout::is_near_edge(coords.x, coords.y, vw, vh) {
-                            drop_target_sig.set(Some(DropTarget::Edge(edge)));
+                        let near = WorkspaceLayout::is_near_edge(coords.x, coords.y, vw, vh);
+                        let cur = *drop_target_sig.peek();
+                        let next = super::workspace::root_dragover_target(cur, near);
+                        if next != cur {
+                            drop_target_sig.set(next);
                         }
                     }
                 }
