@@ -3262,6 +3262,31 @@ Test-Case 'nightly: a run with only dialogs wanted is not empty -- live 11-09' {
 Test-Case 'nightly: a build that failed is RED before any item' {
     Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
 
+# The ENGINE-OPENED dialogs (flask 795, jas 796 (a)): every dialog no menubar
+# item opens, opened by `rendered_tree.ps1 -EngineOpen` with {} params. ADVISORY
+# until one clean nightly (11-11) promotes the passes into the gating dialogs=.
+# The line prints all three states; a NOT RUN is never a FAIL and never leaves
+# the denominator; a PASS carries its compared= count, and one at compared=0
+# is refused (a NOT RUN that names why).
+function New-SbEngRun($d, $exit, [string[]]$out) { @{ Dialog = $d; Exit = $exit; Out = $out } }
+$ePass = New-SbEngRun 'boolean_options' 0 @('VERDICT: compared=5 mismatches=0', 'KINDS-VERDICT: PASS(pairs=2; known: none)')
+$ePass2 = New-SbEngRun 'layer_options' 0 @('VERDICT: compared=12 mismatches=0', 'KINDS-VERDICT: PASS(pairs=6; known: none)')
+$eFail = New-SbEngRun 'color_picker' 1 @('VERDICT: compared=22 mismatches=6', 'KINDS-VERDICT: FAIL(new: radio_group->ABSENT:6)')
+$eNotRun = New-SbEngRun 'pen_alternates' 2 @('VERDICT: REFUSED: the plan has no addressable leaf', 'KINDS-VERDICT: NOT RUN(REFUSED: the plan has no addressable leaf)')
+$eZero = New-SbEngRun 'swatch_library_save' 0 @('VERDICT: compared=0 mismatches=0', 'KINDS-VERDICT: PASS(pairs=0; known: none)')
+Test-Case 'engine dialogs: the line prints pass, fail and not-run, each named' {
+    Get-SbEngineDialogsLine -Runs @($ePass, $eFail, $eNotRun, $ePass2) -Wanted 4
+} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
+Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says so' {
+    Get-SbEngineDialogsLine -Runs @($eZero) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
+Test-Case 'engine dialogs: a run short of the wanted count is torn, never a smaller denominator' {
+    Get-SbEngineDialogsLine -Runs @($ePass) -Wanted 3
+} 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran)'
+Test-Case 'engine dialogs: none wanted prints nothing' {
+    "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
+} '[]'
+
 # The nightly's panel list comes from the panel specs (workspace/panels/*.yaml,
 # the top-level id), not a list typed here, so a new panel joins the run.
 Test-Case 'nightly panels: each spec''s top-level id, in order' { (Get-SbPanelIdsFromSpecs @("id: a_panel_content`nsummary: x", "# c`nid: b_panel_content")) -join ',' } 'a_panel_content,b_panel_content'
