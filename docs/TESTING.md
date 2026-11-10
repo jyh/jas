@@ -265,6 +265,11 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
    * Every decision is made by `scripts/mac_l2_plan.py`, which needs no window and self-tests in CI: the act list,
      the refusals, the document-to-screen mapping and the open's artboard. Its self-test plans every shipped script
      against the real `workspace/menubar.yaml`.
+   * **A key the Mac driver does not deliver is refused by name, never dropped** (`DELIVERED_KEYS` in
+     `mac_l2_plan.py`). A pointer step delivers `kind x y dragging` and the modifiers; a key step `key` and the
+     modifiers; a panel step `panel widget event value`; a menu step `menu`; a read `read`. So `hold_ms`, `row`, `at`,
+     a panel step's modifiers and a tree read's `window` are refused here until this driver builds them. Dropped, a
+     hold would run as a click and an Alt-click as a click, and either would read as measured.
    * `script --receipt FILE <file>...` also writes the run's receipt, one line in the fleet board's grammar:
      `UI-NIGHTLY v1 suite=mac.live verdict=GREEN|RED(fail=N refused=M)|NOT RUN(<why>) items=<pass>/<run> panels=-
      head=<sha8> scope=full|partial date=<iso>`. `scope=full` means every script in `test_fixtures/input_scripts`
