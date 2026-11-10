@@ -123,6 +123,17 @@ public enum FifoRead {
     }
 }
 
+/// `layout <path>`: the workspace layout's canonical test JSON (the shared
+/// `test_fixtures/workspace_operations/` form), written to `path` byte for
+/// byte (atomically, replacing). The harness's --dock check reads where a
+/// dragged dock tab was anchored; `read` sees only the document.
+public enum FifoLayout {
+    public static func write(_ layout: WorkspaceLayout, to path: String) throws {
+        try Data(workspaceToTestJson(layout).utf8)
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+}
+
 /// What a `--test-fifo` launch changes beyond the FIFO itself.
 public enum TestHarness {
     /// A harness launch neither restores nor saves the session

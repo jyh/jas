@@ -171,3 +171,11 @@ private func dropLayout() -> WorkspaceLayout {
     #expect(l.anchoredDock(.left) == nil)
     #expect(l.anchoredDock(.bottom) == nil)
 }
+
+@Test func anEdgeDocksAccessibilityIdIsTheWebAppsDomId() {
+    // The level-2 --dock checks read the drawn edge dock by one id on both
+    // channels: the web app's DOM id (jas_dioxus app.rs) and this AX id.
+    #expect(edgeDockAccessibilityId(.left) == "jas-edge-dock-left")
+    #expect(edgeDockAccessibilityId(.bottom) == "jas-edge-dock-bottom")
+    #expect(edgeDockAccessibilityId(.right) == "jas-edge-dock-right")
+}

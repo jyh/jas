@@ -184,6 +184,19 @@ extension JasAppDelegate {
             } catch {
                 NSLog("test-fifo: read REFUSED %@ (%@)", rest, "\(error)")
             }
+        case "layout":
+            // layout <path>: the workspace layout's canonical test JSON, for
+            // the harness's --dock check (where a dragged tab was anchored).
+            guard let layout = workspace?.workspaceLayout else {
+                NSLog("test-fifo: layout REFUSED (no workspace)")
+                return
+            }
+            do {
+                try FifoLayout.write(layout, to: rest)
+                NSLog("test-fifo: layout wrote %@", rest)
+            } catch {
+                NSLog("test-fifo: layout REFUSED %@ (%@)", rest, "\(error)")
+            }
         default:
             NSLog("test-fifo: unknown command %@", cmd)
         }

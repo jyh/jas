@@ -70,6 +70,7 @@ KEYCODE = {  # ANSI virtual keycodes
  '=':24,'-':27,'space':49,'delete':51,'escape':53,'return':36,'tab':48,
  '\\':42,'/':44,';':41,',':43,'.':47,'[':33,']':30,
  '1':18,'2':19,'3':20,'4':21,'5':23,'6':22,'7':26,'8':28,'9':25,'0':29,
+ 'left':123,'right':124,'down':125,'up':126,
 }
 FLAG = {
  'shift':Quartz.kCGEventFlagMaskShift, 'cmd':Quartz.kCGEventFlagMaskCommand,
@@ -344,7 +345,8 @@ def _canvas(app):
 
 TEXT_ROLES = ("AXTextField", "AXComboBox", "AXTextArea")
 TYPE_DELAY_S = float(os.environ.get("JAS_TYPE_DELAY", "0.25"))  # between typed characters
-KEYNAME = {"Delete": "delete", "Backspace": "delete", "Escape": "escape", "Enter": "return"}
+KEYNAME = {"Delete": "delete", "Backspace": "delete", "Escape": "escape", "Enter": "return",
+           "ArrowLeft": "left", "ArrowRight": "right", "ArrowDown": "down", "ArrowUp": "up"}
 
 def _run_script(path, menubar):
     with open(path, encoding="utf-8") as f:

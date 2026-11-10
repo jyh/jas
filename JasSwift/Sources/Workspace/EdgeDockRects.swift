@@ -82,3 +82,14 @@ extension WorkspaceLayout {
             viewportW: pl.viewportWidth, viewportH: pl.viewportHeight)
     }
 }
+
+/// The accessibility identifier of an edge dock's drawn container. It is the
+/// web app's DOM id for the same dock (`jas-edge-dock-left` / `-bottom`), so
+/// the two level-2 `--dock` checks read the drawing half by one name.
+public func edgeDockAccessibilityId(_ edge: DockEdge) -> String {
+    switch edge {
+    case .left: return "jas-edge-dock-left"
+    case .right: return "jas-edge-dock-right"
+    case .bottom: return "jas-edge-dock-bottom"
+    }
+}
