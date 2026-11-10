@@ -235,6 +235,47 @@ mod tests {
         assert_ne!(f["id"], s["anchored"][0]["id"]);
     }
 
+    /// R1-4a (flask STATUS 805, jas 752): the shell reads the edge-dock
+    /// rectangles FROM THE ENGINE, never re-derived in C#. `shell_state`
+    /// carries `edge_rects` from `WorkspaceLayout::edge_dock_rects`, on
+    /// WORKSPACE.md's worked example: viewport 1200x800, default panes, a Left
+    /// dock of 200 and a Bottom dock of 180.
+    #[test]
+    fn shell_state_carries_the_engines_edge_dock_rectangles() {
+        use crate::workspace::pane::PaneLayout;
+        let edge = |id: usize, width: f64| Dock::from_parts(
+            crate::workspace::workspace::DockId(id), vec![PanelGroup::new(vec![PanelKind::Layers])],
+            false, false, width, crate::workspace::workspace::MIN_DOCK_WIDTH);
+        let mut l = WorkspaceLayout::default_layout();
+        let mut pl = PaneLayout::default_three_pane(1200.0, 800.0);
+        pl.canvas_maximized = false;
+        l.pane_layout = Some(pl);
+        l.anchored.push((DockEdge::Left, edge(7, 200.0)));
+        l.anchored.push((DockEdge::Bottom, edge(8, 180.0)));
+        let r = &shell_state(&l)["edge_rects"];
+        let rect = |x: f64, y: f64, w: f64, h: f64| json!({"x": x, "y": y, "w": w, "h": h});
+        assert_eq!(r["left"], rect(72.0, 0.0, 200.0, 800.0));
+        assert_eq!(r["bottom"], rect(272.0, 620.0, 688.0, 180.0));
+        assert_eq!(r["canvas"], rect(272.0, 0.0, 688.0, 620.0));
+    }
+
+    /// With no Left or Bottom dock the edges are `null` and the canvas is the
+    /// whole canvas pane; with no pane layout there are no rectangles at all.
+    #[test]
+    fn shell_state_edge_rects_are_null_where_there_is_no_edge_dock() {
+        use crate::workspace::pane::PaneLayout;
+        let mut l = WorkspaceLayout::default_layout();
+        let mut pl = PaneLayout::default_three_pane(1200.0, 800.0);
+        pl.canvas_maximized = false;
+        l.pane_layout = Some(pl);
+        let r = &shell_state(&l)["edge_rects"];
+        assert_eq!(r["left"], Value::Null, "{r}");
+        assert_eq!(r["bottom"], Value::Null, "{r}");
+        assert_eq!(r["canvas"], json!({"x": 72.0, "y": 0.0, "w": 888.0, "h": 800.0}));
+        l.pane_layout = None;
+        assert_eq!(shell_state(&l)["edge_rects"], Value::Null);
+    }
+
     /// Each floating dock carries its stacking index from the engine's own
     /// `z_index_for`, so a shell sorts by it and holds no stacking law. Driven
     /// both ways: the dock brought to the front reads the higher `z`, and the
