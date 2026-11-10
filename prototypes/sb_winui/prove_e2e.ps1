@@ -279,8 +279,8 @@ if ($null -ne $ptr) {
     # double reads DISTURBED here, before any document is compared.
     for ($ri = 0; $ri -lt $ptrRows.Count -and $drive -like 'PASS*' -and $doubleMode -ne 'none'; $ri++) {
         $want = if ($ri -eq 1) { '1' } else { '0' }
-        $got = "$(Get-SbField $ptrRows[$ri] 'double')"
-        if ($got -ne $want) { $drive = "DISTURBED(pointer row $($ri + 1) double=$(if ($got) { $got } else { '(absent)' }) want=${want}: the double goes after the second release only)" }
+        $dblGot = "$(Get-SbField $ptrRows[$ri] 'double')"
+        if ($dblGot -ne $want) { $drive = "DISTURBED(pointer row $($ri + 1) double=$(if ($dblGot) { $dblGot } else { '(absent)' }) want=${want}: the double goes after the second release only)" }
     }
     for ($di = 1; $di -le $doubleClicks -and $drive -like 'PASS*'; $di++) {
         $drow = $ptrRows[$di]
