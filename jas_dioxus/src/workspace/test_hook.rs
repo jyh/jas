@@ -14,6 +14,10 @@
 //!                                  active, so a wrong id cannot pass silently
 //!   read()              -> String  `document_to_test_json` of the active
 //!                                  document, byte for byte ("" with no tab)
+//!   layout()            -> String  `workspace_to_test_json` of the workspace
+//!                                  layout, byte for byte: the dock check
+//!                                  (`web_l2_driver.py --dock`) reads where a
+//!                                  dragged panel was anchored
 //!
 //! It is installed ONLY when the page's query carries `jas_test=1`. Without
 //! the flag `window.__jasTest` does not exist, so the public demo exposes
@@ -82,6 +86,13 @@ pub(crate) fn read(st: &AppState) -> String {
     st.tab()
         .map(|t| crate::geometry::test_json::document_to_test_json(t.model.document()))
         .unwrap_or_default()
+}
+
+/// `layout`: the canonical test JSON of the workspace layout, the form the
+/// shared `test_fixtures/workspace_operations/` corpus pins.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // called by the wasm binding
+pub(crate) fn layout(st: &AppState) -> String {
+    super::test_json::workspace_to_test_json(&st.workspace_layout)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -161,6 +172,14 @@ mod wasm_api {
             set(&obj, "read", cb.as_ref());
             cb.forget();
         }
+        {
+            let app = app.clone();
+            let cb = Closure::<dyn Fn() -> String>::new(move || {
+                app.try_borrow().map(|st| layout(&st)).unwrap_or_default()
+            });
+            set(&obj, "layout", cb.as_ref());
+            cb.forget();
+        }
         set(&js_sys::global(), "__jasTest", &JsValue::from(obj));
     }
 }
@@ -221,6 +240,27 @@ mod tests {
             "read() is document_to_test_json of the active document"
         );
         assert!(read(&st).contains("\"type\":\"rect\""), "the fixture's rects are read back");
+    }
+
+    #[test]
+    fn layout_is_workspace_to_test_json_and_the_dock_cases_start_right() {
+        let st = AppState::new();
+        assert_eq!(
+            layout(&st),
+            crate::workspace::test_json::workspace_to_test_json(&st.workspace_layout)
+        );
+        // web_l2_driver.py's DOCK_CASES drag stroke and layers out of the
+        // right dock, and refuse if either starts anywhere else.
+        let v: serde_json::Value = serde_json::from_str(&layout(&st)).expect("layout() is JSON");
+        let edge_of = |kind: &str| -> Vec<String> {
+            v["anchored"].as_array().unwrap().iter()
+                .filter(|a| a["dock"]["groups"].as_array().unwrap().iter()
+                    .any(|g| g["panels"].as_array().unwrap().iter().any(|p| p == kind)))
+                .map(|a| a["edge"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(edge_of("stroke"), vec!["right"]);
+        assert_eq!(edge_of("layers"), vec!["right"]);
     }
 
     #[test]
