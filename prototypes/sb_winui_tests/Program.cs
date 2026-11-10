@@ -971,6 +971,15 @@ static class Program
             PanelWire.WritesPlanOut("layers_panel_content", "layers_panel_content"), "the named panel did not");
         Check("plan out: with SB_PANEL unset or empty, every pane writes it (unchanged)",
             PanelWire.WritesPlanOut("canvas_pane", null) && PanelWire.WritesPlanOut("canvas_pane", ""), "a pane was silenced");
+        // Dialogs at level 2 (flask STATUS 749): the open dialog's plan goes to the
+        // same file ONLY when SB_PANEL names that dialog. Unset means "every pane"
+        // for the dock, and a dialog must never overwrite the dock's file then.
+        Check("plan out: a dialog SB_PANEL names writes the plan file",
+            PanelWire.DialogWritesPlanOut("document_setup", "document_setup"), "the named dialog did not");
+        Check("plan out: a dialog writes nothing with SB_PANEL unset or empty",
+            !PanelWire.DialogWritesPlanOut("document_setup", null) && !PanelWire.DialogWritesPlanOut("document_setup", ""), "a dialog wrote over the dock's file");
+        Check("plan out: a dialog writes nothing when SB_PANEL names a panel or another dialog",
+            !PanelWire.DialogWritesPlanOut("document_setup", "layers_panel_content") && !PanelWire.DialogWritesPlanOut("document_setup", "print"), "the wrong dialog wrote");
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.
