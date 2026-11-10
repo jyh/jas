@@ -1,5 +1,5 @@
 {
-  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815; plus radio, reference_point_widget, color_gradient and color_hue_bar from the engine-opened dialogs, STATUS-flask 795 (jas 796)",
+  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815; plus radio, reference_point_widget, color_gradient and color_hue_bar from the engine-opened dialogs, STATUS-flask 795 (jas 796); plus radio_group and icon_button_group -> Group once their rows got an automation peer, STATUS-flask 798",
   "allowed": {
     "button": [
       "Button"
@@ -32,6 +32,9 @@
     "icon_button": [
       "Button"
     ],
+    "icon_button_group": [
+      "Group"
+    ],
     "icon_select": [
       "ComboBox"
     ],
@@ -43,6 +46,9 @@
     ],
     "radio": [
       "RadioButton"
+    ],
+    "radio_group": [
+      "Group"
     ],
     "reference_point_widget": [
       "Custom"
