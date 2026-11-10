@@ -1150,6 +1150,12 @@ private func transformedCanonicalDocument() -> Document {
     try runOperationFixture("lock_inheritance.json")
 }
 
+/// G11 step 4: `select_rect` with `root` walks the isolation root's children;
+/// without `root` it is the layer walk. Twin of Rust `operation_isolation_marquee`.
+@Test func operationIsolationMarquee() throws {
+    try runOperationFixture("isolation_marquee.json")
+}
+
 /// MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13. Twin of
 /// Rust `operation_lock_toggle_no_materialization`.
 ///

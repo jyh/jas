@@ -26731,7 +26731,8 @@
                   "y1": "min(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)",
                   "x2": "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)",
                   "y2": "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)",
-                  "additive": "event.modifiers.shift"
+                  "additive": "event.modifiers.shift",
+                  "root": "active_document.isolation_root"
                 }
               }
             ]

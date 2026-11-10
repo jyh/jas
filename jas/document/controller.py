@@ -1195,7 +1195,8 @@ class Controller:
     # ------------------------------------------------------------------
 
     def _select_flat(self, predicate: Callable[[Element], bool],
-                     *, extend: bool = False) -> None:
+                     *, extend: bool = False,
+                     root: ElementPath | None = None) -> None:
         """Flat 2-level selection.
 
         Iterates layers and their direct children. A group containing at
@@ -1204,6 +1205,9 @@ class Controller:
         hit.
         """
         doc = self._model.document
+        if root:
+            self._select_flat_in(doc, tuple(root), predicate, extend)
+            return
         entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
             # The lock is read DOWN THE PATH (LOCKINHERIT, LAYER_STRUCTURE.md
@@ -1237,6 +1241,55 @@ class Controller:
         if extend:
             new_sel = self._toggle_selection(doc.selection, new_sel)
         # Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        self._model.set_document_unbracketed(replace(doc, selection=new_sel))
+
+    def _select_flat_in(self, doc: Document, root: ElementPath,
+                        predicate: Callable[[Element], bool],
+                        extend: bool) -> None:
+        """The flat walk with the isolation ROOT's children as the units (G11).
+
+        The descent to ``root`` folds visibility and reads the lock down the
+        path; a root that does not resolve to a visible, unlocked container
+        selects NOTHING, never the layer walk (a root naming nothing is a
+        defect, and a fallback would hide it). Each child then answers as a
+        layer child does in ``_select_flat``: a group with the group alone
+        (section 16.4 / 20). The reference takes no parent frame here either;
+        the ports compose the root's transforms (S6)."""
+        entries: list[ElementSelection] = []
+        node: Element | None = None
+        vis = Visibility.PREVIEW
+        if all(i >= 0 for i in root) and root[0] < len(doc.layers):
+            node = doc.layers[root[0]]
+            vis = node.visibility
+            for idx in root[1:]:
+                if not isinstance(node, Group) or idx >= len(node.children):
+                    node = None
+                    break
+                node = node.children[idx]
+                vis = min(vis, node.visibility, key=lambda v: v.value)
+        # No guard on the root's own lock or visibility: each child's
+        # ``effective_locked`` reads the root's lock down the path and its
+        # visibility folds ``vis``, so a root-level guard would be expressive
+        # only (measured: deleting it left every arm green).
+        if isinstance(node, Group):
+            for ci, child in enumerate(node.children):
+                path = root + (ci,)
+                if doc.effective_locked(path):
+                    continue
+                child_vis = min(vis, child.visibility, key=lambda v: v.value)
+                if child_vis == Visibility.INVISIBLE:
+                    continue
+                if isinstance(child, Group) and not isinstance(child, Layer):
+                    if any(predicate(gc) for gi, gc in enumerate(child.children)
+                           if not doc.effective_locked(path + (gi,))
+                           and min(child_vis, gc.visibility,
+                                   key=lambda v: v.value) != Visibility.INVISIBLE):
+                        entries.append(ElementSelection.all(path))
+                elif predicate(child):
+                    entries.append(ElementSelection.all(path))
+        new_sel = frozenset(entries)
+        if extend:
+            new_sel = self._toggle_selection(doc.selection, new_sel)
         self._model.set_document_unbracketed(replace(doc, selection=new_sel))
 
     def _select_recursive(
@@ -1285,15 +1338,18 @@ class Controller:
     # ------------------------------------------------------------------
 
     def select_rect(self, x: float, y: float, width: float, height: float,
-                    *, extend: bool = False) -> None:
+                    *, extend: bool = False,
+                    root: ElementPath | None = None) -> None:
         """Select all elements whose bounds intersect the given rectangle.
 
-        Group expansion: if any child of a Group intersects, all children
-        of that Group are selected.
+        A group answers alone when any free member intersects (section
+        16.4 / 20). With ``root`` (the innermost isolation entry, G11) the
+        units are that container's children; a band outside it selects
+        nothing.
         """
         self._select_flat(
             lambda elem: element_intersects_rect(elem, x, y, width, height),
-            extend=extend,
+            extend=extend, root=root,
         )
 
     def select_polygon(self, polygon: list[tuple[float, float]], *,

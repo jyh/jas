@@ -340,7 +340,10 @@ it from the production effect path for **exactly the three replay-safe verbs**
   `op.targets`, so empty targets ⇒ empty recipe — **`targets` is load-bearing
   here, not deferrable metadata**). Param-shape note: translate the YAML marquee's
   `x1/y1/x2/y2/additive` into the harness `x/y/width/height/extend` so replay is
-  byte-identical.
+  byte-identical. While a group is isolated (G11) the op also carries `root`, the
+  innermost isolation entry, and selects among that container's children; the key
+  is written ONLY while isolated, so every op recorded outside isolation is
+  unchanged.
 - `copy_selection` (from `doc.copy_selection`) — `targets` = **pre-mutation** source
   ids.
 - `move_selection` (from `doc.translate_selection`) — `targets` = pre-mutation moved
