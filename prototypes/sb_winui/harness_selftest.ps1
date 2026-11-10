@@ -3318,6 +3318,22 @@ Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says 
 Test-Case 'engine dialogs: a run short of the wanted count is torn, never a smaller denominator' {
     Get-SbEngineDialogsLine -Runs @($ePass) -Wanted 3
 } 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran)'
+# jas 799's notes 1 and 2: the shapes the first arms did not build. An engine
+# refusal names the engine's reason, not rendered_tree's `plan=False`; a run with
+# no VERDICT row is a NOT RUN that says so; a FAIL at mismatches=0 (exit 1 from
+# KINDS or GAPS alone) names the verdict that failed it.
+$eRefused = New-SbEngRun 'pen_alternates' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED dialog=pen_alternates status=4 params={} error={`"class`":`"MissingTarget`"} ui-tid=2", 'VERDICT: NOT RUN (plan=False uia=True)')
+$eNoRow = New-SbEngRun 'boolean_options' 2 @('start: pid=0 waited=30 refusal=the app did not come up')
+$eKinds = New-SbEngRun 'scale_options' 1 @('VERDICT: compared=10 mismatches=0', 'GAPS: PASS(known: none)', 'KINDS-VERDICT: FAIL(new: radio->RadioButton:2)')
+Test-Case 'engine dialogs: an engine refusal names the engine''s reason, not plan=False' {
+    Get-SbEngineDialogsLine -Runs @($eRefused) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=pen_alternates(engine refused: status=4 error={"class":"MissingTarget"}) witness=default-render(params {})'
+Test-Case 'engine dialogs: a run with no VERDICT row is a NOT RUN that says so' {
+    Get-SbEngineDialogsLine -Runs @($eNoRow) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=boolean_options(no verdict row) witness=default-render(params {})'
+Test-Case 'engine dialogs: a FAIL at mismatches=0 names the verdict that failed it' {
+    Get-SbEngineDialogsLine -Runs @($eKinds) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 advisory=until-promoted pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {})'
 Test-Case 'engine dialogs: none wanted prints nothing' {
     "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
 } '[]'
