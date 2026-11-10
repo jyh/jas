@@ -388,7 +388,8 @@ INSTRUMENT_JS = """([w, rgb]) => {
     }
     return [...new Set(out)].sort().join('+') || 'none';
   };
-  const p = {phase: 'drag', over: 0, muts: [], last: sides()};
+  const p = {phase: 'drag', over: 0, start: 0, muts: [], last: sides()};
+  window.addEventListener('dragstart', () => { p.start++; }, true);
   window.addEventListener('dragover', () => {
     p.over++;
     if (p.phase === 'release' && !p.relOver) { p.relOver = true; p.muts.push([p.phase, 'over']); }
@@ -420,7 +421,40 @@ def seen_label(muts):
     return ",".join(out) or "none"
 
 
-PREVIEW_FIELDS = ("via", "up", "over", "seen", "ctl", "src")
+PREVIEW_FIELDS = ("hit", "start", "via", "up", "over", "seen", "ctl", "src")
+
+
+# R1-2h press reading (flask's 781). layers->bottom saw no dragover at all, so
+# the question moves to the press: what element is under the point the mouse
+# goes down on, and did a dragstart follow. The point is the tab's bounding-box
+# centre, which Playwright does not scroll into view, so a tab below the fold
+# is pressed at a point outside the viewport.
+PRESS_JS = """([id, x, y]) => {
+  const tab = document.getElementById(id);
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight)
+    return {where: 'offscreen', y: y, vh: innerHeight};
+  const el = document.elementFromPoint(x, y);
+  if (el === tab) return {where: 'tab'};
+  if (el && tab && tab.contains(el)) return {where: 'child', tag: el.tagName};
+  return {where: 'other', tag: el ? el.tagName : null, id: el && el.id ? el.id : ''};
+}"""
+
+
+def press_label(d):
+    """One whitespace-free token for what the press point hit."""
+    import re
+    w = d.get("where")
+    if w == "tab":
+        return "tab"
+    if w == "child":
+        return "child:" + str(d.get("tag")).lower()
+    if w == "offscreen":
+        return f"offscreen:y{round(d['y'])}/vh{round(d['vh'])}"
+    if w == "other":
+        tag = (d.get("tag") or "null").lower()
+        el_id = re.sub(r"\s+", "_", d.get("id") or "")
+        return f"other:{tag}#{el_id}" if el_id else f"other:{tag}"
+    raise _plan.Refused(f"the press reading {d!r} names no known place")
 
 
 def preview_line(cases):
@@ -510,10 +544,13 @@ def run_dock_drag(page, kind, edge, via, pv):
         px, py = dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2)
         box = tab.bounding_box()
         src = tab.element_handle()
-        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        page.mouse.down()
+        bx, by = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
         style = list(snap_preview_style())
+        # Installed before the press, so the press's own dragstart is counted.
         pv["ctl"] = page.evaluate(INSTRUMENT_JS, style)
+        pv["hit"] = press_label(page.evaluate(PRESS_JS, [tab_id, bx, by]))
+        page.mouse.move(bx, by)
+        page.mouse.down()
         if via:
             page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
             pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
@@ -522,7 +559,8 @@ def run_dock_drag(page, kind, edge, via, pv):
         # A source node replaced mid-drag fires its dragend detached, so the
         # event never bubbles to the root's ondragend (app.rs's comment).
         pv["src"] = "kept" if src.evaluate("el => el.isConnected") else "gone"
-        pv["over"] = page.evaluate("() => { const p = window.__jasPreviewProbe; p.phase = 'release'; return p.over; }")
+        pv["over"], pv["start"] = page.evaluate(
+            "() => { const p = window.__jasPreviewProbe; p.phase = 'release'; return [p.over, p.start]; }")
         page.mouse.up()
         page.wait_for_timeout(300)
         pv["seen"] = seen_label(page.evaluate("() => window.__jasPreviewProbe.muts"))
@@ -590,7 +628,7 @@ def run(args):
     body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
-        body.append(preview_line(dock_cases) + " (the snap preview the root draws mid-drag: via = after the band pass, up = just before the release; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+        body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -747,6 +785,29 @@ def self_test():
           "seen_label keeps every transition, phase first, in order")
     check(seen_label([["drag", "left"], ["drag", "left"]]) == "drag:left",
           "seen_label drops a repeat of the same phase and label")
+    # R1-2h press reading (flask's 781: layers->bottom saw over=0, no drag
+    # session at all). hit names what the press point lands on; start counts
+    # dragstart. Both lead the case, because nothing after them counts when
+    # the press missed the tab.
+    seven = [("layers", "bottom", "FAIL", "x", {"src": "kept", "start": 0, "hit": "offscreen:y1012/vh900", "over": 0})]
+    check(preview_line(seven) == "DOCK PREVIEW layers->bottom[hit=offscreen:y1012/vh900 start=0 over=0 src=kept]",
+          "preview_line leads with hit and start, then the drag fields")
+    check(press_label({"where": "tab"}) == "tab", "press_label: the tab itself")
+    check(press_label({"where": "child", "tag": "SPAN"}) == "child:span", "press_label: a descendant, by tag")
+    check(press_label({"where": "other", "tag": "DIV", "id": "pane-3"}) == "other:div#pane-3",
+          "press_label: another element, by tag and id")
+    check(press_label({"where": "other", "tag": "DIV", "id": ""}) == "other:div", "press_label: another element with no id")
+    check(press_label({"where": "offscreen", "y": 1012.4, "vh": 900}) == "offscreen:y1012/vh900",
+          "press_label: a press point outside the viewport names its y and the height")
+    check(press_label({"where": "other", "tag": None, "id": ""}) == "other:null", "press_label: no element at the point")
+    for bad in ({}, {"where": "nowhere"}):
+        try:
+            press_label(bad)
+            check(False, f"press_label refuses {bad!r}")
+        except _plan.Refused:
+            pass
+    check(" " not in press_label({"where": "other", "tag": "DIV", "id": "a b"}),
+          "press_label keeps the token whitespace-free (the line is split on spaces)")
     try:
         snap_preview_style("let snap_left = 1;")
         check(False, "a source with no preview lets refuses")
