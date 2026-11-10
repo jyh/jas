@@ -116,6 +116,8 @@ jobs:
       # The Mac level-2 driver's pure half: plans every shipped input script
       # against the real menubar, with no window (docs/TESTING.md section 6).
       - run: python scripts/mac_l2_plan.py --self-test
+      # The dialogs a level-2 run can open with no person (flask STATUS 749).
+      - run: python scripts/dialog_openers.py --self-test
       # The web level-2 driver's pure half (no browser): the same plan, plus
       # its key names and receipt grammar (pages.yml runs the browser half).
       - run: python scripts/web_l2_driver.py --self-test
@@ -1019,6 +1021,7 @@ jobs:
           python scripts/check_corpus_manifest.py --self-test
           python scripts/check_corpus_manifest.py
           python scripts/mac_l2_plan.py --self-test
+          python scripts/dialog_openers.py --self-test
           python scripts/web_l2_driver.py --self-test
           # The reference's own corpus harness at HEAD, per case, against a
           # ratcheted baseline (POLICY.md section 1). It runs here as well as

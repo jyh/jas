@@ -3239,6 +3239,26 @@ Test-Case 'nightly: an item''s unbalanced parenthesis is bracketed, so RED(...) 
     Get-SbNightlyVerdict -Box 'READY' -Items @('E2E-CERT v1 item=e.drag verdict=NOT RUN -- no PROBE row (did the hand press? keys=') -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 } 'RED(items=0/1 panels=1/1; first: item e.drag NOT RUN -- no PROBE row [did the hand press? keys=)'
 Test-Case 'box: a window class with a parenthesis is bracketed, so NOT RUN(...) stays balanced' {
     Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=odd) rect=0,0,10,10 class=Odd(Class')) } 'NOT RUN(box: a topmost window is up: class=Odd[Class process=odd])'
+# Dialogs at level 2 (flask STATUS 749): each covered dialog's rendered tree,
+# opened by its derived menubar opener. The field appears only when dialogs are
+# wanted, so a run without them writes today's receipt byte for byte; systems'
+# reader takes the extra field unchanged (measured 11-09 on its own code).
+$dOk = @{ Panel = 'document_setup'; Exit = 0 }
+$dBad = @{ Panel = 'print'; Exit = 1 }
+Test-Case 'nightly: with dialogs wanted, GREEN carries dialogs=k/m after panels' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 -Dialogs @($dOk) -DialogsWanted 1 } 'GREEN items=1/1 panels=1/1 dialogs=1/1'
+Test-Case 'nightly: CONTROL -- with no dialogs wanted the receipt is today''s, byte for byte' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 } 'GREEN items=1/1 panels=1/1'
+Test-Case 'nightly: a dialog exit 1 is RED naming the dialog' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 -Dialogs @($dOk, $dBad) -DialogsWanted 2 } 'RED(items=1/1 panels=1/1 dialogs=1/2; first: dialog print exit=1)'
+Test-Case 'nightly: an item failure is still named first, before a dialog''s' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cNo) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 -Dialogs @($dBad) -DialogsWanted 1 } 'RED(items=0/1 panels=1/1 dialogs=0/1; first: item c.drag REFUSED: the selection moved 0 px)'
+Test-Case 'nightly: fewer dialogs than wanted is NOT RUN (torn), and the torn line names them' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 -Dialogs @() -DialogsWanted 2 } 'NOT RUN(torn: 1 of 1 items, 1 of 1 panels and 0 of 2 dialogs ran)'
+# Found live 11-09 by `nightly.ps1 -Only document_setup`: a run with only dialogs
+# read NOT RUN(empty), because the empty check counted items and panels alone.
+Test-Case 'nightly: a run with only dialogs wanted is not empty -- live 11-09' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @() -ItemsWanted 0 -Panels @() -PanelsWanted 0 -Dialogs @($dOk) -DialogsWanted 1 } 'GREEN items=0/0 panels=0/0 dialogs=1/1'
 Test-Case 'nightly: a build that failed is RED before any item' {
     Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
 
