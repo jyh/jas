@@ -86,12 +86,17 @@ if ($panelIds.Count -eq 1 -and "$($panelIds[0])" -like 'REFUSED*') { Complete-Ni
 # here. Its uncovered count rides the receipt so a dialog is never silently out.
 $dialogs = @()
 $uncoveredDialogs = 0
+$engineDialogs = @()
 Push-Location $repo
 try {
     $dj = (& python scripts\dialog_openers.py --json) -join "`n"
     $derived = $dj | ConvertFrom-Json
     $dialogs = @($derived.covered | ForEach-Object { @{ Dialog = "$($_.dialog)"; Opener = "$($_.opener)" } })
     $uncoveredDialogs = @($derived.uncovered).Count
+    # jas 796 (a): every UNCOVERED dialog is also opened in the engine by its id
+    # (`rendered_tree.ps1 -EngineOpen`, {} params). ADVISORY: its own receipt
+    # line (ENGINE-DIALOGS), which moves no verdict until promoted.
+    $engineDialogs = @($derived.uncovered | ForEach-Object { "$($_.dialog)" })
 } catch {
     Pop-Location
     Complete-Night "NOT RUN(corpus: dialog_openers.py gave no list: $(ConvertTo-SbParenSafe "$($_.Exception.Message)"))"
@@ -101,6 +106,7 @@ if ($Only) {
     $scripts = @($scripts | Where-Object { $_.BaseName -like "*$Only*" })
     $panelIds = @($panelIds | Where-Object { $_ -like "*$Only*" })
     $dialogs = @($dialogs | Where-Object { $_.Dialog -like "*$Only*" })
+    $engineDialogs = @($engineDialogs | Where-Object { $_ -like "*$Only*" })
 }
 $lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs")
 
@@ -195,6 +201,19 @@ if (-not $stop) {
         }
     }
 }
+
+# ---- every uncovered dialog, opened in the engine (ADVISORY, jas 796 (a)) ---
+# Run after the gating corpus and never stopping it: a FAIL here moves no
+# verdict. A gating stop skips these, and the line then reads torn.
+$engineRuns = @()
+if (-not $stop) {
+    foreach ($ed in $engineDialogs) {
+        $eo = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'rendered_tree.ps1') -Panel $ed -EngineOpen 2>&1
+        $engineRuns += @{ Dialog = $ed; Exit = $LASTEXITCODE; Out = @($eo | ForEach-Object { "$_" }) }
+    }
+}
+$engineLine = Get-SbEngineDialogsLine -Runs $engineRuns -Wanted $engineDialogs.Count
+if ($engineLine) { $lines.Add($engineLine) }
 
 Complete-Night (Get-SbNightlyVerdict -Box $box -Stop $stop -Items $items.ToArray() -ItemsWanted $scripts.Count `
     -Panels $panels -PanelsWanted $panelIds.Count -Dialogs $dialogRuns -DialogsWanted $dialogs.Count)
