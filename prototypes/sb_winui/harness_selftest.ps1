@@ -3334,6 +3334,17 @@ Test-Case 'engine dialogs: a run with no VERDICT row is a NOT RUN that says so' 
 Test-Case 'engine dialogs: a FAIL at mismatches=0 names the verdict that failed it' {
     Get-SbEngineDialogsLine -Runs @($eKinds) -Wanted 1
 } 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 advisory=until-promoted pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {})'
+# jas 802's notes: (A) the no-engine refusal carries no status= or error=, so its
+# reason is the text after `--`; (B) a real engine error's detail has spaces, and
+# the error is read whole up to the row's ui-tid=.
+$eNoEngine = New-SbEngRun 'layer_options' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED dialog=layer_options -- no engine ui-tid=2 render-tid=4", 'VERDICT: NOT RUN (plan=False uia=True)')
+$eSpaced = New-SbEngRun 'swatch_options' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED dialog=swatch_options status=4 params={} error={`"class`":`"MissingTarget`",`"detail`":`"no dialog named swatch_options in the workspace`"} ui-tid=2 render-tid=4", 'VERDICT: NOT RUN (plan=False uia=True)')
+Test-Case 'engine dialogs: the no-engine refusal names its reason, not status=? error=?' {
+    Get-SbEngineDialogsLine -Runs @($eNoEngine) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=layer_options(engine refused: no engine) witness=default-render(params {})'
+Test-Case 'engine dialogs: an engine error with a spaced detail is read whole' {
+    Get-SbEngineDialogsLine -Runs @($eSpaced) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_options(engine refused: status=4 error={"class":"MissingTarget","detail":"no dialog named swatch_options in the workspace"}) witness=default-render(params {})'
 Test-Case 'engine dialogs: none wanted prints nothing' {
     "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
 } '[]'
