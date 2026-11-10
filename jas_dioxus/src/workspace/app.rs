@@ -1065,6 +1065,27 @@ pub fn App() -> Element {
         .unwrap_or_else(|| super::workspace::PaneConfig::for_kind(PaneKind::Canvas));
     let canvas_border = if canvas_maximized { "none" } else { "1px solid #555" };
 
+    // WORKSPACE.md §"Anchored Docks by Edge": the Left column and the Bottom
+    // row are cut from the canvas pane's rectangle, and the canvas is drawn
+    // in what remains (rules 2–5, 8). The pane itself keeps its geometry, so
+    // its drag and resize handles below still read `cx`/`cy`/`cw`/`ch`.
+    let edge_rects = layout_snapshot.edge_dock_rects();
+    let (ccx, ccy, ccw, cch) = edge_rects
+        .map_or((cx, cy, cw, ch), |r| (r.canvas.x, r.canvas.y, r.canvas.w, r.canvas.h));
+    // Rule 7: above the canvas, below every floating dock (z 900 and up).
+    let edge_dock_style = |r: super::edge_dock::EdgeRect| format!(
+        "position:absolute; left:{}px; top:{}px; width:{}px; height:{}px; z-index:800; \
+         display:flex; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; \
+         box-sizing:border-box;",
+        r.x, r.y, r.w, r.h,
+    );
+    let left_dock_style: Option<String> = edge_rects.and_then(|r| r.left).map(|r|
+        format!("{} flex-direction:column; overflow-y:auto;", edge_dock_style(r)));
+    let edge_dock_left_key = "edge-dock-left";
+    let edge_dock_bottom_key = "edge-dock-bottom";
+    let bottom_dock_style: Option<String> = edge_rects.and_then(|r| r.bottom).map(|r|
+        format!("{} flex-direction:row;", edge_dock_style(r)));
+
     let collapsed_dock_width = 36.0;
     let (dx, dy, dw, dh, dock_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock).map(|p| {
@@ -1492,7 +1513,7 @@ pub fn App() -> Element {
 
             // ===== Canvas pane (position:absolute) =====
             div {
-                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:{canvas_border}; box-sizing:border-box;",
+                style: "position:absolute; left:{ccx}px; top:{ccy}px; width:{ccw}px; height:{cch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:{canvas_border}; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |_: Event<MouseData>| {
@@ -1615,6 +1636,32 @@ pub fn App() -> Element {
             }
             // (canvas pane is always visible, no close button)
 
+            // ===== Left and Bottom anchored docks (WORKSPACE.md §"Anchored
+            // Docks by Edge"). Without these, a dock snapped to the left or
+            // bottom edge left the floating layer and was drawn nowhere.
+            // The rsx! macro refuses a literal `key` (it guards list items
+            // against colliding); each loop runs over an Option, so a
+            // constant identity is correct and keeps a resize from
+            // remounting the dock. Hence a formatted constant.
+            for style in left_dock_style {
+                div {
+                    key: "{edge_dock_left_key}",
+                    id: "jas-edge-dock-left",
+                    style: "{style}",
+                    onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                    DockGroupsView { edge: DockEdge::Left }
+                }
+            }
+            for style in bottom_dock_style {
+                div {
+                    key: "{edge_dock_bottom_key}",
+                    id: "jas-edge-dock-bottom",
+                    style: "{style}",
+                    onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                    DockGroupsView { edge: DockEdge::Bottom }
+                }
+            }
+
             // ===== Dock pane (position:absolute) =====
             if pane_snapshot.as_ref().is_some_and(|pl| pl.is_pane_visible(PaneKind::Dock)) {
             div {
@@ -1689,7 +1736,7 @@ pub fn App() -> Element {
                 // Panel groups
                 div {
                     style: "flex:1; overflow-y:auto;",
-                    DockGroupsView {}
+                    DockGroupsView { edge: DockEdge::Right }
                 }
 
                 // Left edge resize handle
