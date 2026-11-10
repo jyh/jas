@@ -307,68 +307,10 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
 # Each case passes only if BOTH halves hold: the engine's layout puts the
 # panel in the dock anchored at the edge, and the DOM node for that edge's
 # dock holds the panel's tab. Either half alone could agree with itself.
-DOCK_EDGES = ("left", "bottom")
-# (panel, the edge it must end anchored at or None to float, a band to pass
-# through first or None). All three start in the right dock. The third is
-# WORKSPACE.md's "a floating dock DROPPED within SNAP_DISTANCE of a window
-# edge snaps": a drag that crosses the left band and drops mid-viewport must
-# float, not snap.
-DOCK_CASES = (("stroke", "left", None), ("layers", "bottom", None), ("align", None, "left"))
-WORKSPACE_RS = os.path.join(REPO, "jas_dioxus", "src", "workspace", "workspace.rs")
-
-
-def snap_distance():
-    """SNAP_DISTANCE as the app declares it, read from the Rust source."""
-    import re
-    with open(WORKSPACE_RS, encoding="utf-8") as f:
-        hits = re.findall(r"^pub const SNAP_DISTANCE: f64 = ([0-9.]+);", f.read(), re.M)
-    if len(hits) != 1:
-        raise _plan.Refused(f"workspace.rs declares SNAP_DISTANCE {len(hits)} times; the dock check needs exactly one")
-    return float(hits[0])
-
-
-def dock_point(edge, vw, vh, band):
-    """A viewport point a fifth of the way into the edge's snap band.
-    Bottom is mid-width, so neither side band claims it first."""
-    inset = band / 5
-    if edge == "left":
-        return (inset, vh / 2)
-    if edge == "right":
-        return (vw - inset, vh / 2)
-    if edge == "bottom":
-        return (vw / 2, vh - inset)
-    raise _plan.Refused(f"the app snaps to left, right or bottom; {edge!r} is none of them")
-
-
-def dock_edge_of(layout_text, kind):
-    """The edge of the anchored dock holding panel `kind`, or None if no
-    anchored dock holds it (floating or hidden). Refuses rather than guess."""
-    lay = json.loads(layout_text)
-    if "anchored" not in lay:
-        raise _plan.Refused("the layout read carries no anchored member")
-    edges = [a["edge"] for a in lay["anchored"]
-             for g in a["dock"]["groups"] for p in g["panels"] if p == kind]
-    if len(edges) > 1:
-        raise _plan.Refused(f"panel {kind!r} is in {len(edges)} anchored places; a panel is in one")
-    return edges[0] if edges else None
-
-
-def floats(layout_text, kind):
-    """True when a floating dock holds panel `kind`."""
-    lay = json.loads(layout_text)
-    return any(p == kind for f in lay.get("floating", [])
-               for g in f["dock"]["groups"] for p in g["panels"])
-
-
-def dock_line(cases):
-    """cases: [(kind, edge, status, detail)] -> one line beside the receipt."""
-    if not cases:
-        return "DOCK NOT RUN"
-    ok = sum(1 for c in cases if c[2] == "PASS")
-    if ok == len(cases):
-        return f"DOCK {ok}/{len(cases)}"
-    bad = "; ".join(f"{s} {k}->{e or 'float'}: {d}" for k, e, s, d in cases if s != "PASS")
-    return f"DOCK RED {ok}/{len(cases)} ({bad})"
+# The cases, the band, the layout reader, the verdict and the DOCK line are
+# mac_l2_plan's, so the web and Mac channels read a dock by one law.
+DOCK_EDGES, DOCK_CASES = _plan.DOCK_EDGES, _plan.DOCK_CASES
+snap_distance, dock_point, dock_line = _plan.snap_distance, _plan.dock_point, _plan.dock_line
 
 
 def run_dock_case(br, kind, edge, via=None):
@@ -381,8 +323,9 @@ def run_dock_case(br, kind, edge, via=None):
         if not page.evaluate("() => typeof window.__jasTest.layout === 'function'"):
             return "REFUSED", "window.__jasTest has no layout()"
         before = page.evaluate("() => window.__jasTest.layout()")
-        if dock_edge_of(before, kind) != "right":
-            return "REFUSED", f"{kind} does not start in the right dock (reads {dock_edge_of(before, kind)!r})"
+        why = _plan.dock_start_refusal(before, kind)
+        if why:
+            return "REFUSED", why
         tab_id = kind + _plan.PANEL_SUFFIX + _plan.TAB_SUFFIX
         tab = page.locator(f"#{tab_id}")
         if tab.count() != 1:
@@ -399,22 +342,8 @@ def run_dock_case(br, kind, edge, via=None):
         page.mouse.up()
         page.wait_for_timeout(300)
         after = page.evaluate("() => window.__jasTest.layout()")
-        if after == before:
-            return "FAIL", "the layout did not change (did the drag reach ondragend?)"
-        got = dock_edge_of(after, kind)
-        if got != edge:
-            return "FAIL", f"the engine anchors {kind} at {got!r}"
-        if edge is None:
-            if not floats(after, kind):
-                return "FAIL", f"{kind} is in no anchored dock and no floating dock"
-            in_edges = sum(page.locator(f"#jas-edge-dock-{e} #{tab_id}").count() for e in DOCK_EDGES)
-            if in_edges:
-                return "FAIL", f"an edge dock still draws the {kind} tab"
-            return "PASS", ""
-        drawn = page.locator(f"#jas-edge-dock-{edge} #{tab_id}").count()
-        if drawn != 1:
-            return "FAIL", f"#jas-edge-dock-{edge} holds {drawn} copies of the tab"
-        return "PASS", ""
+        drawn = {e: page.locator(f"#{_plan.edge_dock_id(e)} #{tab_id}").count() for e in DOCK_EDGES}
+        return _plan.dock_verdict(before, after, kind, edge, drawn)
     except _plan.Refused as e:
         return "REFUSED", str(e)
     except Exception as e:
@@ -551,52 +480,12 @@ def self_test():
         fails.append("an empty run with no reason is refused")
     except ValueError:
         pass
-    # --dock (R1-2's live arm). The band comes from the Rust source; the point
-    # must classify to its own edge under the app's rule (left, then right,
-    # then bottom), checked here against a mirror of is_near_edge.
+    # --dock (R1-2's live arm): its reader, cases and verdict are mac_l2_plan's
+    # and self-test there. Here, only that the drop points fit this viewport.
     band = snap_distance()
-    check(band == 20.0, f"SNAP_DISTANCE derives from workspace.rs as 20 (read {band})")
-
-    def near_edge(x, y, vw, vh):
-        return "left" if x <= band else "right" if x >= vw - band else "bottom" if y >= vh - band else None
     for e in DOCK_EDGES:
         px, py = dock_point(e, VIEWPORT["width"], VIEWPORT["height"], band)
-        check(near_edge(px, py, VIEWPORT["width"], VIEWPORT["height"]) == e, f"the {e} drop point classifies to {e}")
         check(0 < px < VIEWPORT["width"] and 0 < py < VIEWPORT["height"], f"the {e} drop point is inside the viewport")
-    try:
-        dock_point("top", 1400, 900, band)
-        fails.append("a top drop is refused: the app has no top edge")
-    except _plan.Refused:
-        pass
-    # The layout reader, over the corpus's own layout (bytes, never typed).
-    lay_path = os.path.join(REPO, "test_fixtures", "workspace_operations", "panel_detach_panel_snap_bottom.json")
-    lay = open(lay_path, encoding="utf-8").read().strip()
-    check(dock_edge_of(lay, "swatches") == "bottom", "swatches reads as anchored at bottom in the snap fixture")
-    check(dock_edge_of(lay, "stroke") == "right", "stroke reads as anchored at right in the snap fixture")
-    check(dock_edge_of(lay, "gradient") is None, "a panel in no anchored dock reads None")
-    for bad, why in ((lay.replace('"anchored":', '"anchoredX":', 1), "no anchored member"),
-                     (lay.replace('"panels":["color"]', '"panels":["color","swatches"]', 1), "a panel in two docks")):
-        check(bad != lay, f"the {why} mutant changed the layout")
-        try:
-            dock_edge_of(bad, "swatches")
-            fails.append(f"{why} is refused")
-        except _plan.Refused:
-            pass
-    fl = open(os.path.join(REPO, "test_fixtures", "workspace_operations", "panel_detach_panel.json"),
-              encoding="utf-8").read().strip()
-    check(floats(fl, "swatches") and not floats(fl, "stroke"), "floats() reads the detach fixture: swatches floats, stroke does not")
-    check(not floats(lay, "swatches"), "floats() reads a snapped panel as not floating")
-    check(dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "PASS", "")]) == "DOCK 2/2",
-          "two passing dock cases read DOCK 2/2")
-    check(dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "FAIL", "x")]) == "DOCK RED 1/2 (FAIL layers->bottom: x)",
-          "a failing dock case names itself")
-    check(dock_line([]) == "DOCK NOT RUN", "no dock case is NOT RUN, never 0/0")
-    check(len({c[0] for c in DOCK_CASES}) == len(DOCK_CASES) and {c[1] for c in DOCK_CASES} == {"left", "bottom", None},
-          "the dock cases cover left, bottom and a float, with distinct panels")
-    check(any(c[1] is None and c[2] in DOCK_EDGES for c in DOCK_CASES),
-          "a case passes through a snap band and drops outside it (WORKSPACE.md: a DROP near an edge snaps)")
-    check(dock_line([("align", None, "FAIL", "x")]) == "DOCK RED 0/1 (FAIL align->float: x)",
-          "a float case names itself as ->float")
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:
