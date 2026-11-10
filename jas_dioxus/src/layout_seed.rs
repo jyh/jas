@@ -124,6 +124,19 @@ pub fn shell_state(layout: &WorkspaceLayout) -> Value {
         out["panes"] = Value::Object(panes);
         out["canvas_maximized"] = json!(pl.canvas_maximized);
     }
+    // R1-4a: the anchored Left/Bottom docks' and the canvas's rectangles, the
+    // engine's own drawing law (`edge_dock_rects`, WORKSPACE.md "Anchored
+    // Docks by Edge"), so a shell draws them and derives nothing. `null` with
+    // no pane layout; an edge with no dock is `null`.
+    let rect = |r: crate::workspace::edge_dock::EdgeRect| json!({"x": r.x, "y": r.y, "w": r.w, "h": r.h});
+    out["edge_rects"] = match layout.edge_dock_rects() {
+        Some(r) => json!({
+            "left": r.left.map(rect),
+            "bottom": r.bottom.map(rect),
+            "canvas": rect(r.canvas),
+        }),
+        None => Value::Null,
+    };
     out
 }
 
