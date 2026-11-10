@@ -4091,6 +4091,12 @@ function Get-SbEngineDialogsLine {
         # launch's output; its status and error are the reason, not plan=False.
         $refusal = @($outLines | Where-Object { $_ -cmatch 'RUSTFAIL DIALOG OPEN REFUSED ' } | Select-Object -First 1)
         if ($refusal.Count -gt 0) {
+            # jas 802 (A): a refusal the shell makes before the engine (no engine)
+            # carries no status=; its reason is the text after `--`.
+            if ($refusal[0] -cnotmatch ' status=' -and $refusal[0] -cmatch ' -- (.*?)(?= ui-tid=|$)') {
+                $notrun += "$($r.Dialog)(engine refused: $(ConvertTo-SbParenSafe $Matches[1]))"
+                continue
+            }
             $st = if ($refusal[0] -cmatch ' status=(\S+)') { $Matches[1] } else { '?' }
             $er = if ($refusal[0] -cmatch ' error=(.*?)(?= ui-tid=|$)') { $Matches[1] } else { '?' }
             $notrun += "$($r.Dialog)(engine refused: status=$st error=$(ConvertTo-SbParenSafe $er))"
