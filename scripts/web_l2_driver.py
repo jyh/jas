@@ -38,7 +38,7 @@ its setup.
 Usage:
   python3 scripts/web_l2_driver.py --self-test         (no browser; CI)
   python3 scripts/web_l2_driver.py --url URL [--receipt FILE] [--head SHA]
-                                   [--only NAME ...] [--artifacts DIR]
+                                   [--only NAME ...] [--artifacts DIR] [--dock]
 """
 import argparse
 import datetime
@@ -296,12 +296,69 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         ctx.close()
 
 
+# ---------------------------------------------------------------------------
+# --dock: R1-2's live arm (seat design brief 2026-11-10, option A-prime).
+# The edge-dock LAW is pinned by the shared corpus in
+# test_fixtures/workspace_operations/. This check witnesses what that corpus
+# cannot see: a dock tab dragged in the browser reaches that law, AND the
+# snapped dock is drawn. It runs OUTSIDE the input-script corpus on purpose:
+# every channel replays that corpus, and a dock script would break the
+# engine replays and move every channel's item count.
+# Each case passes only if BOTH halves hold: the engine's layout puts the
+# panel in the dock anchored at the edge, and the DOM node for that edge's
+# dock holds the panel's tab. Either half alone could agree with itself.
+# The cases, the band, the layout reader, the verdict and the DOCK line are
+# mac_l2_plan's, so the web and Mac channels read a dock by one law.
+DOCK_EDGES, DOCK_CASES = _plan.DOCK_EDGES, _plan.DOCK_CASES
+snap_distance, dock_point, dock_line = _plan.snap_distance, _plan.dock_point, _plan.dock_line
+
+
+def run_dock_case(br, kind, edge, via=None):
+    """-> (status, detail). Drags `kind`'s dock tab into `edge`'s snap band,
+    or, with edge None, through `via`'s band and then to the viewport's
+    centre, where it must float."""
+    ctx, page = br.page(True)
+    try:
+        page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+        if not page.evaluate("() => typeof window.__jasTest.layout === 'function'"):
+            return "REFUSED", "window.__jasTest has no layout()"
+        before = page.evaluate("() => window.__jasTest.layout()")
+        why = _plan.dock_start_refusal(before, kind)
+        if why:
+            return "REFUSED", why
+        tab_id = kind + _plan.PANEL_SUFFIX + _plan.TAB_SUFFIX
+        tab = page.locator(f"#{tab_id}")
+        if tab.count() != 1:
+            return "REFUSED", f"{tab.count()} elements carry id {tab_id!r}"
+        vw, vh = page.evaluate("() => [window.innerWidth, window.innerHeight]")
+        band = snap_distance()
+        px, py = dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2)
+        box = tab.bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        if via:
+            page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
+        page.mouse.move(px, py, steps=12)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        after = page.evaluate("() => window.__jasTest.layout()")
+        drawn = {e: page.locator(f"#{_plan.edge_dock_id(e)} #{tab_id}").count() for e in DOCK_EDGES}
+        return _plan.dock_verdict(before, after, kind, edge, drawn)
+    except _plan.Refused as e:
+        return "REFUSED", str(e)
+    except Exception as e:
+        return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+    finally:
+        ctx.close()
+
+
 def run(args):
     menubar = _plan.load_menubar()
     menu_ids = menu_ids_by_path(menubar)
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
+    dock = dock_cases = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -326,18 +383,25 @@ def run(args):
                 if not ok:
                     results = [(n, "REFUSED" if s == "PASS" else s, d) for n, s, d in results]
                     lines.append(f"WITNESS REFUSED: {WITNESS} did not pass with a moved read-back, so no PASS in this run is counted")
+        if args.dock:
+            dock_cases = [(k, e) + run_dock_case(br, k, e, v) for k, e, v in DOCK_CASES] if not not_run else []
+            dock = dock_line(dock_cases)
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     first = receipt(results, args.head, date, not_run=not_run)
-    body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"] + lines
+    body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
+    if dock is not None:
+        body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
+    body += lines
     print("\n".join(body))
     if args.receipt:
         with open(args.receipt, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(body) + "\n")
     if args.advisory and args.receipt:
         return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
-    return 0 if " verdict=GREEN " in first else 1
+    dock_ok = dock_cases is None or (bool(dock_cases) and all(c[2] == "PASS" for c in dock_cases))
+    return 0 if " verdict=GREEN " in first and dock_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +480,12 @@ def self_test():
         fails.append("an empty run with no reason is refused")
     except ValueError:
         pass
+    # --dock (R1-2's live arm): its reader, cases and verdict are mac_l2_plan's
+    # and self-test there. Here, only that the drop points fit this viewport.
+    band = snap_distance()
+    for e in DOCK_EDGES:
+        px, py = dock_point(e, VIEWPORT["width"], VIEWPORT["height"], band)
+        check(0 < px < VIEWPORT["width"] and 0 < py < VIEWPORT["height"], f"the {e} drop point is inside the viewport")
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:
@@ -431,6 +501,8 @@ def main(argv):
     ap.add_argument("--head")
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--artifacts")
+    ap.add_argument("--dock", action="store_true",
+                    help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)

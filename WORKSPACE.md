@@ -208,6 +208,79 @@ When a pane is resized or the window is resized, snap constraints propagate
 position changes to maintain alignment. Panes can be undocked (losing snaps)
 and re-snapped by dragging near an edge.
 
+## Anchored Docks by Edge
+
+`anchored` holds at most one dock per `DockEdge`: `Right`, `Left` or
+`Bottom`. There is no `Top` dock. This section states where each one is
+drawn. Every app draws every non-empty anchored dock. An app that draws only
+the `Right` dock loses the panels of a dock snapped to the left or bottom
+edge: they leave the floating layer and appear nowhere.
+
+### Snapping onto an edge
+
+A floating dock dropped within `SNAP_DISTANCE` of a window edge snaps to that
+edge (`snap_to_edge`). The edge is chosen in this order: left
+(`x <= SNAP_DISTANCE`), then right (`x >= viewport_w - SNAP_DISTANCE`), then
+bottom (`y >= viewport_h - SNAP_DISTANCE`). So a drop in the bottom-left
+corner snaps left. If the edge has no dock yet, the floating dock becomes its
+anchored dock, keeping its id and width. If the edge already holds a dock, the
+floating dock's groups are appended after that dock's groups, in order, and
+the floating dock is removed. The existing dock keeps its id, width and
+collapsed state. `redock` is `snap_to_edge` onto the `Right` edge.
+(Conformance: `panel_ops.json` `snap_to_edge_left`; engine arms
+`snap_to_left_edge`, `snap_creates_anchored_dock` and
+`a_detach_dropped_near_an_edge_snaps_there`.)
+
+### Where each edge dock is drawn
+
+The `Right` dock is the `Dock` pane of the pane layout and is drawn in that
+pane's rectangle, as before. The pane layout has no pane for the other two
+edges. They are cut from the **canvas pane's rectangle**, so no snap
+constraint, toolbar or Right-dock position changes:
+
+1. **Thickness.** A dock's `width` is its extent across its edge: the column
+   width of a `Left` dock and the row height of a `Bottom` dock. It is clamped
+   to the dock's `min_width`..`MAX_DOCK_WIDTH`, as `set_dock_width` clamps it.
+   A collapsed edge dock is 36px thick.
+2. **Left column.** It runs down the canvas pane's left side, at the canvas
+   pane's full height, with thickness *t_L*.
+3. **Bottom row.** It runs along the canvas pane's bottom, with thickness
+   *t_B*. It starts at the left column's right side, or at the canvas pane's
+   left side when there is no left column, and ends at the canvas pane's right
+   side. **The bottom-left corner belongs to the left column.**
+4. **The canvas** is drawn in what remains: the canvas pane's rectangle less
+   the left column and the bottom row. The document view's origin and visible
+   area are measured in that remaining rectangle.
+5. **An empty or missing edge takes no space.** An edge with no anchored dock,
+   or with a dock that has no groups, is not drawn, and the canvas keeps that
+   strip.
+6. **Group order.** A `Left` dock stacks its groups top to bottom, as the
+   `Right` dock does. A `Bottom` dock lays its groups out left to right in
+   equal shares of the row. A group's `height` does not apply in a row.
+7. **Drawing order.** Edge docks are drawn above the canvas and below every
+   floating dock.
+8. **Canvas maximized.** The canvas takes the whole viewport, and the edge
+   docks are drawn over it at the viewport's left and bottom edges by the same
+   rules, as the `Right` dock is drawn over a maximized canvas.
+
+Worked example: viewport 1200×800, the default panes (toolbar 72px, Right dock
+240px, so the canvas pane is x 72..960, y 0..800), a `Left` dock of width 200
+and a `Bottom` dock of width 180:
+
+| region | x | y | w | h |
+|---|---|---|---|---|
+| left column | 72 | 0 | 200 | 800 |
+| bottom row | 272 | 620 | 688 | 180 |
+| canvas | 272 | 0 | 688 | 620 |
+
+If the canvas pane is too small to hold the edge docks and `MIN_CANVAS_WIDTH`,
+the edge docks are drawn at their stated thickness anyway, and the canvas may
+be narrower than `MIN_CANVAS_WIDTH`. This section does not add a reflow rule.
+**Known difference:** a collapsed `Right` dock is drawn 36px wide inside its
+unchanged pane, so the canvas does not grow, whereas a collapsed `Left` or
+`Bottom` dock returns the rest of its strip to the canvas. Making the `Right`
+dock behave the same way is a separate question and is not decided here.
+
 ## Constants
 
 | Constant | Value | Description |
