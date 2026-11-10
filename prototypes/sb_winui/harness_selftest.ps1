@@ -2299,7 +2299,7 @@ Test-Case 'is: CONTROL -- a named modifier set false is no modifier and passes' 
 Test-Case 'is: a key or panel step is refused by name' {
     $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
-} "REFUSED: step 3 kind 'key': this driver delivers only press, move, release"
+} "REFUSED: step 3 kind 'key': this driver delivers only press, move, release, double_click"
 # §333 node 6: KEY steps, the key corpus's chord form ({"key": "Z", "ctrl": true}),
 # delivered AFTER the gesture by send_hand.ps1's key injector.
 Test-Case 'is: a key step after the gesture is accepted and carried' {
