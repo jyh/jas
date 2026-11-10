@@ -153,6 +153,10 @@ internal sealed class PointerReportCmd : Cmd
     /// that makes `DupFrames` checkable rather than merely present.
     internal int MovesRaised;
     internal int Release;
+    /// G11 step 3: 1 when the shell sent the engine a double-click after THIS
+    /// release (`DoubleClickGate`), else 0. The harness holds it to the script:
+    /// exactly the double's second release reads 1.
+    internal int Double;
     internal double PressX;
     internal double PressY;
     internal double ReleaseX;
@@ -2419,6 +2423,9 @@ internal sealed unsafe class Canvas : IDisposable
             DirtyFromModel();
             ApplyDialogAfterRelease();
         }
+        // A double-click can change the model too (the selection tool enters
+        // isolation), so it repaints as a release does.
+        else if (p.Kind == JasCore.PointerDoubleClick) { DirtyFromModel(); }
     }
 
     /// <summary>
@@ -2499,7 +2506,7 @@ internal sealed unsafe class Canvas : IDisposable
             ? r.MovesRaised.ToString()
             : "n/a";
         _report(
-            $"POINTER {r.Kind} press={r.Press} move={r.Move} release={r.Release} "
+            $"POINTER {r.Kind} press={r.Press} move={r.Move} release={r.Release} double={r.Double} "
           + $"dup-frames={r.DupFrames} raised={raisedField} "
           + $"id={r.PointerId} device={r.Device} hit={r.Hit} tool=0 pointer={provenance} "
           + $"doc={doc} loads(shell)={_loadsShell} "
