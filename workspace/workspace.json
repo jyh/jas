@@ -36974,11 +36974,13 @@
             },
             "children": [
               {
+                "id": "sct_cancel_btn",
                 "type": "button",
                 "label": "Cancel",
                 "action": "dismiss_dialog"
               },
               {
+                "id": "sct_discard_btn",
                 "type": "button",
                 "label": "Discard",
                 "action": "discard_and_close_tab",
@@ -36987,6 +36989,7 @@
                 }
               },
               {
+                "id": "sct_save_btn",
                 "type": "button",
                 "label": "Save",
                 "action": "save_and_close",
@@ -37021,21 +37024,25 @@
             },
             "children": [
               {
+                "id": "scw_cancel_btn",
                 "type": "button",
                 "label": "Cancel",
                 "action": "dismiss_dialog"
               },
               {
+                "id": "scw_dont_save_btn",
                 "type": "button",
                 "label": "Don't Save",
                 "action": "close_without_saving"
               },
               {
+                "id": "scw_save_btn",
                 "type": "button",
                 "label": "Save",
                 "action": "save_and_close"
               },
               {
+                "id": "scw_save_all_btn",
                 "type": "button",
                 "label": "Save All",
                 "action": "save_all_and_close",
@@ -38949,6 +38956,7 @@
         },
         "children": [
           {
+            "id": "arrow_alt_partial_selection",
             "type": "icon_button",
             "icon": "partial_selection_arrow",
             "label": "Partial Selection",
@@ -38977,6 +38985,7 @@
             ]
           },
           {
+            "id": "arrow_alt_interior_selection",
             "type": "icon_button",
             "icon": "interior_selection_arrow",
             "label": "Interior Selection",
@@ -39005,6 +39014,7 @@
             ]
           },
           {
+            "id": "arrow_alt_magic_wand",
             "type": "icon_button",
             "icon": "magic_wand",
             "label": "Magic Wand",
@@ -39049,6 +39059,7 @@
         },
         "children": [
           {
+            "id": "pen_alt_pen",
             "type": "icon_button",
             "icon": "pen",
             "label": "Pen",
@@ -39077,6 +39088,7 @@
             ]
           },
           {
+            "id": "pen_alt_add_anchor_point",
             "type": "icon_button",
             "icon": "add_anchor",
             "label": "Add Anchor Point",
@@ -39105,6 +39117,7 @@
             ]
           },
           {
+            "id": "pen_alt_delete_anchor_point",
             "type": "icon_button",
             "icon": "delete_anchor",
             "label": "Delete Anchor Point",
@@ -39133,6 +39146,7 @@
             ]
           },
           {
+            "id": "pen_alt_anchor_point",
             "type": "icon_button",
             "icon": "anchor_point",
             "label": "Anchor Point",
@@ -39177,6 +39191,7 @@
         },
         "children": [
           {
+            "id": "pencil_alt_pencil",
             "type": "icon_button",
             "icon": "pencil",
             "label": "Pencil",
@@ -39205,6 +39220,7 @@
             ]
           },
           {
+            "id": "pencil_alt_paintbrush",
             "type": "icon_button",
             "icon": "paintbrush",
             "label": "Paintbrush",
@@ -39233,6 +39249,7 @@
             ]
           },
           {
+            "id": "pencil_alt_blob_brush",
             "type": "icon_button",
             "icon": "blob_brush",
             "label": "Blob Brush",
@@ -39261,6 +39278,7 @@
             ]
           },
           {
+            "id": "pencil_alt_path_eraser",
             "type": "icon_button",
             "icon": "path_eraser",
             "label": "Path Eraser",
@@ -39289,6 +39307,7 @@
             ]
           },
           {
+            "id": "pencil_alt_smooth",
             "type": "icon_button",
             "icon": "smooth",
             "label": "Smooth",
@@ -39333,6 +39352,7 @@
         },
         "children": [
           {
+            "id": "text_alt_type",
             "type": "icon_button",
             "icon": "type",
             "label": "Type",
@@ -39361,6 +39381,7 @@
             ]
           },
           {
+            "id": "text_alt_type_on_a_path",
             "type": "icon_button",
             "icon": "type_on_path",
             "label": "Type on a Path",
@@ -39405,6 +39426,7 @@
         },
         "children": [
           {
+            "id": "shape_alt_rectangle",
             "type": "icon_button",
             "icon": "rect",
             "label": "Rectangle",
@@ -39433,6 +39455,7 @@
             ]
           },
           {
+            "id": "shape_alt_rounded_rectangle",
             "type": "icon_button",
             "icon": "rounded_rect",
             "label": "Rounded Rectangle",
@@ -39461,6 +39484,7 @@
             ]
           },
           {
+            "id": "shape_alt_ellipse",
             "type": "icon_button",
             "icon": "ellipse",
             "label": "Ellipse",
@@ -39489,6 +39513,7 @@
             ]
           },
           {
+            "id": "shape_alt_polygon",
             "type": "icon_button",
             "icon": "polygon",
             "label": "Polygon",
@@ -39517,6 +39542,7 @@
             ]
           },
           {
+            "id": "shape_alt_star",
             "type": "icon_button",
             "icon": "star",
             "label": "Star",
@@ -39561,6 +39587,7 @@
         },
         "children": [
           {
+            "id": "hand_alt_hand",
             "type": "icon_button",
             "icon": "hand",
             "label": "Hand",
@@ -39589,6 +39616,7 @@
             ]
           },
           {
+            "id": "hand_alt_zoom",
             "type": "icon_button",
             "icon": "zoom",
             "label": "Zoom",
@@ -39633,6 +39661,7 @@
         },
         "children": [
           {
+            "id": "scale_alt_scale",
             "type": "icon_button",
             "icon": "scale",
             "label": "Scale",
@@ -39661,6 +39690,7 @@
             ]
           },
           {
+            "id": "scale_alt_shear",
             "type": "icon_button",
             "icon": "shear",
             "label": "Shear",

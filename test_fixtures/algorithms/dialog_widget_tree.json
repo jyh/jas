@@ -205,7 +205,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "arrow_alt_partial_selection",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -224,7 +224,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "arrow_alt_interior_selection",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -243,7 +243,7 @@
           2
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "arrow_alt_magic_wand",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -6351,7 +6351,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "hand_alt_hand",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -6370,7 +6370,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "hand_alt_zoom",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9218,7 +9218,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pen_alt_pen",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9237,7 +9237,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pen_alt_add_anchor_point",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9256,7 +9256,7 @@
           2
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pen_alt_delete_anchor_point",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9275,7 +9275,7 @@
           3
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pen_alt_anchor_point",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9318,7 +9318,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pencil_alt_pencil",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9337,7 +9337,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pencil_alt_paintbrush",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9356,7 +9356,7 @@
           2
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pencil_alt_blob_brush",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9375,7 +9375,7 @@
           3
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pencil_alt_path_eraser",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9394,7 +9394,7 @@
           4
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "pencil_alt_smooth",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -9821,7 +9821,7 @@
           0
         ],
         "type": "button",
-        "id": "",
+        "id": "sct_cancel_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9835,7 +9835,7 @@
           1
         ],
         "type": "button",
-        "id": "",
+        "id": "sct_discard_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9849,7 +9849,7 @@
           2
         ],
         "type": "button",
-        "id": "",
+        "id": "sct_save_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9916,7 +9916,7 @@
           0
         ],
         "type": "button",
-        "id": "",
+        "id": "scw_cancel_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9930,7 +9930,7 @@
           1
         ],
         "type": "button",
-        "id": "",
+        "id": "scw_dont_save_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9944,7 +9944,7 @@
           2
         ],
         "type": "button",
-        "id": "",
+        "id": "scw_save_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9958,7 +9958,7 @@
           3
         ],
         "type": "button",
-        "id": "",
+        "id": "scw_save_all_btn",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -9995,7 +9995,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "scale_alt_scale",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -10014,7 +10014,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "scale_alt_shear",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -10664,7 +10664,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "shape_alt_rectangle",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -10683,7 +10683,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "shape_alt_rounded_rectangle",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -10702,7 +10702,7 @@
           2
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "shape_alt_ellipse",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -10721,7 +10721,7 @@
           3
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "shape_alt_polygon",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -10740,7 +10740,7 @@
           4
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "shape_alt_star",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -13316,7 +13316,7 @@
           0
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "text_alt_type",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
@@ -13335,7 +13335,7 @@
           1
         ],
         "type": "icon_button",
-        "id": "",
+        "id": "text_alt_type_on_a_path",
         "kind": "icon_button",
         "col": 0,
         "visible": true,
