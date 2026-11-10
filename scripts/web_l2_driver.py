@@ -327,6 +327,59 @@ def snap_distance():
     return float(hits[0])
 
 
+APP_RS = os.path.join(REPO, "jas_dioxus", "src", "workspace", "app.rs")
+
+
+def snap_preview_style(text=None):
+    """(width px, computed colour) of the root's snap preview, read from the
+    three `let snap_<edge> = if snap_edge == ...` lines in app.rs. The preview
+    is drawn exactly while the drop target is an Edge, so reading it mid-drag
+    tells the drop target the dragend handler will read (R1-2h, flask's 775)."""
+    import re
+    if text is None:
+        with open(APP_RS, encoding="utf-8") as f:
+            text = f.read()
+    hits = re.findall(r'let snap_(left|right|bottom) = if snap_edge == Some\(DockEdge::\w+\) '
+                      r'\{ "([0-9]+)px solid (#[0-9a-fA-F]{6})" \}', text)
+    if sorted(h[0] for h in hits) != ["bottom", "left", "right"] or len({h[1:] for h in hits}) != 1:
+        raise _plan.Refused(f"app.rs's snap preview lets read {hits!r}; the preview probe needs three alike")
+    return int(hits[0][1]), hex_to_rgb(hits[0][2])
+
+
+def hex_to_rgb(h):
+    return "rgb({}, {}, {})".format(int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16))
+
+
+# Which root edges draw the snap preview right now. Any element may carry it,
+# so every element is read; the side names are getComputedStyle's.
+PREVIEW_JS = """([w, rgb]) => {
+  const out = [];
+  for (const el of document.querySelectorAll('*')) {
+    const cs = getComputedStyle(el);
+    for (const side of ['left', 'right', 'bottom'])
+      if (cs['border-' + side + '-width'] === w + 'px' && cs['border-' + side + '-style'] === 'solid'
+          && cs['border-' + side + '-color'] === rgb) out.push(side);
+  }
+  return out;
+}"""
+
+
+def preview_label(sides):
+    return "+".join(sorted(set(sides))) or "none"
+
+
+def preview_line(cases):
+    """Every case's preview readings, PASS included: a PASS that floated with
+    the preview still lit is itself a finding."""
+    if not cases:
+        return "DOCK PREVIEW NOT RUN"
+    parts = []
+    for k, e, _s, _d, *rest in cases:
+        pv = rest[0] if rest else {}
+        parts.append(f"{k}->{e or 'float'}[" + " ".join(f"{p}={pv[p]}" for p in ("via", "up") if p in pv) + "]")
+    return "DOCK PREVIEW " + " ".join(parts)
+
+
 def dock_point(edge, vw, vh, band):
     """A viewport point a fifth of the way into the edge's snap band.
     Bottom is mid-width, so neither side band claims it first."""
@@ -367,15 +420,24 @@ def dock_line(cases):
     ok = sum(1 for c in cases if c[2] == "PASS")
     if ok == len(cases):
         return f"DOCK {ok}/{len(cases)}"
-    bad = "; ".join(f"{s} {k}->{e or 'float'}: {d}" for k, e, s, d in cases if s != "PASS")
+    bad = "; ".join(f"{s} {k}->{e or 'float'}: {d}" for k, e, s, d, *_ in cases if s != "PASS")
     return f"DOCK RED {ok}/{len(cases)} ({bad})"
 
 
 def run_dock_case(br, kind, edge, via=None):
-    """-> (status, detail). Drags `kind`'s dock tab into `edge`'s snap band,
+    """-> (status, detail, preview). preview maps "via"/"up" to the snap
+    preview read just after the band pass and just before the release. Drags `kind`'s dock tab into `edge`'s snap band,
     or, with edge None, through `via`'s band and then to the viewport's
     centre, where it must float."""
     ctx, page = br.page(True)
+    pv = {}
+    try:
+        return run_dock_drag(page, kind, edge, via, pv) + (pv,)
+    finally:
+        ctx.close()
+
+
+def run_dock_drag(page, kind, edge, via, pv):
     try:
         page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
         if not page.evaluate("() => typeof window.__jasTest.layout === 'function'"):
@@ -393,9 +455,12 @@ def run_dock_case(br, kind, edge, via=None):
         box = tab.bounding_box()
         page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         page.mouse.down()
+        style = list(snap_preview_style())
         if via:
             page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
+            pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
         page.mouse.move(px, py, steps=12)
+        pv["up"] = preview_label(page.evaluate(PREVIEW_JS, style))
         page.mouse.up()
         page.wait_for_timeout(300)
         after = page.evaluate("() => window.__jasTest.layout()")
@@ -419,8 +484,6 @@ def run_dock_case(br, kind, edge, via=None):
         return "REFUSED", str(e)
     except Exception as e:
         return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
-    finally:
-        ctx.close()
 
 
 def run(args):
@@ -464,6 +527,7 @@ def run(args):
     body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
+        body.append(preview_line(dock_cases) + " (the snap preview the root draws mid-drag: via = after the band pass, up = just before the release)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -597,6 +661,24 @@ def self_test():
           "a case passes through a snap band and drops outside it (WORKSPACE.md: a DROP near an edge snaps)")
     check(dock_line([("align", None, "FAIL", "x")]) == "DOCK RED 0/1 (FAIL align->float: x)",
           "a float case names itself as ->float")
+    # R1-2h: the snap preview, read mid-drag from the DOM (flask's 775).
+    w, rgb = snap_preview_style()
+    check(w > 0 and rgb.startswith("rgb("), f"the preview style reads from app.rs ({w}px {rgb})")
+    check(hex_to_rgb("#4a90d9") == "rgb(74, 144, 217)", "hex_to_rgb writes the computed-style form")
+    check(preview_label([]) == "none" and preview_label(["left", "left"]) == "left"
+          and preview_label(["bottom", "left"]) == "bottom+left", "preview_label: none, dedup, sorted")
+    five = [("stroke", "left", "PASS", "", {"up": "left"}),
+            ("layers", "bottom", "FAIL", "x", {"up": "none"}),
+            ("align", None, "PASS", "", {"via": "left", "up": "left"})]
+    check(dock_line(five) == "DOCK RED 2/3 (FAIL layers->bottom: x)", "dock_line reads cases that carry a preview")
+    check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left] layers->bottom[up=none] align->float[via=left up=left]",
+          "preview_line names every case, PASS included, with via before up")
+    check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
+    try:
+        snap_preview_style("let snap_left = 1;")
+        check(False, "a source with no preview lets refuses")
+    except _plan.Refused:
+        pass
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:
