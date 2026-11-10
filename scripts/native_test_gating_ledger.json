@@ -210,6 +210,11 @@
       "kind": "frontend",
       "reason": "THE WEB APP'S starting state map: build_live_state_map over a new AppState, which is the web shell's state and will not come home. The NATIVE build's starting map is checked by its twin, ffi.rs::the_engine_starts_from_the_spec_defaults_for_every_state_variable, against the same golden (algorithms/initial_state_map.json)."
     },
+    "jas_dioxus/src/cross_language_test.rs::a_script_double_click_step_replays_in_the_gesture_runner": {
+      "kind": "debt",
+      "reason": "THE double_click POINTER STEP in the gesture runner (docs/TESTING.md section 6; jas STATUS-flask 756). Pure fixture replay, like script_corpus. Its NATIVE twins are ffi_script_replay.rs::the_engine_replay_delivers_a_double_click_step and ::the_forms_replay_delivers_a_double_click_step, which replay the same step through jas_pointer_event's KIND_DOUBLE_CLICK.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, as script_corpus: it drives tools::tool::CanvasTool and comes home with the `tools` split."
+    },
     "jas_dioxus/src/cross_language_test.rs::script_corpus": {
       "kind": "debt",
       "reason": "THE INPUT-SCRIPT CORPUS (docs/TESTING.md section 6). Pure fixture replay through the gesture runner; it drives no frontend of its own.",

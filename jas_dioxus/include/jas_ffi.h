@@ -100,6 +100,13 @@
 #define KIND_RELEASE 2
 
 /**
+ * A double-click, sent AFTER the second press/release pair (a browser's
+ * `dblclick` order; docs/TESTING.md section 6). It reaches the active tool's
+ * `on_double_click` and nothing else (jas STATUS-flask 750, 756: G11).
+ */
+#define KIND_DOUBLE_CLICK 3
+
+/**
  * Modifier bit flags. ABI, like the kinds above.
  */
 #define MOD_SHIFT (1 << 0)
