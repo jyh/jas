@@ -59,6 +59,9 @@ pub(crate) mod test_hook;
 // one per-verb body. Promoted from the web-gated harness `apply_workspace_op`.
 // NOT gated: it is the shared body a cross-language corpus pins.
 pub mod layout_apply;
+// Where the Left and Bottom anchored docks are drawn (WORKSPACE.md
+// §"Anchored Docks by Edge"). NOT gated: it is arithmetic over the layout.
+pub mod edge_dock;
 // NOT gated: the menu STRUCTURE is data; only its rendering is a view.
 pub mod menu;
 // NOT gated: the menu's model-pure verbs, shared by every route.

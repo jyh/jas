@@ -2699,6 +2699,114 @@ function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string
     return New-SbVerdict $name 'PASS' "$($key): collapsed with its body hidden, then expanded with it visible, both read off the body after the toggle" $up
 }
 
+# Q6.FL -- TWO GROUPS FLOAT, ONE MOVES AND IS RAISED, BOTH REDOCK (FP-6's
+# scene; the floating-panels freeze, 2026-10-21 section 2). The shell replays
+# SB_DOCK_FLOAT_TOUR=<key>,<key> through each gesture's own method and writes a
+# STEP row before each op and a READ row of the engine's floating docks once
+# that op's answer is placed. Each READ is judged against what its step must
+# have done, so a verb the engine skipped, or applied to the other dock, FAILS.
+$SbDockFloatTourName = 'Q6.FL two dock groups floated, one moved and was raised, and both redocked'
+$SbDockFloatTourSteps = 6
+
+# `at=[1@300,40z0;2@520,40z1]` as {id -> @{X; Y; Z}}; null when any entry is unreadable.
+function ConvertFrom-SbFloatAt([string]$At) {
+    if ($At -notmatch '^\[(.*)\]$') { return $null }
+    $docks = @{}
+    $body = $Matches[1]
+    if ($body -eq '') { return $docks }
+    foreach ($e in $body -split ';') {
+        if ($e -notmatch '^(\d+)@(-?[0-9.]+),(-?[0-9.]+)z(-?\d+)$') { return $null }
+        $docks[[int]$Matches[1]] = @{ X = [double]$Matches[2]; Y = [double]$Matches[3]; Z = [int]$Matches[4] }
+    }
+    return $docks
+}
+
+function Get-SbDockFloatTourVerdict($Rows, [string]$Scene, [string]$Dock, [string]$Tour) {
+    $name = $SbDockFloatTourName
+    if ([string]::IsNullOrWhiteSpace($Tour)) {
+        return New-SbVerdict $name 'NOT RUN' 'SB_DOCK_FLOAT_TOUR is unset: no floating tour was asked for'
+    }
+    $knob = $Tour.Trim()
+    if ($Scene -ne $SbPaneScene -or [string]::IsNullOrWhiteSpace($Dock)) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK_FLOAT_TOUR='$knob' needs a dock (SB_DOCK) under '$SbPaneScene'; this run is scene '$Scene' with SB_DOCK='$Dock', so there is nothing to float"
+    }
+    $bad = Select-SbRow $Rows "`tRUSTFAIL (?:FLOAT TOUR |DOCK OP |FLOAT DOCK DRAW )"
+    if ($null -ne $bad) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK_FLOAT_TOUR='$knob': the shell or the engine refused a step (the row)" $bad
+    }
+    $reads = @{}
+    foreach ($n in 1..$SbDockFloatTourSteps) {
+        $step = Select-SbRow $Rows (Get-SbRowPattern 'FLOAT TOUR STEP' " n=$n .*via=synth")
+        $read = Select-SbRow $Rows (Get-SbRowPattern 'FLOAT TOUR READ' " n=$n ")
+        if ($null -eq $step -or $null -eq $read) {
+            $why = if ($null -eq $step) { 'was never issued' } else { 'was issued and its answer was never placed' }
+            return New-SbVerdict $name 'FAIL' "the tour stopped: step $n of $SbDockFloatTourSteps $why" $step
+        }
+        $at = ConvertFrom-SbFloatAt (Get-SbField $read 'at')
+        if ($null -eq $at) {
+            return New-SbVerdict $name 'FAIL' "step $n's READ carries an unreadable at= list" $read
+        }
+        if ((Get-SbField $read 'docks') -ne "$($at.Count)") {
+            return New-SbVerdict $name 'FAIL' "step $n's READ says docks=$(Get-SbField $read 'docks') and lists $($at.Count)" $read
+        }
+        $reads[$n] = @{ Row = $read; At = $at }
+    }
+    # A move and a raise keep every key's panels, so they are drawn IN PLACE: a
+    # whole-dock republish between their STEP and READ is the zip-in-list-order
+    # defect (jas STATUS-flask 750; its mutant, run live, wrote one at step 4).
+    $all = @($Rows)
+    foreach ($n in 3, 4) {
+        $s = -1; $r = -1
+        for ($i = 0; $i -lt $all.Count; $i++) {
+            if ($s -lt 0 -and $all[$i] -match (Get-SbRowPattern 'FLOAT TOUR STEP' " n=$n ")) { $s = $i }
+            if ($s -ge 0 -and $all[$i] -match (Get-SbRowPattern 'FLOAT TOUR READ' " n=$n ")) { $r = $i; break }
+        }
+        if ($s -ge 0 -and $r -gt $s) {
+            $re = @($all[($s + 1)..($r - 1)] | Where-Object { $_ -match (Get-SbRowPattern 'DOCK LAYOUT' ' name=') })
+            if ($r -gt $s + 1 -and $re.Count -gt 0) {
+                return New-SbVerdict $name 'FAIL' "step $n kept every key's panels and the shell republished the whole dock for it (a DOCK LAYOUT row between its STEP and READ): it should be drawn in place" $re[0]
+            }
+        }
+    }
+    # Step 1 floats one dock (A), step 2 a second (B).
+    if ($reads[1].At.Count -ne 1) { return New-SbVerdict $name 'FAIL' "step 1's detach left $($reads[1].At.Count) floating dock(s), not 1" $reads[1].Row }
+    $a = @($reads[1].At.Keys)[0]
+    if ($reads[2].At.Count -ne 2 -or -not $reads[2].At.ContainsKey($a)) { return New-SbVerdict $name 'FAIL' "step 2's detach did not leave dock $a and one more floating" $reads[2].Row }
+    $b = @($reads[2].At.Keys | Where-Object { $_ -ne $a })[0]
+    # Step 3 moves A to (300, 260) and leaves B where step 2 put it.
+    $r3 = $reads[3].At
+    if ($r3.Count -ne 2 -or -not $r3.ContainsKey($a) -or $r3[$a].X -ne 300 -or $r3[$a].Y -ne 260) {
+        return New-SbVerdict $name 'FAIL' "step 3 asked dock $a at (300, 260) and the engine placed it elsewhere" $reads[3].Row
+    }
+    if ($r3[$b].X -ne $reads[2].At[$b].X -or $r3[$b].Y -ne $reads[2].At[$b].Y) {
+        return New-SbVerdict $name 'FAIL' "step 3 moved dock $b, which it did not name" $reads[3].Row
+    }
+    # Step 4 raises A over B.
+    $r4 = $reads[4].At
+    if ($r4.Count -ne 2 -or $r4[$a].Z -le $r4[$b].Z) {
+        return New-SbVerdict $name 'FAIL' "step 4 raised dock $a and it is not above dock $($b)" $reads[4].Row
+    }
+    # Steps 5 and 6 redock A, then B.
+    if ($reads[5].At.Count -ne 1 -or -not $reads[5].At.ContainsKey($b)) {
+        return New-SbVerdict $name 'FAIL' "step 5 redocked dock $a and dock $b is not the one left floating" $reads[5].Row
+    }
+    if ($reads[6].At.Count -ne 0) {
+        return New-SbVerdict $name 'FAIL' "step 6 redocked dock $b and $($reads[6].At.Count) dock(s) still float" $reads[6].Row
+    }
+    # Every group and tab the dock opened with is anchored again.
+    $done = Select-SbRow $Rows (Get-SbRowPattern 'FLOAT TOUR DONE' ' steps=')
+    $open = Select-SbRow $Rows (Get-SbRowPattern 'DOCK OPEN' ' name=')
+    $drawn = Select-SbRow $Rows (Get-SbRowPattern 'DOCK DRAWN' ' name=')
+    if ($null -eq $done) { return New-SbVerdict $name 'FAIL' 'every step read as asked, and no FLOAT TOUR DONE row followed' $reads[6].Row }
+    $g0 = Get-SbField $open 'groups'; $t0 = Get-SbField $drawn 'tabs'
+    $g1 = Get-SbField $done 'groups'; $t1 = Get-SbField $done 'tabs'
+    if ($g1 -ne $g0 -or $t1 -ne $t0) {
+        return New-SbVerdict $name 'FAIL' "redocked, the dock has groups=$g1 tabs=$t1 against the open's groups=$g0 tabs=$($t0): the tour lost part of the dock" $done
+    }
+    return New-SbVerdict $name 'PASS' ("SB_DOCK_FLOAT_TOUR='$knob': dock $a and dock $b floated, dock $a moved to (300, 260) and was raised " +
+        "(z$($r4[$a].Z) over z$($r4[$b].Z)), both redocked, and the dock is whole again (groups=$g1 tabs=$t1)") $done
+}
+
 $SbPanelMenuName = 'Q6.PM a dock group''s panel menu was read and its item ran in the engine'
 
 # Q6.PM: `SB_PANEL_MENU_SYNTH=<group>:<index>` reads the group's menu and runs
