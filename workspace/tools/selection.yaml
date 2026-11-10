@@ -276,6 +276,15 @@ handlers:
             - set: { tool.selection.drag_start_y: "event.doc_y" }
 
   on_mouseup:
+    # The marquee selects the elements its rectangle touches. While a group
+    # is isolated (G11, STATUS-jas row 73), it selects among that group's
+    # children only, the same scope as the click above: a child inside the
+    # band is selected for itself, a group inside the isolated group answers
+    # as a whole, and a band that touches nothing inside the isolated group
+    # selects nothing, even where it covers elements outside it. Not
+    # isolated, the root is null and the marquee selects among the layers'
+    # children as before. The root rides the journaled `select_rect` op as
+    # `root`, present only while isolated, so replay is byte-identical.
     - if: "tool.selection.mode == 'marquee'"
       then:
         - "doc.select_in_rect":
@@ -284,6 +293,7 @@ handlers:
             x2: "max(tool.selection.doc_marquee_start_x, tool.selection.doc_marquee_end_x)"
             y2: "max(tool.selection.doc_marquee_start_y, tool.selection.doc_marquee_end_y)"
             additive: "event.modifiers.shift"
+            root: "active_document.isolation_root"
     # Mid-drag Alt commit edge case: user pressed Alt AFTER the last
     # mousemove and released the mouse without moving — alt_preview
     # never transitioned to true so the live copy was never created.

@@ -58,13 +58,16 @@ private func selected(_ m: Model) -> [[Int]] {
     click(tool, c, 45, 5)
     #expect(!selected(model).contains([0, 0]) && !selected(model).contains { $0.count > 2 },
             "a click outside the isolated group selects nothing inside it")
-    // ⚠️ DECLARED, NOT BUILT: the miss starts a zero-size marquee, and
-    // `doc.select_in_rect` is not yet scoped to isolation, so its release
-    // selects R3 ([0, 1]) OUTSIDE the isolated group. G11's next step; this
-    // known issue reds the day the marquee is scoped.
-    withKnownIssue("the marquee is not yet scoped to isolation (G11 next step)") {
-        #expect(selected(model) == [], "a click outside the isolated group selects nothing")
-    }
+    // The miss starts a zero-size marquee; G11 step 4 scoped `doc.select_in_rect`
+    // to the isolation root, so its release selects nothing. (Until then this
+    // was a `withKnownIssue`: the release selected R3 [0, 1] outside G.)
+    #expect(selected(model) == [], "a click outside the isolated group selects nothing")
+    let band = ctx(model)
+    tool.onPress(band, x: -1, y: -1, shift: false, alt: false)
+    tool.onMove(band, x: 31, y: 11, shift: false, alt: false, dragging: true)
+    tool.onRelease(band, x: 31, y: 11, shift: false, alt: false)
+    #expect(selected(model) == [[0, 0, 0], [0, 0, 1]],
+            "a marquee over G's members while G is isolated selects the members, never G")
     doubleClick(tool, c, 15, 50)
     #expect(model.layersIsolationStack == [], "double-click on empty canvas exits one level")
     click(tool, c, 25, 5)
@@ -83,4 +86,22 @@ private func selected(_ m: Model) -> [[Int]] {
     #expect(model.layersIsolationStack == [[0, 2], [0, 2, 0]], "a nested group stacks one more level")
     doubleClick(tool, c, 150, 50)
     #expect(model.layersIsolationStack == [[0, 2]], "empty canvas exits ONE level")
+}
+
+/// G11 step 4's FRAME arms (seat design 2026-11-08 §4 arms 4/5), which only
+/// the ports carry: `Moved` [0, 2] is translated by (100, 0), so `Inner` answers
+/// for R4 where R4 is DRAWN, and a walk dropping the root's frame would answer
+/// where its raw geometry sits instead. Twin of Rust
+/// `g11_marquee_composes_the_root_frame_both_directions`.
+@Test func g11MarqueeComposesTheRootFrameBothDirections() throws {
+    let model = try fixtureModel()
+    let controller = Controller(model: model)
+    controller.selectRect(x: 102, y: 2, width: 1, height: 1, root: [0, 2])
+    #expect(selected(model) == [[0, 2, 0]], "Inner answers for R4 where it is drawn")
+    controller.selectRect(x: 2, y: 2, width: 1, height: 1, root: [0, 2])
+    #expect(selected(model) == [], "R4's untransformed geometry is not where it is drawn")
+    controller.selectRect(x: 45, y: 5, width: 0, height: 0, root: [0, 0])
+    #expect(selected(model) == [], "a band outside the root selects nothing")
+    controller.selectRect(x: 2, y: 2, width: 1, height: 1, root: [0, 1])
+    #expect(selected(model) == [], "a leaf root selects nothing, never the layer walk")
 }

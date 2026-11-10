@@ -889,6 +889,22 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
+        Self::select_rect_in(model, x, y, width, height, extend, None);
+    }
+
+    /// `select_rect` scoped to an isolation ROOT (G11): with `Some(root)` the
+    /// units are that container's children and a band outside it selects
+    /// nothing (`select_flat_in`); `None` or an empty root is the layer walk.
+    /// Twin of JasSwift `selectRect(…root:)` and the reference `select_rect`.
+    pub fn select_rect_in(
+        model: &mut Model,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        extend: bool,
+        root: Option<&[usize]>,
+    ) {
         // RESOLVEDHIT: resolve through the Model's index, so an element whose
         // geometry lives behind a stable id (a symbol instance, a recorded or
         // generated element) is caught where it is DRAWN. The index is an rpds
@@ -901,15 +917,15 @@ impl Controller {
         // parent space and tested as a polygon (which applies the element's
         // own transform). With none this is exactly the old call.
         let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)];
-        select_flat(
-            model,
-            |elem, parent| match parent {
-                None => element_intersects_rect_with(elem, x, y, width, height, &resolver),
-                Some(p) => polygon_in_parent_space(&corners, p)
-                    .is_some_and(|poly| element_intersects_polygon_with(elem, &poly, &resolver)),
-            },
-            extend,
-        );
+        let predicate = |elem: &Element, parent: Option<crate::geometry::element::Transform>| match parent {
+            None => element_intersects_rect_with(elem, x, y, width, height, &resolver),
+            Some(p) => polygon_in_parent_space(&corners, p)
+                .is_some_and(|poly| element_intersects_polygon_with(elem, &poly, &resolver)),
+        };
+        match root {
+            Some(r) if !r.is_empty() => select_flat_in(model, r, predicate, extend),
+            _ => select_flat(model, predicate, extend),
+        }
     }
 
     /// Select all elements whose bounds intersect the given polygon.
@@ -3660,6 +3676,88 @@ fn select_flat(
     model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
 }
 
+/// `select_flat` with the isolation ROOT's children as the units (G11 step 4;
+/// seat design 2026-11-08 g11-marquee-scope). The descent to `root` composes
+/// each ancestor's visibility cap and transform, as `select_flat`'s layer and
+/// group steps do; a root that does not resolve to a container selects
+/// NOTHING, never the layer walk (a root naming nothing is a defect, and a
+/// fallback would hide it). Each child then answers as a layer child does: a
+/// group with the group alone (section 16.4), a leaf on the predicate in the
+/// root's frame. There is no guard on the root's own lock or visibility: each
+/// child's `effective_locked` reads the root's lock down the path and its
+/// visibility folds the root's, so such a guard would be expressive only (the
+/// reference measured it by mutant). Twin of JasSwift `selectFlatIn` and the
+/// reference `_select_flat_in`.
+fn select_flat_in(
+    model: &mut Model,
+    root: &[usize],
+    predicate: impl Fn(&Element, Option<crate::geometry::element::Transform>) -> bool,
+    extend: bool,
+) {
+    use crate::geometry::element::Visibility;
+    let doc = model.document().clone();
+    let mut entries: Selection = Vec::new();
+    // Walk to the root: (the container, its visibility cap, its frame).
+    let mut found: Option<(&Element, Visibility, Option<crate::geometry::element::Transform>)> =
+        doc.layers.get(root[0]).map(|l| (l, l.visibility(), l.transform().copied()));
+    for &idx in &root[1..] {
+        found = found.and_then(|(node, vis, frame)| {
+            if !node.is_group_or_layer() {
+                return None;
+            }
+            let kid: &Element = node.children()?.get(idx)?;
+            let kid_frame = match (frame, kid.transform()) {
+                (Some(f), Some(t)) => Some(f.multiply(t)),
+                (f, t) => f.or(t.copied()),
+            };
+            Some((kid, std::cmp::min(vis, kid.visibility()), kid_frame))
+        });
+    }
+    if let Some((node, vis, frame)) = found
+        && node.is_group_or_layer()
+        && let Some(children) = node.children()
+    {
+        for (ci, child) in children.iter().enumerate() {
+            let mut path = root.to_vec();
+            path.push(ci);
+            if doc.effective_locked(&path) {
+                continue;
+            }
+            let child_vis = std::cmp::min(vis, child.visibility());
+            if child_vis == Visibility::Invisible {
+                continue;
+            }
+            if child.is_group() {
+                let group_frame = match (frame, child.transform()) {
+                    (Some(f), Some(g)) => Some(f.multiply(g)),
+                    (f, g) => f.or(g.copied()),
+                };
+                if let Some(grandchildren) = child.children()
+                    && grandchildren.iter().enumerate().any(|(gi, gc)| {
+                        let mut gpath = path.clone();
+                        gpath.push(gi);
+                        !doc.effective_locked(&gpath)
+                            && std::cmp::min(child_vis, gc.visibility()) != Visibility::Invisible
+                            && predicate(gc, group_frame)
+                    })
+                {
+                    entries.push(ElementSelection::all(path));
+                }
+            } else if predicate(child, frame) {
+                entries.push(ElementSelection::all(path));
+            }
+        }
+    }
+    let new_sel = if extend {
+        toggle_selection(&doc.selection, &entries)
+    } else {
+        entries
+    };
+    let mut new_doc = doc;
+    new_doc.selection = new_sel;
+    model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
+}
+
 /// The id index a selection pass resolves through (RESOLVEDHIT), epoching the
 /// recompute cache on the way. `IdIndex` is an rpds map, so the clone is O(1)
 /// structure sharing; it exists so the resolver can borrow while `select_flat`
@@ -4651,6 +4749,104 @@ mod tests {
             model.document().layers[0].children().unwrap().len(),
             layer_count_before + 1
         );
+    }
+
+    // ── G11 step 4: the marquee scoped to the isolation root ──────────────
+    // The design's arms (seat brief 2026-11-08 g11-marquee-scope §4), twin of
+    // the reference `select_rect_root_test.py`, plus the FRAME arms (4/5) only
+    // the ports can carry: the reference's flat walk takes no parent frame.
+    // Tree: L[0] ⊃ G[0,0]{R1 0–10, R2 20–30, S[0,0,2]{R5 60–70}}, R3[0,1]
+    // 40–50, Moved[0,2] (translate 100,0) ⊃ Inner[0,2,0] ⊃ R4 0–10.
+    fn iso_common(mut e: Element, f: impl FnOnce(&mut CommonProps)) -> Element {
+        match &mut e {
+            Element::Group(g) => f(&mut g.common),
+            Element::Rect(r) => f(&mut r.common),
+            _ => unreachable!("the G11 fixture builds groups and rects only"),
+        }
+        e
+    }
+
+    fn iso_model(r1_locked: bool, g_locked: bool, g_hidden: bool) -> Model {
+        let r1 = iso_common(make_rect(0.0, 0.0, 10.0, 10.0), |c| c.locked = r1_locked);
+        let s = make_group(vec![make_rect(60.0, 0.0, 10.0, 10.0)]);
+        let g = iso_common(make_group(vec![r1, make_rect(20.0, 0.0, 10.0, 10.0), s]), |c| {
+            c.locked = g_locked;
+            if g_hidden {
+                c.visibility = Visibility::Invisible;
+            }
+        });
+        let moved = iso_common(
+            make_group(vec![make_group(vec![make_rect(0.0, 0.0, 10.0, 10.0)])]),
+            |c| c.transform = Some(Transform::translate(100.0, 0.0)),
+        );
+        group_doc(vec![make_layer("L", vec![g, make_rect(40.0, 0.0, 10.0, 10.0), moved])], vec![])
+    }
+
+    fn iso_select(m: &mut Model, x: f64, y: f64, w: f64, h: f64, extend: bool, root: Option<&[usize]>) -> Vec<Vec<usize>> {
+        Controller::select_rect_in(m, x, y, w, h, extend, root);
+        sel_paths(m)
+    }
+
+    #[test]
+    fn g11_marquee_inside_the_root_a_member_answers_for_itself() {
+        let mut m = iso_model(false, false, false);
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, Some(&[0, 0])), vec![vec![0, 0, 0]]);
+    }
+
+    #[test]
+    fn g11_marquee_outside_the_root_selects_nothing() {
+        let mut m = iso_model(false, false, false);
+        assert_eq!(iso_select(&mut m, 45.0, 5.0, 0.0, 0.0, false, Some(&[0, 0])), Vec::<Vec<usize>>::new());
+    }
+
+    #[test]
+    fn g11_marquee_wide_band_and_a_group_inside_the_root() {
+        let mut m = iso_model(false, false, false);
+        assert_eq!(iso_select(&mut m, 0.0, 0.0, 30.0, 10.0, false, Some(&[0, 0])), vec![vec![0, 0, 0], vec![0, 0, 1]]);
+        assert_eq!(iso_select(&mut m, 62.0, 2.0, 1.0, 1.0, false, Some(&[0, 0])), vec![vec![0, 0, 2]], "S answers alone");
+    }
+
+    #[test]
+    fn g11_marquee_composes_the_root_frame_both_directions() {
+        let mut m = iso_model(false, false, false);
+        // Where R4 is DRAWN (100–110): Inner answers for it.
+        assert_eq!(iso_select(&mut m, 102.0, 2.0, 1.0, 1.0, false, Some(&[0, 2])), vec![vec![0, 2, 0]]);
+        // Where R4's untransformed geometry sits: a walk dropping the frame hits it.
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, Some(&[0, 2])), Vec::<Vec<usize>>::new());
+    }
+
+    #[test]
+    fn g11_marquee_no_root_is_the_layer_walk() {
+        let mut m = iso_model(false, false, false);
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, None), vec![vec![0, 0]]);
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, Some(&[])), vec![vec![0, 0]]);
+    }
+
+    #[test]
+    fn g11_marquee_a_root_that_is_not_a_container_selects_nothing() {
+        for root in [vec![9], vec![0, 1], vec![0, 0, 7]] {
+            let mut m = iso_model(false, false, false);
+            assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, Some(&root)), Vec::<Vec<usize>>::new(), "{root:?}");
+            assert_eq!(iso_select(&mut m, 45.0, 5.0, 0.0, 0.0, false, Some(&root)), Vec::<Vec<usize>>::new(), "{root:?}");
+        }
+    }
+
+    #[test]
+    fn g11_marquee_lock_and_visibility_inside_the_root() {
+        let mut m = iso_model(true, false, false);
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, Some(&[0, 0])), Vec::<Vec<usize>>::new(), "R1 locked");
+        assert_eq!(iso_select(&mut m, 22.0, 2.0, 1.0, 1.0, false, Some(&[0, 0])), vec![vec![0, 0, 1]], "control: R2 free");
+        let mut m = iso_model(false, true, false);
+        assert_eq!(iso_select(&mut m, 0.0, 0.0, 30.0, 10.0, false, Some(&[0, 0])), Vec::<Vec<usize>>::new(), "G locked");
+        let mut m = iso_model(false, false, true);
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, false, Some(&[0, 0])), Vec::<Vec<usize>>::new(), "G hidden");
+    }
+
+    #[test]
+    fn g11_marquee_extend_toggles_within_the_root() {
+        let mut m = iso_model(false, false, false);
+        iso_select(&mut m, 22.0, 2.0, 1.0, 1.0, false, Some(&[0, 0]));
+        assert_eq!(iso_select(&mut m, 2.0, 2.0, 1.0, 1.0, true, Some(&[0, 0])), vec![vec![0, 0, 0], vec![0, 0, 1]]);
     }
 
     #[test]

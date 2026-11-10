@@ -1,0 +1,97 @@
+[
+  {
+    "_doc": [
+      "ISOLATION SCOPES THE MARQUEE (G11 step 4; seat design 2026-11-08 g11-marquee-scope).",
+      "`select_rect` carries `root` (the innermost isolation entry) ONLY while isolated, so",
+      "every case recorded outside isolation has no key and is unchanged. With a root the",
+      "units are that container's children: a member answers for itself, a group inside the",
+      "root answers alone (section 16.4), and a band outside the root selects nothing.",
+      "",
+      "THE DOCUMENT (SVG px -> pt is x3/4):",
+      "  [0]       Layer 'Stage'",
+      "  [0,0]       group G            the isolation root",
+      "  [0,0,0]       rect R1  0-12",
+      "  [0,0,1]       rect R2  24-36",
+      "  [0,0,2]       group S  {R5 72-84}",
+      "  [0,1]       rect R3  48-60     OUTSIDE the root",
+      "",
+      "No transformed group here: the reference's flat walk takes no parent frame, so",
+      "the frame arms live in each port's own tests, not in this shared family.",
+      "",
+      "Inside the root a band over r1 selects r1 [0,0,0]. a post-filter of the layer walk answers nothing: the layer walk returns g [0,0], which is not under the root."
+    ],
+    "name": "a_member_inside_the_root_answers_for_itself",
+    "setup_svg": "isolation_marquee.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "extend": false,
+        "x": 3,
+        "y": 3,
+        "width": 1,
+        "height": 1,
+        "root": [
+          0,
+          0
+        ]
+      }
+    ],
+    "expected_json": "isolation_marquee_a_member_inside_the_root_answers_for_itself_expected.json"
+  },
+  {
+    "_doc": "The defect this family exists for: a band over r3 [0,1] while g is isolated selected r3.",
+    "name": "a_band_outside_the_root_selects_nothing",
+    "setup_svg": "isolation_marquee.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "extend": false,
+        "x": 52,
+        "y": 3,
+        "width": 0,
+        "height": 0,
+        "root": [
+          0,
+          0
+        ]
+      }
+    ],
+    "expected_json": "isolation_marquee_a_band_outside_the_root_selects_nothing_expected.json"
+  },
+  {
+    "_doc": "Section 16.4 one level down: a band over r5 answers s [0,0,2], never r5.",
+    "name": "a_group_inside_the_root_answers_alone",
+    "setup_svg": "isolation_marquee.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "extend": false,
+        "x": 75,
+        "y": 3,
+        "width": 1,
+        "height": 1,
+        "root": [
+          0,
+          0
+        ]
+      }
+    ],
+    "expected_json": "isolation_marquee_a_group_inside_the_root_answers_alone_expected.json"
+  },
+  {
+    "_doc": "The control: the same band as the first case with no root selects g [0,0], as before g11.",
+    "name": "no_root_is_the_layer_walk",
+    "setup_svg": "isolation_marquee.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "extend": false,
+        "x": 3,
+        "y": 3,
+        "width": 1,
+        "height": 1
+      }
+    ],
+    "expected_json": "isolation_marquee_no_root_is_the_layer_walk_expected.json"
+  }
+]

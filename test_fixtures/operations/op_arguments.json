@@ -283,6 +283,9 @@
       "height": [
         "number"
       ],
+      "root": [
+        "array"
+      ],
       "width": [
         "number"
       ],
@@ -629,6 +632,7 @@
     "select_rect": {
       "extend": "witnessed",
       "height": "witnessed",
+      "root": "witnessed",
       "width": "witnessed",
       "x": "witnessed",
       "y": "witnessed"

@@ -1441,12 +1441,20 @@ def op_apply(model: Model, op: dict) -> None:
         targets = apply_select_by_ids(model, ctrl, str_list_field(op, "from"))
         ctrl.copy_selection(num_field(op, "dx"), num_field(op, "dy"))
     elif name == "select_rect":
+        # ``root`` (G11): the innermost isolation entry, written by the marquee
+        # effect ONLY while isolated, so every op recorded outside isolation
+        # carries no key. A present but malformed root skips the op rather than
+        # running unscoped (a malformed payload skips the op, as parse_path says).
+        root = parse_path(op["root"]) if "root" in op else None
+        if "root" in op and root is None:
+            return
         ctrl.select_rect(
             num_field(op, "x"),
             num_field(op, "y"),
             num_field(op, "width"),
             num_field(op, "height"),
             extend=bool_field(op, "extend"),
+            root=root,
         )
         # Keystone: the resolved selection is this op's targets, so
         # ``capture_recipe`` can seed its working set (empty targets => empty
