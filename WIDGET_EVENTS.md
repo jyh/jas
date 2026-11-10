@@ -97,8 +97,8 @@ gradient_slider: commit
 - **The click kinds** are `button` and `icon_button`. `click` runs the
   widget's `click` behaviors, else its node-level `action` (see §Clicking a
   button). `mouse_down` and `mouse_up` carry press-and-hold handling. A
-  click never runs them, and this document does not define them beyond
-  naming them.
+  click never runs them. This document defines only how a hold relates to
+  the click (see §A press-and-hold consumes its click).
 
 - **The stops kind** is `gradient_slider`. Its one behavior event,
   `commit`, names "a gesture finished". A shell reports gestures, not
@@ -352,6 +352,32 @@ no text and no value.
 `event.meta` and `event.alt`, each `false` when the key was not held. There
 is no `event.value`. The Boolean panel's "Alt-click makes a compound
 shape" reads `event.alt` in a behavior's `condition`.
+
+### A press-and-hold consumes its click
+
+A toolbar slot declares `mouse_down` with a `start_timer` (250 ms, whose
+effects open the slot's alternates flyout), `mouse_up` with a `cancel_timer`
+of the same id, and a `click` that selects the slot's tool. One press of the
+pointer is either a hold or a click, never both:
+
+1. **A press released before its timer fires is a click.** `mouse_up`
+   cancels the timer, and the click runs as above.
+2. **A press whose timer fired is not a click.** The flyout is open, and
+   the release runs `mouse_up` only. Nothing in the slot's `click` runs, so
+   the active tool is unchanged until an item in the flyout is picked.
+3. **Each fired hold consumes one click at most**, and only that press's
+   click. A click with no press of its own (an accessibility press) is a
+   click, and so is the next press of the same slot.
+
+A port enforces this explicitly, by the timer ids the widget's `mouse_down`
+starts. It may not rely on the flyout covering the button: where the release
+lands is a fact about rendering, not about the event.
+Swift: `PressHoldGate` (`JasSwift/Sources/Interpreter/TimerManager.swift`), held by
+`JasSwift/Tests/Interpreter/PressHoldGateTests.swift`. Its `Button` fires on release
+however long the press was held, so without the gate a hold would also select the slot's
+tool. That was read, not measured on a Mac. The web build and Windows do not
+enforce it yet. The web is reported to fire no click after a hold, but no code
+there makes it so.
 
 Rotate, Scale and Shear Options each have a Copy and an OK button that
 dispatch the same action and differ only in a literal `copy:`. A port that

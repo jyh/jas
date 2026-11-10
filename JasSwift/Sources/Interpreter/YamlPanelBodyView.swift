@@ -940,6 +940,8 @@ struct YamlElementView: View {
         let hasMouseDown = behaviors.contains { ($0["event"] as? String) == "mouse_down" }
         let hasMouseUp = behaviors.contains { ($0["event"] as? String) == "mouse_up" }
         let hasPress = hasMouseDown || hasMouseUp
+        // WIDGET_EVENTS.md, "A press-and-hold consumes its click".
+        let holdIds = PressHoldGate.holdTimerIds(element)
         // Double-click a TOOLBAR tool slot → open the active tool's
         // options. Scoped to tool slots only: ``isToolButtonElement``
         // keys on a ``click`` event dispatching ``select_tool`` (the same
@@ -967,8 +969,8 @@ struct YamlElementView: View {
             .help(summary)
             .disabled(isDisabled)
             .modifier(PressDispatchModifier(
-                onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
-                onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
+                onPress: { loc in if hasPress { PressHoldGate.shared.pressed(holdIds); handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
+                onRelease: { if hasPress { PressHoldGate.shared.released(holdIds); handleBehaviorClick(eventName: "mouse_up") } }
             ))
             .modifier(ToolOptionsDblClickModifier(
                 enabled: wantsToolOptionsDblClick, onDoubleClick: toolOptionsAction))
@@ -987,8 +989,8 @@ struct YamlElementView: View {
                 }
                 .disabled(isDisabled)
                 .modifier(PressDispatchModifier(
-                    onPress: { loc in if hasPress { handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
-                    onRelease: { if hasPress { handleBehaviorClick(eventName: "mouse_up") } }
+                    onPress: { loc in if hasPress { PressHoldGate.shared.pressed(holdIds); handleBehaviorClick(eventName: "mouse_down", pressLocation: loc) } },
+                    onRelease: { if hasPress { PressHoldGate.shared.released(holdIds); handleBehaviorClick(eventName: "mouse_up") } }
                 ))
                 .modifier(ToolOptionsDblClickModifier(
                     enabled: wantsToolOptionsDblClick, onDoubleClick: toolOptionsAction))
@@ -1090,6 +1092,10 @@ struct YamlElementView: View {
     ///    buttons whose behavior is a short effect list rather than
     ///    a named action.
     private func handleWidgetClick() {
+        // WIDGET_EVENTS.md, "A press-and-hold consumes its click": the
+        // release of a press whose hold timer fired (the flyout opened) is
+        // not a click.
+        if PressHoldGate.shared.consumesClick(PressHoldGate.holdTimerIds(element)) { return }
         // Opacity panel: op_make_mask dispatches Controller make or
         // release based on selection_has_mask. The button has no
         // ``action`` in yaml — routing is resolved here against the
