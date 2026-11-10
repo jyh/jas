@@ -4086,7 +4086,17 @@ function Get-SbEngineDialogsLine {
     if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran)" }
     $pass = @(); $fail = @(); $notrun = @()
     foreach ($r in $runs) {
-        $v = @($r.Out | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -cmatch '^VERDICT: ' } | Select-Object -First 1)
+        $outLines = @($r.Out | ForEach-Object { "$_".TrimEnd() })
+        # jas 799 note 1: an engine refusal is the shell's own row, carried in the
+        # launch's output; its status and error are the reason, not plan=False.
+        $refusal = @($outLines | Where-Object { $_ -cmatch 'RUSTFAIL DIALOG OPEN REFUSED ' } | Select-Object -First 1)
+        if ($refusal.Count -gt 0) {
+            $st = if ($refusal[0] -cmatch ' status=(\S+)') { $Matches[1] } else { '?' }
+            $er = if ($refusal[0] -cmatch ' error=(.*?)(?= ui-tid=|$)') { $Matches[1] } else { '?' }
+            $notrun += "$($r.Dialog)(engine refused: status=$st error=$(ConvertTo-SbParenSafe $er))"
+            continue
+        }
+        $v = @($outLines | Where-Object { $_ -cmatch '^VERDICT: ' } | Select-Object -First 1)
         $vt = if ($v.Count -gt 0) { $v[0].Substring(9) } else { '' }
         if ($vt -cmatch '^(REFUSED|NOT RUN)') { $notrun += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt))"; continue }
         if ($vt -cnotmatch '^compared=(\d+) mismatches=(\d+)') { $notrun += "$($r.Dialog)(no verdict row)"; continue }
@@ -4096,7 +4106,11 @@ function Get-SbEngineDialogsLine {
             $pass += "$($r.Dialog)($compared)"
             continue
         }
-        $fail += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt))"
+        # jas 799 note 2: a FAIL at mismatches=0 is exit 1 from KINDS or GAPS
+        # alone, so the verdict that failed it is named beside the counts.
+        $because = @($outLines | Where-Object { $_ -cmatch '^(KINDS-VERDICT|GAPS): ' -and $_ -cnotmatch ': PASS' })
+        $tail = if ($because.Count -gt 0) { '; ' + (($because | ForEach-Object { ConvertTo-SbParenSafe $_ }) -join '; ') } else { '' }
+        $fail += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt)$tail)"
     }
     $show = { param($xs) if ($xs.Count -eq 0) { '-' } else { $xs -join ',' } }
     "ENGINE-DIALOGS engine-dialogs=$($pass.Count)/$($runs.Count) fail=$($fail.Count) notrun=$($notrun.Count) advisory=until-promoted " +

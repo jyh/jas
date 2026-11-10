@@ -3311,7 +3311,7 @@ $eNotRun = New-SbEngRun 'pen_alternates' 2 @('VERDICT: REFUSED: the plan has no 
 $eZero = New-SbEngRun 'swatch_library_save' 0 @('VERDICT: compared=0 mismatches=0', 'KINDS-VERDICT: PASS(pairs=0; known: none)')
 Test-Case 'engine dialogs: the line prints pass, fail and not-run, each named' {
     Get-SbEngineDialogsLine -Runs @($ePass, $eFail, $eNotRun, $ePass2) -Wanted 4
-} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
 Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says so' {
     Get-SbEngineDialogsLine -Runs @($eZero) -Wanted 1
 } 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
