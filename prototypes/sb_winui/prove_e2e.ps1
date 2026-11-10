@@ -116,6 +116,12 @@ $menuCount = [int]$sc.Menus
 $clickCount = [int]$sc.Clicks
 $clickPoints = @(ConvertFrom-SbPanelText $panelText | Where-Object { $_.click })
 $lateCount = $panelCount + $menuCount + $clickCount
+# G11 STEP 3: A DOUBLE-CLICK is the gesture's click and then one more click at
+# the same point inside the double-click time (`double`), and `then-click`
+# adds one more after that time. Each extra click is a release, so each writes
+# its own POINTER REAL row and its own PROBE seq.
+$doubleMode = if ($sc.Double) { "$($sc.Double)" } else { 'none' }
+$doubleClicks = switch ($doubleMode) { 'double' { 1 } 'then-click' { 2 } default { 0 } }
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -183,7 +189,7 @@ try {
 
     # ---- drive: a real SendInput drag, in session 1 -------------------------
     $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
-                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Alt $altMode -Keys `"$keyText`" -Panels `"$panelText`"" +
+                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Alt $altMode -Double $doubleMode -Keys `"$keyText`" -Panels `"$panelText`"" +
                 " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY")
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
@@ -194,7 +200,7 @@ try {
     # The shell probes after the release, after each key (flask section 333) and
     # after each panel step (jas section 373), so the reading that describes the
     # script's end is probe 1 + keys + panel steps.
-    $wantSeq = 1 + $keyCount + $lateCount
+    $wantSeq = 1 + $doubleClicks + $keyCount + $lateCount
     # A panel step the hand REFUSES (an id not found, found twice, a disabled
     # control, no pattern for the event) is written to its receipt and nothing
     # more is sent, so no probe will come: the wait ends on the receipt too.
@@ -253,8 +259,8 @@ $readback = Compare-SbReadBack -Got $got -Want ([System.IO.File]::ReadAllText($e
 $ptrRows = @(Select-SbRows (Read-SbRows $log $mark) 'POINTER REAL ')
 $ptr = if ($ptrRows.Count -gt 0) { $ptrRows[0] } else { $null }
 $drive = 'UNREADABLE(no POINTER REAL row)'
-if ($null -ne $ptr -and $ptrRows.Count -ne 1 + $clickCount) {
-    $drive = "DISTURBED(pointer-rows=$($ptrRows.Count) want=$(1 + $clickCount): one for the gesture and one per late click)"
+if ($null -ne $ptr -and $ptrRows.Count -ne 1 + $doubleClicks + $clickCount) {
+    $drive = "DISTURBED(pointer-rows=$($ptrRows.Count) want=$(1 + $doubleClicks + $clickCount): one for the gesture, one per click of its double ($doubleClicks), one per late click)"
     $ptr = $null
 }
 if ($null -ne $ptr) {
@@ -266,8 +272,29 @@ if ($null -ne $ptr) {
     if ([int]$mv -ne $moves -or [math]::Abs($ddx - $dx) -gt $tol -or [math]::Abs($ddy - $dy) -gt $tol) {
         $drive = "DISTURBED(move=$mv want=$moves delta=($([math]::Round($ddx,2)),$([math]::Round($ddy,2))) want=($dx,$dy))"
     } else { $drive = "PASS(move=$mv delta=($([math]::Round($ddx,2)),$([math]::Round($ddy,2))))" }
+    # G11 STEP 3: the double's clicks, rows 1..$doubleClicks, are still clicks AT
+    # THE GESTURE'S POINT, and the shell names on each release whether it sent
+    # the engine a double after it: exactly the double's second release (row 1)
+    # says double=1, and every other row double=0. A shell that never sends the
+    # double reads DISTURBED here, before any document is compared.
+    for ($ri = 0; $ri -lt $ptrRows.Count -and $drive -like 'PASS*' -and $doubleMode -ne 'none'; $ri++) {
+        $want = if ($ri -eq 1) { '1' } else { '0' }
+        $got = "$(Get-SbField $ptrRows[$ri] 'double')"
+        if ($got -ne $want) { $drive = "DISTURBED(pointer row $($ri + 1) double=$(if ($got) { $got } else { '(absent)' }) want=${want}: the double goes after the second release only)" }
+    }
+    for ($di = 1; $di -le $doubleClicks -and $drive -like 'PASS*'; $di++) {
+        $drow = $ptrRows[$di]
+        $dpa = (Get-SbField $drow 'press@') -replace '[()]', '' -split ','
+        $dra = (Get-SbField $drow 'release@') -replace '[()]', '' -split ','
+        $dOffX = [math]::Abs([double]$dpa[0] - [double]$pa[0]); $dOffY = [math]::Abs([double]$dpa[1] - [double]$pa[1])
+        $still = [math]::Abs([double]$dra[0] - [double]$dpa[0]) -le 1.0 -and [math]::Abs([double]$dra[1] - [double]$dpa[1]) -le 1.0
+        if ([int](Get-SbField $drow 'move') -ne 0 -or -not $still -or $dOffX -gt 1.0 -or $dOffY -gt 1.0) {
+            $drive = "DISTURBED(double click $di move=$(Get-SbField $drow 'move') off-the-point=($([math]::Round($dOffX,2)),$([math]::Round($dOffY,2)))px)"
+        }
+    }
+    if ($doubleClicks -gt 0 -and $drive -like 'PASS*') { $drive = $drive -replace '\)$', " double=$doubleMode)" }
     for ($ci = 0; $ci -lt $clickCount -and $drive -like 'PASS*'; $ci++) {
-        $crow = $ptrRows[1 + $ci]; $cp = $clickPoints[$ci]
+        $crow = $ptrRows[1 + $doubleClicks + $ci]; $cp = $clickPoints[$ci]
         $cpa = (Get-SbField $crow 'press@') -replace '[()]', '' -split ','
         $cra = (Get-SbField $crow 'release@') -replace '[()]', '' -split ','
         $ox = ([double]$cpa[0] - [double]$pa[0]) / $sc; $oy = ([double]$cpa[1] - [double]$pa[1]) / $sc
@@ -339,9 +366,10 @@ $openDoc = Join-Path $exeDir 'sb-doc-open.json'
 # An ALT drag copies (selection.yaml: alt_held at mousedown copies on the
 # first move), so the selected path names the COPY, not the element that was
 # under the press: the arm's before/after pairing does not hold either.
-$dragOnly = $isSelection -and $keyCount -eq 0 -and $lateCount -eq 0 -and $altMode -eq 'none'
+$dragOnly = $isSelection -and $keyCount -eq 0 -and $lateCount -eq 0 -and $altMode -eq 'none' -and $doubleClicks -eq 0
 if (-not $isSelection) { $moved = "NOT APPLICABLE(tool=$($tool): the moved-by-delta arm is the selection tool's)" }
 elseif ($altMode -ne 'none') { $moved = "NOT APPLICABLE(alt=$($altMode): an alt drag copies, so the selection names the copy and the read-back is the claim)" }
+elseif ($doubleClicks -gt 0) { $moved = "NOT APPLICABLE(double=$($doubleMode): a double-click moves nothing, so the read-back is the claim)" }
 elseif ($keyCount -gt 0) { $moved = "NOT APPLICABLE(keys=$($keyText): the moved-by-delta arm describes the drag, and the keys after it change the document)" }
 elseif ($lateCount -gt 0) { $moved = "NOT APPLICABLE(panels=$($panelShow): the moved-by-delta arm describes the drag, and the panel or menu steps after it change the document)" }
 elseif ($selCount -eq 1 -and (Test-Path $openDoc)) {

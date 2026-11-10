@@ -2140,7 +2140,7 @@ $sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
 $sRead = [ordered]@{ read = 'document' }
 function Show-SbScript($s) {
     if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
-    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })$(if ($s.PanelShow) { " panels=$($s.PanelShow)" })"
+    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })$(if ($s.PanelShow) { " panels=$($s.PanelShow)" })$(if ($s.Double -and $s.Double -ne 'none') { " double=$($s.Double)" })"
 }
 
 # A script with no `expected_json` used to pass prove_e2e's up-front check:
@@ -2160,6 +2160,34 @@ Test-Case 'is: an empty expected_json is REFUSED by name' {
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
+# G11 STEP 3 (jas sections 756, 758): a `double_click` step is delivered in ONE
+# form only, the browser's order at one point -- press, release, press,
+# release, double_click -- optionally followed by ONE click there (the form that
+# makes the double observable in a document read: the click after it selects
+# the isolated child). send_hand.ps1 sends two real clicks inside the system
+# double-click time, so the shell's DoubleTapped fires. Any other placement is
+# refused by name, never delivered as something it is not.
+$dPress = [ordered]@{ kind = 'press'; x = 36; y = 36 }
+$dRelease = [ordered]@{ kind = 'release'; x = 36; y = 36 }
+$dDouble = [ordered]@{ kind = 'double_click'; x = 36; y = 36 }
+Test-Case 'is: G11 double then a click maps onto a click-pair double and one click after' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($dPress, $dRelease, $dPress, $dRelease, $dDouble, $dPress, $dRelease, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=selection.drag.expected.json double=then-click'
+Test-Case 'is: G11 double with no click after maps onto the double alone' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($dPress, $dRelease, $dPress, $dRelease, $dDouble, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=selection.drag.expected.json double=double'
+Test-Case 'is: a double_click away from its two clicks is REFUSED by name' {
+    $far = [ordered]@{ kind = 'double_click'; x = 40; y = 36 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($dPress, $dRelease, $dPress, $dRelease, $far, $sRead)))
+} 'REFUSED: the double_click at (40,36) is not where its two clicks were (36,36): send_hand.ps1 delivers a double-click at one point'
+Test-Case 'is: a double_click with no two clicks before it is REFUSED by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($dPress, $dRelease, $dDouble, $sRead)))
+} 'REFUSED: a double_click is delivered only as press, release, press, release, double_click at one point, optionally followed by one click there'
+Test-Case 'is: a drag after a double_click is REFUSED by name' {
+    $dMove = [ordered]@{ kind = 'move'; x = 60; y = 52; dragging = $true }
+    $dRel2 = [ordered]@{ kind = 'release'; x = 60; y = 52 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($dPress, $dRelease, $dPress, $dRelease, $dDouble, $dPress, $dMove, $dRel2, $sRead)))
+} 'REFUSED: a double_click is delivered only as press, release, press, release, double_click at one point, optionally followed by one click there'
 Test-Case 'is: moves evenly spaced on the line map onto k=3' {
     $m1 = [ordered]@{ kind = 'move'; x = 48; y = 44; dragging = $true }
     $m2 = [ordered]@{ kind = 'move'; x = 60; y = 52; dragging = $true }
@@ -2271,7 +2299,7 @@ Test-Case 'is: CONTROL -- a named modifier set false is no modifier and passes' 
 Test-Case 'is: a key or panel step is refused by name' {
     $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
-} "REFUSED: step 3 kind 'key': this driver delivers only press, move, release"
+} "REFUSED: step 3 kind 'key': this driver delivers only press, move, release, double_click"
 # §333 node 6: KEY steps, the key corpus's chord form ({"key": "Z", "ctrl": true}),
 # delivered AFTER the gesture by send_hand.ps1's key injector.
 Test-Case 'is: a key step after the gesture is accepted and carried' {

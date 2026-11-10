@@ -149,6 +149,8 @@ public sealed partial class MainWindow : Window
 
     // ---- the open gesture, owned by the XAML thread -----------------------
     private bool _gestureOpen;
+    // G11 step 3: when the canvas sends the engine its double-click.
+    private readonly DoubleClickGate _doubleGate = new();
     private int _pressCount;
     private int _moveCount;
     private int _releaseCount;
@@ -1233,6 +1235,7 @@ public sealed partial class MainWindow : Window
         target.PointerPressed += OnPointerPressed;
         target.PointerMoved += OnPointerMoved;
         target.PointerReleased += OnPointerReleased;
+        target.DoubleTapped += OnCanvasDoubleTapped;
         target.PointerCaptureLost += OnPointerCaptureLost;
         target.PointerCanceled += OnPointerCanceled;
 
@@ -1502,6 +1505,23 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
+    /// <summary>
+    /// G11 step 3 (jas sections 756, 758): WinUI raises `DoubleTapped` on the
+    /// second press, inside its gesture, so `DoubleClickGate` marks it and the
+    /// release that closes the gesture sends the engine its double-click
+    /// (`EndGesture`). Raised with no gesture open, it is sent at once, at the
+    /// last point, and named by its own row, because no release row carries it.
+    /// </summary>
+    private void OnCanvasDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (_doubleGate.OnDoubleTapped(_gestureOpen))
+        {
+            _canvas.Pointer(JasCore.PointerDoubleClick, _lastX, _lastY, 0);
+            Report($"POINTER DOUBLE-AFTER-RELEASE at=({_lastX:F1},{_lastY:F1}) {_canvas.Tids()}");
+        }
+        e.Handled = true;
+    }
+
     private void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e) =>
         EndGesture(_lastX, _lastY, 0, "CAPTURE-LOST");
 
@@ -1523,6 +1543,11 @@ public sealed partial class MainWindow : Window
         _gestureOpen = false;
         _releaseCount++;
         _canvas.Pointer(JasCore.PointerRelease, x, y, mods);
+        // G11 step 3: a double marked on this gesture's press is sent AFTER its
+        // release (the corpus's order), and before the report, so the probe
+        // that follows reads the model the double left.
+        var sendDouble = _doubleGate.TakeOnRelease(kind == "REAL");
+        if (sendDouble) { _canvas.Pointer(JasCore.PointerDoubleClick, x, y, mods); }
         if (kind != "REAL")
         {
             Report($"POINTER CAPTURE-LOST reason={kind} id={_pointerId} device={_device} "
@@ -1539,6 +1564,7 @@ public sealed partial class MainWindow : Window
             DupFrames = _dupFrames,
             MovesRaised = _movesRaised,
             Release = _releaseCount,
+            Double = sendDouble ? 1 : 0,
             PressX = _pressX,
             PressY = _pressY,
             ReleaseX = x,

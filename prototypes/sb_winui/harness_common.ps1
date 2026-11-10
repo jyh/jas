@@ -3579,8 +3579,8 @@ function Read-SbInputScript([string]$Json) {
         if ($keys.Count -gt 0) {
             return (& $no "step $i is a pointer step after a key: send_hand.ps1 delivers keys only after the gesture")
         }
-        if (@('press', 'move', 'release') -notcontains "$($st.kind)") {
-            return (& $no "step $i kind '$($st.kind)': this driver delivers only press, move, release")
+        if (@('press', 'move', 'release', 'double_click') -notcontains "$($st.kind)") {
+            return (& $no "step $i kind '$($st.kind)': this driver delivers only press, move, release, double_click")
         }
         if ($names -contains 'mods' -and @($st.mods).Count -gt 0) {
             return (& $no "step $i carries modifiers ($(@($st.mods) -join ',')): send_hand.ps1 injects none")
@@ -3625,6 +3625,46 @@ function Read-SbInputScript([string]$Json) {
     if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
     foreach ($r in $reads) {
         if ($r -ne 'document') { return (& $no "read '$r': this driver compares only read=document") }
+    }
+    # G11 STEP 3 (jas sections 756, 758): A DOUBLE-CLICK, in the browser's order
+    # at ONE point -- press, release, press, release, double_click -- and
+    # optionally ONE click there after it. send_hand.ps1 sends the two clicks
+    # inside the system double-click time, so WinUI raises DoubleTapped on the
+    # second press and the shell sends the double after the second release
+    # (the order the corpus states). Any other placement is refused by name: a
+    # double_click is never delivered as something it is not.
+    if (@($acts | Where-Object { "$($_.kind)" -eq 'double_click' }).Count -gt 0) {
+        $form = 'a double_click is delivered only as press, release, press, release, double_click at one point, optionally followed by one click there'
+        $want = @('press', 'release', 'press', 'release', 'double_click')
+        if ($acts.Count -eq 7) { $want += @('press', 'release') }
+        if ($acts.Count -ne $want.Count) { return (& $no $form) }
+        for ($j = 0; $j -lt $acts.Count; $j++) {
+            if ("$($acts[$j].kind)" -ne $want[$j]) { return (& $no $form) }
+        }
+        $cx = [double]$acts[0].x; $cy = [double]$acts[0].y
+        $dbl = $acts[4]
+        if ([double]$dbl.x -ne $cx -or [double]$dbl.y -ne $cy) {
+            return (& $no "the double_click at ($($dbl.x),$($dbl.y)) is not where its two clicks were ($($acts[0].x),$($acts[0].y)): send_hand.ps1 delivers a double-click at one point")
+        }
+        foreach ($a in $acts) {
+            if ([double]$a.x -ne $cx -or [double]$a.y -ne $cy) { return (& $no $form) }
+        }
+        foreach ($mod in @('shift', 'alt')) {
+            if (@($acts | Where-Object { @($_.PSObject.Properties | ForEach-Object { $_.Name }) -contains $mod -and $_.$mod }).Count -gt 0) {
+                return (& $no "$mod on a double_click gesture: send_hand.ps1 delivers a double-click with no modifier held")
+            }
+        }
+        return [pscustomobject]@{
+            Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
+            DocX = $cx; DocY = $cy; Dx = 0.0; Dy = 0.0; Moves = 0; Read = 'document'; Expected = "$($s.expected_json)"
+            Shift = 'none'; Alt = 'none'
+            Double = $(if ($acts.Count -eq 7) { 'then-click' } else { 'double' })
+            Keys = $keys.Count; KeyText = ($keys -join ';')
+            Panels = @($panels | Where-Object { $_.panel }).Count; Menus = @($panels | Where-Object { $_.menu }).Count
+            Clicks = @($panels | Where-Object { $_.click }).Count
+            PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
+            Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
+        }
     }
     # A CLICK (flask section 348): press + release at ONE point, no move, k=0.
     # SendInput delivers no motion for a zero-length move, so a click is sent

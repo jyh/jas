@@ -189,6 +189,11 @@ internal static unsafe class JasCore
     internal const uint PointerPress = 0;
     internal const uint PointerMove = 1;
     internal const uint PointerRelease = 2;
+    // G11 step 3: `ffi_pointer.rs`'s KIND_DOUBLE_CLICK, the tool's double-click
+    // handler. Sent after the release that closes a double-tap's gesture
+    // (`DoubleClickGate`), the corpus's press, release, press, release,
+    // double_click.
+    internal const uint PointerDoubleClick = 3;
 
     internal const uint ModShift = 1u << 0;
     internal const uint ModAlt = 1u << 1;
