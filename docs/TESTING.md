@@ -171,7 +171,12 @@ each live app:
   It goes to the active tool's double-click handler (`on_dblclick`), and nothing else: the two clicks are the steps
   before it. **Delivered by Swift's level-1 script runner (2026-11-09).** **Delivered by Rust's three
   level-1 runners (2026-11-09):** `ffi_script_replay`'s `replay` and `replay_forms` through `jas_pointer_event`'s
-  `KIND_DOUBLE_CLICK` (3), and the gesture runner. No gating script uses it until every runner that gates delivers it.
+  `KIND_DOUBLE_CLICK` (3), and the gesture runner. **Delivered by the Windows level-2 driver (2026-11-10)** in one form
+  only: the four steps and the `double_click` at one point, optionally followed by one click there.
+  `send_hand.ps1 -Double` sends two real clicks inside the system double-click time. The shell's canvas `DoubleTapped`
+  (raised on the second press) marks the double, and the release that closes that gesture sends `KIND_DOUBLE_CLICK`
+  after itself. Any other placement is refused by name. No gating script uses it until every runner that gates
+  delivers it.
 * **Key steps** use the key corpus's chord form (`test_fixtures/keys/`): `key` is the canonical token.
   A key takes the engine's key order, `route_key` (Rust) and `routeKey` (Swift): an unclaimed Delete or Backspace
   deletes the selection; Escape, Enter and a claimed Delete go to the active tool; a command chord acts only for undo

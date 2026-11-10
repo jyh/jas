@@ -34,3 +34,42 @@ internal static class PointerWire
         return Math.Abs(px - whole) <= SnapWindow ? whole : px;
     }
 }
+
+/// <summary>
+/// G11 step 3 (jas sections 756, 758): WHEN the canvas sends the engine its
+/// double-click, `jas_pointer_event`'s `KIND_DOUBLE_CLICK`.
+///
+/// The corpus's order is press, release, press, release, double_click (the
+/// browser's `dblclick`). WinUI raises `DoubleTapped` ON THE SECOND PRESS
+/// (measured on the Windows box at 60 and 150 ms gaps), while that press's
+/// gesture is still open, so the double is MARKED there and sent by the
+/// release that closes the gesture, after the release. A `DoubleTapped` with
+/// no gesture open (raised after the release) is sent at once. A lost capture
+/// is not a release a person made, so it drops a marked double.
+///
+/// ⛔ PURE ON PURPOSE, like `PointerWire`: `sb_winui_tests` links this file.
+/// </summary>
+internal sealed class DoubleClickGate
+{
+    private bool _pending;
+
+    /// <summary>WinUI raised `DoubleTapped`. True when the double must be sent
+    /// NOW (no gesture is open to close); false when it is marked for the
+    /// release that closes the open one.</summary>
+    internal bool OnDoubleTapped(bool gestureOpen)
+    {
+        if (!gestureOpen) { return true; }
+        _pending = true;
+        return false;
+    }
+
+    /// <summary>A gesture closed. True when this release must be followed by
+    /// the double: a marked double and a REAL release. Either way the mark is
+    /// spent.</summary>
+    internal bool TakeOnRelease(bool real)
+    {
+        var send = _pending && real;
+        _pending = false;
+        return send;
+    }
+}
