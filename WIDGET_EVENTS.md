@@ -535,9 +535,12 @@ port:
   panel-write host, and an action goes through the view's dispatcher,
   whose native intercepts (`set_concept_param`) the catalog does not have.
 
-A Swift `combo_box` is still a menu of its declared options with no free
-entry, so only a declared option's value can be committed. A combo whose
-options are computed offers none.
+A Swift `combo_box` is a text field beside a menu of its declared options,
+as the Rust web combo is an input with a datalist: any typed value commits,
+on Enter or focus loss and only when the text changed (the HTML `change`
+rule), and choosing an option commits its value. Until 2026-11-09 it was the
+menu alone, so only a declared option could be committed. A combo whose
+options are computed shows the field and no menu.
 
 **The Rust web app does not call the door yet**, so the Rust lines below
 still describe what its view does. Since 2026-11-06 some of them are

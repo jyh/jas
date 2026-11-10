@@ -1483,12 +1483,15 @@ pub(crate) fn build_dock_groups(
 // DockGroupsView — anchored dock content
 // ---------------------------------------------------------------------------
 
-/// Renders the panel groups for the anchored right dock.
+/// Renders the panel groups for the anchored dock at `edge`.
 ///
 /// When the dock is collapsed, shows icon buttons for each panel.
 /// When expanded, renders full tabbed groups via [`build_dock_groups`].
+/// A `Bottom` dock lays its groups out left to right in equal shares of the
+/// row (WORKSPACE.md §"Anchored Docks by Edge", rule 6); `Left` and `Right`
+/// stack them top to bottom.
 #[component]
-pub(crate) fn DockGroupsView() -> Element {
+pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
     let act = use_context::<Act>();
     let app = use_context::<Rc<RefCell<AppState>>>();
     let ds = use_context::<DragState>();
@@ -1504,7 +1507,7 @@ pub(crate) fn DockGroupsView() -> Element {
          live_state_map, selection_preds, active_doc_view) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
-        let dock = st.workspace_layout.anchored_dock(DockEdge::Right).cloned();
+        let dock = st.workspace_layout.anchored_dock(edge).cloned();
         let panel_ov = build_live_panel_overrides(&st);
         let panel_table = live_panel_state_table(&st);
         let state_map = build_live_state_map(&st);
@@ -1569,6 +1572,20 @@ pub(crate) fn DockGroupsView() -> Element {
     };
 
     // (borrow already dropped above)
+
+    // Rule 6: a Bottom row gives each group an equal share; a group's
+    // `height` does not apply in a row.
+    if edge == DockEdge::Bottom {
+        return rsx! {
+            for (i, node) in nodes.into_iter().enumerate() {
+                div {
+                    key: "bottom-group-{i}",
+                    style: "flex:1 1 0; min-width:0; overflow-y:auto;",
+                    {node}
+                }
+            }
+        };
+    }
 
     rsx! {
         for node in nodes {

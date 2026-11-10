@@ -48,11 +48,12 @@ jobs:
       # --advisory: the step exits 0 once the receipt is written, and the verdict rides in the
       # receipt. A red check here would make the merge preflight refuse every later web PR.
       # Only a run that wrote no receipt fails the step.
+      # --dock: R1-2's live edge-dock arm; its DOCK line rides in the receipt body.
       - name: Every input script through the live web app
         run: |
           python scripts/web_l2_driver.py --url http://127.0.0.1:8080/jas/ \
             --head "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory
+            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock
       - name: The receipt in the run summary
         if: always()
         run: |
