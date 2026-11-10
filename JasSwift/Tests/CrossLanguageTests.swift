@@ -4875,6 +4875,11 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false,
         case "release":
             tool.onRelease(ctx, x: x, y: y, shift: shift, alt: alt)
             syncAlignKeyObjectFromSelection(model: model, store: model.stateStore)
+        case "double_click":
+            // TESTING.md section 6: the double is its own step, after the
+            // second press/release pair (the browser's `dblclick`), and goes
+            // to the active tool's `onDoubleClick`, the canvas's call.
+            tool.onDoubleClick(ctx, x: x, y: y)
         default:
             Issue.record("unknown gesture event kind: \(ev["kind"] ?? "nil")")
         }
@@ -5212,6 +5217,38 @@ private struct MintRefusal: Error, Equatable {
     #expect(why(acceptMintedIds(one, want)).contains("carries 1 ids where the expected names 2"))
 }
 
+/// Row 85's Swift half (G11 from the canvas): the replay delivers a
+/// `{"kind": "double_click"}` pointer step to the active tool's
+/// `onDoubleClick`, after the second press/release pair, as the browser's
+/// `dblclick` comes (TESTING.md section 6). The selection tool's double-click
+/// on a group enters isolation, so a click on the group's child then selects
+/// the CHILD. The control is the same clicks with the double removed: they
+/// select the group. The point is derived from the fixture's own line (its
+/// midpoint, clear of the rect and the circle), never typed.
+/// Swift lands this first while cargo is frozen (O54); Rust's
+/// `ffi_script_replay` conforms to the same grammar, not to this runner.
+@Test func doubleClickStepEntersIsolationThenAClickSelectsTheChild() throws {
+    let probe = svgToDocument(readFixture("svg/complex_document.svg"))
+    guard case .group(let g) = probe.getElement([0, 2]), case .line(let ln) = g.children[0] else {
+        Issue.record("complex_document.svg no longer has a group holding a line at [0, 2]")
+        return
+    }
+    let x = (ln.x1 + ln.x2) / 2, y = (ln.y1 + ln.y2) / 2
+    func click() -> [[String: Any]] {
+        [["kind": "press", "x": x, "y": y], ["kind": "release", "x": x, "y": y]]
+    }
+    func run(_ events: [[String: Any]]) -> Model {
+        runGestureModel(["name": "g11.double_click", "setup_svg": "complex_document.svg",
+                         "tool": "selection", "app_state": [:], "events": events])
+    }
+    let withDouble = run(click() + click() + [["kind": "double_click", "x": x, "y": y]] + click())
+    #expect(withDouble.layersIsolationStack == [[0, 2]])
+    #expect(withDouble.document.selection.map(\.path) == [[0, 2, 0]])
+    let control = run(click() + click() + click())
+    #expect(control.layersIsolationStack == [])
+    #expect(control.document.selection.map(\.path) == [[0, 2]])
+}
+
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
     for fixture in scriptFixtures {
@@ -5230,7 +5267,7 @@ private struct MintRefusal: Error, Equatable {
         for (i, st) in steps.dropLast().enumerated() {
             if st["panel"] != nil || st["menu"] != nil {
                 events.append(["kind": "script_step", "index": i, "step": st])
-            } else if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+            } else if let kind = st["kind"] as? String, ["press", "move", "release", "double_click"].contains(kind) {
                 events.append(st)
             } else if st["kind"] == nil, let key = st["key"] as? String {
                 // A KEY step (the key corpus's chord form). Mirrors Rust
@@ -7731,7 +7768,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
     var events: [[String: Any]] = [["kind": "script_step", "index": -1, "step": [:] as [String: Any]]]
     var focused = false
     for (i, st) in steps.enumerated() {
-        if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+        if let kind = st["kind"] as? String, ["press", "move", "release", "double_click"].contains(kind) {
             focused = false
             events.append(["kind": "script_step", "index": i, "step": ["__pointer": true]])
             events.append(st)
@@ -8041,4 +8078,38 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
     let out = env["JAS_FORMS_OUT"] ?? "\(dir)/forms-readbacks-swift.json"
     try JSONSerialization.data(withJSONObject: doc, options: [.prettyPrinted, .sortedKeys])
         .write(to: URL(fileURLWithPath: out))
+}
+
+/// The forms runner's twin of Rust `the_forms_replay_delivers_a_double_click_step`
+/// (flask's §757 wired `replay_forms`): G11's script, press, release, press,
+/// release, `double_click` on complex_document.svg's group `[0, 2]`, then a
+/// click, read back, selects `[0, 2, 0]`; the CONTROL without the double
+/// selects `[0, 2]`. The point is the group's line's midpoint, from the fixture.
+@Test func formsReplayDeliversADoubleClickStep() throws {
+    let probe = svgToDocument(readFixture("svg/complex_document.svg"))
+    guard case .group(let g) = probe.getElement([0, 2]), case .line(let ln) = g.children[0] else {
+        Issue.record("complex_document.svg no longer has a group holding a line at [0, 2]")
+        return
+    }
+    let x = (ln.x1 + ln.x2) / 2, y = (ln.y1 + ln.y2) / 2
+    func selected(_ double: Bool) -> [[Int]]? {
+        func click(_ k: String) -> [String: Any] { ["kind": k, "x": x, "y": y] }
+        var steps = [click("press"), click("release"), click("press"), click("release")]
+        if double { steps.append(click("double_click")) }
+        steps += [click("press"), click("release"), ["read": "document"]]
+        switch replayForms(["item": "g11", "setup_svg": "complex_document.svg", "tool": "selection",
+                            "app_state": [String: Any](), "steps": steps]) {
+        case .failure(let r):
+            Issue.record("forms replay refused: \(r.why)"); return nil
+        case .success(let out):
+            if let why = formsRefusal(out) { Issue.record("forms replay refused: \(why)"); return nil }
+            guard let text = formsDocReads(out).last,
+                  let v = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else {
+                Issue.record("no document read"); return nil
+            }
+            return ((v["selection"] as? [[String: Any]]) ?? []).compactMap { ($0["path"] as? [Any])?.compactMap { ($0 as? NSNumber)?.intValue } }
+        }
+    }
+    #expect(selected(true) == [[0, 2, 0]], "isolated: the click selects the child")
+    #expect(selected(false) == [[0, 2]], "no double: the click selects the group")
 }

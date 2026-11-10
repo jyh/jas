@@ -938,13 +938,10 @@ class CrossLanguageTest(absltest.TestCase):
         # seam keeps section 16.4, and a duplicate selects its copies in
         # document order (section 19). Needs the `select_all` and
         # `add_to_selection` verbs.
-        # ONE CASE IS A KNOWN, OWED FAILURE, counted in
-        # scripts/reference_drift_baseline.json:
         # `add_to_selection_appends_in_the_order_the_paths_were_added` pins
-        # insertion ORDER (D6, section 10). The reference's Selection is a
-        # frozenset and its serializer sorts by path, so it cannot express an
-        # order at all. That is the reference's missing D6, not a defect in
-        # the verb; the other nine cases pass.
+        # insertion ORDER (D6, section 10). It was a known, owed failure until
+        # 2026-11-09, while the reference's Selection was a frozenset that
+        # could express no order; the Selection is ordered now.
         self._run_operation_fixture("select_all_top_level.json")
 
     def test_operation_paste_layers(self):

@@ -10,7 +10,7 @@ import json
 import math
 
 from document.document import (
-    Document, ElementSelection, SortedCps,
+    Document, ElementSelection, Selection, SortedCps,
     _SelectionAll, _SelectionPartial,
 )
 from geometry.element import (
@@ -762,9 +762,11 @@ def _element_json(elem: Element) -> str:
 # Selection serializer                                                #
 # ------------------------------------------------------------------ #
 
-def _selection_json(sel: frozenset[ElementSelection]) -> str:
+def _selection_json(sel) -> str:
+    """A selection as canonical JSON, in its own order (a plain set, which has
+    none, in path order: ``Selection.of``)."""
     entries = []
-    for es in sel:
+    for es in Selection.of(sel):
         o = _JsonObj()
         if isinstance(es.kind, _SelectionAll):
             o.str("kind", "all")
@@ -774,8 +776,9 @@ def _selection_json(sel: frozenset[ElementSelection]) -> str:
         path = ",".join(str(i) for i in es.path)
         o.raw("path", f"[{path}]")
         entries.append((list(es.path), o.build()))
-    # Sort by path lexicographically.
-    entries.sort(key=lambda e: e[0])
+    # In the selection's OWN order, never sorted and never deduplicated
+    # (D6): Rust's `selection_json` emits its Vec as given, so an order or a
+    # missing insertion guard is visible in every multi-entry golden.
     items = [json for _, json in entries]
     return _json_array(items)
 

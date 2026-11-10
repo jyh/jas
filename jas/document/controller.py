@@ -44,8 +44,10 @@ def first_mask(document) -> Mask | None:
     """
     if not document.selection:
         return None
-    # Selection is a frozenset; pick a deterministic "first" by path.
-    first = min(document.selection, key=lambda es: es.path)
+    # The selection is ordered (D6), so "first" is its first entry, as Rust's
+    # `doc.selection.first()`. Until 2026-11-09 it was a frozenset and this
+    # took the least path.
+    first = Selection.of(document.selection)[0]
     try:
         return document.get_element(first.path).mask
     except Exception:
@@ -111,15 +113,13 @@ def selection_to_ids(doc: Document) -> list[str]:
     journaled op). Id-less selected elements are silently dropped (a recorded
     source must carry an id — a documented prerequisite, not a bug).
 
-    The selection is a path-keyed ``frozenset`` here, so paths are sorted to
-    give a deterministic document order (matching the Rust selection-order
-    iteration, which for any real recorded source is single-element). One
-    definition reused by the production ``op_apply`` path and the harness so
-    both populate ``targets`` identically. Mirrors the Rust
-    ``controller::selection_to_ids``.
+    In the selection's own order (D6), as Rust's ``selection_to_ids`` walks
+    its Vec; until 2026-11-09 the selection was a frozenset and this sorted
+    by path. One definition reused by the production ``op_apply`` path and
+    the harness so both populate ``targets`` identically.
     """
     out: list[str] = []
-    for es in sorted(doc.selection, key=lambda e: e.path):
+    for es in Selection.of(doc.selection):
         try:
             elem = doc.get_element(es.path)
         except Exception:
@@ -152,7 +152,8 @@ def selection_with_path_added(sel: Selection,
     if any(len(es.path) < n and path[:len(es.path)] == es.path for es in sel):
         return None
     kept = [es for es in sel if not (len(es.path) > n and es.path[:n] == path)]
-    return frozenset(kept + [ElementSelection.all(path)])
+    # D6: the survivors keep their order and the new entry APPENDS.
+    return Selection(kept + [ElementSelection.all(path)])
 
 
 _CHARACTER_ATTRIBUTES = ("font_family", "font_size", "font_weight", "font_style")
@@ -1162,33 +1163,32 @@ class Controller:
         - Mixed ``.all``/``.partial`` collapses to ``.all`` (preserving
           the pre-refactor behavior for this rare case).
         """
+        # D6: CURRENT in its own order, so survivors keep their place, and the
+        # shared paths resolve where they stand; then NEW in its own order,
+        # appended behind. The order of Rust's `toggle_selection` (XOR).
         current_by_path = {es.path: es for es in current}
         new_by_path = {es.path: es for es in new}
-        result: set[ElementSelection] = set()
-        # Elements only in current
-        for path, es in current_by_path.items():
-            if path not in new_by_path:
-                result.add(es)
-        # Elements only in new
-        for path, es in new_by_path.items():
-            if path not in current_by_path:
-                result.add(es)
-        # Elements in both: XOR.
-        for path in current_by_path.keys() & new_by_path.keys():
-            cur = current_by_path[path].kind
-            nw = new_by_path[path].kind
-            if isinstance(cur, _SelectionAll) and isinstance(nw, _SelectionAll):
+        result: list[ElementSelection] = []
+        for es in current:
+            nw = new_by_path.get(es.path)
+            if nw is None:
+                result.append(es)
+                continue
+            cur, nk = es.kind, nw.kind
+            if isinstance(cur, _SelectionAll) and isinstance(nk, _SelectionAll):
                 # Cancel out — element drops out of selection.
                 continue
-            if isinstance(cur, _SelectionPartial) and isinstance(nw, _SelectionPartial):
+            if isinstance(cur, _SelectionPartial) and isinstance(nk, _SelectionPartial):
                 # Keep the element even when the XOR is empty.
-                xor = cur.cps.symmetric_difference(nw.cps)
-                result.add(ElementSelection(
-                    path=path, kind=_SelectionPartial(xor)))
+                result.append(ElementSelection(
+                    path=es.path, kind=_SelectionPartial(cur.cps.symmetric_difference(nk.cps))))
             else:
                 # Mixed All/Partial — keep `.all`.
-                result.add(ElementSelection.all(path))
-        return frozenset(result)
+                result.append(ElementSelection.all(es.path))
+        for es in new:
+            if es.path not in current_by_path:
+                result.append(es)
+        return Selection(result)
 
     # ------------------------------------------------------------------
     # Private helpers for selection
@@ -1435,13 +1435,11 @@ class Controller:
         Mirrors Rust ``Controller::add_to_selection``."""
         path = tuple(path)
         sel = self._model.document.selection
-        # HONEST NOTE: this guard is expressive here, not behavioural
-        # (measured by mutation). ElementSelection hashes by path alone, and
-        # selection_with_path_added puts the kept entries BEFORE the new one,
-        # so the frozenset keeps the existing entry either way. In the ports
-        # the selection is an ordered list and the guard is what stops a
-        # duplicate; it becomes load-bearing here the day this Selection is
-        # ordered too (D6).
+        # THIS GUARD IS LOAD-BEARING (D6's migration hazard): the selection
+        # is an ordered sequence that does not deduplicate, as the ports'
+        # arrays do not, so without it a repeat would APPEND a second entry.
+        # Measured by mutation 2026-11-09: deleting it reds two controller
+        # arms and the corpus's select_all_top_level.
         if any(es.path == path for es in sel):
             return
         new_sel = selection_with_path_added(sel, path)
@@ -1558,7 +1556,7 @@ class Controller:
             # what they did. Mirrors the Rust `move_selection`.
             kind = remap_cp_selection_after_move(elem, new_elem, es.kind)
             if kind != es.kind:
-                new_doc = replace(new_doc, selection=frozenset(
+                new_doc = replace(new_doc, selection=Selection(
                     ElementSelection(path=e.path, kind=kind)
                     if e.path == es.path else e
                     for e in new_doc.selection))

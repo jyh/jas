@@ -1028,7 +1028,10 @@ def stroke_compensation(sx: float, sy: float, scale_strokes: bool) -> float | No
 
 
 def _selection_paths(doc) -> list[tuple[int, ...]]:
-    return [es.path for es in sorted(doc.selection, key=lambda e: e.path)]
+    """The selection's paths in SELECTION order (D6), as Rust's
+    ``selection_paths``; path-sorted until 2026-11-09, when the selection
+    was a frozenset."""
+    return [es.path for es in doc.selection]
 
 
 def apply_scale(model: Model, sx: float, sy: float, rx: float, ry: float,

@@ -2075,7 +2075,7 @@ pub(crate) mod tests {
         let mut events = vec![];
         for (i, st) in steps[..steps.len() - 1].iter().enumerate() {
             match (st.get("kind").and_then(|k| k.as_str()), st.get("key").and_then(|k| k.as_str())) {
-                (Some("press" | "move" | "release"), _) => events.push(st.clone()),
+                (Some("press" | "move" | "release" | "double_click"), _) => events.push(st.clone()),
                 // A KEY step (the key corpus's chord form): the engine's key
                 // order, `replay::replay_key`. The engine takes no `meta`.
                 (None, Some(key)) => {
@@ -2095,6 +2095,34 @@ pub(crate) mod tests {
             "app_state": script.get("app_state").cloned().unwrap_or(serde_json::json!({})),
             "events": events,
         })
+    }
+
+    #[cfg(feature = "web")]
+    #[test]
+    /// G11's double_click pointer step (jas STATUS-flask 756) at level 1 in the
+    /// gesture runner: press, release, press, release, double on
+    /// complex_document.svg's group [0, 2], then a click, selects [0, 2, 0];
+    /// the control (no double) selects [0, 2]. The point is read from the fixture.
+    fn a_script_double_click_step_replays_in_the_gesture_runner() {
+        let doc = crate::geometry::svg::svg_to_document(&read_fixture("svg/complex_document.svg"));
+        let (x, y) = match doc.get_element(&vec![0, 2, 0].into()) {
+            Some(crate::geometry::element::Element::Line(l)) => ((l.x1 + l.x2) / 2.0, (l.y1 + l.y2) / 2.0),
+            other => panic!("the fixture's [0, 2, 0] is not a line: {other:?}"),
+        };
+        let script = |double: bool| {
+            let click = |k: &str| serde_json::json!({"kind": k, "x": x, "y": y});
+            let mut steps = vec![click("press"), click("release"), click("press"), click("release")];
+            if double { steps.push(click("double_click")); }
+            steps.extend([click("press"), click("release"), serde_json::json!({"read": "document"})]);
+            serde_json::json!({"item": "g11", "setup_svg": "complex_document.svg", "tool": "selection",
+                               "app_state": {}, "steps": steps})
+        };
+        let paths = |tc: serde_json::Value| -> Vec<serde_json::Value> {
+            let v: serde_json::Value = serde_json::from_str(&run_gesture_test(&script_as_gesture_case(&tc))).unwrap();
+            v["selection"].as_array().cloned().unwrap_or_default().iter().map(|s| s["path"].clone()).collect()
+        };
+        assert_eq!(paths(script(true)), vec![serde_json::json!([0, 2, 0])], "isolated: the click selects the child");
+        assert_eq!(paths(script(false)), vec![serde_json::json!([0, 2])], "no double: the click selects the group");
     }
 
     #[cfg(feature = "web")]
