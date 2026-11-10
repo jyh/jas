@@ -38,7 +38,7 @@ its setup.
 Usage:
   python3 scripts/web_l2_driver.py --self-test         (no browser; CI)
   python3 scripts/web_l2_driver.py --url URL [--receipt FILE] [--head SHA]
-                                   [--only NAME ...] [--artifacts DIR]
+                                   [--only NAME ...] [--artifacts DIR] [--dock]
 """
 import argparse
 import datetime
@@ -296,12 +296,116 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         ctx.close()
 
 
+# ---------------------------------------------------------------------------
+# --dock: R1-2's live arm (seat design brief 2026-11-10, option A-prime).
+# The edge-dock LAW is pinned by the shared corpus in
+# test_fixtures/workspace_operations/. This check witnesses what that corpus
+# cannot see: a dock tab dragged in the browser reaches that law, AND the
+# snapped dock is drawn. It runs OUTSIDE the input-script corpus on purpose:
+# every channel replays that corpus, and a dock script would break the
+# engine replays and move every channel's item count.
+# Each case passes only if BOTH halves hold: the engine's layout puts the
+# panel in the dock anchored at the edge, and the DOM node for that edge's
+# dock holds the panel's tab. Either half alone could agree with itself.
+DOCK_EDGES = ("left", "bottom")
+DOCK_CASES = (("stroke", "left"), ("layers", "bottom"))  # both start in the right dock
+WORKSPACE_RS = os.path.join(REPO, "jas_dioxus", "src", "workspace", "workspace.rs")
+
+
+def snap_distance():
+    """SNAP_DISTANCE as the app declares it, read from the Rust source."""
+    import re
+    with open(WORKSPACE_RS, encoding="utf-8") as f:
+        hits = re.findall(r"^pub const SNAP_DISTANCE: f64 = ([0-9.]+);", f.read(), re.M)
+    if len(hits) != 1:
+        raise _plan.Refused(f"workspace.rs declares SNAP_DISTANCE {len(hits)} times; the dock check needs exactly one")
+    return float(hits[0])
+
+
+def dock_point(edge, vw, vh, band):
+    """A viewport point a fifth of the way into the edge's snap band.
+    Bottom is mid-width, so neither side band claims it first."""
+    inset = band / 5
+    if edge == "left":
+        return (inset, vh / 2)
+    if edge == "right":
+        return (vw - inset, vh / 2)
+    if edge == "bottom":
+        return (vw / 2, vh - inset)
+    raise _plan.Refused(f"the app snaps to left, right or bottom; {edge!r} is none of them")
+
+
+def dock_edge_of(layout_text, kind):
+    """The edge of the anchored dock holding panel `kind`, or None if no
+    anchored dock holds it (floating or hidden). Refuses rather than guess."""
+    lay = json.loads(layout_text)
+    if "anchored" not in lay:
+        raise _plan.Refused("the layout read carries no anchored member")
+    edges = [a["edge"] for a in lay["anchored"]
+             for g in a["dock"]["groups"] for p in g["panels"] if p == kind]
+    if len(edges) > 1:
+        raise _plan.Refused(f"panel {kind!r} is in {len(edges)} anchored places; a panel is in one")
+    return edges[0] if edges else None
+
+
+def dock_line(cases):
+    """cases: [(kind, edge, status, detail)] -> one line beside the receipt."""
+    if not cases:
+        return "DOCK NOT RUN"
+    ok = sum(1 for c in cases if c[2] == "PASS")
+    if ok == len(cases):
+        return f"DOCK {ok}/{len(cases)}"
+    bad = "; ".join(f"{s} {k}->{e}: {d}" for k, e, s, d in cases if s != "PASS")
+    return f"DOCK RED {ok}/{len(cases)} ({bad})"
+
+
+def run_dock_case(br, kind, edge):
+    """-> (status, detail). Drags `kind`'s dock tab into `edge`'s snap band."""
+    ctx, page = br.page(True)
+    try:
+        page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+        if not page.evaluate("() => typeof window.__jasTest.layout === 'function'"):
+            return "REFUSED", "window.__jasTest has no layout()"
+        before = page.evaluate("() => window.__jasTest.layout()")
+        if dock_edge_of(before, kind) != "right":
+            return "REFUSED", f"{kind} does not start in the right dock (reads {dock_edge_of(before, kind)!r})"
+        tab_id = kind + _plan.PANEL_SUFFIX + _plan.TAB_SUFFIX
+        tab = page.locator(f"#{tab_id}")
+        if tab.count() != 1:
+            return "REFUSED", f"{tab.count()} elements carry id {tab_id!r}"
+        vw, vh = page.evaluate("() => [window.innerWidth, window.innerHeight]")
+        px, py = dock_point(edge, vw, vh, snap_distance())
+        box = tab.bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(px, py, steps=12)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        after = page.evaluate("() => window.__jasTest.layout()")
+        if after == before:
+            return "FAIL", "the layout did not change (did the drag reach ondragend?)"
+        got = dock_edge_of(after, kind)
+        if got != edge:
+            return "FAIL", f"the engine anchors {kind} at {got!r}"
+        drawn = page.locator(f"#jas-edge-dock-{edge} #{tab_id}").count()
+        if drawn != 1:
+            return "FAIL", f"#jas-edge-dock-{edge} holds {drawn} copies of the tab"
+        return "PASS", ""
+    except _plan.Refused as e:
+        return "REFUSED", str(e)
+    except Exception as e:
+        return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+    finally:
+        ctx.close()
+
+
 def run(args):
     menubar = _plan.load_menubar()
     menu_ids = menu_ids_by_path(menubar)
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
+    dock = dock_cases = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -326,18 +430,25 @@ def run(args):
                 if not ok:
                     results = [(n, "REFUSED" if s == "PASS" else s, d) for n, s, d in results]
                     lines.append(f"WITNESS REFUSED: {WITNESS} did not pass with a moved read-back, so no PASS in this run is counted")
+        if args.dock:
+            dock_cases = [(k, e) + run_dock_case(br, k, e) for k, e in DOCK_CASES] if not not_run else []
+            dock = dock_line(dock_cases)
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     first = receipt(results, args.head, date, not_run=not_run)
-    body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"] + lines
+    body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
+    if dock is not None:
+        body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
+    body += lines
     print("\n".join(body))
     if args.receipt:
         with open(args.receipt, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(body) + "\n")
     if args.advisory and args.receipt:
         return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
-    return 0 if " verdict=GREEN " in first else 1
+    dock_ok = dock_cases is None or (bool(dock_cases) and all(c[2] == "PASS" for c in dock_cases))
+    return 0 if " verdict=GREEN " in first and dock_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +527,44 @@ def self_test():
         fails.append("an empty run with no reason is refused")
     except ValueError:
         pass
+    # --dock (R1-2's live arm). The band comes from the Rust source; the point
+    # must classify to its own edge under the app's rule (left, then right,
+    # then bottom), checked here against a mirror of is_near_edge.
+    band = snap_distance()
+    check(band == 20.0, f"SNAP_DISTANCE derives from workspace.rs as 20 (read {band})")
+
+    def near_edge(x, y, vw, vh):
+        return "left" if x <= band else "right" if x >= vw - band else "bottom" if y >= vh - band else None
+    for e in DOCK_EDGES:
+        px, py = dock_point(e, VIEWPORT["width"], VIEWPORT["height"], band)
+        check(near_edge(px, py, VIEWPORT["width"], VIEWPORT["height"]) == e, f"the {e} drop point classifies to {e}")
+        check(0 < px < VIEWPORT["width"] and 0 < py < VIEWPORT["height"], f"the {e} drop point is inside the viewport")
+    try:
+        dock_point("top", 1400, 900, band)
+        fails.append("a top drop is refused: the app has no top edge")
+    except _plan.Refused:
+        pass
+    # The layout reader, over the corpus's own layout (bytes, never typed).
+    lay_path = os.path.join(REPO, "test_fixtures", "workspace_operations", "panel_detach_panel_snap_bottom.json")
+    lay = open(lay_path, encoding="utf-8").read().strip()
+    check(dock_edge_of(lay, "swatches") == "bottom", "swatches reads as anchored at bottom in the snap fixture")
+    check(dock_edge_of(lay, "stroke") == "right", "stroke reads as anchored at right in the snap fixture")
+    check(dock_edge_of(lay, "gradient") is None, "a panel in no anchored dock reads None")
+    for bad, why in ((lay.replace('"anchored":', '"anchoredX":', 1), "no anchored member"),
+                     (lay.replace('"panels":["color"]', '"panels":["color","swatches"]', 1), "a panel in two docks")):
+        check(bad != lay, f"the {why} mutant changed the layout")
+        try:
+            dock_edge_of(bad, "swatches")
+            fails.append(f"{why} is refused")
+        except _plan.Refused:
+            pass
+    check(dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "PASS", "")]) == "DOCK 2/2",
+          "two passing dock cases read DOCK 2/2")
+    check(dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "FAIL", "x")]) == "DOCK RED 1/2 (FAIL layers->bottom: x)",
+          "a failing dock case names itself")
+    check(dock_line([]) == "DOCK NOT RUN", "no dock case is NOT RUN, never 0/0")
+    check(len({k for k, _ in DOCK_CASES}) == len(DOCK_CASES) and {e for _, e in DOCK_CASES} == {"left", "bottom"},
+          "the dock cases cover left and bottom with distinct panels")
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:
@@ -431,6 +580,8 @@ def main(argv):
     ap.add_argument("--head")
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--artifacts")
+    ap.add_argument("--dock", action="store_true",
+                    help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)
