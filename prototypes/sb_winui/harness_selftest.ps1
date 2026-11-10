@@ -3152,9 +3152,11 @@ Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRender
 # The engine-opened dialogs (flask STATUS 795, jas 796): four kinds the 16 panels
 # never carried, measured on the box: radio -> RadioButton (built so on purpose,
 # PaneView.cs), and reference_point_widget, color_gradient and color_hue_bar ->
-# Custom (custom-drawn, as color_bar is). 21 kinds, 2 known. radio_group and
-# icon_button_group ABSENT are NOT allowed: those are open shell questions.
-Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '21 2'
+# Custom (custom-drawn, as color_bar is). radio_group and icon_button_group read
+# ABSENT there: their rows (RadioGroupRow, IconGroupRow) were StackPanels with no
+# automation peer, so the leaf's id reached no reader. Each now has a Group peer,
+# measured through -EngineOpen (color_picker, artboard_options): 23 kinds, 2 known.
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '23 2'
 
 Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
 Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
@@ -3309,13 +3311,29 @@ $eNotRun = New-SbEngRun 'pen_alternates' 2 @('VERDICT: REFUSED: the plan has no 
 $eZero = New-SbEngRun 'swatch_library_save' 0 @('VERDICT: compared=0 mismatches=0', 'KINDS-VERDICT: PASS(pairs=0; known: none)')
 Test-Case 'engine dialogs: the line prints pass, fail and not-run, each named' {
     Get-SbEngineDialogsLine -Runs @($ePass, $eFail, $eNotRun, $ePass2) -Wanted 4
-} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
 Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says so' {
     Get-SbEngineDialogsLine -Runs @($eZero) -Wanted 1
 } 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
 Test-Case 'engine dialogs: a run short of the wanted count is torn, never a smaller denominator' {
     Get-SbEngineDialogsLine -Runs @($ePass) -Wanted 3
 } 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran)'
+# jas 799's notes 1 and 2: the shapes the first arms did not build. An engine
+# refusal names the engine's reason, not rendered_tree's `plan=False`; a run with
+# no VERDICT row is a NOT RUN that says so; a FAIL at mismatches=0 (exit 1 from
+# KINDS or GAPS alone) names the verdict that failed it.
+$eRefused = New-SbEngRun 'pen_alternates' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED dialog=pen_alternates status=4 params={} error={`"class`":`"MissingTarget`"} ui-tid=2", 'VERDICT: NOT RUN (plan=False uia=True)')
+$eNoRow = New-SbEngRun 'boolean_options' 2 @('start: pid=0 waited=30 refusal=the app did not come up')
+$eKinds = New-SbEngRun 'scale_options' 1 @('VERDICT: compared=10 mismatches=0', 'GAPS: PASS(known: none)', 'KINDS-VERDICT: FAIL(new: radio->RadioButton:2)')
+Test-Case 'engine dialogs: an engine refusal names the engine''s reason, not plan=False' {
+    Get-SbEngineDialogsLine -Runs @($eRefused) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=pen_alternates(engine refused: status=4 error={"class":"MissingTarget"}) witness=default-render(params {})'
+Test-Case 'engine dialogs: a run with no VERDICT row is a NOT RUN that says so' {
+    Get-SbEngineDialogsLine -Runs @($eNoRow) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=boolean_options(no verdict row) witness=default-render(params {})'
+Test-Case 'engine dialogs: a FAIL at mismatches=0 names the verdict that failed it' {
+    Get-SbEngineDialogsLine -Runs @($eKinds) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 advisory=until-promoted pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {})'
 Test-Case 'engine dialogs: none wanted prints nothing' {
     "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
 } '[]'
