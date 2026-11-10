@@ -2734,6 +2734,22 @@ internal sealed partial class SeparatorRulePeer : Microsoft.UI.Xaml.Automation.P
 }
 
 /// <summary>
+/// The plain element peer, reporting <see cref="Microsoft.UI.Xaml.Automation.Peers.AutomationControlType.Group"/>:
+/// a row of option controls (<see cref="RadioGroupRow"/>, <see cref="IconGroupRow"/>).
+/// A StackPanel has no automation peer, so the leaf's id on the row reached no
+/// reader and the rendered tree read the leaf ABSENT while its options drew
+/// (flask STATUS 798, measured on color_picker and artboard_options through the
+/// engine opener). A group of choices is a Group in UI Automation.
+/// </summary>
+internal sealed partial class GroupRowPeer : Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer
+{
+    internal GroupRowPeer(FrameworkElement owner) : base(owner) { }
+
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationControlType GetAutomationControlTypeCore() =>
+        Microsoft.UI.Xaml.Automation.Peers.AutomationControlType.Group;
+}
+
+/// <summary>
 /// The gradient slider's surface (<c>DrawGradientSlider</c>): a `UserControl`,
 /// so it can take focus and its keys (a `Canvas` is a panel and cannot), hosting
 /// the `Canvas` the picture is drawn in. It is given the plain element peer, as
@@ -2780,6 +2796,8 @@ internal sealed partial class PanelHost : Microsoft.UI.Xaml.Controls.Canvas
 /// so the value applier can tell it from any other StackPanel.</summary>
 internal sealed partial class IconGroupRow : StackPanel
 {
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new GroupRowPeer(this);
 }
 
 /// <summary>#434: a `reference_point_widget`'s grid of anchor cells, a type of its
@@ -2795,6 +2813,9 @@ internal sealed partial class AnchorGrid : Grid
 /// value applier can tell it from any other StackPanel.</summary>
 internal sealed partial class RadioGroupRow : StackPanel
 {
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new GroupRowPeer(this);
+
     /// <summary>Option i's radio, whether it sits in the row itself or in the
     /// Viewbox that fits it to a short row (finding 14).</summary>
     internal RadioButton? RadioAt(int i) => Children[i] switch
