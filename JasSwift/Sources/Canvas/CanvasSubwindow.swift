@@ -2983,6 +2983,8 @@ func canonicalKeyName(_ event: NSEvent) -> String {
 /// Dispatches mouse/key events through the CanvasTool protocol.
 class CanvasNSView: NSView {
     var document: Document = Document()
+    /// Holds a double-click until its release (`CanvasClickOrder`).
+    var clickOrder = CanvasClickOrder()
     /// Panel-selected artboard ids (ARTBOARDS.md §Selection
     /// semantics). Drives the accent-border pass. Set from outside
     /// by the SwiftUI wrapper / AppState.
@@ -3935,11 +3937,9 @@ class CanvasNSView: NSView {
         window?.makeFirstResponder(self)
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
-        if event.clickCount >= 2 {
-            activeTool.onDoubleClick(ctx, x: pt.x, y: pt.y)
-            ensureBlinkTimer()
-            return
-        }
+        // The second press of a double-click is a press; the double itself is
+        // held until its release (`CanvasClickOrder`, the grammar's order).
+        _ = clickOrder.down(clickCount: event.clickCount)
         let shift = event.modifierFlags.contains(.shift)
         let alt = event.modifierFlags.contains(.option)
         // Align panel key-object intercept (Phase 3i, ALIGN.md
@@ -4234,6 +4234,11 @@ class CanvasNSView: NSView {
         activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onRelease(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
         syncAlignKeyObjectFromSelection(model: ctx.model, store: ctx.model.stateStore)
+        // The held double-click, after its release (`CanvasClickOrder`).
+        if clickOrder.up().contains(.doubleClick) {
+            activeTool.onDoubleClick(ctx, x: pt.x, y: pt.y)
+            ensureBlinkTimer()
+        }
         // A dialog the tool opened (Scale's Alt-click) moves to the model's
         // store, where the app's dialog view reads it (flask STATUS §285).
         handOffToolEvent(activeTool, model: ctx.model)

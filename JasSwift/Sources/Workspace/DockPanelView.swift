@@ -66,16 +66,32 @@ public struct DockPanelView: View {
         }
     }
 
+    @ViewBuilder
     private func collapsedView(_ dock: Dock) -> some View {
-        VStack(spacing: 2) {
-            ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
-                ForEach(Array(group.panels.enumerated()), id: \.offset) { pi, kind in
-                    collapsedIcon(kind: kind, gi: gi, pi: pi)
-                }
+        // A Bottom dock is a row (WORKSPACE.md "Anchored Docks by Edge",
+        // rule 6), so its collapsed icon strip runs left to right.
+        if edge == .bottom {
+            HStack(spacing: 2) {
+                collapsedIcons(dock)
+                Spacer()
             }
-            Spacer()
+            .padding(.leading, 4)
+            .frame(maxHeight: .infinity)
+        } else {
+            VStack(spacing: 2) {
+                collapsedIcons(dock)
+                Spacer()
+            }
+            .padding(.top, 4)
         }
-        .padding(.top, 4)
+    }
+
+    private func collapsedIcons(_ dock: Dock) -> some View {
+        ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
+            ForEach(Array(group.panels.enumerated()), id: \.offset) { pi, kind in
+                collapsedIcon(kind: kind, gi: gi, pi: pi)
+            }
+        }
     }
 
     private func collapsedIcon(kind: PanelKind, gi: Int, pi: Int) -> some View {
@@ -101,21 +117,38 @@ public struct DockPanelView: View {
         .help(label)
     }
 
+    @ViewBuilder
     private func expandedView(_ dock: Dock) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
-                PanelGroupView(
-                    workspaceLayout: $workspaceLayout,
-                    dockId: dockId,
-                    groupIdx: gi,
-                    group: group,
-                    theme: theme,
-                    model: model,
-                    yamlDialogState: yamlDialogState
-                )
+        // Rule 6: a Left or Right dock stacks its groups top to bottom; a
+        // Bottom dock lays them out left to right in equal shares of the
+        // row, and a group's height does not apply.
+        if edge == .bottom {
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
+                    groupView(gi, group)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
             }
-            Spacer()
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
+                    groupView(gi, group)
+                }
+                Spacer()
+            }
         }
+    }
+
+    private func groupView(_ gi: Int, _ group: PanelGroup) -> some View {
+        PanelGroupView(
+            workspaceLayout: $workspaceLayout,
+            dockId: dockId,
+            groupIdx: gi,
+            group: group,
+            theme: theme,
+            model: model,
+            yamlDialogState: yamlDialogState
+        )
     }
 
 }
@@ -659,18 +692,36 @@ struct DockDetachDropDelegate: DropDelegate {
                 // dispatcher arm discards that return; promoting it would need an
                 // op-return pattern, so it stays direct with the drag sites.
                 // `detachPanel` is intentionally not a dispatcher verb at all.
-                switch decoded {
-                case .panel(let addr):
-                    _ = layoutBinding.wrappedValue.detachPanel(
-                        addr, x: Double(location.x), y: Double(location.y))
-                case .group(let addr):
-                    _ = layoutBinding.wrappedValue.detachGroup(
-                        addr, x: Double(location.x), y: Double(location.y))
-                }
+                detachDroppedOnCanvas(&layoutBinding.wrappedValue, decoded,
+                                      x: Double(location.x), y: Double(location.y))
             }
         }
         return true
     }
+}
+
+/// A dock tab or grip dropped on the canvas: detach it into a floating dock
+/// at the drop point, then, if the drop is within `snapDistance` of a window
+/// edge, snap the new dock to that edge (WORKSPACE.md "Anchored Docks by
+/// Edge", "Snapping onto an edge"; `isNearEdge` picks left, then right, then
+/// bottom). Rust's dock-tab dragend does the same (`is_near_edge`, then
+/// `snap_to_edge`). The drop point is in the pane container's coordinates,
+/// which are the viewport's. With no pane layout there is no viewport, and
+/// the dock floats.
+@discardableResult
+func detachDroppedOnCanvas(_ layout: inout WorkspaceLayout, _ decoded: DecodedDrag,
+                           x: Double, y: Double) -> DockId? {
+    let fid: DockId?
+    switch decoded {
+    case .panel(let addr): fid = layout.detachPanel(addr, x: x, y: y)
+    case .group(let addr): fid = layout.detachGroup(addr, x: x, y: y)
+    }
+    if let fid, let pl = layout.panes(),
+       let edge = WorkspaceLayout.isNearEdge(x: x, y: y, viewportW: pl.viewportWidth,
+                                             viewportH: pl.viewportHeight) {
+        layout.snapToEdge(fid, edge: edge)
+    }
+    return fid
 }
 
 /// The evaluation context a docked panel body renders and acts with: the

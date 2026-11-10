@@ -174,6 +174,9 @@ pub fn run_gesture_case_on(tc: &Value, doc: crate::document::document::Document)
                 tool.on_move(&mut model, x, y, shift, alt, dragging)
             }
             "release" => tool.on_release(&mut model, x, y, shift, alt),
+            // An input script's double_click step (docs/TESTING.md section 6):
+            // the tool's double-click handler only, as the web's dblclick.
+            "double_click" => tool.on_double_click(&mut model, x, y),
             other => panic!("unknown gesture event kind: {other:?}"),
         }
     }

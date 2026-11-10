@@ -192,6 +192,21 @@ pub enum DropTarget {
     Edge(DockEdge),
 }
 
+/// The drop target after the app root sees a dragover. `near` is
+/// `WorkspaceLayout::is_near_edge` at the pointer. Near an edge the target is
+/// that edge. Away from every edge only an `Edge` target is cleared, so a
+/// drag that crosses a snap band and is dropped elsewhere does not snap
+/// (WORKSPACE.md: a dock DROPPED within `SNAP_DISTANCE` snaps). Any other
+/// target is kept: a dock group slot sets its own and does not stop the
+/// event, so the root sees the same dragover after it, before its ondrop.
+pub(crate) fn root_dragover_target(current: Option<DropTarget>, near: Option<DockEdge>) -> Option<DropTarget> {
+    match (near, current) {
+        (Some(edge), _) => Some(DropTarget::Edge(edge)),
+        (None, Some(DropTarget::Edge(_))) => None,
+        (None, other) => other,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WorkspaceLayout
 // ---------------------------------------------------------------------------
@@ -2352,6 +2367,30 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         l.redock(DockId(99)); // no panic, no change
         assert_eq!(l.anchored.len(), 1);
+    }
+
+    #[test]
+    fn the_root_dragover_clears_an_edge_target_away_from_every_edge() {
+        // WORKSPACE.md: a dock DROPPED within SNAP_DISTANCE of an edge snaps,
+        // so a drag that crosses a band and leaves it must not keep the edge.
+        let left = Some(DropTarget::Edge(DockEdge::Left));
+        assert_eq!(root_dragover_target(left, None), None);
+        assert_eq!(root_dragover_target(None, Some(DockEdge::Bottom)), Some(DropTarget::Edge(DockEdge::Bottom)));
+        assert_eq!(root_dragover_target(left, Some(DockEdge::Right)), Some(DropTarget::Edge(DockEdge::Right)));
+        assert_eq!(root_dragover_target(None, None), None);
+    }
+
+    #[test]
+    fn the_root_dragover_keeps_a_nested_zones_target() {
+        // A dock group slot sets its target and does not stop propagation, so
+        // the root sees the same dragover after it. Its target must reach its
+        // ondrop; only an Edge target is the root's to clear.
+        let slot = Some(DropTarget::GroupSlot { dock_id: DockId(0), group_idx: 2 });
+        let tab = Some(DropTarget::TabBar { group: ga(0, 1), index: 0 });
+        assert_eq!(root_dragover_target(slot, None), slot);
+        assert_eq!(root_dragover_target(tab, None), tab);
+        // Near an edge the edge wins, as before this law.
+        assert_eq!(root_dragover_target(slot, Some(DockEdge::Left)), Some(DropTarget::Edge(DockEdge::Left)));
     }
 
     #[test]

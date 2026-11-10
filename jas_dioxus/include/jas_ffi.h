@@ -100,6 +100,13 @@
 #define KIND_RELEASE 2
 
 /**
+ * A double-click, sent AFTER the second press/release pair (a browser's
+ * `dblclick` order; docs/TESTING.md section 6). It reaches the active tool's
+ * `on_double_click` and nothing else (jas STATUS-flask 750, 756: G11).
+ */
+#define KIND_DOUBLE_CLICK 3
+
+/**
  * Modifier bit flags. ABI, like the kinds above.
  */
 #define MOD_SHIFT (1 << 0)
@@ -912,6 +919,29 @@ uint8_t jas_dialog_dismiss(struct JasEngine *e);
  * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
  */
 struct JasBytes jas_document_pdf(struct JasEngine *e);
+
+/**
+ * Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
+ * the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
+ * a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
+ * object whose values are strings, numbers, booleans or null, each passed
+ * as a literal. A test seam: a shell opens a dialog through its own opener.
+ *
+ * `Ok` only when the named dialog is then the TOP open dialog. Every refusal
+ * is named in [`jas_last_error_json`] and opens nothing: `MissingTarget` (no
+ * spec defines the id), `BadParamType` (params not an object, or a value no
+ * literal carries: the detail names `dialog.param`), `BadUtf8`, `BadJson`,
+ * and `NullHandle`.
+ *
+ * # Safety
+ * `e` must be NULL or a live engine; `id` and `params_json` must be readable
+ * for `id_len` and `params_len` bytes.
+ */
+JasStatus jas_dialog_open(struct JasEngine *e,
+                          const uint8_t *id,
+                          uintptr_t id_len,
+                          const uint8_t *params_json,
+                          uintptr_t params_len);
 
 /**
  * **The open dialog's plan** (the dialog door, design 2026-10-14): the panel

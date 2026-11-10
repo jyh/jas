@@ -330,6 +330,7 @@ public struct ContentView: View {
             let rs = RenderingState.from(workspace.workspaceLayout.panes(), dockCollapsed: dockCollapsed, activeBorderSnap: paneState.borderDrag?.snapIdx)
             let snapLines = RenderingState.snapLines(from: paneState.snapPreview,
                                                       paneLayout: workspace.workspaceLayout.panes())
+            let edgeRects = workspace.workspaceLayout.edgeDockRects()
 
             ZStack {
                 // Background
@@ -342,6 +343,19 @@ public struct ContentView: View {
                             .frame(width: geo.width, height: geo.height)
                             .position(x: geo.x + geo.width / 2, y: geo.y + geo.height / 2)
                             .zIndex(Double(geo.zIndex))
+                    }
+                }
+
+                // Edge docks (WORKSPACE.md "Anchored Docks by Edge"): the
+                // Left column and Bottom row, cut from the canvas pane by
+                // `edgeDockRects`. Rule 7: above the canvas (every pane is a
+                // small z) and below every floating dock (900 + z).
+                if let er = edgeRects {
+                    if let r = er.left, let d = workspace.workspaceLayout.anchoredDock(.left) {
+                        edgeDockView(d, edge: .left, rect: r)
+                    }
+                    if let r = er.bottom, let d = workspace.workspaceLayout.anchoredDock(.bottom) {
+                        edgeDockView(d, edge: .bottom, rect: r)
                     }
                 }
 
@@ -488,7 +502,7 @@ public struct ContentView: View {
                           paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .canvas:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: !(geo.config.doubleClickAction == .maximize && rs.canvasMaximized),
-                          content: { canvasContent },
+                          content: { canvasContent.padding(canvasEdgeDockInsets(geo)) },
                           paneDrag: $paneState.paneDrag, edgeResize: $paneState.edgeResize, edgeSnappedCoord: $paneState.edgeSnappedCoord, snapPreview: $paneState.snapPreview)
         case .dock:
             PaneFrameView(geo: geo, workspace: workspace, showTitleBar: true,
@@ -607,6 +621,39 @@ public struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Rule 4: the canvas is drawn in what the edge docks leave of the canvas
+    /// pane. The insets are read off `edgeDockRects`, never re-derived, so
+    /// the view and the law cannot disagree. A maximized canvas keeps the
+    /// whole viewport (rule 8), so its insets are zero.
+    private func canvasEdgeDockInsets(_ geo: PaneGeometry) -> EdgeInsets {
+        guard let er = workspace.workspaceLayout.edgeDockRects(),
+              !(workspace.workspaceLayout.panes()?.canvasMaximized ?? false) else {
+            return EdgeInsets()
+        }
+        let leading = max(0, er.canvas.x - geo.x)
+        let bottom = max(0, (geo.y + geo.height) - (er.canvas.y + er.canvas.h))
+        return EdgeInsets(top: 0, leading: leading, bottom: bottom, trailing: 0)
+    }
+
+    private func edgeDockView(_ dock: Dock, edge: DockEdge, rect: EdgeRect) -> some View {
+        DockPanelView(
+            workspaceLayout: $workspace.workspaceLayout,
+            dockId: dock.id,
+            edge: edge,
+            theme: workspace.theme,
+            model: workspace.activeModel,
+            yamlDialogState: $yamlDialogState
+        )
+        .frame(width: rect.w, height: rect.h)
+        .border(SwiftUI.Color(nsColor: workspace.theme.border), width: 1)
+        // One AX container per edge dock, so a harness finds the dock's tabs
+        // as its descendants (the --dock check's drawing half).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(edgeDockAccessibilityId(edge))
+        .position(x: rect.x + rect.w / 2, y: rect.y + rect.h / 2)
+        .zIndex(800)
     }
 
     @ViewBuilder

@@ -260,6 +260,9 @@ public sealed partial class MainWindow : Window
     private bool _dockWanted;
     private bool _dockCollapseDone;
     private bool _dockFloatDone;
+    /// <summary>SB_DOCK_FLOAT_TOUR's replay (FP-6, Q6.FL), while it runs.</summary>
+    private FloatTour? _floatTour;
+    private bool _floatTourAsked;
     private bool _panelMenuSynthDone;
     /// <summary>The group whose SB_PANEL_MENU_SYNTH run waits on its menu read.</summary>
     private (string Group, int Index)? _panelMenuSynth;
@@ -525,8 +528,45 @@ public sealed partial class MainWindow : Window
     /// <summary>How many floating docks the last placement drew, so an all-anchored dock stays quiet.</summary>
     private int _floatDrawn;
 
-    /// <summary>Put each floating frame at the engine's (x, y) and `z`, and say so in one row.</summary>
+    /// <summary>Draw the engine's floating docks where it put them, then let the float tour read that answer.</summary>
     private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via)
+    {
+        PlaceFloatingFrames(floating, via);
+        // A resize's clamp is nobody's answer: the tour reads only the placements its ops caused.
+        if (via != "resize") { AdvanceFloatTour(floating); }
+    }
+
+    /// <summary>
+    /// SB_DOCK_FLOAT_TOUR (FP-6, Q6.FL): read the answer to the step in flight,
+    /// then send the next one, through the same `LayoutOp` the gestures send.
+    /// `FloatTour` decides every op and row; this only carries them out.
+    /// </summary>
+    private void AdvanceFloatTour(IReadOnlyList<LayoutWire.Floated> floating)
+    {
+        if (_floatTour is null) { return; }
+        if (_floatTour.Observe(floating) is { } read) { Report(read); }
+        SendFloatTourStep();
+    }
+
+    /// <summary>Send the tour's next op, or write its DONE row once the last answer is read.</summary>
+    private void SendFloatTourStep()
+    {
+        if (_floatTour is null) { return; }
+        if (_floatTour.Finished)
+        {
+            var docked = _dockGroups.Where(d => d.Key.StartsWith("dock", StringComparison.Ordinal)).ToList();
+            Report($"FLOAT TOUR DONE steps={FloatTour.Steps} groups={docked.Count} tabs={docked.Sum(d => d.Value.Tabs.Count)}");
+            _floatTour = null;
+            return;
+        }
+        if (_floatTour.Next(_dockId) is not { } step) { return; }
+        Report(step.Row);
+        if (step.Op is null) { _floatTour = null; return; }
+        _canvas.LayoutOp(new LayoutOpCmd { Op = step.Op, Group = step.Group, Via = "synth" });
+    }
+
+    /// <summary>Put each floating frame at the engine's (x, y) and `z`, and say so in one row.</summary>
+    private void PlaceFloatingFrames(IReadOnlyList<LayoutWire.Floated> floating, string via)
     {
         var placed = new List<string>();
         foreach (var f in floating)
@@ -699,6 +739,22 @@ public sealed partial class MainWindow : Window
                 else
                 {
                     Report($"RUSTFAIL DOCK FLOAT REFUSED value={floatKnob.Trim()} -- want <dock key>:<x>,<y> with a key of the {docked.Count} anchored group(s)");
+                }
+            }
+            // SB_DOCK_FLOAT_TOUR=<dock key>,<dock key> (FP-6, Q6.FL): two groups
+            // float, the first moves and is raised, both redock; one op at a time.
+            var tourKnob = Environment.GetEnvironmentVariable("SB_DOCK_FLOAT_TOUR");
+            if (!_floatTourAsked && !string.IsNullOrWhiteSpace(tourKnob))
+            {
+                _floatTourAsked = true;
+                _floatTour = FloatTour.Parse(tourKnob, docked.Count);
+                if (_floatTour is null)
+                {
+                    Report($"RUSTFAIL FLOAT TOUR REFUSED value={tourKnob.Trim()} -- want two distinct keys of the {docked.Count} anchored group(s)");
+                }
+                else
+                {
+                    SendFloatTourStep();
                 }
             }
             var collapseKnob = Environment.GetEnvironmentVariable("SB_DOCK_COLLAPSE");

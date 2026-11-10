@@ -165,8 +165,88 @@ class ElementSelection:
     def __hash__(self) -> int:
         return hash(self.path)
 
-# A selection is an immutable set of ElementSelection entries (unique by path).
-Selection = frozenset[ElementSelection]
+class Selection(tuple):
+    """The document selection: an ORDERED, immutable sequence of
+    ``ElementSelection`` entries (D6, LAYER_STRUCTURE.md, ruled 2026-07-28:
+    an ordered array, the same representation in every port, as Rust's
+    ``Vec`` and JasSwift's array). It APPENDS in the order entries were
+    added and the canonical JSON emits that order.
+
+    It does NOT deduplicate, as the ports' arrays do not: an insertion site
+    owes its own guard (D6's "migration hazard"), and a missing guard shows
+    as a doubled entry in every golden. Until 2026-11-09 this was a
+    ``frozenset``, which deduplicated for free and could hold no order.
+
+    Membership (``in``) is by PATH, through ``ElementSelection.__eq__``.
+    The set operators keep the LEFT operand's order and append the right
+    operand's new entries in its own iteration order; a right operand that
+    is a plain set has none, so it is taken in path order. Comparing with a
+    plain set or frozenset compares MEMBERSHIP only, because a set states no
+    order and such a comparison never claimed one; two selections compare
+    in order, as two ``Vec``s do.
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def of(entries: Iterable["ElementSelection"]) -> "Selection":
+        """``entries`` as a Selection: a sequence keeps its order and an
+        unordered set is taken in path order (the only order it can have)."""
+        if isinstance(entries, Selection):
+            return entries
+        if isinstance(entries, (set, frozenset)):
+            # getattr: a few legacy tests store bare paths in a set; they
+            # order by the path itself.
+            return Selection(sorted(entries, key=lambda e: getattr(e, "path", e)))
+        return Selection(entries)
+
+    def _merged(self, other) -> "Selection":
+        tail = Selection.of(other)
+        return Selection(tuple(self) + tuple(e for e in tail if e not in self))
+
+    def __or__(self, other) -> "Selection":
+        return self._merged(other)
+
+    __ror__ = None  # a set on the left has no order to keep; build a Selection first
+
+    def union(self, *others) -> "Selection":
+        out = self
+        for o in others:
+            out = out._merged(o)
+        return out
+
+    def __sub__(self, other) -> "Selection":
+        drop = set(Selection.of(other))
+        return Selection(e for e in self if e not in drop)
+
+    def difference(self, *others) -> "Selection":
+        out = self
+        for o in others:
+            out = out - o
+        return out
+
+    def __and__(self, other) -> "Selection":
+        keep = set(Selection.of(other))
+        return Selection(e for e in self if e in keep)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (set, frozenset)):
+            return len(set(self)) == len(self) and set(self) == other
+        if isinstance(other, tuple):
+            return tuple.__eq__(self, other)
+        return NotImplemented
+
+    def __ne__(self, other: object) -> bool:
+        r = self.__eq__(other)
+        return r if r is NotImplemented else not r
+
+    __hash__ = tuple.__hash__
+
+    def __add__(self, other) -> "Selection":
+        return Selection(tuple(self) + tuple(other))
+
+    def __repr__(self) -> str:
+        return f"Selection({list(self)!r})"
 
 
 @dataclass(frozen=True)
@@ -185,7 +265,7 @@ class Document:
     # resolver, index) per §2 deterministic order.
     symbols: tuple[Element, ...] = ()
     selected_layer: int = 0
-    selection: Selection = frozenset()
+    selection: Selection = Selection()
     artboards: tuple = ()
     artboard_options: "ArtboardOptions" = field(
         default_factory=lambda: _default_artboard_options()
@@ -205,6 +285,15 @@ class Document:
     # A fresh Document (file open, parse, decode) starts with no run, as a
     # new Model does in the ports.
     paste_run: tuple[str, int] | None = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        # D6: the selection is ordered. A caller that still hands over a set
+        # (the representation before 2026-11-09) gets it in PATH order, which
+        # is exactly what the serializer emitted for it then, so a site that
+        # has not been migrated behaves as it did; an ordered site keeps its
+        # order. Any other iterable is taken as given.
+        if not isinstance(self.selection, Selection):
+            object.__setattr__(self, "selection", Selection.of(self.selection))
 
     def get_element_selection(self, path: ElementPath) -> ElementSelection | None:
         """Return the ElementSelection for the given path, or None."""

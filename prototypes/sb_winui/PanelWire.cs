@@ -2189,6 +2189,136 @@ internal static class LayoutWire
 
     internal static string DetachGroup(int dockId, int groupIdx, double x, double y) =>
         Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["x"] = x, ["y"] = y });
+
+    /// <summary>
+    /// Whether a layout answer kept the dock's STRUCTURE: the same pane keys, each
+    /// showing the same panels in the same order. Compared as a map from key to
+    /// panels, never in list order: the floating docks arrive sorted by `z`, so a
+    /// raise reorders the list and keeps every key (jas STATUS-flask 750). A panel
+    /// moving between groups keeps the keys and changes the map, so it is a change.
+    /// An unreadable answer (null) is never the same.
+    /// </summary>
+    internal static bool SameStructure(IReadOnlyList<(string Key, List<string> Panels)> before,
+                                       IReadOnlyList<(string Key, List<string> Panels)>? after)
+    {
+        if (after is null || after.Count != before.Count) { return false; }
+        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (key, panels) in before) { map[key] = panels; }
+        return map.Count == before.Count
+            && after.All(a => map.TryGetValue(a.Key, out var p) && p.SequenceEqual(a.Panels));
+    }
+}
+
+/// <summary>
+/// FP-6's scene, `SB_DOCK_FLOAT_TOUR=&lt;key&gt;,&lt;key&gt;`: two anchored groups
+/// float, the first moves and is raised over the second, then both redock.
+/// This class decides every op and writes every row; the shell sends the op
+/// through the method the gesture uses and hands back each placement. One op
+/// is in flight at a time, so each step acts on the engine's previous answer.
+/// Q6.FL (`Get-SbDockFloatTourVerdict`) judges the rows.
+/// </summary>
+internal sealed class FloatTour
+{
+    internal const int Steps = 6;
+
+    /// <summary>The higher anchored index (detached first, so the lower key stays valid) and the lower.</summary>
+    internal int Hi { get; }
+    internal int Lo { get; }
+    internal bool Finished { get; private set; }
+
+    private int _issued;
+    private bool _awaiting;
+    private int? _a, _b;
+    private int _count1, _count2;
+
+    private FloatTour(int hi, int lo) { Hi = hi; Lo = lo; }
+
+    /// <summary>Two distinct `dock{i}` keys of the anchored dock, or null.</summary>
+    internal static FloatTour? Parse(string? knob, int anchoredCount)
+    {
+        if (string.IsNullOrWhiteSpace(knob)) { return null; }
+        var keys = knob.Split(',');
+        if (keys.Length != 2) { return null; }
+        var idx = new int[2];
+        for (var i = 0; i < 2; i++)
+        {
+            var k = keys[i].Trim();
+            if (!k.StartsWith("dock", StringComparison.Ordinal) || k.Length == 4 || !k[4..].All(char.IsAsciiDigit)
+                || !int.TryParse(k.AsSpan(4), System.Globalization.NumberStyles.None,
+                                 System.Globalization.CultureInfo.InvariantCulture, out idx[i])
+                || idx[i] >= anchoredCount)
+            {
+                return null;
+            }
+        }
+        if (idx[0] == idx[1]) { return null; }
+        return idx[0] > idx[1] ? new FloatTour(idx[0], idx[1]) : new FloatTour(idx[1], idx[0]);
+    }
+
+    /// <summary>One step: the op to send (null when refused), the pane group it names, and its row.</summary>
+    internal sealed record Step(string? Op, string Group, string Row);
+
+    /// <summary>The next step, or null while an op is in flight or the tour is over.</summary>
+    internal Step? Next(int anchoredDockId)
+    {
+        if (Finished || _awaiting || _issued >= Steps) { return null; }
+        var n = _issued + 1;
+        if (n == 2 && _a is null) { return Refuse(n, $"step 1 left {_count1} floating dock(s), not 1"); }
+        if (n == 3 && _b is null) { return Refuse(n, $"step 2 left {_count2} floating dock(s), not 2"); }
+        _issued = n;
+        _awaiting = true;
+        var a = _a ?? 0;
+        var b = _b ?? 0;
+        return n switch
+        {
+            1 => Detach(n, anchoredDockId, Hi, 300, 40),
+            2 => Detach(n, anchoredDockId, Lo, 520, 40),
+            3 => new Step(LayoutWire.SetFloatingPosition(a, 300, 260), Float(a),
+                          Inv($"FLOAT TOUR STEP n={n} op=set_floating_position dock={a} x=300 y=260 via=synth")),
+            4 => new Step(LayoutWire.BringToFront(a), Float(a), Inv($"FLOAT TOUR STEP n={n} op=bring_to_front dock={a} via=synth")),
+            5 => new Step(LayoutWire.Redock(a), Float(a), Inv($"FLOAT TOUR STEP n={n} op=redock dock={a} via=synth")),
+            _ => new Step(LayoutWire.Redock(b), Float(b), Inv($"FLOAT TOUR STEP n={n} op=redock dock={b} via=synth")),
+        };
+    }
+
+    /// <summary>The READ row for the step in flight, or null when no step awaits (a placement nobody asked for).</summary>
+    internal string? Observe(IReadOnlyList<LayoutWire.Floated> floating)
+    {
+        if (!_awaiting) { return null; }
+        _awaiting = false;
+        var n = _issued;
+        if (n == 1)
+        {
+            _count1 = floating.Count;
+            if (floating.Count == 1) { _a = floating[0].DockId; }
+        }
+        else if (n == 2)
+        {
+            _count2 = floating.Count;
+            var others = floating.Where(f => f.DockId != _a).ToList();
+            if (floating.Count == 2 && others.Count == 1) { _b = others[0].DockId; }
+        }
+        if (n == Steps) { Finished = true; }
+        return Inv($"FLOAT TOUR READ n={n} docks={floating.Count} at={At(floating)}");
+    }
+
+    /// <summary>The engine's floating docks as one row field: `[id@x,yzZ;…]`, in the order given.</summary>
+    internal static string At(IReadOnlyList<LayoutWire.Floated> floating) =>
+        "[" + string.Join(";", floating.Select(f => Inv($"{f.DockId}@{f.X},{f.Y}z{f.Z}"))) + "]";
+
+    private Step Refuse(int n, string why)
+    {
+        Finished = true;
+        return new Step(null, "float", Inv($"RUSTFAIL FLOAT TOUR REFUSED step={n} -- {why}"));
+    }
+
+    private static Step Detach(int n, int dockId, int idx, double x, double y) =>
+        new(LayoutWire.DetachGroup(dockId, idx, x, y), Inv($"dock{idx}"),
+            Inv($"FLOAT TOUR STEP n={n} op=detach_group group=dock{idx} x={x} y={y} via=synth"));
+
+    private static string Float(int dockId) => Inv($"float{dockId}");
+
+    private static string Inv(FormattableString s) => FormattableString.Invariant(s);
 }
 
 /// <summary>The keys an action reply carries for the shell to act on.</summary>

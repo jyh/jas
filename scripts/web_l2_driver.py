@@ -38,7 +38,7 @@ its setup.
 Usage:
   python3 scripts/web_l2_driver.py --self-test         (no browser; CI)
   python3 scripts/web_l2_driver.py --url URL [--receipt FILE] [--head SHA]
-                                   [--only NAME ...] [--artifacts DIR]
+                                   [--only NAME ...] [--artifacts DIR] [--dock]
 """
 import argparse
 import datetime
@@ -296,12 +296,265 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         ctx.close()
 
 
+# ---------------------------------------------------------------------------
+# --dock: R1-2's live arm (seat design brief 2026-11-10, option A-prime).
+# The edge-dock LAW is pinned by the shared corpus in
+# test_fixtures/workspace_operations/. This check witnesses what that corpus
+# cannot see: a dock tab dragged in the browser reaches that law, AND the
+# snapped dock is drawn. It runs OUTSIDE the input-script corpus on purpose:
+# every channel replays that corpus, and a dock script would break the
+# engine replays and move every channel's item count.
+# Each case passes only if BOTH halves hold: the engine's layout puts the
+# panel in the dock anchored at the edge, and the DOM node for that edge's
+# dock holds the panel's tab. Either half alone could agree with itself.
+# The cases, the band, the layout reader, the verdict and the DOCK line are
+# mac_l2_plan's, so the web and Mac channels read a dock by one law.
+DOCK_EDGES, DOCK_CASES = _plan.DOCK_EDGES, _plan.DOCK_CASES
+snap_distance, dock_point, dock_line = _plan.snap_distance, _plan.dock_point, _plan.dock_line
+
+APP_RS = os.path.join(REPO, "jas_dioxus", "src", "workspace", "app.rs")
+
+
+def snap_preview_style(text=None):
+    """(width px, computed colour) of the root's snap preview, read from the
+    three `let snap_<edge> = if snap_edge == ...` lines in app.rs. The preview
+    is drawn exactly while the drop target is an Edge, so reading it mid-drag
+    tells the drop target the dragend handler will read (R1-2h, flask's 775)."""
+    import re
+    if text is None:
+        with open(APP_RS, encoding="utf-8") as f:
+            text = f.read()
+    hits = re.findall(r'let snap_(left|right|bottom) = if snap_edge == Some\(DockEdge::\w+\) '
+                      r'\{ "([0-9]+)px solid (#[0-9a-fA-F]{6})" \}', text)
+    if sorted(h[0] for h in hits) != ["bottom", "left", "right"] or len({h[1:] for h in hits}) != 1:
+        raise _plan.Refused(f"app.rs's snap preview lets read {hits!r}; the preview probe needs three alike")
+    return int(hits[0][1]), hex_to_rgb(hits[0][2])
+
+
+def hex_to_rgb(h):
+    return "rgb({}, {}, {})".format(int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16))
+
+
+# Which root edges draw the snap preview right now. Any element may carry it,
+# so every element is read; the side names are getComputedStyle's.
+PREVIEW_JS = """([w, rgb]) => {
+  const out = [];
+  for (const el of document.querySelectorAll('*')) {
+    const cs = getComputedStyle(el);
+    for (const side of ['left', 'right', 'bottom'])
+      if (cs['border-' + side + '-width'] === w + 'px' && cs['border-' + side + '-style'] === 'solid'
+          && cs['border-' + side + '-color'] === rgb) out.push(side);
+  }
+  return out;
+}"""
+
+
+def preview_label(sides):
+    return "+".join(sorted(set(sides))) or "none"
+
+
+# R1-2h positive control (flask's 779). A passing stroke->left read up=none,
+# so a single read before the release cannot tell "never drawn" from "drawn
+# late" or "drawn only by the release's own dragover". This instrument is
+# installed before the press and logs, by phase, every change in which root
+# edges draw the preview (a MutationObserver on style attributes), and counts
+# the dragover events the window saw. In the release phase it also logs the
+# release's own first dragover, its drop and its dragend into the same
+# sequence, so the order names the event that drew (or cleared) the preview. `ctl` plants an element carrying the
+# preview's exact style and reads it back: the reader's own positive control.
+INSTRUMENT_JS = """([w, rgb]) => {
+  const sides = () => {
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+      for (const side of ['left', 'right', 'bottom'])
+        if (cs['border-' + side + '-width'] === w + 'px' && cs['border-' + side + '-style'] === 'solid'
+            && cs['border-' + side + '-color'] === rgb) out.push(side);
+    }
+    return [...new Set(out)].sort().join('+') || 'none';
+  };
+  const p = {phase: 'drag', over: 0, start: 0, muts: [], last: sides()};
+  window.addEventListener('dragstart', () => { p.start++; }, true);
+  window.addEventListener('dragover', () => {
+    p.over++;
+    if (p.phase === 'release' && !p.relOver) { p.relOver = true; p.muts.push([p.phase, 'over']); }
+  }, true);
+  for (const ev of ['drop', 'dragend'])
+    window.addEventListener(ev, () => { p.muts.push([p.phase, ev]); }, true);
+  new MutationObserver(() => {
+    const now = sides();
+    if (now !== p.last) { p.muts.push([p.phase, now]); p.last = now; }
+  }).observe(document.documentElement, {subtree: true, attributes: true, attributeFilter: ['style']});
+  window.__jasPreviewProbe = p;
+  const el = document.createElement('div');
+  el.style.cssText = 'position:absolute;left:-99px;width:9px;height:9px;border-left:' + w + 'px solid ' + rgb;
+  document.body.appendChild(el);
+  const ctl = getComputedStyle(el)['border-left-width'] === w + 'px'
+    && getComputedStyle(el)['border-left-color'] === rgb ? 'left' : 'none';
+  el.remove();
+  return ctl;
+}"""
+
+
+def seen_label(muts):
+    """The phase-tagged preview transitions, in order, repeats dropped."""
+    out = []
+    for ph, lab in muts:
+        t = f"{ph}:{lab}"
+        if not out or out[-1] != t:
+            out.append(t)
+    return ",".join(out) or "none"
+
+
+PREVIEW_FIELDS = ("hit", "start", "via", "viaw", "up", "upw", "over", "seen", "ctl", "src")
+
+# How long after a move the preview is read a second time (viaw, upw), before
+# the release: long enough for a render a frame or two late to land.
+SETTLE_MS = 150
+
+
+# R1-2h press reading (flask's 781). layers->bottom saw no dragover at all, so
+# the question moves to the press: what element is under the point the mouse
+# goes down on, and did a dragstart follow. The point is the tab's bounding-box
+# centre, which Playwright does not scroll into view, so a tab below the fold
+# is pressed at a point outside the viewport.
+PRESS_JS = """([id, x, y]) => {
+  const tab = document.getElementById(id);
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight)
+    return {where: 'offscreen', y: y, vh: innerHeight};
+  const el = document.elementFromPoint(x, y);
+  if (el === tab) return {where: 'tab'};
+  if (el && tab && tab.contains(el)) return {where: 'child', tag: el.tagName};
+  return {where: 'other', tag: el ? el.tagName : null, id: el && el.id ? el.id : ''};
+}"""
+
+
+def press_label(d):
+    """One whitespace-free token for what the press point hit."""
+    import re
+    w = d.get("where")
+    if w == "tab":
+        return "tab"
+    if w == "child":
+        return "child:" + str(d.get("tag")).lower()
+    if w == "offscreen":
+        return f"offscreen:y{round(d['y'])}/vh{round(d['vh'])}"
+    if w == "other":
+        tag = (d.get("tag") or "null").lower()
+        el_id = re.sub(r"\s+", "_", d.get("id") or "")
+        return f"other:{tag}#{el_id}" if el_id else f"other:{tag}"
+    raise _plan.Refused(f"the press reading {d!r} names no known place")
+
+
+def dock_summary(cases):
+    """The DOCK line for cases that carry a preview dict after the four
+    fields _plan.dock_line reads (kind, edge, status, detail)."""
+    return dock_line([c[:4] for c in cases])
+
+
+def preview_line(cases):
+    """Every case's preview readings, PASS included: a PASS that floated with
+    the preview still lit is itself a finding."""
+    if not cases:
+        return "DOCK PREVIEW NOT RUN"
+    parts = []
+    for k, e, _s, _d, *rest in cases:
+        pv = rest[0] if rest else {}
+        parts.append(f"{k}->{e or 'float'}[" + " ".join(f"{p}={pv[p]}" for p in PREVIEW_FIELDS if p in pv) + "]")
+    return "DOCK PREVIEW " + " ".join(parts)
+
+
+DRAG_STEPS = 12
+
+
+def drag_to(page, x, y):
+    """Move a held mouse to (x, y) in DRAG_STEPS steps, then once more to the
+    same point. Chromium delivers a drag's dragover for the LAST mouse move
+    only when the next input event arrives (flask's 787, then driven on this
+    bundle: the dragovers stop at the second-to-last step, and the target's
+    own arrives with the release). Without the extra move the app never sees
+    the target mid-drag, so a preview read there measures the driver."""
+    page.mouse.move(x, y, steps=DRAG_STEPS)
+    page.mouse.move(x, y)
+
+
+
+
+def run_dock_case(br, kind, edge, via=None):
+    """-> (status, detail, preview). preview maps "via"/"up" to the snap
+    preview read just after the band pass and just before the release, and
+    "src" to whether the pressed tab node is still in the DOM then. Drags `kind`'s dock tab into `edge`'s snap band,
+    or, with edge None, through `via`'s band and then to the viewport's
+    centre, where it must float."""
+    ctx, page = br.page(True)
+    pv = {}
+    try:
+        return run_dock_drag(page, kind, edge, via, pv) + (pv,)
+    finally:
+        ctx.close()
+
+
+def run_dock_drag(page, kind, edge, via, pv):
+    try:
+        page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+        if not page.evaluate("() => typeof window.__jasTest.layout === 'function'"):
+            return "REFUSED", "window.__jasTest has no layout()"
+        before = page.evaluate("() => window.__jasTest.layout()")
+        why = _plan.dock_start_refusal(before, kind)
+        if why:
+            return "REFUSED", why
+        tab_id = kind + _plan.PANEL_SUFFIX + _plan.TAB_SUFFIX
+        tab = page.locator(f"#{tab_id}")
+        if tab.count() != 1:
+            return "REFUSED", f"{tab.count()} elements carry id {tab_id!r}"
+        vw, vh = page.evaluate("() => [window.innerWidth, window.innerHeight]")
+        band = snap_distance()
+        px, py = dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2)
+        # The dock scrolls: a tab in its lowest group can sit below the fold
+        # (flask's 784: layers at y 1087 of 900), and the mouse cannot press it there.
+        tab.scroll_into_view_if_needed()
+        box = tab.bounding_box()
+        src = tab.element_handle()
+        bx, by = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        style = list(snap_preview_style())
+        # Installed before the press, so the press's own dragstart is counted.
+        pv["ctl"] = page.evaluate(INSTRUMENT_JS, style)
+        pv["hit"] = press_label(page.evaluate(PRESS_JS, [tab_id, bx, by]))
+        page.mouse.move(bx, by)
+        page.mouse.down()
+        if via:
+            drag_to(page, *dock_point(via, vw, vh, band))
+            pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
+            page.wait_for_timeout(SETTLE_MS)
+            pv["viaw"] = preview_label(page.evaluate(PREVIEW_JS, style))
+        drag_to(page, px, py)
+        pv["up"] = preview_label(page.evaluate(PREVIEW_JS, style))
+        page.wait_for_timeout(SETTLE_MS)
+        pv["upw"] = preview_label(page.evaluate(PREVIEW_JS, style))
+        # A source node replaced mid-drag fires its dragend detached, so the
+        # event never bubbles to the root's ondragend (app.rs's comment).
+        pv["src"] = "kept" if src.evaluate("el => el.isConnected") else "gone"
+        pv["over"], pv["start"] = page.evaluate(
+            "() => { const p = window.__jasPreviewProbe; p.phase = 'release'; return [p.over, p.start]; }")
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        pv["seen"] = seen_label(page.evaluate("() => window.__jasPreviewProbe.muts"))
+        after = page.evaluate("() => window.__jasTest.layout()")
+        drawn = {e: page.locator(f"#{_plan.edge_dock_id(e)} #{tab_id}").count() for e in DOCK_EDGES}
+        return _plan.dock_verdict(before, after, kind, edge, drawn)
+    except _plan.Refused as e:
+        return "REFUSED", str(e)
+    except Exception as e:
+        return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+
+
 def run(args):
     menubar = _plan.load_menubar()
     menu_ids = menu_ids_by_path(menubar)
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
+    dock = dock_cases = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -326,18 +579,26 @@ def run(args):
                 if not ok:
                     results = [(n, "REFUSED" if s == "PASS" else s, d) for n, s, d in results]
                     lines.append(f"WITNESS REFUSED: {WITNESS} did not pass with a moved read-back, so no PASS in this run is counted")
+        if args.dock:
+            dock_cases = [(k, e) + run_dock_case(br, k, e, v) for k, e, v in DOCK_CASES] if not not_run else []
+            dock = dock_summary(dock_cases)
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     first = receipt(results, args.head, date, not_run=not_run)
-    body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"] + lines
+    body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
+    if dock is not None:
+        body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
+        body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+    body += lines
     print("\n".join(body))
     if args.receipt:
         with open(args.receipt, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(body) + "\n")
     if args.advisory and args.receipt:
         return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
-    return 0 if " verdict=GREEN " in first else 1
+    dock_ok = dock_cases is None or (bool(dock_cases) and all(c[2] == "PASS" for c in dock_cases))
+    return 0 if " verdict=GREEN " in first and dock_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +677,93 @@ def self_test():
         fails.append("an empty run with no reason is refused")
     except ValueError:
         pass
+    # --dock (R1-2's live arm): its reader, cases and verdict are mac_l2_plan's
+    # and self-test there. Here, only that the drop points fit this viewport.
+    band = snap_distance()
+    for e in DOCK_EDGES:
+        px, py = dock_point(e, VIEWPORT["width"], VIEWPORT["height"], band)
+        check(0 < px < VIEWPORT["width"] and 0 < py < VIEWPORT["height"], f"the {e} drop point is inside the viewport")
+    # R1-2h (flask's 787): Chromium holds back the dragover for a drag's LAST
+    # mouse move until the next input event, so a stepped move must end with
+    # one more move to the same point, or the app never sees the target mid-drag.
+    class _Mouse:
+        def __init__(self):
+            self.calls = []
+
+        def move(self, x, y, steps=1):
+            self.calls.append((x, y, steps))
+
+    class _Page:
+        def __init__(self):
+            self.mouse = _Mouse()
+    fake = _Page()
+    drag_to(fake, 4, 450)
+    check(fake.mouse.calls == [(4, 450, DRAG_STEPS), (4, 450, 1)],
+          f"drag_to steps to the point, then moves to it once more (calls {fake.mouse.calls})")
+    # R1-2h: the snap preview, read mid-drag from the DOM (flask's 775).
+    w, rgb = snap_preview_style()
+    check(w > 0 and rgb.startswith("rgb("), f"the preview style reads from app.rs ({w}px {rgb})")
+    check(hex_to_rgb("#4a90d9") == "rgb(74, 144, 217)", "hex_to_rgb writes the computed-style form")
+    check(preview_label([]) == "none" and preview_label(["left", "left"]) == "left"
+          and preview_label(["bottom", "left"]) == "bottom+left", "preview_label: none, dedup, sorted")
+    five = [("stroke", "left", "PASS", "", {"up": "left", "src": "kept"}),
+            ("layers", "bottom", "FAIL", "x", {"up": "none", "src": "gone"}),
+            ("align", None, "PASS", "", {"via": "left", "up": "left"})]
+    check(dock_summary(five) == "DOCK RED 2/3 (FAIL layers->bottom: x)", "dock_summary reads cases that carry a preview")
+    check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
+          "preview_line names every case, PASS included, in the order via, up, src")
+    check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
+    # R1-2h positive control (flask's 779: a PASSING snap read up=none). The
+    # instrument fields ride in a fixed order after via/up, before src.
+    six = [("stroke", "left", "PASS", "", {"src": "kept", "seen": "release:left", "ctl": "left", "over": 11, "up": "none"})]
+    check(preview_line(six) == "DOCK PREVIEW stroke->left[up=none over=11 seen=release:left ctl=left src=kept]",
+          "preview_line orders up, over, seen, ctl, src whatever the dict order")
+    check(seen_label([]) == "none", "seen_label: no preview mutation at all is none")
+    check(seen_label([["drag", "left"], ["release", "none"]]) == "drag:left,release:none",
+          "seen_label keeps every transition, phase first, in order")
+    check(seen_label([["drag", "left"], ["drag", "left"]]) == "drag:left",
+          "seen_label drops a repeat of the same phase and label")
+    # R1-2h press reading (flask's 781: layers->bottom saw over=0, no drag
+    # session at all). hit names what the press point lands on; start counts
+    # dragstart. Both lead the case, because nothing after them counts when
+    # the press missed the tab.
+    seven = [("layers", "bottom", "FAIL", "x", {"src": "kept", "start": 0, "hit": "offscreen:y1012/vh900", "over": 0})]
+    check(preview_line(seven) == "DOCK PREVIEW layers->bottom[hit=offscreen:y1012/vh900 start=0 over=0 src=kept]",
+          "preview_line leads with hit and start, then the drag fields")
+    # flask's 784: layers' press point was 187 px below the viewport. The tab
+    # is scrolled into view BEFORE its box is read, so the press lands on it.
+    import inspect
+    drag_src = inspect.getsource(run_dock_drag)
+    si, bi = drag_src.find("tab.scroll_into_view_if_needed()"), drag_src.find("tab.bounding_box()")
+    check(0 <= si < bi, "run_dock_drag scrolls the tab into view before it reads the tab's box")
+    # flask's 784: stroke's preview drew only on the release's own dragover.
+    # viaw/upw re-read the preview SETTLE_MS after the move, before the release,
+    # so "drawn late" and "not drawn by a drag-phase dragover" read apart.
+    eight = [("align", None, "PASS", "", {"upw": "none", "viaw": "left", "up": "none", "via": "none", "hit": "tab"})]
+    check(preview_line(eight) == "DOCK PREVIEW align->float[hit=tab via=none viaw=left up=none upw=none]",
+          "preview_line puts each settled read right after its immediate one")
+    check(0 < SETTLE_MS <= 500, "the settle wait is a fraction of a second")
+    check(press_label({"where": "tab"}) == "tab", "press_label: the tab itself")
+    check(press_label({"where": "child", "tag": "SPAN"}) == "child:span", "press_label: a descendant, by tag")
+    check(press_label({"where": "other", "tag": "DIV", "id": "pane-3"}) == "other:div#pane-3",
+          "press_label: another element, by tag and id")
+    check(press_label({"where": "other", "tag": "DIV", "id": ""}) == "other:div", "press_label: another element with no id")
+    check(press_label({"where": "offscreen", "y": 1012.4, "vh": 900}) == "offscreen:y1012/vh900",
+          "press_label: a press point outside the viewport names its y and the height")
+    check(press_label({"where": "other", "tag": None, "id": ""}) == "other:null", "press_label: no element at the point")
+    for bad in ({}, {"where": "nowhere"}):
+        try:
+            press_label(bad)
+            check(False, f"press_label refuses {bad!r}")
+        except _plan.Refused:
+            pass
+    check(" " not in press_label({"where": "other", "tag": "DIV", "id": "a b"}),
+          "press_label keeps the token whitespace-free (the line is split on spaces)")
+    try:
+        snap_preview_style("let snap_left = 1;")
+        check(False, "a source with no preview lets refuses")
+    except _plan.Refused:
+        pass
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:
@@ -431,6 +779,8 @@ def main(argv):
     ap.add_argument("--head")
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--artifacts")
+    ap.add_argument("--dock", action="store_true",
+                    help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)

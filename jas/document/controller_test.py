@@ -677,6 +677,30 @@ class SelectionInvariantTest(absltest.TestCase):
         self.assertEqual([(es.path, es.kind) for es in ctrl.document.selection],
                          [((0, 1), partial.kind)])
 
+    def test_add_appends_in_the_order_the_paths_were_added(self):
+        # D6 (LAYER_STRUCTURE.md, ruled 2026-07-28): the selection is an
+        # ORDERED array in every port, so an add APPENDS. [0,1] then [0,0]
+        # stays [0,1], [0,0], never document order. A set could not hold it.
+        # BOTH directions: one fixed iteration order (a set's) passes one of
+        # them by coincidence, and did, before the selection was ordered.
+        for label, add in self._seams():
+            for order in ([(0, 1), (0, 0)], [(0, 0), (0, 1)]):
+                ctrl = self._ctrl()
+                for p in order:
+                    add(ctrl, p)
+                self.assertEqual([es.path for es in ctrl.document.selection],
+                                 order, label)
+
+    def test_a_repeated_add_is_a_no_op_and_never_a_duplicate(self):
+        # THE MIGRATION HAZARD (D6): a set dedups for free and an array does
+        # not, so add_to_selection's guard is what stops a second entry.
+        ctrl = self._ctrl()
+        ctrl.add_to_selection((0, 1))
+        ctrl.add_to_selection((0, 0))
+        ctrl.add_to_selection((0, 1))
+        self.assertEqual([es.path for es in ctrl.document.selection],
+                         [(0, 1), (0, 0)])
+
     def test_toggle_removes_a_partial_entry_by_path(self):
         ctrl = self._ctrl()
         ctrl.set_selection(frozenset({ElementSelection.partial((0, 1), (0,))}))

@@ -1404,6 +1404,86 @@ static class Program
             """{"op":"clamp_floating_docks","viewport_w":1024.5,"viewport_h":600}""", LayoutWire.ClampFloatingDocks(1024.5, 600));
         Eq("floating: a floating group's pane key never starts with `dock`", "float2g0|float13g4",
             LayoutWire.FloatKey(2, 0) + "|" + LayoutWire.FloatKey(13, 4));
+        // FP-6's scene: SB_DOCK_FLOAT_TOUR=<key>,<key>. The plan is decided here;
+        // the shell only sends each op and reports each placement.
+        static string TK(string? k, int n) { var t = FloatTour.Parse(k, n); return t is null ? "refused" : $"{t.Hi}|{t.Lo}"; }
+        Eq("float tour knob: two anchored keys, the higher index detached first", "3|1", TK("dock1,dock3", 5));
+        Eq("float tour knob: order and whitespace do not matter", "3|1", TK(" dock3 , dock1 ", 5));
+        Eq("float tour knob: one key, the same key twice, a key past the dock, a floating key, unset: each refused",
+            "refused|refused|refused|refused|refused",
+            string.Join("|", TK("dock1", 5), TK("dock1,dock1", 5), TK("dock1,dock5", 5), TK("float1g0,dock1", 5), TK(null, 5)));
+        static LayoutWire.Floated Fd(int id, double x, double y, int z) =>
+            new(id, x, y, 240, z, new[] { new LayoutWire.Group(new[] { "p" }, 0, false) });
+        var tour = FloatTour.Parse("dock1,dock3", 5)!;
+        var answers = new[]
+        {
+            new[] { Fd(1, 300, 40, 0) },
+            new[] { Fd(1, 300, 40, 0), Fd(2, 520, 40, 1) },
+            new[] { Fd(1, 300, 260, 0), Fd(2, 520, 40, 1) },
+            new[] { Fd(2, 520, 40, 1), Fd(1, 300, 260, 2) },
+            new[] { Fd(2, 520, 40, 1) },
+            Array.Empty<LayoutWire.Floated>(),
+        };
+        var log = new List<string>();
+        foreach (var answer in answers)
+        {
+            var step = tour.Next(0);
+            log.Add(step is null ? "(none)" : $"{step.Op} {step.Group} {step.Row}");
+            Check("float tour: a second op while one is in flight is refused", tour.Next(0) is null, "issued two");
+            log.Add(tour.Observe(answer) ?? "(none)");
+        }
+        Eq("float tour: six ops, each on the previous answer, and each answer read",
+            string.Join("\n", new[]
+            {
+                """{"op":"detach_group","dock_id":0,"group_idx":3,"x":300,"y":40} dock3 FLOAT TOUR STEP n=1 op=detach_group group=dock3 x=300 y=40 via=synth""",
+                "FLOAT TOUR READ n=1 docks=1 at=[1@300,40z0]",
+                """{"op":"detach_group","dock_id":0,"group_idx":1,"x":520,"y":40} dock1 FLOAT TOUR STEP n=2 op=detach_group group=dock1 x=520 y=40 via=synth""",
+                "FLOAT TOUR READ n=2 docks=2 at=[1@300,40z0;2@520,40z1]",
+                """{"op":"set_floating_position","dock_id":1,"x":300,"y":260} float1 FLOAT TOUR STEP n=3 op=set_floating_position dock=1 x=300 y=260 via=synth""",
+                "FLOAT TOUR READ n=3 docks=2 at=[1@300,260z0;2@520,40z1]",
+                """{"op":"bring_to_front","dock_id":1} float1 FLOAT TOUR STEP n=4 op=bring_to_front dock=1 via=synth""",
+                "FLOAT TOUR READ n=4 docks=2 at=[2@520,40z1;1@300,260z2]",
+                """{"op":"redock","dock_id":1} float1 FLOAT TOUR STEP n=5 op=redock dock=1 via=synth""",
+                "FLOAT TOUR READ n=5 docks=1 at=[2@520,40z1]",
+                """{"op":"redock","dock_id":2} float2 FLOAT TOUR STEP n=6 op=redock dock=2 via=synth""",
+                "FLOAT TOUR READ n=6 docks=0 at=[]",
+            }),
+            string.Join("\n", log));
+        Check("float tour: after six answers it is finished and issues nothing", tour.Finished && tour.Next(0) is null, $"finished={tour.Finished}");
+        Check("float tour: a placement nobody asked for (a resize) is not an answer", FloatTour.Parse("dock1,dock3", 5)!.Observe(answers[0]) is null, "read it");
+        var lost = FloatTour.Parse("dock1,dock3", 5)!;
+        lost.Next(0);
+        lost.Observe(Array.Empty<LayoutWire.Floated>());
+        var refused = lost.Next(0);
+        Eq("float tour: a detach that floated nothing leaves no dock to address, so step 2 is REFUSED by name",
+            "(no op) RUSTFAIL FLOAT TOUR REFUSED step=2 -- step 1 left 0 floating dock(s), not 1",
+            refused is null ? "(null)" : $"{refused.Op ?? "(no op)"} {refused.Row}");
+        Check("float tour: ...and a refused tour is finished", lost.Finished, "still running");
+        var noB = FloatTour.Parse("dock1,dock3", 5)!;
+        noB.Next(0); noB.Observe(answers[0]); noB.Next(0); noB.Observe(answers[0]);
+        Eq("float tour: a second detach that floated no NEW dock is refused at step 3",
+            "RUSTFAIL FLOAT TOUR REFUSED step=3 -- step 2 left 1 floating dock(s), not 2",
+            noB.Next(0)?.Row ?? "(null)");
+        // jas §750 (1): a raise reorders the z-sorted floating list and keeps every
+        // key's panels, so it is drawn in place; a panel that changes group, a
+        // detach and a redock change the map and republish.
+        static List<(string Key, List<string> Panels)> Kp(params (string, string[])[] g) =>
+            g.Select(x => (x.Item1, x.Item2.ToList())).ToList();
+        var twoFloats = Kp(("dock0", new[] { "a" }), ("float1g0", new[] { "b" }), ("float2g0", new[] { "c" }));
+        Eq("structure: a raise (the floats reordered by z) keeps the structure",
+            "True", LayoutWire.SameStructure(twoFloats, Kp(("dock0", new[] { "a" }), ("float2g0", new[] { "c" }), ("float1g0", new[] { "b" }))).ToString());
+        Eq("structure: the identical list keeps it", "True", LayoutWire.SameStructure(twoFloats, twoFloats).ToString());
+        Eq("structure: a panel moved between two groups (same keys) changes it",
+            "False", LayoutWire.SameStructure(Kp(("dock0", new[] { "a", "b" }), ("dock1", new[] { "c" })),
+                                              Kp(("dock0", new[] { "a" }), ("dock1", new[] { "b", "c" }))).ToString());
+        Eq("structure: a group's own tab order changing changes it",
+            "False", LayoutWire.SameStructure(Kp(("dock0", new[] { "a", "b" })), Kp(("dock0", new[] { "b", "a" }))).ToString());
+        Eq("structure: a detach (a key gone, a key new) changes it",
+            "False", LayoutWire.SameStructure(Kp(("dock0", new[] { "a" }), ("dock1", new[] { "b" })),
+                                              Kp(("dock0", new[] { "a" }), ("float1g0", new[] { "b" }))).ToString());
+        Eq("structure: an unreadable answer (null) is never the same", "False", LayoutWire.SameStructure(twoFloats, null).ToString());
+        Eq("float at: the engine's docks as one row field, fractions kept", "[1@300.5,40z0;2@-20,0z3]",
+            FloatTour.At(new[] { Fd(1, 300.5, 40, 0), Fd(2, -20, 0, 3) }));
         Eq("layout: the chevron's op is the engine's toggle verb, addressed by dock and group",
             """{"op":"toggle_group_collapsed","dock_id":3,"group_idx":1}""", LayoutWire.ToggleCollapsed(3, 1));
         Eq("key: a character name is that one character, a control character none", "O|=|(null)|(null)",
