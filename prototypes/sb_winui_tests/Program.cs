@@ -1388,6 +1388,28 @@ static class Program
             fl is null ? "(null)" : string.Join("|", fl.Select(f => FormattableString.Invariant($"{f.DockId}@{f.X},{f.Y}w{f.Width}:{string.Join(",", f.Groups.SelectMany(g => g.Panels))}"))));
         Eq("floating: no floating docks is an empty list, not a refusal", "0",
             LayoutWire.Floating(state)?.Count.ToString() ?? "(null)");
+        // R1-4a (jas 752, 806): EVERY anchored dock, by its edge. A snap can put
+        // a Left dock first in the engine's list, so the Right dock is found by
+        // its edge, never as anchored[0].
+        const string edges = """{"name":"Default","anchored":[{"id":7,"edge":"left","collapsed":false,"width":200.0,"groups":[{"panels":["layers_panel_content"],"active":0,"collapsed":false}]},{"id":0,"edge":"right","collapsed":false,"width":240.0,"groups":[{"panels":["color_panel_content"],"active":0,"collapsed":false}]},{"id":8,"edge":"bottom","collapsed":false,"width":180.0,"groups":[{"panels":["align_panel_content"],"active":0,"collapsed":false},{"panels":["stroke_panel_content"],"active":0,"collapsed":false}]}],"floating":[],"z_order":[],"edge_rects":{"left":{"x":72.0,"y":0.0,"w":200.0,"h":800.0},"bottom":{"x":272.0,"y":620.0,"w":688.0,"h":180.0},"canvas":{"x":272.0,"y":0.0,"w":688.0,"h":620.0}}}""";
+        Eq("edges: the Right dock is found by its edge, not as anchored[0]", "0:color_panel_content",
+            LayoutWire.Dock(edges) is { } rd ? $"{rd.DockId}:{string.Join(",", rd.Groups.SelectMany(g => g.Panels))}" : "(null)");
+        Eq("edges: every anchored dock reads with its edge, in the engine's order", "left:7:1|right:0:1|bottom:8:2",
+            LayoutWire.AnchoredDocks(edges) is { } all ? string.Join("|", all.Select(a => $"{a.Edge}:{a.Dock.DockId}:{a.Dock.Groups.Count}")) : "(null)");
+        Eq("edges: an edge the engine never sends is refused, the whole read with it", "(null)",
+            LayoutWire.AnchoredDocks(edges.Replace("\"edge\":\"bottom\"", "\"edge\":\"top\"")) is null ? "(null)" : "read");
+        Eq("edges: a left or bottom group's pane key is edge-qualified; dock{i} stays the Right dock's", "edgeL7g0|edgeB8g1|(null)",
+            (LayoutWire.EdgeKey("left", 7, 0) ?? "(null)") + "|" + (LayoutWire.EdgeKey("bottom", 8, 1) ?? "(null)") + "|" + (LayoutWire.EdgeKey("right", 0, 0) ?? "(null)"));
+        string ShowRects(LayoutWire.EdgeRectSet? r) => r is null ? "(null)" : string.Join("|",
+            new[] { ("L", r.Left), ("B", r.Bottom), ("C", (LayoutWire.EdgeRect?)r.Canvas) }.Select(p =>
+                p.Item2 is { } e ? FormattableString.Invariant($"{p.Item1}{e.X},{e.Y},{e.W},{e.H}") : p.Item1 + "-"));
+        Eq("edge rects: the engine's rectangles read back (the worked example)", "L72,0,200,800|B272,620,688,180|C272,0,688,620",
+            ShowRects(LayoutWire.EdgeRects(edges)));
+        Eq("edge rects: an absent edge reads none, the canvas still reads", "L72,0,200,800|B-|C272,0,688,800",
+            ShowRects(LayoutWire.EdgeRects(edges.Replace("\"bottom\":{\"x\":272.0,\"y\":620.0,\"w\":688.0,\"h\":180.0}", "\"bottom\":null").Replace("\"h\":620.0}}", "\"h\":800.0}}"))));
+        Eq("edge rects: null rects, no field, or a rect missing a side are each refused", "(null)|(null)|(null)",
+            ShowRects(LayoutWire.EdgeRects(state.Replace("\"z_order\":[]", "\"z_order\":[],\"edge_rects\":null"))) + "|" + ShowRects(LayoutWire.EdgeRects(state)) + "|"
+            + ShowRects(LayoutWire.EdgeRects(edges.Replace(",\"h\":180.0}", "}"))));
         var floatDefects = new[]
         {
             floats.Replace(",\"x\":100.0", ""),
