@@ -24,7 +24,7 @@ use crate::ffi::{
     jas_last_error_json, jas_panel_behavior, JasBytes, JasEngine, JasStatus,
 };
 use crate::ffi_pointer::{
-    jas_pointer_event, jas_set_tool, KIND_MOVE, KIND_PRESS, KIND_RELEASE, MOD_ALT, MOD_DRAGGING,
+    jas_pointer_event, jas_set_tool, KIND_DOUBLE_CLICK, KIND_MOVE, KIND_PRESS, KIND_RELEASE, MOD_ALT, MOD_DRAGGING,
     MOD_SHIFT, TOOL_IDS,
 };
 use serde_json::Value;
@@ -99,6 +99,7 @@ fn replay_then<T>(script: &Value, read_back: impl Fn(*mut JasEngine) -> Result<T
                     "press" => KIND_PRESS,
                     "move" => KIND_MOVE,
                     "release" => KIND_RELEASE,
+                    "double_click" => KIND_DOUBLE_CLICK,
                     _ => return Err(format!("script {item}: step {i} has an unknown kind '{kind}'")),
                 };
                 let mods = if flag(st, "shift") { MOD_SHIFT } else { 0 }
@@ -634,6 +635,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     "press" => KIND_PRESS,
                     "move" => KIND_MOVE,
                     "release" => KIND_RELEASE,
+                    "double_click" => KIND_DOUBLE_CLICK,
                     _ => { refuse(&mut out, format!("pointer kind '{kind}' is not delivered")); break; }
                 };
                 if flag(st, "ctrl") || flag(st, "meta") {
@@ -997,4 +999,48 @@ fn forms_replay_of_a_named_script_directory() {
     let path = std::env::var("JAS_FORMS_OUT").unwrap_or_else(|_| format!("{dir}/forms-readbacks.json"));
     std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
     eprintln!("forms_replay: {} script(s) -> {path}", names.len());
+}
+
+/// G11's script form (jas STATUS-flask 756): press, release, press, release,
+/// `{"kind": "double_click"}` on complex_document.svg's group `[0, 2]`, then a
+/// click, read back. The point is the group's line's midpoint, read from the
+/// fixture, never typed; the CONTROL is the same clicks with no double.
+fn g11_script(double: bool) -> Value {
+    let svg = read("svg/complex_document.svg");
+    let doc = crate::geometry::svg::svg_to_document(&svg);
+    let (x, y) = match doc.get_element(&vec![0, 2, 0].into()) {
+        Some(crate::geometry::element::Element::Line(l)) => ((l.x1 + l.x2) / 2.0, (l.y1 + l.y2) / 2.0),
+        other => panic!("the fixture's [0, 2, 0] is not a line: {other:?}"),
+    };
+    let click = |k: &str| serde_json::json!({"kind": k, "x": x, "y": y});
+    let mut steps = vec![click("press"), click("release"), click("press"), click("release")];
+    if double { steps.push(click("double_click")); }
+    steps.extend([click("press"), click("release"), serde_json::json!({"read": "document"})]);
+    serde_json::json!({"item": "g11", "setup_svg": "complex_document.svg", "tool": "selection",
+                       "app_state": {}, "steps": steps, "expected_json": "-"})
+}
+
+fn selected_paths_of(doc_json: &str) -> Vec<Value> {
+    let v: Value = serde_json::from_str(doc_json).expect("the read-back is JSON");
+    v["selection"].as_array().cloned().unwrap_or_default().iter().map(|s| s["path"].clone()).collect()
+}
+
+#[test]
+fn the_engine_replay_delivers_a_double_click_step() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let entered = replay(&g11_script(true)).expect("the double_click step is delivered");
+    assert_eq!(selected_paths_of(&entered), vec![serde_json::json!([0, 2, 0])], "isolated: the click selects the child");
+    let control = replay(&g11_script(false)).unwrap();
+    assert_eq!(selected_paths_of(&control), vec![serde_json::json!([0, 2])], "no double: the click selects the group");
+}
+
+#[test]
+fn the_forms_replay_delivers_a_double_click_step() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&g11_script(true)).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    let reads = doc_reads(&out);
+    let doc = reads.last().expect("one document read");
+    let text = doc.as_str().map(str::to_string).unwrap_or_else(|| doc.to_string());
+    assert_eq!(selected_paths_of(&text), vec![serde_json::json!([0, 2, 0])], "isolated: the click selects the child");
 }
