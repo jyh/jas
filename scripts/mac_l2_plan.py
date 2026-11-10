@@ -403,6 +403,135 @@ def load_menubar():
 
 
 # ---------------------------------------------------------------------------
+# The dock check: one reader and one verdict, shared by the web channel
+# (scripts/web_l2_driver.py --dock) and the Mac channel (jas_gui_harness.py
+# dock). It runs OUTSIDE the input-script corpus on purpose: every channel
+# replays that corpus, and a dock script would break the engine replays and
+# move every channel's item count. A case passes only if BOTH halves hold:
+# the engine's layout puts the panel in the dock anchored at the edge, and
+# the drawn dock for that edge holds the panel's tab. Either half alone could
+# agree with itself.
+DOCK_EDGES = ("left", "bottom")
+# (panel, the edge it must end anchored at or None to float, a band to pass
+# through first or None). All three start in the right dock. The third is
+# WORKSPACE.md's "a floating dock DROPPED within SNAP_DISTANCE of a window
+# edge snaps": a drag that crosses the left band and drops mid-viewport must
+# float, not snap.
+DOCK_CASES = (("stroke", "left", None), ("layers", "bottom", None), ("align", None, "left"))
+WORKSPACE_RS = os.path.join(REPO, "jas_dioxus", "src", "workspace", "workspace.rs")
+
+
+def edge_dock_id(edge):
+    """The drawn edge dock's id: the web DOM id, which the Swift app also
+    carries as the container's AXIdentifier (edgeDockAccessibilityId)."""
+    return f"jas-edge-dock-{edge}"
+
+
+def snap_distance():
+    """SNAP_DISTANCE as the app declares it, read from the Rust source."""
+    with open(WORKSPACE_RS, encoding="utf-8") as f:
+        hits = re.findall(r"^pub const SNAP_DISTANCE: f64 = ([0-9.]+);", f.read(), re.M)
+    if len(hits) != 1:
+        raise Refused(f"workspace.rs declares SNAP_DISTANCE {len(hits)} times; the dock check needs exactly one")
+    return float(hits[0])
+
+
+def dock_point(edge, vw, vh, band):
+    """A viewport point a fifth of the way into the edge's snap band.
+    Bottom is mid-width, so neither side band claims it first."""
+    inset = band / 5
+    if edge == "left":
+        return (inset, vh / 2)
+    if edge == "right":
+        return (vw - inset, vh / 2)
+    if edge == "bottom":
+        return (vw / 2, vh - inset)
+    raise Refused(f"the app snaps to left, right or bottom; {edge!r} is none of them")
+
+
+def dock_edge_of(layout_text, kind):
+    """The edge of the anchored dock holding panel `kind`, or None if no
+    anchored dock holds it (floating or hidden). Refuses rather than guess."""
+    lay = json.loads(layout_text)
+    if "anchored" not in lay:
+        raise Refused("the layout read carries no anchored member")
+    edges = [a["edge"] for a in lay["anchored"]
+             for g in a["dock"]["groups"] for p in g["panels"] if p == kind]
+    if len(edges) > 1:
+        raise Refused(f"panel {kind!r} is in {len(edges)} anchored places; a panel is in one")
+    return edges[0] if edges else None
+
+
+def floats(layout_text, kind):
+    """True when a floating dock holds panel `kind`."""
+    lay = json.loads(layout_text)
+    return any(p == kind for f in lay.get("floating", [])
+               for g in f["dock"]["groups"] for p in g["panels"])
+
+
+def dock_start_refusal(before, kind):
+    """None when `kind` starts in the right dock, as every case assumes;
+    else the reason the case cannot run."""
+    at = dock_edge_of(before, kind)
+    return None if at == "right" else f"{kind} does not start in the right dock (reads {at!r})"
+
+
+def dock_verdict(before, after, kind, edge, drawn):
+    """-> (status, detail) for one case. `before`/`after` are the engine's
+    layout reads; `drawn` maps each of DOCK_EDGES to how many copies of the
+    panel's tab that edge's drawn dock holds (0 when the dock is absent)."""
+    if after == before:
+        return "FAIL", "the layout did not change (did the drag reach its drop?)"
+    got = dock_edge_of(after, kind)
+    if got != edge:
+        return "FAIL", f"the engine anchors {kind} at {got!r}"
+    if edge is None:
+        if not floats(after, kind):
+            return "FAIL", f"{kind} is in no anchored dock and no floating dock"
+        if sum(drawn.get(e, 0) for e in DOCK_EDGES):
+            return "FAIL", f"an edge dock still draws the {kind} tab"
+        return "PASS", ""
+    n = drawn.get(edge, 0)
+    if n != 1:
+        return "FAIL", f"{edge_dock_id(edge)} holds {n} copies of the tab"
+    return "PASS", ""
+
+
+def dock_line(cases):
+    """cases: [(kind, edge, status, detail)] -> one line beside the receipt."""
+    if not cases:
+        return "DOCK NOT RUN"
+    ok = sum(1 for c in cases if c[2] == "PASS")
+    if ok == len(cases):
+        return f"DOCK {ok}/{len(cases)}"
+    bad = "; ".join(f"{s} {k}->{e or 'float'}: {d}" for k, e, s, d in cases if s != "PASS")
+    return f"DOCK RED {ok}/{len(cases)} ({bad})"
+
+
+TITLE_BAR_MAX = 64.0  # points; a Mac title bar (with or without a toolbar strip) is under this
+
+
+def viewport_size(layout_text):
+    """(width, height) of the pane viewport the app snaps against."""
+    pl = json.loads(layout_text).get("pane_layout")
+    if not isinstance(pl, dict):
+        raise Refused("the layout read has no pane_layout, so there is no viewport to snap against")
+    return float(pl["viewport_width"]), float(pl["viewport_height"])
+
+
+def viewport_origin(win, vw, vh, slack=2.0):
+    """The Mac viewport's top-left in screen points. The pane container
+    fills the window below its title bar, so it shares the window's left and
+    bottom edges. Refuses when the sizes say otherwise, rather than drop at a
+    point the app reads differently."""
+    if abs(win["w"] - vw) > slack:
+        raise Refused(f"the viewport is {vw} wide in a {win['w']} wide window; it should fill the width")
+    bar = win["h"] - vh
+    if bar < -slack or bar > TITLE_BAR_MAX:
+        raise Refused(f"the viewport is {vh} tall in a {win['h']} tall window; that is no title bar")
+    return (win["x"], win["y"] + bar)
+
+
 def self_test():
     fails = []
     ran = [0]
@@ -608,6 +737,85 @@ def self_test():
     for member in ("align.left.json", "object.group.json", "shortcut.undo.json", "selection.drag.json"):
         check(f"the population holds {member}", member in names)
     check("the real menubar gives object.group its path", menu_paths(real).get("menu_group") == ["Object", "Group"])
+
+    # The dock check (R1-2 web, row 89 Mac): one reader and one verdict for
+    # both channels. The band comes from the Rust source; each drop point
+    # must classify to its own edge under the app's rule (left, then right,
+    # then bottom), checked against a mirror of is_near_edge.
+    band = snap_distance()
+    check(f"SNAP_DISTANCE derives from workspace.rs as 20 (read {band})", band == 20.0)
+
+    def near_edge(x, y, vw, vh):
+        return "left" if x <= band else "right" if x >= vw - band else "bottom" if y >= vh - band else None
+    for vw, vh in ((1400, 900), (1200, 800)):
+        for e in DOCK_EDGES:
+            px, py = dock_point(e, vw, vh, band)
+            check(f"the {e} drop point classifies to {e} in {vw}x{vh}", near_edge(px, py, vw, vh) == e)
+            check(f"the {e} drop point is inside {vw}x{vh}", 0 < px < vw and 0 < py < vh)
+    check("a top drop is refused: the app has no top edge", refused(lambda: dock_point("top", 1400, 900, band), "top"))
+    # The layout reader, over the corpus's own layout (bytes, never typed).
+    wo = os.path.join(REPO, "test_fixtures", "workspace_operations")
+    lay = open(os.path.join(wo, "panel_detach_panel_snap_bottom.json"), encoding="utf-8").read().strip()
+    check("swatches reads as anchored at bottom in the snap fixture", dock_edge_of(lay, "swatches") == "bottom")
+    check("stroke reads as anchored at right in the snap fixture", dock_edge_of(lay, "stroke") == "right")
+    check("a panel in no anchored dock reads None", dock_edge_of(lay, "gradient") is None)
+    for bad, why in ((lay.replace('"anchored":', '"anchoredX":', 1), "no anchored member"),
+                     (lay.replace('"panels":["color"]', '"panels":["color","swatches"]', 1), "two docks")):
+        check(f"the {why} mutant changed the layout", bad != lay)
+        check(f"a layout with {why} is refused", refused(lambda: dock_edge_of(bad, "swatches"), "anchored"))
+    fl = open(os.path.join(wo, "panel_detach_panel.json"), encoding="utf-8").read().strip()
+    check("floats() reads the detach fixture: swatches floats, stroke does not",
+          floats(fl, "swatches") and not floats(fl, "stroke"))
+    check("floats() reads a snapped panel as not floating", not floats(lay, "swatches"))
+    check("two passing dock cases read DOCK 2/2",
+          dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "PASS", "")]) == "DOCK 2/2")
+    check("a failing dock case names itself",
+          dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "FAIL", "x")]) == "DOCK RED 1/2 (FAIL layers->bottom: x)")
+    check("no dock case is NOT RUN, never 0/0", dock_line([]) == "DOCK NOT RUN")
+    check("a float case names itself as ->float", dock_line([("align", None, "FAIL", "x")]) == "DOCK RED 0/1 (FAIL align->float: x)")
+    check("the dock cases cover left, bottom and a float, with distinct panels",
+          len({c[0] for c in DOCK_CASES}) == len(DOCK_CASES) and {c[1] for c in DOCK_CASES} == {"left", "bottom", None})
+    check("a case passes through a snap band and drops outside it (WORKSPACE.md: a DROP near an edge snaps)",
+          any(c[1] is None and c[2] in DOCK_EDGES for c in DOCK_CASES))
+    check("the edge-dock ids are the web DOM ids the Swift app also carries",
+          [edge_dock_id(e) for e in DOCK_EDGES] == ["jas-edge-dock-left", "jas-edge-dock-bottom"])
+    # The start condition: every case starts with its panel in the right dock.
+    check("stroke starts in the right dock of the snap fixture", dock_start_refusal(lay, "stroke") is None)
+    check("swatches at bottom is refused as a start", "swatches" in (dock_start_refusal(lay, "swatches") or ""))
+    # The verdict, over the two fixtures: lay has swatches snapped bottom and
+    # fl has it floating, so each direction of each case is a real layout.
+    none = {e: 0 for e in DOCK_EDGES}
+    bottom_drawn = dict(none, bottom=1)
+    check("an unchanged layout FAILS by name", dock_verdict(lay, lay, "swatches", "bottom", bottom_drawn)[0] == "FAIL"
+          and "did not change" in dock_verdict(lay, lay, "swatches", "bottom", bottom_drawn)[1])
+    check("swatches snapped bottom and drawn there PASSES", dock_verdict(fl, lay, "swatches", "bottom", bottom_drawn) == ("PASS", ""))
+    v = dock_verdict(fl, lay, "swatches", "bottom", none)
+    check("the engine half alone is not a PASS (the bottom dock draws no tab)", v[0] == "FAIL" and "jas-edge-dock-bottom" in v[1])
+    v = dock_verdict(fl, lay, "swatches", "bottom", dict(none, bottom=2))
+    check("two drawn copies FAIL", v[0] == "FAIL" and "2 copies" in v[1])
+    v = dock_verdict(fl, lay, "swatches", "left", dict(none, left=1))
+    check("anchored at the wrong edge FAILS and names the edge read", v[0] == "FAIL" and "'bottom'" in v[1])
+    check("a float case PASSES on a floating panel no edge dock draws", dock_verdict(lay, fl, "swatches", None, none) == ("PASS", ""))
+    v = dock_verdict(lay, fl, "swatches", None, dict(none, left=1))
+    check("a float case FAILS while an edge dock still draws the tab", v[0] == "FAIL" and "still draws" in v[1])
+    v = dock_verdict(fl, lay, "swatches", None, none)
+    check("a float case FAILS on a snapped panel", v[0] == "FAIL" and "'bottom'" in v[1])
+    hidden = lay.replace('"panels":["swatches"]', '"panels":[]', 1)
+    check("the hidden mutant changed the layout", hidden != lay)
+    v = dock_verdict(fl, hidden, "swatches", None, none)
+    check("a float case FAILS on a panel in no dock at all", v[0] == "FAIL" and "no floating dock" in v[1])
+    # The Mac viewport: the pane container fills the window below its title
+    # bar, so its origin is the window's bottom-left minus the viewport height.
+    sized = lay.replace('"pane_layout":null', '"pane_layout":{"viewport_height":772.0,"viewport_width":1200.0}', 1)
+    check("the sized mutant changed the layout", sized != lay)
+    check("the viewport size reads from pane_layout", viewport_size(sized) == (1200.0, 772.0))
+    check("a null pane_layout is refused", refused(lambda: viewport_size(lay), "pane_layout"))
+    win = {"x": 100.0, "y": 50.0, "w": 1200.0, "h": 800.0}
+    check("the viewport sits under a 28 pt title bar", viewport_origin(win, 1200.0, 772.0) == (100.0, 78.0))
+    check("a viewport narrower than its window is refused", refused(lambda: viewport_origin(win, 1000.0, 772.0), "wide"))
+    check("a viewport taller than its window is refused", refused(lambda: viewport_origin(win, 1200.0, 900.0), "tall"))
+    check("a viewport far shorter than its window is refused (not under a title bar)",
+          refused(lambda: viewport_origin(win, 1200.0, 500.0), "tall"))
 
     total = ran[0]
     print(f"mac_l2_plan self-test: {total - len(fails)} of {total} checks passed, {planned} shipped scripts planned")
