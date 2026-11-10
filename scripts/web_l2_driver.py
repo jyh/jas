@@ -421,7 +421,11 @@ def seen_label(muts):
     return ",".join(out) or "none"
 
 
-PREVIEW_FIELDS = ("hit", "start", "via", "up", "over", "seen", "ctl", "src")
+PREVIEW_FIELDS = ("hit", "start", "via", "viaw", "up", "upw", "over", "seen", "ctl", "src")
+
+# How long after a move the preview is read a second time (viaw, upw), before
+# the release: long enough for a render a frame or two late to land.
+SETTLE_MS = 150
 
 
 # R1-2h press reading (flask's 781). layers->bottom saw no dragover at all, so
@@ -542,6 +546,9 @@ def run_dock_drag(page, kind, edge, via, pv):
         vw, vh = page.evaluate("() => [window.innerWidth, window.innerHeight]")
         band = snap_distance()
         px, py = dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2)
+        # The dock scrolls: a tab in its lowest group can sit below the fold
+        # (flask's 784: layers at y 1087 of 900), and the mouse cannot press it there.
+        tab.scroll_into_view_if_needed()
         box = tab.bounding_box()
         src = tab.element_handle()
         bx, by = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
@@ -554,8 +561,12 @@ def run_dock_drag(page, kind, edge, via, pv):
         if via:
             page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
             pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
+            page.wait_for_timeout(SETTLE_MS)
+            pv["viaw"] = preview_label(page.evaluate(PREVIEW_JS, style))
         page.mouse.move(px, py, steps=12)
         pv["up"] = preview_label(page.evaluate(PREVIEW_JS, style))
+        page.wait_for_timeout(SETTLE_MS)
+        pv["upw"] = preview_label(page.evaluate(PREVIEW_JS, style))
         # A source node replaced mid-drag fires its dragend detached, so the
         # event never bubbles to the root's ondragend (app.rs's comment).
         pv["src"] = "kept" if src.evaluate("el => el.isConnected") else "gone"
@@ -628,7 +639,7 @@ def run(args):
     body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
-        body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+        body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -792,6 +803,19 @@ def self_test():
     seven = [("layers", "bottom", "FAIL", "x", {"src": "kept", "start": 0, "hit": "offscreen:y1012/vh900", "over": 0})]
     check(preview_line(seven) == "DOCK PREVIEW layers->bottom[hit=offscreen:y1012/vh900 start=0 over=0 src=kept]",
           "preview_line leads with hit and start, then the drag fields")
+    # flask's 784: layers' press point was 187 px below the viewport. The tab
+    # is scrolled into view BEFORE its box is read, so the press lands on it.
+    import inspect
+    drag_src = inspect.getsource(run_dock_drag)
+    si, bi = drag_src.find("tab.scroll_into_view_if_needed()"), drag_src.find("tab.bounding_box()")
+    check(0 <= si < bi, "run_dock_drag scrolls the tab into view before it reads the tab's box")
+    # flask's 784: stroke's preview drew only on the release's own dragover.
+    # viaw/upw re-read the preview SETTLE_MS after the move, before the release,
+    # so "drawn late" and "not drawn by a drag-phase dragover" read apart.
+    eight = [("align", None, "PASS", "", {"upw": "none", "viaw": "left", "up": "none", "via": "none", "hit": "tab"})]
+    check(preview_line(eight) == "DOCK PREVIEW align->float[hit=tab via=none viaw=left up=none upw=none]",
+          "preview_line puts each settled read right after its immediate one")
+    check(0 < SETTLE_MS <= 500, "the settle wait is a fraction of a second")
     check(press_label({"where": "tab"}) == "tab", "press_label: the tab itself")
     check(press_label({"where": "child", "tag": "SPAN"}) == "child:span", "press_label: a descendant, by tag")
     check(press_label({"where": "other", "tag": "DIV", "id": "pane-3"}) == "other:div#pane-3",
