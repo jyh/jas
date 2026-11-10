@@ -980,6 +980,24 @@ static class Program
             !PanelWire.DialogWritesPlanOut("document_setup", null) && !PanelWire.DialogWritesPlanOut("document_setup", ""), "a dialog wrote over the dock's file");
         Check("plan out: a dialog writes nothing when SB_PANEL names a panel or another dialog",
             !PanelWire.DialogWritesPlanOut("document_setup", "layers_panel_content") && !PanelWire.DialogWritesPlanOut("document_setup", "print"), "the wrong dialog wrote");
+        // The engine opener (piece 2, `jas_dialog_open`): SB_DIALOG_OPEN=<dialog id>
+        // opens that dialog in the engine with no menubar item, and
+        // SB_DIALOG_PARAMS its literal params (a JSON object, `{}` when unset), so a
+        // level-2 run reaches a dialog only a panel, a tool or another dialog opens.
+        {
+            var dkUnset = PanelWire.DialogOpenKnob(null, null);
+            Check("dialog open: unset asks for nothing", dkUnset.Id is null && dkUnset.Refusal is null, $"id={dkUnset.Id} refusal={dkUnset.Refusal}");
+            var dkBlank = PanelWire.DialogOpenKnob("  ", "{\"x\":1}");
+            Check("dialog open: a blank id asks for nothing, whatever the params", dkBlank.Id is null && dkBlank.Refusal is null, $"id={dkBlank.Id} refusal={dkBlank.Refusal}");
+            var dkBare = PanelWire.DialogOpenKnob("color_picker", null);
+            Eq("dialog open: an id alone opens it with {} params", "color_picker|{}|", $"{dkBare.Id}|{dkBare.Params}|{dkBare.Refusal}");
+            var dkGiven = PanelWire.DialogOpenKnob(" layer_options ", " {\"layer\":0} ");
+            Eq("dialog open: the id and params are trimmed and kept", "layer_options|{\"layer\":0}|", $"{dkGiven.Id}|{dkGiven.Params}|{dkGiven.Refusal}");
+            var dkBadId = PanelWire.DialogOpenKnob("Color Picker", null);
+            Eq("dialog open: an id that is not [a-z0-9_]+ is refused by name", "|SB_DIALOG_OPEN='Color Picker' is not a dialog id ([a-z0-9_]+)", $"{dkBadId.Id}|{dkBadId.Refusal}");
+            var dkBadParams = PanelWire.DialogOpenKnob("color_picker", "[1,2]");
+            Eq("dialog open: params that are not a JSON object are refused by name", "|SB_DIALOG_PARAMS='[1,2]' is not a JSON object", $"{dkBadParams.Id}|{dkBadParams.Refusal}");
+        }
         // S1 (the dialog door, design §3): a `button`'s face and whether a press
         // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
         // their address, as a library swatch's is. `icon_button` keeps its rule.
