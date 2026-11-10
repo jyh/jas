@@ -308,7 +308,12 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
 # panel in the dock anchored at the edge, and the DOM node for that edge's
 # dock holds the panel's tab. Either half alone could agree with itself.
 DOCK_EDGES = ("left", "bottom")
-DOCK_CASES = (("stroke", "left"), ("layers", "bottom"))  # both start in the right dock
+# (panel, the edge it must end anchored at or None to float, a band to pass
+# through first or None). All three start in the right dock. The third is
+# WORKSPACE.md's "a floating dock DROPPED within SNAP_DISTANCE of a window
+# edge snaps": a drag that crosses the left band and drops mid-viewport must
+# float, not snap.
+DOCK_CASES = (("stroke", "left", None), ("layers", "bottom", None), ("align", None, "left"))
 WORKSPACE_RS = os.path.join(REPO, "jas_dioxus", "src", "workspace", "workspace.rs")
 
 
@@ -348,6 +353,13 @@ def dock_edge_of(layout_text, kind):
     return edges[0] if edges else None
 
 
+def floats(layout_text, kind):
+    """True when a floating dock holds panel `kind`."""
+    lay = json.loads(layout_text)
+    return any(p == kind for f in lay.get("floating", [])
+               for g in f["dock"]["groups"] for p in g["panels"])
+
+
 def dock_line(cases):
     """cases: [(kind, edge, status, detail)] -> one line beside the receipt."""
     if not cases:
@@ -355,12 +367,14 @@ def dock_line(cases):
     ok = sum(1 for c in cases if c[2] == "PASS")
     if ok == len(cases):
         return f"DOCK {ok}/{len(cases)}"
-    bad = "; ".join(f"{s} {k}->{e}: {d}" for k, e, s, d in cases if s != "PASS")
+    bad = "; ".join(f"{s} {k}->{e or 'float'}: {d}" for k, e, s, d in cases if s != "PASS")
     return f"DOCK RED {ok}/{len(cases)} ({bad})"
 
 
-def run_dock_case(br, kind, edge):
-    """-> (status, detail). Drags `kind`'s dock tab into `edge`'s snap band."""
+def run_dock_case(br, kind, edge, via=None):
+    """-> (status, detail). Drags `kind`'s dock tab into `edge`'s snap band,
+    or, with edge None, through `via`'s band and then to the viewport's
+    centre, where it must float."""
     ctx, page = br.page(True)
     try:
         page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
@@ -374,10 +388,13 @@ def run_dock_case(br, kind, edge):
         if tab.count() != 1:
             return "REFUSED", f"{tab.count()} elements carry id {tab_id!r}"
         vw, vh = page.evaluate("() => [window.innerWidth, window.innerHeight]")
-        px, py = dock_point(edge, vw, vh, snap_distance())
+        band = snap_distance()
+        px, py = dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2)
         box = tab.bounding_box()
         page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         page.mouse.down()
+        if via:
+            page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
         page.mouse.move(px, py, steps=12)
         page.mouse.up()
         page.wait_for_timeout(300)
@@ -387,6 +404,13 @@ def run_dock_case(br, kind, edge):
         got = dock_edge_of(after, kind)
         if got != edge:
             return "FAIL", f"the engine anchors {kind} at {got!r}"
+        if edge is None:
+            if not floats(after, kind):
+                return "FAIL", f"{kind} is in no anchored dock and no floating dock"
+            in_edges = sum(page.locator(f"#jas-edge-dock-{e} #{tab_id}").count() for e in DOCK_EDGES)
+            if in_edges:
+                return "FAIL", f"an edge dock still draws the {kind} tab"
+            return "PASS", ""
         drawn = page.locator(f"#jas-edge-dock-{edge} #{tab_id}").count()
         if drawn != 1:
             return "FAIL", f"#jas-edge-dock-{edge} holds {drawn} copies of the tab"
@@ -431,7 +455,7 @@ def run(args):
                     results = [(n, "REFUSED" if s == "PASS" else s, d) for n, s, d in results]
                     lines.append(f"WITNESS REFUSED: {WITNESS} did not pass with a moved read-back, so no PASS in this run is counted")
         if args.dock:
-            dock_cases = [(k, e) + run_dock_case(br, k, e) for k, e in DOCK_CASES] if not not_run else []
+            dock_cases = [(k, e) + run_dock_case(br, k, e, v) for k, e, v in DOCK_CASES] if not not_run else []
             dock = dock_line(dock_cases)
     finally:
         br.close()
@@ -558,13 +582,21 @@ def self_test():
             fails.append(f"{why} is refused")
         except _plan.Refused:
             pass
+    fl = open(os.path.join(REPO, "test_fixtures", "workspace_operations", "panel_detach_panel.json"),
+              encoding="utf-8").read().strip()
+    check(floats(fl, "swatches") and not floats(fl, "stroke"), "floats() reads the detach fixture: swatches floats, stroke does not")
+    check(not floats(lay, "swatches"), "floats() reads a snapped panel as not floating")
     check(dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "PASS", "")]) == "DOCK 2/2",
           "two passing dock cases read DOCK 2/2")
     check(dock_line([("stroke", "left", "PASS", ""), ("layers", "bottom", "FAIL", "x")]) == "DOCK RED 1/2 (FAIL layers->bottom: x)",
           "a failing dock case names itself")
     check(dock_line([]) == "DOCK NOT RUN", "no dock case is NOT RUN, never 0/0")
-    check(len({k for k, _ in DOCK_CASES}) == len(DOCK_CASES) and {e for _, e in DOCK_CASES} == {"left", "bottom"},
-          "the dock cases cover left and bottom with distinct panels")
+    check(len({c[0] for c in DOCK_CASES}) == len(DOCK_CASES) and {c[1] for c in DOCK_CASES} == {"left", "bottom", None},
+          "the dock cases cover left, bottom and a float, with distinct panels")
+    check(any(c[1] is None and c[2] in DOCK_EDGES for c in DOCK_CASES),
+          "a case passes through a snap band and drops outside it (WORKSPACE.md: a DROP near an edge snaps)")
+    check(dock_line([("align", None, "FAIL", "x")]) == "DOCK RED 0/1 (FAIL align->float: x)",
+          "a float case names itself as ->float")
     print(f"web_l2_driver self-test: {len(paths)} scripts, {planned} planned, {refused} refused by the plan; "
           f"{len(fails)} failure(s)")
     for f in fails:

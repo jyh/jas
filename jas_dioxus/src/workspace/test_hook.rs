@@ -249,8 +249,8 @@ mod tests {
             layout(&st),
             crate::workspace::test_json::workspace_to_test_json(&st.workspace_layout)
         );
-        // web_l2_driver.py's DOCK_CASES drag stroke and layers out of the
-        // right dock, and refuse if either starts anywhere else.
+        // web_l2_driver.py's DOCK_CASES drag stroke, layers and align out of
+        // the right dock, and refuse if any starts anywhere else.
         let v: serde_json::Value = serde_json::from_str(&layout(&st)).expect("layout() is JSON");
         let edge_of = |kind: &str| -> Vec<String> {
             v["anchored"].as_array().unwrap().iter()
@@ -261,6 +261,7 @@ mod tests {
         };
         assert_eq!(edge_of("stroke"), vec!["right"]);
         assert_eq!(edge_of("layers"), vec!["right"]);
+        assert_eq!(edge_of("align"), vec!["right"]);
     }
 
     #[test]
