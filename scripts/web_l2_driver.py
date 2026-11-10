@@ -473,6 +473,20 @@ def preview_line(cases):
     return "DOCK PREVIEW " + " ".join(parts)
 
 
+DRAG_STEPS = 12
+
+
+def drag_to(page, x, y):
+    """Move a held mouse to (x, y) in DRAG_STEPS steps, then once more to the
+    same point. Chromium delivers a drag's dragover for the LAST mouse move
+    only when the next input event arrives (flask's 787, then driven on this
+    bundle: the dragovers stop at the second-to-last step, and the target's
+    own arrives with the release). Without the extra move the app never sees
+    the target mid-drag, so a preview read there measures the driver."""
+    page.mouse.move(x, y, steps=DRAG_STEPS)
+    page.mouse.move(x, y)
+
+
 def dock_point(edge, vw, vh, band):
     """A viewport point a fifth of the way into the edge's snap band.
     Bottom is mid-width, so neither side band claims it first."""
@@ -559,11 +573,11 @@ def run_dock_drag(page, kind, edge, via, pv):
         page.mouse.move(bx, by)
         page.mouse.down()
         if via:
-            page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
+            drag_to(page, *dock_point(via, vw, vh, band))
             pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
             page.wait_for_timeout(SETTLE_MS)
             pv["viaw"] = preview_label(page.evaluate(PREVIEW_JS, style))
-        page.mouse.move(px, py, steps=12)
+        drag_to(page, px, py)
         pv["up"] = preview_label(page.evaluate(PREVIEW_JS, style))
         page.wait_for_timeout(SETTLE_MS)
         pv["upw"] = preview_label(page.evaluate(PREVIEW_JS, style))
@@ -744,6 +758,23 @@ def self_test():
         fails.append("a top drop is refused: the app has no top edge")
     except _plan.Refused:
         pass
+    # R1-2h (flask's 787): Chromium holds back the dragover for a drag's LAST
+    # mouse move until the next input event, so a stepped move must end with
+    # one more move to the same point, or the app never sees the target mid-drag.
+    class _Mouse:
+        def __init__(self):
+            self.calls = []
+
+        def move(self, x, y, steps=1):
+            self.calls.append((x, y, steps))
+
+    class _Page:
+        def __init__(self):
+            self.mouse = _Mouse()
+    fake = _Page()
+    drag_to(fake, 4, 450)
+    check(fake.mouse.calls == [(4, 450, DRAG_STEPS), (4, 450, 1)],
+          f"drag_to steps to the point, then moves to it once more (calls {fake.mouse.calls})")
     # The layout reader, over the corpus's own layout (bytes, never typed).
     lay_path = os.path.join(REPO, "test_fixtures", "workspace_operations", "panel_detach_panel_snap_bottom.json")
     lay = open(lay_path, encoding="utf-8").read().strip()
