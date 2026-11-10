@@ -272,6 +272,26 @@ mod tests {
         assert_eq!(r["canvas"], rect(272.0, 0.0, 688.0, 620.0));
     }
 
+    /// Left only (jas 806): an absent edge is `null`, never omitted, so a
+    /// reader tells "no Bottom dock" from "a reply without the field"; the
+    /// canvas loses only the left column.
+    #[test]
+    fn shell_state_edge_rects_with_a_left_dock_alone_reads_bottom_null() {
+        use crate::workspace::pane::PaneLayout;
+        let mut l = WorkspaceLayout::default_layout();
+        let mut pl = PaneLayout::default_three_pane(1200.0, 800.0);
+        pl.canvas_maximized = false;
+        l.pane_layout = Some(pl);
+        l.anchored.push((DockEdge::Left, Dock::from_parts(
+            crate::workspace::workspace::DockId(7), vec![PanelGroup::new(vec![PanelKind::Layers])],
+            false, false, 200.0, crate::workspace::workspace::MIN_DOCK_WIDTH)));
+        let r = &shell_state(&l)["edge_rects"];
+        assert!(r.as_object().is_some_and(|o| o.contains_key("bottom")), "bottom is present, as null: {r}");
+        assert_eq!(r["bottom"], Value::Null, "{r}");
+        assert_eq!(r["left"], json!({"x": 72.0, "y": 0.0, "w": 200.0, "h": 800.0}));
+        assert_eq!(r["canvas"], json!({"x": 272.0, "y": 0.0, "w": 688.0, "h": 800.0}));
+    }
+
     /// With no Left or Bottom dock the edges are `null` and the canvas is the
     /// whole canvas pane; with no pane layout there are no rectangles at all.
     #[test]
