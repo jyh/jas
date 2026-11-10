@@ -763,6 +763,33 @@ internal static class PanelWire
     internal static bool DialogWritesPlanOut(string dialogId, string? panelKnob) =>
         !string.IsNullOrEmpty(panelKnob) && string.Equals(dialogId, panelKnob, StringComparison.Ordinal);
 
+    /// <summary>
+    /// The engine opener (piece 2): `SB_DIALOG_OPEN=&lt;dialog id&gt;` opens that
+    /// dialog in the engine through `jas_dialog_open`, with no menubar item, and
+    /// `SB_DIALOG_PARAMS` is its literal params, a JSON object (`{}` when unset).
+    /// Unset or blank asks for nothing. An id that is not `[a-z0-9_]+`, or params
+    /// that are not an object, is refused by name; JSON inside the braces is the
+    /// engine's to refuse (`BadJson`, `UnliteralParam`), and it names its reason.
+    /// </summary>
+    internal static (string? Id, string Params, string? Refusal) DialogOpenKnob(string? idKnob, string? paramsKnob)
+    {
+        if (string.IsNullOrWhiteSpace(idKnob)) { return (null, "{}", null); }
+        var id = idKnob.Trim();
+        foreach (var c in id)
+        {
+            if (!(c is >= 'a' and <= 'z' || c is >= '0' and <= '9' || c == '_'))
+            {
+                return (null, "{}", $"SB_DIALOG_OPEN='{idKnob}' is not a dialog id ([a-z0-9_]+)");
+            }
+        }
+        var ps = string.IsNullOrWhiteSpace(paramsKnob) ? "{}" : paramsKnob.Trim();
+        if (!ps.StartsWith('{') || !ps.EndsWith('}'))
+        {
+            return (null, "{}", $"SB_DIALOG_PARAMS='{paramsKnob}' is not a JSON object");
+        }
+        return (id, ps, null);
+    }
+
     /// <summary>A labelled icon_button's parts (row 56): its icon, and its label when the engine planned room for one.</summary>
     internal sealed record LeafParts(PartRect Icon, PartRect? Label);
 
