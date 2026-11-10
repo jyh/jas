@@ -3170,8 +3170,19 @@ struct YamlElementView: View {
             return ""
         }()
 
-        // SwiftUI doesn't have a native combo box with free entry;
-        // use Picker as a dropdown with the current value displayed.
+        // A combo is free entry plus presets, as the Rust web combo is an
+        // `<input>` with a `<datalist>`: a text field the person can type ANY
+        // value into, beside a menu of the declared options. Both commit
+        // through the one door (WIDGET_EVENTS.md: a number by the number
+        // grammar, clamped to the declared bounds, else the text; the bind
+        // write first, then every `commit` / `change` behavior). The field
+        // shows the RAW value ("100") and the menu lists the option LABELS
+        // ("100%"), as the reference's input and datalist do. The field
+        // commits on Enter or focus loss and only when the text changed, the
+        // HTML `change` event's rule (BufferedTextField). Until 2026-11-09 this
+        // was a menu alone, so a value that is not an option (or any value of
+        // a combo with no options: the Gradient Location) could not be
+        // committed in the Mac app at all.
         let entries = pickerEntries(element["options"])
         // When the YAML declares style.width: "100%" (the convention for
         // panel rows where the dropdown shares a col cell with sibling
@@ -3179,44 +3190,53 @@ struct YamlElementView: View {
         // take intrinsic width so the combo doesn't ballow into empty
         // space.
         let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
-        // The field shows the RAW value ("100"); the menu lists the option
-        // LABELS ("100%"). Mirrors the Rust reference (input value = raw
-        // value, datalist carries the labels). A plain Picker shows the
-        // selected option's label in the closed field, so use a Menu whose
-        // label is the raw value.
         let textColor: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
-        let menu = Menu {
-            ForEach(entries) { e in
-                if e.isDivider {
-                    Divider()
-                } else {
-                    Button(e.displayLabel) {
-                        // WIDGET_EVENTS.md: a number by the number grammar,
-                        // clamped to the declared bounds, else the text; the
-                        // bind write first (panel or dialog), then every
-                        // `commit` / `change` behavior (Stroke's linked-scale
-                        // mirror, Gradient's render keys).
-                        widgetEvents?.commit(element, text: e.val)
+        let combo = HStack(spacing: 0) {
+            BufferedTextField(
+                placeholder: "",
+                externalValue: currentValue,
+                commit: { typed in widgetEvents?.commit(element, text: typed) }
+            )
+                .textFieldStyle(.plain)
+                .foregroundColor(textColor)
+                .frame(minWidth: 36)
+            if !entries.isEmpty {
+                Menu {
+                    ForEach(entries) { e in
+                        if e.isDivider {
+                            Divider()
+                        } else {
+                            Button(e.displayLabel) {
+                                widgetEvents?.commit(element, text: e.val)
+                            }
+                        }
                     }
+                } label: {
+                    SwiftUI.Text("\u{2304}").foregroundColor(textColor).opacity(0.6)
                 }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
             }
-        } label: {
-            HStack(spacing: 2) {
-                SwiftUI.Text(currentValue).lineLimit(1).foregroundColor(textColor)
-                Spacer(minLength: 0)
-                SwiftUI.Text("\u{2304}").foregroundColor(textColor).opacity(0.6)
-            }
+        }
             .padding(.horizontal, 4)
             .padding(.vertical, 1)
             .overlay(RoundedRectangle(cornerRadius: 3)
                 .stroke(SwiftUI.Color(white: 0.33), lineWidth: 1))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+            // One accessibility element CONTAINING the field and the menu, so
+            // the widget's identifier (YamlElementView.body) names the combo
+            // once and does not spread onto both children: the level-2 driver
+            // requires a unique identifier and types into the one text field.
+            .accessibilityElement(children: .contain)
+            // `bind.disabled`, read as Rust's render_combo_box reads it. The
+            // commit door refuses a disabled widget either way
+            // (WidgetEvent.disabled); this makes the field say so, and the
+            // level-2 driver reads AXEnabled.
+            .disabled(evalBindDisabled())
         if fillsParent {
-            menu.frame(maxWidth: .infinity).padding(.trailing, 24)
+            combo.frame(maxWidth: .infinity).padding(.trailing, 24)
         } else {
-            menu.fixedSize(horizontal: true, vertical: false)
+            combo.frame(minWidth: 60).fixedSize(horizontal: true, vertical: false)
         }
     }
 
