@@ -368,6 +368,61 @@ def preview_label(sides):
     return "+".join(sorted(set(sides))) or "none"
 
 
+# R1-2h positive control (flask's 779). A passing stroke->left read up=none,
+# so a single read before the release cannot tell "never drawn" from "drawn
+# late" or "drawn only by the release's own dragover". This instrument is
+# installed before the press and logs, by phase, every change in which root
+# edges draw the preview (a MutationObserver on style attributes), and counts
+# the dragover events the window saw. In the release phase it also logs the
+# release's own first dragover, its drop and its dragend into the same
+# sequence, so the order names the event that drew (or cleared) the preview. `ctl` plants an element carrying the
+# preview's exact style and reads it back: the reader's own positive control.
+INSTRUMENT_JS = """([w, rgb]) => {
+  const sides = () => {
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+      for (const side of ['left', 'right', 'bottom'])
+        if (cs['border-' + side + '-width'] === w + 'px' && cs['border-' + side + '-style'] === 'solid'
+            && cs['border-' + side + '-color'] === rgb) out.push(side);
+    }
+    return [...new Set(out)].sort().join('+') || 'none';
+  };
+  const p = {phase: 'drag', over: 0, muts: [], last: sides()};
+  window.addEventListener('dragover', () => {
+    p.over++;
+    if (p.phase === 'release' && !p.relOver) { p.relOver = true; p.muts.push([p.phase, 'over']); }
+  }, true);
+  for (const ev of ['drop', 'dragend'])
+    window.addEventListener(ev, () => { p.muts.push([p.phase, ev]); }, true);
+  new MutationObserver(() => {
+    const now = sides();
+    if (now !== p.last) { p.muts.push([p.phase, now]); p.last = now; }
+  }).observe(document.documentElement, {subtree: true, attributes: true, attributeFilter: ['style']});
+  window.__jasPreviewProbe = p;
+  const el = document.createElement('div');
+  el.style.cssText = 'position:absolute;left:-99px;width:9px;height:9px;border-left:' + w + 'px solid ' + rgb;
+  document.body.appendChild(el);
+  const ctl = getComputedStyle(el)['border-left-width'] === w + 'px'
+    && getComputedStyle(el)['border-left-color'] === rgb ? 'left' : 'none';
+  el.remove();
+  return ctl;
+}"""
+
+
+def seen_label(muts):
+    """The phase-tagged preview transitions, in order, repeats dropped."""
+    out = []
+    for ph, lab in muts:
+        t = f"{ph}:{lab}"
+        if not out or out[-1] != t:
+            out.append(t)
+    return ",".join(out) or "none"
+
+
+PREVIEW_FIELDS = ("via", "up", "over", "seen", "ctl", "src")
+
+
 def preview_line(cases):
     """Every case's preview readings, PASS included: a PASS that floated with
     the preview still lit is itself a finding."""
@@ -376,7 +431,7 @@ def preview_line(cases):
     parts = []
     for k, e, _s, _d, *rest in cases:
         pv = rest[0] if rest else {}
-        parts.append(f"{k}->{e or 'float'}[" + " ".join(f"{p}={pv[p]}" for p in ("via", "up", "src") if p in pv) + "]")
+        parts.append(f"{k}->{e or 'float'}[" + " ".join(f"{p}={pv[p]}" for p in PREVIEW_FIELDS if p in pv) + "]")
     return "DOCK PREVIEW " + " ".join(parts)
 
 
@@ -458,6 +513,7 @@ def run_dock_drag(page, kind, edge, via, pv):
         page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         page.mouse.down()
         style = list(snap_preview_style())
+        pv["ctl"] = page.evaluate(INSTRUMENT_JS, style)
         if via:
             page.mouse.move(*dock_point(via, vw, vh, band), steps=12)
             pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
@@ -466,8 +522,10 @@ def run_dock_drag(page, kind, edge, via, pv):
         # A source node replaced mid-drag fires its dragend detached, so the
         # event never bubbles to the root's ondragend (app.rs's comment).
         pv["src"] = "kept" if src.evaluate("el => el.isConnected") else "gone"
+        pv["over"] = page.evaluate("() => { const p = window.__jasPreviewProbe; p.phase = 'release'; return p.over; }")
         page.mouse.up()
         page.wait_for_timeout(300)
+        pv["seen"] = seen_label(page.evaluate("() => window.__jasPreviewProbe.muts"))
         after = page.evaluate("() => window.__jasTest.layout()")
         if after == before:
             return "FAIL", "the layout did not change (did the drag reach ondragend?)"
@@ -532,7 +590,7 @@ def run(args):
     body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
-        body.append(preview_line(dock_cases) + " (the snap preview the root draws mid-drag: via = after the band pass, up = just before the release; src = the pressed tab node still in the DOM at the release)")
+        body.append(preview_line(dock_cases) + " (the snap preview the root draws mid-drag: via = after the band pass, up = just before the release; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -679,6 +737,16 @@ def self_test():
     check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
           "preview_line names every case, PASS included, in the order via, up, src")
     check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
+    # R1-2h positive control (flask's 779: a PASSING snap read up=none). The
+    # instrument fields ride in a fixed order after via/up, before src.
+    six = [("stroke", "left", "PASS", "", {"src": "kept", "seen": "release:left", "ctl": "left", "over": 11, "up": "none"})]
+    check(preview_line(six) == "DOCK PREVIEW stroke->left[up=none over=11 seen=release:left ctl=left src=kept]",
+          "preview_line orders up, over, seen, ctl, src whatever the dict order")
+    check(seen_label([]) == "none", "seen_label: no preview mutation at all is none")
+    check(seen_label([["drag", "left"], ["release", "none"]]) == "drag:left,release:none",
+          "seen_label keeps every transition, phase first, in order")
+    check(seen_label([["drag", "left"], ["drag", "left"]]) == "drag:left",
+          "seen_label drops a repeat of the same phase and label")
     try:
         snap_preview_style("let snap_left = 1;")
         check(False, "a source with no preview lets refuses")
