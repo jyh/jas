@@ -33,6 +33,7 @@ shortcuts. With another Chrome already open, prefer a focus-click over
 
 Verbs:
   script FILE...   (level 2: an input script through the live app; see below)
+  dock             (the dock check: three tab drags, one DOCK line; needs JAS_APP)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
@@ -584,8 +585,133 @@ def do_script(paths, receipt=None):
         return 4
     return 1 if bad else 0
 
+# ── `dock`: the dock check on the Mac (row 89; the web channel's is
+# scripts/web_l2_driver.py --dock). The cases, the band, the layout reader and
+# the verdict are mac_l2_plan's, so both channels read a dock by one law. Each
+# case drags a dock tab with an AppKit drag session (`.onDrag` on the tab, the
+# pane container's `.onDrop`) and passes only when the engine layout (the FIFO
+# `layout` verb) AND the drawn edge dock (AXIdentifier jas-edge-dock-<edge>)
+# agree. NOT MEASURED until the Mac lane runs it: whether posted HID events complete
+# an `.onDrag` session at all. A session that never starts leaves the layout
+# unchanged, which the verdict reports as a FAIL by name, never a PASS.
+def _layout_read():
+    out = os.path.join(os.environ.get("TMPDIR", "/tmp"), "jas-l2-layout.json")
+    if os.path.exists(out): os.remove(out)
+    _fifo("layout " + out)
+    for _ in range(30):
+        if os.path.exists(out): break
+        time.sleep(0.1)
+    else:
+        raise _plan.Refused("the app wrote no layout (is this app built with the test-fifo `layout` verb?)")
+    return open(out, encoding="utf-8").read().strip()
+
+def _frame(el):
+    AX = _ax()
+    pos, size = _attr(el, "AXPosition"), _attr(el, "AXSize")
+    if pos is None or size is None:
+        raise _plan.Refused(f"{_attr(el, 'AXIdentifier')!r} reports no frame")
+    _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+    _, s = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+    return p.x, p.y, s.width, s.height
+
+def _session_drag(x1, y1, waypoints):
+    # An AppKit drag session starts only after the button has been held and the
+    # pointer has moved past the drag threshold, so: settle after the press,
+    # nudge a few points, then walk each leg in small steps and hold before
+    # the release so the drop target sees the final position.
+    mouse(Quartz.kCGEventMouseMoved, x1, y1); time.sleep(0.05)
+    mouse(Quartz.kCGEventLeftMouseDown, x1, y1); time.sleep(0.25)
+    for i in range(1, 5):
+        mouse(Quartz.kCGEventLeftMouseDragged, x1 + 2 * i, y1); time.sleep(0.03)
+    a = (x1 + 8, y1)
+    for b in waypoints:
+        for i in range(1, 17):
+            mouse(Quartz.kCGEventLeftMouseDragged, a[0] + (b[0] - a[0]) * i / 16, a[1] + (b[1] - a[1]) * i / 16)
+            time.sleep(0.02)
+        a = b
+    time.sleep(0.3)
+    mouse(Quartz.kCGEventLeftMouseUp, *a); time.sleep(0.5)
+
+def _drawn_counts(app, tab_id):
+    out = {}
+    for e in _plan.DOCK_EDGES:
+        docks = _by_id(app, _plan.edge_dock_id(e))
+        if len(docks) > 1:
+            raise _plan.Refused(f"{len(docks)} elements carry {_plan.edge_dock_id(e)!r}")
+        out[e] = len(_by_id(docks[0], tab_id)) if docks else 0
+    return out
+
+def _dock_case(kind, edge, via):
+    global WIN
+    before = _layout_read()
+    why = _plan.dock_start_refusal(before, kind)
+    if why:
+        return "REFUSED", why
+    WIN = find_window()
+    if not WIN:
+        raise _plan.Refused(f"no window titled {TITLE!r}")
+    vw, vh = _plan.viewport_size(before)
+    ox, oy = _plan.viewport_origin(WIN, vw, vh)
+    app = _app_element()
+    tab_id = kind + _plan.PANEL_SUFFIX + _plan.TAB_SUFFIX
+    tabs = _by_id(app, tab_id)
+    if len(tabs) != 1:
+        return "REFUSED", f"{len(tabs)} elements carry AXIdentifier {tab_id!r}"
+    tx, ty, tw, th = _frame(tabs[0])
+    band = _plan.snap_distance()
+    legs = [_plan.dock_point(via, vw, vh, band)] if via else []
+    legs.append(_plan.dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2))
+    _session_drag(tx + tw / 2, ty + th / 2, [(ox + px, oy + py) for px, py in legs])
+    after = _layout_read()
+    return _plan.dock_verdict(before, after, kind, edge, _drawn_counts(app, tab_id))
+
+def do_dock():
+    """One DOCK line (the web channel's form). Each case gets a fresh app, as
+    each web case gets a fresh page: a case's start is the default layout."""
+    global _plan
+    import mac_l2_plan as _plan
+    problem = _plan.launch_env_problem(os.environ)
+    if problem or not os.environ.get("JAS_APP"):
+        print("REFUSED: " + (problem or "the dock check needs JAS_APP: each case starts from a fresh app"))
+        print("DOCK NOT RUN")
+        return 3
+    if _screen_locked():
+        print("REFUSED: the screen is locked"); print("DOCK NOT RUN"); return 3
+    busy, idle = _console_in_use()
+    if busy:
+        print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s)"); print("DOCK NOT RUN")
+        return 3
+    cases = []
+    for kind, edge, via in _plan.DOCK_CASES:
+        proc = None
+        try:
+            clear_mods()
+            proc = _launch()
+            status, detail = _dock_case(kind, edge, via)
+        except _plan.Refused as e:
+            status, detail = "REFUSED", str(e)
+        except Exception as e:
+            status, detail = "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+        finally:
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                time.sleep(0.3)
+        cases.append((kind, edge, status, detail))
+        print(f"{status} {kind}->{edge or 'float'}" + (f" -- {detail}" if detail else ""))
+    with open(_lastpost_file(), "w", encoding="utf-8", newline="") as f:
+        f.write(str(time.time()))
+    line = _plan.dock_line(cases)
+    print(line)
+    return 0 if line.startswith("DOCK ") and not line.startswith(("DOCK RED", "DOCK NOT")) else 1
+
 if __name__=="__main__":
     v=sys.argv[1]
+    if v=="dock":
+        sys.exit(do_dock())
     if v=="activate":
         # Unminimize + frontmost WITHOUT clicking (title-bar clicks risk a
         # double-click-minimize). Does NOT require the window to be found.
