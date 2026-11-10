@@ -1442,9 +1442,10 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>
     /// The engine opener (piece 2, `SB_DIALOG_OPEN`): open a dialog BY ID in the
     /// engine (`jas_dialog_open`), with no menubar item, and show it through the
-    /// same refresh a menu-opened dialog takes. `Ok` only when the engine's open
-    /// dialog is then that id; any other status is refused by name with the
-    /// engine's own reason (`jas_last_error_json`), never shown as an empty pane.
+    /// same refresh a menu-opened dialog takes. The ENGINE returns `Ok` only when
+    /// its open dialog is then that id (`jas_dialog_open`, piece 2); this reads
+    /// the status alone. Any other status is refused by name with the engine's
+    /// own reason (`jas_last_error_json`), never shown as an empty pane.
     /// </summary>
     private void ApplyDialogOpen(DialogOpenCmd d)
     {
