@@ -169,8 +169,9 @@ each live app:
 * **A double-click is its own pointer step**, `{"kind": "double_click", "x": …, "y": …}`, written AFTER the second
   press/release pair, the order in which a browser sends `dblclick`: `press, release, press, release, double_click`.
   It goes to the active tool's double-click handler (`on_dblclick`), and nothing else: the two clicks are the steps
-  before it. **Delivered by Swift's level-1 script runner (2026-11-09).** Rust delivers it when `jas_pointer_event`
-  takes a double-click kind; until then Rust refuses it by name, so no gating script uses it yet.
+  before it. **Delivered by Swift's level-1 script runner (2026-11-09).** **Delivered by Rust's three
+  level-1 runners (2026-11-09):** `ffi_script_replay`'s `replay` and `replay_forms` through `jas_pointer_event`'s
+  `KIND_DOUBLE_CLICK` (3), and the gesture runner. No gating script uses it until every runner that gates delivers it.
 * **Key steps** use the key corpus's chord form (`test_fixtures/keys/`): `key` is the canonical token.
   A key takes the engine's key order, `route_key` (Rust) and `routeKey` (Swift): an unclaimed Delete or Backspace
   deletes the selection; Escape, Enter and a claimed Delete go to the active tool; a command chord acts only for undo
