@@ -5091,7 +5091,8 @@ internal sealed unsafe class Canvas : IDisposable
         }
         // A verb that changed WHICH panels sit in WHICH group (a detach, a
         // redock) re-indexes `dock{i}`, so the dock is republished whole; a
-        // collapse, a move or a raise keeps every key and is drawn in place.
+        // collapse, a move or a raise keeps every key's panels and is drawn in
+        // place (compared as a map: a raise reorders the z-sorted floating list).
         var before = _layoutGroups;
         var read = LayoutWire.Dock(answer);
         var floating = LayoutWire.Floating(answer);
@@ -5099,8 +5100,7 @@ internal sealed unsafe class Canvas : IDisposable
             : read.Groups.Select((g, i) => (Key: DockPaneKey(i), Panels: g.Panels.ToList()))
                 .Concat(floating.SelectMany(f => f.Groups.Select((g, i) => (Key: LayoutWire.FloatKey(f.DockId, i), Panels: g.Panels.ToList()))))
                 .ToList();
-        var same = after is not null && after.Count == before.Count
-            && after.Zip(before).All(p => p.First.Key == p.Second.Key && p.First.Panels.SequenceEqual(p.Second.Panels));
+        var same = LayoutWire.SameStructure(before, after);
         if (!same)
         {
             PublishLayout(answer, "op");
