@@ -18,13 +18,24 @@
 # that menu item through SB_MENU_SYNTH (a person's Invoke), and the tree is read
 # under the dialog layer (DialogScroll) instead of the dock (PaneScroll). The
 # shell writes the dialog's plan only because SB_PANEL names it.
-param([string]$Panel = 'align_panel_content', [int]$SettleSec = 4, [switch]$FreezeGaps, [string]$Opener = '')
+# -EngineOpen [-Params <json object>] (piece 2): -Panel names a DIALOG, opened
+# in the engine by its id through SB_DIALOG_OPEN (`jas_dialog_open`), for a
+# dialog no menubar item opens. A refused open is the shell's RUSTFAIL row,
+# naming the engine's reason.
+param([string]$Panel = 'align_panel_content', [int]$SettleSec = 4, [switch]$FreezeGaps, [string]$Opener = '',
+      [switch]$EngineOpen, [string]$Params = '')
 if ($Opener -notmatch '^[a-z0-9_]*$') { "VERDICT: REFUSED: -Opener '$Opener' is not a menubar item id"; exit 2 }
-$root = if ($Opener) { 'DialogScroll' } else { 'PaneScroll' }
+if ($EngineOpen -and $Opener) { "VERDICT: REFUSED: -EngineOpen and -Opener are two openers for one dialog; pass one"; exit 2 }
+if ($EngineOpen -and $Panel -notmatch '^[a-z0-9_]+$') { "VERDICT: REFUSED: -Panel '$Panel' is not a dialog id"; exit 2 }
+if ($Params -and -not $EngineOpen) { "VERDICT: REFUSED: -Params is the engine opener's; pass -EngineOpen"; exit 2 }
+if ($Params.Contains("'")) { "VERDICT: REFUSED: -Params carries a single quote, which the launch's env prefix cannot hold"; exit 2 }
+$root = if ($Opener -or $EngineOpen) { 'DialogScroll' } else { 'PaneScroll' }
 # SB_DOCK too: the dock replaces the one pane, so SB_PANEL (the dialog's id) is
 # never opened as a panel, and no dock pane's id matches it (measured 11-09:
 # without the dock the shell refused `panel=document_setup` as a panel).
-$openerEnv = if ($Opener) { "`$env:SB_DOCK='Default'; `$env:SB_MENU_SYNTH='" + $Opener + "'; " } else { '' }
+$openerEnv = if ($Opener) { "`$env:SB_DOCK='Default'; `$env:SB_MENU_SYNTH='" + $Opener + "'; " }
+             elseif ($EngineOpen) { "`$env:SB_DOCK='Default'; `$env:SB_DIALOG_OPEN='" + $Panel + "'; `$env:SB_DIALOG_PARAMS='" + $Params + "'; " }
+             else { '' }
 $ErrorActionPreference = 'Stop'
 $dir = $PSScriptRoot
 . (Join-Path $dir 'harness_common.ps1')

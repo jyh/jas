@@ -112,6 +112,14 @@ internal sealed class RepaintCmd : Cmd
     internal string Cause = "repaint";
 }
 
+/// <summary>The engine opener (piece 2): open dialog `Id` in the engine with
+/// literal params `Params` (`jas_dialog_open`), as `SB_DIALOG_OPEN` asks.</summary>
+internal sealed class DialogOpenCmd : Cmd
+{
+    internal string Id = "";
+    internal string Params = "{}";
+}
+
 /// <summary>One key (W5-3b), queued like a pointer event. Sent to the engine
 /// by `jas_dispatch_action` as `{"key", "mods"}` (jas §314).</summary>
 internal sealed class KeyCmd : Cmd
@@ -1028,6 +1036,9 @@ internal sealed unsafe class Canvas : IDisposable
 
     internal void PointerReport(PointerReportCmd report) => _queue.Add(report);
 
+    internal void DialogOpen(string id, string paramsJson) =>
+        _queue.Add(new DialogOpenCmd { Id = id, Params = paramsJson });
+
     internal void SetDpiScale(double scale) => _queue.Add(new DpiCmd { Scale = scale });
 
     /// <summary>
@@ -1425,6 +1436,34 @@ internal sealed unsafe class Canvas : IDisposable
         }
         _report($"DIALOG OPENED {head} dialog={named} {Tids()}");
         _dialogOpener = opener is null || named is null ? null : (named, opener);
+        ApplyDialogRefresh("open");
+    }
+
+    /// <summary>
+    /// The engine opener (piece 2, `SB_DIALOG_OPEN`): open a dialog BY ID in the
+    /// engine (`jas_dialog_open`), with no menubar item, and show it through the
+    /// same refresh a menu-opened dialog takes. `Ok` only when the engine's open
+    /// dialog is then that id; any other status is refused by name with the
+    /// engine's own reason (`jas_last_error_json`), never shown as an empty pane.
+    /// </summary>
+    private void ApplyDialogOpen(DialogOpenCmd d)
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            _report($"RUSTFAIL DIALOG OPEN REFUSED dialog={d.Id} -- no engine {Tids()}");
+            return;
+        }
+        var id = System.Text.Encoding.UTF8.GetBytes(d.Id);
+        var ps = System.Text.Encoding.UTF8.GetBytes(d.Params);
+        var rc = JasCore.jas_dialog_open(_engine, id, (nuint)id.Length, ps, (nuint)ps.Length);
+        if (rc != 0)
+        {
+            var why = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL DIALOG OPEN REFUSED dialog={d.Id} status={rc} params={d.Params} error={why} {Tids()}");
+            return;
+        }
+        _report($"DIALOG OPENED engine dialog={d.Id} params={d.Params} {Tids()}");
+        _dialogOpener = null;
         ApplyDialogRefresh("open");
     }
 
@@ -1828,6 +1867,12 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PointerReportCmd pr:
                     ApplyPointerReport(pr);
+                    break;
+
+                case DialogOpenCmd dop:
+                    ApplyDialogOpen(dop);
+                    dirty = true;
+                    cause = "dialog";
                     break;
 
                 case LoadCmd l:

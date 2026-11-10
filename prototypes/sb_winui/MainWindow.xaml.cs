@@ -2703,6 +2703,27 @@ public sealed partial class MainWindow : Window
                     Report($"RUSTFAIL MENU SYNTH REFUSED item={synthId} -- the menubar holds no such item ({_menuActions.Count} items)");
                 }
             }
+
+            // SB_DIALOG_OPEN=<dialog id> (+ SB_DIALOG_PARAMS): the engine opener
+            // (piece 2), once, at the same moment as SB_MENU_SYNTH, for a dialog
+            // no menubar item opens. A malformed knob is refused by name.
+            if (!_dialogOpenDone)
+            {
+                var (dlgId, dlgParams, dlgRefusal) = PanelWire.DialogOpenKnob(
+                    Environment.GetEnvironmentVariable("SB_DIALOG_OPEN"),
+                    Environment.GetEnvironmentVariable("SB_DIALOG_PARAMS"));
+                if (dlgRefusal is not null)
+                {
+                    _dialogOpenDone = true;
+                    Report($"RUSTFAIL DIALOG OPEN REFUSED -- {dlgRefusal}");
+                }
+                else if (dlgId is not null)
+                {
+                    _dialogOpenDone = true;
+                    Report($"DIALOG OPEN KNOB dialog={dlgId} params={dlgParams}");
+                    _canvas.DialogOpen(dlgId, dlgParams);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -2738,6 +2759,7 @@ public sealed partial class MainWindow : Window
         Report($"RUSTFAIL MENU KEY REFUSED action={action} -- the menubar holds no item that runs it ({_menuActions.Count} items)");
     }
     private bool _menuSynthDone;
+    private bool _dialogOpenDone;
 
     /// <summary>
     /// Join the two passes on `path` and materialize the result.

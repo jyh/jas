@@ -1,5 +1,5 @@
 {
-  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815",
+  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815; plus radio, reference_point_widget, color_gradient and color_hue_bar from the engine-opened dialogs, STATUS-flask 795 (jas 796)",
   "allowed": {
     "button": [
       "Button"
@@ -9,6 +9,12 @@
       "CheckBox"
     ],
     "color_bar": [
+      "Custom"
+    ],
+    "color_gradient": [
+      "Custom"
+    ],
+    "color_hue_bar": [
       "Custom"
     ],
     "color_swatch": [
@@ -34,6 +40,12 @@
     ],
     "number_input": [
       "Edit"
+    ],
+    "radio": [
+      "RadioButton"
+    ],
+    "reference_point_widget": [
+      "Custom"
     ],
     "select": [
       "ComboBox"

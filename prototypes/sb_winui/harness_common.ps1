@@ -4070,6 +4070,39 @@ function Get-SbNightlyVerdict {
     return "RED($counts; first: $first)"
 }
 
+# The ENGINE-OPENED dialogs (flask 795, jas 796 (a)): each dialog no menubar
+# item opens, run by `rendered_tree.ps1 -EngineOpen` with {} params, as
+# @{Dialog; Exit; Out} (Out = rendered_tree's lines). ADVISORY: this line is
+# its own receipt row and moves no verdict until one clean nightly (11-11)
+# promotes its passes into the gating dialogs=. Three states, all printed:
+# PASS is exit 0 with compared>0 (and carries the count); a PASS at compared=0
+# compares nothing and is a NOT RUN that says so; a VERDICT of REFUSED or NOT
+# RUN is NOT RUN, never a FAIL; anything else is FAIL. A short run is torn,
+# never a smaller denominator. Empty when none are wanted.
+function Get-SbEngineDialogsLine {
+    param($Runs = @(), [int]$Wanted = 0)
+    if ($Wanted -eq 0) { return '' }
+    $runs = @($Runs | Where-Object { $null -ne $_ })
+    if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran)" }
+    $pass = @(); $fail = @(); $notrun = @()
+    foreach ($r in $runs) {
+        $v = @($r.Out | ForEach-Object { "$_".TrimEnd() } | Where-Object { $_ -cmatch '^VERDICT: ' } | Select-Object -First 1)
+        $vt = if ($v.Count -gt 0) { $v[0].Substring(9) } else { '' }
+        if ($vt -cmatch '^(REFUSED|NOT RUN)') { $notrun += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt))"; continue }
+        if ($vt -cnotmatch '^compared=(\d+) mismatches=(\d+)') { $notrun += "$($r.Dialog)(no verdict row)"; continue }
+        $compared = [int]$Matches[1]
+        if ([int]$r.Exit -eq 0) {
+            if ($compared -eq 0) { $notrun += "$($r.Dialog)(a pass at compared=0 compares nothing)"; continue }
+            $pass += "$($r.Dialog)($compared)"
+            continue
+        }
+        $fail += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt))"
+    }
+    $show = { param($xs) if ($xs.Count -eq 0) { '-' } else { $xs -join ',' } }
+    "ENGINE-DIALOGS engine-dialogs=$($pass.Count)/$($runs.Count) fail=$($fail.Count) notrun=$($notrun.Count) advisory=until-promoted " +
+        "pass=$(& $show $pass) fail=$(& $show $fail) notrun=$(& $show $notrun) witness=default-render(params {})"
+}
+
 # The panel ids the nightly walks, from the panel specs' texts (in file order):
 # each spec's top-level `id:`. A spec without one is REFUSED, never dropped,
 # so a panel can never leave the run silently.

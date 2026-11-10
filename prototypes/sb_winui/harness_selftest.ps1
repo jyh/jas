@@ -3149,7 +3149,12 @@ Test-Case 'kinds verdict: a refused census is NOT RUN, never a pass' { Test-SbRe
 Test-Case 'kinds verdict: an empty census is NOT RUN, never a pass' { Test-SbRenderedKinds '' $kMap } 'NOT RUN(empty census)'
 Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRenderedKinds 'icon_button->Button:3' $null } 'NOT RUN(no map; census: icon_button->Button:3)'
 # separator-peer (flask STATUS 732): the separator renders as Separator, so the map allows it and no longer lists separator->ABSENT as known: 17 kinds, 2 known.
-Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '17 2'
+# The engine-opened dialogs (flask STATUS 795, jas 796): four kinds the 16 panels
+# never carried, measured on the box: radio -> RadioButton (built so on purpose,
+# PaneView.cs), and reference_point_widget, color_gradient and color_hue_bar ->
+# Custom (custom-drawn, as color_bar is). 21 kinds, 2 known. radio_group and
+# icon_button_group ABSENT are NOT allowed: those are open shell questions.
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '21 2'
 
 Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
 Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
@@ -3289,6 +3294,31 @@ Test-Case 'nightly: a run with only dialogs wanted is not empty -- live 11-09' {
     Get-SbNightlyVerdict -Box 'READY' -Items @() -ItemsWanted 0 -Panels @() -PanelsWanted 0 -Dialogs @($dOk) -DialogsWanted 1 } 'GREEN items=0/0 panels=0/0 dialogs=1/1'
 Test-Case 'nightly: a build that failed is RED before any item' {
     Get-SbNightlyVerdict -Box 'READY' -Build 'cargo exit 101' -Items @() -ItemsWanted 2 -Panels @() -PanelsWanted 1 } 'RED(build: cargo exit 101)'
+
+# The ENGINE-OPENED dialogs (flask 795, jas 796 (a)): every dialog no menubar
+# item opens, opened by `rendered_tree.ps1 -EngineOpen` with {} params. ADVISORY
+# until one clean nightly (11-11) promotes the passes into the gating dialogs=.
+# The line prints all three states; a NOT RUN is never a FAIL and never leaves
+# the denominator; a PASS carries its compared= count, and one at compared=0
+# is refused (a NOT RUN that names why).
+function New-SbEngRun($d, $exit, [string[]]$out) { @{ Dialog = $d; Exit = $exit; Out = $out } }
+$ePass = New-SbEngRun 'boolean_options' 0 @('VERDICT: compared=5 mismatches=0', 'KINDS-VERDICT: PASS(pairs=2; known: none)')
+$ePass2 = New-SbEngRun 'layer_options' 0 @('VERDICT: compared=12 mismatches=0', 'KINDS-VERDICT: PASS(pairs=6; known: none)')
+$eFail = New-SbEngRun 'color_picker' 1 @('VERDICT: compared=22 mismatches=6', 'KINDS-VERDICT: FAIL(new: radio_group->ABSENT:6)')
+$eNotRun = New-SbEngRun 'pen_alternates' 2 @('VERDICT: REFUSED: the plan has no addressable leaf', 'KINDS-VERDICT: NOT RUN(REFUSED: the plan has no addressable leaf)')
+$eZero = New-SbEngRun 'swatch_library_save' 0 @('VERDICT: compared=0 mismatches=0', 'KINDS-VERDICT: PASS(pairs=0; known: none)')
+Test-Case 'engine dialogs: the line prints pass, fail and not-run, each named' {
+    Get-SbEngineDialogsLine -Runs @($ePass, $eFail, $eNotRun, $ePass2) -Wanted 4
+} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
+Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says so' {
+    Get-SbEngineDialogsLine -Runs @($eZero) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
+Test-Case 'engine dialogs: a run short of the wanted count is torn, never a smaller denominator' {
+    Get-SbEngineDialogsLine -Runs @($ePass) -Wanted 3
+} 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran)'
+Test-Case 'engine dialogs: none wanted prints nothing' {
+    "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
+} '[]'
 
 # The nightly's panel list comes from the panel specs (workspace/panels/*.yaml,
 # the top-level id), not a list typed here, so a new panel joins the run.
