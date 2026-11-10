@@ -1065,6 +1065,25 @@ pub fn App() -> Element {
         .unwrap_or_else(|| super::workspace::PaneConfig::for_kind(PaneKind::Canvas));
     let canvas_border = if canvas_maximized { "none" } else { "1px solid #555" };
 
+    // WORKSPACE.md §"Anchored Docks by Edge": the Left column and the Bottom
+    // row are cut from the canvas pane's rectangle, and the canvas is drawn
+    // in what remains (rules 2–5, 8). The pane itself keeps its geometry, so
+    // its drag and resize handles below still read `cx`/`cy`/`cw`/`ch`.
+    let edge_rects = layout_snapshot.edge_dock_rects();
+    let (ccx, ccy, ccw, cch) = edge_rects
+        .map_or((cx, cy, cw, ch), |r| (r.canvas.x, r.canvas.y, r.canvas.w, r.canvas.h));
+    // Rule 7: above the canvas, below every floating dock (z 900 and up).
+    let edge_dock_style = |r: super::edge_dock::EdgeRect| format!(
+        "position:absolute; left:{}px; top:{}px; width:{}px; height:{}px; z-index:800; \
+         display:flex; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; \
+         box-sizing:border-box;",
+        r.x, r.y, r.w, r.h,
+    );
+    let left_dock_style: Option<String> = edge_rects.and_then(|r| r.left).map(|r|
+        format!("{} flex-direction:column; overflow-y:auto;", edge_dock_style(r)));
+    let bottom_dock_style: Option<String> = edge_rects.and_then(|r| r.bottom).map(|r|
+        format!("{} flex-direction:row;", edge_dock_style(r)));
+
     let collapsed_dock_width = 36.0;
     let (dx, dy, dw, dh, dock_z) = pane_snapshot.as_ref()
         .and_then(|pl| pl.pane_by_kind(PaneKind::Dock).map(|p| {
@@ -1344,14 +1363,19 @@ pub fn App() -> Element {
                 // Track drag position and detect edge snapping
                 let coords = evt.data().page_coordinates();
                 last_drag_pos.set((coords.x, coords.y));
-                // Check if near a screen edge for snap-to-dock
+                // Snap-to-dock: near a screen edge the target is that edge;
+                // away from every edge an edge target is cleared, so only a
+                // DROP in the band snaps (root_dragover_target).
                 #[cfg(target_arch = "wasm32")]
                 {
                     if let Some(win) = web_sys::window() {
                         let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
                         let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
-                        if let Some(edge) = WorkspaceLayout::is_near_edge(coords.x, coords.y, vw, vh) {
-                            drop_target_sig.set(Some(DropTarget::Edge(edge)));
+                        let near = WorkspaceLayout::is_near_edge(coords.x, coords.y, vw, vh);
+                        let cur = *drop_target_sig.peek();
+                        let next = super::workspace::root_dragover_target(cur, near);
+                        if next != cur {
+                            drop_target_sig.set(next);
                         }
                     }
                 }
@@ -1492,7 +1516,7 @@ pub fn App() -> Element {
 
             // ===== Canvas pane (position:absolute) =====
             div {
-                style: "position:absolute; left:{cx}px; top:{cy}px; width:{cw}px; height:{ch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:{canvas_border}; box-sizing:border-box;",
+                style: "position:absolute; left:{ccx}px; top:{ccy}px; width:{ccw}px; height:{cch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:{canvas_border}; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |_: Event<MouseData>| {
@@ -1615,6 +1639,28 @@ pub fn App() -> Element {
             }
             // (canvas pane is always visible, no close button)
 
+            // ===== Left and Bottom anchored docks (WORKSPACE.md §"Anchored
+            // Docks by Edge"). Without these, a dock snapped to the left or
+            // bottom edge left the floating layer and was drawn nowhere.
+            for style in left_dock_style {
+                div {
+                    key: "edge-dock-left",
+                    id: "jas-edge-dock-left",
+                    style: "{style}",
+                    onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                    DockGroupsView { edge: DockEdge::Left }
+                }
+            }
+            for style in bottom_dock_style {
+                div {
+                    key: "edge-dock-bottom",
+                    id: "jas-edge-dock-bottom",
+                    style: "{style}",
+                    onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                    DockGroupsView { edge: DockEdge::Bottom }
+                }
+            }
+
             // ===== Dock pane (position:absolute) =====
             if pane_snapshot.as_ref().is_some_and(|pl| pl.is_pane_visible(PaneKind::Dock)) {
             div {
@@ -1689,7 +1735,7 @@ pub fn App() -> Element {
                 // Panel groups
                 div {
                     style: "flex:1; overflow-y:auto;",
-                    DockGroupsView {}
+                    DockGroupsView { edge: DockEdge::Right }
                 }
 
                 // Left edge resize handle
