@@ -376,7 +376,7 @@ def preview_line(cases):
     parts = []
     for k, e, _s, _d, *rest in cases:
         pv = rest[0] if rest else {}
-        parts.append(f"{k}->{e or 'float'}[" + " ".join(f"{p}={pv[p]}" for p in ("via", "up") if p in pv) + "]")
+        parts.append(f"{k}->{e or 'float'}[" + " ".join(f"{p}={pv[p]}" for p in ("via", "up", "src") if p in pv) + "]")
     return "DOCK PREVIEW " + " ".join(parts)
 
 
@@ -426,7 +426,8 @@ def dock_line(cases):
 
 def run_dock_case(br, kind, edge, via=None):
     """-> (status, detail, preview). preview maps "via"/"up" to the snap
-    preview read just after the band pass and just before the release. Drags `kind`'s dock tab into `edge`'s snap band,
+    preview read just after the band pass and just before the release, and
+    "src" to whether the pressed tab node is still in the DOM then. Drags `kind`'s dock tab into `edge`'s snap band,
     or, with edge None, through `via`'s band and then to the viewport's
     centre, where it must float."""
     ctx, page = br.page(True)
@@ -453,6 +454,7 @@ def run_dock_drag(page, kind, edge, via, pv):
         band = snap_distance()
         px, py = dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2)
         box = tab.bounding_box()
+        src = tab.element_handle()
         page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         page.mouse.down()
         style = list(snap_preview_style())
@@ -461,6 +463,9 @@ def run_dock_drag(page, kind, edge, via, pv):
             pv["via"] = preview_label(page.evaluate(PREVIEW_JS, style))
         page.mouse.move(px, py, steps=12)
         pv["up"] = preview_label(page.evaluate(PREVIEW_JS, style))
+        # A source node replaced mid-drag fires its dragend detached, so the
+        # event never bubbles to the root's ondragend (app.rs's comment).
+        pv["src"] = "kept" if src.evaluate("el => el.isConnected") else "gone"
         page.mouse.up()
         page.wait_for_timeout(300)
         after = page.evaluate("() => window.__jasTest.layout()")
@@ -527,7 +532,7 @@ def run(args):
     body = [first, f"unmoved={unmoved} (PASSes whose read equals their opening read; a vacuity tell, not a failure)"]
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
-        body.append(preview_line(dock_cases) + " (the snap preview the root draws mid-drag: via = after the band pass, up = just before the release)")
+        body.append(preview_line(dock_cases) + " (the snap preview the root draws mid-drag: via = after the band pass, up = just before the release; src = the pressed tab node still in the DOM at the release)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -667,12 +672,12 @@ def self_test():
     check(hex_to_rgb("#4a90d9") == "rgb(74, 144, 217)", "hex_to_rgb writes the computed-style form")
     check(preview_label([]) == "none" and preview_label(["left", "left"]) == "left"
           and preview_label(["bottom", "left"]) == "bottom+left", "preview_label: none, dedup, sorted")
-    five = [("stroke", "left", "PASS", "", {"up": "left"}),
-            ("layers", "bottom", "FAIL", "x", {"up": "none"}),
+    five = [("stroke", "left", "PASS", "", {"up": "left", "src": "kept"}),
+            ("layers", "bottom", "FAIL", "x", {"up": "none", "src": "gone"}),
             ("align", None, "PASS", "", {"via": "left", "up": "left"})]
     check(dock_line(five) == "DOCK RED 2/3 (FAIL layers->bottom: x)", "dock_line reads cases that carry a preview")
-    check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left] layers->bottom[up=none] align->float[via=left up=left]",
-          "preview_line names every case, PASS included, with via before up")
+    check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
+          "preview_line names every case, PASS included, in the order via, up, src")
     check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
     try:
         snap_preview_style("let snap_left = 1;")
