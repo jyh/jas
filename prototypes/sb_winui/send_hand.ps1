@@ -109,7 +109,13 @@ param(
     # separator could be inside it. The parsed count is echoed in the receipt.
     [string]$Panels = '',
     # How long a panel step re-reads a control the gesture is still enabling.
-    [int]$PanelWaitMs = 3000
+    [int]$PanelWaitMs = 3000,
+    # G11 STEP 3: A DOUBLE-CLICK, only on a click (k=0, no delta). `double`
+    # sends a second click one settle after the first, inside the system
+    # double-click time, so WinUI raises DoubleTapped; `then-click` also sends
+    # one more click there AFTER that time has passed, so it is a click and not
+    # a third tap. Read-SbInputScript maps the corpus form onto these.
+    [ValidateSet('none', 'double', 'then-click')][string]$Double = 'none'
 )
 
 # Select-SbPanelAction and ConvertFrom-SbPanelText: the panel steps' rules,
@@ -118,7 +124,12 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $log = New-Object System.Collections.Generic.List[string]
-$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift alt=$Alt keys=$Keys")
+$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift alt=$Alt keys=$Keys double=$Double")
+if ($Double -ne 'none' -and ($Moves -ne 0 -or $DocDx -ne 0 -or $DocDy -ne 0 -or $Shift -ne 'none' -or $Alt -ne 'none')) {
+    $log.Add("FAIL: -Double $Double is a double-click, delivered only on a click (k=0, no delta, no modifier held); got k=$Moves delta=($DocDx,$DocDy) shift=$Shift alt=$Alt")
+    $log | Set-Content -Path $Out -Encoding utf8
+    exit 2
+}
 
 $source = @'
 using System;
@@ -155,6 +166,9 @@ public static class SbHand
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDoubleClickTime();
 
     [DllImport("user32.dll")]
     public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
@@ -471,6 +485,27 @@ for ($i = 1; $i -le $Moves; $i++) {
 $dragSw.Stop()
 $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
 $heldSw.Stop()
+# G11 STEP 3: the double's second click, AT THE CURSOR, one settle after the
+# first click's release -- well inside the system double-click time and on the
+# same point, so WinUI raises DoubleTapped on this press. `then-click` waits
+# that time out (plus a margin) before its click, so the click is not a tap
+# count of three.
+$doubleEvents = 0
+$doubleClickMs = [int][SbHand]::GetDoubleClickTime()
+if ($Double -ne 'none') {
+    Start-Sleep -Milliseconds $SettleMs
+    $sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
+    Start-Sleep -Milliseconds $SettleMs
+    $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
+    $doubleEvents += 2
+    if ($Double -eq 'then-click') {
+        Start-Sleep -Milliseconds ($doubleClickMs + 150)
+        $sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
+        Start-Sleep -Milliseconds $SettleMs
+        $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
+        $doubleEvents += 2
+    }
+}
 } finally {
     if ($altDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Key(0x12, $false) }
     if ($shiftDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Shift($false) }
@@ -737,9 +772,10 @@ $log.Add("shift=$Shift shift-down=$(if ($Shift -eq 'none') { 'never' } else { "b
 $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")
 $log.Add(("post-press-ms={0} button-held-ms={1} settle-ms={2}" -f
           [int]$dragSw.Elapsed.TotalMilliseconds, [int]$heldSw.Elapsed.TotalMilliseconds, $SettleMs))
-$log.Add("events-inserted=$sent expected=$($Moves + 3 + 3 * $clicksSent) late-clicks=$clicksSent")
+$log.Add("double=$Double double-events=$doubleEvents double-click-ms=$doubleClickMs")
+$log.Add("events-inserted=$sent expected=$($Moves + 3 + 3 * $clicksSent + $doubleEvents) late-clicks=$clicksSent")
 $log.Add("NOTE: SendInput returning the expected count proves the events were INSERTED, not that they ARRIVED. UIPI discards are invisible here by design; the shell's counters are the only oracle for arrival.")
 $log.Add("NOTE: post-press-moves is what THIS injector sent, and as of 2026-09-06 it is also what the shell counts. The `move != k` extras are IDENTIFIED: they were RE-DELIVERIES of a pointer frame the shell had already applied -- same FrameId, same Timestamp, same position, raised again by XAML while the contact sat still, so they multiplied with the idle gap after each move (settle 10ms: 0 extras; 40/100/300ms: 1; 800ms: 5). NOT a system arrival: probe_hold.ps1 drives a bare Win32 window with THIS construction at these same configurations and reads arrivals == k exactly, in both input stacks. The shell now suppresses a repeated frame and reports the count as `dup-frames=` on its POINTER row. move<k with normalized-collisions=0 still means the window coalesced despite MOVE_NOCOALESCE.")
 $log | Set-Content -Path $Out -Encoding utf8
-if ($sent -ne ($Moves + 3 + 3 * $clicksSent)) { exit 5 }
+if ($sent -ne ($Moves + 3 + 3 * $clicksSent + $doubleEvents)) { exit 5 }
 exit 0
