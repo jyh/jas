@@ -3152,9 +3152,11 @@ Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRender
 # The engine-opened dialogs (flask STATUS 795, jas 796): four kinds the 16 panels
 # never carried, measured on the box: radio -> RadioButton (built so on purpose,
 # PaneView.cs), and reference_point_widget, color_gradient and color_hue_bar ->
-# Custom (custom-drawn, as color_bar is). 21 kinds, 2 known. radio_group and
-# icon_button_group ABSENT are NOT allowed: those are open shell questions.
-Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '21 2'
+# Custom (custom-drawn, as color_bar is). radio_group and icon_button_group read
+# ABSENT there: their rows (RadioGroupRow, IconGroupRow) were StackPanels with no
+# automation peer, so the leaf's id reached no reader. Each now has a Group peer,
+# measured through -EngineOpen (color_picker, artboard_options): 23 kinds, 2 known.
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '23 2'
 
 Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
 Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
