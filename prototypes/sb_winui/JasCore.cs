@@ -413,6 +413,15 @@ internal static unsafe class JasCore
     internal static extern byte jas_dialog_dismiss(IntPtr engine);
 
     /// <summary>
+    /// Open a dialog BY ID in the engine (`jas_dialog_open`, a test seam for the
+    /// level-2 dialog pass): <paramref name="paramsJson"/> is a JSON object of
+    /// literal values. Returns a <c>JasStatus</c>: 0 only when that dialog is then
+    /// the top open one; every refusal is named in <c>jas_last_error_json</c>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_dialog_open(IntPtr engine, byte[] id, nuint idLen, byte[] paramsJson, nuint paramsLen);
+
+    /// <summary>
     /// The open dialog's plan: <c>{"open": false}</c>, or <c>{"open": true,
     /// "id", "summary", "modal", "depth", "plan"}</c> where <c>plan</c> is
     /// <see cref="jas_panel_plan"/>'s shape for the TOP dialog (<c>depth</c> is 2

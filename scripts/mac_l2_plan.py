@@ -584,6 +584,17 @@ def self_test():
           plan(dict(base, steps=[sstep, read]), mb, sel)[2][7] == "Multiply")
     check("a select value that is not an option is refused",
           refused(lambda: plan(dict(base, steps=[dict(sstep, value="nope"), read]), mb, sel), "not an option"))
+    # A combo_box in JasSwift is a text field beside the menu of its options
+    # (YamlPanelBodyView.renderComboBox, since 2026-11-09), as the Rust web
+    # combo is an input with a datalist: a person can type any value, so a
+    # commit is TYPED, option or not, and carries no menu label.
+    combo = {"content": [{"id": "angle", "type": "combo_box",
+                          "options": [-45, 0, 45, 0.5, {"value": 150, "label": "150%"}]}]}
+    cstep = {"panel": "gradient_panel_content", "widget": "angle", "event": "commit", "value": "45"}
+    for v in ("45", "-45", "0.5", "150", "30"):
+        a = plan(dict(base, steps=[dict(cstep, value=v), read]), mb, combo)[2]
+        check(f"a combo commit of {v!r} is typed (no label), option or not",
+              a[7] is None and a[6] == v)
     check("a click carries no label", acts[4][7] is None)
     check("modifiers are carried", plan(dict(base, steps=[dict(press, shift=True), read]), mb)[2][5] == ("shift",))
     check("no read is refused", refused(lambda: plan(dict(base, steps=[press]), mb), "without a read"))

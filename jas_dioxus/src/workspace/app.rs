@@ -1081,6 +1081,8 @@ pub fn App() -> Element {
     );
     let left_dock_style: Option<String> = edge_rects.and_then(|r| r.left).map(|r|
         format!("{} flex-direction:column; overflow-y:auto;", edge_dock_style(r)));
+    let edge_dock_left_key = "edge-dock-left";
+    let edge_dock_bottom_key = "edge-dock-bottom";
     let bottom_dock_style: Option<String> = edge_rects.and_then(|r| r.bottom).map(|r|
         format!("{} flex-direction:row;", edge_dock_style(r)));
 
@@ -1642,9 +1644,13 @@ pub fn App() -> Element {
             // ===== Left and Bottom anchored docks (WORKSPACE.md §"Anchored
             // Docks by Edge"). Without these, a dock snapped to the left or
             // bottom edge left the floating layer and was drawn nowhere.
+            // The rsx! macro refuses a literal `key` (it guards list items
+            // against colliding); each loop runs over an Option, so a
+            // constant identity is correct and keeps a resize from
+            // remounting the dock. Hence a formatted constant.
             for style in left_dock_style {
                 div {
-                    key: "edge-dock-left",
+                    key: "{edge_dock_left_key}",
                     id: "jas-edge-dock-left",
                     style: "{style}",
                     onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
@@ -1653,7 +1659,7 @@ pub fn App() -> Element {
             }
             for style in bottom_dock_style {
                 div {
-                    key: "edge-dock-bottom",
+                    key: "{edge_dock_bottom_key}",
                     id: "jas-edge-dock-bottom",
                     style: "{style}",
                     onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
