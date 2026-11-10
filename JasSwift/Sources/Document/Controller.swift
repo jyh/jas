@@ -886,6 +886,64 @@ public class Controller {
         model.setDocumentUnbracketed(doc.replacing(selection: finalSel), intent: .selection)
     }
 
+    /// `selectFlat` with the isolation ROOT's children as the units (G11 step 4;
+    /// seat design 2026-11-08 g11-marquee-scope). The descent to `root`
+    /// composes each ancestor's visibility cap and transform; a root that does
+    /// not resolve to a layer or group selects NOTHING, never the layer walk.
+    /// Each child answers as a layer child does in `selectFlat`: a group with
+    /// the group alone (§16.4), a leaf on the predicate in the root's frame. No
+    /// guard on the root's own lock or visibility: each child's
+    /// `effectiveLocked` reads the root's lock down the path and its visibility
+    /// folds the root's (measured by mutant in the reference). Twin of Rust
+    /// `select_flat_in`.
+    private func selectFlatIn(_ model: Model, root: ElementPath,
+                              predicate: (Element, Transform?) -> Bool, extend: Bool) {
+        let doc = model.document
+        var selection: Selection = []
+        var kids: [Element]? = nil
+        var vis: Visibility = .preview
+        var frame: Transform? = nil
+        if root[0] >= 0, root[0] < doc.layers.count {
+            let layer = doc.layers[root[0]]
+            kids = layer.children; vis = layer.visibility; frame = layer.transform
+            for idx in root.dropFirst() {
+                guard let k = kids, idx >= 0, idx < k.count, case .group(let g) = k[idx] else {
+                    kids = nil; break
+                }
+                kids = g.children
+                vis = min(vis, g.visibility)
+                switch (frame, g.transform) {
+                case let (f?, t?): frame = f.multiply(t)
+                case let (f, t): frame = f ?? t
+                }
+            }
+        }
+        for (ci, child) in (kids ?? []).enumerated() {
+            let path = root + [ci]
+            if doc.effectiveLocked(path) { continue }
+            let childVis = min(vis, child.visibility)
+            if childVis == .invisible { continue }
+            if case .group(let g) = child {
+                let groupFrame: Transform? = {
+                    switch (frame, g.transform) {
+                    case let (f?, t?): return f.multiply(t)
+                    case let (f, t): return f ?? t
+                    }
+                }()
+                let anyHit = g.children.enumerated().contains {
+                    !doc.effectiveLocked(path + [$0.offset])
+                        && min(childVis, $0.element.visibility) != .invisible
+                        && predicate($0.element, groupFrame)
+                }
+                if anyHit { selection.append(ElementSelection.all(path)) }
+            } else if predicate(child, frame) {
+                selection.append(ElementSelection.all(path))
+            }
+        }
+        let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
+        model.setDocumentUnbracketed(doc.replacing(selection: finalSel), intent: .selection)
+    }
+
     /// Recursive selection with customizable leaf handling. Used by
     /// `groupSelectRect` and `directSelectRect` — they differ only in
     /// what happens when a leaf element is reached.
@@ -959,19 +1017,27 @@ public class Controller {
                                         generation: model.generation))
     }
 
-    public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
+    /// With `root` (the innermost isolation entry, G11) the units are that
+    /// container's children and a band outside it selects nothing
+    /// (`selectFlatIn`); `nil` or an empty root is the layer walk. Twin of Rust
+    /// `select_rect_in` and the reference `select_rect(…, root=)`.
+    public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false,
+                           root: ElementPath? = nil) {
         let resolver = hitResolver
         // Compared where each element is DRAWN (transform-correct path verbs
         // S6): with a parent frame the rect's corners are mapped into the
         // parent space and tested as a polygon; with none this is the old call.
         let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)]
-        selectFlat(model,
-                   predicate: { elem, parent in
-                       guard let p = parent else { return elementIntersectsRectWith(elem, x, y, width, height, resolver) }
-                       guard let poly = polygonInParentSpace(corners, p) else { return false }
-                       return elementIntersectsPolygonWith(elem, poly, resolver)
-                   },
-                   extend: extend)
+        let predicate: (Element, Transform?) -> Bool = { [self] elem, parent in
+            guard let p = parent else { return elementIntersectsRectWith(elem, x, y, width, height, resolver) }
+            guard let poly = polygonInParentSpace(corners, p) else { return false }
+            return elementIntersectsPolygonWith(elem, poly, resolver)
+        }
+        if let r = root, !r.isEmpty {
+            selectFlatIn(model, root: r, predicate: predicate, extend: extend)
+        } else {
+            selectFlat(model, predicate: predicate, extend: extend)
+        }
     }
 
     public func selectPolygon(polygon: [(Double, Double)], extend: Bool = false) {

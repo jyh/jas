@@ -1880,11 +1880,21 @@ fn run_doc_effect(
                 let ry = y1.min(y2);
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
-                let op = serde_json::json!({
+                let mut op = serde_json::json!({
                     "op": "select_rect",
                     "x": rx, "y": ry, "width": rw, "height": rh,
                     "extend": additive,
                 });
+                // G11: `root` (selection.yaml passes the innermost isolation
+                // entry) rides the op ONLY when non-empty, so an op recorded
+                // outside isolation is byte-identical to before.
+                let root = match args.get("root") {
+                    Some(serde_json::Value::String(e)) => index_path(&eval_expr(e, store, ctx)),
+                    _ => None,
+                };
+                if let Some(r) = root.filter(|r| !r.is_empty()) {
+                    op["root"] = serde_json::json!(r);
+                }
                 let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }

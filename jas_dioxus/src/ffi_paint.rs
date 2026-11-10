@@ -2347,7 +2347,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 101, "the fixture corpus changed size");
+        assert_eq!(total, 102, "the fixture corpus changed size");
         // ⛔ 100 → 101 (jas, 2026-10-28, the layers_nav_right empty-container
         // case): `two_layers_top_empty.svg`, multi_layer.svg with the circle
         // removed, so its top layer is empty: one rect, no gradient, no text.
@@ -2519,6 +2519,12 @@ mod tests {
         // solid stroke), a path (no fill) and a line: solid paint only, no
         // gradient, no text. Expected to present; that it does is read, not
         // measured here. Both pins bumped in the same edit.
+        // ⛔ 101 → 102 (jas, 2026-11-08, G11 step 4's marquee corpus):
+        // `isolation_marquee.svg`, one layer holding a group (two rects and a
+        // nested group of one rect) and a rect: solid fills, no stroke, no
+        // gradient, no text, no transform. Expected to present; that it does
+        // is read, not measured here (no cargo on the authoring box, O54).
+        // Both pins bumped in the same edit.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2530,6 +2536,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 101, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 102, "the whole corpus presents");
     }
 }

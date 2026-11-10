@@ -605,9 +605,27 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     effects["doc.select_in_rect"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let (rx, ry, rw, rh, additive) = normalizeRectArgs(args, store: store, ctx: ctx)
-        opApply(model, Controller(model: model),
-                ["op": "select_rect", "x": rx, "y": ry,
-                 "width": rw, "height": rh, "extend": additive])
+        var op: [String: Any] = ["op": "select_rect", "x": rx, "y": ry,
+                                 "width": rw, "height": rh, "extend": additive]
+        // G11: `root` (selection.yaml passes the innermost isolation entry)
+        // rides the op ONLY when non-empty, so an op recorded outside isolation
+        // is byte-identical to before. Twin of Rust effects.rs.
+        if let e = args["root"] as? String {
+            var root: [Int] = []
+            switch evalExprAsValue(e, store: store, ctx: ctx) {
+            case .path(let p): root = p
+            case .list(let items):
+                let ints = items.compactMap { v -> Int? in
+                    guard let n = v.value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+                          n.intValue >= 0 else { return nil }
+                    return n.intValue
+                }
+                if ints.count == items.count { root = ints }
+            default: break
+            }
+            if !root.isEmpty { op["root"] = root }
+        }
+        opApply(model, Controller(model: model), op)
         return nil
     }
 
