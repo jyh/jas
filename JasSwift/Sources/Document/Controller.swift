@@ -1679,8 +1679,10 @@ public class Controller {
     public func groupSelection() {
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
-        // `Selection` is a Set here and a Vec in Rust, so this sort is what
-        // makes the two ports agree on document order at all.
+        // Group in DOCUMENT order, whatever order the selection was made in:
+        // Rust's `group_selection` sorts its paths the same way. (This said
+        // "`Selection` is a Set here" until 2026-11-09; it has been an array
+        // since D6, LAYER_STRUCTURE.md.)
         let sorted = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
         var paths: [ElementPath] = []
         for p in sorted where paths.last != p { paths.append(p) }
