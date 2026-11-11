@@ -102,13 +102,21 @@ try {
     Complete-Night "NOT RUN(corpus: dialog_openers.py gave no list: $(ConvertTo-SbParenSafe "$($_.Exception.Message)"))"
 }
 Pop-Location
+# PROMOTION (jas 796, 826): the engine dialogs that GATE, from
+# e2e_baselines/engine_dialogs_promoted.json. Read against the WHOLE uncovered
+# list, before -Only narrows it, so a stale id is refused on every run.
+$promotedPath = Join-Path $PSScriptRoot 'e2e_baselines\engine_dialogs_promoted.json'
+$promoted = Get-SbPromotedEngineDialogs -Json (Get-Content -Raw -Encoding UTF8 -LiteralPath $promotedPath) -Known $engineDialogs
+if ($promoted -is [string]) { Complete-Night "NOT RUN(corpus: $(ConvertTo-SbParenSafe $promoted))" }
 if ($Only) {
     $scripts = @($scripts | Where-Object { $_.BaseName -like "*$Only*" })
     $panelIds = @($panelIds | Where-Object { $_ -like "*$Only*" })
     $dialogs = @($dialogs | Where-Object { $_.Dialog -like "*$Only*" })
     $engineDialogs = @($engineDialogs | Where-Object { $_ -like "*$Only*" })
 }
-$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs")
+$promoted = @($promoted | Where-Object { $engineDialogs -ccontains $_ })
+$dialogsWanted = $dialogs.Count + $promoted.Count
+$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs promoted=$($promoted.Count)")
 
 # ---- build once: capture_desktop, then the cdylib lane LAST (the last lane to
 # touch target/ decides what the shell loads), then the shell. prove_e2e.ps1
@@ -130,7 +138,7 @@ if (-not $build) {
 }
 if ($build) {
     $lines.Add("BUILD $build (log: $buildLog)")
-    Complete-Night (Get-SbNightlyVerdict -Box $box -Build $build -ItemsWanted $scripts.Count -PanelsWanted $panelIds.Count -DialogsWanted $dialogs.Count)
+    Complete-Night (Get-SbNightlyVerdict -Box $box -Build $build -ItemsWanted $scripts.Count -PanelsWanted $panelIds.Count -DialogsWanted $dialogsWanted)
 }
 
 # After a failure, the box is read again (with no quiet gate: this run's own
@@ -209,11 +217,19 @@ $engineRuns = @()
 if (-not $stop) {
     foreach ($ed in $engineDialogs) {
         $eo = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'rendered_tree.ps1') -Panel $ed -EngineOpen 2>&1
-        $engineRuns += @{ Dialog = $ed; Exit = $LASTEXITCODE; Out = @($eo | ForEach-Object { "$_" }) }
+        $er = @{ Dialog = $ed; Exit = $LASTEXITCODE; Out = @($eo | ForEach-Object { "$_" }) }
+        $engineRuns += $er
+        # A PROMOTED dialog gates (jas 796, 826): its run joins the gating
+        # dialogs, and a non-PASS is named on its own DIALOG row.
+        if ($promoted -ccontains $ed) {
+            $g = ConvertTo-SbGatingDialogRun $er
+            $dialogRuns += $g
+            if ($g.Exit -ne 0) { $lines.Add("DIALOG $ed opener=engine exit=$($g.Exit) $((Get-SbEngineDialogState $er).Text)") }
+        }
     }
 }
-$engineLine = Get-SbEngineDialogsLine -Runs $engineRuns -Wanted $engineDialogs.Count
+$engineLine = Get-SbEngineDialogsLine -Runs $engineRuns -Wanted $engineDialogs.Count -Promoted $promoted
 if ($engineLine) { $lines.Add($engineLine) }
 
 Complete-Night (Get-SbNightlyVerdict -Box $box -Stop $stop -Items $items.ToArray() -ItemsWanted $scripts.Count `
-    -Panels $panels -PanelsWanted $panelIds.Count -Dialogs $dialogRuns -DialogsWanted $dialogs.Count)
+    -Panels $panels -PanelsWanted $panelIds.Count -Dialogs $dialogRuns -DialogsWanted $dialogsWanted)
