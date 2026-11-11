@@ -241,6 +241,46 @@
             Grid.Column="1" />
 
         <!--
+          THE ACCEPT BAR ((A) W1c), as the Mac's ProposalBarView: top centre over
+          the panes, shown while the engine holds an agent's pending proposal
+          (jas_mcp_pending), "Proposed: <name>" with Accept and Reject. The two
+          buttons are the ARTIST'S decision (no client line can accept); each
+          goes to the render queue as jas_mcp_accept / jas_mcp_reject. Declared
+          after FloatLayer and before DialogLayer: over a floating dock, under a
+          dialog. Collapsed until a proposal is pending.
+        -->
+        <Border
+            x:Name="ProposalBar"
+            Grid.Row="1"
+            Grid.ColumnSpan="3"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,8,0,0"
+            Padding="14,8,14,8"
+            CornerRadius="8"
+            Background="#EB262626"
+            Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock
+                    x:Name="ProposalText"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    FontWeight="Medium"
+                    Foreground="White" />
+                <Button x:Name="ProposalAccept" Content="Accept" Click="OnProposalAccept">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Enter" Modifiers="Control" />
+                    </Button.KeyboardAccelerators>
+                </Button>
+                <Button x:Name="ProposalReject" Content="Reject" Click="OnProposalReject">
+                    <Button.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Escape" Modifiers="Control" />
+                    </Button.KeyboardAccelerators>
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <!--
           Status is XAML, not painted content, so a blank canvas over a healthy
           status line is a legible failure rather than an ambiguous one.
         -->

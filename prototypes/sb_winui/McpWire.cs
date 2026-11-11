@@ -120,6 +120,14 @@ internal static class McpWire
         return string.Join("; ", rows);
     }
 
+    /// <summary>
+    /// (A) W1c: the accept bar's label, as the Mac's `ProposalBarView` draws it,
+    /// or null when no bar is shown: none pending, or a read refused (whose
+    /// refusal is the shell's row, never a label).
+    /// </summary>
+    internal static string? BarText(PendingRead read) =>
+        read.Why is null && read.Id is not null ? $"Proposed: {read.Name}" : null;
+
     /// <summary>The pipe the shell serves, named for its own process: `\\.\pipe\jas-mcp-&lt;pid&gt;` (A6 F2 (a)).</summary>
     internal static string PipeName(int pid) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"jas-mcp-{pid}");
