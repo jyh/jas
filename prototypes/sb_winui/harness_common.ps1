@@ -2699,6 +2699,84 @@ function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string
     return New-SbVerdict $name 'PASS' "$($key): collapsed with its body hidden, then expanded with it visible, both read off the body after the toggle" $up
 }
 
+# R1-4b S6 (flask STATUS 829) -- THE EDGE DOCKS AS A PERSON'S SCREEN HOLDS THEM.
+# The shell's EDGE RECTS row (the cell and the engine's canvas rect) and its
+# EDGE DOCK DRAWN row (each edge's dock, group count and rect) are DIPs in the
+# cell; -Uia maps an AutomationId to its UIA BoundingRectangle in PHYSICAL
+# pixels (@{X;Y;W;H}), so every pixel is divided by -Scale (1.5 on this box).
+# The cell's screen origin is taken from the first frame read (a Left column
+# sits at the cell's left and top; a Bottom row's first share at its left), and
+# CanvasStripScroll -- cut exactly as the surface is -- must then sit at the
+# engine's canvas rect's x, y and width: the canvas is beside the docks, not
+# under them. A frame is a Left dock's `edgeL<d>` or a Bottom group's
+# `edgeB<d>g<i>`. Tolerance 1.5 DIP: a frame's one-DIP border, and rounding.
+# Returns PASS(...), FAIL(<each mismatch>) or REFUSED: <why>; never a PASS on
+# rows it cannot read or a run with no edge dock.
+function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Uia, [double]$Scale) {
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    function ConvertTo-SbRect4([string]$Text) {
+        $p = $Text.Split(',')
+        if ($p.Count -ne 4) { return $null }
+        $v = @()
+        foreach ($x in $p) { $d = 0.0; if (-not [double]::TryParse($x, [System.Globalization.NumberStyles]::Float, $inv, [ref]$d)) { return $null }; $v += $d }
+        return @{ X = $v[0]; Y = $v[1]; W = $v[2]; H = $v[3] }
+    }
+    function Format-SbDip([double]$V) { return $V.ToString('0.##', $inv) }
+    $cm = [regex]::Match($RectsRow, ' canvas=([^ ]+)')
+    if (-not $RectsRow.Contains(' cell=') -or -not $cm.Success -or $null -eq (ConvertTo-SbRect4 $cm.Groups[1].Value)) {
+        return 'REFUSED: the EDGE RECTS row has no cell and canvas'
+    }
+    $canvas = ConvertTo-SbRect4 $cm.Groups[1].Value
+    $frames = New-Object System.Collections.Generic.List[object]
+    $lm = [regex]::Match($DrawnRow, ' left=dock(\d+):(\d+)@([^ ]+)')
+    $bm = [regex]::Match($DrawnRow, ' bottom=dock(\d+):(\d+)@([^ ]+)')
+    $nLeft = 0; $nBottom = 0
+    if ($lm.Success) {
+        $r = ConvertTo-SbRect4 $lm.Groups[3].Value
+        if ($null -eq $r) { return 'REFUSED: the EDGE DOCK DRAWN row''s left rect is unreadable' }
+        $frames.Add(@{ Id = "edgeL$($lm.Groups[1].Value)"; Want = $r })
+        $nLeft = 1
+    }
+    if ($bm.Success) {
+        $r = ConvertTo-SbRect4 $bm.Groups[3].Value
+        $n = [int]$bm.Groups[2].Value
+        if ($null -eq $r -or $n -le 0) { return 'REFUSED: the EDGE DOCK DRAWN row''s bottom rect is unreadable' }
+        for ($i = 0; $i -lt $n; $i++) {
+            $frames.Add(@{ Id = "edgeB$($bm.Groups[1].Value)g$i"; Want = @{ X = $r.X + $i * $r.W / $n; Y = $r.Y; W = $r.W / $n; H = $r.H } })
+        }
+        $nBottom = $n
+    }
+    if ($frames.Count -eq 0) { return 'REFUSED: the EDGE DOCK DRAWN row names no edge dock' }
+    $bad = New-Object System.Collections.Generic.List[string]
+    $origin = $null
+    $tol = 1.5
+    foreach ($f in $frames) {
+        if (-not $Uia.ContainsKey($f.Id)) { $bad.Add("$($f.Id) is not in the UIA read"); continue }
+        $px = $Uia[$f.Id]
+        if ($null -eq $origin) { $origin = @{ X = $px.X - $f.Want.X * $Scale; Y = $px.Y - $f.Want.Y * $Scale } }
+        $got = @{ X = ($px.X - $origin.X) / $Scale; Y = ($px.Y - $origin.Y) / $Scale; W = $px.W / $Scale; H = $px.H / $Scale }
+        foreach ($k in 'X', 'Y', 'W', 'H') {
+            if ([math]::Abs($got[$k] - $f.Want[$k]) -gt $tol) {
+                $bad.Add("$($f.Id) $($k.ToLowerInvariant())=$(Format-SbDip $got[$k]) want $(Format-SbDip $f.Want[$k])")
+            }
+        }
+    }
+    if ($null -ne $origin) {
+        if (-not $Uia.ContainsKey('CanvasStripScroll')) { $bad.Add('CanvasStripScroll is not in the UIA read') }
+        else {
+            $s = $Uia['CanvasStripScroll']
+            $got = @{ X = ($s.X - $origin.X) / $Scale; Y = ($s.Y - $origin.Y) / $Scale; W = $s.W / $Scale }
+            foreach ($k in 'X', 'Y', 'W') {
+                if ([math]::Abs($got[$k] - $canvas[$k]) -gt $tol) {
+                    $bad.Add("CanvasStripScroll $($k.ToLowerInvariant())=$(Format-SbDip $got[$k]) want $(Format-SbDip $canvas[$k])")
+                }
+            }
+        }
+    }
+    if ($bad.Count -gt 0) { return "FAIL($($bad -join '; '))" }
+    return "PASS(left=$nLeft frame bottom=$nBottom frames, the canvas beside them)"
+}
+
 # Q6.FL -- TWO GROUPS FLOAT, ONE MOVES AND IS RAISED, BOTH REDOCK (FP-6's
 # scene; the floating-panels freeze, 2026-10-21 section 2). The shell replays
 # SB_DOCK_FLOAT_TOUR=<key>,<key> through each gesture's own method and writes a

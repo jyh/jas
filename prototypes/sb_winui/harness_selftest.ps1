@@ -3429,7 +3429,7 @@ Test-Case 'edge docks on screen: a share drawn at the wrong place, or missing, i
     $u2 = @{ edgeB1g0 = $edgeBotUia.edgeB1g0; CanvasStripScroll = $edgeBotUia.CanvasStripScroll }
     (Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $u1 -Scale 1.5) + ' | ' +
     (Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $u2 -Scale 1.5)
-} 'FAIL(edgeB1g1 x=721.33 want 793.33) | FAIL(edgeB1g1 is not in the UIA read)'
+} 'FAIL(edgeB1g1 x=721.33 want 793.34) | FAIL(edgeB1g1 is not in the UIA read)'
 Test-Case 'edge docks on screen: rows it cannot read, or no edge dock, are REFUSED, never a PASS' {
     (Test-SbEdgeDockUia -RectsRow 'EDGE RECTS cell=? cause=draw' -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5) + ' | ' +
     (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow 'EDGE DOCK DRAWN left=- bottom=- cut=0,0,0,0 cause=draw' -Uia $edgeLeftUia -Scale 1.5)
