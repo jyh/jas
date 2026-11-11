@@ -3299,7 +3299,7 @@ Test-Case 'nightly: a build that failed is RED before any item' {
 
 # The ENGINE-OPENED dialogs (flask 795, jas 796 (a)): every dialog no menubar
 # item opens, opened by `rendered_tree.ps1 -EngineOpen` with {} params. ADVISORY
-# until one clean nightly (11-11) promotes the passes into the gating dialogs=.
+# unless promoted (the PROMOTION cases below, jas 826): a promoted one gates.
 # The line prints all three states; a NOT RUN is never a FAIL and never leaves
 # the denominator; a PASS carries its compared= count, and one at compared=0
 # is refused (a NOT RUN that names why).

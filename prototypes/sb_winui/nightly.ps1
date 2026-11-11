@@ -94,8 +94,8 @@ try {
     $dialogs = @($derived.covered | ForEach-Object { @{ Dialog = "$($_.dialog)"; Opener = "$($_.opener)" } })
     $uncoveredDialogs = @($derived.uncovered).Count
     # jas 796 (a): every UNCOVERED dialog is also opened in the engine by its id
-    # (`rendered_tree.ps1 -EngineOpen`, {} params). ADVISORY: its own receipt
-    # line (ENGINE-DIALOGS), which moves no verdict until promoted.
+    # (`rendered_tree.ps1 -EngineOpen`, {} params), on its own receipt line
+    # (ENGINE-DIALOGS). A PROMOTED one gates (jas 826); the rest are advisory.
     $engineDialogs = @($derived.uncovered | ForEach-Object { "$($_.dialog)" })
 } catch {
     Pop-Location
@@ -106,7 +106,13 @@ Pop-Location
 # e2e_baselines/engine_dialogs_promoted.json. Read against the WHOLE uncovered
 # list, before -Only narrows it, so a stale id is refused on every run.
 $promotedPath = Join-Path $PSScriptRoot 'e2e_baselines\engine_dialogs_promoted.json'
-$promoted = Get-SbPromotedEngineDialogs -Json (Get-Content -Raw -Encoding UTF8 -LiteralPath $promotedPath) -Known $engineDialogs
+# jas 830 item 2: under Stop, an unreadable list would end the night with no
+# receipt, so it is read inside a try and refused by name, as the corpus is.
+try {
+    $promoted = Get-SbPromotedEngineDialogs -Json (Get-Content -Raw -Encoding UTF8 -LiteralPath $promotedPath) -Known $engineDialogs
+} catch {
+    Complete-Night "NOT RUN(corpus: the promotion list is unreadable: $(ConvertTo-SbParenSafe "$($_.Exception.Message)"))"
+}
 if ($promoted -is [string]) { Complete-Night "NOT RUN(corpus: $(ConvertTo-SbParenSafe $promoted))" }
 if ($Only) {
     $scripts = @($scripts | Where-Object { $_.BaseName -like "*$Only*" })
@@ -210,9 +216,12 @@ if (-not $stop) {
     }
 }
 
-# ---- every uncovered dialog, opened in the engine (ADVISORY, jas 796 (a)) ---
-# Run after the gating corpus and never stopping it: a FAIL here moves no
-# verdict. A gating stop skips these, and the line then reads torn.
+# ---- every uncovered dialog, opened in the engine (jas 796 (a), 826) -------
+# Run after the gating corpus. An ADVISORY one moves no verdict and never stops
+# the run. A PROMOTED one gates, and after its non-PASS the box is read again
+# (jas 830 item 1), as after an item, a panel or a menubar dialog, so a box that
+# went not ready reads NOT RUN, never RED. A gating stop skips these, and the
+# line then reads torn.
 $engineRuns = @()
 if (-not $stop) {
     foreach ($ed in $engineDialogs) {
@@ -224,7 +233,11 @@ if (-not $stop) {
         if ($promoted -ccontains $ed) {
             $g = ConvertTo-SbGatingDialogRun $er
             $dialogRuns += $g
-            if ($g.Exit -ne 0) { $lines.Add("DIALOG $ed opener=engine exit=$($g.Exit) $((Get-SbEngineDialogState $er).Text)") }
+            if ($g.Exit -ne 0) {
+                $lines.Add("DIALOG $ed opener=engine exit=$($g.Exit) $((Get-SbEngineDialogState $er).Text)")
+                $stop = Get-SbStopAfter "engine dialog $ed"
+                if ($stop) { break }
+            }
         }
     }
 }
