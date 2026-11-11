@@ -1,0 +1,129 @@
+[
+  {
+    "name": "the_worked_example",
+    "setup": "workspace_edge_docks.json",
+    "ops": [],
+    "cell": {
+      "x": 72.0,
+      "y": 0.0,
+      "w": 888.0,
+      "h": 800.0,
+      "viewport_w": 1200.0,
+      "viewport_h": 800.0
+    },
+    "expected": {
+      "left": {
+        "x": 72.0,
+        "y": 0.0,
+        "w": 200.0,
+        "h": 800.0
+      },
+      "bottom": {
+        "x": 272.0,
+        "y": 620.0,
+        "w": 688.0,
+        "h": 180.0
+      },
+      "canvas": {
+        "x": 272.0,
+        "y": 0.0,
+        "w": 688.0,
+        "h": 620.0
+      }
+    }
+  },
+  {
+    "name": "the_cell_is_the_apps_not_the_held_pane_layout",
+    "setup": "workspace_edge_docks.json",
+    "ops": [],
+    "cell": {
+      "x": 10.0,
+      "y": 30.0,
+      "w": 1500.0,
+      "h": 700.0,
+      "viewport_w": 1800.0,
+      "viewport_h": 760.0
+    },
+    "expected": {
+      "left": {
+        "x": 10.0,
+        "y": 30.0,
+        "w": 200.0,
+        "h": 700.0
+      },
+      "bottom": {
+        "x": 210.0,
+        "y": 550.0,
+        "w": 1300.0,
+        "h": 180.0
+      },
+      "canvas": {
+        "x": 210.0,
+        "y": 30.0,
+        "w": 1300.0,
+        "h": 520.0
+      }
+    }
+  },
+  {
+    "name": "a_maximized_canvas_takes_the_viewport",
+    "setup": "workspace_edge_docks.json",
+    "ops": [
+      {
+        "op": "set_canvas_maximized",
+        "value": true
+      }
+    ],
+    "cell": {
+      "x": 10.0,
+      "y": 30.0,
+      "w": 1500.0,
+      "h": 700.0,
+      "viewport_w": 1800.0,
+      "viewport_h": 760.0
+    },
+    "expected": {
+      "left": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 200.0,
+        "h": 760.0
+      },
+      "bottom": {
+        "x": 200.0,
+        "y": 580.0,
+        "w": 1600.0,
+        "h": 180.0
+      },
+      "canvas": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 1800.0,
+        "h": 760.0
+      }
+    }
+  },
+  {
+    "name": "no_edge_dock_leaves_the_cell_to_the_canvas",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [],
+    "cell": {
+      "x": 10.0,
+      "y": 30.0,
+      "w": 1500.0,
+      "h": 700.0,
+      "viewport_w": 1800.0,
+      "viewport_h": 760.0
+    },
+    "expected": {
+      "left": null,
+      "bottom": null,
+      "canvas": {
+        "x": 10.0,
+        "y": 30.0,
+        "w": 1500.0,
+        "h": 700.0
+      }
+    }
+  }
+]

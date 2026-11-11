@@ -1410,6 +1410,14 @@ static class Program
         Eq("edge rects: null rects, no field, or a rect missing a side are each refused", "(null)|(null)|(null)",
             ShowRects(LayoutWire.EdgeRects(state.Replace("\"z_order\":[]", "\"z_order\":[],\"edge_rects\":null"))) + "|" + ShowRects(LayoutWire.EdgeRects(state)) + "|"
             + ShowRects(LayoutWire.EdgeRects(edges.Replace(",\"h\":180.0}", "}"))));
+        // jas 823: the rects are no longer on the layout reply. They are the
+        // answer to `jas_layout_edge_rects`, asked with the shell's own cell,
+        // and that answer is the same `edge_rects` object the reader reads.
+        Eq("edge rects: the query's bare answer reads as the layout reply's field did", "L0,40,220,600|B-|C220,40,780,600",
+            ShowRects(LayoutWire.EdgeRects("""{"edge_rects":{"left":{"x":0.0,"y":40.0,"w":220.0,"h":600.0},"bottom":null,"canvas":{"x":220.0,"y":40.0,"w":780.0,"h":600.0}}}""")));
+        Eq("edge cell: the shell's cell is sent in DIPs with every key the engine reads, culture-invariant",
+            """{"x":0,"y":40.5,"w":1000,"h":600,"viewport_w":1300,"viewport_h":700}""",
+            LayoutWire.EdgeCell(0, 40.5, 1000, 600, 1300, 700));
         var floatDefects = new[]
         {
             floats.Replace(",\"x\":100.0", ""),

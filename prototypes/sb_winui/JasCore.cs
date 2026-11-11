@@ -647,6 +647,15 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_layout_apply(IntPtr engine, byte[] op, nuint len);
 
+    /// <summary>
+    /// The edge-dock rectangles cut from the shell's own canvas cell (jas 823):
+    /// `cell` is `PanelWire.LayoutWire.EdgeCell`'s JSON, the answer is
+    /// `{"edge_rects":{...}}`. A query that changes nothing. An empty span is a
+    /// refusal (`BadCell`, `BadJson`, `NoLayout`) in <see cref="jas_last_error_json"/>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_layout_edge_rects(IntPtr engine, byte[] cell, nuint len);
+
     // -- events (BL1: the shell sends events, never state) -------------------
 
     /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>

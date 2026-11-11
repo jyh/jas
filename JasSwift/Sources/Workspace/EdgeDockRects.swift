@@ -81,6 +81,19 @@ extension WorkspaceLayout {
             maximized: pl.canvasMaximized,
             viewportW: pl.viewportWidth, viewportH: pl.viewportHeight)
     }
+
+    /// The edge-dock rectangles cut from an APP's own canvas cell (jas 823),
+    /// for an app whose pane layout is not its real geometry. Rule 8 reads
+    /// this layout's `canvasMaximized`, `false` with no pane layout; the cell
+    /// needs no pane layout, since it is the app's. Rust's
+    /// `edge_dock_rects_in`; the corpus is `edge_dock_rects.json`.
+    public func edgeDockRects(inCell cell: EdgeRect, viewportW: Double, viewportH: Double) -> EdgeDockRects {
+        JasLib.edgeDockRects(
+            left: anchoredDock(.left), bottom: anchoredDock(.bottom),
+            canvasPane: cell,
+            maximized: paneLayout?.canvasMaximized ?? false,
+            viewportW: viewportW, viewportH: viewportH)
+    }
 }
 
 /// The accessibility identifier of an edge dock's drawn container. It is the

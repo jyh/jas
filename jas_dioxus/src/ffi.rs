@@ -1075,7 +1075,8 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 /// The engine's layout as a shell draws it, or the empty span with
 /// `{"panel_event":"NoLayout"}` before a load.
 /// The viewport the engine's pane layout is seeded at. Nominal: no reply
-/// carries pane geometry, only visibility and maximization.
+/// carries pane geometry, only visibility and maximization. A shell that needs
+/// geometry passes its own cell ([`jas_layout_edge_rects`], jas 823).
 const ENGINE_PANE_VIEWPORT: (f64, f64) = (1200.0, 900.0);
 
 fn layout_reply(engine: &JasEngine) -> JasBytes {
@@ -1187,6 +1188,49 @@ pub unsafe extern "C" fn jas_layout_apply(e: *mut JasEngine, op: *const u8, len:
     }
     let out = layout_reply(engine);
     ffi_instr::record_out(Crossing::LayoutApply, out.len);
+    out
+}
+
+/// **The edge-dock rectangles** (WORKSPACE.md "Where each edge dock is
+/// drawn") cut from the SHELL's own canvas cell: `cell` is
+/// `{"x","y","w","h","viewport_w","viewport_h"}` in DIPs, and the answer is
+/// `{"edge_rects":{"left","bottom","canvas"}}`, an edge with no dock as
+/// `null`. The engine's pane layout is nominal ([`ENGINE_PANE_VIEWPORT`]), so
+/// the cell is the shell's to pass, on every call; it is never stored, so it
+/// cannot go stale (jas 823). Rule 8 reads the held `canvas_maximized`.
+///
+/// A query: it changes nothing. A refusal is the empty span: `BadUtf8`,
+/// `BadJson`, `NoLayout`, or `BadCell` (detail: the key) for a key that is
+/// missing, not a number, or (for `w`, `h`) negative.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or an engine from [`jas_engine_new`]; `cell` NULL or valid
+/// for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u8, len: usize) -> JasBytes {
+    ffi_instr::record(Crossing::LayoutEdgeRects, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let Ok(raw) = (unsafe { utf8(cell, len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(cell) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasBytes::empty();
+    };
+    let answer = match engine.layout.borrow().as_ref() {
+        Some(l) => crate::workspace::edge_dock::edge_rects_reply(l, &cell),
+        None => Err(("NoLayout", String::new())),
+    };
+    let out = match answer {
+        Ok(v) => JasBytes::from_string(v.to_string()),
+        Err((class, detail)) => {
+            set_panel_event_error(engine, class, &detail);
+            JasBytes::empty()
+        }
+    };
+    ffi_instr::record_out(Crossing::LayoutEdgeRects, out.len);
     out
 }
 
@@ -7686,6 +7730,54 @@ mod tests {
         assert_eq!(layout_op(e, r#"{"op":"toggle_dock_collapsed","edge":"top"}"#), "");
         assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadLayoutOp", "toggle_dock_collapsed"));
         assert_eq!(json(&take(unsafe { jas_layout_state(e) })), held, "the refusal changed nothing");
+        unsafe { jas_engine_free(e) };
+    }
+
+    fn edge_rects_of(e: *mut JasEngine, cell: &str) -> String {
+        take(unsafe { jas_layout_edge_rects(e, cell.as_ptr(), cell.len()) })
+    }
+
+    /// jas 823: the edge-dock rectangles are cut from the cell the SHELL
+    /// passes, never from the engine's nominal pane layout (flask 822 measured
+    /// `canvas = 72,0 888x900` for every window). A Left dock made by a real
+    /// snap is drawn in the shell's cell, and the held layout is not changed.
+    #[test]
+    fn edge_rects_are_cut_from_the_shells_cell() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        layout_load(e, "Default");
+        layout_op(e, r#"{"op":"detach_group","dock_id":0,"group_idx":0,"x":100.0,"y":200.0}"#);
+        let held = json(&layout_op(e, r#"{"op":"snap_to_edge","dock_id":1,"edge":"left"}"#));
+        let width = held["anchored"].as_array().unwrap().iter()
+            .find(|d| d["edge"] == "left").and_then(|d| d["width"].as_f64()).expect("a Left dock");
+        let got = json(&edge_rects_of(e, r#"{"x":0.0,"y":40.0,"w":1000.0,"h":600.0,"viewport_w":1300.0,"viewport_h":700.0}"#));
+        let rect = |x: f64, y: f64, w: f64, h: f64| serde_json::json!({"x": x, "y": y, "w": w, "h": h});
+        assert_eq!(got["edge_rects"]["left"], rect(0.0, 40.0, width, 600.0), "{got}");
+        assert_eq!(got["edge_rects"]["bottom"], serde_json::Value::Null, "{got}");
+        assert_eq!(got["edge_rects"]["canvas"], rect(width, 40.0, 1000.0 - width, 600.0), "{got}");
+        assert_eq!(take(unsafe { jas_layout_state(e) }), held.to_string(), "a query changes nothing");
+        assert!(held.as_object().is_some_and(|o| !o.contains_key("edge_rects")), "the reply carries none: {held}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Each refusal is the empty span and names its class: `NoLayout` before a
+    /// load, `BadUtf8`, `BadJson`, and `BadCell` with the key.
+    #[test]
+    fn an_edge_rects_query_is_refused_by_name() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let good = r#"{"x":0.0,"y":0.0,"w":100.0,"h":100.0,"viewport_w":100.0,"viewport_h":100.0}"#;
+        assert_eq!(edge_rects_of(e, good), "", "nothing before a load");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("NoLayout", ""));
+        layout_load(e, "Default");
+        let bad = [0xffu8, 0xfe];
+        assert_eq!(take(unsafe { jas_layout_edge_rects(e, bad.as_ptr(), bad.len()) }), "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadUtf8", ""));
+        assert_eq!(edge_rects_of(e, "{"), "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadJson", ""));
+        assert_eq!(edge_rects_of(e, &good.replace(r#""h":100.0,"#, "")), "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadCell", "h"));
+        assert_ne!(edge_rects_of(e, good), "", "the control cell is answered");
         unsafe { jas_engine_free(e) };
     }
 
