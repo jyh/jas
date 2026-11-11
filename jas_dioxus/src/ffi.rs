@@ -213,6 +213,12 @@ pub struct JasEngine {
     /// shell holds only the clock, so a tick for an id not here (cancelled,
     /// already fired, never started) runs nothing.
     timers: RefCell<std::collections::BTreeMap<(String, String), Vec<serde_json::Value>>>,
+    /// The agent session beside the document (O25 A6 R2): the attached
+    /// client's subscription and proposal counter. It BORROWS `model` per call
+    /// (`mcp::SessionState`), so the engine stays the document's one owner and
+    /// a proposal is drawn, accepted and undone in the document the shell
+    /// paints. Reset by [`jas_mcp_attach`] for each client.
+    mcp: RefCell<crate::mcp::SessionState>,
 }
 
 impl JasEngine {
@@ -437,6 +443,7 @@ impl JasEngine {
             tool: RefCell::new(None),
             layout: RefCell::new(None),
             timers: RefCell::new(std::collections::BTreeMap::new()),
+            mcp: RefCell::new(crate::mcp::SessionState::new()),
         }
     }
 }
@@ -2753,6 +2760,140 @@ pub unsafe extern "C" fn jas_widget_tree(
 // ---------------------------------------------------------------------------
 // Tests — the Rust half of the boundary, provable without a shell
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The agent API (O25 A6 R2): an MCP session beside the engine's model
+// ---------------------------------------------------------------------------
+//
+// The shell is the TRANSPORT (a named pipe on Windows, as the Mac's app serves
+// a Unix socket): it reads one JSON-RPC line from the client, hands it to
+// `jas_mcp_handle` on the thread that owns this engine (BL2), and writes back
+// what it returns. The accept bar reads `jas_mcp_pending` and its two buttons
+// call `jas_mcp_accept` / `jas_mcp_reject`. ACCEPT IS THE ARTIST'S: no client
+// line can accept (`mcp::tool_list` offers no such tool).
+//
+// Every `JasBytes` these return is zero or more JSON-RPC lines, each ending in
+// `\n`, ready to write to the client as they are. Empty means nothing is owed.
+
+/// The lines `lines` as one span, each newline-terminated.
+fn mcp_lines(lines: Vec<String>) -> JasBytes {
+    let mut s = String::new();
+    for l in lines {
+        s.push_str(&l);
+        s.push('\n');
+    }
+    JasBytes::from_string(s)
+}
+
+/// **A client attached: start a fresh session** for it, as the Mac makes one
+/// `McpSession` per client. The previous client's subscription and proposal
+/// counter are gone; a proposal it left pending stays in the document until
+/// the artist decides it. 1 when reset, 255 for a null engine.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_mcp_attach(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    let mut st = crate::mcp::SessionState::new();
+    engine.with_model(|m| st.observe(m));
+    *engine.mcp.borrow_mut() = st;
+    1
+}
+
+/// **One line from the client**: what changed outside the session since it
+/// last looked ([`jas_mcp_observe`]'s lines), then the reply and its
+/// notifications. A line that is not UTF-8 is answered as a JSON-RPC parse
+/// error, never dropped. NULL handle: the empty span.
+///
+/// # Safety
+/// `e` must be NULL or a live engine pointer; `line` must be NULL or valid
+/// for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_mcp_handle(e: *mut JasEngine, line: *const u8, len: usize) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let bytes: &[u8] = if line.is_null() || len == 0 { &[] } else {
+        unsafe { std::slice::from_raw_parts(line, len) }
+    };
+    let text = String::from_utf8_lossy(bytes);
+    let mut st = engine.mcp.borrow_mut();
+    let out = engine.with_model_mut(|m| {
+        let mut out = st.observe(m);
+        out.extend(st.handle(m, &text));
+        out
+    });
+    mcp_lines(out)
+}
+
+/// **The bar's Accept**: the pending proposal lands as ONE undoable
+/// transaction under the client's actor (`ai`), and the client is told its
+/// fate. Nothing pending: the empty span (any outside change is still
+/// reported). NULL handle: the empty span.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_mcp_accept(e: *mut JasEngine) -> JasBytes {
+    unsafe { mcp_decide(e, true) }
+}
+
+/// **The bar's Reject**: the document returns to what it was before the
+/// preview, nothing is journaled, and the client is told. As
+/// [`jas_mcp_accept`] otherwise.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_mcp_reject(e: *mut JasEngine) -> JasBytes {
+    unsafe { mcp_decide(e, false) }
+}
+
+/// The body of the bar's two buttons.
+unsafe fn mcp_decide(e: *mut JasEngine, accept: bool) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let mut st = engine.mcp.borrow_mut();
+    let out = engine.with_model_mut(|m| {
+        let mut out = st.observe(m);
+        if let Some(id) = m.pending_proposal_id().map(str::to_string) {
+            out.extend(if accept { st.artist_accept(m, &id) } else { st.artist_reject(m, &id) });
+        }
+        out
+    });
+    mcp_lines(out)
+}
+
+/// **What the artist did outside the session, for the client**: a pending
+/// proposal withdrawn by an edit or an undo, and, to a subscriber, a change to
+/// the settled document, each reported once. The shell calls this after each
+/// crossing that can edit (a pointer, an action, a dispatch) while a client is
+/// attached, and writes the lines to it: no callback crosses this ABI (BL3),
+/// so the shell pulls what the Mac's model pushes. NULL handle: the empty span.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_mcp_observe(e: *mut JasEngine) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let mut st = engine.mcp.borrow_mut();
+    mcp_lines(engine.with_model(|m| st.observe(m)))
+}
+
+/// **What the accept bar shows**: `{"id": "...", "name": "..."}` for the
+/// pending proposal, or `null` when none is. The bar draws "Proposed: <name>"
+/// with Accept and Reject while this is not null, as the Mac's does. NULL
+/// handle: the empty span. **BL4**: copy, then [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_mcp_pending(e: *mut JasEngine) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let v = engine.with_model(|m| match (m.pending_proposal_id(), m.pending_proposal_name()) {
+        (Some(id), Some(name)) => serde_json::json!({"id": id, "name": name}),
+        _ => serde_json::Value::Null,
+    });
+    JasBytes::from_string(v.to_string())
+}
 
 #[cfg(test)]
 mod tests {
@@ -10525,6 +10666,187 @@ mod tests {
             let vb = l["display"]["preview.viewbox"].as_str();
             assert_eq!(vb, w.as_ref().map(|_| crate::brush_preview::VIEWBOX), "leaf {i}");
         }
+        unsafe { jas_engine_free(e) };
+    }
+}
+
+/// A6 R2: the agent API's session beside the engine's model, through the C ABI.
+#[cfg(test)]
+mod mcp_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn fixture(rel: &str) -> String {
+        std::fs::read_to_string(format!("{}/../test_fixtures/{rel}", env!("CARGO_MANIFEST_DIR")))
+            .unwrap_or_else(|e| panic!("fixture {rel}: {e}"))
+    }
+
+    /// Copy a returned span and free it (BL4), split into its lines.
+    fn take_lines(b: JasBytes) -> Vec<Value> {
+        let text = if b.ptr.is_null() { String::new() } else {
+            String::from_utf8(unsafe { std::slice::from_raw_parts(b.ptr, b.len) }.to_vec()).unwrap()
+        };
+        unsafe { jas_free(b) };
+        assert!(text.is_empty() || text.ends_with('\n'), "every line is newline-terminated: {text:?}");
+        text.lines().map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("{e}: {l}"))).collect()
+    }
+
+    fn take_json(b: JasBytes) -> Value {
+        let text = String::from_utf8(unsafe { std::slice::from_raw_parts(b.ptr, b.len) }.to_vec()).unwrap();
+        unsafe { jas_free(b) };
+        serde_json::from_str(&text).unwrap()
+    }
+
+    fn send(e: *mut JasEngine, msg: &Value) -> Vec<Value> {
+        let line = msg.to_string();
+        take_lines(unsafe { jas_mcp_handle(e, line.as_ptr(), line.len()) })
+    }
+
+    fn propose(e: *mut JasEngine, id: u64, name: &str) -> Vec<Value> {
+        send(e, &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": "propose",
+            "arguments": {"name": name, "ops": [
+                {"op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false},
+                {"op": "move_selection", "dx": 10, "dy": 20}]}}}))
+    }
+
+    fn two_rects_engine() -> *mut JasEngine {
+        let e = jas_engine_new();
+        let doc = crate::geometry::svg::svg_to_document(&fixture("svg/two_rects.svg"));
+        unsafe { &*e }.replace_document(doc);
+        e
+    }
+
+    /// The transport corpus, replayed through the ENGINE: every case of
+    /// `operations/mcp_exchanges.json`, with the artist's accept and reject
+    /// through `jas_mcp_accept` / `jas_mcp_reject` (the bar's two buttons), and
+    /// the artist's edit and undo made OUTSIDE the session, on the engine's
+    /// model, as a shell's ordinary crossing makes them, then reported by
+    /// `jas_mcp_observe`. The outgoing lines must match the corpus, which
+    /// `mcp::Session` (`cross_language_test::mcp_exchanges`) and Swift's
+    /// `McpSession` also replay. Anti-vacuity: the case count, the outside
+    /// acts that ran, and every step's outgoing count.
+    #[test]
+    fn mcp_exchanges_replay_through_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let file: Value = serde_json::from_str(&fixture("operations/mcp_exchanges.json")).unwrap();
+        let cases = file["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8, "mcp_exchanges has {} cases", cases.len());
+        let mut outside = 0;
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let doc = crate::geometry::svg::svg_to_document(
+                &fixture(&format!("svg/{}", case["setup_svg"].as_str().unwrap())));
+            let settled: Value = serde_json::from_str(&crate::geometry::test_json::document_to_test_json(&doc)).unwrap();
+            let e = jas_engine_new();
+            let engine = unsafe { &*e };
+            engine.replace_document(doc);
+            assert_eq!(unsafe { jas_mcp_attach(e) }, 1);
+            for (i, step) in case["steps"].as_array().unwrap().iter().enumerate() {
+                let out = if let Some(msg) = step.get("client") {
+                    send(e, msg)
+                } else {
+                    let act = step["artist"].as_str().unwrap();
+                    if let Some(pid) = step["proposal"].as_str() {
+                        assert_eq!(engine.with_model(|m| m.pending_proposal_id().map(str::to_string)).as_deref(),
+                            Some(pid), "{name} step {i}: the bar acts on the pending proposal");
+                    }
+                    match act {
+                        "accept" => take_lines(unsafe { jas_mcp_accept(e) }),
+                        "reject" => take_lines(unsafe { jas_mcp_reject(e) }),
+                        "undo" => {
+                            engine.with_model_mut(|m| m.undo());
+                            outside += 1;
+                            take_lines(unsafe { jas_mcp_observe(e) })
+                        }
+                        "edit" => {
+                            let ops = step["ops"].as_array().unwrap().clone();
+                            engine.with_model_mut(|m| m.with_txn(|m| for op in &ops {
+                                op_apply(m, op).expect("an edit op applies");
+                            }));
+                            outside += 1;
+                            take_lines(unsafe { jas_mcp_observe(e) })
+                        }
+                        other => panic!("{name}: unknown artist act {other}"),
+                    }
+                };
+                let want = step["expect"].as_array().unwrap();
+                assert_eq!(want.len(), out.len(), "{name} step {i}: outgoing count; got {out:?}");
+                for (k, (w, g)) in want.iter().zip(&out).enumerate() {
+                    crate::mcp::exchange_match(w, g, &settled, &format!("{name} step {i} message {k}"));
+                }
+            }
+            unsafe { jas_engine_free(e) };
+        }
+        assert!(outside >= 2, "the corpus exercised {outside} outside act(s); the edit and the undo are both owed");
+    }
+
+    /// What the accept bar reads: the pending proposal's id and name, or null.
+    #[test]
+    fn mcp_pending_reads_what_the_bar_shows() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects_engine();
+        unsafe { jas_mcp_attach(e) };
+        assert_eq!(take_json(unsafe { jas_mcp_pending(e) }), Value::Null);
+        propose(e, 1, "nudge");
+        assert_eq!(take_json(unsafe { jas_mcp_pending(e) }), json!({"id": "p-0", "name": "nudge"}));
+        let out = take_lines(unsafe { jas_mcp_accept(e) });
+        assert_eq!(out[0]["params"], json!({"proposal": "p-0", "state": "accepted"}), "{out:?}");
+        assert_eq!(take_json(unsafe { jas_mcp_pending(e) }), Value::Null);
+        let journal = unsafe { &*e }.with_model(|m| m.journal()[..m.journal_head()].iter()
+            .map(|t| t.actor.clone()).collect::<Vec<_>>());
+        assert_eq!(journal, vec!["ai".to_string()], "the accept is ONE ai transaction");
+        // With nothing pending, the bar's buttons do nothing and say nothing.
+        assert!(take_lines(unsafe { jas_mcp_accept(e) }).is_empty());
+        assert!(take_lines(unsafe { jas_mcp_reject(e) }).is_empty());
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Each client attach starts a fresh session (the Mac makes one
+    /// `McpSession` per client): the proposal counter and the subscription are
+    /// the previous client's, not this one's.
+    #[test]
+    fn mcp_attach_starts_a_fresh_session() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects_engine();
+        unsafe { jas_mcp_attach(e) };
+        send(e, &json!({"jsonrpc": "2.0", "id": 1, "method": "resources/subscribe", "params": {"uri": "jas://document"}}));
+        assert_eq!(propose(e, 2, "a")[0]["result"]["structuredContent"]["proposal"], "p-0");
+        take_lines(unsafe { jas_mcp_reject(e) });
+        assert_eq!(propose(e, 3, "b")[0]["result"]["structuredContent"]["proposal"], "p-1");
+        take_lines(unsafe { jas_mcp_reject(e) });
+        assert_eq!(unsafe { jas_mcp_attach(e) }, 1);
+        assert_eq!(propose(e, 1, "c")[0]["result"]["structuredContent"]["proposal"], "p-0",
+            "a new client's counter starts again");
+        let out = take_lines(unsafe { jas_mcp_accept(e) });
+        assert!(out.iter().all(|m| m["method"] != "notifications/resources/updated"),
+            "the new client never subscribed: {out:?}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A null engine: 255 from the u8 entry, the empty span from the rest.
+    #[test]
+    fn mcp_entries_on_a_null_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let n = std::ptr::null_mut();
+        assert_eq!(unsafe { jas_mcp_attach(n) }, 255);
+        let line = "{}";
+        for b in [unsafe { jas_mcp_handle(n, line.as_ptr(), line.len()) }, unsafe { jas_mcp_accept(n) },
+                  unsafe { jas_mcp_reject(n) }, unsafe { jas_mcp_observe(n) }, unsafe { jas_mcp_pending(n) }] {
+            assert!(b.ptr.is_null() && b.len == 0);
+        }
+    }
+
+    /// A line that is not UTF-8 is answered as JSON-RPC's parse error, as the
+    /// socket would answer it, never dropped.
+    #[test]
+    fn mcp_handle_answers_bad_bytes_with_a_parse_error() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects_engine();
+        unsafe { jas_mcp_attach(e) };
+        let bad = [0xff_u8, 0xfe];
+        let out = take_lines(unsafe { jas_mcp_handle(e, bad.as_ptr(), bad.len()) });
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["error"]["code"], -32700);
         unsafe { jas_engine_free(e) };
     }
 }

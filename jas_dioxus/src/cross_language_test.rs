@@ -482,44 +482,13 @@ pub(crate) mod tests {
         assert_svg_parse("line_basic");
     }
 
-    /// The `mcp_exchanges.json` matcher (its `_doc` states the rules): a
-    /// subset match on objects, exact length on arrays, `"<any>"`, an expected
-    /// object against an actual JSON string, and `"<settled>"`.
-    fn mcp_match(want: &serde_json::Value, got: &serde_json::Value, settled: &serde_json::Value, at: &str) {
-        use serde_json::Value;
-        match want {
-            Value::String(w) if w == "<any>" => {}
-            Value::String(w) if w == "<settled>" => assert_eq!(got, settled, "{at}: not the settled document"),
-            Value::Object(wm) => {
-                let parsed;
-                let got = match got {
-                    Value::String(t) => { parsed = serde_json::from_str::<Value>(t).unwrap_or(Value::Null); &parsed }
-                    g => g,
-                };
-                let gm = got.as_object().unwrap_or_else(|| panic!("{at}: expected an object, got {got}"));
-                for (k, wv) in wm {
-                    let gv = gm.get(k).unwrap_or_else(|| panic!("{at}: missing key `{k}` in {got}"));
-                    mcp_match(wv, gv, settled, &format!("{at}.{k}"));
-                }
-            }
-            Value::Array(wa) => {
-                let ga = got.as_array().unwrap_or_else(|| panic!("{at}: expected an array, got {got}"));
-                assert_eq!(wa.len(), ga.len(), "{at}: array length; got {got}");
-                for (i, (wv, gv)) in wa.iter().zip(ga).enumerate() {
-                    mcp_match(wv, gv, settled, &format!("{at}[{i}]"));
-                }
-            }
-            w => assert_eq!(w, got, "{at}"),
-        }
-    }
-
     /// A4, the transport conformance corpus: every case of
     /// `operations/mcp_exchanges.json` replayed through `mcp::Session`. Swift's
     /// twin is `mcpExchanges`. Anti-vacuity: the corpus has cases, and every
     /// step's outgoing count is asserted (an empty expectation is a claim).
     #[test]
     fn mcp_exchanges() {
-        use crate::mcp::Session;
+        use crate::mcp::{exchange_match as mcp_match, Session};
         let file: serde_json::Value = serde_json::from_str(&read_fixture("operations/mcp_exchanges.json")).unwrap();
         let cases = file["cases"].as_array().unwrap();
         assert!(cases.len() >= 8, "mcp_exchanges has {} cases", cases.len());

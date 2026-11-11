@@ -1524,6 +1524,12 @@ impl Model {
         self.pending_proposal.as_ref().map(|p| p.id.as_str())
     }
 
+    /// The pending proposal's name, which the accept bar shows (Swift:
+    /// `pendingProposalName`).
+    pub fn pending_proposal_name(&self) -> Option<&str> {
+        self.pending_proposal.as_ref().map(|p| p.name.as_str())
+    }
+
     /// The document as it stands without the preview: the held document while
     /// a proposal is pending, else the live one. The journal replays to this
     /// (a preview is not history).

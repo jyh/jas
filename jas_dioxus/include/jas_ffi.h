@@ -1157,6 +1157,74 @@ struct JasBytes jas_widget_tree(struct JasEngine *e,
                                 uintptr_t ctx_len);
 
 /**
+ * **A client attached: start a fresh session** for it, as the Mac makes one
+ * `McpSession` per client. The previous client's subscription and proposal
+ * counter are gone; a proposal it left pending stays in the document until
+ * the artist decides it. 1 when reset, 255 for a null engine.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uint8_t jas_mcp_attach(struct JasEngine *e);
+
+/**
+ * **One line from the client**: what changed outside the session since it
+ * last looked ([`jas_mcp_observe`]'s lines), then the reply and its
+ * notifications. A line that is not UTF-8 is answered as a JSON-RPC parse
+ * error, never dropped. NULL handle: the empty span.
+ *
+ * # Safety
+ * `e` must be NULL or a live engine pointer; `line` must be NULL or valid
+ * for `len` bytes.
+ */
+struct JasBytes jas_mcp_handle(struct JasEngine *e, const uint8_t *line, uintptr_t len);
+
+/**
+ * **The bar's Accept**: the pending proposal lands as ONE undoable
+ * transaction under the client's actor (`ai`), and the client is told its
+ * fate. Nothing pending: the empty span (any outside change is still
+ * reported). NULL handle: the empty span.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+struct JasBytes jas_mcp_accept(struct JasEngine *e);
+
+/**
+ * **The bar's Reject**: the document returns to what it was before the
+ * preview, nothing is journaled, and the client is told. As
+ * [`jas_mcp_accept`] otherwise.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+struct JasBytes jas_mcp_reject(struct JasEngine *e);
+
+/**
+ * **What the artist did outside the session, for the client**: a pending
+ * proposal withdrawn by an edit or an undo, and, to a subscriber, a change to
+ * the settled document, each reported once. The shell calls this after each
+ * crossing that can edit (a pointer, an action, a dispatch) while a client is
+ * attached, and writes the lines to it: no callback crosses this ABI (BL3),
+ * so the shell pulls what the Mac's model pushes. NULL handle: the empty span.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+struct JasBytes jas_mcp_observe(struct JasEngine *e);
+
+/**
+ * **What the accept bar shows**: `{"id": "...", "name": "..."}` for the
+ * pending proposal, or `null` when none is. The bar draws "Proposed: <name>"
+ * with Accept and Reject while this is not null, as the Mac's does. NULL
+ * handle: the empty span. **BL4**: copy, then [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+struct JasBytes jas_mcp_pending(struct JasEngine *e);
+
+/**
  * How many tools the shell may select. Pairs with [`jas_tool_name`].
  *
  * # Safety

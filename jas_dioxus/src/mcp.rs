@@ -27,25 +27,78 @@ pub const JOURNAL_URI: &str = "jas://journal";
 /// The journal actor a client's proposals land under (OP_LOG.md §5).
 pub const CLIENT_ACTOR: &str = "ai";
 
-/// One MCP session over one document.
-pub struct Session {
-    model: Model,
+/// What one MCP session holds BESIDE its document: the client's subscription
+/// and the proposal counter. Every call borrows the document's [`Model`], so
+/// the owner of the document stays its one owner (A6 R1, F1 (a)): `JasEngine`
+/// keeps a `SessionState` next to its model, and [`Session`] is this state
+/// plus an owned model, for `jas_mcp`'s headless mode. The pending proposal
+/// itself lives in the model (`Model::propose`), so an edit that reaches the
+/// model by any route withdraws it; [`SessionState::observe`] is how such an
+/// edit is REPORTED to the client (A6 R2).
+#[derive(Debug, Default)]
+pub struct SessionState {
     subscribed: bool,
     next_proposal: u64,
+    /// The pending proposal's id as the session last saw it, so `observe`
+    /// can report one that vanished outside the session.
+    last_pending: Option<String>,
+    /// The settled document (test JSON) as last reported, kept only while a
+    /// client is subscribed: the comparison serialises the document.
+    last_settled: Option<String>,
 }
 
-impl Session {
-    pub fn new(model: Model) -> Self {
-        Session { model, subscribed: false, next_proposal: 0 }
-    }
-
-    pub fn model(&self) -> &Model {
-        &self.model
+impl SessionState {
+    pub fn new() -> Self {
+        SessionState::default()
     }
 
     /// Answer one incoming JSON-RPC line. Returns the outgoing lines: the
     /// response (if the message was a request) followed by any notifications.
-    pub fn handle(&mut self, line: &str) -> Vec<String> {
+    pub fn handle(&mut self, model: &mut Model, line: &str) -> Vec<String> {
+        let out = self.handle_message(model, line);
+        self.rebaseline(model);
+        out
+    }
+
+    /// What changed OUTSIDE the session since it last looked, as the lines a
+    /// client is owed (A6 R2): a pending proposal that vanished ("withdrawn",
+    /// by an artist edit, an undo or a new document) and, to a subscriber, a
+    /// change to the settled document. Every act of the session itself
+    /// re-baselines, so nothing it returned is reported twice.
+    ///
+    /// ⛔ PULL, NOT PUSH, BECAUSE OF THE C ABI. The Mac's `McpSession` hangs
+    /// callbacks on its model (`onProposalWithdrawn`, `onTransactionCommitted`)
+    /// and pushes. No function pointer crosses this ABI (BL3), so a shell that
+    /// edits through its ordinary crossings calls `jas_mcp_observe` after each
+    /// one while a client is attached, and writes what it returns.
+    pub fn observe(&mut self, model: &Model) -> Vec<String> {
+        let mut out = Vec::new();
+        let now_pending = model.pending_proposal_id().map(str::to_string);
+        if let Some(p) = self.last_pending.take() {
+            if now_pending.as_deref() != Some(p.as_str()) {
+                out.push(notification("notifications/jas/proposal",
+                    json!({"proposal": p, "state": "withdrawn"})));
+            }
+        }
+        self.last_pending = now_pending;
+        if self.subscribed {
+            let now = document_to_test_json(model.document_without_preview());
+            if self.last_settled.as_deref().is_some_and(|prev| prev != now) {
+                out.push(notification("notifications/resources/updated", json!({"uri": DOCUMENT_URI})));
+            }
+            self.last_settled = Some(now);
+        }
+        out
+    }
+
+    /// Record the model as the session now leaves it, after one of its own acts.
+    fn rebaseline(&mut self, model: &Model) {
+        self.last_pending = model.pending_proposal_id().map(str::to_string);
+        self.last_settled = self.subscribed
+            .then(|| document_to_test_json(model.document_without_preview()));
+    }
+
+    fn handle_message(&mut self, model: &mut Model, line: &str) -> Vec<String> {
         let msg: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => return vec![error(Value::Null, -32700, &format!("parse error: {e}"))],
@@ -65,7 +118,7 @@ impl Session {
             }))],
             "ping" => vec![result(id, json!({}))],
             "tools/list" => vec![result(id, json!({"tools": tool_list()}))],
-            "tools/call" => self.call_tool(id, params),
+            "tools/call" => self.call_tool(model, id, params),
             "resources/list" => vec![result(id, json!({"resources": [{
                 "uri": DOCUMENT_URI, "name": "document", "mimeType": "application/json",
                 "description": "The settled document (without any pending preview) and the pending proposal's id."}, {
@@ -73,11 +126,11 @@ impl Session {
                 "description": "The applied journal: each transaction's name and actor (`ai` for an accepted proposal)."}]}))],
             "resources/read" if params["uri"] == JOURNAL_URI => {
                 vec![result(id, json!({"contents": [{"uri": JOURNAL_URI,
-                    "mimeType": "application/json", "text": self.journal_resource().to_string()}]}))]
+                    "mimeType": "application/json", "text": journal_resource(model).to_string()}]}))]
             }
             "resources/read" if params["uri"] == DOCUMENT_URI => {
                 vec![result(id, json!({"contents": [{"uri": DOCUMENT_URI,
-                    "mimeType": "application/json", "text": self.document_resource().to_string()}]}))]
+                    "mimeType": "application/json", "text": document_resource(model).to_string()}]}))]
             }
             "resources/read" => vec![error(id, -32602, "unknown resource uri")],
             "resources/subscribe" | "resources/unsubscribe" if params["uri"] == DOCUMENT_URI => {
@@ -92,65 +145,50 @@ impl Session {
     }
 
     /// The artist accepts the pending proposal `id`.
-    pub fn artist_accept(&mut self, id: &str) -> Vec<String> {
-        self.artist_act(|m| m.accept_proposal(id).is_ok(), "accepted")
+    pub fn artist_accept(&mut self, model: &mut Model, id: &str) -> Vec<String> {
+        self.artist_act(model, |m| m.accept_proposal(id).is_ok(), "accepted")
     }
 
     /// The artist rejects the pending proposal `id`.
-    pub fn artist_reject(&mut self, id: &str) -> Vec<String> {
-        self.artist_act(|m| m.reject_proposal(id).is_ok(), "rejected")
+    pub fn artist_reject(&mut self, model: &mut Model, id: &str) -> Vec<String> {
+        self.artist_act(model, |m| m.reject_proposal(id).is_ok(), "rejected")
     }
 
     /// The artist edits the document by hand: `f` runs inside one transaction.
     /// A pending proposal is withdrawn by the model before the edit applies.
-    pub fn artist_edit(&mut self, f: impl FnOnce(&mut Model)) -> Vec<String> {
-        self.artist_act(|m| { m.with_txn(f); false }, "withdrawn")
+    pub fn artist_edit(&mut self, model: &mut Model, f: impl FnOnce(&mut Model)) -> Vec<String> {
+        self.artist_act(model, |m| { m.with_txn(f); false }, "withdrawn")
     }
 
     /// The artist undoes. A pending proposal is withdrawn first.
-    pub fn artist_undo(&mut self) -> Vec<String> {
-        self.artist_act(|m| { m.undo(); false }, "withdrawn")
+    pub fn artist_undo(&mut self, model: &mut Model) -> Vec<String> {
+        self.artist_act(model, |m| { m.undo(); false }, "withdrawn")
     }
 
     /// Run one artist act and report what it did to the client: the fate of a
     /// proposal that was pending before the act (`fate` when the act itself
     /// decided it, else "withdrawn"), and a resource update when the settled
     /// document changed and the client subscribed.
-    fn artist_act(&mut self, act: impl FnOnce(&mut Model) -> bool, fate: &str) -> Vec<String> {
-        let before_pending = self.model.pending_proposal_id().map(str::to_string);
-        let before = document_to_test_json(self.model.document_without_preview());
-        let decided = act(&mut self.model);
+    fn artist_act(&mut self, model: &mut Model, act: impl FnOnce(&mut Model) -> bool, fate: &str) -> Vec<String> {
+        let before_pending = model.pending_proposal_id().map(str::to_string);
+        let before = document_to_test_json(model.document_without_preview());
+        let decided = act(model);
         let mut out = Vec::new();
         if let Some(p) = before_pending {
-            if self.model.pending_proposal_id() != Some(p.as_str()) {
+            if model.pending_proposal_id() != Some(p.as_str()) {
                 let state = if decided { fate } else { "withdrawn" };
                 out.push(notification("notifications/jas/proposal",
                     json!({"proposal": p, "state": state})));
             }
         }
-        if self.subscribed && document_to_test_json(self.model.document_without_preview()) != before {
+        if self.subscribed && document_to_test_json(model.document_without_preview()) != before {
             out.push(notification("notifications/resources/updated", json!({"uri": DOCUMENT_URI})));
         }
+        self.rebaseline(model);
         out
     }
 
-    /// The APPLIED journal, up to its head (undone transactions are past it),
-    /// as each transaction's name and actor: what an accept leaves behind.
-    fn journal_resource(&self) -> Value {
-        let head = self.model.journal_head();
-        let txns: Vec<Value> = self.model.journal()[..head].iter()
-            .map(|t| json!({"name": t.name, "actor": t.actor}))
-            .collect();
-        json!({"head": head, "transactions": txns})
-    }
-
-    fn document_resource(&self) -> Value {
-        let doc: Value = serde_json::from_str(&document_to_test_json(self.model.document_without_preview()))
-            .unwrap_or(Value::Null);
-        json!({"document": doc, "pending_proposal": self.model.pending_proposal_id()})
-    }
-
-    fn call_tool(&mut self, id: Value, params: &Value) -> Vec<String> {
+    fn call_tool(&mut self, model: &mut Model, id: Value, params: &Value) -> Vec<String> {
         let args = &params["arguments"];
         match params["name"].as_str().unwrap_or("") {
             "propose" => {
@@ -158,7 +196,7 @@ impl Session {
                     return vec![error(id, -32602, "propose needs `name` (string) and `ops` (array)")];
                 };
                 let pid = format!("p-{}", self.next_proposal);
-                match self.model.propose(&pid, CLIENT_ACTOR, name, ops) {
+                match model.propose(&pid, CLIENT_ACTOR, name, ops) {
                     Ok(()) => {
                         self.next_proposal += 1;
                         vec![tool_result(id, false, &format!(
@@ -170,7 +208,7 @@ impl Session {
             }
             "withdraw_proposal" => {
                 let pid = args["proposal"].as_str().unwrap_or("");
-                match self.model.reject_proposal(pid) {
+                match model.reject_proposal(pid) {
                     Ok(()) => vec![tool_result(id, false, &format!("proposal {pid} withdrawn"),
                         json!({"proposal": pid}))],
                     Err(r) => vec![tool_result(id, true, &refusal_text(&r), json!({"refused": refusal_text(&r)}))],
@@ -179,6 +217,60 @@ impl Session {
             other => vec![error(id, -32602, &format!("unknown tool: {other}"))],
         }
     }
+}
+
+/// One MCP session over one OWNED document: a [`SessionState`] and its
+/// [`Model`] together, for `jas_mcp`'s headless mode and the tests. Each method
+/// lends the model to the state's method of the same name.
+pub struct Session {
+    model: Model,
+    state: SessionState,
+}
+
+impl Session {
+    pub fn new(model: Model) -> Self {
+        Session { model, state: SessionState::new() }
+    }
+
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    pub fn handle(&mut self, line: &str) -> Vec<String> {
+        self.state.handle(&mut self.model, line)
+    }
+
+    pub fn artist_accept(&mut self, id: &str) -> Vec<String> {
+        self.state.artist_accept(&mut self.model, id)
+    }
+
+    pub fn artist_reject(&mut self, id: &str) -> Vec<String> {
+        self.state.artist_reject(&mut self.model, id)
+    }
+
+    pub fn artist_edit(&mut self, f: impl FnOnce(&mut Model)) -> Vec<String> {
+        self.state.artist_edit(&mut self.model, f)
+    }
+
+    pub fn artist_undo(&mut self) -> Vec<String> {
+        self.state.artist_undo(&mut self.model)
+    }
+}
+
+/// The APPLIED journal, up to its head (undone transactions are past it),
+/// as each transaction's name and actor: what an accept leaves behind.
+fn journal_resource(model: &Model) -> Value {
+    let head = model.journal_head();
+    let txns: Vec<Value> = model.journal()[..head].iter()
+        .map(|t| json!({"name": t.name, "actor": t.actor}))
+        .collect();
+    json!({"head": head, "transactions": txns})
+}
+
+fn document_resource(model: &Model) -> Value {
+    let doc: Value = serde_json::from_str(&document_to_test_json(model.document_without_preview()))
+        .unwrap_or(Value::Null);
+    json!({"document": doc, "pending_proposal": model.pending_proposal_id()})
 }
 
 /// The declared op vocabulary (A3b): every verb `op_apply` accepts, as data.
@@ -353,6 +445,41 @@ mod attach_tests {
         app.join().unwrap();
         let _ = std::fs::remove_file(&path);
         assert_eq!(String::from_utf8(out).unwrap(), "answer:one\nanswer:two\n");
+    }
+}
+
+/// The `mcp_exchanges.json` matcher (its `_doc` states the rules): a
+/// subset match on objects, exact length on arrays, `"<any>"`, an expected
+/// object against an actual JSON string, and `"<settled>"`.
+/// Shared by the corpus's two replays: through [`Session`]
+/// (`cross_language_test::mcp_exchanges`) and through the C ABI
+/// (`ffi::tests::mcp_exchanges_replay_through_the_engine`).
+#[cfg(test)]
+pub(crate) fn exchange_match(want: &serde_json::Value, got: &serde_json::Value, settled: &serde_json::Value, at: &str) {
+    use serde_json::Value;
+    match want {
+        Value::String(w) if w == "<any>" => {}
+        Value::String(w) if w == "<settled>" => assert_eq!(got, settled, "{at}: not the settled document"),
+        Value::Object(wm) => {
+            let parsed;
+            let got = match got {
+                Value::String(t) => { parsed = serde_json::from_str::<Value>(t).unwrap_or(Value::Null); &parsed }
+                g => g,
+            };
+            let gm = got.as_object().unwrap_or_else(|| panic!("{at}: expected an object, got {got}"));
+            for (k, wv) in wm {
+                let gv = gm.get(k).unwrap_or_else(|| panic!("{at}: missing key `{k}` in {got}"));
+                exchange_match(wv, gv, settled, &format!("{at}.{k}"));
+            }
+        }
+        Value::Array(wa) => {
+            let ga = got.as_array().unwrap_or_else(|| panic!("{at}: expected an array, got {got}"));
+            assert_eq!(wa.len(), ga.len(), "{at}: array length; got {got}");
+            for (i, (wv, gv)) in wa.iter().zip(ga).enumerate() {
+                exchange_match(wv, gv, settled, &format!("{at}[{i}]"));
+            }
+        }
+        w => assert_eq!(w, got, "{at}"),
     }
 }
 
@@ -586,6 +713,100 @@ mod tests {
         assert!(notifications(&out, "notifications/resources/updated").is_empty(), "{out:?}");
         // The proposal's own fate is always reported: the client asked for it.
         assert_eq!(notifications(&out, "notifications/jas/proposal").len(), 1);
+    }
+
+    /// A6 R1 (F1 (a)): the session's state lives BESIDE a model the caller
+    /// owns, as `JasEngine` owns its document, and borrows it per call. The
+    /// caller's model is the one edited (no copy), and the state the client
+    /// set up (its subscription, the proposal counter) persists across calls.
+    #[test]
+    fn borrowed_state_edits_the_callers_model_and_persists_across_calls() {
+        let mut model = Model::new(svg_to_document(TWO_RECTS), None);
+        let mut st = SessionState::new();
+        let line = |id: u64, method: &str, params: Value| {
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string()
+        };
+        let propose_line = |id: u64| line(id, "tools/call", json!({"name": "propose",
+            "arguments": {"name": "move", "ops": move_ops()}}));
+        parse(st.handle(&mut model, &line(1, "resources/subscribe", json!({"uri": "jas://document"}))));
+        let first = parse(st.handle(&mut model, &propose_line(2)));
+        let id = proposal_id(&first);
+        assert_eq!(model.pending_proposal_id(), Some(id.as_str()), "the caller's model holds the proposal");
+        let out = parse(st.artist_reject(&mut model, &id));
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"]["state"], "rejected");
+        let id2 = proposal_id(&parse(st.handle(&mut model, &propose_line(3))));
+        assert_ne!(id2, id, "the proposal counter persists across calls");
+        let out = parse(st.artist_accept(&mut model, &id2));
+        assert_eq!(model.journal_head(), 1);
+        assert_eq!(model.journal()[0].actor, "ai");
+        assert_eq!(notifications(&out, "notifications/resources/updated").len(), 1,
+            "the subscription persists across calls: {out:?}");
+    }
+
+    /// The borrowed form's artist edit and undo report a withdrawal to the
+    /// client exactly as the owned form does.
+    #[test]
+    fn borrowed_state_reports_an_edit_and_an_undo_as_withdrawals() {
+        let mut model = Model::new(svg_to_document(TWO_RECTS), None);
+        let mut st = SessionState::new();
+        let propose_line = |id: u64| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": "propose", "arguments": {"name": "move", "ops": move_ops()}}}).to_string();
+        let id = proposal_id(&parse(st.handle(&mut model, &propose_line(1))));
+        let out = parse(st.artist_edit(&mut model, |m| {
+            crate::document::op_apply::op_apply(m, &json!(
+                {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false}))
+                .unwrap();
+            crate::document::op_apply::op_apply(m, &json!({"op": "move_selection", "dx": 1, "dy": 1}))
+                .unwrap();
+        }));
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
+            json!({"proposal": id, "state": "withdrawn"}));
+        let id2 = proposal_id(&parse(st.handle(&mut model, &propose_line(2))));
+        let out = parse(st.artist_undo(&mut model));
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
+            json!({"proposal": id2, "state": "withdrawn"}));
+        assert_eq!(model.pending_proposal_id(), None);
+    }
+
+    /// A6 R2: `observe` reports what changed OUTSIDE the session since it last
+    /// looked, and nothing the session did itself (each own act re-baselines).
+    #[test]
+    fn observe_reports_outside_changes_once_and_never_the_sessions_own() {
+        let mut model = Model::new(svg_to_document(TWO_RECTS), None);
+        let mut st = SessionState::new();
+        let line = |id: u64, method: &str, params: Value| {
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string()
+        };
+        st.handle(&mut model, &line(1, "resources/subscribe", json!({"uri": "jas://document"})));
+        let id = proposal_id(&parse(st.handle(&mut model, &line(2, "tools/call",
+            json!({"name": "propose", "arguments": {"name": "move", "ops": move_ops()}})))));
+        assert!(st.observe(&model).is_empty(), "a propose is the session's own act");
+        st.artist_accept(&mut model, &id);
+        assert!(st.observe(&model).is_empty(), "an accept is the session's own act");
+        // An edit OUTSIDE the session: the shell's ordinary path.
+        let id2 = proposal_id(&parse(st.handle(&mut model, &line(3, "tools/call",
+            json!({"name": "propose", "arguments": {"name": "move", "ops": move_ops()}})))));
+        model.with_txn(|m| {
+            crate::document::op_apply::op_apply(m, &json!(
+                {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false})).unwrap();
+            crate::document::op_apply::op_apply(m, &json!({"op": "move_selection", "dx": 3, "dy": 3})).unwrap();
+        });
+        let out = parse(st.observe(&model));
+        assert_eq!(notifications(&out, "notifications/jas/proposal").len(), 1, "{out:?}");
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
+            json!({"proposal": id2, "state": "withdrawn"}));
+        assert_eq!(notifications(&out, "notifications/resources/updated").len(), 1, "{out:?}");
+        assert!(st.observe(&model).is_empty(), "reported once");
+    }
+
+    /// `Model::pending_proposal_name` is what the accept bar shows (Swift:
+    /// `pendingProposalName`).
+    #[test]
+    fn the_pending_proposals_name_is_readable_for_the_bar() {
+        let mut s = session();
+        assert_eq!(s.model().pending_proposal_name(), None);
+        propose(&mut s, 1);
+        assert_eq!(s.model().pending_proposal_name(), Some("move"));
     }
 
     #[test]
