@@ -656,6 +656,34 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_layout_edge_rects(IntPtr engine, byte[] cell, nuint len);
 
+    // -- the agent session (A6 R2; the shell's side is W1) -------------------
+    // Every reply is zero or more newline-terminated JSON-RPC lines, written
+    // to the client as they are (McpWire). The render thread makes every call.
+
+    /// <summary>A client attached: a fresh session for it. 1 when reset, 255 for a null engine.</summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_mcp_attach(IntPtr engine);
+
+    /// <summary>One client line, as bytes: what changed outside the session, then the reply.</summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_mcp_handle(IntPtr engine, byte[] line, nuint len);
+
+    /// <summary>The bar's Accept: the pending proposal lands as ONE undoable `ai` transaction.</summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_mcp_accept(IntPtr engine);
+
+    /// <summary>The bar's Reject: the document returns to before the preview; nothing is journaled.</summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_mcp_reject(IntPtr engine);
+
+    /// <summary>What the artist did outside the session, for the client: called after each editing crossing while attached.</summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_mcp_observe(IntPtr engine);
+
+    /// <summary>What the bar shows: `{"id","name"}` or `null` (<see cref="McpWire.Pending"/>).</summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_mcp_pending(IntPtr engine);
+
     // -- events (BL1: the shell sends events, never state) -------------------
 
     /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>
