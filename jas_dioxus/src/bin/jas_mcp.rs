@@ -5,6 +5,10 @@
 ///   jas_mcp --attach PATH  -- relay to a RUNNING app's socket (node A4 (iii)):
 ///                             the Mac app, launched with `--mcp-socket PATH`,
 ///                             owns the document and the session
+///   jas_mcp --attach [PIPE] -- on Windows (O25 A6 R3): relay to a running
+///                             shell's named pipe `\\.\pipe\jas-mcp-<pid>`
+///                             (the shell launched with SB_MCP_PIPE=1); with no
+///                             PIPE, the one such pipe that exists
 ///
 /// A reader thread owns stdin and forwards each line over a channel; the main
 /// thread owns the session and stdout. The split is what makes the server
@@ -41,6 +45,22 @@ fn main() {
         });
         if let Err(e) = jas_dioxus::mcp::relay_attached(stream, std::io::stdin().lock(), std::io::stdout()) {
             eprintln!("jas_mcp: the relay ended: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    // On Windows the running shell serves a named pipe (`mcp_pipe`).
+    #[cfg(windows)]
+    if args.get(1).map(String::as_str) == Some("--attach") {
+        let path = match args.get(2) {
+            Some(p) => p.clone(),
+            None => jas_dioxus::mcp_pipe::discover().unwrap_or_else(|e| {
+                eprintln!("jas_mcp: {e}");
+                std::process::exit(1);
+            }),
+        };
+        if let Err(e) = jas_dioxus::mcp_pipe::relay_attached(&path, std::io::stdin().lock(), std::io::stdout()) {
+            eprintln!("jas_mcp: {e}");
             std::process::exit(1);
         }
         return;
