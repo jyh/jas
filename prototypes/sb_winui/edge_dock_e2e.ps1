@@ -75,15 +75,11 @@ if ($read.error) { "VERDICT: NOT RUN (the UIA read: $($read.error))"; exit 2 }
 $uia = @{}
 foreach ($p in $read.rects.PSObject.Properties) { $uia[$p.Name] = @{ X = [double]$p.Value.X; Y = [double]$p.Value.Y; W = [double]$p.Value.W; H = [double]$p.Value.H; Offscreen = [bool]$p.Value.offscreen } }
 "uia: asked=$($read.asked) found=$($read.found) " + (($uia.Keys | Sort-Object | ForEach-Object { "$_=$($uia[$_].X),$($uia[$_].Y),$($uia[$_].W),$($uia[$_].H)" }) -join ' ')
-# Q-flask-3: the canvas height off the swap chain's own size -- the LAST
-# `surface=WxH` the shell reported (a row the surface's SizeChanged writes),
-# less the canvas strip's height. No surface row leaves the height unread.
-$surfRow = $rows | Where-Object { $null -ne (Get-SbField $_ 'surface') } | Select-Object -Last 1
-$surfPx = $null
-if ($surfRow) {
-    $wh = (Get-SbField $surfRow 'surface').Split('x')
-    if ($wh.Count -eq 2) { $surfPx = @{ W = [double]$wh[0]; H = [double]$wh[1] } }
-}
+# Q-flask-3 (jas 851): the canvas height off the swap chain's own size -- ONE
+# named row kind, the resize REPAINT written after the last EDGE DOCK DRAWN
+# (Get-SbEdgeSurfacePx) -- less the canvas strip's height. No such row leaves
+# the height NOT READ.
+$surfPx = Get-SbEdgeSurfacePx @($rows)
 $stripRow = $rows | Where-Object { $_ -match "`tCANVAS STRIP height=" } | Select-Object -Last 1
 $stripH = if ($stripRow) { [double](Get-SbField $stripRow 'height') } else { 0.0 }
 "surface: $(if ($surfPx) { "$($surfPx.W)x$($surfPx.H) px" } else { 'none' }) strip=$stripH"
