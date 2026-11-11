@@ -439,6 +439,19 @@ public struct ContentView: View {
                     pl.onViewportResize(newW: newSize.width, newH: newSize.height)
                 }
             }
+            // Publish what this view shows for the test FIFO's `state` and
+            // `dialog` reads (FifoLive): the live tool and the open dialog
+            // are @State here, out of the FIFO's reach.
+            .onAppear {
+                FifoLive.tool = yamlToolString(currentTool)
+                FifoLive.dialog = yamlDialogState?.id
+            }
+            .onChange(of: currentTool) { newTool in
+                FifoLive.tool = yamlToolString(newTool)
+            }
+            .onChange(of: yamlDialogState?.id) { newId in
+                FifoLive.dialog = newId
+            }
             .overlay {
                 YamlDialogOverlay(
                     dialogState: $yamlDialogState,
