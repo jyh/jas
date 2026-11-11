@@ -146,3 +146,87 @@ public enum TestHarness {
         args.contains("--test-fifo")
     }
 }
+
+// ── `state` and `dialog`: the toolbar's level-2 reads (TESTING.md, row 50) ──
+// On the Mac the live tool and the open dialog are ContentView @State
+// (`currentTool`, `yamlDialogState`), and the FIFO reaches only the workspace
+// and its active model. The store's `active_tool` is a MIRROR of the tool,
+// written on the click and flyout paths, so a read of it measures the mirror.
+// ContentView publishes both values here as they change, and the reads below
+// answer from what it published.
+
+/// What ContentView shows, as it last published it. Written on the main
+/// thread by ContentView's `.onChange`, read on the main thread by the FIFO.
+public enum FifoLive {
+    /// The live tool's `state.active_tool` string, or nil before ContentView
+    /// has published one.
+    nonisolated(unsafe) public static var tool: String? = nil
+    /// The id of the open dialog, or nil when none is open.
+    nonisolated(unsafe) public static var dialog: String? = nil
+}
+
+/// A read the app cannot answer truthfully. It is refused, by name, so a
+/// harness never mistakes a missing value for a measured one.
+public struct FifoReadError: Error, CustomStringConvertible {
+    public let description: String
+}
+
+/// `state <path> <key> [<key>…]`: the named state keys as the app holds them,
+/// as one JSON object with sorted keys, written to `path` (atomically,
+/// replacing). `active_tool` is the live tool ContentView published, never the
+/// store's mirror, and is refused if nothing was published. Every other key is
+/// the store's value, and a key the store does not hold is refused by name.
+public enum FifoState {
+    public static func parse(_ rest: String) -> (path: String, keys: [String])? {
+        let f = rest.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard f.count >= 2 else { return nil }
+        let keys = Array(f.dropFirst())
+        guard Set(keys).count == keys.count else { return nil }
+        return (f[0], keys)
+    }
+
+    public static func json(keys: [String], store: StateStore,
+                            liveTool: String?) throws -> String {
+        var out: [String: Any] = [:]
+        for key in keys {
+            if key == "active_tool" {
+                guard let tool = liveTool else {
+                    throw FifoReadError(description:
+                        "state REFUSED active_tool (ContentView has published no live tool)")
+                }
+                out[key] = tool
+            } else {
+                guard let v = store.get(key) else {
+                    throw FifoReadError(description: "state REFUSED \(key) (the store holds no such key)")
+                }
+                out[key] = v
+            }
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: out, options: [.sortedKeys, .withoutEscapingSlashes])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public static func write(keys: [String], store: StateStore,
+                             liveTool: String?, to path: String) throws {
+        try Data(json(keys: keys, store: store, liveTool: liveTool).utf8)
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+}
+
+/// `dialog <path>`: `{"dialog": <id>}` for the open dialog, or
+/// `{"dialog": null}` when none is open, written to `path` (atomically,
+/// replacing). A slot's alternates flyout is the dialog its hold timer opens.
+public enum FifoDialog {
+    public static func json(dialog: String?) -> String {
+        let value: Any = dialog ?? NSNull()
+        let data = try! JSONSerialization.data(
+            withJSONObject: ["dialog": value], options: [.sortedKeys, .withoutEscapingSlashes])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public static func write(dialog: String?, to path: String) throws {
+        try Data(json(dialog: dialog).utf8)
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+}
