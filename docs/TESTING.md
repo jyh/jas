@@ -214,6 +214,31 @@ marked PROPOSED and never gates.
 * **`"event": "double_click"` on a panel step** (a swatch double-click opens Swatch Options or the Color Picker).
 * **`"hold_ms": <n>` on a press step**: the press is held that long before the next step (a toolbar slot's alternates
   open on a press-and-hold).
+* **A toolbar step** names a tool slot as a panel step names a widget, with the pane's id as the panel:
+  `{"panel": "toolbar_pane", "widget": "btn_arrow_slot", "event": "press", "hold_ms": 400}`. The slot's widgets are
+  declared in `workspace/layout.yaml`, not under `workspace/panels/`, so a toolbar script's `spec` is that file. A
+  `press` runs the slot's `mouse_down`, waits `hold_ms`, then runs its `mouse_up`, and then its `click` only if no
+  timer that press started has fired (WIDGET_EVENTS.md §A press-and-hold consumes its click). A `press` with no
+  `hold_ms` is a press released at once, which is a click. A level-1 runner advances its timer clock by `hold_ms`
+  instead of sleeping, so a 250 ms timer fires under `hold_ms` 400 and not under `hold_ms` 100. The Mac driver posts a
+  real mouse-down at the slot's AX frame, sleeps `hold_ms`, then posts the mouse-up: an AXPress has no duration.
+* **`{"read": "state", "keys": ["active_tool"]}`** compares the named keys of `workspace/state.yaml` with the script's
+  `expected_state_json`, an object naming exactly the read's keys: canonical JSON, keys sorted. A key `state.yaml` does
+  not declare is refused by name. The Mac reads them through a test FIFO command, `state <path> <key>…`, which writes
+  the keys as the app holds them; the toolbar's checked highlight is a rendering of the key, not the key. On the Mac
+  `active_tool` is the live tool ContentView publishes, never the store's mirror of it, and the read is refused when
+  none has been published.
+* **`{"read": "dialog"}`** reads the id of the open dialog, or `null` when none is open (a slot's alternates flyout is
+  the dialog its timer opens, `arrow_alternates`), against the script's `expected_dialog` (an id or `null`). The Mac
+  reads it through the same FIFO: `dialog <path>` writes `{"dialog": <id or null>}`.
+* **The press-and-hold pair these three forms exist for** (row 50): from tool `selection`, a hold on
+  `btn_arrow_slot` must read `{"active_tool": "selection"}` and dialog `arrow_alternates`, and the same press with no
+  `hold_ms` must read `{"active_tool": "partial_selection"}` and dialog `null`. Each script is the other's control.
+  A hold that also clicked reads `partial_selection` with the flyout open, and a hold that never fired its timer reads
+  the click's pair. Both are wrong answers the reads tell apart, so neither defect can pass as the other.
+* **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
+  `jas_gui_harness.py`) and not yet measured on a live app. The web channel refuses all three by name until its test
+  hook has them, and no level-1 runner reads them yet, so no shipped script uses them.
 * **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
   "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
   hovering there that long.

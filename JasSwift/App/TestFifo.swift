@@ -184,6 +184,33 @@ extension JasAppDelegate {
             } catch {
                 NSLog("test-fifo: read REFUSED %@ (%@)", rest, "\(error)")
             }
+        case "state":
+            // state <path> <key>...: the named state keys as the app holds
+            // them; active_tool is the live tool ContentView published
+            // (FifoLive), never the store's mirror (TESTING.md, row 50).
+            guard let req = FifoState.parse(rest) else {
+                NSLog("test-fifo: state REFUSED %@ (want a path and distinct keys)", rest)
+                return
+            }
+            guard let model = workspace?.activeModel else {
+                NSLog("test-fifo: state REFUSED (no active canvas)")
+                return
+            }
+            do {
+                try FifoState.write(keys: req.keys, store: model.stateStore,
+                                    liveTool: FifoLive.tool, to: req.path)
+                NSLog("test-fifo: state wrote %@", req.path)
+            } catch {
+                NSLog("test-fifo: %@", "\(error)")
+            }
+        case "dialog":
+            // dialog <path>: the open dialog's id, or null (FifoLive).
+            do {
+                try FifoDialog.write(dialog: FifoLive.dialog, to: rest)
+                NSLog("test-fifo: dialog wrote %@", rest)
+            } catch {
+                NSLog("test-fifo: dialog REFUSED %@ (%@)", rest, "\(error)")
+            }
         case "layout":
             // layout <path>: the workspace layout's canonical test JSON, for
             // the harness's --dock check (where a dragged tab was anchored).

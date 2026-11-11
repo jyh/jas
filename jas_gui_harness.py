@@ -354,9 +354,13 @@ def _run_script(path, menubar):
         script = _json.load(f)
     acts = _plan.plan(script, menubar, _plan.load_spec(script))
     repo = os.path.dirname(os.path.abspath(__file__))
-    want = open(os.path.join(os.path.dirname(path), script["expected_json"]), encoding="utf-8").read().strip()
+    # Only a document read compares with expected_json; a toolbar script
+    # reads state and the dialog, and carries the expected values itself.
+    want = None
+    if any(a[0] == "read" and a[1] == "document" for a in acts):
+        want = open(os.path.join(os.path.dirname(path), script["expected_json"]), encoding="utf-8").read().strip()
     app = _app_element()
-    st = {"view": None, "origin": None}
+    st = {"view": None, "origin": None, "reads": []}
 
     def blocked():
         # Before EVERY act: a locked screen, or input after this driver's own
@@ -382,7 +386,7 @@ def _run_script(path, menubar):
                 raise _plan.Refused(f"the canvas reports view {view} after `view 1 0 0`")
         elif k == "tool":
             _fifo("tool " + act[1]); time.sleep(0.3)
-        elif k in ("pointer", "key") and not _front_is_jas():
+        elif k in ("pointer", "key", "toolbar") and not _front_is_jas():
             raise _plan.Refused("Jas is not the frontmost app; a real event would land elsewhere")
         elif k == "pointer":
             _, kind, x, y, dragging, mods = act
@@ -458,20 +462,41 @@ def _run_script(path, menubar):
             time.sleep(0.3)
         elif k == "menu":
             _press(_menu_item(app, act[1])); time.sleep(0.4)
+        elif k == "toolbar":
+            # A real press at the slot's AX frame, held hold_ms, then released:
+            # an AXPress has no duration, so it cannot drive a hold (TESTING.md,
+            # the toolbar step). hold_ms 0 is a press released at once.
+            _, slot, hold_ms = act
+            hits = _by_id(app, slot)
+            if len(hits) != 1:
+                raise _plan.Refused(f"{len(hits)} elements carry AXIdentifier {slot!r}; a toolbar press needs one")
+            import ApplicationServices as AX
+            pos, size = _attr(hits[0], "AXPosition"), _attr(hits[0], "AXSize")
+            if pos is None or size is None:
+                raise _plan.Refused(f"slot {slot!r} reports no AX frame")
+            _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+            _, z = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+            sx, sy = p.x + z.width / 2, p.y + z.height / 2
+            mouse(Quartz.kCGEventMouseMoved, sx, sy); mouse(Quartz.kCGEventLeftMouseDown, sx, sy)
+            time.sleep(hold_ms / 1000.0 if hold_ms else 0.05)
+            mouse(Quartz.kCGEventLeftMouseUp, sx, sy)
+            time.sleep(0.5)
         elif k == "read":
             out = os.path.join(os.environ.get("TMPDIR", "/tmp"), "jas-l2-read.json")
             if os.path.exists(out): os.remove(out)
-            _fifo("read " + out)
+            _fifo(_plan.fifo_read_command(act, out))
             for _ in range(30):
                 if os.path.exists(out): break
                 time.sleep(0.1)
             else:
-                raise _plan.Refused("the app wrote no read-back (is --test-fifo the same path as JAS_FIFO?)")
-            got = open(out, encoding="utf-8").read().strip()
-            got = _plan.read_back(got, want)
-            return got == want, got, want
+                raise _plan.Refused(f"the app wrote no {act[1]} read (is --test-fifo the same path as JAS_FIFO? "
+                                    "a refused state read is in the app's log)")
+            st["reads"].append(_plan.compare_read(act, open(out, encoding="utf-8").read().strip(), want))
 
-    return _plan.run_guarded(acts, blocked, do_act)
+    _plan.run_guarded(acts, blocked, do_act)
+    # Every read must pass; a FAIL shows each read's got and want.
+    reads = st["reads"]
+    return (all(r[0] for r in reads), " | ".join(r[1] for r in reads), " | ".join(r[2] for r in reads))
 
 IDLE_FLOOR_S = 120  # a person's input this recent means the console is in use
 
