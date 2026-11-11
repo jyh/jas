@@ -2233,6 +2233,66 @@ internal static class LayoutWire
     }
 
     /// <summary>
+    /// R1-4b S3: every Left and Bottom dock group as a pane, under its edge key
+    /// (<see cref="EdgeKey"/>), with its panels and active panel, in the engine's
+    /// order. The Right dock is not here: it keeps `dock{i}`.
+    /// </summary>
+    internal static IReadOnlyList<(string Key, List<string> Panels, string Active)> EdgeKeyed(IReadOnlyList<EdgeDock> anchored)
+    {
+        var keyed = new List<(string, List<string>, string)>();
+        foreach (var a in anchored)
+        {
+            for (var i = 0; i < a.Dock.Groups.Count; i++)
+            {
+                if (EdgeKey(a.Edge, a.Dock.DockId, i) is not { } key) { break; }
+                var g = a.Dock.Groups[i];
+                keyed.Add((key, g.Panels.ToList(), g.Panels[g.Active]));
+            }
+        }
+        return keyed;
+    }
+
+    /// <summary>
+    /// Rule 6 (WORKSPACE.md "Where each edge dock is drawn"): a Bottom dock lays
+    /// its <paramref name="n"/> groups out left to right in equal shares of its row.
+    /// </summary>
+    internal static IReadOnlyList<EdgeRect> RowShares(EdgeRect row, int n) => n <= 0
+        ? Array.Empty<EdgeRect>()
+        : Enumerable.Range(0, n).Select(i => new EdgeRect(row.X + i * row.W / n, row.Y, row.W / n, row.H)).ToList();
+
+    /// <summary>
+    /// R1-4b S4: the margin that cuts the canvas surface down to the engine's
+    /// canvas rect (rule 4), left, top, right and bottom, in DIPs. No rects cut
+    /// nothing. Null when the canvas rect reaches outside the cell, which only a
+    /// rect asked for over a different cell can do: refused, never drawn.
+    /// </summary>
+    internal static (double L, double T, double R, double B)? CanvasCut(EdgeRectSet? rects, double cellW, double cellH)
+    {
+        if (rects is null) { return (0, 0, 0, 0); }
+        var c = rects.Canvas;
+        double l = c.X, t = c.Y, r = cellW - (c.X + c.W), b = cellH - (c.Y + c.H);
+        // Half a DIP of round-off (the engine's f32 against the shell's double) is none.
+        const double Slack = 0.5;
+        if (l < -Slack || t < -Slack || r < -Slack || b < -Slack) { return null; }
+        static double None(double v) => v < 0 ? 0 : v;
+        return (None(l), None(t), None(r), None(b));
+    }
+
+    /// <summary>
+    /// R1-4b S3+S4: what was drawn, as one row: each edge's dock id and group
+    /// count at its rect (`-` for an edge with no dock), then the canvas cut.
+    /// </summary>
+    internal static string EdgeDockDrawnRow(IReadOnlyList<EdgeDock> anchored, EdgeRectSet rects, (double L, double T, double R, double B) cut, string cause)
+    {
+        static string N(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        string Edge(string edge, EdgeRect? r) => anchored.FirstOrDefault(a => a.Edge == edge) is { } a && r is not null
+            ? $"dock{a.Dock.DockId.ToString(System.Globalization.CultureInfo.InvariantCulture)}:{a.Dock.Groups.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)}@{N(r.X)},{N(r.Y)},{N(r.W)},{N(r.H)}"
+            : "-";
+        return $"EDGE DOCK DRAWN left={Edge("left", rects.Left)} bottom={Edge("bottom", rects.Bottom)} "
+             + $"cut={N(cut.L)},{N(cut.T)},{N(cut.R)},{N(cut.B)} cause={cause}";
+    }
+
+    /// <summary>
     /// R1-4b S2 (jas 815): why the edge docks cannot be drawn, or null when they
     /// can. Rects that did not arrive while a Left or Bottom dock exists, or an
     /// edge dock whose rect is null, is named, never drawn as nothing.

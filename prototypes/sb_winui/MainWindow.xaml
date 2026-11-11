@@ -209,6 +209,21 @@
         </Border>
 
         <!--
+          EDGE DOCKS (R1-4b S3, flask STATUS 829): the Left and Bottom anchored
+          docks, drawn in the rectangles the engine cuts from this cell
+          (jas_layout_edge_rects; WORKSPACE.md "Where each edge dock is drawn").
+          The canvas surface and its overlays are cut by the same rects (S4), so
+          nothing here overlaps it. NO BACKGROUND: the layer's empty area passes
+          every press through, and each frame has its own. Declared AFTER the
+          canvas overlays and BEFORE FloatLayer, so a floating dock draws above
+          an edge dock (rule 7).
+        -->
+        <Canvas
+            x:Name="EdgeDockLayer"
+            Grid.Row="1"
+            Grid.Column="1" />
+
+        <!--
           FLOATING DOCKS (floating panels, FP-4a): an in-window layer over the
           canvas's cell, one framed dock per floating dock the engine holds, at
           its (x, y), stacked by the engine's `z`. NO BACKGROUND on purpose: the
