@@ -2148,14 +2148,75 @@ internal static class LayoutWire
         }
     }
 
-    /// <summary>The first anchored dock of a layout state, or null.</summary>
+    /// <summary>
+    /// The RIGHT anchored dock of a layout state, or null. Found by its `edge`,
+    /// never as `anchored[0]`: a snap can put a Left dock first in the engine's
+    /// list (R1-4a). `dock{i}` pane keys are this dock's.
+    /// </summary>
     internal static Anchored? Dock(string stateJson) => Read(stateJson, root =>
     {
-        var anchored = root.GetProperty("anchored");
-        if (anchored.GetArrayLength() == 0) { return null; }
-        var d = anchored[0];
-        var groups = Groups(d);
-        return groups is null ? null : new Anchored(d.GetProperty("id").GetInt32(), groups);
+        foreach (var d in root.GetProperty("anchored").EnumerateArray())
+        {
+            if (d.GetProperty("edge").GetString() != "right") { continue; }
+            var groups = Groups(d);
+            return groups is null ? null : new Anchored(d.GetProperty("id").GetInt32(), groups);
+        }
+        return null;
+    });
+
+    /// <summary>An anchored dock and the edge it is anchored at (`left`, `right` or `bottom`).</summary>
+    internal sealed record EdgeDock(string Edge, Anchored Dock);
+
+    /// <summary>
+    /// R1-4a: EVERY anchored dock, with its edge, in the engine's list order.
+    /// Null when any dock names an edge the engine never sends, or carries a
+    /// group the engine would never send: a refused read, never a partial one.
+    /// </summary>
+    internal static IReadOnlyList<EdgeDock>? AnchoredDocks(string stateJson) => Read(stateJson, root =>
+    {
+        var docks = new List<EdgeDock>();
+        foreach (var d in root.GetProperty("anchored").EnumerateArray())
+        {
+            var edge = d.GetProperty("edge").GetString();
+            if (edge is not ("left" or "right" or "bottom")) { return null; }
+            var groups = Groups(d);
+            if (groups is null) { return null; }
+            docks.Add(new EdgeDock(edge, new Anchored(d.GetProperty("id").GetInt32(), groups)));
+        }
+        return (IReadOnlyList<EdgeDock>)docks;
+    });
+
+    /// <summary>
+    /// A Left or Bottom dock group's pane key: `edgeL{d}g{i}` or `edgeB{d}g{i}`.
+    /// Never `dock…`, which four sites parse back to the RIGHT dock's group
+    /// index; null for any other edge (the Right dock keeps `dock{i}`).
+    /// </summary>
+    internal static string? EdgeKey(string edge, int dockId, int groupIdx) => edge switch
+    {
+        "left" => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"edgeL{dockId}g{groupIdx}"),
+        "bottom" => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"edgeB{dockId}g{groupIdx}"),
+        _ => null,
+    };
+
+    /// <summary>One of the engine's edge-dock rectangles, in DIPs.</summary>
+    internal sealed record EdgeRect(double X, double Y, double W, double H);
+
+    /// <summary>The engine's Left and Bottom dock rectangles (null when that edge has no dock) and the canvas's.</summary>
+    internal sealed record EdgeRectSet(EdgeRect? Left, EdgeRect? Bottom, EdgeRect Canvas);
+
+    /// <summary>
+    /// R1-4a: the engine's `edge_rects` (`edge_dock_rects`, WORKSPACE.md
+    /// "Anchored Docks by Edge"), read as sent. The shell derives none of them
+    /// (jas 752). Null when the field is absent or `null`, or any rect lacks a
+    /// side; an edge sent as `null` reads as no rect.
+    /// </summary>
+    internal static EdgeRectSet? EdgeRects(string stateJson) => Read(stateJson, root =>
+    {
+        if (!root.TryGetProperty("edge_rects", out var r) || r.ValueKind != System.Text.Json.JsonValueKind.Object) { return null; }
+        static EdgeRect Rect(System.Text.Json.JsonElement e) =>
+            new(e.GetProperty("x").GetDouble(), e.GetProperty("y").GetDouble(), e.GetProperty("w").GetDouble(), e.GetProperty("h").GetDouble());
+        EdgeRect? Edge(string k) => r.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.Null ? null : Rect(r.GetProperty(k));
+        return new EdgeRectSet(Edge("left"), Edge("bottom"), Rect(r.GetProperty("canvas")));
     });
 
     /// <summary>
