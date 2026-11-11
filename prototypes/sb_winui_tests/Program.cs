@@ -1531,6 +1531,12 @@ static class Program
                 McpWire.BarRow(("p-1", "lift"), null) ?? "(none)",
             }));
         Eq("mcp pipe: the pipe is named for the shell's own process", "jas-mcp-4242", McpWire.PipeName(4242));
+        // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
+        Eq("mcp bar: the label names the proposal; none pending shows no bar",
+            "Proposed: nudge|(no bar)",
+            (McpWire.BarText(McpWire.Pending("""{"id":"p-0","name":"nudge"}""")) ?? "(no bar)") + "|" + (McpWire.BarText(McpWire.Pending("null")) ?? "(no bar)"));
+        Eq("mcp bar: a refused read shows no bar (its refusal is the shell's row, not a label)",
+            "(no bar)", McpWire.BarText(McpWire.Pending("")) ?? "(no bar)");
         // R1-4b S5 (flask 829): an edge group's gestures are addressed by ITS dock
         // id, never the Right dock's. A key names the (dock id, group index) every
         // layout verb takes; a floating key is not addressed here (FP-4a).
