@@ -2293,6 +2293,38 @@ internal static class LayoutWire
     }
 
     /// <summary>
+    /// Q-flask-2: the width each Left or Bottom group's panel is planned at, by
+    /// pane key: its frame's width less the frame's vertical border and the
+    /// pane's padding each side, in whole DIPs. A Left dock's groups all take
+    /// the column (its frame has a right border); a Bottom dock's group i takes
+    /// its share of the row (every share but the first has a left border). An
+    /// edge with no rect plans nothing; a width under one DIP is left out.
+    /// </summary>
+    internal static IReadOnlyList<KeyValuePair<string, long>> EdgePaneWidths(IReadOnlyList<EdgeDock> anchored, EdgeRectSet rects, double pad, double border)
+    {
+        var widths = new List<KeyValuePair<string, long>>();
+        void Add(string key, double frameW, double leftRightBorder)
+        {
+            var w = (long)Math.Floor(frameW - leftRightBorder - 2 * pad);
+            if (w >= 1) { widths.Add(new(key, w)); }
+        }
+        foreach (var a in anchored)
+        {
+            var n = a.Dock.Groups.Count;
+            if (a.Edge == "left" && rects.Left is { } l)
+            {
+                for (var i = 0; i < n; i++) { Add(EdgeKey("left", a.Dock.DockId, i)!, l.W, border); }
+            }
+            else if (a.Edge == "bottom" && rects.Bottom is { } b)
+            {
+                var shares = RowShares(b, n);
+                for (var i = 0; i < shares.Count; i++) { Add(EdgeKey("bottom", a.Dock.DockId, i)!, shares[i].W, i == 0 ? 0 : border); }
+            }
+        }
+        return widths;
+    }
+
+    /// <summary>
     /// Rule 6 (WORKSPACE.md "Where each edge dock is drawn"): a Bottom dock lays
     /// its <paramref name="n"/> groups out left to right in equal shares of its row.
     /// </summary>

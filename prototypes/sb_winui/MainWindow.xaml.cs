@@ -443,6 +443,12 @@ public sealed partial class MainWindow : Window
         PlaceEdgeDocks(rects);
         ApplyCanvasCut(cut);
         Report(LayoutWire.EdgeDockDrawnRow(_edgeDocks, rects, cut, cause));
+        // Q-flask-2: each edge group's panel at its own frame's width. The
+        // engine side re-plans only a pane whose width changed.
+        foreach (var (key, w) in LayoutWire.EdgePaneWidths(_edgeDocks, rects, PanePad, 1))
+        {
+            _canvas.PaneWidth(new PaneWidthCmd { Key = key, AvailW = w });
+        }
     }
 
     /// <summary>
