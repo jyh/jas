@@ -18,9 +18,9 @@ save_changes_tab:
       - type: row
         style: { justify: end, gap: 8 }
         children:
-          - { type: button, label: "Cancel",  action: dismiss_dialog }
-          - { type: button, label: "Discard", action: discard_and_close_tab, params: { index: "param.index" } }
-          - { type: button, label: "Save",    action: save_and_close, variant: primary }
+          - { id: sct_cancel_btn, type: button, label: "Cancel",  action: dismiss_dialog }
+          - { id: sct_discard_btn, type: button, label: "Discard", action: discard_and_close_tab, params: { index: "param.index" } }
+          - { id: sct_save_btn, type: button, label: "Save",    action: save_and_close, variant: primary }
 
 save_changes_window:
   summary: "Save All Changes"
@@ -38,7 +38,7 @@ save_changes_window:
       - type: row
         style: { justify: end, gap: 8 }
         children:
-          - { type: button, label: "Cancel",     action: dismiss_dialog }
-          - { type: button, label: "Don't Save", action: close_without_saving }
-          - { type: button, label: "Save",       action: save_and_close }
-          - { type: button, label: "Save All",   action: save_all_and_close, variant: primary }
+          - { id: scw_cancel_btn, type: button, label: "Cancel",     action: dismiss_dialog }
+          - { id: scw_dont_save_btn, type: button, label: "Don't Save", action: close_without_saving }
+          - { id: scw_save_btn, type: button, label: "Save",       action: save_and_close }
+          - { id: scw_save_all_btn, type: button, label: "Save All",   action: save_all_and_close, variant: primary }

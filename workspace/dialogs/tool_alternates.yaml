@@ -16,7 +16,8 @@ arrow_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: arrow_alt_partial_selection
+        type: icon_button
         icon: "partial_selection_arrow"
         label: "Partial Selection"
         summary: "Select individual anchor points and path segments"
@@ -26,7 +27,8 @@ arrow_alternates:
             effects:
               - set: { active_tool: '"partial_selection"' }
               - close_dialog: null
-      - type: icon_button
+      - id: arrow_alt_interior_selection
+        type: icon_button
         icon: "interior_selection_arrow"
         label: "Interior Selection"
         summary: "Select objects within groups without ungrouping"
@@ -36,7 +38,8 @@ arrow_alternates:
             effects:
               - set: { active_tool: '"interior_selection"' }
               - close_dialog: null
-      - type: icon_button
+      - id: arrow_alt_magic_wand
+        type: icon_button
         icon: "magic_wand"
         label: "Magic Wand"
         summary: "Select objects with similar appearance attributes"
@@ -64,7 +67,8 @@ pen_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: pen_alt_pen
+        type: icon_button
         icon: "pen"
         label: "Pen"
         summary: "Draw paths by clicking to place anchor points"
@@ -74,7 +78,8 @@ pen_alternates:
             effects:
               - set: { active_tool: '"pen"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pen_alt_add_anchor_point
+        type: icon_button
         icon: "add_anchor"
         label: "Add Anchor Point"
         summary: "Add anchor points to an existing path"
@@ -84,7 +89,8 @@ pen_alternates:
             effects:
               - set: { active_tool: '"add_anchor"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pen_alt_delete_anchor_point
+        type: icon_button
         icon: "delete_anchor"
         label: "Delete Anchor Point"
         summary: "Remove anchor points from a path"
@@ -94,7 +100,8 @@ pen_alternates:
             effects:
               - set: { active_tool: '"delete_anchor"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pen_alt_anchor_point
+        type: icon_button
         icon: "anchor_point"
         label: "Anchor Point"
         summary: "Convert anchor points between smooth and corner"
@@ -123,7 +130,8 @@ pencil_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: pencil_alt_pencil
+        type: icon_button
         icon: "pencil"
         label: "Pencil"
         summary: "Draw freehand paths"
@@ -133,7 +141,8 @@ pencil_alternates:
             effects:
               - set: { active_tool: '"pencil"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pencil_alt_paintbrush
+        type: icon_button
         icon: "paintbrush"
         label: "Paintbrush"
         summary: "Paint calligraphic and art-brush strokes along a freehand path"
@@ -143,7 +152,8 @@ pencil_alternates:
             effects:
               - set: { active_tool: '"paintbrush"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pencil_alt_blob_brush
+        type: icon_button
         icon: "blob_brush"
         label: "Blob Brush"
         summary: "Paint filled blob shapes that merge with overlapping fills"
@@ -153,7 +163,8 @@ pencil_alternates:
             effects:
               - set: { active_tool: '"blob_brush"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pencil_alt_path_eraser
+        type: icon_button
         icon: "path_eraser"
         label: "Path Eraser"
         summary: "Erase portions of paths"
@@ -163,7 +174,8 @@ pencil_alternates:
             effects:
               - set: { active_tool: '"path_eraser"' }
               - close_dialog: null
-      - type: icon_button
+      - id: pencil_alt_smooth
+        type: icon_button
         icon: "smooth"
         label: "Smooth"
         summary: "Smooth out rough path segments"
@@ -189,7 +201,8 @@ text_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: text_alt_type
+        type: icon_button
         icon: "type"
         label: "Type"
         summary: "Create and edit text"
@@ -199,7 +212,8 @@ text_alternates:
             effects:
               - set: { active_tool: '"type"' }
               - close_dialog: null
-      - type: icon_button
+      - id: text_alt_type_on_a_path
+        type: icon_button
         icon: "type_on_path"
         label: "Type on a Path"
         summary: "Place text along a path curve"
@@ -226,7 +240,8 @@ shape_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: shape_alt_rectangle
+        type: icon_button
         icon: "rect"
         label: "Rectangle"
         summary: "Draw rectangles and squares"
@@ -236,7 +251,8 @@ shape_alternates:
             effects:
               - set: { active_tool: '"rect"' }
               - close_dialog: null
-      - type: icon_button
+      - id: shape_alt_rounded_rectangle
+        type: icon_button
         icon: "rounded_rect"
         label: "Rounded Rectangle"
         summary: "Draw rectangles with rounded corners"
@@ -246,7 +262,8 @@ shape_alternates:
             effects:
               - set: { active_tool: '"rounded_rect"' }
               - close_dialog: null
-      - type: icon_button
+      - id: shape_alt_ellipse
+        type: icon_button
         icon: "ellipse"
         label: "Ellipse"
         summary: "Draw ellipses and circles"
@@ -256,7 +273,8 @@ shape_alternates:
             effects:
               - set: { active_tool: '"ellipse"' }
               - close_dialog: null
-      - type: icon_button
+      - id: shape_alt_polygon
+        type: icon_button
         icon: "polygon"
         label: "Polygon"
         summary: "Draw regular polygons"
@@ -266,7 +284,8 @@ shape_alternates:
             effects:
               - set: { active_tool: '"polygon"' }
               - close_dialog: null
-      - type: icon_button
+      - id: shape_alt_star
+        type: icon_button
         icon: "star"
         label: "Star"
         summary: "Draw star shapes"
@@ -296,7 +315,8 @@ hand_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: hand_alt_hand
+        type: icon_button
         icon: "hand"
         label: "Hand"
         summary: "Pan the canvas by click-and-drag"
@@ -306,7 +326,8 @@ hand_alternates:
             effects:
               - set: { active_tool: '"hand"' }
               - close_dialog: null
-      - type: icon_button
+      - id: hand_alt_zoom
+        type: icon_button
         icon: "zoom"
         label: "Zoom"
         summary: "Zoom in by click, drag, or marquee"
@@ -336,7 +357,8 @@ scale_alternates:
     layout: column
     style: { padding: 4, gap: 2 }
     children:
-      - type: icon_button
+      - id: scale_alt_scale
+        type: icon_button
         icon: "scale"
         label: "Scale"
         summary: "Resize objects relative to a reference point"
@@ -346,7 +368,8 @@ scale_alternates:
             effects:
               - set: { active_tool: '"scale"' }
               - close_dialog: null
-      - type: icon_button
+      - id: scale_alt_shear
+        type: icon_button
         icon: "shear"
         label: "Shear"
         summary: "Slant objects along a configurable axis"

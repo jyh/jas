@@ -112,6 +112,25 @@ def panel_menu_paths(menubar):
 
 PANEL_SUFFIX = "_panel_content"
 POINTER_KINDS = ("press", "move", "release")
+# The keys each step kind DELIVERS on this channel. Any other key is refused by
+# name: a form this driver does not build (`hold_ms`, `row`, `at`, a panel
+# step's modifiers, a tree read's `window`) would otherwise be dropped, and the
+# run would drive a different gesture and read as measured (docs/TESTING.md
+# lists those forms; the Mac driver has not built them).
+DELIVERED_KEYS = {
+    "read": {"read"},
+    "pointer": {"kind", "x", "y", "dragging", "shift", "alt", "ctrl", "meta"},
+    "key": {"key", "shift", "alt", "ctrl", "meta"},
+    "panel": {"panel", "widget", "event", "value"},
+    "menu": {"menu"},
+}
+
+
+def _refuse_undelivered(item, i, st, kind):
+    extra = sorted(set(st) - DELIVERED_KEYS[kind])
+    if extra:
+        raise Refused(f"{item}: step {i} carries {', '.join(extra)}; a {kind} step on this "
+                      f"channel delivers only {', '.join(sorted(DELIVERED_KEYS[kind]))}")
 MODS = ("shift", "alt", "ctrl")
 
 
@@ -158,6 +177,7 @@ def plan(script, menubar, spec=None):
     acts = [("open", script["setup_svg"]), ("tool", script["tool"])]
     for i, st in enumerate(steps):
         if "read" in st:
+            _refuse_undelivered(item, i, st, "read")
             if st["read"] != "document":
                 raise Refused(f"{item}: step {i} reads {st['read']!r}; this channel reads the document only")
             acts.append(("read", "document"))
@@ -165,6 +185,7 @@ def plan(script, menubar, spec=None):
         if st.get("meta"):
             raise Refused(f"{item}: step {i} carries meta, which the engine's key route does not take")
         if "kind" in st or "key" in st:
+            _refuse_undelivered(item, i, st, "pointer" if "kind" in st else "key")
             mods = tuple(m for m in MODS if st.get(m))
             if "kind" in st:
                 if st["kind"] not in POINTER_KINDS:
@@ -176,6 +197,7 @@ def plan(script, menubar, spec=None):
                 acts.append(("key", st["key"], mods))
             continue
         if "panel" in st:
+            _refuse_undelivered(item, i, st, "panel")
             pid = st["panel"]
             if not pid.endswith(PANEL_SUFFIX):
                 raise Refused(f"{item}: step {i} names panel {pid!r}, not a panel content id")
@@ -193,6 +215,7 @@ def plan(script, menubar, spec=None):
                          st["widget"], st["event"], st.get("value"), label))
             continue
         if "menu" in st:
+            _refuse_undelivered(item, i, st, "menu")
             path = menus.get(st["menu"])
             if not path:
                 raise Refused(f"{item}: step {i}: menu id {st['menu']!r} has no unique path in the menubar")
@@ -607,6 +630,23 @@ def self_test():
           [a[0] for a in plan(dict(base, steps=[{"menu": "menu_group"}, {"key": "Z"}, read]), mb)]
           == ["open", "tool", "menu", "key", "read"])
     check("an odd unit is refused", refused(lambda: plan(dict(base, steps=[dict(press, x=37), read]), mb), "even"))
+    # A key this channel does not deliver is refused BY NAME, never dropped: a
+    # dropped `hold_ms` runs a hold as a click, and a dropped `alt` on a panel
+    # step runs an Alt-click as a click, and either reads as measured.
+    for name, st, needle in (
+        ("a press's hold_ms", dict(press, hold_ms=400), "hold_ms"),
+        ("an unknown pointer key", dict(press, bogus=1), "bogus"),
+        ("an unknown key-step key", {"key": "Z", "repeat": 2}, "repeat"),
+        ("a panel step's alt", dict(pan, alt=True), "alt"),
+        ("a panel step's row", dict(pan, row=[0]), "row"),
+        ("a panel step's at", dict(pan, at=[0, 1]), "at"),
+        ("a panel step's hold_ms", dict(pan, hold_ms=400), "hold_ms"),
+        ("a menu step's extra key", {"menu": "menu_group", "shift": True}, "shift"),
+        ("a read step's extra key", {"read": "document", "window": {"w": 1, "h": 1}}, "window"),
+    ):
+        check(f"{name} is refused by name", refused(lambda st=st: plan(dict(base, steps=[st, read]), mb), needle))
+    check("a refusal names the step kind's delivered keys",
+          refused(lambda: plan(dict(base, steps=[dict(press, hold_ms=400), read]), mb), "delivers only"))
     check("a fractional unit is refused", refused(lambda: plan(dict(base, steps=[dict(press, y=18.5), read]), mb), "even"))
     check("an unknown menu id is refused", refused(lambda: plan(dict(base, steps=[{"menu": "nope"}, read]), mb), "'nope'"))
     check("a duplicate menu id is refused", refused(lambda: plan(dict(base, steps=[{"menu": "menu_dup"}, read]), mb), "menu_dup"))
