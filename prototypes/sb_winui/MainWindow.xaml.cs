@@ -381,7 +381,7 @@ public sealed partial class MainWindow : Window
     /// <summary>The engine answered a layout verb: draw the touched group's collapse as it now reads.</summary>
     private void OnLayoutChanged(string key, string via, string stateJson)
     {
-        if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via); }
+        if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via, key); }
         if (!key.StartsWith("dock", StringComparison.Ordinal) && !key.StartsWith("edge", StringComparison.Ordinal)) { return; }
         if (LayoutWire.GroupCollapsed(stateJson, key) is not { } collapsed)
         {
@@ -696,12 +696,16 @@ public sealed partial class MainWindow : Window
     /// <summary>How many floating docks the last placement drew, so an all-anchored dock stays quiet.</summary>
     private int _floatDrawn;
 
-    /// <summary>Draw the engine's floating docks where it put them, then let the float tour read that answer.</summary>
-    private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via)
+    /// <summary>
+    /// Draw the engine's floating docks where it put them, then let the float
+    /// tour read that answer. <paramref name="answeredGroup"/> is the group an
+    /// in-place answer names, or null for a draw (Q-flask-1).
+    /// </summary>
+    private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via, string? answeredGroup = null)
     {
         PlaceFloatingFrames(floating, via);
         // A resize's clamp is nobody's answer: the tour reads only the placements its ops caused.
-        if (via != "resize") { AdvanceFloatTour(floating); }
+        if (via != "resize") { AdvanceFloatTour(floating, answeredGroup); }
     }
 
     /// <summary>
@@ -709,10 +713,10 @@ public sealed partial class MainWindow : Window
     /// then send the next one, through the same `LayoutOp` the gestures send.
     /// `FloatTour` decides every op and row; this only carries them out.
     /// </summary>
-    private void AdvanceFloatTour(IReadOnlyList<LayoutWire.Floated> floating)
+    private void AdvanceFloatTour(IReadOnlyList<LayoutWire.Floated> floating, string? answeredGroup)
     {
         if (_floatTour is null) { return; }
-        if (_floatTour.Observe(floating) is { } read) { Report(read); }
+        if (_floatTour.Observe(floating, answeredGroup) is { } read) { Report(read); }
         SendFloatTourStep();
     }
 
