@@ -1013,7 +1013,13 @@ public sealed partial class MainWindow : Window
             {
                 _dockCollapseDone = true;
                 var ck = collapseKnob.Trim();
-                if (_dockGroups.ContainsKey(ck))
+                if (_floatTour is not null && _floatTour.Names(ck))
+                {
+                    // Q-flask-4 (jas 844): the tour matches answers by group, so a
+                    // collapse of its own key would race a step; refused, never raced.
+                    Report($"RUSTFAIL DOCK COLLAPSE REFUSED key={ck} -- it is a key of SB_DOCK_FLOAT_TOUR, whose steps would read its answers");
+                }
+                else if (_dockGroups.ContainsKey(ck))
                 {
                     // Through the engine, as the chevron goes: toggle, then toggle back.
                     ToggleDockGroup(ck, "synth");
