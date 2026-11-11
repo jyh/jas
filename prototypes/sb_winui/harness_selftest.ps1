@@ -3339,9 +3339,16 @@ Test-Case 'engine dialogs: a FAIL at mismatches=0 names the verdict that failed 
 # the error is read whole up to the row's ui-tid=.
 $eNoEngine = New-SbEngRun 'layer_options' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED dialog=layer_options -- no engine ui-tid=2 render-tid=4", 'VERDICT: NOT RUN (plan=False uia=True)')
 $eSpaced = New-SbEngRun 'swatch_options' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED dialog=swatch_options status=4 params={} error={`"class`":`"MissingTarget`",`"detail`":`"no dialog named swatch_options in the workspace`"} ui-tid=2 render-tid=4", 'VERDICT: NOT RUN (plan=False uia=True)')
-Test-Case 'engine dialogs: the no-engine refusal names its reason, not status=? error=?' {
+# jas 804's note: a refusal with no status= is the SHELL's (no engine, or a
+# malformed knob), so it reads `shell refused:`; only one carrying status= is
+# the engine's.
+$eKnob = New-SbEngRun 'Bad Id' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED -- SB_DIALOG_OPEN='Bad Id' is not a dialog id ([a-z0-9_]+)", 'VERDICT: NOT RUN (plan=False uia=True)')
+Test-Case 'engine dialogs: the no-engine refusal is the shell''s, and names its reason' {
     Get-SbEngineDialogsLine -Runs @($eNoEngine) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=layer_options(engine refused: no engine) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=layer_options(shell refused: no engine) witness=default-render(params {})'
+Test-Case 'engine dialogs: a malformed knob is the shell''s refusal, never the engine''s' {
+    Get-SbEngineDialogsLine -Runs @($eKnob) -Wanted 1
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=Bad Id(shell refused: SB_DIALOG_OPEN=''Bad Id'' is not a dialog id [[a-z0-9_]+]) witness=default-render(params {})'
 Test-Case 'engine dialogs: an engine error with a spaced detail is read whole' {
     Get-SbEngineDialogsLine -Runs @($eSpaced) -Wanted 1
 } 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_options(engine refused: status=4 error={"class":"MissingTarget","detail":"no dialog named swatch_options in the workspace"}) witness=default-render(params {})'
