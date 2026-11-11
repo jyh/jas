@@ -588,6 +588,59 @@ mod tests {
         assert_eq!(notifications(&out, "notifications/jas/proposal").len(), 1);
     }
 
+    /// A6 R1 (F1 (a)): the session's state lives BESIDE a model the caller
+    /// owns, as `JasEngine` owns its document, and borrows it per call. The
+    /// caller's model is the one edited (no copy), and the state the client
+    /// set up (its subscription, the proposal counter) persists across calls.
+    #[test]
+    fn borrowed_state_edits_the_callers_model_and_persists_across_calls() {
+        let mut model = Model::new(svg_to_document(TWO_RECTS), None);
+        let mut st = SessionState::new();
+        let line = |id: u64, method: &str, params: Value| {
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string()
+        };
+        let propose_line = |id: u64| line(id, "tools/call", json!({"name": "propose",
+            "arguments": {"name": "move", "ops": move_ops()}}));
+        parse(st.handle(&mut model, &line(1, "resources/subscribe", json!({"uri": "jas://document"}))));
+        let first = parse(st.handle(&mut model, &propose_line(2)));
+        let id = proposal_id(&first);
+        assert_eq!(model.pending_proposal_id(), Some(id.as_str()), "the caller's model holds the proposal");
+        let out = parse(st.artist_reject(&mut model, &id));
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"]["state"], "rejected");
+        let id2 = proposal_id(&parse(st.handle(&mut model, &propose_line(3))));
+        assert_ne!(id2, id, "the proposal counter persists across calls");
+        let out = parse(st.artist_accept(&mut model, &id2));
+        assert_eq!(model.journal_head(), 1);
+        assert_eq!(model.journal()[0].actor, "ai");
+        assert_eq!(notifications(&out, "notifications/resources/updated").len(), 1,
+            "the subscription persists across calls: {out:?}");
+    }
+
+    /// The borrowed form's artist edit and undo report a withdrawal to the
+    /// client exactly as the owned form does.
+    #[test]
+    fn borrowed_state_reports_an_edit_and_an_undo_as_withdrawals() {
+        let mut model = Model::new(svg_to_document(TWO_RECTS), None);
+        let mut st = SessionState::new();
+        let propose_line = |id: u64| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": "propose", "arguments": {"name": "move", "ops": move_ops()}}}).to_string();
+        let id = proposal_id(&parse(st.handle(&mut model, &propose_line(1))));
+        let out = parse(st.artist_edit(&mut model, |m| {
+            crate::document::op_apply::op_apply(m, &json!(
+                {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false}))
+                .unwrap();
+            crate::document::op_apply::op_apply(m, &json!({"op": "move_selection", "dx": 1, "dy": 1}))
+                .unwrap();
+        }));
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
+            json!({"proposal": id, "state": "withdrawn"}));
+        let id2 = proposal_id(&parse(st.handle(&mut model, &propose_line(2))));
+        let out = parse(st.artist_undo(&mut model));
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
+            json!({"proposal": id2, "state": "withdrawn"}));
+        assert_eq!(model.pending_proposal_id(), None);
+    }
+
     #[test]
     fn protocol_errors_are_json_rpc_errors() {
         let mut s = session();
