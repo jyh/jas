@@ -300,10 +300,15 @@ where
 fn forward<R: BufRead>(input: R, up: &mut Half, state: &(Mutex<Outstanding>, Condvar)) -> std::io::Result<()> {
     for line in input.lines() {
         let line = line?;
+        // A .NET or PowerShell host writes a UTF-8 BOM before its first line
+        // (`Process.Start` flushes `Console.InputEncoding`'s preamble), and
+        // JSON never begins with one: strip it, or `initialize` is a parse
+        // error at column 1 (flask, measured on the Windows box, 11-11).
+        let line = line.strip_prefix('\u{feff}').unwrap_or(&line);
         if line.trim().is_empty() {
             continue;
         }
-        if let Kind::Request(id) = kind(&line) {
+        if let Kind::Request(id) = kind(line) {
             state.0.lock().unwrap().ids.push(id);
         }
         up.write_all(line.as_bytes())?;
@@ -358,12 +363,34 @@ mod tests {
         assert!(ok != 0 && n as usize == text.len(), "{}", std::io::Error::last_os_error());
     }
 
+    /// A stdin that waits before it yields its bytes, as a person or an agent
+    /// does. ⛔ WITHOUT THE WAIT THE DEADLOCK ARM IS A COIN TOSS: a `Cursor`
+    /// is ready at once, so the relay could write its request before its own
+    /// reader thread had posted the read, and the synchronous-handle mutant
+    /// passed the whole suite in 2 of 4 runs (flask, the Windows box, 11-11).
+    /// The server's own sleep cannot order the relay's two threads; this can.
+    struct SlowStdin {
+        bytes: std::io::Cursor<&'static [u8]>,
+        waited: bool,
+    }
+
+    impl std::io::Read for SlowStdin {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if !self.waited {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                self.waited = true;
+            }
+            self.bytes.read(buf)
+        }
+    }
+
     /// Run the relay on its own thread, bounded: a deadlocked relay must FAIL
     /// this test, not hang the lane (a hung test is not a red one).
     fn relay_bounded(path: String, stdin: &'static [u8]) -> String {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(relay_attached(&path, std::io::Cursor::new(stdin), Vec::<u8>::new()));
+            let stdin = std::io::BufReader::new(SlowStdin { bytes: std::io::Cursor::new(stdin), waited: false });
+            let _ = tx.send(relay_attached(&path, stdin, Vec::<u8>::new()));
         });
         let out = rx.recv_timeout(std::time::Duration::from_secs(20))
             .expect("the relay returned within 20 s (a synchronous pipe handle deadlocks here)")
@@ -372,10 +399,10 @@ mod tests {
     }
 
     /// The case that deadlocks a synchronous handle: the relay's reader is
-    /// already blocked in a read when the client's request must be written.
-    /// The server waits before it reads, so the relay's read is pending first,
-    /// then it answers the request, pushes a line of its own (an artist act),
-    /// and closes only after the client does.
+    /// already blocked in a read when the client's request must be written
+    /// (`SlowStdin` holds the request back until the read is pending). The
+    /// server reads the request, answers it, pushes a line of its own (an
+    /// artist act), and closes only after the client does.
     #[test]
     fn attach_writes_while_a_read_is_pending_and_relays_both_ways() {
         let name = format!(r"\\.\pipe\jas-mcp-test-{}-a", std::process::id());
@@ -383,7 +410,6 @@ mod tests {
         let app = std::thread::spawn(move || {
             let s = s;
             unsafe { ConnectNamedPipe(s.0, std::ptr::null_mut()) };
-            std::thread::sleep(std::time::Duration::from_millis(300));
             let req = server_read_line(&s).expect("the request reaches the shell");
             assert!(req.contains(r#""id":1"#), "{req}");
             server_write(&s, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/jas/proposal\",\"params\":{}}\n");
@@ -419,6 +445,27 @@ mod tests {
         app.join().unwrap();
         assert_eq!(out.lines().count(), 1, "{out}");
         assert!(out.contains(r#""ok":true"#), "{out}");
+    }
+
+    /// A host that writes a UTF-8 BOM first (.NET, PowerShell): the shell
+    /// receives the request without it.
+    #[test]
+    fn attach_strips_a_leading_bom() {
+        let name = format!(r"\\.\pipe\jas-mcp-test-{}-c", std::process::id());
+        let s = server(&name);
+        let app = std::thread::spawn(move || {
+            let s = s;
+            unsafe { ConnectNamedPipe(s.0, std::ptr::null_mut()) };
+            let req = server_read_line(&s).expect("the request reaches the shell");
+            server_write(&s, "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n");
+            while server_read_line(&s).is_some() {}
+            unsafe { CloseHandle(s.0) };
+            req
+        });
+        let out = relay_bounded(name, "\u{feff}{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n".as_bytes());
+        let req = app.join().unwrap();
+        assert!(req.starts_with('{'), "the BOM reached the shell: {req:?}");
+        assert!(out.contains(r#""id":7"#), "the answer was awaited and relayed: {out}");
     }
 
     /// No such pipe: the error names the knob that serves one.
