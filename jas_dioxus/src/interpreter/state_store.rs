@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use serde_json;
-use super::expr_types::Value;
 
 /// Reactive state store for global, panel-scoped, tool-scoped, and
 /// dialog-scoped state. Mirrors `jas_flask/static/js/engine/store.mjs`
