@@ -282,6 +282,8 @@ public sealed partial class MainWindow : Window
 
     /// <summary>R1-4b S1: SB_DOCK_SNAP is sent once, on the first draw.</summary>
     private bool _dockSnapDone;
+    /// <summary>jas 840 Low 2: the snap was SENT, not merely asked for (a refused snap sends nothing).</summary>
+    private bool _dockSnapSent;
     /// <summary>SB_DOCK_FLOAT_TOUR's replay (FP-6, Q6.FL), while it runs.</summary>
     private FloatTour? _floatTour;
     private bool _floatTourAsked;
@@ -381,7 +383,7 @@ public sealed partial class MainWindow : Window
     /// <summary>The engine answered a layout verb: draw the touched group's collapse as it now reads.</summary>
     private void OnLayoutChanged(string key, string via, string stateJson)
     {
-        if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via); }
+        if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via, key); }
         if (!key.StartsWith("dock", StringComparison.Ordinal) && !key.StartsWith("edge", StringComparison.Ordinal)) { return; }
         if (LayoutWire.GroupCollapsed(stateJson, key) is not { } collapsed)
         {
@@ -485,9 +487,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>One edge frame: the dock's light background, its inner border, and a vertical scroll for a group taller than its rect.</summary>
+    /// <summary>
+    /// One edge frame: the dock's light background, its inner border, and a
+    /// vertical scroll for a group taller than its rect. The AutomationId is on
+    /// the scroll, not the Border: a Border has no automation peer, so UIA would
+    /// never see it (R1-4b S6 reads these rects off the screen).
+    /// </summary>
     private FrameworkElement EdgeFrame(Panel stack, Thickness border, string automationId)
     {
+        var scroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = stack,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(scroll, automationId);
         var frame = new Border
         {
             Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
@@ -497,14 +511,8 @@ public sealed partial class MainWindow : Window
             BorderThickness = border,
             RequestedTheme = ElementTheme.Light,
             Visibility = Visibility.Collapsed,
-            Child = new ScrollViewer
-            {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Content = stack,
-            },
+            Child = scroll,
         };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(frame, automationId);
         EdgeDockLayer.Children.Add(frame);
         return frame;
     }
@@ -702,12 +710,16 @@ public sealed partial class MainWindow : Window
     /// <summary>How many floating docks the last placement drew, so an all-anchored dock stays quiet.</summary>
     private int _floatDrawn;
 
-    /// <summary>Draw the engine's floating docks where it put them, then let the float tour read that answer.</summary>
-    private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via)
+    /// <summary>
+    /// Draw the engine's floating docks where it put them, then let the float
+    /// tour read that answer. <paramref name="answeredGroup"/> is the group an
+    /// in-place answer names, or null for a draw (Q-flask-1).
+    /// </summary>
+    private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via, string? answeredGroup = null)
     {
         PlaceFloatingFrames(floating, via);
         // A resize's clamp is nobody's answer: the tour reads only the placements its ops caused.
-        if (via != "resize") { AdvanceFloatTour(floating); }
+        if (via != "resize") { AdvanceFloatTour(floating, answeredGroup); }
     }
 
     /// <summary>
@@ -715,10 +727,10 @@ public sealed partial class MainWindow : Window
     /// then send the next one, through the same `LayoutOp` the gestures send.
     /// `FloatTour` decides every op and row; this only carries them out.
     /// </summary>
-    private void AdvanceFloatTour(IReadOnlyList<LayoutWire.Floated> floating)
+    private void AdvanceFloatTour(IReadOnlyList<LayoutWire.Floated> floating, string? answeredGroup)
     {
         if (_floatTour is null) { return; }
-        if (_floatTour.Observe(floating) is { } read) { Report(read); }
+        if (_floatTour.Observe(floating, answeredGroup) is { } read) { Report(read); }
         SendFloatTourStep();
     }
 
@@ -941,7 +953,14 @@ public sealed partial class MainWindow : Window
             if (_edgeRects is { } lastRects && _edgeDocks.Count > 0
                 && LayoutWire.EdgeRectsMissing(_edgeDocks, lastRects) is null) { PlaceEdgeDocks(lastRects); }
             else { _edgeRects = null; }
-            if (_edgeDocks.Count > 0) { AskEdgeRects("draw"); }
+            if (_edgeDocks.Count > 0)
+            {
+                // SB_EDGE_ASK_TWICE=1 (R1-4b S6, jas 838 Low 2): the draw asks
+                // twice, so the first answer lands behind a newer ask and must be
+                // dropped as EDGE RECTS STALE; only the second draws.
+                if (Environment.GetEnvironmentVariable("SB_EDGE_ASK_TWICE") == "1") { AskEdgeRects("draw"); }
+                AskEdgeRects("draw");
+            }
             else if (_canvasCut != default)
             {
                 // The last edge dock went: the canvas takes its strips back, and
@@ -971,6 +990,7 @@ public sealed partial class MainWindow : Window
                 {
                     Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
                         $"DOCK SNAP SENT group=dock{sn.Idx} edge={sn.Edge} cell={cw}x{ch} via=synth"));
+                    _dockSnapSent = true;
                     _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.DetachGroupToEdge(_dockId, sn.Idx, sn.Edge, cw, ch), Group = "snap", Via = "synth" });
                 }
             }
@@ -994,7 +1014,7 @@ public sealed partial class MainWindow : Window
             // An edge group's key (R1-4b S5) exists only once SB_DOCK_SNAP's
             // answer is drawn, so the knob waits for that draw, not the load's.
             var collapseWaits = collapseKnob is not null && collapseKnob.Trim().StartsWith("edge", StringComparison.Ordinal)
-                && _dockSnapDone && _edgeDocks.Count == 0;
+                && _dockSnapSent && _edgeDocks.Count == 0;
             if (!_dockCollapseDone && !collapseWaits && !string.IsNullOrWhiteSpace(collapseKnob))
             {
                 _dockCollapseDone = true;
