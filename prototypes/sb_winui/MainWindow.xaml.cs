@@ -401,6 +401,8 @@ public sealed partial class MainWindow : Window
             // re-asks while an edge dock exists.
             Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
                 $"EDGE RECTS DEFERRED cause={cause} -- the canvas cell is not laid out yet ({w}x{h}); its resize asks again"));
+            // jas 838 Low 1: a draw that asks nothing still outdates every answer in flight.
+            ++_edgeAskSeq;
             return;
         }
         _canvas.EdgeRects(new EdgeRectsCmd { W = w, H = h, Cause = cause, Seq = ++_edgeAskSeq });
@@ -936,7 +938,9 @@ public sealed partial class MainWindow : Window
             if (_edgeDocks.Count > 0) { AskEdgeRects("draw"); }
             else if (_canvasCut != default)
             {
-                // The last edge dock went: the canvas takes its strips back.
+                // The last edge dock went: the canvas takes its strips back, and
+                // an answer still in flight is stale (jas 838 Low 1).
+                ++_edgeAskSeq;
                 ApplyCanvasCut(default);
                 Report($"EDGE DOCK DRAWN left=- bottom=- cut=0,0,0,0 cause={snap.Cause}");
             }
