@@ -300,6 +300,8 @@ internal sealed class EdgeRectsCmd : Cmd
     internal double W;
     internal double H;
     internal string Cause = "";
+    /// <summary>The ask's number (jas 836 Low 2): an answer to any but the newest ask is dropped.</summary>
+    internal int Seq;
 }
 
 internal sealed class PaneOpenCmd : Cmd
@@ -5054,7 +5056,8 @@ internal sealed unsafe class Canvas : IDisposable
         // the strict reader refuses is a broken reply, refused by name.
         var read = LayoutWire.Dock(layout);
         var floating = LayoutWire.Floating(layout);
-        if (read is null || floating is null)
+        var anchored = LayoutWire.AnchoredDocks(layout);
+        if (read is null || floating is null || anchored is null)
         {
             _report($"RUSTFAIL DOCK UNREADABLE name={_dockName} cause={cause} -- the engine's layout {Tids()}");
             return;
@@ -5073,6 +5076,8 @@ internal sealed unsafe class Canvas : IDisposable
                 keyed.Add((LayoutWire.FloatKey(f.DockId, i), g.Panels.ToList(), g.Panels[g.Active]));
             }
         }
+        // R1-4b S3: a Left or Bottom dock's groups are panes under their edge keys.
+        keyed.AddRange(LayoutWire.EdgeKeyed(anchored));
         // Published FIRST, so the UI has built every group's frame before any
         // group's plan arrives (one thread, one dispatcher queue: in order).
         _dockTabs = read.Groups.Select(g => g.Panels.ToList()).ToList();
@@ -5082,7 +5087,8 @@ internal sealed unsafe class Canvas : IDisposable
         PublishPanes(layout, cause);
         var live = keyed.Select(k => k.Key).ToHashSet(StringComparer.Ordinal);
         foreach (var stale in _panes.Keys.Where(k => (k.StartsWith("dock", StringComparison.Ordinal)
-                                                      || k.StartsWith("float", StringComparison.Ordinal)) && !live.Contains(k)).ToList())
+                                                      || k.StartsWith("float", StringComparison.Ordinal)
+                                                      || k.StartsWith("edge", StringComparison.Ordinal)) && !live.Contains(k)).ToList())
         {
             _panes.Remove(stale);
             Panes.TryRemove(stale, out _);
@@ -5133,8 +5139,8 @@ internal sealed unsafe class Canvas : IDisposable
 
     internal void EdgeRects(EdgeRectsCmd cmd) => _queue.Add(cmd);
 
-    /// <summary>Raised on the UI thread with the cause and `jas_layout_edge_rects`'s answer.</summary>
-    internal Action<string, string>? EdgeRectsChanged { get; set; }
+    /// <summary>Raised on the UI thread with the ask (its cell and cause) and `jas_layout_edge_rects`'s answer.</summary>
+    internal Action<EdgeRectsCmd, string>? EdgeRectsChanged { get; set; }
 
     /// <summary>
     /// R1-4b S2 (jas 823): the engine's edge-dock rects over the cell, asked
@@ -5155,8 +5161,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         var rects = LayoutWire.EdgeRects(answer);
         _report($"EDGE RECTS cell={size} {(rects is null ? "unreadable" : LayoutWire.EdgeRectsRow(rects))} cause={cmd.Cause} {Tids()}");
-        var c = cmd.Cause;
-        PostToUi(() => EdgeRectsChanged?.Invoke(c, answer));
+        PostToUi(() => EdgeRectsChanged?.Invoke(cmd, answer));
     }
 
     /// <summary>Raised on the UI thread with a verb's group key, via and the
@@ -5193,9 +5198,11 @@ internal sealed unsafe class Canvas : IDisposable
         var before = _layoutGroups;
         var read = LayoutWire.Dock(answer);
         var floating = LayoutWire.Floating(answer);
-        var after = read is null || floating is null ? null
+        var anchored = LayoutWire.AnchoredDocks(answer);
+        var after = read is null || floating is null || anchored is null ? null
             : read.Groups.Select((g, i) => (Key: DockPaneKey(i), Panels: g.Panels.ToList()))
                 .Concat(floating.SelectMany(f => f.Groups.Select((g, i) => (Key: LayoutWire.FloatKey(f.DockId, i), Panels: g.Panels.ToList()))))
+                .Concat(LayoutWire.EdgeKeyed(anchored).Select(k => (k.Key, k.Panels)))
                 .ToList();
         var same = LayoutWire.SameStructure(before, after);
         if (!same)

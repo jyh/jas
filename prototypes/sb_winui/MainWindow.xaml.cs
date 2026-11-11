@@ -268,6 +268,18 @@ public sealed partial class MainWindow : Window
     /// <summary>R1-4b S2: the engine's rects for the edge docks, as last answered.</summary>
     private LayoutWire.EdgeRectSet? _edgeRects;
 
+    /// <summary>R1-4b S3 (jas 836 Low 2): the newest ask's number; an answer to an older one is stale.</summary>
+    private int _edgeAskSeq;
+
+    /// <summary>R1-4b S3: the Left column's frame, hidden until the engine's rects place it.</summary>
+    private FrameworkElement? _edgeLeftFrame;
+
+    /// <summary>R1-4b S3: one frame per Bottom group, left to right, hidden until placed.</summary>
+    private readonly List<FrameworkElement> _edgeBottomFrames = new();
+
+    /// <summary>R1-4b S4: the canvas cut now applied, left, top, right and bottom; 0 with no edge dock.</summary>
+    private (double L, double T, double R, double B) _canvasCut;
+
     /// <summary>R1-4b S1: SB_DOCK_SNAP is sent once, on the first draw.</summary>
     private bool _dockSnapDone;
     /// <summary>SB_DOCK_FLOAT_TOUR's replay (FP-6, Q6.FL), while it runs.</summary>
@@ -390,19 +402,30 @@ public sealed partial class MainWindow : Window
         double w = FloatLayer.ActualWidth, h = FloatLayer.ActualHeight;
         if (w <= 0 || h <= 0)
         {
+            // jas 836 Low 3: "not yet", not a refusal. The cell's first SizeChanged
+            // re-asks while an edge dock exists.
             Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                $"RUSTFAIL EDGE RECTS REFUSED cause={cause} -- the canvas cell is not laid out ({w}x{h})"));
+                $"EDGE RECTS DEFERRED cause={cause} -- the canvas cell is not laid out yet ({w}x{h}); its resize asks again"));
             return;
         }
-        _canvas.EdgeRects(new EdgeRectsCmd { W = w, H = h, Cause = cause });
+        _canvas.EdgeRects(new EdgeRectsCmd { W = w, H = h, Cause = cause, Seq = ++_edgeAskSeq });
     }
 
     /// <summary>
     /// R1-4b S2 (jas 815): the engine's rects arrived. An edge dock with no rect
     /// to draw in is refused by name, never drawn as nothing.
     /// </summary>
-    private void OnEdgeRectsChanged(string cause, string answer)
+    private void OnEdgeRectsChanged(EdgeRectsCmd asked, string answer)
     {
+        var cause = asked.Cause;
+        // jas 836 Low 2: an answer is judged against the dock list of the draw
+        // that asked; a newer draw's ask is in flight, and its answer will land.
+        if (asked.Seq != _edgeAskSeq)
+        {
+            Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"EDGE RECTS STALE seq={asked.Seq} newest={_edgeAskSeq} cause={cause} -- dropped; the newest ask's answer draws"));
+            return;
+        }
         var rects = LayoutWire.EdgeRects(answer);
         if (LayoutWire.EdgeRectsMissing(_edgeDocks, rects) is { } why)
         {
@@ -410,7 +433,121 @@ public sealed partial class MainWindow : Window
             Report($"RUSTFAIL EDGE RECTS REFUSED cause={cause} -- {why}");
             return;
         }
+        // S4: the cut is measured against the cell the rects were ASKED over, not
+        // the cell as it is when the answer lands.
+        if (rects is null || LayoutWire.CanvasCut(rects, asked.W, asked.H) is not { } cut)
+        {
+            _edgeRects = null;
+            Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"RUSTFAIL EDGE DOCK DRAW REFUSED cause={cause} -- the canvas rect is not inside the cell {asked.W:0.##}x{asked.H:0.##}"));
+            return;
+        }
         _edgeRects = rects;
+        PlaceEdgeDocks(rects);
+        ApplyCanvasCut(cut);
+        Report(LayoutWire.EdgeDockDrawnRow(_edgeDocks, rects, cut, cause));
+    }
+
+    /// <summary>
+    /// R1-4b S3: build the Left and Bottom docks' frames on <c>EdgeDockLayer</c>,
+    /// their groups by the same builder as the Right dock's, under their edge
+    /// keys. Each stays hidden until the engine's rects place it.
+    /// </summary>
+    private void DrawEdgeDocks(Action<string, LayoutWire.Group, Panel> buildGroup)
+    {
+        EdgeDockLayer.Children.Clear();
+        _edgeLeftFrame = null;
+        _edgeBottomFrames.Clear();
+        foreach (var a in _edgeDocks)
+        {
+            var id = a.Dock.DockId;
+            if (a.Edge == "left")
+            {
+                var stack = new StackPanel();
+                for (var gi = 0; gi < a.Dock.Groups.Count; gi++) { buildGroup(LayoutWire.EdgeKey("left", id, gi)!, a.Dock.Groups[gi], stack); }
+                _edgeLeftFrame = EdgeFrame(stack, new Thickness(0, 0, 1, 0),
+                    string.Create(System.Globalization.CultureInfo.InvariantCulture, $"edgeL{id}"));
+            }
+            else
+            {
+                // Rule 6: a Bottom dock's groups sit side by side, one frame each.
+                for (var gi = 0; gi < a.Dock.Groups.Count; gi++)
+                {
+                    var key = LayoutWire.EdgeKey("bottom", id, gi)!;
+                    var stack = new StackPanel();
+                    buildGroup(key, a.Dock.Groups[gi], stack);
+                    _edgeBottomFrames.Add(EdgeFrame(stack, new Thickness(gi == 0 ? 0 : 1, 1, 0, 0), key));
+                }
+            }
+        }
+    }
+
+    /// <summary>One edge frame: the dock's light background, its inner border, and a vertical scroll for a group taller than its rect.</summary>
+    private FrameworkElement EdgeFrame(Panel stack, Thickness border, string automationId)
+    {
+        var frame = new Border
+        {
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xF3, 0xF3, 0xF3)),
+            BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x2A, 0x2F, 0x36)),
+            BorderThickness = border,
+            RequestedTheme = ElementTheme.Light,
+            Visibility = Visibility.Collapsed,
+            Child = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = stack,
+            },
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(frame, automationId);
+        EdgeDockLayer.Children.Add(frame);
+        return frame;
+    }
+
+    /// <summary>R1-4b S3: put each edge frame at the engine's rect; a Bottom dock's groups at equal shares of its row.</summary>
+    private void PlaceEdgeDocks(LayoutWire.EdgeRectSet rects)
+    {
+        static void Place(FrameworkElement f, LayoutWire.EdgeRect r)
+        {
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(f, r.X);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(f, r.Y);
+            f.Width = r.W;
+            f.Height = r.H;
+            f.Visibility = Visibility.Visible;
+        }
+        if (_edgeLeftFrame is { } left && rects.Left is { } l) { Place(left, l); }
+        if (rects.Bottom is { } b)
+        {
+            var shares = LayoutWire.RowShares(b, _edgeBottomFrames.Count);
+            for (var i = 0; i < shares.Count; i++) { Place(_edgeBottomFrames[i], shares[i]); }
+        }
+    }
+
+    /// <summary>R1-4b S4: cut the canvas surface and its overlays to the engine's canvas rect.</summary>
+    private void ApplyCanvasCut((double L, double T, double R, double B) cut)
+    {
+        _canvasCut = cut;
+        ApplySurfaceMargins();
+    }
+
+    /// <summary>
+    /// The surface's margins, from the two things that move it: the canvas cut
+    /// (S4) on every side, and the canvas strip's height (STATUS-flask 255) on
+    /// top of the surface and its hit shield only. The strip, the no-document
+    /// cover and the focus target take the cut alone. With no edge dock the cut
+    /// is 0 and every margin is what the strip alone set.
+    /// </summary>
+    private void ApplySurfaceMargins()
+    {
+        var (l, t, r, b) = _canvasCut;
+        var top = Math.Max(_canvasStripTop, 0);
+        Canvas.Margin = new Thickness(l, t + top, r, b);
+        HitShield.Margin = new Thickness(l, t + top, r, b);
+        CanvasStripHost.Margin = new Thickness(l, t, r, 0);
+        NoDocumentCover.Margin = new Thickness(l, t, r, b);
+        CanvasFocus.Margin = new Thickness(l, t, 0, 0);
     }
 
     /// <summary>Each floating dock's frame on <c>FloatLayer</c>, by the engine's dock id.</summary>
@@ -797,8 +934,20 @@ public sealed partial class MainWindow : Window
             // R1-4b S2: the rects are asked for on every draw that holds an edge
             // dock, with the cell as it is now (jas 823: never stored).
             _edgeDocks = anchoredAll?.Where(a => a.Edge is "left" or "bottom").ToList() ?? new List<LayoutWire.EdgeDock>();
-            _edgeRects = null;
+            DrawEdgeDocks(BuildGroup);
+            // jas 836 Low 1: the new frames stand at the last good rects while
+            // their own answer is asked for, so a redraw never blanks them; the
+            // answer then places them, or refuses by name.
+            if (_edgeRects is { } lastRects && _edgeDocks.Count > 0
+                && LayoutWire.EdgeRectsMissing(_edgeDocks, lastRects) is null) { PlaceEdgeDocks(lastRects); }
+            else { _edgeRects = null; }
             if (_edgeDocks.Count > 0) { AskEdgeRects("draw"); }
+            else if (_canvasCut != default)
+            {
+                // The last edge dock went: the canvas takes its strips back.
+                ApplyCanvasCut(default);
+                Report($"EDGE DOCK DRAWN left=- bottom=- cut=0,0,0,0 cause={snap.Cause}");
+            }
             // SB_DOCK_SNAP=<dock key>:<left|bottom> (R1-4b S1): that anchored group
             // is dropped ON that edge of the canvas cell, through the engine's own
             // drop-snap (`detach_group` with the cell as the viewport), once.
@@ -1036,7 +1185,8 @@ public sealed partial class MainWindow : Window
             Report($"RUSTFAIL {(key == SbWinUi.Canvas.ToolbarPaneKey ? "TOOLBAR" : $"PANE key={key}")} DRAW threw "
                  + $"{ex.GetType().Name}: {ex.Message}");
         }
-        if (key.StartsWith("dock", StringComparison.Ordinal) || key.StartsWith("float", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
+        if (key.StartsWith("dock", StringComparison.Ordinal) || key.StartsWith("float", StringComparison.Ordinal)
+            || key.StartsWith("edge", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
     }
 
     /// <summary>
@@ -1061,8 +1211,7 @@ public sealed partial class MainWindow : Window
         _canvasStripTop = top;
         CanvasStripHost.Height = top;
         CanvasStripHost.Visibility = top > 0 ? Visibility.Visible : Visibility.Collapsed;
-        Canvas.Margin = new Thickness(0, top, 0, 0);
-        HitShield.Margin = new Thickness(0, top, 0, 0);
+        ApplySurfaceMargins();
         // A layout pass even when nothing moved (a zero strip), so the deferred
         // HITTARGET row is always written.
         Canvas.InvalidateArrange();
