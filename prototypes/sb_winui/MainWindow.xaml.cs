@@ -1094,7 +1094,19 @@ public sealed partial class MainWindow : Window
         _canvas.LayoutChanged = OnLayoutChanged;
         _canvas.EdgeRectsChanged = OnEdgeRectsChanged;
         // R1-4b S2: a resized cell re-asks the rects, while an edge dock exists.
-        FloatLayer.SizeChanged += (_, _) => { if (_edgeDocks.Count > 0) { AskEdgeRects("resize"); } };
+        // The window's own size law decides the size first (O2b), as the
+        // floating clamp's does: a zero is refused, never asked about.
+        FloatLayer.SizeChanged += (_, e) =>
+        {
+            if (_edgeDocks.Count == 0) { return; }
+            var decision = SurfacePolicy.Decide((uint)e.NewSize.Width, (uint)e.NewSize.Height, hasSurface: true);
+            if (decision != Decision.Accept)
+            {
+                Report($"EDGE RECTS {decision} {(uint)e.NewSize.Width}x{(uint)e.NewSize.Height} -- the rects stay as they were");
+                return;
+            }
+            AskEdgeRects("resize");
+        };
         // FP-6: a resized canvas cell keeps every floating dock reachable, by the
         // engine's `clamp_floating_docks`; sent only while something floats.
         FloatLayer.SizeChanged += (_, e) =>
