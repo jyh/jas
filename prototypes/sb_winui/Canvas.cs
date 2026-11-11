@@ -290,6 +290,25 @@ internal sealed class LayoutOpCmd : Cmd
     internal string Via = "hand";
 }
 
+/// <summary>(A) W1b: a client attached to the agent pipe; the engine starts it a fresh session.</summary>
+internal sealed class McpAttachCmd : Cmd
+{
+    internal bool Attached = true;
+}
+
+/// <summary>(A) W1b: one whole line from the agent client, as its bytes (McpWire.LineSplitter).</summary>
+internal sealed class McpLineCmd : Cmd
+{
+    internal byte[] Line = Array.Empty<byte>();
+}
+
+/// <summary>(A) W1c: the accept bar's Accept or Reject, decided by the artist.</summary>
+internal sealed class McpDecideCmd : Cmd
+{
+    internal bool Accept;
+    internal string Via = "hand";
+}
+
 /// <summary>
 /// Q-flask-2: an edge group's pane is planned at this width from now on; a
 /// pane already open at another width is re-planned at it.
@@ -1793,9 +1812,13 @@ internal sealed unsafe class Canvas : IDisposable
         var cause = "repaint";
         var resizes = 0;
         var applied = false;
+        // (A) W1b: did this drain hold a crossing that CAN edit the document?
+        var editing = false;
 
         for (var i = 0; i < batch.Count; i++)
         {
+            if (batch[i] is PointerCmd or KeyCmd or OpCmd or PanelClickCmd or PanelSynthCmd or PanelValueSynthCmd
+                or DialogEventCmd or DialogDismissCmd or MenuActionCmd) { editing = true; }
             switch (batch[i])
             {
                 case QuitCmd _:
@@ -1976,6 +1999,30 @@ internal sealed unsafe class Canvas : IDisposable
                     ApplyPaneWidth(pw);
                     break;
 
+                case McpAttachCmd mat:
+                    ApplyMcpAttach(mat);
+                    break;
+
+                case McpLineCmd ml:
+                    // A proposal previews IN the document, so a line can move it
+                    // as a key can: read the model, repaint, re-read the panes.
+                    ApplyMcpLine(ml);
+                    DirtyFromModel();
+                    dirty = true;
+                    cause = "mcp";
+                    _panelStale = true;
+                    ApplyMenuRefresh("mcp");
+                    break;
+
+                case McpDecideCmd md:
+                    ApplyMcpDecide(md);
+                    DirtyFromModel();
+                    dirty = true;
+                    cause = "mcp";
+                    _panelStale = true;
+                    ApplyMenuRefresh("mcp");
+                    break;
+
                 case PanelClickCmd pc:
                     if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
                     // SB_PROBE (jas §373): a panel step lands on the document as a
@@ -2016,6 +2063,11 @@ internal sealed unsafe class Canvas : IDisposable
                     break;
             }
         }
+
+        // (A) W1b: the artist's edits reach the client by PULL (BL3: no
+        // callback crosses the ABI). Once per drain that held a crossing that
+        // CAN edit, while a client is attached; one that owed nothing is quiet.
+        if (_mcpAttached && editing) { McpWrite(JasCore.jas_mcp_observe(_engine), "observe"); }
 
         // ONE plan re-read per drain, however many commands in it could have
         // moved the document -- the same collapse a repaint gets.
@@ -5160,6 +5212,84 @@ internal sealed unsafe class Canvas : IDisposable
     internal void EdgeRects(EdgeRectsCmd cmd) => _queue.Add(cmd);
 
     internal void PaneWidth(PaneWidthCmd cmd) => _queue.Add(cmd);
+
+    internal void McpAttach(bool attached) => _queue.Add(new McpAttachCmd { Attached = attached });
+
+    internal void McpLine(byte[] line) => _queue.Add(new McpLineCmd { Line = line });
+
+    internal void McpDecide(bool accept, string via) => _queue.Add(new McpDecideCmd { Accept = accept, Via = via });
+
+    /// <summary>(A) W1b: the bytes owed to the agent client, raised on the RENDER thread; the pipe's outbox writes them.</summary>
+    internal Action<byte[]>? McpOut { get; set; }
+
+    /// <summary>(A) W1b: what the accept bar shows changed, on the UI thread.</summary>
+    internal Action<McpWire.PendingRead>? McpPendingChanged { get; set; }
+
+    private bool _mcpAttached;
+    private (string Id, string Name)? _mcpShown;
+
+    /// <summary>A client came or went. On arrival the engine starts a fresh session for it.</summary>
+    private void ApplyMcpAttach(McpAttachCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        _mcpAttached = cmd.Attached;
+        if (!cmd.Attached)
+        {
+            _report($"MCP DETACHED {Tids()}");
+            return;
+        }
+        var rc = JasCore.jas_mcp_attach(_engine);
+        _report(rc == 1 ? $"MCP ATTACHED {Tids()}" : $"RUSTFAIL MCP ATTACH REFUSED rc={rc} {Tids()}");
+        ApplyMcpPending();
+    }
+
+    /// <summary>One client line: the engine's reply (and what changed outside the session) goes back as it is.</summary>
+    private void ApplyMcpLine(McpLineCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var answer = JasCore.jas_mcp_handle(_engine, cmd.Line, (nuint)cmd.Line.Length);
+        McpWrite(answer, "line", cmd.Line.Length);
+        ApplyMcpPending();
+    }
+
+    /// <summary>The artist's Accept or Reject: the client is told the proposal's fate.</summary>
+    private void ApplyMcpDecide(McpDecideCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var id = _mcpShown?.Id ?? "-";
+        var answer = cmd.Accept ? JasCore.jas_mcp_accept(_engine) : JasCore.jas_mcp_reject(_engine);
+        McpWrite(answer, cmd.Accept ? "accept" : "reject");
+        _report($"PROPOSAL {(cmd.Accept ? "ACCEPTED" : "REJECTED")} id={id} via={cmd.Via} {Tids()}");
+        ApplyMcpPending();
+    }
+
+    /// <summary>Hand an engine answer to the pipe and say what crossed: `MCP OUT cause= in-bytes= lines= bytes=`.</summary>
+    private void McpWrite(JasCore.JasBytes answer, string cause, int inBytes = 0)
+    {
+        var text = JasCore.TakeString(answer);
+        var lines = 0;
+        foreach (var c in text) { if (c == '\n') { lines++; } }
+        if (text.Length > 0 && _mcpAttached) { McpOut?.Invoke(System.Text.Encoding.UTF8.GetBytes(text)); }
+        // An observe that owed nothing is quiet: it runs on every editing drain.
+        if (cause == "observe" && lines == 0) { return; }
+        _report($"MCP OUT cause={cause} in-bytes={inBytes} lines={lines} bytes={System.Text.Encoding.UTF8.GetByteCount(text)} {Tids()}");
+    }
+
+    /// <summary>Re-read what the bar shows; a change writes its row and goes to the UI.</summary>
+    private void ApplyMcpPending()
+    {
+        var json = JasCore.TakeString(JasCore.jas_mcp_pending(_engine));
+        var read = McpWire.Pending(json);
+        if (read.Why is not null)
+        {
+            _report($"RUSTFAIL MCP PENDING UNREADABLE -- {read.Why} {Tids()}");
+            return;
+        }
+        (string Id, string Name)? now = read.Id is null ? null : (read.Id, read.Name!);
+        if (McpWire.BarRow(_mcpShown, now) is { } row) { _report($"{row} {Tids()}"); }
+        _mcpShown = now;
+        PostToUi(() => McpPendingChanged?.Invoke(read));
+    }
 
     /// <summary>Q-flask-2: each edge group's own plan width, by pane key; honoured by every open of that key.</summary>
     private readonly Dictionary<string, long> _paneWidth = new(StringComparer.Ordinal);
