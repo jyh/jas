@@ -4072,54 +4072,90 @@ function Get-SbNightlyVerdict {
 
 # The ENGINE-OPENED dialogs (flask 795, jas 796 (a)): each dialog no menubar
 # item opens, run by `rendered_tree.ps1 -EngineOpen` with {} params, as
-# @{Dialog; Exit; Out} (Out = rendered_tree's lines). ADVISORY: this line is
-# its own receipt row and moves no verdict until one clean nightly (11-11)
-# promotes its passes into the gating dialogs=. Three states, all printed:
+# @{Dialog; Exit; Out} (Out = rendered_tree's lines). Three states, all printed:
 # PASS is exit 0 with compared>0 (and carries the count); a PASS at compared=0
 # compares nothing and is a NOT RUN that says so; a VERDICT of REFUSED or NOT
-# RUN is NOT RUN, never a FAIL; anything else is FAIL. A short run is torn,
-# never a smaller denominator. Empty when none are wanted.
+# RUN is NOT RUN, never a FAIL; anything else is FAIL. One classifier serves
+# the advisory line AND the gating verdict (promotion, jas 796 and 826), so
+# the two can never disagree about a dialog.
+function Get-SbEngineDialogState {
+    param($Run)
+    $outLines = @($Run.Out | ForEach-Object { "$_".TrimEnd() })
+    # jas 799 note 1: an engine refusal is the shell's own row, carried in the
+    # launch's output; its status and error are the reason, not plan=False.
+    $refusal = @($outLines | Where-Object { $_ -cmatch 'RUSTFAIL DIALOG OPEN REFUSED ' } | Select-Object -First 1)
+    if ($refusal.Count -gt 0) {
+        # jas 802 (A), 804: a refusal with no status= is the SHELL's (no engine,
+        # or a malformed knob); its reason is the text after `--`.
+        if ($refusal[0] -cnotmatch ' status=' -and $refusal[0] -cmatch ' -- (.*?)(?= ui-tid=|$)') {
+            return @{ State = 'NOTRUN'; Text = "$($Run.Dialog)(shell refused: $(ConvertTo-SbParenSafe $Matches[1]))" }
+        }
+        $st = if ($refusal[0] -cmatch ' status=(\S+)') { $Matches[1] } else { '?' }
+        $er = if ($refusal[0] -cmatch ' error=(.*?)(?= ui-tid=|$)') { $Matches[1] } else { '?' }
+        return @{ State = 'NOTRUN'; Text = "$($Run.Dialog)(engine refused: status=$st error=$(ConvertTo-SbParenSafe $er))" }
+    }
+    $v = @($outLines | Where-Object { $_ -cmatch '^VERDICT: ' } | Select-Object -First 1)
+    $vt = if ($v.Count -gt 0) { $v[0].Substring(9) } else { '' }
+    if ($vt -cmatch '^(REFUSED|NOT RUN)') { return @{ State = 'NOTRUN'; Text = "$($Run.Dialog)($(ConvertTo-SbParenSafe $vt))" } }
+    if ($vt -cnotmatch '^compared=(\d+) mismatches=(\d+)') { return @{ State = 'NOTRUN'; Text = "$($Run.Dialog)(no verdict row)" } }
+    $compared = [int]$Matches[1]
+    if ([int]$Run.Exit -eq 0) {
+        if ($compared -eq 0) { return @{ State = 'NOTRUN'; Text = "$($Run.Dialog)(a pass at compared=0 compares nothing)" } }
+        return @{ State = 'PASS'; Text = "$($Run.Dialog)($compared)" }
+    }
+    # jas 799 note 2: a FAIL at mismatches=0 is exit 1 from KINDS or GAPS
+    # alone, so the verdict that failed it is named beside the counts.
+    $because = @($outLines | Where-Object { $_ -cmatch '^(KINDS-VERDICT|GAPS): ' -and $_ -cnotmatch ': PASS' })
+    $tail = if ($because.Count -gt 0) { '; ' + (($because | ForEach-Object { ConvertTo-SbParenSafe $_ }) -join '; ') } else { '' }
+    return @{ State = 'FAIL'; Text = "$($Run.Dialog)($(ConvertTo-SbParenSafe $vt)$tail)" }
+}
+
+# A PROMOTED engine dialog's run as a gating dialog run (jas 796, 826): exit 0
+# for PASS, 1 for FAIL, 2 for NOT RUN. A promoted dialog that stops running is
+# a regression, so its NOT RUN is never 0.
+function ConvertTo-SbGatingDialogRun {
+    param($Run)
+    $exit = switch ((Get-SbEngineDialogState $Run).State) { 'PASS' { 0 } 'FAIL' { 1 } default { 2 } }
+    @{ Panel = "$($Run.Dialog)"; Exit = $exit }
+}
+
+# The promotion list (`e2e_baselines/engine_dialogs_promoted.json`, jas 796,
+# 826): the engine dialogs that GATE. Every id must be among the uncovered
+# dialogs tonight (Known); one that is not, a duplicate, or a list with no
+# `promoted` array is REFUSED by name, never dropped.
+function Get-SbPromotedEngineDialogs {
+    param([string]$Json, [string[]]$Known = @())
+    $doc = $Json | ConvertFrom-Json
+    if ($null -eq $doc.PSObject.Properties['promoted']) { return 'REFUSED: the promotion list has no promoted array' }
+    $seen = @{}
+    $ids = @()
+    foreach ($id in @($doc.promoted)) {
+        $id = "$id"
+        if ($seen.ContainsKey($id)) { return "REFUSED: promoted engine dialog $id is listed twice" }
+        $seen[$id] = $true
+        if ($Known -cnotcontains $id) { return "REFUSED: promoted engine dialog $id is not among the uncovered dialogs (moved to a menubar opener, or renamed?)" }
+        $ids += $id
+    }
+    return ,$ids
+}
+
+# The ENGINE-DIALOGS receipt line: every engine dialog's state, gating or not.
+# `promoted=<p>` counts the runs whose dialog gates (Promoted); the rest are
+# advisory. A short run is torn, never a smaller denominator. Empty when none
+# are wanted.
 function Get-SbEngineDialogsLine {
-    param($Runs = @(), [int]$Wanted = 0)
+    param($Runs = @(), [int]$Wanted = 0, [string[]]$Promoted = @())
     if ($Wanted -eq 0) { return '' }
     $runs = @($Runs | Where-Object { $null -ne $_ })
     if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran)" }
-    $pass = @(); $fail = @(); $notrun = @()
+    $pass = @(); $fail = @(); $notrun = @(); $gating = 0
     foreach ($r in $runs) {
-        $outLines = @($r.Out | ForEach-Object { "$_".TrimEnd() })
-        # jas 799 note 1: an engine refusal is the shell's own row, carried in the
-        # launch's output; its status and error are the reason, not plan=False.
-        $refusal = @($outLines | Where-Object { $_ -cmatch 'RUSTFAIL DIALOG OPEN REFUSED ' } | Select-Object -First 1)
-        if ($refusal.Count -gt 0) {
-            # jas 802 (A), 804: a refusal with no status= is the SHELL's (no engine,
-            # or a malformed knob); its reason is the text after `--`.
-            if ($refusal[0] -cnotmatch ' status=' -and $refusal[0] -cmatch ' -- (.*?)(?= ui-tid=|$)') {
-                $notrun += "$($r.Dialog)(shell refused: $(ConvertTo-SbParenSafe $Matches[1]))"
-                continue
-            }
-            $st = if ($refusal[0] -cmatch ' status=(\S+)') { $Matches[1] } else { '?' }
-            $er = if ($refusal[0] -cmatch ' error=(.*?)(?= ui-tid=|$)') { $Matches[1] } else { '?' }
-            $notrun += "$($r.Dialog)(engine refused: status=$st error=$(ConvertTo-SbParenSafe $er))"
-            continue
-        }
-        $v = @($outLines | Where-Object { $_ -cmatch '^VERDICT: ' } | Select-Object -First 1)
-        $vt = if ($v.Count -gt 0) { $v[0].Substring(9) } else { '' }
-        if ($vt -cmatch '^(REFUSED|NOT RUN)') { $notrun += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt))"; continue }
-        if ($vt -cnotmatch '^compared=(\d+) mismatches=(\d+)') { $notrun += "$($r.Dialog)(no verdict row)"; continue }
-        $compared = [int]$Matches[1]
-        if ([int]$r.Exit -eq 0) {
-            if ($compared -eq 0) { $notrun += "$($r.Dialog)(a pass at compared=0 compares nothing)"; continue }
-            $pass += "$($r.Dialog)($compared)"
-            continue
-        }
-        # jas 799 note 2: a FAIL at mismatches=0 is exit 1 from KINDS or GAPS
-        # alone, so the verdict that failed it is named beside the counts.
-        $because = @($outLines | Where-Object { $_ -cmatch '^(KINDS-VERDICT|GAPS): ' -and $_ -cnotmatch ': PASS' })
-        $tail = if ($because.Count -gt 0) { '; ' + (($because | ForEach-Object { ConvertTo-SbParenSafe $_ }) -join '; ') } else { '' }
-        $fail += "$($r.Dialog)($(ConvertTo-SbParenSafe $vt)$tail)"
+        if ($Promoted -ccontains "$($r.Dialog)") { $gating++ }
+        $st = Get-SbEngineDialogState $r
+        switch ($st.State) { 'PASS' { $pass += $st.Text } 'FAIL' { $fail += $st.Text } default { $notrun += $st.Text } }
     }
     $show = { param($xs) if ($xs.Count -eq 0) { '-' } else { $xs -join ',' } }
-    "ENGINE-DIALOGS engine-dialogs=$($pass.Count)/$($runs.Count) fail=$($fail.Count) notrun=$($notrun.Count) advisory=until-promoted " +
+    "ENGINE-DIALOGS engine-dialogs=$($pass.Count)/$($runs.Count) fail=$($fail.Count) notrun=$($notrun.Count) promoted=$gating " +
         "pass=$(& $show $pass) fail=$(& $show $fail) notrun=$(& $show $notrun) witness=default-render(params {})"
 }
 

@@ -94,21 +94,35 @@ try {
     $dialogs = @($derived.covered | ForEach-Object { @{ Dialog = "$($_.dialog)"; Opener = "$($_.opener)" } })
     $uncoveredDialogs = @($derived.uncovered).Count
     # jas 796 (a): every UNCOVERED dialog is also opened in the engine by its id
-    # (`rendered_tree.ps1 -EngineOpen`, {} params). ADVISORY: its own receipt
-    # line (ENGINE-DIALOGS), which moves no verdict until promoted.
+    # (`rendered_tree.ps1 -EngineOpen`, {} params), on its own receipt line
+    # (ENGINE-DIALOGS). A PROMOTED one gates (jas 826); the rest are advisory.
     $engineDialogs = @($derived.uncovered | ForEach-Object { "$($_.dialog)" })
 } catch {
     Pop-Location
     Complete-Night "NOT RUN(corpus: dialog_openers.py gave no list: $(ConvertTo-SbParenSafe "$($_.Exception.Message)"))"
 }
 Pop-Location
+# PROMOTION (jas 796, 826): the engine dialogs that GATE, from
+# e2e_baselines/engine_dialogs_promoted.json. Read against the WHOLE uncovered
+# list, before -Only narrows it, so a stale id is refused on every run.
+$promotedPath = Join-Path $PSScriptRoot 'e2e_baselines\engine_dialogs_promoted.json'
+# jas 830 item 2: under Stop, an unreadable list would end the night with no
+# receipt, so it is read inside a try and refused by name, as the corpus is.
+try {
+    $promoted = Get-SbPromotedEngineDialogs -Json (Get-Content -Raw -Encoding UTF8 -LiteralPath $promotedPath) -Known $engineDialogs
+} catch {
+    Complete-Night "NOT RUN(corpus: the promotion list is unreadable: $(ConvertTo-SbParenSafe "$($_.Exception.Message)"))"
+}
+if ($promoted -is [string]) { Complete-Night "NOT RUN(corpus: $(ConvertTo-SbParenSafe $promoted))" }
 if ($Only) {
     $scripts = @($scripts | Where-Object { $_.BaseName -like "*$Only*" })
     $panelIds = @($panelIds | Where-Object { $_ -like "*$Only*" })
     $dialogs = @($dialogs | Where-Object { $_.Dialog -like "*$Only*" })
     $engineDialogs = @($engineDialogs | Where-Object { $_ -like "*$Only*" })
 }
-$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs")
+$promoted = @($promoted | Where-Object { $engineDialogs -ccontains $_ })
+$dialogsWanted = $dialogs.Count + $promoted.Count
+$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs promoted=$($promoted.Count)")
 
 # ---- build once: capture_desktop, then the cdylib lane LAST (the last lane to
 # touch target/ decides what the shell loads), then the shell. prove_e2e.ps1
@@ -130,7 +144,7 @@ if (-not $build) {
 }
 if ($build) {
     $lines.Add("BUILD $build (log: $buildLog)")
-    Complete-Night (Get-SbNightlyVerdict -Box $box -Build $build -ItemsWanted $scripts.Count -PanelsWanted $panelIds.Count -DialogsWanted $dialogs.Count)
+    Complete-Night (Get-SbNightlyVerdict -Box $box -Build $build -ItemsWanted $scripts.Count -PanelsWanted $panelIds.Count -DialogsWanted $dialogsWanted)
 }
 
 # After a failure, the box is read again (with no quiet gate: this run's own
@@ -202,18 +216,33 @@ if (-not $stop) {
     }
 }
 
-# ---- every uncovered dialog, opened in the engine (ADVISORY, jas 796 (a)) ---
-# Run after the gating corpus and never stopping it: a FAIL here moves no
-# verdict. A gating stop skips these, and the line then reads torn.
+# ---- every uncovered dialog, opened in the engine (jas 796 (a), 826) -------
+# Run after the gating corpus. An ADVISORY one moves no verdict and never stops
+# the run. A PROMOTED one gates, and after its non-PASS the box is read again
+# (jas 830 item 1), as after an item, a panel or a menubar dialog, so a box that
+# went not ready reads NOT RUN, never RED. A gating stop skips these, and the
+# line then reads torn.
 $engineRuns = @()
 if (-not $stop) {
     foreach ($ed in $engineDialogs) {
         $eo = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'rendered_tree.ps1') -Panel $ed -EngineOpen 2>&1
-        $engineRuns += @{ Dialog = $ed; Exit = $LASTEXITCODE; Out = @($eo | ForEach-Object { "$_" }) }
+        $er = @{ Dialog = $ed; Exit = $LASTEXITCODE; Out = @($eo | ForEach-Object { "$_" }) }
+        $engineRuns += $er
+        # A PROMOTED dialog gates (jas 796, 826): its run joins the gating
+        # dialogs, and a non-PASS is named on its own DIALOG row.
+        if ($promoted -ccontains $ed) {
+            $g = ConvertTo-SbGatingDialogRun $er
+            $dialogRuns += $g
+            if ($g.Exit -ne 0) {
+                $lines.Add("DIALOG $ed opener=engine exit=$($g.Exit) $((Get-SbEngineDialogState $er).Text)")
+                $stop = Get-SbStopAfter "engine dialog $ed"
+                if ($stop) { break }
+            }
+        }
     }
 }
-$engineLine = Get-SbEngineDialogsLine -Runs $engineRuns -Wanted $engineDialogs.Count
+$engineLine = Get-SbEngineDialogsLine -Runs $engineRuns -Wanted $engineDialogs.Count -Promoted $promoted
 if ($engineLine) { $lines.Add($engineLine) }
 
 Complete-Night (Get-SbNightlyVerdict -Box $box -Stop $stop -Items $items.ToArray() -ItemsWanted $scripts.Count `
-    -Panels $panels -PanelsWanted $panelIds.Count -Dialogs $dialogRuns -DialogsWanted $dialogs.Count)
+    -Panels $panels -PanelsWanted $panelIds.Count -Dialogs $dialogRuns -DialogsWanted $dialogsWanted)

@@ -3299,7 +3299,7 @@ Test-Case 'nightly: a build that failed is RED before any item' {
 
 # The ENGINE-OPENED dialogs (flask 795, jas 796 (a)): every dialog no menubar
 # item opens, opened by `rendered_tree.ps1 -EngineOpen` with {} params. ADVISORY
-# until one clean nightly (11-11) promotes the passes into the gating dialogs=.
+# unless promoted (the PROMOTION cases below, jas 826): a promoted one gates.
 # The line prints all three states; a NOT RUN is never a FAIL and never leaves
 # the denominator; a PASS carries its compared= count, and one at compared=0
 # is refused (a NOT RUN that names why).
@@ -3311,10 +3311,10 @@ $eNotRun = New-SbEngRun 'pen_alternates' 2 @('VERDICT: REFUSED: the plan has no 
 $eZero = New-SbEngRun 'swatch_library_save' 0 @('VERDICT: compared=0 mismatches=0', 'KINDS-VERDICT: PASS(pairs=0; known: none)')
 Test-Case 'engine dialogs: the line prints pass, fail and not-run, each named' {
     Get-SbEngineDialogsLine -Runs @($ePass, $eFail, $eNotRun, $ePass2) -Wanted 4
-} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 advisory=until-promoted pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 promoted=0 pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
 Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says so' {
     Get-SbEngineDialogsLine -Runs @($eZero) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
 Test-Case 'engine dialogs: a run short of the wanted count is torn, never a smaller denominator' {
     Get-SbEngineDialogsLine -Runs @($ePass) -Wanted 3
 } 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran)'
@@ -3327,13 +3327,13 @@ $eNoRow = New-SbEngRun 'boolean_options' 2 @('start: pid=0 waited=30 refusal=the
 $eKinds = New-SbEngRun 'scale_options' 1 @('VERDICT: compared=10 mismatches=0', 'GAPS: PASS(known: none)', 'KINDS-VERDICT: FAIL(new: radio->RadioButton:2)')
 Test-Case 'engine dialogs: an engine refusal names the engine''s reason, not plan=False' {
     Get-SbEngineDialogsLine -Runs @($eRefused) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=pen_alternates(engine refused: status=4 error={"class":"MissingTarget"}) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=pen_alternates(engine refused: status=4 error={"class":"MissingTarget"}) witness=default-render(params {})'
 Test-Case 'engine dialogs: a run with no VERDICT row is a NOT RUN that says so' {
     Get-SbEngineDialogsLine -Runs @($eNoRow) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=boolean_options(no verdict row) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=boolean_options(no verdict row) witness=default-render(params {})'
 Test-Case 'engine dialogs: a FAIL at mismatches=0 names the verdict that failed it' {
     Get-SbEngineDialogsLine -Runs @($eKinds) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 advisory=until-promoted pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 promoted=0 pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {})'
 # jas 802's notes: (A) the no-engine refusal carries no status= or error=, so its
 # reason is the text after `--`; (B) a real engine error's detail has spaces, and
 # the error is read whole up to the row's ui-tid=.
@@ -3345,16 +3345,51 @@ $eSpaced = New-SbEngRun 'swatch_options' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REF
 $eKnob = New-SbEngRun 'Bad Id' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED -- SB_DIALOG_OPEN='Bad Id' is not a dialog id ([a-z0-9_]+)", 'VERDICT: NOT RUN (plan=False uia=True)')
 Test-Case 'engine dialogs: the no-engine refusal is the shell''s, and names its reason' {
     Get-SbEngineDialogsLine -Runs @($eNoEngine) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=layer_options(shell refused: no engine) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=layer_options(shell refused: no engine) witness=default-render(params {})'
 Test-Case 'engine dialogs: a malformed knob is the shell''s refusal, never the engine''s' {
     Get-SbEngineDialogsLine -Runs @($eKnob) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=Bad Id(shell refused: SB_DIALOG_OPEN=''Bad Id'' is not a dialog id [[a-z0-9_]+]) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=Bad Id(shell refused: SB_DIALOG_OPEN=''Bad Id'' is not a dialog id [[a-z0-9_]+]) witness=default-render(params {})'
 Test-Case 'engine dialogs: an engine error with a spaced detail is read whole' {
     Get-SbEngineDialogsLine -Runs @($eSpaced) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 advisory=until-promoted pass=- fail=- notrun=swatch_options(engine refused: status=4 error={"class":"MissingTarget","detail":"no dialog named swatch_options in the workspace"}) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=swatch_options(engine refused: status=4 error={"class":"MissingTarget","detail":"no dialog named swatch_options in the workspace"}) witness=default-render(params {})'
 Test-Case 'engine dialogs: none wanted prints nothing' {
     "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
 } '[]'
+# PROMOTION (jas 796, 826): after the first clean nightly (11-10 22:15), each
+# promoted engine dialog GATES. One classifier (Get-SbEngineDialogState) serves
+# the line and the verdict, so the two cannot disagree about a dialog. A
+# promoted run joins the gating dialogs as exit 0 (PASS), 1 (FAIL) or 2 (NOT
+# RUN); a NOT RUN of a promoted dialog is a regression, so it reds.
+Test-Case 'engine dialogs: one classifier names each state' {
+    (@($ePass, $eFail, $eNotRun, $eZero) | ForEach-Object { $st = Get-SbEngineDialogState $_; "$($st.State):$($st.Text)" }) -join ' | '
+} 'PASS:boolean_options(5) | FAIL:color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) | NOTRUN:pen_alternates(REFUSED: the plan has no addressable leaf) | NOTRUN:swatch_library_save(a pass at compared=0 compares nothing)'
+Test-Case 'engine dialogs: a promoted run gates as exit 0, 1 or 2 by its state' {
+    (@($ePass, $eFail, $eNotRun) | ForEach-Object { $g = ConvertTo-SbGatingDialogRun $_; "$($g.Panel)=$($g.Exit)" }) -join ','
+} 'boolean_options=0,color_picker=1,pen_alternates=2'
+Test-Case 'nightly: promoted engine passes join dialogs=k/m and stay GREEN' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 `
+        -Dialogs @($dOk, (ConvertTo-SbGatingDialogRun $ePass), (ConvertTo-SbGatingDialogRun $ePass2)) -DialogsWanted 3
+} 'GREEN items=1/1 panels=1/1 dialogs=3/3'
+Test-Case 'nightly: a promoted engine dialog that regresses to FAIL reds the night' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 `
+        -Dialogs @($dOk, (ConvertTo-SbGatingDialogRun $eFail)) -DialogsWanted 2
+} 'RED(items=1/1 panels=1/1 dialogs=1/2; first: dialog color_picker exit=1)'
+Test-Case 'nightly: a promoted engine dialog that stops running reds the night' {
+    Get-SbNightlyVerdict -Box 'READY' -Items @($cOk) -ItemsWanted 1 -Panels @($pOk) -PanelsWanted 1 `
+        -Dialogs @($dOk, (ConvertTo-SbGatingDialogRun $eNotRun)) -DialogsWanted 2
+} 'RED(items=1/1 panels=1/1 dialogs=1/2; first: dialog pen_alternates exit=2)'
+Test-Case 'engine dialogs: the line counts the promoted among its runs' {
+    Get-SbEngineDialogsLine -Runs @($ePass, $eFail) -Wanted 2 -Promoted @('boolean_options', 'not_run_tonight')
+} 'ENGINE-DIALOGS engine-dialogs=1/2 fail=1 notrun=0 promoted=1 pass=boolean_options(5) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=- witness=default-render(params {})'
+Test-Case 'promotion list: read from its JSON, every id an engine dialog' {
+    (Get-SbPromotedEngineDialogs -Json '{"_source":"t","promoted":["a_options","b_options"]}' -Known @('a_options', 'b_options', 'c_options')) -join ','
+} 'a_options,b_options'
+Test-Case 'promotion list: an id that is not an engine dialog is refused by name, never dropped' {
+    Get-SbPromotedEngineDialogs -Json '{"_source":"t","promoted":["a_options","gone_options"]}' -Known @('a_options')
+} 'REFUSED: promoted engine dialog gone_options is not among the uncovered dialogs (moved to a menubar opener, or renamed?)'
+Test-Case 'promotion list: a duplicate or a list with no promoted array is refused' {
+    (Get-SbPromotedEngineDialogs -Json '{"promoted":["a_options","a_options"]}' -Known @('a_options')) + ' | ' + (Get-SbPromotedEngineDialogs -Json '{"_source":"t"}' -Known @('a_options'))
+} 'REFUSED: promoted engine dialog a_options is listed twice | REFUSED: the promotion list has no promoted array'
 
 # The nightly's panel list comes from the panel specs (workspace/panels/*.yaml,
 # the top-level id), not a list typed here, so a new panel joins the run.
