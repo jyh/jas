@@ -188,6 +188,9 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         return (box["x"], box["y"])
 
     def do_act(act):
+        why = undelivered(act)
+        if why:
+            raise _plan.Refused(why)
         k = act[0]
         if k == "open":
             with open(os.path.join(SVGS, act[1]), encoding="utf-8") as f:
@@ -602,6 +605,21 @@ def run(args):
 
 
 # ---------------------------------------------------------------------------
+# The acts this channel delivers. A toolbar press, a state read and a dialog
+# read (TESTING.md, row 50) have no web hook yet; they are refused by name,
+# because answering a state read with the document, or skipping a press, would
+# read as measured.
+WEB_ACTS = {"open", "tool", "pointer", "key", "panel", "menu"}
+WEB_READS = {"document"}
+
+
+def undelivered(act):
+    """None if this channel delivers `act`, else the refusal naming it."""
+    if act[0] in WEB_ACTS or (act[0] == "read" and act[1] in WEB_READS):
+        return None
+    return f"the web channel does not deliver a {' '.join(map(str, act[:2]))} act yet"
+
+
 def self_test():
     fails = []
 
@@ -633,6 +651,10 @@ def self_test():
     check(WITNESS in [os.path.basename(p)[:-5] for p in paths], f"the witness {WITNESS} is in the corpus")
     ids = menu_ids_by_path(menubar)
     check(ids.get(tuple(_plan.menu_paths(menubar)["menu_group"])) == "menu_group", "a menu path maps back to its id")
+    for a in (("toolbar", "btn_arrow_slot", 400), ("read", "state", ("active_tool",), "{}"), ("read", "dialog", None)):
+        check(undelivered(a) is not None and str(a[1]) in undelivered(a), f"{a[:2]} is refused by name")
+    check(undelivered(("read", "document")) is None, "a document read is delivered")
+    check(undelivered(("pointer", "press", 0, 0, False, ())) is None, "a pointer act is delivered")
     check(key_chord("Z", ("ctrl",)) == "Control+Z", "ctrl is Control")
     check(key_chord("Delete", ()) == "Delete", "named keys pass through")
     check(key_chord("v", ()) == "v", "a bare letter is lower case")
