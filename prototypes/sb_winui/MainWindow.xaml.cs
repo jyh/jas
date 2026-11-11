@@ -542,7 +542,8 @@ public sealed partial class MainWindow : Window
     private void ApplySurfaceMargins()
     {
         var (l, t, r, b) = _canvasCut;
-        var top = Math.Max(_canvasStripTop, 0);
+        // -1 is "no strip placed yet", which moves nothing.
+        var top = _canvasStripTop < 0 ? 0 : _canvasStripTop;
         Canvas.Margin = new Thickness(l, t + top, r, b);
         HitShield.Margin = new Thickness(l, t + top, r, b);
         CanvasStripHost.Margin = new Thickness(l, t, r, 0);

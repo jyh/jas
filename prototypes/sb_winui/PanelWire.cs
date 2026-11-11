@@ -2256,8 +2256,9 @@ internal static class LayoutWire
     /// Rule 6 (WORKSPACE.md "Where each edge dock is drawn"): a Bottom dock lays
     /// its <paramref name="n"/> groups out left to right in equal shares of its row.
     /// </summary>
-    internal static IReadOnlyList<EdgeRect> RowShares(EdgeRect row, int n) =>
-        Enumerable.Range(0, Math.Max(n, 0)).Select(i => new EdgeRect(row.X + i * row.W / n, row.Y, row.W / n, row.H)).ToList();
+    internal static IReadOnlyList<EdgeRect> RowShares(EdgeRect row, int n) => n <= 0
+        ? Array.Empty<EdgeRect>()
+        : Enumerable.Range(0, n).Select(i => new EdgeRect(row.X + i * row.W / n, row.Y, row.W / n, row.H)).ToList();
 
     /// <summary>
     /// R1-4b S4: the margin that cuts the canvas surface down to the engine's
@@ -2273,7 +2274,8 @@ internal static class LayoutWire
         // Half a DIP of round-off (the engine's f32 against the shell's double) is none.
         const double Slack = 0.5;
         if (l < -Slack || t < -Slack || r < -Slack || b < -Slack) { return null; }
-        return (Math.Max(l, 0), Math.Max(t, 0), Math.Max(r, 0), Math.Max(b, 0));
+        static double None(double v) => v < 0 ? 0 : v;
+        return (None(l), None(t), None(r), None(b));
     }
 
     /// <summary>
