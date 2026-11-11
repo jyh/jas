@@ -33,11 +33,18 @@ pub const CLIENT_ACTOR: &str = "ai";
 /// keeps a `SessionState` next to its model, and [`Session`] is this state
 /// plus an owned model, for `jas_mcp`'s headless mode. The pending proposal
 /// itself lives in the model (`Model::propose`), so an edit that reaches the
-/// model by any route withdraws it.
+/// model by any route withdraws it; [`SessionState::observe`] is how such an
+/// edit is REPORTED to the client (A6 R2).
 #[derive(Debug, Default)]
 pub struct SessionState {
     subscribed: bool,
     next_proposal: u64,
+    /// The pending proposal's id as the session last saw it, so `observe`
+    /// can report one that vanished outside the session.
+    last_pending: Option<String>,
+    /// The settled document (test JSON) as last reported, kept only while a
+    /// client is subscribed: the comparison serialises the document.
+    last_settled: Option<String>,
 }
 
 impl SessionState {
@@ -48,6 +55,50 @@ impl SessionState {
     /// Answer one incoming JSON-RPC line. Returns the outgoing lines: the
     /// response (if the message was a request) followed by any notifications.
     pub fn handle(&mut self, model: &mut Model, line: &str) -> Vec<String> {
+        let out = self.handle_message(model, line);
+        self.rebaseline(model);
+        out
+    }
+
+    /// What changed OUTSIDE the session since it last looked, as the lines a
+    /// client is owed (A6 R2): a pending proposal that vanished ("withdrawn",
+    /// by an artist edit, an undo or a new document) and, to a subscriber, a
+    /// change to the settled document. Every act of the session itself
+    /// re-baselines, so nothing it returned is reported twice.
+    ///
+    /// ⛔ PULL, NOT PUSH, BECAUSE OF THE C ABI. The Mac's `McpSession` hangs
+    /// callbacks on its model (`onProposalWithdrawn`, `onTransactionCommitted`)
+    /// and pushes. No function pointer crosses this ABI (BL3), so a shell that
+    /// edits through its ordinary crossings calls `jas_mcp_observe` after each
+    /// one while a client is attached, and writes what it returns.
+    pub fn observe(&mut self, model: &Model) -> Vec<String> {
+        let mut out = Vec::new();
+        let now_pending = model.pending_proposal_id().map(str::to_string);
+        if let Some(p) = self.last_pending.take() {
+            if now_pending.as_deref() != Some(p.as_str()) {
+                out.push(notification("notifications/jas/proposal",
+                    json!({"proposal": p, "state": "withdrawn"})));
+            }
+        }
+        self.last_pending = now_pending;
+        if self.subscribed {
+            let now = document_to_test_json(model.document_without_preview());
+            if self.last_settled.as_deref().is_some_and(|prev| prev != now) {
+                out.push(notification("notifications/resources/updated", json!({"uri": DOCUMENT_URI})));
+            }
+            self.last_settled = Some(now);
+        }
+        out
+    }
+
+    /// Record the model as the session now leaves it, after one of its own acts.
+    fn rebaseline(&mut self, model: &Model) {
+        self.last_pending = model.pending_proposal_id().map(str::to_string);
+        self.last_settled = self.subscribed
+            .then(|| document_to_test_json(model.document_without_preview()));
+    }
+
+    fn handle_message(&mut self, model: &mut Model, line: &str) -> Vec<String> {
         let msg: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => return vec![error(Value::Null, -32700, &format!("parse error: {e}"))],
@@ -133,6 +184,7 @@ impl SessionState {
         if self.subscribed && document_to_test_json(model.document_without_preview()) != before {
             out.push(notification("notifications/resources/updated", json!({"uri": DOCUMENT_URI})));
         }
+        self.rebaseline(model);
         out
     }
 

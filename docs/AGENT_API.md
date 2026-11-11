@@ -104,6 +104,18 @@ Both active ports run the same file (POLICY.md §1).
   The model validates every op either way, and a failing op refuses the proposal.
 - **A4, accept in the app:** the preview drawn as an overlay, with Accept and Reject. This is ROADMAP §3.1's first
   observable.
+- **A6, the same accept on Windows (in progress).** The Windows shell is not an interpreter, so the session lives in the
+  core and crosses the C ABI. The session's state (the client's subscription and proposal counter) is
+  `mcp::SessionState`, which borrows the document's model per call, so `JasEngine` keeps it beside the model it already
+  owns. Six entries carry it: `jas_mcp_attach` (a fresh session per client), `jas_mcp_handle` (one client line in, the
+  lines owed out), `jas_mcp_accept` and `jas_mcp_reject` (the bar's two buttons), `jas_mcp_pending` (the id and name the
+  bar shows) and `jas_mcp_observe`. **The last is PULL where the Mac PUSHES:** the Mac's session hangs callbacks on its
+  model, and no callback crosses the C ABI (BL3). So the shell calls `jas_mcp_observe` after each crossing that can edit
+  while a client is attached, and writes what it returns: a proposal withdrawn by an artist edit or an undo, and a
+  change to the settled document for a subscriber, each reported once. The transport corpus
+  (`operations/mcp_exchanges.json`) is replayed through these entries, with the artist's edits and undos made outside
+  the session, and must produce the same lines as `mcp::Session` and the Mac's `McpSession`. The pipe itself and the
+  bar are the Windows shell's.
 - **A7, the intent ledger's schema:** open by R0. What a ledger entry records is not part of this repository.
 
 ## 5. What this page does not decide
