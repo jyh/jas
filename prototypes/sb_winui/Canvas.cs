@@ -290,6 +290,18 @@ internal sealed class LayoutOpCmd : Cmd
     internal string Via = "hand";
 }
 
+/// <summary>
+/// R1-4b S2: ask `jas_layout_edge_rects` for the edge-dock rects over the
+/// canvas cell (W x H, in DIPs, at the origin: the rects come back in the
+/// cell's own coordinates). `Cause` names what asked.
+/// </summary>
+internal sealed class EdgeRectsCmd : Cmd
+{
+    internal double W;
+    internal double H;
+    internal string Cause = "";
+}
+
 internal sealed class PaneOpenCmd : Cmd
 {
     internal string Key = "";
@@ -1940,6 +1952,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case LayoutOpCmd lo:
                     ApplyLayoutOp(lo);
+                    break;
+
+                case EdgeRectsCmd er:
+                    ApplyEdgeRects(er);
                     break;
 
                 case PanelClickCmd pc:
@@ -5114,6 +5130,34 @@ internal sealed unsafe class Canvas : IDisposable
     internal void PanelMenu(PanelMenuCmd cmd) => _queue.Add(cmd);
 
     internal void LayoutOp(LayoutOpCmd cmd) => _queue.Add(cmd);
+
+    internal void EdgeRects(EdgeRectsCmd cmd) => _queue.Add(cmd);
+
+    /// <summary>Raised on the UI thread with the cause and `jas_layout_edge_rects`'s answer.</summary>
+    internal Action<string, string>? EdgeRectsChanged { get; set; }
+
+    /// <summary>
+    /// R1-4b S2 (jas 823): the engine's edge-dock rects over the cell, asked
+    /// with the cell every time (never stored). A refusal is a row with the
+    /// channel; an answer is written as `EDGE RECTS` and posted to the UI.
+    /// </summary>
+    private void ApplyEdgeRects(EdgeRectsCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var cell = System.Text.Encoding.UTF8.GetBytes(LayoutWire.EdgeCell(0, 0, cmd.W, cmd.H, cmd.W, cmd.H));
+        var answer = JasCore.TakeString(JasCore.jas_layout_edge_rects(_engine, cell, (nuint)cell.Length));
+        var size = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{cmd.W:0.##}x{cmd.H:0.##}");
+        if (answer.Length == 0)
+        {
+            var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL EDGE RECTS REFUSED cell={size} cause={cmd.Cause} channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+            return;
+        }
+        var rects = LayoutWire.EdgeRects(answer);
+        _report($"EDGE RECTS cell={size} {(rects is null ? "unreadable" : LayoutWire.EdgeRectsRow(rects))} cause={cmd.Cause} {Tids()}");
+        var c = cmd.Cause;
+        PostToUi(() => EdgeRectsChanged?.Invoke(c, answer));
+    }
 
     /// <summary>Raised on the UI thread with a verb's group key, via and the
     /// layout the engine answered (`jas_layout_state`'s JSON).</summary>
