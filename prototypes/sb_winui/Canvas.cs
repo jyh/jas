@@ -291,6 +291,16 @@ internal sealed class LayoutOpCmd : Cmd
 }
 
 /// <summary>
+/// Q-flask-2: an edge group's pane is planned at this width from now on; a
+/// pane already open at another width is re-planned at it.
+/// </summary>
+internal sealed class PaneWidthCmd : Cmd
+{
+    internal string Key = "";
+    internal long AvailW;
+}
+
+/// <summary>
 /// R1-4b S2: ask `jas_layout_edge_rects` for the edge-dock rects over the
 /// canvas cell (W x H, in DIPs, at the origin: the rects come back in the
 /// cell's own coordinates). `Cause` names what asked.
@@ -459,9 +469,11 @@ internal sealed class PanelValueSynthCmd : Cmd
 /// ⛔ IMMUTABLE, FOR THE SAME REASON AS <see cref="MenuSnapshot"/>: the render
 /// thread builds one and swaps the reference, and the UI thread reads whatever
 /// is there, so it can never see a half-written plan. `Seq` lets the drawn row
-/// say how many publications it skipped.
+/// say how many publications it skipped. `AvailW` is the width the plan was
+/// laid out at when the view must draw at that width (an edge group,
+/// Q-flask-2); 0 means the view's own.
 /// </summary>
-internal sealed record PanelSnapshot(string PanelId, string PlanJson, long Seq, string Cause);
+internal sealed record PanelSnapshot(string PanelId, string PlanJson, long Seq, string Cause, long AvailW = 0);
 
 /// <summary>
 /// One published reading of the menu: the STATIC half, the DYNAMIC half, and
@@ -1958,6 +1970,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case EdgeRectsCmd er:
                     ApplyEdgeRects(er);
+                    break;
+
+                case PaneWidthCmd pw:
+                    ApplyPaneWidth(pw);
                     break;
 
                 case PanelClickCmd pc:
@@ -4962,10 +4978,12 @@ internal sealed unsafe class Canvas : IDisposable
             }
         }
         var seq = _panes.TryGetValue(open.Key, out var old) ? old.Seq : 0;
-        _panes[open.Key] = new PaneChannel { PanelId = open.PanelId, AvailW = open.AvailW, Seq = seq };
+        // Q-flask-2: an edge group's own width, once its rects have said it.
+        var availW = _paneWidth.TryGetValue(open.Key, out var own) ? own : open.AvailW;
+        _panes[open.Key] = new PaneChannel { PanelId = open.PanelId, AvailW = availW, Seq = seq };
         var plan = ApplyPaneRefresh(open.Key, "open");
         if (plan is null) { return; }
-        _report($"{PaneNoun(open.Key)} OPEN {PaneHead(open.Key)}panel={open.PanelId} avail-w={open.AvailW} "
+        _report($"{PaneNoun(open.Key)} OPEN {PaneHead(open.Key)}panel={open.PanelId} avail-w={availW} "
               + $"{PlanReading(plan)} seq={_panes[open.Key].Seq} {Tids()}");
     }
 
@@ -4986,7 +5004,8 @@ internal sealed unsafe class Canvas : IDisposable
             return null;
         }
         ch.Seq++;
-        Panes[key] = new PanelSnapshot(ch.PanelId, plan, ch.Seq, cause);
+        Panes[key] = new PanelSnapshot(ch.PanelId, plan, ch.Seq, cause,
+            key.StartsWith("edge", StringComparison.Ordinal) ? ch.AvailW : 0);
         PostToUi(() => PaneChanged?.Invoke(key));
         return plan;
     }
@@ -5091,6 +5110,7 @@ internal sealed unsafe class Canvas : IDisposable
                                                       || k.StartsWith("edge", StringComparison.Ordinal)) && !live.Contains(k)).ToList())
         {
             _panes.Remove(stale);
+            _paneWidth.Remove(stale);
             Panes.TryRemove(stale, out _);
             _report($"PANE CLOSED key={stale} cause={cause} {Tids()}");
         }
@@ -5138,6 +5158,21 @@ internal sealed unsafe class Canvas : IDisposable
     internal void LayoutOp(LayoutOpCmd cmd) => _queue.Add(cmd);
 
     internal void EdgeRects(EdgeRectsCmd cmd) => _queue.Add(cmd);
+
+    internal void PaneWidth(PaneWidthCmd cmd) => _queue.Add(cmd);
+
+    /// <summary>Q-flask-2: each edge group's own plan width, by pane key; honoured by every open of that key.</summary>
+    private readonly Dictionary<string, long> _paneWidth = new(StringComparer.Ordinal);
+
+    /// <summary>Q-flask-2: remember the width, and re-plan the pane's current panel if it is open at another.</summary>
+    private void ApplyPaneWidth(PaneWidthCmd cmd)
+    {
+        _paneWidth[cmd.Key] = cmd.AvailW;
+        if (_panes.TryGetValue(cmd.Key, out var ch) && ch.AvailW != cmd.AvailW)
+        {
+            ApplyPaneOpen(new PaneOpenCmd { Key = cmd.Key, PanelId = ch.PanelId, AvailW = cmd.AvailW });
+        }
+    }
 
     /// <summary>Raised on the UI thread with the ask (its cell and cause) and `jas_layout_edge_rects`'s answer.</summary>
     internal Action<EdgeRectsCmd, string>? EdgeRectsChanged { get; set; }

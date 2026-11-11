@@ -25,6 +25,8 @@ public sealed partial class MainWindow
         private readonly Border _host;
         private readonly ScrollViewer _scroll;
         private readonly long _availW;
+        /// <summary>The width the current plan is drawn at: the snapshot's when it names one (Q-flask-2), else the view's own.</summary>
+        private long _drawW;
         private readonly bool _topAligned;
 
         /// <summary>
@@ -45,6 +47,7 @@ public sealed partial class MainWindow
             _host = host;
             _scroll = scroll;
             _availW = availW;
+            _drawW = availW;
             _paneDrawnPanel = firstPanel;
         }
 
@@ -155,6 +158,7 @@ public sealed partial class MainWindow
 
         internal void DrawPane(PanelSnapshot snap)
         {
+            _drawW = snap.AvailW > 0 ? snap.AvailW : _availW;
             using var doc = System.Text.Json.JsonDocument.Parse(snap.PlanJson);
             var root = doc.RootElement;
             var leaves = new List<PaneLeaf>();
@@ -361,7 +365,7 @@ public sealed partial class MainWindow
 
             var host = new PanelHost
             {
-                Width = _availW,
+                Width = _drawW,
                 Height = height,
                 Margin = new Thickness(_pad),
             };
