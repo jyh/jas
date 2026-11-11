@@ -106,6 +106,50 @@ impl WorkspaceLayout {
     }
 }
 
+impl WorkspaceLayout {
+    /// The edge-dock rectangles cut from an APP's own canvas cell, for an app
+    /// whose pane layout is not its real geometry (the FFI path, jas 823).
+    /// Rule 8 reads this layout's `canvas_maximized`, `false` with no pane
+    /// layout; the cell needs no pane layout, since it is the app's.
+    pub fn edge_dock_rects_in(&self, cell: EdgeRect, viewport_w: f64, viewport_h: f64) -> EdgeDockRects {
+        edge_dock_rects(
+            self.anchored_dock(DockEdge::Left),
+            self.anchored_dock(DockEdge::Bottom),
+            cell,
+            self.pane_layout.as_ref().is_some_and(|pl| pl.canvas_maximized),
+            viewport_w,
+            viewport_h,
+        )
+    }
+}
+
+/// The body of `jas_layout_edge_rects` (jas 823): read `cell` as
+/// `{"x","y","w","h","viewport_w","viewport_h"}` in DIPs and answer
+/// `{"edge_rects":{"left","bottom","canvas"}}`, an absent edge as `null`.
+/// A pure query: the cell is an argument, never stored, so it cannot go
+/// stale. Refused as `("BadCell", key)` for a key that is missing, not a
+/// finite number, or (for `w`, `h`) negative; `("BadCell", "")` for a cell
+/// that is not an object.
+pub fn edge_rects_reply(
+    layout: &WorkspaceLayout,
+    cell: &serde_json::Value,
+) -> Result<serde_json::Value, (&'static str, String)> {
+    let obj = cell.as_object().ok_or(("BadCell", String::new()))?;
+    let num = |k: &str| -> Result<f64, (&'static str, String)> {
+        obj.get(k).and_then(serde_json::Value::as_f64).filter(|v| v.is_finite())
+            .ok_or(("BadCell", k.to_string()))
+    };
+    let size = |k: &str| num(k).and_then(|v| if v < 0.0 { Err(("BadCell", k.to_string())) } else { Ok(v) });
+    let rect = EdgeRect::new(num("x")?, num("y")?, size("w")?, size("h")?);
+    let r = layout.edge_dock_rects_in(rect, num("viewport_w")?, num("viewport_h")?);
+    let json = |r: EdgeRect| serde_json::json!({"x": r.x, "y": r.y, "w": r.w, "h": r.h});
+    Ok(serde_json::json!({"edge_rects": {
+        "left": r.left.map(json),
+        "bottom": r.bottom.map(json),
+        "canvas": json(r.canvas),
+    }}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +289,98 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         l.pane_layout = None;
         assert_eq!(l.edge_dock_rects(), None);
+    }
+
+    // --- `edge_rects_reply`: the body of `jas_layout_edge_rects` (jas 823) ---
+
+    fn cell(x: f64, y: f64, w: f64, h: f64, vw: f64, vh: f64) -> serde_json::Value {
+        serde_json::json!({"x": x, "y": y, "w": w, "h": h, "viewport_w": vw, "viewport_h": vh})
+    }
+
+    fn rect_json(x: f64, y: f64, w: f64, h: f64) -> serde_json::Value {
+        serde_json::json!({"x": x, "y": y, "w": w, "h": h})
+    }
+
+    fn with_panes() -> WorkspaceLayout {
+        let mut l = WorkspaceLayout::default_layout();
+        let mut pl = PaneLayout::default_three_pane(1200.0, 800.0);
+        pl.canvas_maximized = false;
+        l.pane_layout = Some(pl);
+        l
+    }
+
+    /// Moved from `layout_seed` (the reply no longer carries `edge_rects`):
+    /// the worked example, now over the cell the app passes.
+    #[test]
+    fn the_reply_cuts_the_worked_example_from_the_cell() {
+        let mut l = with_panes();
+        l.anchored.push((DockEdge::Left, dock(7, 1, 200.0, false, MIN_DOCK_WIDTH)));
+        l.anchored.push((DockEdge::Bottom, dock(8, 1, 180.0, false, MIN_DOCK_WIDTH)));
+        let r = &edge_rects_reply(&l, &cell(72.0, 0.0, 888.0, 800.0, 1200.0, 800.0)).unwrap()["edge_rects"];
+        assert_eq!(r["left"], rect_json(72.0, 0.0, 200.0, 800.0));
+        assert_eq!(r["bottom"], rect_json(272.0, 620.0, 688.0, 180.0));
+        assert_eq!(r["canvas"], rect_json(272.0, 0.0, 688.0, 620.0));
+    }
+
+    /// Moved from `layout_seed`: an absent edge is `null`, never omitted.
+    #[test]
+    fn the_reply_with_a_left_dock_alone_reads_bottom_null() {
+        let mut l = with_panes();
+        l.anchored.push((DockEdge::Left, dock(7, 1, 200.0, false, MIN_DOCK_WIDTH)));
+        let r = &edge_rects_reply(&l, &cell(72.0, 0.0, 888.0, 800.0, 1200.0, 800.0)).unwrap()["edge_rects"];
+        assert!(r.as_object().is_some_and(|o| o.contains_key("bottom")), "bottom is present, as null: {r}");
+        assert_eq!(r["bottom"], serde_json::Value::Null, "{r}");
+        assert_eq!(r["left"], rect_json(72.0, 0.0, 200.0, 800.0));
+        assert_eq!(r["canvas"], rect_json(272.0, 0.0, 688.0, 800.0));
+    }
+
+    /// Moved from `layout_seed`: no edge dock leaves the whole cell to the
+    /// canvas, and a layout with NO pane layout still answers over the cell
+    /// (the cell is the app's, so it needs none; maximized reads false).
+    #[test]
+    fn the_reply_with_no_edge_dock_gives_the_canvas_the_cell() {
+        let mut l = with_panes();
+        let r = &edge_rects_reply(&l, &cell(10.0, 30.0, 1500.0, 700.0, 1800.0, 760.0)).unwrap()["edge_rects"];
+        assert_eq!((&r["left"], &r["bottom"]), (&serde_json::Value::Null, &serde_json::Value::Null), "{r}");
+        assert_eq!(r["canvas"], rect_json(10.0, 30.0, 1500.0, 700.0));
+        l.pane_layout = None;
+        let r = &edge_rects_reply(&l, &cell(10.0, 30.0, 1500.0, 700.0, 1800.0, 760.0)).unwrap()["edge_rects"];
+        assert_eq!(r["canvas"], rect_json(10.0, 30.0, 1500.0, 700.0));
+    }
+
+    /// The cell, never the held pane layout: the held canvas pane is
+    /// 72,0 888x800, and the answer follows the cell passed.
+    #[test]
+    fn the_reply_reads_the_cell_not_the_held_pane_layout() {
+        let mut l = with_panes();
+        l.anchored.push((DockEdge::Left, dock(7, 1, 200.0, false, MIN_DOCK_WIDTH)));
+        let r = &edge_rects_reply(&l, &cell(0.0, 40.0, 1000.0, 600.0, 1300.0, 700.0)).unwrap()["edge_rects"];
+        assert_eq!(r["left"], rect_json(0.0, 40.0, 200.0, 600.0));
+        assert_eq!(r["canvas"], rect_json(200.0, 40.0, 800.0, 600.0));
+    }
+
+    /// `BadCell`, detail the key: a missing key, a non-number, a negative
+    /// `w` or `h`. (JSON carries no NaN or infinity, so a finite check
+    /// guards only a caller that builds the Value in Rust.)
+    #[test]
+    fn a_bad_cell_is_refused_by_its_key() {
+        let l = with_panes();
+        let refused = |c: serde_json::Value| edge_rects_reply(&l, &c).err();
+        let full = cell(0.0, 0.0, 100.0, 100.0, 100.0, 100.0);
+        for key in ["x", "y", "w", "h", "viewport_w", "viewport_h"] {
+            let mut c = full.clone();
+            c.as_object_mut().unwrap().remove(key);
+            assert_eq!(refused(c), Some(("BadCell", key.to_string())), "missing {key}");
+            let mut c = full.clone();
+            c[key] = serde_json::json!("1");
+            assert_eq!(refused(c), Some(("BadCell", key.to_string())), "string {key}");
+        }
+        for key in ["w", "h"] {
+            let mut c = full.clone();
+            c[key] = serde_json::json!(-1.0);
+            assert_eq!(refused(c), Some(("BadCell", key.to_string())), "negative {key}");
+        }
+        assert_eq!(refused(serde_json::json!([1, 2])), Some(("BadCell", String::new())), "not an object");
+        assert_eq!(edge_rects_reply(&l, &full).err(), None, "the full cell is accepted");
     }
 }

@@ -2924,6 +2924,43 @@ private func runWorkspaceOperationFixture(_ fixture: String) throws {
     try runWorkspaceOperationFixture("pane_ops.json")
 }
 
+/// The edge-dock law over an APP's own canvas cell (WORKSPACE.md "Where each
+/// edge dock is drawn", jas 823): each row builds a layout, passes a cell and
+/// pins the three rectangles. Rust replays the same rows through
+/// `edge_rects_reply`, the body of `jas_layout_edge_rects`. One row's cell
+/// differs from the held pane layout, so an answer cut from the held layout
+/// instead of the cell fails.
+@Test func testWorkspaceEdgeDockRects() throws {
+    let json = readFixture("workspace_operations/edge_dock_rects.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    func rect(_ v: Any?) -> EdgeRect? {
+        guard let d = v as? [String: Any] else { return nil }
+        return EdgeRect(x: (d["x"] as! NSNumber).doubleValue, y: (d["y"] as! NSNumber).doubleValue,
+                        w: (d["w"] as! NSNumber).doubleValue, h: (d["h"] as! NSNumber).doubleValue)
+    }
+    var rows = 0
+    for tc in tests {
+        let name = tc["name"] as! String
+        let setupJson = readFixture("expected/\(tc["setup"] as! String)").trimmingCharacters(in: .whitespacesAndNewlines)
+        var layout = testJsonToWorkspace(setupJson)
+        for op in tc["ops"] as! [[String: Any]] {
+            let before = workspaceToTestJson(layout)
+            applyWorkspaceOp(&layout, op)
+            #expect(workspaceToTestJson(layout) != before, "\(name): \(op["op"] ?? "?") changed nothing")
+        }
+        let cell = tc["cell"] as! [String: Any]
+        let got = layout.edgeDockRects(inCell: rect(cell)!,
+                                       viewportW: (cell["viewport_w"] as! NSNumber).doubleValue,
+                                       viewportH: (cell["viewport_h"] as! NSNumber).doubleValue)
+        let expected = tc["expected"] as! [String: Any]
+        #expect(got.left == rect(expected["left"]), "\(name): left")
+        #expect(got.bottom == rect(expected["bottom"]), "\(name): bottom")
+        #expect(got.canvas == rect(expected["canvas"]), "\(name): canvas")
+        rows += 1
+    }
+    #expect(rows >= 4, "the edge-dock corpus replayed only \(rows) rows")
+}
+
 // MARK: - 3d-2 production-route tests (OP_LOG.md §12, Fork 5, Option B)
 //
 // These pin that the PRODUCTION layout-mutation sites route through the SAME
