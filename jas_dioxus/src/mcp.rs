@@ -27,25 +27,27 @@ pub const JOURNAL_URI: &str = "jas://journal";
 /// The journal actor a client's proposals land under (OP_LOG.md §5).
 pub const CLIENT_ACTOR: &str = "ai";
 
-/// One MCP session over one document.
-pub struct Session {
-    model: Model,
+/// What one MCP session holds BESIDE its document: the client's subscription
+/// and the proposal counter. Every call borrows the document's [`Model`], so
+/// the owner of the document stays its one owner (A6 R1, F1 (a)): `JasEngine`
+/// keeps a `SessionState` next to its model, and [`Session`] is this state
+/// plus an owned model, for `jas_mcp`'s headless mode. The pending proposal
+/// itself lives in the model (`Model::propose`), so an edit that reaches the
+/// model by any route withdraws it.
+#[derive(Debug, Default)]
+pub struct SessionState {
     subscribed: bool,
     next_proposal: u64,
 }
 
-impl Session {
-    pub fn new(model: Model) -> Self {
-        Session { model, subscribed: false, next_proposal: 0 }
-    }
-
-    pub fn model(&self) -> &Model {
-        &self.model
+impl SessionState {
+    pub fn new() -> Self {
+        SessionState::default()
     }
 
     /// Answer one incoming JSON-RPC line. Returns the outgoing lines: the
     /// response (if the message was a request) followed by any notifications.
-    pub fn handle(&mut self, line: &str) -> Vec<String> {
+    pub fn handle(&mut self, model: &mut Model, line: &str) -> Vec<String> {
         let msg: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(e) => return vec![error(Value::Null, -32700, &format!("parse error: {e}"))],
@@ -65,7 +67,7 @@ impl Session {
             }))],
             "ping" => vec![result(id, json!({}))],
             "tools/list" => vec![result(id, json!({"tools": tool_list()}))],
-            "tools/call" => self.call_tool(id, params),
+            "tools/call" => self.call_tool(model, id, params),
             "resources/list" => vec![result(id, json!({"resources": [{
                 "uri": DOCUMENT_URI, "name": "document", "mimeType": "application/json",
                 "description": "The settled document (without any pending preview) and the pending proposal's id."}, {
@@ -73,11 +75,11 @@ impl Session {
                 "description": "The applied journal: each transaction's name and actor (`ai` for an accepted proposal)."}]}))],
             "resources/read" if params["uri"] == JOURNAL_URI => {
                 vec![result(id, json!({"contents": [{"uri": JOURNAL_URI,
-                    "mimeType": "application/json", "text": self.journal_resource().to_string()}]}))]
+                    "mimeType": "application/json", "text": journal_resource(model).to_string()}]}))]
             }
             "resources/read" if params["uri"] == DOCUMENT_URI => {
                 vec![result(id, json!({"contents": [{"uri": DOCUMENT_URI,
-                    "mimeType": "application/json", "text": self.document_resource().to_string()}]}))]
+                    "mimeType": "application/json", "text": document_resource(model).to_string()}]}))]
             }
             "resources/read" => vec![error(id, -32602, "unknown resource uri")],
             "resources/subscribe" | "resources/unsubscribe" if params["uri"] == DOCUMENT_URI => {
@@ -92,65 +94,49 @@ impl Session {
     }
 
     /// The artist accepts the pending proposal `id`.
-    pub fn artist_accept(&mut self, id: &str) -> Vec<String> {
-        self.artist_act(|m| m.accept_proposal(id).is_ok(), "accepted")
+    pub fn artist_accept(&mut self, model: &mut Model, id: &str) -> Vec<String> {
+        self.artist_act(model, |m| m.accept_proposal(id).is_ok(), "accepted")
     }
 
     /// The artist rejects the pending proposal `id`.
-    pub fn artist_reject(&mut self, id: &str) -> Vec<String> {
-        self.artist_act(|m| m.reject_proposal(id).is_ok(), "rejected")
+    pub fn artist_reject(&mut self, model: &mut Model, id: &str) -> Vec<String> {
+        self.artist_act(model, |m| m.reject_proposal(id).is_ok(), "rejected")
     }
 
     /// The artist edits the document by hand: `f` runs inside one transaction.
     /// A pending proposal is withdrawn by the model before the edit applies.
-    pub fn artist_edit(&mut self, f: impl FnOnce(&mut Model)) -> Vec<String> {
-        self.artist_act(|m| { m.with_txn(f); false }, "withdrawn")
+    pub fn artist_edit(&mut self, model: &mut Model, f: impl FnOnce(&mut Model)) -> Vec<String> {
+        self.artist_act(model, |m| { m.with_txn(f); false }, "withdrawn")
     }
 
     /// The artist undoes. A pending proposal is withdrawn first.
-    pub fn artist_undo(&mut self) -> Vec<String> {
-        self.artist_act(|m| { m.undo(); false }, "withdrawn")
+    pub fn artist_undo(&mut self, model: &mut Model) -> Vec<String> {
+        self.artist_act(model, |m| { m.undo(); false }, "withdrawn")
     }
 
     /// Run one artist act and report what it did to the client: the fate of a
     /// proposal that was pending before the act (`fate` when the act itself
     /// decided it, else "withdrawn"), and a resource update when the settled
     /// document changed and the client subscribed.
-    fn artist_act(&mut self, act: impl FnOnce(&mut Model) -> bool, fate: &str) -> Vec<String> {
-        let before_pending = self.model.pending_proposal_id().map(str::to_string);
-        let before = document_to_test_json(self.model.document_without_preview());
-        let decided = act(&mut self.model);
+    fn artist_act(&mut self, model: &mut Model, act: impl FnOnce(&mut Model) -> bool, fate: &str) -> Vec<String> {
+        let before_pending = model.pending_proposal_id().map(str::to_string);
+        let before = document_to_test_json(model.document_without_preview());
+        let decided = act(model);
         let mut out = Vec::new();
         if let Some(p) = before_pending {
-            if self.model.pending_proposal_id() != Some(p.as_str()) {
+            if model.pending_proposal_id() != Some(p.as_str()) {
                 let state = if decided { fate } else { "withdrawn" };
                 out.push(notification("notifications/jas/proposal",
                     json!({"proposal": p, "state": state})));
             }
         }
-        if self.subscribed && document_to_test_json(self.model.document_without_preview()) != before {
+        if self.subscribed && document_to_test_json(model.document_without_preview()) != before {
             out.push(notification("notifications/resources/updated", json!({"uri": DOCUMENT_URI})));
         }
         out
     }
 
-    /// The APPLIED journal, up to its head (undone transactions are past it),
-    /// as each transaction's name and actor: what an accept leaves behind.
-    fn journal_resource(&self) -> Value {
-        let head = self.model.journal_head();
-        let txns: Vec<Value> = self.model.journal()[..head].iter()
-            .map(|t| json!({"name": t.name, "actor": t.actor}))
-            .collect();
-        json!({"head": head, "transactions": txns})
-    }
-
-    fn document_resource(&self) -> Value {
-        let doc: Value = serde_json::from_str(&document_to_test_json(self.model.document_without_preview()))
-            .unwrap_or(Value::Null);
-        json!({"document": doc, "pending_proposal": self.model.pending_proposal_id()})
-    }
-
-    fn call_tool(&mut self, id: Value, params: &Value) -> Vec<String> {
+    fn call_tool(&mut self, model: &mut Model, id: Value, params: &Value) -> Vec<String> {
         let args = &params["arguments"];
         match params["name"].as_str().unwrap_or("") {
             "propose" => {
@@ -158,7 +144,7 @@ impl Session {
                     return vec![error(id, -32602, "propose needs `name` (string) and `ops` (array)")];
                 };
                 let pid = format!("p-{}", self.next_proposal);
-                match self.model.propose(&pid, CLIENT_ACTOR, name, ops) {
+                match model.propose(&pid, CLIENT_ACTOR, name, ops) {
                     Ok(()) => {
                         self.next_proposal += 1;
                         vec![tool_result(id, false, &format!(
@@ -170,7 +156,7 @@ impl Session {
             }
             "withdraw_proposal" => {
                 let pid = args["proposal"].as_str().unwrap_or("");
-                match self.model.reject_proposal(pid) {
+                match model.reject_proposal(pid) {
                     Ok(()) => vec![tool_result(id, false, &format!("proposal {pid} withdrawn"),
                         json!({"proposal": pid}))],
                     Err(r) => vec![tool_result(id, true, &refusal_text(&r), json!({"refused": refusal_text(&r)}))],
@@ -179,6 +165,60 @@ impl Session {
             other => vec![error(id, -32602, &format!("unknown tool: {other}"))],
         }
     }
+}
+
+/// One MCP session over one OWNED document: a [`SessionState`] and its
+/// [`Model`] together, for `jas_mcp`'s headless mode and the tests. Each method
+/// lends the model to the state's method of the same name.
+pub struct Session {
+    model: Model,
+    state: SessionState,
+}
+
+impl Session {
+    pub fn new(model: Model) -> Self {
+        Session { model, state: SessionState::new() }
+    }
+
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    pub fn handle(&mut self, line: &str) -> Vec<String> {
+        self.state.handle(&mut self.model, line)
+    }
+
+    pub fn artist_accept(&mut self, id: &str) -> Vec<String> {
+        self.state.artist_accept(&mut self.model, id)
+    }
+
+    pub fn artist_reject(&mut self, id: &str) -> Vec<String> {
+        self.state.artist_reject(&mut self.model, id)
+    }
+
+    pub fn artist_edit(&mut self, f: impl FnOnce(&mut Model)) -> Vec<String> {
+        self.state.artist_edit(&mut self.model, f)
+    }
+
+    pub fn artist_undo(&mut self) -> Vec<String> {
+        self.state.artist_undo(&mut self.model)
+    }
+}
+
+/// The APPLIED journal, up to its head (undone transactions are past it),
+/// as each transaction's name and actor: what an accept leaves behind.
+fn journal_resource(model: &Model) -> Value {
+    let head = model.journal_head();
+    let txns: Vec<Value> = model.journal()[..head].iter()
+        .map(|t| json!({"name": t.name, "actor": t.actor}))
+        .collect();
+    json!({"head": head, "transactions": txns})
+}
+
+fn document_resource(model: &Model) -> Value {
+    let doc: Value = serde_json::from_str(&document_to_test_json(model.document_without_preview()))
+        .unwrap_or(Value::Null);
+    json!({"document": doc, "pending_proposal": model.pending_proposal_id()})
 }
 
 /// The declared op vocabulary (A3b): every verb `op_apply` accepts, as data.
