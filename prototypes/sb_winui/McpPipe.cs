@@ -81,6 +81,8 @@ internal sealed class McpPipe : IDisposable
                 _report($"RUSTFAIL MCP PIPE REFUSED pipe={Path} -- {ex.GetType().Name}: {ex.Message}");
                 return;
             }
+            // jas 861 Low: what was owed to the last client is not this one's.
+            while (_outbox.TryTake(out _)) { }
             _client = server;
             _attached(true);
             var split = new McpWire.LineSplitter(LineCap);

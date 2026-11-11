@@ -5255,10 +5255,14 @@ internal sealed unsafe class Canvas : IDisposable
     private void ApplyMcpDecide(McpDecideCmd cmd)
     {
         if (_engine == IntPtr.Zero) { return; }
-        var id = _mcpShown?.Id ?? "-";
+        var shown = _mcpShown;
         var answer = cmd.Accept ? JasCore.jas_mcp_accept(_engine) : JasCore.jas_mcp_reject(_engine);
         McpWrite(answer, cmd.Accept ? "accept" : "reject");
-        _report($"PROPOSAL {(cmd.Accept ? "ACCEPTED" : "REJECTED")} id={id} via={cmd.Via} {Tids()}");
+        // jas 861 Low: a decide with nothing pending decided nothing; it is
+        // said so, never written as an ACCEPTED of no proposal.
+        _report(shown is { } s
+            ? $"PROPOSAL {(cmd.Accept ? "ACCEPTED" : "REJECTED")} id={s.Id} via={cmd.Via} {Tids()}"
+            : $"PROPOSAL DECIDE IGNORED {(cmd.Accept ? "accept" : "reject")} via={cmd.Via} -- nothing pending {Tids()}");
         ApplyMcpPending();
     }
 

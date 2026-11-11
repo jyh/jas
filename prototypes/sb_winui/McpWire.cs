@@ -130,12 +130,14 @@ internal static class McpWire
 
     /// <summary>
     /// (A) W1b: whether a drain that held this command must pull
-    /// `jas_mcp_observe` for an attached client -- a crossing that can edit the
-    /// document, and so withdraw a pending proposal.
+    /// `jas_mcp_observe` for an attached client. EVERY drain does (jas 861):
+    /// a list of the crossings that can edit missed three (a load, an open, a
+    /// run panel-menu item), and a miss reports a withdrawal late, beside an
+    /// unrelated act. A pull that owes nothing is quiet and cheap, so no kind
+    /// is exempt: the rule fails safe. The parameter stays so the rule is
+    /// asked per command, where a future exemption would have to be argued.
     /// </summary>
-    internal static bool ObserveAfter(string commandKind) => commandKind is
-        "PointerCmd" or "KeyCmd" or "OpCmd" or "PanelClickCmd" or "PanelSynthCmd" or "PanelValueSynthCmd"
-        or "DialogEventCmd" or "DialogDismissCmd" or "MenuActionCmd";
+    internal static bool ObserveAfter(string commandKind) => true;
 
     /// <summary>The pipe the shell serves, named for its own process: `\\.\pipe\jas-mcp-&lt;pid&gt;` (A6 F2 (a)).</summary>
     internal static string PipeName(int pid) =>
