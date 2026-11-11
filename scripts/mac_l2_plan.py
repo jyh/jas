@@ -964,7 +964,8 @@ def self_test():
     check("a toolbar step carrying a key it does not deliver is refused",
           refused(lambda: plan(dict(tb, steps=[dict(hold, value=1), rst]), mb, lay, state_keys=SK), "value"))
     check("a state key state.yaml does not declare is refused by name",
-          refused(lambda: plan(dict(tb, steps=[{"read": "state", "keys": ["no_such"]}]), mb, lay, state_keys=SK), "no_such"))
+          refused(lambda: plan(dict(tb, expected_state_json={"no_such": 1}, steps=[{"read": "state", "keys": ["no_such"]}]),
+                               mb, lay, state_keys=SK), "no_such, which workspace/state.yaml does not declare"))
     for ks in ([], ["active_tool", "active_tool"], "active_tool", None):
         check(f"state keys {ks!r} are refused",
               refused(lambda: plan(dict(tb, steps=[{"read": "state", "keys": ks}]), mb, lay, state_keys=SK), "keys"))
