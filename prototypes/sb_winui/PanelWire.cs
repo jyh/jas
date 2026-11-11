@@ -2289,6 +2289,40 @@ internal static class LayoutWire
         Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["x"] = x, ["y"] = y });
 
     /// <summary>
+    /// R1-4b S1 (flask 829): `SB_DOCK_SNAP=<dock key>:<left|bottom>` read as the
+    /// anchored group's index and the edge, or null. `right` is refused: the
+    /// Right dock is the group's own dock, and `redock` already reaches it.
+    /// </summary>
+    internal static (int Idx, string Edge)? ParseDockSnap(string? knob, int anchoredCount)
+    {
+        if (string.IsNullOrWhiteSpace(knob)) { return null; }
+        var parts = knob.Trim().Split(':');
+        if (parts.Length != 2 || parts[1] is not ("left" or "bottom")) { return null; }
+        var k = parts[0];
+        if (!k.StartsWith("dock", StringComparison.Ordinal) || k.Length == 4 || !k[4..].All(char.IsAsciiDigit)
+            || !int.TryParse(k.AsSpan(4), System.Globalization.NumberStyles.None,
+                             System.Globalization.CultureInfo.InvariantCulture, out var idx)
+            || idx >= anchoredCount)
+        {
+            return null;
+        }
+        return (idx, parts[1]);
+    }
+
+    /// <summary>
+    /// A `detach_group` dropped ON a window edge of the canvas cell (w x h), with
+    /// the cell as the viewport, so the engine's own drop-snap
+    /// (`snap_if_dropped_near_an_edge`) makes the edge dock: left at (0, h/2),
+    /// bottom at (w/2, h).
+    /// </summary>
+    internal static string DetachGroupToEdge(int dockId, int groupIdx, string edge, double w, double h)
+    {
+        var (x, y) = edge == "left" ? (0.0, h / 2) : (w / 2, h);
+        return Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx,
+                          ["x"] = x, ["y"] = y, ["viewport_w"] = w, ["viewport_h"] = h });
+    }
+
+    /// <summary>
     /// Whether a layout answer kept the dock's STRUCTURE: the same pane keys, each
     /// showing the same panels in the same order. Compared as a map from key to
     /// panels, never in list order: the floating docks arrive sorted by `z`, so a

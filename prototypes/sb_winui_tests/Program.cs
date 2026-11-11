@@ -1418,6 +1418,18 @@ static class Program
         Eq("edge cell: the shell's cell is sent in DIPs with every key the engine reads, culture-invariant",
             """{"x":0,"y":40.5,"w":1000,"h":600,"viewport_w":1300,"viewport_h":700}""",
             LayoutWire.EdgeCell(0, 40.5, 1000, 600, 1300, 700));
+        // R1-4b S1 (flask 829): SB_DOCK_SNAP=<dock key>:<left|bottom> makes an edge
+        // dock through the engine's OWN drop-snap (`detach_group` with a viewport,
+        // dropped on that edge), the path a real drop takes. Anything else is refused.
+        string ShowSnap((int Idx, string Edge)? p) => p is { } v ? $"{v.Idx}:{v.Edge}" : "(null)";
+        Eq("dock snap: a dock key and the left or bottom edge parse", "2:left|0:bottom",
+            ShowSnap(LayoutWire.ParseDockSnap("dock2:left", 5)) + "|" + ShowSnap(LayoutWire.ParseDockSnap(" dock0:bottom ", 5)));
+        Eq("dock snap: right, an unknown edge, an out-of-range or non-dock key, or no edge are refused", "(null)|(null)|(null)|(null)|(null)|(null)",
+            string.Join("|", new[] { "dock2:right", "dock2:top", "dock5:left", "float1:left", "dock2", "dock-1:left" }
+                .Select(k => ShowSnap(LayoutWire.ParseDockSnap(k, 5)))));
+        Eq("dock snap: the drop lands ON the edge, with the cell as the viewport",
+            """{"op":"detach_group","dock_id":0,"group_idx":2,"x":0,"y":300,"viewport_w":1000,"viewport_h":600}|{"op":"detach_group","dock_id":0,"group_idx":1,"x":500,"y":600,"viewport_w":1000,"viewport_h":600}""",
+            LayoutWire.DetachGroupToEdge(0, 2, "left", 1000, 600) + "|" + LayoutWire.DetachGroupToEdge(0, 1, "bottom", 1000, 600));
         var floatDefects = new[]
         {
             floats.Replace(",\"x\":100.0", ""),

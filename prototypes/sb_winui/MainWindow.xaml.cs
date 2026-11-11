@@ -262,6 +262,8 @@ public sealed partial class MainWindow : Window
     private bool _dockWanted;
     private bool _dockCollapseDone;
     private bool _dockFloatDone;
+    /// <summary>R1-4b S1: SB_DOCK_SNAP is sent once, on the first draw.</summary>
+    private bool _dockSnapDone;
     /// <summary>SB_DOCK_FLOAT_TOUR's replay (FP-6, Q6.FL), while it runs.</summary>
     private FloatTour? _floatTour;
     private bool _floatTourAsked;
@@ -741,6 +743,43 @@ public sealed partial class MainWindow : Window
                 else
                 {
                     Report($"RUSTFAIL DOCK FLOAT REFUSED value={floatKnob.Trim()} -- want <dock key>:<x>,<y> with a key of the {docked.Count} anchored group(s)");
+                }
+            }
+            // R1-4b S1 (flask 829): every Left or Bottom anchored dock the engine
+            // holds is named, so a run reads what the engine made. Nothing is
+            // written when there is none, so every SB_DOCK baseline is unchanged.
+            if (LayoutWire.AnchoredDocks(snap.LayoutJson) is not { } anchoredAll)
+            {
+                Report("RUSTFAIL EDGE DOCKS UNREADABLE -- the engine's anchored docks");
+            }
+            else if (anchoredAll.Any(a => a.Edge != "right"))
+            {
+                string Edge(string e) => anchoredAll.FirstOrDefault(a => a.Edge == e) is { } a
+                    ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"dock{a.Dock.DockId}:{a.Dock.Groups.Count}") : "-";
+                Report($"EDGE DOCKS left={Edge("left")} bottom={Edge("bottom")} cause={snap.Cause}");
+            }
+            // SB_DOCK_SNAP=<dock key>:<left|bottom> (R1-4b S1): that anchored group
+            // is dropped ON that edge of the canvas cell, through the engine's own
+            // drop-snap (`detach_group` with the cell as the viewport), once.
+            var snapKnob = Environment.GetEnvironmentVariable("SB_DOCK_SNAP");
+            if (!_dockSnapDone && !string.IsNullOrWhiteSpace(snapKnob))
+            {
+                _dockSnapDone = true;
+                double cw = FloatLayer.ActualWidth, ch = FloatLayer.ActualHeight;
+                if (LayoutWire.ParseDockSnap(snapKnob, docked.Count) is not { } sn)
+                {
+                    Report($"RUSTFAIL DOCK SNAP REFUSED value={snapKnob.Trim()} -- want <dock key>:<left|bottom> with a key of the {docked.Count} anchored group(s)");
+                }
+                else if (cw <= 0 || ch <= 0)
+                {
+                    Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                        $"RUSTFAIL DOCK SNAP REFUSED value={snapKnob.Trim()} -- the canvas cell is not laid out ({cw}x{ch})"));
+                }
+                else
+                {
+                    Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                        $"DOCK SNAP SENT group=dock{sn.Idx} edge={sn.Edge} cell={cw}x{ch} via=synth"));
+                    _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.DetachGroupToEdge(_dockId, sn.Idx, sn.Edge, cw, ch), Group = "snap", Via = "synth" });
                 }
             }
             // SB_DOCK_FLOAT_TOUR=<dock key>,<dock key> (FP-6, Q6.FL): two groups
