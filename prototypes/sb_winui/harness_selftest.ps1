@@ -3435,6 +3435,30 @@ Test-Case 'edge docks on screen: a left column''s surface is read too, its width
     (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5 -SurfacePx @{ W = 2049; H = 1333 } -StripH 24) + ' | ' +
     (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5 -SurfacePx @{ W = 2379; H = 1333 } -StripH 24)
 } 'PASS(left=1 frame bottom=0 frames; canvas x/y/w beside them; canvas h=888.67 from the surface) | FAIL(surface w=1586 want 1366.67)'
+# jas 851: the height is read off ONE named row kind -- the render thread's
+# `RUSTOK REPAINT ... cause=resize ... surface=WxH`, written after a drain that
+# APPLIED a resize -- and only one written after the last EDGE DOCK DRAWN.
+# Any other row carrying `surface=` (PROBE, POINTER, FIRST-PRESENT, ...) is not
+# it; no such row after the draw, or a malformed one, reads NOT READ.
+$surfRows = @(
+    "t`tm`tRUSTOK REPAINT events_total=1 frames=1 cause=resize resizes-in-drain=1 surface=2379x1333 paint=1ms",
+    "t`tm`tEDGE DOCK DRAWN left=- bottom=dock1:1@0,692.67,1586.67,220 cut=0,0,0,220 cause=draw",
+    "t`tm`tRUSTOK REPAINT events_total=2 frames=1 cause=resize resizes-in-drain=1 surface=2379x1003 paint=1ms",
+    "t`tm`tRUSTOK REPAINT events_total=2 frames=1 cause=pointer resizes-in-drain=0 surface=9x9 paint=1ms",
+    "t`tm`tPROBE surface=1x1 hash=abc"
+)
+function Show-SbSurf($s) { if ($null -eq $s) { 'none' } else { "$($s.W)x$($s.H)" } }
+Test-Case 'edge surface: the last resize REPAINT after the last draw, never a pointer repaint or a PROBE' {
+    Show-SbSurf (Get-SbEdgeSurfacePx $surfRows)
+} '2379x1003'
+Test-Case 'edge surface: a resize row only BEFORE the draw is no reading (NOT READ)' {
+    $only = @($surfRows[0], $surfRows[1], $surfRows[3], $surfRows[4])
+    (Show-SbSurf (Get-SbEdgeSurfacePx $only)) + ' | ' + (Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5 -SurfacePx (Get-SbEdgeSurfacePx $only) -StripH 24)
+} 'none | PASS(left=0 frame bottom=2 frames; canvas x/y/w beside them; canvas HEIGHT NOT READ)'
+Test-Case 'edge surface: a malformed surface value, or no draw at all, is no reading' {
+    $bad = @($surfRows[1], "t`tm`tRUSTOK REPAINT cause=resize surface=2379xabc paint=1ms")
+    (Show-SbSurf (Get-SbEdgeSurfacePx $bad)) + ' | ' + (Show-SbSurf (Get-SbEdgeSurfacePx @($surfRows[0], $surfRows[2])))
+} 'none | none'
 Test-Case 'edge docks on screen: a frame UIA reports offscreen is a FAIL' {
     $u = @{ edgeL1 = @{ X = 108; Y = 60; W = 330; H = 1369; Offscreen = $true }; CanvasStripScroll = $edgeLeftUia.CanvasStripScroll }
     Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $u -Scale 1.5
