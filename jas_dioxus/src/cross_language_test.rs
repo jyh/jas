@@ -7152,6 +7152,33 @@ pub(crate) mod tests {
         run_workspace_operation_fixture("workspace_operations/panel_ops.json");
     }
 
+    /// The edge-dock law over an APP's own canvas cell (WORKSPACE.md "Where
+    /// each edge dock is drawn", jas 823): each row builds a layout, passes a
+    /// cell, and pins the rectangles `edge_rects_reply` answers, the body of
+    /// `jas_layout_edge_rects`. One row's cell differs from the held pane
+    /// layout, so an answer cut from the held layout instead of the cell reds.
+    #[test]
+    fn workspace_edge_dock_rects() {
+        let tests: serde_json::Value =
+            serde_json::from_str(&read_fixture("workspace_operations/edge_dock_rects.json")).unwrap();
+        let mut rows = 0;
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let setup = read_fixture(&format!("expected/{}", tc["setup"].as_str().unwrap()));
+            let mut layout = test_json_to_workspace(setup.trim());
+            for op in tc["ops"].as_array().unwrap() {
+                let before = workspace_to_test_json(&layout);
+                apply_workspace_op(&mut layout, op);
+                assert_ne!(workspace_to_test_json(&layout), before, "{name}: {} changed nothing", op["op"]);
+            }
+            let got = crate::workspace::edge_dock::edge_rects_reply(&layout, &tc["cell"])
+                .unwrap_or_else(|(class, detail)| panic!("{name}: refused {class} {detail}"));
+            assert_eq!(got["edge_rects"], tc["expected"], "{name}");
+            rows += 1;
+        }
+        assert!(rows >= 4, "the edge-dock corpus replayed only {rows} rows");
+    }
+
     /// Every op in the panel corpus CHANGES the layout. `layout_apply` skips an
     /// unknown verb silently, so a row whose verb is not wired would replay as
     /// a no-op, and a golden generated from that replay would pin the no-op.
