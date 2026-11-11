@@ -146,7 +146,7 @@ impl SessionState {
                 let pid = format!("p-{}", self.next_proposal);
                 match model.propose(&pid, CLIENT_ACTOR, name, ops) {
                     Ok(()) => {
-                        self.next_proposal += 1;
+                        let _ = self.next_proposal; // MUTANT: the counter does not advance
                         vec![tool_result(id, false, &format!(
                             "proposal {pid} is shown to the artist; it lands only if the artist accepts it"),
                             json!({"proposal": pid}))]
