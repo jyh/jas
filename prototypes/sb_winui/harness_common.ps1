@@ -2710,6 +2710,16 @@ function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string
 # engine's canvas rect's x, y and width: the canvas is beside the docks, not
 # under them. A frame is a Left dock's `edgeL<d>` or a Bottom group's
 # `edgeB<d>g<i>`. Tolerance 1.5 DIP: a frame's one-DIP border, and rounding.
+# A frame UIA reports offscreen is a FAIL (jas 842 Low 2).
+#
+# WHAT THIS CANNOT SEE (jas 842), named so a PASS never claims it:
+#   * THE CANVAS'S HEIGHT. The strip takes the cut's left, top and right, never
+#     its bottom (ApplySurfaceMargins), so with a Bottom dock an uncut canvas
+#     reads the same as a cut one. A PASS with a Bottom dock says
+#     `canvas HEIGHT NOT READ`.
+#   * THE FIRST FRAME'S OWN X AND Y. They set the origin, so a frame drawn at a
+#     wrong offset with the canvas shifted by the same amount still passes;
+#     every OTHER position is read relative to it.
 # Returns PASS(...), FAIL(<each mismatch>) or REFUSED: <why>; never a PASS on
 # rows it cannot read or a run with no edge dock.
 function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Uia, [double]$Scale) {
@@ -2753,6 +2763,7 @@ function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Ui
     foreach ($f in $frames) {
         if (-not $Uia.ContainsKey($f.Id)) { $bad.Add("$($f.Id) is not in the UIA read"); continue }
         $px = $Uia[$f.Id]
+        if ($px.ContainsKey('Offscreen') -and $px.Offscreen) { $bad.Add("$($f.Id) is offscreen"); continue }
         if ($null -eq $origin) { $origin = @{ X = $px.X - $f.Want.X * $Scale; Y = $px.Y - $f.Want.Y * $Scale } }
         $got = @{ X = ($px.X - $origin.X) / $Scale; Y = ($px.Y - $origin.Y) / $Scale; W = $px.W / $Scale; H = $px.H / $Scale }
         foreach ($k in 'X', 'Y', 'W', 'H') {
@@ -2774,7 +2785,8 @@ function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Ui
         }
     }
     if ($bad.Count -gt 0) { return "FAIL($($bad -join '; '))" }
-    return "PASS(left=$nLeft frame bottom=$nBottom frames, the canvas beside them)"
+    $height = if ($nBottom -gt 0) { '; canvas HEIGHT NOT READ' } else { '' }
+    return "PASS(left=$nLeft frame bottom=$nBottom frames; canvas x/y/w beside them$height)"
 }
 
 # Q6.FL -- TWO GROUPS FLOAT, ONE MOVES AND IS RAISED, BOTH REDOCK (FP-6's

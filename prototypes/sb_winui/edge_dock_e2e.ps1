@@ -73,7 +73,7 @@ if (-not (Test-Path $uiaOut)) { "VERDICT: NOT RUN (no UIA read)"; exit 2 }
 $read = Get-Content -Raw $uiaOut | ConvertFrom-Json
 if ($read.error) { "VERDICT: NOT RUN (the UIA read: $($read.error))"; exit 2 }
 $uia = @{}
-foreach ($p in $read.rects.PSObject.Properties) { $uia[$p.Name] = @{ X = [double]$p.Value.X; Y = [double]$p.Value.Y; W = [double]$p.Value.W; H = [double]$p.Value.H } }
+foreach ($p in $read.rects.PSObject.Properties) { $uia[$p.Name] = @{ X = [double]$p.Value.X; Y = [double]$p.Value.Y; W = [double]$p.Value.W; H = [double]$p.Value.H; Offscreen = [bool]$p.Value.offscreen } }
 "uia: asked=$($read.asked) found=$($read.found) " + (($uia.Keys | Sort-Object | ForEach-Object { "$_=$($uia[$_].X),$($uia[$_].Y),$($uia[$_].W),$($uia[$_].H)" }) -join ' ')
 $v = Test-SbEdgeDockUia -RectsRow ([string]$rectsRow) -DrawnRow ([string]$drawnRow) -Uia $uia -Scale $scale
 if ($bad.Count -gt 0 -and $v -like 'PASS*') { $v = "FAIL(the shell wrote $($bad.Count) RUSTFAIL row(s))" }

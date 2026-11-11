@@ -3412,10 +3412,20 @@ $edgeBotUia = @{
 }
 Test-Case 'edge docks on screen: a left column at its rect, the canvas beside it' {
     Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5
-} 'PASS(left=1 frame bottom=0 frames, the canvas beside them)'
+} 'PASS(left=1 frame bottom=0 frames; canvas x/y/w beside them)'
 Test-Case 'edge docks on screen: a bottom row in equal shares, the canvas above it' {
     Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5
-} 'PASS(left=0 frame bottom=2 frames, the canvas beside them)'
+} 'PASS(left=0 frame bottom=2 frames; canvas x/y/w beside them; canvas HEIGHT NOT READ)'
+# jas 842: the strip never takes the bottom cut, so an UNCUT canvas under a
+# Bottom row reads exactly as a cut one. The verdict must not claim the height.
+Test-Case 'edge docks on screen: a bottom PASS never claims the canvas height it cannot read' {
+    $v = Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5
+    "$($v -like '*canvas HEIGHT NOT READ*') $($v -like '*the canvas beside them*')"
+} 'True False'
+Test-Case 'edge docks on screen: a frame UIA reports offscreen is a FAIL' {
+    $u = @{ edgeL1 = @{ X = 108; Y = 60; W = 330; H = 1369; Offscreen = $true }; CanvasStripScroll = $edgeLeftUia.CanvasStripScroll }
+    Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $u -Scale 1.5
+} 'FAIL(edgeL1 is offscreen)'
 Test-Case 'edge docks on screen: a frame drawn at the Right dock''s width is a FAIL' {
     $u = @{ edgeL1 = @{ X = 108; Y = 60; W = 342; H = 1369 }; CanvasStripScroll = $edgeLeftUia.CanvasStripScroll }
     Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $u -Scale 1.5
