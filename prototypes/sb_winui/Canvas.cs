@@ -469,10 +469,10 @@ internal sealed class PanelValueSynthCmd : Cmd
 /// ⛔ IMMUTABLE, FOR THE SAME REASON AS <see cref="MenuSnapshot"/>: the render
 /// thread builds one and swaps the reference, and the UI thread reads whatever
 /// is there, so it can never see a half-written plan. `Seq` lets the drawn row
-/// say how many publications it skipped.
+/// say how many publications it skipped. `AvailW` is the width the plan was
+/// laid out at when the view must draw at that width (an edge group,
+/// Q-flask-2); 0 means the view's own.
 /// </summary>
-/// <summary>A panel's plan as published. <c>AvailW</c> is the width it was planned at
-/// when the view must draw at that width (an edge group, Q-flask-2); 0 means the view's own.</summary>
 internal sealed record PanelSnapshot(string PanelId, string PlanJson, long Seq, string Cause, long AvailW = 0);
 
 /// <summary>
