@@ -2485,6 +2485,8 @@ internal sealed class FloatTour
 
     private int _issued;
     private bool _awaiting;
+    /// <summary>The pane group the step in flight was sent under (`dock{i}` or `float{id}`).</summary>
+    private string _awaitGroup = "";
     private int? _a, _b;
     private int _count1, _count2;
 
@@ -2526,7 +2528,7 @@ internal sealed class FloatTour
         _awaiting = true;
         var a = _a ?? 0;
         var b = _b ?? 0;
-        return n switch
+        var step = n switch
         {
             1 => Detach(n, anchoredDockId, Hi, 300, 40),
             2 => Detach(n, anchoredDockId, Lo, 520, 40),
@@ -2536,12 +2538,22 @@ internal sealed class FloatTour
             5 => new Step(LayoutWire.Redock(a), Float(a), Inv($"FLOAT TOUR STEP n={n} op=redock dock={a} via=synth")),
             _ => new Step(LayoutWire.Redock(b), Float(b), Inv($"FLOAT TOUR STEP n={n} op=redock dock={b} via=synth")),
         };
+        _awaitGroup = step.Group;
+        return step;
     }
 
-    /// <summary>The READ row for the step in flight, or null when no step awaits (a placement nobody asked for).</summary>
-    internal string? Observe(IReadOnlyList<LayoutWire.Floated> floating)
+    /// <summary>
+    /// The READ row for the step in flight, or null when no step awaits (a
+    /// placement nobody asked for). <paramref name="answeredGroup"/> is the group
+    /// a verb's in-place answer names, or null for a DRAW (a republish, which is
+    /// how a detach or redock answers). Q-flask-1: an answer under any other
+    /// group (a collapse sent beside the tour) is not this step's, and the step
+    /// stays in flight.
+    /// </summary>
+    internal string? Observe(IReadOnlyList<LayoutWire.Floated> floating, string? answeredGroup = null)
     {
         if (!_awaiting) { return null; }
+        if (answeredGroup is not null && !string.Equals(answeredGroup, _awaitGroup, StringComparison.Ordinal)) { return null; }
         _awaiting = false;
         var n = _issued;
         if (n == 1)

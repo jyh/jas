@@ -1584,6 +1584,25 @@ static class Program
             "(no op) RUSTFAIL FLOAT TOUR REFUSED step=2 -- step 1 left 0 floating dock(s), not 1",
             refused is null ? "(null)" : $"{refused.Op ?? "(no op)"} {refused.Row}");
         Check("float tour: ...and a refused tour is finished", lost.Finished, "still running");
+        // Q-flask-1 (flask 839): a group collapse answered while a tour step is in
+        // flight (SB_DOCK_COLLAPSE beside SB_DOCK_FLOAT_TOUR) is not the step's
+        // answer. A detach or redock answers on a DRAW (no group); a float op
+        // answers under its own `float{id}`; any other group is someone else's.
+        var race = FloatTour.Parse("dock1,dock3", 5)!;
+        race.Next(0); race.Observe(answers[0]);
+        race.Next(0);
+        var raced = new List<string>
+        {
+            race.Observe(answers[0], "dock0") ?? "(ignored)",
+            race.Next(0) is null ? "(still in flight)" : "(issued)",
+            race.Observe(answers[1]) ?? "(none)",
+        };
+        race.Next(0);
+        raced.Add(race.Observe(answers[2], "dock0") ?? "(ignored)");
+        raced.Add(race.Observe(answers[2], "float1") ?? "(none)");
+        Eq("float tour: another group's answer is ignored and the step stays in flight; its own draw or group is read",
+            "(ignored)|(still in flight)|FLOAT TOUR READ n=2 docks=2 at=[1@300,40z0;2@520,40z1]|(ignored)|FLOAT TOUR READ n=3 docks=2 at=[1@300,260z0;2@520,40z1]",
+            string.Join("|", raced));
         var noB = FloatTour.Parse("dock1,dock3", 5)!;
         noB.Next(0); noB.Observe(answers[0]); noB.Next(0); noB.Observe(answers[0]);
         Eq("float tour: a second detach that floated no NEW dock is refused at step 3",
