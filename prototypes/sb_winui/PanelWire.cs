@@ -2546,6 +2546,15 @@ internal sealed class FloatTour
         return idx[0] > idx[1] ? new FloatTour(idx[0], idx[1]) : new FloatTour(idx[1], idx[0]);
     }
 
+    /// <summary>
+    /// Q-flask-4 (jas 844): whether <paramref name="key"/> is one of the tour's two
+    /// `dock{i}` keys. The tour reads answers by group, so a collapse of one of
+    /// its own keys would carry a step's group and race it; the shell refuses
+    /// that pair by name instead.
+    /// </summary>
+    internal bool Names(string key) =>
+        key == FormattableString.Invariant($"dock{Hi}") || key == FormattableString.Invariant($"dock{Lo}");
+
     /// <summary>One step: the op to send (null when refused), the pane group it names, and its row.</summary>
     internal sealed record Step(string? Op, string Group, string Row);
 

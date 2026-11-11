@@ -6915,7 +6915,7 @@ fn magic_wand_apply(
     seed_path: &[usize],
     mode: &str,
 ) {
-    use crate::algorithms::magic_wand::{magic_wand_match, MagicWandConfig};
+    use crate::algorithms::magic_wand::magic_wand_match;
     use crate::document::controller::Controller;
     use crate::document::document::ElementSelection;
 
