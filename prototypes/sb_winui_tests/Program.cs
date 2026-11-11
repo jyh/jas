@@ -1603,6 +1603,12 @@ static class Program
         Eq("float tour: another group's answer is ignored and the step stays in flight; its own draw or group is read",
             "(ignored)|(still in flight)|FLOAT TOUR READ n=2 docks=2 at=[1@300,40z0;2@520,40z1]|(ignored)|FLOAT TOUR READ n=3 docks=2 at=[1@300,260z0;2@520,40z1]",
             string.Join("|", raced));
+        // Q-flask-4 (jas 844): the tour matches answers by GROUP, so a collapse of
+        // one of the tour's own keys would still race it; that pair is refused by
+        // name, and this is how the shell asks.
+        var tourKeys = FloatTour.Parse("dock1,dock3", 5)!;
+        Eq("float tour: it names exactly its two keys", "True|True|False|False|False",
+            string.Join("|", new[] { "dock1", "dock3", "dock0", "float1", "dock13" }.Select(k => tourKeys.Names(k).ToString())));
         var noB = FloatTour.Parse("dock1,dock3", 5)!;
         noB.Next(0); noB.Observe(answers[0]); noB.Next(0); noB.Observe(answers[0]);
         Eq("float tour: a second detach that floated no NEW dock is refused at step 3",
