@@ -400,6 +400,10 @@ where
     let mut up = stream;
     for line in input.lines() {
         let line = line?;
+        // A .NET or PowerShell host writes a UTF-8 BOM before its first line,
+        // and JSON never begins with one: strip it, as `mcp_pipe` does on
+        // Windows, so the two relays forward the same bytes.
+        let line = line.strip_prefix('\u{feff}').unwrap_or(&line);
         if line.trim().is_empty() {
             continue;
         }
@@ -445,6 +449,35 @@ mod attach_tests {
         app.join().unwrap();
         let _ = std::fs::remove_file(&path);
         assert_eq!(String::from_utf8(out).unwrap(), "answer:one\nanswer:two\n");
+    }
+
+    /// A leading UTF-8 BOM (a .NET or PowerShell host's first write) does not
+    /// reach the app, as on Windows (`mcp_pipe::attach_strips_a_leading_bom`).
+    #[test]
+    fn attach_strips_a_leading_bom() {
+        let path = std::env::temp_dir().join(format!("jas-attach-bom-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        let app = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            let mut w = conn.try_clone().unwrap();
+            let mut got = Vec::new();
+            for line in BufReader::new(conn).lines() {
+                let line = line.unwrap();
+                writeln!(w, "answer").unwrap();
+                got.push(line);
+            }
+            got
+        });
+        let stream = std::os::unix::net::UnixStream::connect(&path).unwrap();
+        let stdin = std::io::Cursor::new("\u{feff}{\"id\":1}\n".as_bytes().to_vec());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || { let _ = tx.send(super::relay_attached(stream, stdin, Vec::<u8>::new())); });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the relay returned within 5 s").expect("the relay finishes");
+        let got = app.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(got, vec![r#"{"id":1}"#.to_string()], "the BOM reached the app");
     }
 }
 
