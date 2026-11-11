@@ -1531,6 +1531,12 @@ static class Program
                 McpWire.BarRow(("p-1", "lift"), null) ?? "(none)",
             }));
         Eq("mcp pipe: the pipe is named for the shell's own process", "jas-mcp-4242", McpWire.PipeName(4242));
+        // jas 861: a load, an open, or a run panel-menu item can edit the
+        // document (and so withdraw a pending proposal), so the drain that
+        // holds one observes for the client -- as every drain does, failing safe.
+        Eq("mcp observe: every drain observes while attached, a load, an open and a panel menu run included",
+            "True|True|True|True|True",
+            string.Join("|", new[] { "LoadCmd", "OpenCmd", "PanelMenuCmd", "ResizeCmd", "KeyCmd" }.Select(k => McpWire.ObserveAfter(k).ToString())));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
             "Proposed: nudge|(no bar)",
