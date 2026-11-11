@@ -1439,6 +1439,43 @@ static class Program
         Eq("edge rects refusal: null rects, or an edge dock whose rect is null, is named", "no rects for left|no rect for bottom",
             (LayoutWire.EdgeRectsMissing(new[] { s2Left }, null) ?? "(ok)") + "|"
             + (LayoutWire.EdgeRectsMissing(new[] { s2Left, new LayoutWire.EdgeDock("bottom", new LayoutWire.Anchored(2, new List<LayoutWire.Group>())) }, s2Rects) ?? "(ok)"));
+        // R1-4b S3 (flask 829): each Left or Bottom dock group is a pane under its
+        // own edge key (never `dock…`), with its panels and its active panel; the
+        // Right dock is not here, it keeps `dock{i}`.
+        var s3G = new List<LayoutWire.Group> { new(new[] { "layers", "color" }, 1, false), new(new[] { "stroke" }, 0, true) };
+        var s3Docks = new[]
+        {
+            new LayoutWire.EdgeDock("right", new LayoutWire.Anchored(0, s3G)),
+            new LayoutWire.EdgeDock("left", new LayoutWire.Anchored(1, s3G)),
+            new LayoutWire.EdgeDock("bottom", new LayoutWire.Anchored(2, s3G.Take(1).ToList())),
+        };
+        Eq("edge keyed: left and bottom groups under their edge keys, the right dock left out",
+            "edgeL1g0=layers,color@color|edgeL1g1=stroke@stroke|edgeB2g0=layers,color@color",
+            string.Join("|", LayoutWire.EdgeKeyed(s3Docks).Select(k => $"{k.Key}={string.Join(",", k.Panels)}@{k.Active}")));
+        Eq("edge keyed: no edge dock is no keys", "", string.Join("|", LayoutWire.EdgeKeyed(s3Docks.Take(1).ToList()).Select(k => k.Key)));
+        // Rule 6: a Bottom dock's groups share its row equally, left to right.
+        string ShowRect(LayoutWire.EdgeRect r) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{r.X:0.##},{r.Y:0.##},{r.W:0.##},{r.H:0.##}");
+        Eq("row shares: three groups split the row in equal shares, left to right",
+            "220,692,300,220|520,692,300,220|820,692,300,220",
+            string.Join("|", LayoutWire.RowShares(new LayoutWire.EdgeRect(220, 692, 900, 220), 3).Select(ShowRect)));
+        Eq("row shares: one group takes the row; none takes nothing", "0,10,1000,180|",
+            string.Join("|", LayoutWire.RowShares(new LayoutWire.EdgeRect(0, 10, 1000, 180), 1).Select(ShowRect)) + "|"
+            + string.Join("|", LayoutWire.RowShares(new LayoutWire.EdgeRect(0, 10, 1000, 180), 0).Select(ShowRect)));
+        // S4: the canvas is cut by the margin between the engine's canvas rect and the cell.
+        string ShowCut((double L, double T, double R, double B)? c) => c is { } v
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{v.L:0.##},{v.T:0.##},{v.R:0.##},{v.B:0.##}") : "(null)";
+        Eq("canvas cut: a left column cuts the left, a bottom row the bottom, no rects cut nothing",
+            "220,0,0,0|0,0,0,220|220,0,0,180|0,0,0,0",
+            ShowCut(LayoutWire.CanvasCut(s2Rects, 1586.6666259765625, 912.6666870117188)) + "|"
+            + ShowCut(LayoutWire.CanvasCut(LayoutWire.EdgeRects("""{"edge_rects":{"left":null,"bottom":{"x":0,"y":692.67,"w":1586.67,"h":220},"canvas":{"x":0,"y":0,"w":1586.67,"h":692.67}}}"""), 1586.67, 912.67)) + "|"
+            + ShowCut(LayoutWire.CanvasCut(LayoutWire.EdgeRects("""{"edge_rects":{"left":{"x":0,"y":0,"w":220,"h":600},"bottom":{"x":220,"y":420,"w":780,"h":180},"canvas":{"x":220,"y":0,"w":780,"h":420}}}"""), 1000, 600)) + "|"
+            + ShowCut(LayoutWire.CanvasCut(null, 1000, 600)));
+        Eq("canvas cut: a canvas rect reaching outside the cell is refused, not drawn", "(null)|(null)",
+            ShowCut(LayoutWire.CanvasCut(LayoutWire.EdgeRects("""{"edge_rects":{"left":null,"bottom":null,"canvas":{"x":0,"y":0,"w":1200,"h":900}}}"""), 1000, 600)) + "|"
+            + ShowCut(LayoutWire.CanvasCut(LayoutWire.EdgeRects("""{"edge_rects":{"left":null,"bottom":null,"canvas":{"x":-5,"y":0,"w":1000,"h":600}}}"""), 1000, 600)));
+        Eq("edge dock drawn row: each edge's dock, group count and rect, then the cut",
+            "EDGE DOCK DRAWN left=dock1:2@0,0,220,912.67 bottom=- cut=220,0,0,0 cause=draw",
+            LayoutWire.EdgeDockDrawnRow(s3Docks.Take(2).ToList(), s2Rects!, (220, 0, 0, 0), "draw"));
         Eq("dock snap: the drop lands ON the edge, with the cell as the viewport",
             """{"op":"detach_group","dock_id":0,"group_idx":2,"x":0,"y":300,"viewport_w":1000,"viewport_h":600}|{"op":"detach_group","dock_id":0,"group_idx":1,"x":500,"y":600,"viewport_w":1000,"viewport_h":600}""",
             LayoutWire.DetachGroupToEdge(0, 2, "left", 1000, 600) + "|" + LayoutWire.DetachGroupToEdge(0, 1, "bottom", 1000, 600));
