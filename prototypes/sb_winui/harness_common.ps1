@@ -2713,16 +2713,44 @@ function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string
 # A frame UIA reports offscreen is a FAIL (jas 842 Low 2).
 #
 # WHAT THIS CANNOT SEE (jas 842), named so a PASS never claims it:
-#   * THE CANVAS'S HEIGHT. The strip takes the cut's left, top and right, never
-#     its bottom (ApplySurfaceMargins), so with a Bottom dock an uncut canvas
-#     reads the same as a cut one. A PASS with a Bottom dock says
+#   * THE CANVAS'S HEIGHT, FROM UIA. The strip takes the cut's left, top and
+#     right, never its bottom (ApplySurfaceMargins), and the surface has no UIA
+#     peer (Q-flask-3, measured). So the height is read off the swap chain's
+#     own size instead: -SurfacePx is Get-SbEdgeSurfacePx's reading (the last
+#     resize REPAINT after the last draw, physical px) and -StripH the canvas
+#     strip's height in DIPs (no CANVAS STRIP row means no strip was placed,
+#     so 0); the surface must be canvas.W wide and canvas.H less the strip
+#     tall, within the same 1.5 DIP. Without -SurfacePx a PASS with a Bottom dock says
 #     `canvas HEIGHT NOT READ`.
 #   * THE FIRST FRAME'S OWN X AND Y. They set the origin, so a frame drawn at a
 #     wrong offset with the canvas shifted by the same amount still passes;
 #     every OTHER position is read relative to it.
 # Returns PASS(...), FAIL(<each mismatch>) or REFUSED: <why>; never a PASS on
 # rows it cannot read or a run with no edge dock.
-function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Uia, [double]$Scale) {
+# jas 851: the surface size the canvas height is read off is ONE named row
+# kind, taken only after the LAST `EDGE DOCK DRAWN`: the render thread's
+# `RUSTOK REPAINT ... cause=resize ... surface=WxH`, which Canvas.cs writes after
+# a drain that APPLIED a resize (cause=resize is set only when ApplyResize
+# succeeds), with the swap chain's new size. Some twenty other row kinds carry
+# `surface=` (PROBE's is a different quantity); none of them is read. Returns
+# @{W;H} in physical px, or $null -- no draw, no such row after it, or a value
+# that is not <int>x<int> -- which the judge reads as `canvas HEIGHT NOT READ`.
+function Get-SbEdgeSurfacePx([string[]]$Rows) {
+    $drawn = -1
+    for ($i = 0; $i -lt $Rows.Count; $i++) { if ($Rows[$i] -cmatch "`tEDGE DOCK DRAWN ") { $drawn = $i } }
+    if ($drawn -lt 0) { return $null }
+    $hit = $null
+    for ($i = $drawn + 1; $i -lt $Rows.Count; $i++) {
+        if ($Rows[$i] -cmatch "`tRUSTOK REPAINT " -and $Rows[$i] -cmatch ' cause=resize ') { $hit = $Rows[$i] }
+    }
+    if ($null -eq $hit) { return $null }
+    $v = Get-SbField $hit 'surface'
+    if ($null -eq $v -or $v -notmatch '^(\d+)x(\d+)$') { return $null }
+    return @{ W = [double]$Matches[1]; H = [double]$Matches[2] }
+}
+
+function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Uia, [double]$Scale,
+                            [hashtable]$SurfacePx = $null, [double]$StripH = 0) {
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
     function ConvertTo-SbRect4([string]$Text) {
         $p = $Text.Split(',')
@@ -2784,8 +2812,14 @@ function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Ui
             }
         }
     }
-    if ($bad.Count -gt 0) { return "FAIL($($bad -join '; '))" }
     $height = if ($nBottom -gt 0) { '; canvas HEIGHT NOT READ' } else { '' }
+    if ($null -ne $SurfacePx) {
+        $sw = $SurfacePx.W / $Scale; $sh = $SurfacePx.H / $Scale; $wantH = $canvas.H - $StripH
+        if ([math]::Abs($sw - $canvas.W) -gt $tol) { $bad.Add("surface w=$(Format-SbDip $sw) want $(Format-SbDip $canvas.W)") }
+        if ([math]::Abs($sh - $wantH) -gt $tol) { $bad.Add("surface h=$(Format-SbDip $sh) want $(Format-SbDip $wantH)") }
+        $height = "; canvas h=$(Format-SbDip $sh) from the surface"
+    }
+    if ($bad.Count -gt 0) { return "FAIL($($bad -join '; '))" }
     return "PASS(left=$nLeft frame bottom=$nBottom frames; canvas x/y/w beside them$height)"
 }
 
