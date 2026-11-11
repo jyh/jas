@@ -106,6 +106,50 @@ impl WorkspaceLayout {
     }
 }
 
+impl WorkspaceLayout {
+    /// The edge-dock rectangles cut from an APP's own canvas cell, for an app
+    /// whose pane layout is not its real geometry (the FFI path, jas 823).
+    /// Rule 8 reads this layout's `canvas_maximized`, `false` with no pane
+    /// layout; the cell needs no pane layout, since it is the app's.
+    pub fn edge_dock_rects_in(&self, cell: EdgeRect, viewport_w: f64, viewport_h: f64) -> EdgeDockRects {
+        edge_dock_rects(
+            self.anchored_dock(DockEdge::Left),
+            self.anchored_dock(DockEdge::Bottom),
+            cell,
+            self.pane_layout.as_ref().is_some_and(|pl| pl.canvas_maximized),
+            viewport_w,
+            viewport_h,
+        )
+    }
+}
+
+/// The body of `jas_layout_edge_rects` (jas 823): read `cell` as
+/// `{"x","y","w","h","viewport_w","viewport_h"}` in DIPs and answer
+/// `{"edge_rects":{"left","bottom","canvas"}}`, an absent edge as `null`.
+/// A pure query: the cell is an argument, never stored, so it cannot go
+/// stale. Refused as `("BadCell", key)` for a key that is missing, not a
+/// finite number, or (for `w`, `h`) negative; `("BadCell", "")` for a cell
+/// that is not an object.
+pub fn edge_rects_reply(
+    layout: &WorkspaceLayout,
+    cell: &serde_json::Value,
+) -> Result<serde_json::Value, (&'static str, String)> {
+    let obj = cell.as_object().ok_or(("BadCell", String::new()))?;
+    let num = |k: &str| -> Result<f64, (&'static str, String)> {
+        obj.get(k).and_then(serde_json::Value::as_f64).filter(|v| v.is_finite())
+            .ok_or(("BadCell", k.to_string()))
+    };
+    let size = |k: &str| num(k).and_then(|v| if v < 0.0 { Err(("BadCell", k.to_string())) } else { Ok(v) });
+    let rect = EdgeRect::new(num("x")?, num("y")?, size("w")?, size("h")?);
+    let r = layout.edge_dock_rects_in(rect, num("viewport_w")?, num("viewport_h")?);
+    let json = |r: EdgeRect| serde_json::json!({"x": r.x, "y": r.y, "w": r.w, "h": r.h});
+    Ok(serde_json::json!({"edge_rects": {
+        "left": r.left.map(json),
+        "bottom": r.bottom.map(json),
+        "canvas": json(r.canvas),
+    }}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

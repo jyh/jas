@@ -131,6 +131,9 @@ pub enum Crossing {
     /// One `layout_apply` verb (a tab, a collapse, a drag of a floating dock),
     /// so its count is the dock gestures the shell sent.
     LayoutApply = 22,
+    /// The edge-dock rectangles over the shell's cell (jas 823), read once per
+    /// layout pass, so its count follows the layout passes, never the frames.
+    LayoutEdgeRects = 23,
 }
 
 impl Crossing {
@@ -160,6 +163,7 @@ impl Crossing {
         "jas_layout_load",
         "jas_layout_state",
         "jas_layout_apply",
+        "jas_layout_edge_rects",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -169,7 +173,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 23;
+    pub(crate) const COUNT: usize = 24;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -200,6 +204,7 @@ impl Crossing {
         Crossing::LayoutLoad,
         Crossing::LayoutState,
         Crossing::LayoutApply,
+        Crossing::LayoutEdgeRects,
     ];
 
     pub fn name(self) -> &'static str {

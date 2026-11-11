@@ -1075,7 +1075,8 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 /// The engine's layout as a shell draws it, or the empty span with
 /// `{"panel_event":"NoLayout"}` before a load.
 /// The viewport the engine's pane layout is seeded at. Nominal: no reply
-/// carries pane geometry, only visibility and maximization.
+/// carries pane geometry, only visibility and maximization. A shell that needs
+/// geometry passes its own cell ([`jas_layout_edge_rects`], jas 823).
 const ENGINE_PANE_VIEWPORT: (f64, f64) = (1200.0, 900.0);
 
 fn layout_reply(engine: &JasEngine) -> JasBytes {
@@ -1187,6 +1188,49 @@ pub unsafe extern "C" fn jas_layout_apply(e: *mut JasEngine, op: *const u8, len:
     }
     let out = layout_reply(engine);
     ffi_instr::record_out(Crossing::LayoutApply, out.len);
+    out
+}
+
+/// **The edge-dock rectangles** (WORKSPACE.md "Where each edge dock is
+/// drawn") cut from the SHELL's own canvas cell: `cell` is
+/// `{"x","y","w","h","viewport_w","viewport_h"}` in DIPs, and the answer is
+/// `{"edge_rects":{"left","bottom","canvas"}}`, an edge with no dock as
+/// `null`. The engine's pane layout is nominal ([`ENGINE_PANE_VIEWPORT`]), so
+/// the cell is the shell's to pass, on every call; it is never stored, so it
+/// cannot go stale (jas 823). Rule 8 reads the held `canvas_maximized`.
+///
+/// A query: it changes nothing. A refusal is the empty span: `BadUtf8`,
+/// `BadJson`, `NoLayout`, or `BadCell` (detail: the key) for a key that is
+/// missing, not a number, or (for `w`, `h`) negative.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or an engine from [`jas_engine_new`]; `cell` NULL or valid
+/// for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u8, len: usize) -> JasBytes {
+    ffi_instr::record(Crossing::LayoutEdgeRects, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let Ok(raw) = (unsafe { utf8(cell, len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(cell) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasBytes::empty();
+    };
+    let answer = match engine.layout.borrow().as_ref() {
+        Some(l) => crate::workspace::edge_dock::edge_rects_reply(l, &cell),
+        None => Err(("NoLayout", String::new())),
+    };
+    let out = match answer {
+        Ok(v) => JasBytes::from_string(v.to_string()),
+        Err((class, detail)) => {
+            set_panel_event_error(engine, class, &detail);
+            JasBytes::empty()
+        }
+    };
+    ffi_instr::record_out(Crossing::LayoutEdgeRects, out.len);
     out
 }
 
