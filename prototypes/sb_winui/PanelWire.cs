@@ -2222,6 +2222,31 @@ internal static class LayoutWire
     });
 
     /// <summary>
+    /// R1-4b S2: the rects a draw is made by, as one row's fields: each rect
+    /// `x,y,w,h` at two decimals, culture-invariant; an absent edge is `-`.
+    /// </summary>
+    internal static string EdgeRectsRow(EdgeRectSet r)
+    {
+        static string N(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        static string R(EdgeRect? e) => e is null ? "-" : $"{N(e.X)},{N(e.Y)},{N(e.W)},{N(e.H)}";
+        return $"left={R(r.Left)} bottom={R(r.Bottom)} canvas={R(r.Canvas)}";
+    }
+
+    /// <summary>
+    /// R1-4b S2 (jas 815): why the edge docks cannot be drawn, or null when they
+    /// can. Rects that did not arrive while a Left or Bottom dock exists, or an
+    /// edge dock whose rect is null, is named, never drawn as nothing.
+    /// </summary>
+    internal static string? EdgeRectsMissing(IEnumerable<EdgeDock> anchored, EdgeRectSet? rects)
+    {
+        var edges = anchored.Select(a => a.Edge).Where(e => e is "left" or "bottom").ToList();
+        if (edges.Count == 0) { return null; }
+        if (rects is null) { return "no rects for " + string.Join(",", edges); }
+        var missing = edges.Where(e => (e == "left" ? rects.Left : rects.Bottom) is null).ToList();
+        return missing.Count == 0 ? null : "no rect for " + string.Join(",", missing);
+    }
+
+    /// <summary>
     /// jas 823: the shell's own canvas cell and viewport, in DIPs, as
     /// `jas_layout_edge_rects` reads them. Passed on every call and never
     /// stored, so a missed resize cannot leave a stale copy in the engine.

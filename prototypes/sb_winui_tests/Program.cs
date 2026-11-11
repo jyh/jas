@@ -1427,6 +1427,18 @@ static class Program
         Eq("dock snap: right, an unknown edge, an out-of-range or non-dock key, or no edge are refused", "(null)|(null)|(null)|(null)|(null)|(null)",
             string.Join("|", new[] { "dock2:right", "dock2:top", "dock5:left", "float1:left", "dock2", "dock-1:left" }
                 .Select(k => ShowSnap(LayoutWire.ParseDockSnap(k, 5)))));
+        // R1-4b S2 (flask 829, jas 815): the rects the shell draws by, as one row,
+        // and the refusal when a Left or Bottom dock has no rect to draw in.
+        var s2Left = new LayoutWire.EdgeDock("left", new LayoutWire.Anchored(1, new List<LayoutWire.Group>()));
+        var s2Right = new LayoutWire.EdgeDock("right", new LayoutWire.Anchored(0, new List<LayoutWire.Group>()));
+        var s2Rects = LayoutWire.EdgeRects("""{"edge_rects":{"left":{"x":0.0,"y":0.0,"w":220.0,"h":912.6666870117188},"bottom":null,"canvas":{"x":220.0,"y":0.0,"w":1366.6666259765625,"h":912.6666870117188}}}""");
+        Eq("edge rects row: each rect at two decimals, culture-invariant, an absent edge as -",
+            "left=0,0,220,912.67 bottom=- canvas=220,0,1366.67,912.67", s2Rects is null ? "(null)" : LayoutWire.EdgeRectsRow(s2Rects));
+        Eq("edge rects refusal: none when every edge dock has its rect, or there is no edge dock", "(ok)|(ok)",
+            (LayoutWire.EdgeRectsMissing(new[] { s2Right, s2Left }, s2Rects) ?? "(ok)") + "|" + (LayoutWire.EdgeRectsMissing(new[] { s2Right }, null) ?? "(ok)"));
+        Eq("edge rects refusal: null rects, or an edge dock whose rect is null, is named", "no rects for left|no rect for bottom",
+            (LayoutWire.EdgeRectsMissing(new[] { s2Left }, null) ?? "(ok)") + "|"
+            + (LayoutWire.EdgeRectsMissing(new[] { s2Left, new LayoutWire.EdgeDock("bottom", new LayoutWire.Anchored(2, new List<LayoutWire.Group>())) }, s2Rects) ?? "(ok)"));
         Eq("dock snap: the drop lands ON the edge, with the cell as the viewport",
             """{"op":"detach_group","dock_id":0,"group_idx":2,"x":0,"y":300,"viewport_w":1000,"viewport_h":600}|{"op":"detach_group","dock_id":0,"group_idx":1,"x":500,"y":600,"viewport_w":1000,"viewport_h":600}""",
             LayoutWire.DetachGroupToEdge(0, 2, "left", 1000, 600) + "|" + LayoutWire.DetachGroupToEdge(0, 1, "bottom", 1000, 600));

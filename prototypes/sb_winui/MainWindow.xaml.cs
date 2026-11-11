@@ -262,6 +262,12 @@ public sealed partial class MainWindow : Window
     private bool _dockWanted;
     private bool _dockCollapseDone;
     private bool _dockFloatDone;
+    /// <summary>R1-4b S2: the Left and Bottom anchored docks of the last draw (empty when none).</summary>
+    private IReadOnlyList<LayoutWire.EdgeDock> _edgeDocks = Array.Empty<LayoutWire.EdgeDock>();
+
+    /// <summary>R1-4b S2: the engine's rects for the edge docks, as last answered.</summary>
+    private LayoutWire.EdgeRectSet? _edgeRects;
+
     /// <summary>R1-4b S1: SB_DOCK_SNAP is sent once, on the first draw.</summary>
     private bool _dockSnapDone;
     /// <summary>SB_DOCK_FLOAT_TOUR's replay (FP-6, Q6.FL), while it runs.</summary>
@@ -376,6 +382,35 @@ public sealed partial class MainWindow : Window
             return;
         }
         SetDockCollapsed(key, read.Groups[idx].Collapsed, via);
+    }
+
+    /// <summary>R1-4b S2: ask the engine for the edge-dock rects over the canvas cell as it is now.</summary>
+    private void AskEdgeRects(string cause)
+    {
+        double w = FloatLayer.ActualWidth, h = FloatLayer.ActualHeight;
+        if (w <= 0 || h <= 0)
+        {
+            Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"RUSTFAIL EDGE RECTS REFUSED cause={cause} -- the canvas cell is not laid out ({w}x{h})"));
+            return;
+        }
+        _canvas.EdgeRects(new EdgeRectsCmd { W = w, H = h, Cause = cause });
+    }
+
+    /// <summary>
+    /// R1-4b S2 (jas 815): the engine's rects arrived. An edge dock with no rect
+    /// to draw in is refused by name, never drawn as nothing.
+    /// </summary>
+    private void OnEdgeRectsChanged(string cause, string answer)
+    {
+        var rects = LayoutWire.EdgeRects(answer);
+        if (LayoutWire.EdgeRectsMissing(_edgeDocks, rects) is { } why)
+        {
+            _edgeRects = null;
+            Report($"RUSTFAIL EDGE RECTS REFUSED cause={cause} -- {why}");
+            return;
+        }
+        _edgeRects = rects;
     }
 
     /// <summary>Each floating dock's frame on <c>FloatLayer</c>, by the engine's dock id.</summary>
@@ -748,7 +783,8 @@ public sealed partial class MainWindow : Window
             // R1-4b S1 (flask 829): every Left or Bottom anchored dock the engine
             // holds is named, so a run reads what the engine made. Nothing is
             // written when there is none, so every SB_DOCK baseline is unchanged.
-            if (LayoutWire.AnchoredDocks(snap.LayoutJson) is not { } anchoredAll)
+            var anchoredAll = LayoutWire.AnchoredDocks(snap.LayoutJson);
+            if (anchoredAll is null)
             {
                 Report("RUSTFAIL EDGE DOCKS UNREADABLE -- the engine's anchored docks");
             }
@@ -758,6 +794,11 @@ public sealed partial class MainWindow : Window
                     ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"dock{a.Dock.DockId}:{a.Dock.Groups.Count}") : "-";
                 Report($"EDGE DOCKS left={Edge("left")} bottom={Edge("bottom")} cause={snap.Cause}");
             }
+            // R1-4b S2: the rects are asked for on every draw that holds an edge
+            // dock, with the cell as it is now (jas 823: never stored).
+            _edgeDocks = anchoredAll?.Where(a => a.Edge is "left" or "bottom").ToList() ?? new List<LayoutWire.EdgeDock>();
+            _edgeRects = null;
+            if (_edgeDocks.Count > 0) { AskEdgeRects("draw"); }
             // SB_DOCK_SNAP=<dock key>:<left|bottom> (R1-4b S1): that anchored group
             // is dropped ON that edge of the canvas cell, through the engine's own
             // drop-snap (`detach_group` with the cell as the viewport), once.
@@ -1051,6 +1092,21 @@ public sealed partial class MainWindow : Window
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
         _canvas.LayoutChanged = OnLayoutChanged;
+        _canvas.EdgeRectsChanged = OnEdgeRectsChanged;
+        // R1-4b S2: a resized cell re-asks the rects, while an edge dock exists.
+        // The window's own size law decides the size first (O2b), as the
+        // floating clamp's does: a zero is refused, never asked about.
+        FloatLayer.SizeChanged += (_, e) =>
+        {
+            if (_edgeDocks.Count == 0) { return; }
+            var decision = SurfacePolicy.Decide((uint)e.NewSize.Width, (uint)e.NewSize.Height, hasSurface: true);
+            if (decision != Decision.Accept)
+            {
+                Report($"EDGE RECTS {decision} {(uint)e.NewSize.Width}x{(uint)e.NewSize.Height} -- the rects stay as they were");
+                return;
+            }
+            AskEdgeRects("resize");
+        };
         // FP-6: a resized canvas cell keeps every floating dock reachable, by the
         // engine's `clamp_floating_docks`; sent only while something floats.
         FloatLayer.SizeChanged += (_, e) =>
