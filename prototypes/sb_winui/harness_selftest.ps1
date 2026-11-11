@@ -3397,6 +3397,44 @@ Test-Case 'nightly panels: each spec''s top-level id, in order' { (Get-SbPanelId
 Test-Case 'nightly panels: a nested id is not the panel''s' { Get-SbPanelIdsFromSpecs @("content:`n  id: inner`nid: top_panel_content") } 'top_panel_content'
 Test-Case 'nightly panels: a spec with no top-level id is REFUSED, never dropped' { Get-SbPanelIdsFromSpecs @("id: a_panel_content", "summary: no id") } 'REFUSED: spec 2 of 2 has no top-level id'
 
+# R1-4b S6 (flask STATUS 829): the edge docks as a person's screen holds them.
+# UIA rects are physical pixels on a 150% box, the rows are DIPs; the cell's
+# screen origin is taken from the first frame (it sits at the cell's edge), and
+# the canvas strip, cut like the surface, must sit exactly beside the docks.
+$edgeLeftRects = 'EDGE RECTS cell=1586.67x912.67 left=0,0,220,912.67 bottom=- canvas=220,0,1366.67,912.67 cause=draw'
+$edgeLeftDrawn = 'EDGE DOCK DRAWN left=dock1:1@0,0,220,912.67 bottom=- cut=220,0,0,0 cause=draw'
+$edgeLeftUia = @{ edgeL1 = @{ X = 108; Y = 60; W = 330; H = 1369 }; CanvasStripScroll = @{ X = 438; Y = 60; W = 2050; H = 36 } }
+$edgeBotRects = 'EDGE RECTS cell=1586.67x912.67 left=- bottom=0,692.67,1586.67,220 canvas=0,0,1586.67,692.67 cause=draw'
+$edgeBotDrawn = 'EDGE DOCK DRAWN left=- bottom=dock1:2@0,692.67,1586.67,220 cut=0,0,0,220 cause=draw'
+$edgeBotUia = @{
+    edgeB1g0 = @{ X = 108; Y = 1099; W = 1190; H = 330 }; edgeB1g1 = @{ X = 1298; Y = 1099; W = 1190; H = 330 }
+    CanvasStripScroll = @{ X = 108; Y = 60; W = 2380; H = 36 }
+}
+Test-Case 'edge docks on screen: a left column at its rect, the canvas beside it' {
+    Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5
+} 'PASS(left=1 frame bottom=0 frames, the canvas beside them)'
+Test-Case 'edge docks on screen: a bottom row in equal shares, the canvas above it' {
+    Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5
+} 'PASS(left=0 frame bottom=2 frames, the canvas beside them)'
+Test-Case 'edge docks on screen: a frame drawn at the Right dock''s width is a FAIL' {
+    $u = @{ edgeL1 = @{ X = 108; Y = 60; W = 342; H = 1369 }; CanvasStripScroll = $edgeLeftUia.CanvasStripScroll }
+    Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $u -Scale 1.5
+} 'FAIL(edgeL1 w=228 want 220)'
+Test-Case 'edge docks on screen: a canvas left uncut under the column is a FAIL' {
+    $u = @{ edgeL1 = $edgeLeftUia.edgeL1; CanvasStripScroll = @{ X = 108; Y = 60; W = 2380; H = 36 } }
+    Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $u -Scale 1.5
+} 'FAIL(CanvasStripScroll x=0 want 220; CanvasStripScroll w=1586.67 want 1366.67)'
+Test-Case 'edge docks on screen: a share drawn at the wrong place, or missing, is a FAIL' {
+    $u1 = @{ edgeB1g0 = $edgeBotUia.edgeB1g0; edgeB1g1 = @{ X = 1190; Y = 1099; W = 1190; H = 330 }; CanvasStripScroll = $edgeBotUia.CanvasStripScroll }
+    $u2 = @{ edgeB1g0 = $edgeBotUia.edgeB1g0; CanvasStripScroll = $edgeBotUia.CanvasStripScroll }
+    (Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $u1 -Scale 1.5) + ' | ' +
+    (Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $u2 -Scale 1.5)
+} 'FAIL(edgeB1g1 x=721.33 want 793.33) | FAIL(edgeB1g1 is not in the UIA read)'
+Test-Case 'edge docks on screen: rows it cannot read, or no edge dock, are REFUSED, never a PASS' {
+    (Test-SbEdgeDockUia -RectsRow 'EDGE RECTS cell=? cause=draw' -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5) + ' | ' +
+    (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow 'EDGE DOCK DRAWN left=- bottom=- cut=0,0,0,0 cause=draw' -Uia $edgeLeftUia -Scale 1.5)
+} 'REFUSED: the EDGE RECTS row has no cell and canvas | REFUSED: the EDGE DOCK DRAWN row names no edge dock'
+
 Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state can read as a FAIL' {
     @((New-SbBoxSnap), (New-SbBoxSnap -LogonUI $true), (New-SbBoxSnap -Rows $null)) | ForEach-Object { (Get-SbBoxReadiness $_) -match '^(READY|NOT RUN\(box: .+\))$' } | Sort-Object -Unique } 'True'
 
