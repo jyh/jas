@@ -720,6 +720,26 @@ struct JasBytes jas_layout_state(struct JasEngine *e);
 struct JasBytes jas_layout_apply(struct JasEngine *e, const uint8_t *op, uintptr_t len);
 
 /**
+ * **The edge-dock rectangles** (WORKSPACE.md "Where each edge dock is
+ * drawn") cut from the SHELL's own canvas cell: `cell` is
+ * `{"x","y","w","h","viewport_w","viewport_h"}` in DIPs, and the answer is
+ * `{"edge_rects":{"left","bottom","canvas"}}`, an edge with no dock as
+ * `null`. The engine's pane layout is nominal ([`ENGINE_PANE_VIEWPORT`]), so
+ * the cell is the shell's to pass, on every call; it is never stored, so it
+ * cannot go stale (jas 823). Rule 8 reads the held `canvas_maximized`.
+ *
+ * A query: it changes nothing. A refusal is the empty span: `BadUtf8`,
+ * `BadJson`, `NoLayout`, or `BadCell` (detail: the key) for a key that is
+ * missing, not a number, or (for `w`, `h`) negative.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or an engine from [`jas_engine_new`]; `cell` NULL or valid
+ * for `len` bytes.
+ */
+struct JasBytes jas_layout_edge_rects(struct JasEngine *e, const uint8_t *cell, uintptr_t len);
+
+/**
  * **A widget's behavior**, run in the engine (wave 2, A6).
  *
  * `{"widget":"align_left_button","event":"click","alt":false}`: the shell

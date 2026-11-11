@@ -263,6 +263,21 @@ constraint, toolbar or Right-dock position changes:
    docks are drawn over it at the viewport's left and bottom edges by the same
    rules, as the `Right` dock is drawn over a maximized canvas.
 
+**Whose rectangle.** The canvas pane's rectangle in these rules is the
+rectangle the app actually draws its canvas pane in, and the viewport is the
+app's own window. An app whose pane layout is its real geometry (the web app
+and the Swift app) cuts the edge docks from that layout. An app whose engine
+pane layout is only nominal (the Windows app, which lays out its own columns
+while the engine holds a fixed 1200×900 pane layout) must not use the
+engine's pane geometry. It passes its own canvas cell and viewport to the
+engine on every layout pass, and the engine answers the three rectangles
+from these rules. The cell is passed with each call and never stored, so it
+cannot go stale when the window is resized. Rule 8 reads the layout's own
+`canvas_maximized`. (Conformance: `edge_dock_rects.json`, whose rows give a
+layout, a cell and the expected rectangles. One row's cell differs from the
+layout's pane geometry, so an answer cut from that geometry instead of the
+cell fails it.)
+
 Worked example: viewport 1200×800, the default panes (toolbar 72px, Right dock
 240px, so the canvas pane is x 72..960, y 0..800), a `Left` dock of width 200
 and a `Bottom` dock of width 180:

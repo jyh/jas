@@ -2207,8 +2207,10 @@ internal static class LayoutWire
     /// <summary>
     /// R1-4a: the engine's `edge_rects` (`edge_dock_rects`, WORKSPACE.md
     /// "Anchored Docks by Edge"), read as sent. The shell derives none of them
-    /// (jas 752). Null when the field is absent or `null`, or any rect lacks a
-    /// side; an edge sent as `null` reads as no rect.
+    /// (jas 752). Since jas 823 they are the answer of `jas_layout_edge_rects`,
+    /// asked with <see cref="EdgeCell"/>, never a field of the layout reply,
+    /// whose pane geometry is nominal. Null when the field is absent or `null`,
+    /// or any rect lacks a side; an edge sent as `null` reads as no rect.
     /// </summary>
     internal static EdgeRectSet? EdgeRects(string stateJson) => Read(stateJson, root =>
     {
@@ -2218,6 +2220,14 @@ internal static class LayoutWire
         EdgeRect? Edge(string k) => r.GetProperty(k).ValueKind == System.Text.Json.JsonValueKind.Null ? null : Rect(r.GetProperty(k));
         return new EdgeRectSet(Edge("left"), Edge("bottom"), Rect(r.GetProperty("canvas")));
     });
+
+    /// <summary>
+    /// jas 823: the shell's own canvas cell and viewport, in DIPs, as
+    /// `jas_layout_edge_rects` reads them. Passed on every call and never
+    /// stored, so a missed resize cannot leave a stale copy in the engine.
+    /// </summary>
+    internal static string EdgeCell(double x, double y, double w, double h, double viewportW, double viewportH) =>
+        Op(new() { ["x"] = x, ["y"] = y, ["w"] = w, ["h"] = h, ["viewport_w"] = viewportW, ["viewport_h"] = viewportH });
 
     /// <summary>
     /// The floating docks, back to front: ascending `z` (the engine's
