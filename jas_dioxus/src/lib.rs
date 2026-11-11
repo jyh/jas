@@ -72,6 +72,10 @@ pub mod document;
 // The agent API's MCP transport core (docs/AGENT_API.md §4, node A3). Pure: no
 // I/O and no dependency beyond serde_json, so it compiles in every build.
 pub mod mcp;
+// `jas_mcp --attach` on Windows: the relay to a running shell's named pipe
+// (O25 A6 R3). Windows-only, and std plus nine kernel32 calls.
+#[cfg(windows)]
+pub mod mcp_pipe;
 pub mod geometry;
 // The immediate-mode Painter seam (contract v2, RATIFIED + FROZEN 2026-07-23).
 // Always compiled (pure-native core; the Canvas2dPainter backend is

@@ -115,7 +115,10 @@ Both active ports run the same file (POLICY.md §1).
   change to the settled document for a subscriber, each reported once. The transport corpus
   (`operations/mcp_exchanges.json`) is replayed through these entries, with the artist's edits and undos made outside
   the session, and must produce the same lines as `mcp::Session` and the Mac's `McpSession`. The pipe itself and the
-  bar are the Windows shell's.
+  bar are the Windows shell's. **The client end is `jas_mcp --attach [PIPE]`** (`src/mcp_pipe.rs`), which relays a stdio
+  client to the shell's `\\.\pipe\jas-mcp-<pid>` (with no PIPE, the one that exists). It opens the pipe OVERLAPPED,
+  because a synchronous handle serialises its reads and writes and the relay must write while a read is pending. And
+  because a pipe cannot be half-closed, after stdin ends it waits until every request it forwarded is answered.
 - **A7, the intent ledger's schema:** open by R0. What a ledger entry records is not part of this repository.
 
 ## 5. What this page does not decide
