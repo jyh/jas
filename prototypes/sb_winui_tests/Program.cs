@@ -1476,6 +1476,22 @@ static class Program
         Eq("edge dock drawn row: each edge's dock, group count and rect, then the cut",
             "EDGE DOCK DRAWN left=dock1:2@0,0,220,912.67 bottom=- cut=220,0,0,0 cause=draw",
             LayoutWire.EdgeDockDrawnRow(s3Docks.Take(2).ToList(), s2Rects!, (220, 0, 0, 0), "draw"));
+        // Q-flask-2 (flask 841): an edge group's panel is planned at ITS frame's
+        // inner width, not the Right dock's 228: the frame's width less its
+        // border and the pane's padding each side, whole DIPs. A Left dock's
+        // groups share its column; a Bottom dock's groups each take a share.
+        var q2Docks = new[]
+        {
+            new LayoutWire.EdgeDock("right", new LayoutWire.Anchored(0, s3G)),
+            new LayoutWire.EdgeDock("left", new LayoutWire.Anchored(1, s3G)),
+            new LayoutWire.EdgeDock("bottom", new LayoutWire.Anchored(2, s3G)),
+        };
+        var q2Rects = LayoutWire.EdgeRects("""{"edge_rects":{"left":{"x":0,"y":0,"w":220,"h":912.67},"bottom":{"x":220,"y":692.67,"w":1366.67,"h":220},"canvas":{"x":220,"y":0,"w":1366.67,"h":692.67}}}""")!;
+        Eq("edge pane widths: a left column's groups at its width, a bottom row's at each share, less border and padding",
+            "edgeL1g0=211|edgeL1g1=211|edgeB2g0=675|edgeB2g1=674",
+            string.Join("|", LayoutWire.EdgePaneWidths(q2Docks, q2Rects, 4, 1).Select(kv => $"{kv.Key}={kv.Value}")));
+        Eq("edge pane widths: a collapsed (36) left column still plans; an edge with no rect plans nothing", "edgeL1g0=27|edgeL1g1=27",
+            string.Join("|", LayoutWire.EdgePaneWidths(q2Docks, LayoutWire.EdgeRects("""{"edge_rects":{"left":{"x":0,"y":0,"w":36,"h":900},"bottom":null,"canvas":{"x":36,"y":0,"w":964,"h":900}}}""")!, 4, 1).Select(kv => $"{kv.Key}={kv.Value}")));
         // R1-4b S5 (flask 829): an edge group's gestures are addressed by ITS dock
         // id, never the Right dock's. A key names the (dock id, group index) every
         // layout verb takes; a floating key is not addressed here (FP-4a).
