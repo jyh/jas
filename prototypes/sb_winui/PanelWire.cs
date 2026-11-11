@@ -2233,6 +2233,46 @@ internal static class LayoutWire
     }
 
     /// <summary>
+    /// R1-4b S5: the (dock id, group index) a group's pane key addresses, the
+    /// pair every layout verb takes. `dock{i}` is the Right dock's group i;
+    /// `edgeL{d}g{i}` and `edgeB{d}g{i}` name dock d's group i. Null for any
+    /// other key: a floating group is not addressed here (FP-4a).
+    /// </summary>
+    internal static (int DockId, int GroupIdx)? GroupAddress(string key, int rightDockId)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        const System.Globalization.NumberStyles Digits = System.Globalization.NumberStyles.None;
+        if (key.StartsWith("dock", StringComparison.Ordinal))
+        {
+            return int.TryParse(key.AsSpan(4), Digits, inv, out var i) ? (rightDockId, i) : null;
+        }
+        if (!key.StartsWith("edgeL", StringComparison.Ordinal) && !key.StartsWith("edgeB", StringComparison.Ordinal)) { return null; }
+        var rest = key.AsSpan(5);
+        var g = rest.IndexOf('g');
+        return g > 0
+            && int.TryParse(rest[..g], Digits, inv, out var d)
+            && int.TryParse(rest[(g + 1)..], Digits, inv, out var gi) ? (d, gi) : null;
+    }
+
+    /// <summary>
+    /// R1-4b S5: the collapse of the group a key names, read from a layout
+    /// answer: the Right dock's for `dock{i}`, the named dock's for an edge key,
+    /// which must sit on the key's edge. Null when there is no such group.
+    /// </summary>
+    internal static bool? GroupCollapsed(string stateJson, string key)
+    {
+        if (key.StartsWith("dock", StringComparison.Ordinal))
+        {
+            return Dock(stateJson) is { } right && GroupAddress(key, right.DockId) is { } a && a.GroupIdx < right.Groups.Count
+                ? right.Groups[a.GroupIdx].Collapsed : null;
+        }
+        if (GroupAddress(key, -1) is not { } at || AnchoredDocks(stateJson) is not { } docks) { return null; }
+        var edge = key.StartsWith("edgeL", StringComparison.Ordinal) ? "left" : "bottom";
+        var dock = docks.FirstOrDefault(x => x.Dock.DockId == at.DockId && x.Edge == edge);
+        return dock is not null && at.GroupIdx < dock.Dock.Groups.Count ? dock.Dock.Groups[at.GroupIdx].Collapsed : null;
+    }
+
+    /// <summary>
     /// R1-4b S3: every Left and Bottom dock group as a pane, under its edge key
     /// (<see cref="EdgeKey"/>), with its panels and active panel, in the engine's
     /// order. The Right dock is not here: it keeps `dock{i}`.

@@ -373,27 +373,22 @@ public sealed partial class MainWindow : Window
     /// <summary>Send a group's collapse toggle to the engine; the answer is drawn by <see cref="OnLayoutChanged"/>.</summary>
     private void ToggleDockGroup(string key, string via)
     {
-        if (_canvas is null || !_dockGroups.ContainsKey(key) || !key.StartsWith("dock", StringComparison.Ordinal)
-            || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
-                             System.Globalization.CultureInfo.InvariantCulture, out var idx)) { return; }
-        _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.ToggleCollapsed(_dockId, idx), Group = key, Via = via });
+        // R1-4b S5: a Right dock group by the Right dock's id, an edge group by its own.
+        if (_canvas is null || !_dockGroups.ContainsKey(key) || LayoutWire.GroupAddress(key, _dockId) is not { } at) { return; }
+        _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.ToggleCollapsed(at.DockId, at.GroupIdx), Group = key, Via = via });
     }
 
     /// <summary>The engine answered a layout verb: draw the touched group's collapse as it now reads.</summary>
     private void OnLayoutChanged(string key, string via, string stateJson)
     {
         if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via); }
-        if (!key.StartsWith("dock", StringComparison.Ordinal)) { return; }
-        var read = LayoutWire.Dock(stateJson);
-        if (read is null || !key.StartsWith("dock", StringComparison.Ordinal)
-            || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
-                             System.Globalization.CultureInfo.InvariantCulture, out var idx)
-            || idx >= read.Groups.Count)
+        if (!key.StartsWith("dock", StringComparison.Ordinal) && !key.StartsWith("edge", StringComparison.Ordinal)) { return; }
+        if (LayoutWire.GroupCollapsed(stateJson, key) is not { } collapsed)
         {
             Report($"RUSTFAIL DOCK OP UNREADABLE group={key} via={via} -- the engine's answer");
             return;
         }
-        SetDockCollapsed(key, read.Groups[idx].Collapsed, via);
+        SetDockCollapsed(key, collapsed, via);
     }
 
     /// <summary>R1-4b S2: ask the engine for the edge-dock rects over the canvas cell as it is now.</summary>
@@ -654,12 +649,6 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    /// <summary>An ANCHORED group's index from its `dock{i}` key, or null (a floating group's key).</summary>
-    private static int? DockGroupIndex(string key) =>
-        key.StartsWith("dock", StringComparison.Ordinal)
-        && int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
-                        System.Globalization.CultureInfo.InvariantCulture, out var i) ? i : null;
-
     /// <summary>The press a tear-out drag started at, in canvas-cell coordinates, and the element that claimed it.</summary>
     private Windows.Foundation.Point? _tearFrom;
     private UIElement? _tearSource;
@@ -802,8 +791,9 @@ public sealed partial class MainWindow : Window
                     Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 };
                 var tabList = new List<(string, Button)>();
-                var groupIdx = DockGroupIndex(key);
-                if (groupIdx is int gi) { WireTearOut(tabs, key, () => LayoutWire.DetachGroup(_dockId, gi, _tearX, _tearY)); }
+                // R1-4b S5: a tear-out from an edge group detaches from ITS dock.
+                var address = LayoutWire.GroupAddress(key, _dockId);
+                if (address is { } ga) { WireTearOut(tabs, key, () => LayoutWire.DetachGroup(ga.DockId, ga.GroupIdx, _tearX, _tearY)); }
                 foreach (var id in ids)
                 {
                     var panelId = id;
@@ -818,7 +808,7 @@ public sealed partial class MainWindow : Window
                         MinHeight = 0,
                     };
                     tab.Click += (_, _) => _canvas.OpenPane(key, panelId, PaneAvailW);
-                    if (groupIdx is int ti) { WireTearOut(tab, key, () => LayoutWire.DetachPanel(_dockId, ti, panelIdx, _tearX, _tearY)); }
+                    if (address is { } ta) { WireTearOut(tab, key, () => LayoutWire.DetachPanel(ta.DockId, ta.GroupIdx, panelIdx, _tearX, _tearY)); }
                     tabs.Children.Add(tab);
                     tabList.Add((id, tab));
                 }
@@ -885,7 +875,8 @@ public sealed partial class MainWindow : Window
                 if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; menuButton.Visibility = Visibility.Collapsed; }
                 // A floating group's collapse is addressed by its own dock id,
                 // which FP-4a does not send; its chevron is hidden, not inert.
-                if (!key.StartsWith("dock", StringComparison.Ordinal)) { chevron.Visibility = Visibility.Collapsed; }
+                // An edge group's is addressed (R1-4b S5), so it shows.
+                if (address is null) { chevron.Visibility = Visibility.Collapsed; }
             }
             var i = 0;
             foreach (var g in read.Groups) { BuildGroup(SbWinUi.Canvas.DockPaneKey(i++), g, _dockStack); }
@@ -990,7 +981,11 @@ public sealed partial class MainWindow : Window
                 }
             }
             var collapseKnob = Environment.GetEnvironmentVariable("SB_DOCK_COLLAPSE");
-            if (!_dockCollapseDone && !string.IsNullOrWhiteSpace(collapseKnob))
+            // An edge group's key (R1-4b S5) exists only once SB_DOCK_SNAP's
+            // answer is drawn, so the knob waits for that draw, not the load's.
+            var collapseWaits = collapseKnob is not null && collapseKnob.Trim().StartsWith("edge", StringComparison.Ordinal)
+                && _dockSnapDone && _edgeDocks.Count == 0;
+            if (!_dockCollapseDone && !collapseWaits && !string.IsNullOrWhiteSpace(collapseKnob))
             {
                 _dockCollapseDone = true;
                 var ck = collapseKnob.Trim();
