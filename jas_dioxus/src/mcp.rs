@@ -396,6 +396,41 @@ mod attach_tests {
     }
 }
 
+/// The `mcp_exchanges.json` matcher (its `_doc` states the rules): a
+/// subset match on objects, exact length on arrays, `"<any>"`, an expected
+/// object against an actual JSON string, and `"<settled>"`.
+/// Shared by the corpus's two replays: through [`Session`]
+/// (`cross_language_test::mcp_exchanges`) and through the C ABI
+/// (`ffi::tests::mcp_exchanges_replay_through_the_engine`).
+#[cfg(test)]
+pub(crate) fn exchange_match(want: &serde_json::Value, got: &serde_json::Value, settled: &serde_json::Value, at: &str) {
+    use serde_json::Value;
+    match want {
+        Value::String(w) if w == "<any>" => {}
+        Value::String(w) if w == "<settled>" => assert_eq!(got, settled, "{at}: not the settled document"),
+        Value::Object(wm) => {
+            let parsed;
+            let got = match got {
+                Value::String(t) => { parsed = serde_json::from_str::<Value>(t).unwrap_or(Value::Null); &parsed }
+                g => g,
+            };
+            let gm = got.as_object().unwrap_or_else(|| panic!("{at}: expected an object, got {got}"));
+            for (k, wv) in wm {
+                let gv = gm.get(k).unwrap_or_else(|| panic!("{at}: missing key `{k}` in {got}"));
+                exchange_match(wv, gv, settled, &format!("{at}.{k}"));
+            }
+        }
+        Value::Array(wa) => {
+            let ga = got.as_array().unwrap_or_else(|| panic!("{at}: expected an array, got {got}"));
+            assert_eq!(wa.len(), ga.len(), "{at}: array length; got {got}");
+            for (i, (wv, gv)) in wa.iter().zip(ga).enumerate() {
+                exchange_match(wv, gv, settled, &format!("{at}[{i}]"));
+            }
+        }
+        w => assert_eq!(w, got, "{at}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,6 +714,47 @@ mod tests {
         assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
             json!({"proposal": id2, "state": "withdrawn"}));
         assert_eq!(model.pending_proposal_id(), None);
+    }
+
+    /// A6 R2: `observe` reports what changed OUTSIDE the session since it last
+    /// looked, and nothing the session did itself (each own act re-baselines).
+    #[test]
+    fn observe_reports_outside_changes_once_and_never_the_sessions_own() {
+        let mut model = Model::new(svg_to_document(TWO_RECTS), None);
+        let mut st = SessionState::new();
+        let line = |id: u64, method: &str, params: Value| {
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string()
+        };
+        st.handle(&mut model, &line(1, "resources/subscribe", json!({"uri": "jas://document"})));
+        let id = proposal_id(&parse(st.handle(&mut model, &line(2, "tools/call",
+            json!({"name": "propose", "arguments": {"name": "move", "ops": move_ops()}})))));
+        assert!(st.observe(&model).is_empty(), "a propose is the session's own act");
+        st.artist_accept(&mut model, &id);
+        assert!(st.observe(&model).is_empty(), "an accept is the session's own act");
+        // An edit OUTSIDE the session: the shell's ordinary path.
+        let id2 = proposal_id(&parse(st.handle(&mut model, &line(3, "tools/call",
+            json!({"name": "propose", "arguments": {"name": "move", "ops": move_ops()}})))));
+        model.with_txn(|m| {
+            crate::document::op_apply::op_apply(m, &json!(
+                {"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false})).unwrap();
+            crate::document::op_apply::op_apply(m, &json!({"op": "move_selection", "dx": 3, "dy": 3})).unwrap();
+        });
+        let out = parse(st.observe(&model));
+        assert_eq!(notifications(&out, "notifications/jas/proposal").len(), 1, "{out:?}");
+        assert_eq!(notifications(&out, "notifications/jas/proposal")[0]["params"],
+            json!({"proposal": id2, "state": "withdrawn"}));
+        assert_eq!(notifications(&out, "notifications/resources/updated").len(), 1, "{out:?}");
+        assert!(st.observe(&model).is_empty(), "reported once");
+    }
+
+    /// `Model::pending_proposal_name` is what the accept bar shows (Swift:
+    /// `pendingProposalName`).
+    #[test]
+    fn the_pending_proposals_name_is_readable_for_the_bar() {
+        let mut s = session();
+        assert_eq!(s.model().pending_proposal_name(), None);
+        propose(&mut s, 1);
+        assert_eq!(s.model().pending_proposal_name(), Some("move"));
     }
 
     #[test]
