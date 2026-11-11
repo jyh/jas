@@ -1476,6 +1476,22 @@ static class Program
         Eq("edge dock drawn row: each edge's dock, group count and rect, then the cut",
             "EDGE DOCK DRAWN left=dock1:2@0,0,220,912.67 bottom=- cut=220,0,0,0 cause=draw",
             LayoutWire.EdgeDockDrawnRow(s3Docks.Take(2).ToList(), s2Rects!, (220, 0, 0, 0), "draw"));
+        // R1-4b S5 (flask 829): an edge group's gestures are addressed by ITS dock
+        // id, never the Right dock's. A key names the (dock id, group index) every
+        // layout verb takes; a floating key is not addressed here (FP-4a).
+        string ShowAddr((int DockId, int GroupIdx)? a) => a is { } v ? $"{v.DockId}/{v.GroupIdx}" : "(null)";
+        Eq("group address: a Right dock key takes the Right dock's id; an edge key names its own dock", "0/3|7/0|8/1|5/2",
+            ShowAddr(LayoutWire.GroupAddress("dock3", 0)) + "|" + ShowAddr(LayoutWire.GroupAddress("edgeL7g0", 0)) + "|"
+            + ShowAddr(LayoutWire.GroupAddress("edgeB8g1", 0)) + "|" + ShowAddr(LayoutWire.GroupAddress("dock2", 5)));
+        Eq("group address: a floating, malformed or signed key is no address", "(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)",
+            string.Join("|", new[] { "float1g0", "edgeL7", "edgeX7g0", "edgeL7g-1", "dockx", "edgeL7g0x", "toolbar", "edgeLg0" }
+                .Select(k => ShowAddr(LayoutWire.GroupAddress(k, 0)))));
+        var edgesCollapsed = edges.Replace("\"panels\":[\"stroke_panel_content\"],\"active\":0,\"collapsed\":false", "\"panels\":[\"stroke_panel_content\"],\"active\":0,\"collapsed\":true");
+        string ShowColl(bool? c) => c is { } v ? (v ? "true" : "false") : "(null)";
+        Eq("group collapsed: read from the dock and group the key names", "false|false|false|true",
+            string.Join("|", new[] { "dock0", "edgeL7g0", "edgeB8g0", "edgeB8g1" }.Select(k => ShowColl(LayoutWire.GroupCollapsed(edgesCollapsed, k)))));
+        Eq("group collapsed: a group out of range, an edge the dock is not on, or no such dock is no answer", "(null)|(null)|(null)|(null)",
+            string.Join("|", new[] { "edgeB8g2", "edgeL8g0", "edgeL9g0", "dock1" }.Select(k => ShowColl(LayoutWire.GroupCollapsed(edgesCollapsed, k)))));
         Eq("dock snap: the drop lands ON the edge, with the cell as the viewport",
             """{"op":"detach_group","dock_id":0,"group_idx":2,"x":0,"y":300,"viewport_w":1000,"viewport_h":600}|{"op":"detach_group","dock_id":0,"group_idx":1,"x":500,"y":600,"viewport_w":1000,"viewport_h":600}""",
             LayoutWire.DetachGroupToEdge(0, 2, "left", 1000, 600) + "|" + LayoutWire.DetachGroupToEdge(0, 1, "bottom", 1000, 600));
