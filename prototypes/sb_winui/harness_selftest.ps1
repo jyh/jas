@@ -3422,6 +3422,19 @@ Test-Case 'edge docks on screen: a bottom PASS never claims the canvas height it
     $v = Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5
     "$($v -like '*canvas HEIGHT NOT READ*') $($v -like '*the canvas beside them*')"
 } 'True False'
+# Q-flask-3 (jas 842): the canvas HEIGHT, read off the swap chain's own size
+# (the last `surface=WxH` the shell reported, physical px) less the canvas
+# strip: an uncut canvas under a Bottom row keeps the full height and FAILs.
+Test-Case 'edge docks on screen: the surface''s own size reads the canvas height under a bottom row' {
+    Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5 -SurfacePx @{ W = 2379; H = 1003 } -StripH 24
+} 'PASS(left=0 frame bottom=2 frames; canvas x/y/w beside them; canvas h=668.67 from the surface)'
+Test-Case 'edge docks on screen: a canvas left uncut under the bottom row FAILs on the surface height' {
+    Test-SbEdgeDockUia -RectsRow $edgeBotRects -DrawnRow $edgeBotDrawn -Uia $edgeBotUia -Scale 1.5 -SurfacePx @{ W = 2379; H = 1333 } -StripH 24
+} 'FAIL(surface h=888.67 want 668.67)'
+Test-Case 'edge docks on screen: a left column''s surface is read too, its width beside the column' {
+    (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5 -SurfacePx @{ W = 2049; H = 1333 } -StripH 24) + ' | ' +
+    (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $edgeLeftUia -Scale 1.5 -SurfacePx @{ W = 2379; H = 1333 } -StripH 24)
+} 'PASS(left=1 frame bottom=0 frames; canvas x/y/w beside them; canvas h=888.67 from the surface) | FAIL(surface w=1586 want 1366.67)'
 Test-Case 'edge docks on screen: a frame UIA reports offscreen is a FAIL' {
     $u = @{ edgeL1 = @{ X = 108; Y = 60; W = 330; H = 1369; Offscreen = $true }; CanvasStripScroll = $edgeLeftUia.CanvasStripScroll }
     Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow $edgeLeftDrawn -Uia $u -Scale 1.5
