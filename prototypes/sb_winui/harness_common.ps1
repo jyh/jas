@@ -2713,16 +2713,21 @@ function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string
 # A frame UIA reports offscreen is a FAIL (jas 842 Low 2).
 #
 # WHAT THIS CANNOT SEE (jas 842), named so a PASS never claims it:
-#   * THE CANVAS'S HEIGHT. The strip takes the cut's left, top and right, never
-#     its bottom (ApplySurfaceMargins), so with a Bottom dock an uncut canvas
-#     reads the same as a cut one. A PASS with a Bottom dock says
+#   * THE CANVAS'S HEIGHT, FROM UIA. The strip takes the cut's left, top and
+#     right, never its bottom (ApplySurfaceMargins), and the surface has no UIA
+#     peer (Q-flask-3, measured). So the height is read off the swap chain's
+#     own size instead: -SurfacePx is the last `surface=WxH` the shell reported
+#     (physical px, from the surface's SizeChanged) and -StripH the canvas
+#     strip's height in DIPs; the surface must be canvas.W wide and canvas.H
+#     less the strip tall. Without -SurfacePx a PASS with a Bottom dock says
 #     `canvas HEIGHT NOT READ`.
 #   * THE FIRST FRAME'S OWN X AND Y. They set the origin, so a frame drawn at a
 #     wrong offset with the canvas shifted by the same amount still passes;
 #     every OTHER position is read relative to it.
 # Returns PASS(...), FAIL(<each mismatch>) or REFUSED: <why>; never a PASS on
 # rows it cannot read or a run with no edge dock.
-function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Uia, [double]$Scale) {
+function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Uia, [double]$Scale,
+                            [hashtable]$SurfacePx = $null, [double]$StripH = 0) {
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
     function ConvertTo-SbRect4([string]$Text) {
         $p = $Text.Split(',')
@@ -2784,8 +2789,14 @@ function Test-SbEdgeDockUia([string]$RectsRow, [string]$DrawnRow, [hashtable]$Ui
             }
         }
     }
-    if ($bad.Count -gt 0) { return "FAIL($($bad -join '; '))" }
     $height = if ($nBottom -gt 0) { '; canvas HEIGHT NOT READ' } else { '' }
+    if ($null -ne $SurfacePx) {
+        $sw = $SurfacePx.W / $Scale; $sh = $SurfacePx.H / $Scale; $wantH = $canvas.H - $StripH
+        if ([math]::Abs($sw - $canvas.W) -gt $tol) { $bad.Add("surface w=$(Format-SbDip $sw) want $(Format-SbDip $canvas.W)") }
+        if ([math]::Abs($sh - $wantH) -gt $tol) { $bad.Add("surface h=$(Format-SbDip $sh) want $(Format-SbDip $wantH)") }
+        $height = "; canvas h=$(Format-SbDip $sh) from the surface"
+    }
+    if ($bad.Count -gt 0) { return "FAIL($($bad -join '; '))" }
     return "PASS(left=$nLeft frame bottom=$nBottom frames; canvas x/y/w beside them$height)"
 }
 
