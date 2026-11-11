@@ -128,6 +128,15 @@ internal static class McpWire
     internal static string? BarText(PendingRead read) =>
         read.Why is null && read.Id is not null ? $"Proposed: {read.Name}" : null;
 
+    /// <summary>
+    /// (A) W1b: whether a drain that held this command must pull
+    /// `jas_mcp_observe` for an attached client -- a crossing that can edit the
+    /// document, and so withdraw a pending proposal.
+    /// </summary>
+    internal static bool ObserveAfter(string commandKind) => commandKind is
+        "PointerCmd" or "KeyCmd" or "OpCmd" or "PanelClickCmd" or "PanelSynthCmd" or "PanelValueSynthCmd"
+        or "DialogEventCmd" or "DialogDismissCmd" or "MenuActionCmd";
+
     /// <summary>The pipe the shell serves, named for its own process: `\\.\pipe\jas-mcp-&lt;pid&gt;` (A6 F2 (a)).</summary>
     internal static string PipeName(int pid) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"jas-mcp-{pid}");

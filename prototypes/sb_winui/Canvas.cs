@@ -1817,8 +1817,7 @@ internal sealed unsafe class Canvas : IDisposable
 
         for (var i = 0; i < batch.Count; i++)
         {
-            if (batch[i] is PointerCmd or KeyCmd or OpCmd or PanelClickCmd or PanelSynthCmd or PanelValueSynthCmd
-                or DialogEventCmd or DialogDismissCmd or MenuActionCmd) { editing = true; }
+            if (McpWire.ObserveAfter(batch[i].GetType().Name)) { editing = true; }
             switch (batch[i])
             {
                 case QuitCmd _:
