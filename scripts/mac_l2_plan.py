@@ -123,7 +123,10 @@ DELIVERED_KEYS = {
     "key": {"key", "shift", "alt", "ctrl", "meta"},
     "panel": {"panel", "widget", "event", "value"},
     "menu": {"menu"},
+    "toolbar": {"panel", "widget", "event", "hold_ms"},
+    "read state": {"read", "keys"},
 }
+TOOLBAR_PANE = "toolbar_pane"  # a toolbar step's panel: the slots live in workspace/layout.yaml
 
 
 def _refuse_undelivered(item, i, st, kind):
@@ -163,12 +166,72 @@ def select_label(widget, value):
     return None
 
 
-def plan(script, menubar, spec=None):
+def canonical_state(text):
+    """A state read as the comparison reads it: JSON, keys sorted, no whitespace."""
+    return json.dumps(json.loads(text), sort_keys=True, separators=(",", ":"))
+
+
+def load_state_keys():
+    """The keys `workspace/state.yaml` declares: the only keys a state read may name."""
+    import yaml
+    with open(os.path.join(REPO, "workspace", "state.yaml"), encoding="utf-8") as f:
+        return set((yaml.safe_load(f) or {}).get("state") or {})
+
+
+def _plan_read(item, i, st, script, state_keys):
+    kind = st["read"]
+    if kind == "state":
+        keys = st.get("keys")
+        if not (isinstance(keys, list) and keys and all(isinstance(k, str) for k in keys)
+                and len(set(keys)) == len(keys)):
+            raise Refused(f"{item}: step {i}: a state read's keys must be a non-empty list of distinct names, "
+                          f"not {keys!r}")
+        _refuse_undelivered(item, i, st, "read state")
+        undeclared = sorted(set(keys) - state_keys)
+        if undeclared:
+            raise Refused(f"{item}: step {i} reads {', '.join(undeclared)}, which workspace/state.yaml does not declare")
+        want = script.get("expected_state_json")
+        if not isinstance(want, dict):
+            raise Refused(f"{item}: step {i} reads state; the script carries no expected_state_json object")
+        if set(want) != set(keys):
+            raise Refused(f"{item}: step {i} reads {sorted(keys)}; expected_state_json names {sorted(want)}")
+        return ("read", "state", tuple(keys), canonical_state(json.dumps(want)))
+    _refuse_undelivered(item, i, st, "read")
+    if kind == "dialog":
+        if "expected_dialog" not in script:
+            raise Refused(f"{item}: step {i} reads the dialog; the script carries no expected_dialog")
+        want = script["expected_dialog"]
+        if want is not None and not isinstance(want, str):
+            raise Refused(f"{item}: step {i}: expected_dialog is {want!r}, not a dialog id or null")
+        return ("read", "dialog", want)
+    if kind != "document":
+        raise Refused(f"{item}: step {i} reads {kind!r}; this channel reads the document, state or dialog")
+    return ("read", "document")
+
+
+def _plan_toolbar(item, i, st, spec):
+    _refuse_undelivered(item, i, st, "toolbar")
+    if st.get("event") != "press":
+        raise Refused(f"{item}: step {i}: a toolbar step's event is press, not {st.get('event')!r}")
+    hold = st.get("hold_ms", 0)
+    if "hold_ms" in st and not (type(hold) is int and hold > 0):
+        raise Refused(f"{item}: step {i}: hold_ms is {hold!r}; it is a positive whole number of milliseconds")
+    if spec is None:
+        raise Refused(f"{item}: step {i} is a toolbar step; its script's spec must be workspace/layout.yaml")
+    if find_widget(spec, st.get("widget")) is None:
+        raise Refused(f"{item}: step {i}: slot {st.get('widget')!r} is not declared in workspace/layout.yaml")
+    return ("toolbar", st["widget"], hold)
+
+
+def plan(script, menubar, spec=None, state_keys=None):
     """The script as acts: ("open", svg) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
     window_path, widget, event, value, option_label) ("menu", path)
-    ("read", "document"). `spec` is the script's panel spec, parsed; a select
-    commit needs it for the option's label. Raises Refused."""
+    ("read", "document") ("toolbar", slot, hold_ms) ("read", "state", keys,
+    canonical expected) ("read", "dialog", expected id or None). `spec` is the
+    script's panel spec, parsed (workspace/layout.yaml for a toolbar step); a
+    select commit needs it for the option's label. `state_keys` is the set
+    workspace/state.yaml declares (loaded when None). Raises Refused."""
     item = script.get("item", "?")
     steps = script.get("steps") or []
     if not any(isinstance(s, dict) and "read" in s for s in steps):
@@ -177,10 +240,12 @@ def plan(script, menubar, spec=None):
     acts = [("open", script["setup_svg"]), ("tool", script["tool"])]
     for i, st in enumerate(steps):
         if "read" in st:
-            _refuse_undelivered(item, i, st, "read")
-            if st["read"] != "document":
-                raise Refused(f"{item}: step {i} reads {st['read']!r}; this channel reads the document only")
-            acts.append(("read", "document"))
+            if st["read"] == "state" and state_keys is None:
+                state_keys = load_state_keys()
+            acts.append(_plan_read(item, i, st, script, state_keys))
+            continue
+        if st.get("panel") == TOOLBAR_PANE:
+            acts.append(_plan_toolbar(item, i, st, spec))
             continue
         if st.get("meta"):
             raise Refused(f"{item}: step {i} carries meta, which the engine's key route does not take")
@@ -413,7 +478,9 @@ def receipt_line(outcomes, corpus, head, date, not_run=None, suite="mac.live"):
 def load_spec(script):
     import yaml
     path = os.path.join(REPO, script.get("spec", ""))
-    if not script.get("spec", "").startswith("workspace/panels/") or not os.path.exists(path):
+    if script.get("spec") != "workspace/layout.yaml" and not script.get("spec", "").startswith("workspace/panels/"):
+        return None
+    if not os.path.exists(path):
         return None
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -621,7 +688,7 @@ def self_test():
     check("a click carries no label", acts[4][7] is None)
     check("modifiers are carried", plan(dict(base, steps=[dict(press, shift=True), read]), mb)[2][5] == ("shift",))
     check("no read is refused", refused(lambda: plan(dict(base, steps=[press]), mb), "without a read"))
-    check("a tree read is refused", refused(lambda: plan(dict(base, steps=[{"read": "tree"}]), mb), "document only"))
+    check("a tree read is refused", refused(lambda: plan(dict(base, steps=[{"read": "tree"}]), mb), "reads 'tree'"))
     check("meta is refused", refused(lambda: plan(dict(base, steps=[{"key": "Z", "meta": True}, read]), mb), "meta"))
     check("a gesture after a panel step is planned in script order",
           [a[0] for a in plan(dict(base, steps=[pan, press, rel, read]), mb)]
@@ -867,6 +934,54 @@ def self_test():
     check("a viewport taller than its window is refused", refused(lambda: viewport_origin(win, 1200.0, 900.0), "tall"))
     check("a viewport far shorter than its window is refused (not under a title bar)",
           refused(lambda: viewport_origin(win, 1200.0, 500.0), "tall"))
+
+    # The toolbar forms (TESTING.md, row 50): a toolbar step, a state read,
+    # a dialog read. Each refusal arm names the field it refuses.
+    SK = {"active_tool", "fill_on_top"}
+    tb = dict(base, spec="workspace/layout.yaml", expected_state_json={"active_tool": "selection"},
+              expected_dialog="arrow_alternates")
+    hold = {"panel": "toolbar_pane", "widget": "btn_arrow_slot", "event": "press", "hold_ms": 400}
+    click = {"panel": "toolbar_pane", "widget": "btn_arrow_slot", "event": "press"}
+    rst = {"read": "state", "keys": ["active_tool"]}
+    rdl = {"read": "dialog"}
+    lay = {"tool_grid": [{"id": "btn_arrow_slot"}]}
+    ta = plan(dict(tb, steps=[hold, rst, rdl]), mb, lay, state_keys=SK)
+    check("a held toolbar press plans as a toolbar act carrying its hold",
+          ta[2] == ("toolbar", "btn_arrow_slot", 400))
+    check("a state read carries its keys and its expected, canonical",
+          ta[3] == ("read", "state", ("active_tool",), '{"active_tool":"selection"}'))
+    check("a dialog read carries its expected id", ta[4] == ("read", "dialog", "arrow_alternates"))
+    tc = plan(dict(tb, expected_dialog=None, steps=[click, rst, rdl]), mb, lay, state_keys=SK)
+    check("a press with no hold_ms plans as a hold of 0 (a click)", tc[2] == ("toolbar", "btn_arrow_slot", 0))
+    check("a dialog read can expect none open", tc[4] == ("read", "dialog", None))
+    check("a toolbar step's event is press",
+          refused(lambda: plan(dict(tb, steps=[dict(click, event="click"), rst]), mb, lay, state_keys=SK), "press"))
+    for bad in (0, -5, 2.5, "400", True):
+        check(f"hold_ms {bad!r} is refused",
+              refused(lambda: plan(dict(tb, steps=[dict(hold, hold_ms=bad), rst]), mb, lay, state_keys=SK), "hold_ms"))
+    check("a slot the layout does not declare is refused",
+          refused(lambda: plan(dict(tb, steps=[dict(hold, widget="btn_nope"), rst]), mb, lay, state_keys=SK), "btn_nope"))
+    check("a toolbar step carrying a key it does not deliver is refused",
+          refused(lambda: plan(dict(tb, steps=[dict(hold, value=1), rst]), mb, lay, state_keys=SK), "value"))
+    check("a state key state.yaml does not declare is refused by name",
+          refused(lambda: plan(dict(tb, steps=[{"read": "state", "keys": ["no_such"]}]), mb, lay, state_keys=SK), "no_such"))
+    for ks in ([], ["active_tool", "active_tool"], "active_tool", None):
+        check(f"state keys {ks!r} are refused",
+              refused(lambda: plan(dict(tb, steps=[{"read": "state", "keys": ks}]), mb, lay, state_keys=SK), "keys"))
+    nost = {k: v for k, v in tb.items() if k != "expected_state_json"}
+    check("a state read with no expected_state_json is refused",
+          refused(lambda: plan(dict(nost, steps=[rst]), mb, lay, state_keys=SK), "expected_state_json"))
+    check("an expected_state_json naming a key the read does not is refused",
+          refused(lambda: plan(dict(tb, expected_state_json={"active_tool": "x", "fill_on_top": True}, steps=[rst]),
+                               mb, lay, state_keys=SK), "expected_state_json"))
+    nodl = {k: v for k, v in tb.items() if k != "expected_dialog"}
+    check("a dialog read with no expected_dialog is refused",
+          refused(lambda: plan(dict(nodl, steps=[rdl]), mb, lay, state_keys=SK), "expected_dialog"))
+    check("a dialog read carrying keys is refused",
+          refused(lambda: plan(dict(tb, steps=[dict(rdl, keys=["a"])]), mb, lay, state_keys=SK), "keys"))
+    check("canonical state sorts keys and drops whitespace",
+          canonical_state('{ "b": 1, "a": "x" }') == '{"a":"x","b":1}')
+    check("the shipped state.yaml declares active_tool", "active_tool" in load_state_keys())
 
     total = ran[0]
     print(f"mac_l2_plan self-test: {total - len(fails)} of {total} checks passed, {planned} shipped scripts planned")
