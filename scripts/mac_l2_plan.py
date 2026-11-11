@@ -427,6 +427,36 @@ def read_back(got, want):
     return accept_minted_ids(set_aside_the_opens_artboard(got, want), want)
 
 
+def fifo_read_command(act, out):
+    """The test-FIFO command that writes `act`'s read to the file `out`."""
+    if act[1] == "document":
+        return "read " + out
+    if act[1] == "state":
+        return "state " + out + " " + " ".join(act[2])
+    if act[1] == "dialog":
+        return "dialog " + out
+    raise Refused(f"no FIFO command reads {act[1]!r}")
+
+
+def compare_read(act, got, want_doc):
+    """(ok, got, want) for one read act over the app's written text. A document
+    read compares through read_back with the script's expected_json; a state
+    read compares canonical JSON with the planned expected; a dialog read
+    compares the written id (or null) with the planned one."""
+    if act[1] == "document":
+        g = read_back(got, want_doc)
+        return g == want_doc, g, want_doc
+    if act[1] == "state":
+        g = canonical_state(got)
+        return g == act[3], g, act[3]
+    if act[1] == "dialog":
+        d = json.loads(got)
+        if not (isinstance(d, dict) and set(d) == {"dialog"}):
+            raise Refused(f"the app's dialog read is {got!r}, not {{\"dialog\": <id or null>}}")
+        return d["dialog"] == act[2], json.dumps(d["dialog"]), json.dumps(act[2])
+    raise Refused(f"no comparison for a {act[1]!r} read")
+
+
 def launch_env_problem(env):
     """Why `jas_gui_harness.py script` cannot start under `env`, or None. The
     driver talks to the app through `JAS_FIFO`, and finds its window by
@@ -983,6 +1013,23 @@ def self_test():
     check("canonical state sorts keys and drops whitespace",
           canonical_state('{ "b": 1, "a": "x" }') == '{"a":"x","b":1}')
     check("the shipped state.yaml declares active_tool", "active_tool" in load_state_keys())
+    check("a state read's FIFO command names its keys",
+          fifo_read_command(("read", "state", ("active_tool", "fill_on_top"), "{}"), "/o")
+          == "state /o active_tool fill_on_top")
+    check("a dialog read's FIFO command", fifo_read_command(("read", "dialog", None), "/o") == "dialog /o")
+    check("a document read's FIFO command is unchanged", fifo_read_command(("read", "document"), "/o") == "read /o")
+    sact = ("read", "state", ("active_tool",), '{"active_tool":"selection"}')
+    check("a state read passes on the expected, whatever its spacing",
+          compare_read(sact, '{ "active_tool" : "selection" }', None)[0])
+    check("a state read fails on another tool", not compare_read(sact, '{"active_tool":"partial_selection"}', None)[0])
+    dact = ("read", "dialog", "arrow_alternates")
+    check("a dialog read passes on the expected id", compare_read(dact, '{"dialog":"arrow_alternates"}', None)[0])
+    check("a dialog read fails on none open", not compare_read(dact, '{"dialog":null}', None)[0])
+    check("a dialog read expecting none passes on null", compare_read(("read", "dialog", None), '{"dialog":null}', None)[0])
+    check("a dialog read expecting none fails on an open flyout",
+          not compare_read(("read", "dialog", None), '{"dialog":"arrow_alternates"}', None)[0])
+    check("a dialog read of the wrong shape is refused",
+          refused(lambda: compare_read(dact, '"arrow_alternates"', None), "dialog read"))
 
     total = ran[0]
     print(f"mac_l2_plan self-test: {total - len(fails)} of {total} checks passed, {planned} shipped scripts planned")
