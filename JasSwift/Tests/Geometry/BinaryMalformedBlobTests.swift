@@ -563,7 +563,22 @@ private func onBigStack<T>(_ body: @escaping () -> T) -> T {
     var elem = Element.rect(Rect(x: 0, y: 0, width: 1, height: 1))
     for _ in 0..<10 { elem = .group(Group(children: [elem])) }
     let doc = Document(layers: [Layer(name: "deep", children: [elem])], selectedLayer: 0)
-    let back = try binaryToDocument(documentToBinary(doc, compress: false))
+    // On the SHIPPING caller's stack (the main thread's 8 MB), not the test
+    // runner's: on 2026-11-12 this 10-deep chain overflowed a swift-testing
+    // task's stack on the authoring Mac (signal 10, 3 of 3, on main's own code)
+    // while CI passed, so the bound moved with the machine and took the whole
+    // suite down with it. A thread with an explicit stack makes the arm about
+    // the codec, which is what it was written for.
+    var result: Result<Document, Error>?
+    let done = DispatchSemaphore(value: 0)
+    let worker = Thread {
+        result = Result { try binaryToDocument(documentToBinary(doc, compress: false)) }
+        done.signal()
+    }
+    worker.stackSize = 8 << 20
+    worker.start()
+    done.wait()
+    let back = try #require(result).get()
     var depth = 0
     var cursor = back.layers[0].children[0]
     while case .group(let g) = cursor, let first = g.children.first {

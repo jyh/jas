@@ -473,7 +473,7 @@ class BinaryCommonExtensionTest(absltest.TestCase):
                          (BlendMode.NORMAL, None, None, None, None))
         # A group's base is 8: mode 8, mask 9, tool_origin 10, then the pair.
         g = _pack_element(Group(children=()))
-        self.assertEqual(len(g), 13)
+        self.assertEqual(len(g), 15)   # ... then the two gradient slots (I1b)
         g[8] = True                  # a boolean is not a mode tag (True == 1)
         g[9] = [5, True]             # a mask whose subtree slot is not an element
         g[11:13] = ["yes", 1]        # the blending pair, not booleans
@@ -498,6 +498,80 @@ class BinaryCommonExtensionTest(absltest.TestCase):
         from geometry.binary import _BLEND_MODE_TO_INT
         from geometry.element import BlendMode
         self.assertEqual(_BLEND_MODE_TO_INT, {m: i for i, m in enumerate(BlendMode)})
+
+
+class BinaryGradientSlotTest(absltest.TestCase):
+    """I1b, 2026-11-12: the fill and stroke gradients ride the last two slots
+    of every tag. Session restore is binary in both apps, so before these
+    slots a gradient was lost on every quit and relaunch."""
+
+    @staticmethod
+    def _grads():
+        from geometry.element import (Gradient, GradientMethod, GradientStop,
+                                      GradientType, StrokeSubMode)
+        lin = Gradient(type=GradientType.LINEAR, angle=30, aspect_ratio=100,
+                       method=GradientMethod.CLASSIC, dither=False,
+                       stroke_sub_mode=StrokeSubMode.WITHIN,
+                       stops=(GradientStop(color="#ff0000", opacity=100, location=20, midpoint_to_next=40),
+                              GradientStop(color="#0000ff", opacity=40, location=80, midpoint_to_next=50)))
+        rad = Gradient(type=GradientType.RADIAL, angle=45, aspect_ratio=200,
+                       method=GradientMethod.SMOOTH, dither=True,
+                       stroke_sub_mode=StrokeSubMode.ACROSS,
+                       stops=(GradientStop(color="#00ff00", opacity=100, location=0, midpoint_to_next=50),
+                              GradientStop(color="#ff00ff", opacity=0, location=100, midpoint_to_next=50)))
+        return lin, rad
+
+    def test_every_carrier_keeps_both_gradients(self):
+        import dataclasses
+        from geometry.binary import _pack_element, _unpack_element
+        lin, rad = self._grads()
+        carriers = [
+            Rect(x=0, y=0, width=1, height=2),
+            Ellipse(cx=0, cy=0, rx=1, ry=2),
+            Polyline(points=((0, 0), (1, 1))),
+            Polygon(points=((0, 0), (1, 1), (2, 0))),
+            Path(d=(MoveTo(0, 0), LineToCmd(1, 1))),
+        ]
+        for e in carriers:
+            e = dataclasses.replace(e, fill_gradient=lin, stroke_gradient=rad)
+            back = _unpack_element(_pack_element(e))
+            self.assertEqual((back.fill_gradient, back.stroke_gradient), (lin, rad),
+                             type(e).__name__)
+        line = dataclasses.replace(Line(x1=0, y1=0, x2=1, y2=1), stroke_gradient=rad)
+        self.assertEqual(_unpack_element(_pack_element(line)).stroke_gradient, rad)
+
+    def test_a_document_keeps_its_gradients_through_the_session_codec(self):
+        import dataclasses
+        lin, rad = self._grads()
+        r = dataclasses.replace(Rect(x=0, y=0, width=1, height=2),
+                                fill_gradient=lin, stroke_gradient=rad)
+        doc = Document(layers=(Layer(children=(Group(children=(r,)),)),), selected_layer=0)
+        back = binary_to_document(document_to_binary(doc, compress=True))
+        kid = back.layers[0].children[0].children[0]
+        self.assertEqual((kid.fill_gradient, kid.stroke_gradient), (lin, rad))
+
+    def test_a_blob_written_before_the_slots_reads_no_gradient(self):
+        import dataclasses
+        from geometry.binary import _pack_element, _unpack_element
+        lin, _ = self._grads()
+        arr = _pack_element(dataclasses.replace(Rect(x=0, y=0, width=1, height=2), fill_gradient=lin))
+        self.assertIsNotNone(arr[-2], "the control: the slot carries the gradient")
+        back = _unpack_element(arr[:-2])
+        self.assertEqual((back.fill_gradient, back.stroke_gradient, back.width), (None, None, 1))
+
+    def test_ill_typed_gradient_slots_read_as_none(self):
+        from geometry.binary import _pack_element, _unpack_element
+        for bad in (7, True, "not json", "[1,2]", ["x"], "{"):
+            arr = _pack_element(Rect(x=0, y=0, width=1, height=2))
+            arr[-2] = bad
+            arr[-1] = bad
+            back = _unpack_element(arr)
+            self.assertEqual((back.fill_gradient, back.stroke_gradient), (None, None), repr(bad))
+
+    def test_no_gradient_writes_nil_slots(self):
+        from geometry.binary import _pack_element
+        for e in (Rect(x=0, y=0, width=1, height=2), Group(children=()), Layer(children=())):
+            self.assertEqual(_pack_element(e)[-2:], [None, None], type(e).__name__)
 
 
 class BinaryFillRuleTest(absltest.TestCase):

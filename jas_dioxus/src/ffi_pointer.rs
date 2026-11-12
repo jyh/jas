@@ -69,7 +69,7 @@ pub(crate) const KEY_NOT_SELECTABLE: &[&str] = &[];
 /// Tools in `TOOL_IDS` that are NATIVE, not workspace YAML tools, so the
 /// workspace's tool table does not list them: built by name in `build_tool`.
 #[cfg(test)]
-const NATIVE_TOOL_IDS: &[&str] = &["type"];
+const NATIVE_TOOL_IDS: &[&str] = &["type", "type_on_path"];
 
 /// The tools the shell may select, by index. Order is ABI.
 ///
@@ -114,9 +114,11 @@ pub const TOOL_IDS: &[&str] = &[
     "star",
     // 2026-10-20 (the 10-20 feel sitting, finding 3): the Type tool, APPENDED
     // so every index above keeps its meaning. It is native, not a workspace
-    // YAML tool, so `build_tool` builds it by name. Type on a Path is not
-    // here yet: it needs a path to place on, and is its own node.
+    // YAML tool, so `build_tool` builds it by name.
     "type",
+    // 2026-11-12 (STATUS-flask 865: the popover pick was refused on Windows):
+    // Type on a Path, native like Type, APPENDED.
+    "type_on_path",
 ];
 
 /// How many tools the shell may select. Pairs with [`jas_tool_name`].
@@ -634,6 +636,9 @@ fn artboard_rect(ab: &crate::document::artboard::Artboard) -> crate::painter::Re
 fn build_tool(id: &str) -> Option<Box<dyn CanvasTool>> {
     if id == "type" {
         return Some(Box::new(crate::tools::type_tool::TypeTool::new()));
+    }
+    if id == "type_on_path" {
+        return Some(Box::new(crate::tools::type_on_path_tool::TypeOnPathTool::new()));
     }
     let ws = crate::interpreter::workspace::Workspace::load()?;
     let spec = ws.data().get("tools")?.get(id)?;
@@ -1434,11 +1439,28 @@ mod tests {
         let e = jas_engine_new();
         let engine = unsafe { &*e };
         assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
-        // Type on a Path is native and not a shell tool yet.
-        engine.set_active_tool_state("type_on_path");
+        // A name no tool answers (Type on a Path was this arm's subject until
+        // 2026-11-12, when it became a shell tool: STATUS-flask 865).
+        engine.set_active_tool_state("no_such_tool");
         assert_eq!(sync_tool_to_state(engine), ToolSync::Refused);
         assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| *i), Some(0));
         assert_eq!(engine.active_tool_state().as_deref(), Some("selection"), "written back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Type on a Path is a shell tool (2026-11-12, measured refused on Windows
+    /// in STATUS-flask 865): the toolbar popover's pick writes `type_on_path`,
+    /// and the pointer now drives it rather than writing the old tool back.
+    #[test]
+    fn type_on_a_path_is_a_shell_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let engine = unsafe { &*e };
+        assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+        engine.set_active_tool_state("type_on_path");
+        assert_eq!(sync_tool_to_state(engine), ToolSync::Switched);
+        assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| TOOL_IDS[*i]), Some("type_on_path"));
+        assert_eq!(engine.active_tool_state().as_deref(), Some("type_on_path"), "not written back");
         unsafe { jas_engine_free(e) };
     }
 
