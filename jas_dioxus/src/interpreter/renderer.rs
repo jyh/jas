@@ -7709,10 +7709,79 @@ pub(crate) fn toggle_panel_view_target(
     Some(crate::workspace::test_hook::dock_group_dom_id(addr.group.dock_id.0, addr.group.group_idx))
 }
 
+/// The SMALLEST scroll that brings the span `[top, bottom]` inside a
+/// scroller's visible span `[view_top, view_bottom]` (all in one coordinate
+/// space): 0 when it is already inside; otherwise the delta to add to the
+/// scroller's `scrollTop`. A span taller than the view aligns its TOP. This is
+/// `block: nearest`'s rule and the Windows shell's (#913,
+/// `LayoutWire.ScrollToShow`), kept here as arithmetic so it has native tests.
+// Native builds call it only from tests; its caller is the wasm scroller below.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn nearest_scroll_delta(top: f64, bottom: f64, view_top: f64, view_bottom: f64) -> f64 {
+    if top >= view_top && bottom <= view_bottom {
+        return 0.0;
+    }
+    if top < view_top || bottom - top > view_bottom - view_top {
+        return top - view_top;
+    }
+    bottom - view_bottom
+}
+
+/// Scroll `el` into view by moving ONLY its nearest ancestor a person can
+/// scroll (`overflow-y` auto or scroll, with content to scroll), by
+/// [`nearest_scroll_delta`]. `Element.scrollIntoView` also moves every other
+/// scrollable ancestor, including an `overflow: hidden` one, which a person
+/// can never scroll back: measured live (main `c22a0e65`), Window ▸ Layers
+/// moved the workspace area under the menubar by 25 px and left the top of
+/// every pane cut off.
+#[cfg(target_arch = "wasm32")]
+fn scroll_into_nearest_scroller(el: &web_sys::Element) {
+    let Some(win) = web_sys::window() else { return };
+    let mut p = el.parent_element();
+    while let Some(sc) = p {
+        let oy = win.get_computed_style(&sc).ok().flatten()
+            .and_then(|cs| cs.get_property_value("overflow-y").ok())
+            .unwrap_or_default();
+        if (oy == "auto" || oy == "scroll") && sc.scroll_height() > sc.client_height() {
+            let r = el.get_bounding_client_rect();
+            let v = sc.get_bounding_client_rect();
+            let mut view_top = v.top() + sc.client_top() as f64;
+            let mut view_bottom = view_top + sc.client_height() as f64;
+            // What a person SEES of the scroller: its client area clipped by
+            // every ancestor that clips (overflow other than visible) and by
+            // the window. A pane taller than its clipping parent otherwise
+            // counts rows below the window as "in view".
+            let mut a = sc.parent_element();
+            while let Some(anc) = a {
+                let clips = win.get_computed_style(&anc).ok().flatten()
+                    .and_then(|cs| cs.get_property_value("overflow-y").ok())
+                    .is_some_and(|o| o != "visible");
+                if clips {
+                    let ar = anc.get_bounding_client_rect();
+                    let at = ar.top() + anc.client_top() as f64;
+                    view_top = view_top.max(at);
+                    view_bottom = view_bottom.min(at + anc.client_height() as f64);
+                }
+                a = anc.parent_element();
+            }
+            if let Some(h) = win.inner_height().ok().and_then(|h| h.as_f64()) {
+                view_top = view_top.max(0.0);
+                view_bottom = view_bottom.min(h);
+            }
+            let d = nearest_scroll_delta(r.top(), r.bottom(), view_top, view_bottom);
+            if d != 0.0 {
+                sc.set_scroll_top(sc.scroll_top() + d.round() as i32);
+            }
+            return;
+        }
+        p = sc.parent_element();
+    }
+}
+
 /// Scroll the element with this DOM id into its scroll container after the
-/// next frame (the render that draws the raised group). `block: nearest` is
-/// the SMALLEST scroll, and none at all when the group is already in view: the
-/// shape the Windows shell measured (#913, `LayoutWire.ScrollToShow`).
+/// next frame (the render that draws the raised group): the SMALLEST scroll,
+/// and none at all when the group is already in view, of the dock's own
+/// scroller only ([`scroll_into_nearest_scroller`]).
 #[cfg(target_arch = "wasm32")]
 fn schedule_scroll_into_view(id: String) {
     use wasm_bindgen::prelude::*;
@@ -7720,9 +7789,7 @@ fn schedule_scroll_into_view(id: String) {
     let cb = Closure::once(Box::new(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id(&id) {
-                let opts = web_sys::ScrollIntoViewOptions::new();
-                opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-                el.scroll_into_view_with_scroll_into_view_options(&opts);
+                scroll_into_nearest_scroller(&el);
             }
         }
     }) as Box<dyn FnOnce()>);
@@ -7803,9 +7870,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             if let Some(win) = web_sys::window() {
                 if let Some(doc) = win.document() {
                     if let Some(el) = doc.get_element_by_id(&row_id) {
-                        let opts = web_sys::ScrollIntoViewOptions::new();
-                        opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-                        el.scroll_into_view_with_scroll_into_view_options(&opts);
+                        scroll_into_nearest_scroller(&el);
                     }
                 }
             }
@@ -9466,6 +9531,20 @@ mod tests {
     use super::*;
     use crate::geometry::element::{Color, Fill, Stroke};
     use crate::workspace::app_state::AppState;
+
+    /// Row 111 (web): the dock scrolls by the SMALLEST amount, and not at all
+    /// when the group is already in view. Coordinates are one space; the view
+    /// is [100, 500].
+    #[test]
+    fn nearest_scroll_delta_is_the_smallest_scroll() {
+        assert_eq!(nearest_scroll_delta(200.0, 240.0, 100.0, 500.0), 0.0, "inside: no scroll");
+        assert_eq!(nearest_scroll_delta(100.0, 500.0, 100.0, 500.0), 0.0, "exactly the view: no scroll");
+        assert_eq!(nearest_scroll_delta(560.0, 600.0, 100.0, 500.0), 100.0, "below: bring its bottom to the view's");
+        assert_eq!(nearest_scroll_delta(40.0, 80.0, 100.0, 500.0), -60.0, "above: bring its top to the view's");
+        assert_eq!(nearest_scroll_delta(480.0, 520.0, 100.0, 500.0), 20.0, "half below: the 20 px it overhangs");
+        assert_eq!(nearest_scroll_delta(600.0, 1100.0, 100.0, 500.0), 500.0, "taller than the view: align its top");
+        assert_eq!(nearest_scroll_delta(40.0, 600.0, 100.0, 500.0), -60.0, "taller and above: align its top");
+    }
 
     /// The web's value loops honour a behavior's `condition`. Driven on the
     /// SHIPPED orientation group: in a portrait dialog, committing "portrait"

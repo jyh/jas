@@ -272,6 +272,27 @@ fn apply_pending_panel_writes(
 
 /// Toolbar content rendered from YAML. Takes revision as prop so it only
 /// re-renders on state changes, not during layout drag/resize.
+
+/// The DOM id of the pane area under the menubar (row 116).
+const PANE_AREA_ID: &str = "jas-pane-area";
+
+/// The size the panes are laid out in: the pane area's client size (the
+/// window less the menubar), or the window's before the area exists (the
+/// first render). Measured 11-12 on main `c22a0e65` at 1600x900: the area was
+/// 874 px and every pane, sized to the window, was 900.
+#[cfg(target_arch = "wasm32")]
+fn pane_area_size(win: &web_sys::Window) -> (f64, f64) {
+    if let Some(el) = win.document().and_then(|d| d.get_element_by_id(PANE_AREA_ID)) {
+        let (w, h) = (el.client_width() as f64, el.client_height() as f64);
+        if w > 0.0 && h > 0.0 {
+            return (w, h);
+        }
+    }
+    let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
+    let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+    (vw, vh)
+}
+
 #[component]
 fn YamlToolbarContent(revision: u64) -> Element {
     use std::sync::OnceLock;
@@ -450,8 +471,7 @@ pub fn App() -> Element {
                 use wasm_bindgen::closure::Closure;
                 let cb = Closure::<dyn FnMut()>::new(move || {
                     if let Some(win) = web_sys::window() {
-                        let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
-                        let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+                        let (vw, vh) = pane_area_size(&win);
                         if let Ok(mut st) = app_r.try_borrow_mut() {
                             if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                                 pl.on_viewport_resize(vw, vh);
@@ -474,6 +494,40 @@ pub fn App() -> Element {
             }
             #[cfg(not(target_arch = "wasm32"))]
             { let _ = (&app_r, &mut rev_r); }
+        });
+    }
+
+    // Row 116: once the pane area exists (after the first render), lay the
+    // panes out in ITS size. The first layout falls back to the window, which
+    // is the area plus the menubar, so without this every pane's bottom edge
+    // sat below the window. Reads no signal, so it runs once; it bumps the
+    // revision only when the size differs, so it cannot loop.
+    {
+        let app_m = app.clone();
+        let mut rev_m = revision;
+        use_effect(move || {
+            #[cfg(target_arch = "wasm32")]
+            if let Some(win) = web_sys::window() {
+                let (w, h) = pane_area_size(&win);
+                let mut changed = false;
+                if let Ok(mut st) = app_m.try_borrow_mut() {
+                    if let Some(ref mut pl) = st.workspace_layout.pane_layout {
+                        if (pl.viewport_width - w).abs() > 0.5 || (pl.viewport_height - h).abs() > 0.5 {
+                            pl.on_viewport_resize(w, h);
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        st.workspace_layout.clamp_floating_docks(w, h);
+                        st.workspace_layout.bump();
+                    }
+                }
+                if changed {
+                    rev_m += 1;
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            { let _ = (&app_m, &mut rev_m); }
         });
     }
 
@@ -880,8 +934,7 @@ pub fn App() -> Element {
             #[cfg(target_arch = "wasm32")]
             {
                 if let Some(win) = web_sys::window() {
-                    let vw = win.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1000.0);
-                    let vh = win.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(700.0);
+                    let (vw, vh) = pane_area_size(&win);
                     st.workspace_layout.ensure_pane_layout(vw, vh);
                     if let Some(ref mut pl) = st.workspace_layout.pane_layout {
                         pl.repair_snaps(vw, vh);
@@ -1463,6 +1516,7 @@ pub fn App() -> Element {
 
             // ===== Pane container (fills remaining space) =====
             div {
+                id: PANE_AREA_ID,
                 style: "flex:1; position:relative; overflow:hidden;",
 
             // ===== Toolbar pane (position:absolute) =====
