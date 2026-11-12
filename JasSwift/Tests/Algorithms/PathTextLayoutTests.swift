@@ -37,6 +37,28 @@ private func fixedMeasure(_ w: Double) -> (String) -> Double {
     #expect(abs(p.1) < 1e-6)
 }
 
+/// Row 112 (flask §895): an EMPTY session draws its caret at the path point
+/// of `startOffset`, along the tangent, before the first character.
+@Test func ptlCursorPosOnAnEmptyLayoutIsTheStartPointAlongTheTangent() {
+    let m = fixedMeasure(10.0)
+    let l = layoutPathText(straight(), content: "", startOffset: 0.25, fontSize: 16.0, measure: m)
+    let p = l.cursorPos(0)
+    #expect(p != nil, "an empty session still has a caret")
+    if let (x, y, a) = p {
+        #expect(abs(x - 25.0) < 1e-6 && abs(y) < 1e-6 && abs(a) < 1e-6, "(\(x), \(y), \(a))")
+    }
+    let vertical: [PathCommand] = [.moveTo(0, 0), .lineTo(0, 100)]
+    let v = layoutPathText(vertical, content: "", startOffset: 0.5, fontSize: 16.0, measure: m)
+    let q = v.cursorPos(0)
+    #expect(q != nil, "a caret on the vertical path")
+    if let (x, y, a) = q {
+        #expect(abs(x) < 1e-6 && abs(y - 50.0) < 1e-6 && abs(a - Double.pi / 2) < 1e-6, "(\(x), \(y), \(a))")
+    }
+    // A degenerate path still has no caret.
+    let d = layoutPathText([.moveTo(5, 5)], content: "", startOffset: 0.0, fontSize: 16.0, measure: m)
+    #expect(d.cursorPos(0) == nil)
+}
+
 @Test func ptlCursorPosAtEndIsAfterLastGlyph() {
     let l = layoutPathText(straight(), content: "abc", startOffset: 0.0, fontSize: 16.0, measure: fixedMeasure(10.0))
     let p = l.cursorPos(3)!
