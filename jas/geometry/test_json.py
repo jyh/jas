@@ -195,7 +195,7 @@ def _stroke_json(stroke: Stroke | None) -> str:
     return o.build()
 
 
-def _gradient_json(g: Gradient) -> str:
+def gradient_json(g: Gradient) -> str:
     """A gradient, in the ONE form every implementation can write
     byte-identically. A stop's colour is written as this file's colour
     OBJECT, not the hex string this model stores: jas_dioxus stores a
@@ -541,10 +541,10 @@ def _extended_element_fields(o: _JsonObj, elem: Element):
         o.str("tool_origin", tool_origin)
     fill_gradient = getattr(elem, "fill_gradient", None)
     if fill_gradient is not None:
-        o.raw("fill_gradient", _gradient_json(fill_gradient))
+        o.raw("fill_gradient", gradient_json(fill_gradient))
     stroke_gradient = getattr(elem, "stroke_gradient", None)
     if stroke_gradient is not None:
-        o.raw("stroke_gradient", _gradient_json(stroke_gradient))
+        o.raw("stroke_gradient", gradient_json(stroke_gradient))
     width_points = getattr(elem, "width_points", ())
     if width_points:
         o.raw("width_points", _width_points_json(width_points))
@@ -1049,7 +1049,7 @@ def _enum_or(enum_cls, value, default):
         return default
 
 
-def _parse_gradient(v) -> Gradient | None:
+def parse_gradient(v) -> Gradient | None:
     if not isinstance(v, dict):
         return None
     return Gradient(
@@ -1269,8 +1269,8 @@ def _apply_extended_element_fields(elem: Element, d: dict) -> Element:
         "blend_mode": _enum_or(BlendMode, d.get("mode"), BlendMode.NORMAL),
         "mask": _parse_mask(d.get("mask")),
         "tool_origin": d.get("tool_origin"),
-        "fill_gradient": _parse_gradient(d.get("fill_gradient")),
-        "stroke_gradient": _parse_gradient(d.get("stroke_gradient")),
+        "fill_gradient": parse_gradient(d.get("fill_gradient")),
+        "stroke_gradient": parse_gradient(d.get("stroke_gradient")),
         "width_points": _parse_width_points(d.get("width_points")),
         "stroke_brush": d.get("stroke_brush"),
         "stroke_brush_overrides": d.get("stroke_brush_overrides"),

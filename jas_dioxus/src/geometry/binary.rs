@@ -610,7 +610,57 @@ fn pack_element(elem: &Element) -> Value {
         }
         _ => {}
     }
+    // The fill and stroke gradients, LAST on every tag (I1b, 2026-11-12).
+    slots.extend(gradient_slots(elem));
     Value::Array(slots)
+}
+
+/// The fill and stroke gradients as the canonical test-JSON gradient TEXT
+/// (`test_json::gradient_json`), the one form every implementation writes
+/// byte-identically -- the SVG codec's `jas:fill-gradient` precedent (I1b-1),
+/// which is why no stop-colour width had to be chosen. Session restore is
+/// binary in both apps, so before these slots a gradient was lost on every
+/// quit and relaunch. nil when the element has none or cannot carry one.
+/// Mirrors JasSwift's `gradientSlots` and the reference's `_gradient_slot`.
+fn gradient_slots(elem: &Element) -> [Value; 2] {
+    let slot = |g: Option<&crate::geometry::element::Gradient>| match g {
+        Some(g) => Value::from(crate::geometry::test_json::gradient_json(g)),
+        None => Value::Nil,
+    };
+    [slot(elem.fill_gradient()), slot(elem.stroke_gradient())]
+}
+
+/// Slots a tag's extension carries before the gradient pair.
+fn tag_ext_len(tag: i64) -> usize {
+    match tag {
+        TAG_PATH | TAG_GROUP | TAG_LAYER => COMMON_EXT_LEN + 2,
+        _ => COMMON_EXT_LEN,
+    }
+}
+
+/// The inverse of [`gradient_slots`], read TOLERANTLY: absent, nil, not a
+/// string, or text that is not a JSON object all read as no gradient, so a
+/// blob written before the slots loads as it was authored.
+fn unpack_gradient_slot(v: Option<&Value>) -> Option<Box<crate::geometry::element::Gradient>> {
+    let raw = tolerant_opt_str(v)?;
+    let json = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    crate::geometry::test_json::parse_gradient(&json)
+}
+
+/// Applies the gradient slots to an unpacked element. Called once, on the
+/// value `unpack_element`'s match produced, inside the same frame: that
+/// function recurses once per nested element, so a wrapper frame per level
+/// would deepen every nested read (JasSwift measured exactly that).
+fn with_gradient_slots(elem: Element, arr: &[Value], tag: i64) -> Element {
+    let gi = tag_base_arity(tag) + tag_ext_len(tag);
+    let mut out = elem;
+    if let Some(g) = unpack_gradient_slot(arr.get(gi)) {
+        out = crate::geometry::element::with_fill_gradient(&out, Some(g));
+    }
+    if let Some(g) = unpack_gradient_slot(arr.get(gi + 1)) {
+        out = crate::geometry::element::with_stroke_gradient(&out, Some(g));
+    }
+    out
 }
 
 /// A trailing boolean slot: absent, nil or anything that is not a boolean
@@ -1055,7 +1105,7 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
     let tag = as_i64(at(arr, 0)?)?;
     let common = unpack_common(arr, tag)?;
 
-    Ok(match tag {
+    let elem = match tag {
         TAG_LAYER => {
             let children: Vec<Rc<Element>> = as_array(at(arr, 7)?)?.iter()
                 .map(|c| Ok(Rc::new(unpack_element(c)?))).collect::<Result<Vec<_>, String>>()?;
@@ -1284,7 +1334,8 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
             }
         }
         _ => return Err(format!("unknown element tag: {}", tag)),
-    })
+    };
+    Ok(with_gradient_slots(elem, arr, tag))
 }
 
 fn unpack_selection(v: &Value) -> Result<Selection, String> {
@@ -1605,9 +1656,9 @@ mod tests {
             let Value::Array(children) = &layer[7] else { panic!("children not an array") };
             let Value::Array(path) = &children[0] else { panic!("path not an array") };
             assert_eq!(path[0].as_i64(), Some(TAG_PATH));
-            assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2,
+            assert_eq!(path.len(), tag_base_arity(TAG_PATH) + tag_ext_len(TAG_PATH) + 2,
                        "TAG_PATH should carry its base arity (fill_rule last, slot 11) \
-                        plus the trailing common extension and the two brush slots");
+                        plus the trailing common extension, the two brush slots and the two gradient slots");
             assert_eq!(path[11].as_i64(), Some(want),
                        "fill_rule tag for {rule:?} should be {want}");
         }
@@ -1630,7 +1681,7 @@ mod tests {
         let Value::Array(mut layer) = layers[0].clone() else { panic!() };
         let Value::Array(mut children) = layer[7].clone() else { panic!() };
         let Value::Array(mut path) = children[0].clone() else { panic!() };
-        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2);
+        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + tag_ext_len(TAG_PATH) + 2);
         path.truncate(11);
         children[0] = Value::Array(path);
         layer[7] = Value::Array(children);
@@ -1661,8 +1712,8 @@ mod tests {
     /// To regenerate after an intentional codec change: print
     /// `document_to_binary(&donut_doc(rule), false)` as hex and update
     /// BOTH ports.
-    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919d00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00000c0c0c0c000c0c0c2c2009090";
-    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919d00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00100c0c0c0c000c0c0c2c2009090";
+    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919f00c2cb3ff000000000000002c0c0c091dc001307c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00000c0c0c0c0c0c000c0c0c2c2c0c0009090";
+    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919f00c2cb3ff000000000000002c0c0c091dc001307c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00100c0c0c0c0c0c000c0c0c2c2c0c0009090";
     /// The SAME document as written BEFORE the per-tag common extension
     /// (RULED 2026-07-27) joined the codec: TAG_LAYER carries 8 slots (0x98)
     /// and TAG_PATH 12 (0x9c), with no mode / mask / tool_origin /
@@ -2018,6 +2069,94 @@ mod tests {
         ]
     }
 
+    /// I1b, 2026-11-12: the fill and stroke gradients ride the last two slots
+    /// of every tag. Session restore is binary in both apps, so before these
+    /// slots a gradient was lost on every quit and relaunch. Twin of the
+    /// reference's `BinaryGradientSlotTest` and JasSwift's arms.
+    fn i1b_gradients() -> (Box<Gradient>, Box<Gradient>) {
+        let stop = |c: Color, o: f64, l: f64, m: f64| GradientStop { color: c, opacity: o, location: l, midpoint_to_next: m };
+        let lin = Gradient {
+            angle: 30.0,
+            stops: vec![stop(Color::rgb(1.0, 0.0, 0.0), 100.0, 20.0, 40.0), stop(Color::rgb(0.0, 0.0, 1.0), 40.0, 80.0, 50.0)],
+            ..Gradient::default()
+        };
+        let rad = Gradient {
+            gtype: GradientType::Radial, angle: 45.0, aspect_ratio: 200.0,
+            method: GradientMethod::Smooth, dither: true, stroke_sub_mode: StrokeSubMode::Across,
+            stops: vec![stop(Color::rgb(0.0, 1.0, 0.0), 100.0, 0.0, 50.0), stop(Color::rgb(1.0, 0.0, 1.0), 0.0, 100.0, 50.0)],
+            ..Gradient::default()
+        };
+        (Box::new(lin), Box::new(rad))
+    }
+
+    fn i1b_carriers() -> Vec<Element> {
+        let doc = crate::geometry::svg::svg_to_document(r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g>
+            <rect x="0" y="0" width="1" height="2"/><ellipse cx="0" cy="0" rx="1" ry="2"/>
+            <polyline points="0,0 1,1"/><polygon points="0,0 1,1 2,0"/><path d="M0 0 L1 1"/>
+            <line x1="0" y1="0" x2="1" y2="1"/></g></svg>"#);
+        let mut out = Vec::new();
+        for layer in &doc.layers {
+            if let Some(kids) = layer.children() { for k in kids { out.push((**k).clone()); } }
+        }
+        assert_eq!(out.len(), 6, "the control: six carriers parsed, got {out:?}");
+        out
+    }
+
+    #[test]
+    fn every_carrier_keeps_both_gradients_through_binary() {
+        let (lin, rad) = i1b_gradients();
+        for e in i1b_carriers() {
+            let e = with_fill_gradient(&with_stroke_gradient(&e, Some(rad.clone())), Some(lin.clone()));
+            let back = unpack_element(&pack_element(&e)).expect("decode");
+            assert_eq!(back.stroke_gradient(), Some(&*rad), "{e:?}");
+            assert_eq!(back.fill_gradient(), e.fill_gradient(), "{e:?}");
+            assert_eq!(back, e);
+        }
+    }
+
+    #[test]
+    fn a_document_keeps_its_gradients_through_the_session_codec() {
+        let (lin, rad) = i1b_gradients();
+        let e = with_fill_gradient(&with_stroke_gradient(&i1b_carriers()[0], Some(rad.clone())), Some(lin.clone()));
+        let doc = doc_with(e.clone());
+        let back = binary_to_document(&document_to_binary(&doc, true)).expect("decode");
+        assert_eq!(first_child(&back).fill_gradient(), Some(&*lin));
+        assert_eq!(first_child(&back).stroke_gradient(), Some(&*rad));
+    }
+
+    #[test]
+    fn a_blob_written_before_the_gradient_slots_reads_no_gradient() {
+        let (lin, _) = i1b_gradients();
+        let e = with_fill_gradient(&i1b_carriers()[0], Some(lin));
+        let Value::Array(mut arr) = pack_element(&e) else { panic!("an array") };
+        assert!(arr[arr.len() - 2].is_str(), "the control: the slot carries the gradient");
+        arr.truncate(arr.len() - 2);
+        let back = unpack_element(&Value::Array(arr)).expect("an old blob still loads");
+        assert_eq!((back.fill_gradient(), back.stroke_gradient()), (None, None));
+    }
+
+    #[test]
+    fn ill_typed_gradient_slots_read_as_none() {
+        let bad = [Value::from(7), Value::Boolean(true), Value::from("not json"), Value::from("[1,2]"),
+                   Value::Array(vec![Value::from("x")]), Value::from("{")];
+        for b in bad {
+            let Value::Array(mut arr) = pack_element(&i1b_carriers()[0]) else { panic!("an array") };
+            let n = arr.len();
+            arr[n - 2] = b.clone();
+            arr[n - 1] = b.clone();
+            let back = unpack_element(&Value::Array(arr)).expect("tolerant");
+            assert_eq!((back.fill_gradient(), back.stroke_gradient()), (None, None), "{b:?}");
+        }
+    }
+
+    #[test]
+    fn no_gradient_writes_nil_slots() {
+        for e in i1b_carriers() {
+            let Value::Array(arr) = pack_element(&e) else { panic!("an array") };
+            assert_eq!(&arr[arr.len() - 2..], &[Value::Nil, Value::Nil], "{e:?}");
+        }
+    }
+
     /// The live transform operation (council 2026-10-16, ruling 4) round-trips
     /// WHOLE: the child (with its own paint and transform), the matrix, and
     /// the Scale Strokes choice in both values, nested one wrapper in another.
@@ -2059,7 +2198,7 @@ mod tests {
         let Value::Array(mut layer) = layers[0].clone() else { panic!() };
         let Value::Array(mut children) = layer[7].clone() else { panic!() };
         let Value::Array(mut path) = children[0].clone() else { panic!() };
-        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2,
+        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + tag_ext_len(TAG_PATH) + 2,
                    "TAG_PATH should carry its base arity plus the extension");
         // Truncate BOTH the path and its enclosing layer back to their
         // pre-extension arities.

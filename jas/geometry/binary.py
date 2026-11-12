@@ -28,8 +28,10 @@ from geometry.element import (
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
     GeneratedElem, BlendMode, FillRule, Mask,
+    with_fill_gradient, with_stroke_gradient,
 )
 from geometry.normalize import dedupe_element_ids
+from geometry.test_json import gradient_json, parse_gradient
 
 # -- Constants ---------------------------------------------------------------
 
@@ -124,6 +126,22 @@ _EXT_MODE, _EXT_MASK, _EXT_TOOL_ORIGIN = 0, 1, 2
 _COMMON_EXT_LEN = 3
 _EXT_STROKE_BRUSH = _EXT_ISOLATED_BLENDING = _COMMON_EXT_LEN
 _EXT_STROKE_BRUSH_OVERRIDES = _EXT_KNOCKOUT_GROUP = _COMMON_EXT_LEN + 1
+# The fill and stroke gradients ride LAST on every tag, after the tag's own
+# pair (I1b, 2026-11-12): session restore is binary in both apps, so before
+# this slot a gradient was lost on every quit and relaunch. Each slot holds
+# the canonical test-JSON gradient TEXT (test_json.gradient_json), the one
+# form every implementation writes byte-identically -- the SVG codec's
+# `jas:fill-gradient` precedent (I1b-1), which is why no stop-colour width
+# had to be chosen. nil when the element has none or cannot carry one; an
+# unparsable slot reads as no gradient. Mirrors Rust's `gradient_slots` and
+# JasSwift's `gradientSlots`.
+
+
+def _tag_ext_len(tag) -> int:
+    """Slots a tag's extension carries before the gradient pair."""
+    if tag in (_TAG_PATH, _TAG_GROUP, _TAG_LAYER):
+        return _COMMON_EXT_LEN + 2
+    return _COMMON_EXT_LEN
 
 # Blend-mode wire tags, written out by name rather than taken from the enum's
 # order, so reordering the enum cannot silently renumber saved files. An
@@ -395,7 +413,23 @@ def _pack_element(elem: Element) -> list:
         slots += [elem.stroke_brush, elem.stroke_brush_overrides]
     elif isinstance(elem, Group):   # Layer is a Group
         slots += [elem.isolated_blending, elem.knockout_group]
+    slots += [_gradient_slot(getattr(elem, "fill_gradient", None)),
+              _gradient_slot(getattr(elem, "stroke_gradient", None))]
     return slots
+
+
+def _gradient_slot(g) -> str | None:
+    return gradient_json(g) if g is not None else None
+
+
+def _unpack_gradient_slot(v):
+    """Tolerant: anything but a JSON object's text reads as no gradient."""
+    if not isinstance(v, str):
+        return None
+    try:
+        return parse_gradient(json.loads(v))
+    except ValueError:
+        return None
 
 
 def element_tag_label(elem: Element) -> str:
@@ -680,6 +714,19 @@ def _unpack_mode(v) -> BlendMode:
 
 
 def _unpack_element(arr: list) -> Element:
+    elem = _unpack_element_body(arr)
+    tag = arr[0]
+    at = _TAG_BASE_ARITY.get(tag, len(arr)) + _tag_ext_len(tag)
+    fill_g = _unpack_gradient_slot(_slot(arr, at))
+    stroke_g = _unpack_gradient_slot(_slot(arr, at + 1))
+    if fill_g is not None:
+        elem = with_fill_gradient(elem, fill_g)
+    if stroke_g is not None:
+        elem = with_stroke_gradient(elem, stroke_g)
+    return elem
+
+
+def _unpack_element_body(arr: list) -> Element:
     tag = arr[0]
     common = _unpack_common(arr)
     # The trailing extension at the tag's base arity, read tolerantly.
