@@ -176,6 +176,18 @@ class WorkspaceData {
         return nil
     }
 
+    /// The canvas tab's label TEMPLATE: the `content` of the text under
+    /// `canvas_tab_bar`'s `do:` (layout.yaml). The spec owns the rule for what
+    /// a tab says (its name, and its modified mark), so the native tab bar
+    /// evaluates this rather than restating it. Nil if the layout lacks it.
+    func canvasTabLabelTemplate() -> String? {
+        guard let layout = data["layout"] as? [String: Any],
+              let bar = findLayoutNode("canvas_tab_bar", in: layout),
+              let tab = bar["do"] as? [String: Any],
+              let kids = tab["children"] as? [[String: Any]] else { return nil }
+        return kids.first { $0["type"] as? String == "text" }?["content"] as? String
+    }
+
     /// The toolbar's ``tool_grid`` element from the compiled layout
     /// (``layout`` → ``toolbar_pane`` → ``content`` → ``tool_grid``).
     /// Nil if the layout or grid is absent. Step A renders only the
@@ -386,4 +398,13 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     case .gradient: return "gradient_panel_content"
     case .concepts: return "concepts_panel_content"
     }
+}
+
+/// What a canvas tab says for a document (row 115): the
+/// spec's `canvas_tab_bar` label evaluated with `doc = {name, is_modified}`,
+/// the same entry `workspace.open_documents` carries. Falls back to the bare
+/// name only if the compiled layout has no template.
+public func canvasTabLabel(name: String, isModified: Bool) -> String {
+    guard let template = WorkspaceData.load()?.canvasTabLabelTemplate() else { return name }
+    return evaluateText(template, context: ["doc": ["name": name, "is_modified": isModified] as [String: Any]])
 }
