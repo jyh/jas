@@ -2138,7 +2138,20 @@ internal static class LayoutWire
     /// or null. A CLOSE (any panel present before is gone after) names none, so
     /// the group a close leaves behind is never scrolled to.
     /// </summary>
-    internal static int? ShownGroup(Anchored? before, Anchored after) => null;
+    internal static int? ShownGroup(Anchored? before, Anchored after)
+    {
+        if (before is null) { return null; }
+        var was = before.Groups.SelectMany(g => g.Panels).ToHashSet(StringComparer.Ordinal);
+        var now = after.Groups.SelectMany(g => g.Panels).ToHashSet(StringComparer.Ordinal);
+        if (!was.IsSubsetOf(now)) { return null; }
+        var wasActive = before.Groups.Select(g => g.Panels[g.Active]).ToHashSet(StringComparer.Ordinal);
+        for (var i = 0; i < after.Groups.Count; i++)
+        {
+            var g = after.Groups[i];
+            if (!wasActive.Contains(g.Panels[g.Active])) { return i; }
+        }
+        return null;
+    }
 
     /// <summary>
     /// jas row 111: the vertical offset that brings a group (its top and height
@@ -2148,7 +2161,13 @@ internal static class LayoutWire
     /// viewport's bottom, one above aligns its top, and one taller than the
     /// viewport aligns its top.
     /// </summary>
-    internal static double? ScrollToShow(double top, double height, double offset, double viewport) => null;
+    internal static double? ScrollToShow(double top, double height, double offset, double viewport)
+    {
+        var bottom = top + height;
+        if (top >= offset && bottom <= offset + viewport) { return null; }
+        if (height > viewport || top < offset) { return top; }
+        return bottom - viewport;
+    }
     internal sealed record Floated(int DockId, double X, double Y, double Width, int Z, IReadOnlyList<Group> Groups);
 
     /// <summary>A dock's groups, or null for any group the engine would never send.</summary>
