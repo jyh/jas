@@ -21,6 +21,9 @@ public struct PathTextLayout {
     public let totalLength: Double
     public let fontSize: Double
     public let charCount: Int
+    /// Row 112: the (x, y, tangent angle) at `startOffset`, so an EMPTY layout
+    /// still has a caret position (`cursorPos(0)`); nil on a degenerate path.
+    public let start: (Double, Double, Double)?
 }
 
 private func arcLengths(_ pts: [(Double, Double)]) -> [Double] {
@@ -72,9 +75,11 @@ public func layoutPathText(_ d: [PathCommand],
     let chars = Array(content)
     let n = chars.count
     if total <= 0 || pts.isEmpty {
-        return PathTextLayout(glyphs: [], totalLength: total, fontSize: fontSize, charCount: n)
+        return PathTextLayout(glyphs: [], totalLength: total, fontSize: fontSize, charCount: n,
+                              start: nil)
     }
     let startArc = max(0.0, min(1.0, startOffset)) * total
+    let start = sampleAtArc(pts, lens, startArc)
     var curArc = startArc
     var glyphs: [PathGlyph] = []
     for i in 0..<n {
@@ -86,14 +91,16 @@ public func layoutPathText(_ d: [PathCommand],
                                 cx: cx, cy: cy, angle: angle, overflow: overflow))
         curArc += cw
     }
-    return PathTextLayout(glyphs: glyphs, totalLength: total, fontSize: fontSize, charCount: n)
+    return PathTextLayout(glyphs: glyphs, totalLength: total, fontSize: fontSize, charCount: n,
+                          start: start)
 }
 
 public extension PathTextLayout {
-    /// Caret position (x, y, tangent angle) for `cursor`. nil if empty.
+    /// Caret position (x, y, tangent angle) for `cursor`. With no glyphs it is
+    /// the start point along the tangent (row 112); nil only on a degenerate path.
     func cursorPos(_ cursor: Int) -> (Double, Double, Double)? {
         let n = glyphs.count
-        if n == 0 { return nil }
+        if n == 0 { return start }
         if cursor == 0 {
             let g = glyphs[0]
             let dx = -cos(g.angle) * g.width / 2

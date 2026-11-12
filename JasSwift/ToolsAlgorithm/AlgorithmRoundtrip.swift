@@ -873,10 +873,16 @@ func runPathTextLayout(_ vectors: [[String: Any]]) -> [[String: Any]] {
             ["idx": g.idx, "cx": g.cx, "cy": g.cy, "angle": g.angle,
              "overflow": g.overflow] as [String: Any]
         }
+        // Row 112: the caret at index 0, which an EMPTY session draws at
+        // start_offset along the tangent; null only on a degenerate path.
+        let caret: Any = layout.cursorPos(0).map { (x, y, angle) in
+            ["x": x, "y": y, "angle": angle] as [String: Any]
+        } ?? NSNull()
         return ["name": name, "result": [
             "total_length": layout.totalLength,
             "char_count": layout.charCount,
-            "glyphs": glyphs
+            "glyphs": glyphs,
+            "caret": caret
         ] as [String: Any]] as [String: Any]
     }
 }
