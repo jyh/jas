@@ -935,7 +935,10 @@ pub fn App() -> Element {
     // --- Tab bar ---
     let borrowed = app.borrow();
     let tab_info: Vec<(usize, String, bool)> = borrowed.tabs.iter().enumerate().map(|(i, tab)| {
-        (i, tab.model.filename.clone(), i == borrowed.active_tab)
+        // Row 115: the label is the spec's (layout.yaml `canvas_tab_bar`),
+        // which marks a modified document "name *".
+        let label = crate::interpreter::workspace::canvas_tab_label(&tab.model.filename, tab.model.is_modified());
+        (i, label, i == borrowed.active_tab)
     }).collect();
     let has_tabs = !borrowed.tabs.is_empty();
     drop(borrowed);
