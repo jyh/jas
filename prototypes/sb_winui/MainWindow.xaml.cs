@@ -2303,7 +2303,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            // ⭐ AN EMPTY SB_SCENE RESOLVES TO `benchmark` (FREEZE §1.2 / A8).
+            // ⭐ AN EMPTY SB_SCENE RESOLVES TO `benchmark` IN A BUILD TREE (FREEZE
+            // §1.2 / A8), and to `app` in an installed layout (`EffectiveScene`).
             // `RenderFrame` was what ran when the knob was unset, and the
             // committed 4K sweep never set it -- so every historical invocation
             // keeps its meaning, and the sweep now names the scene explicitly so

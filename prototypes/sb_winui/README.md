@@ -109,8 +109,9 @@ renumbered.
 
 ## The scenes
 
-One knob selects the workload. An empty value resolves to `benchmark`, so every
-invocation written before the scenes existed keeps its meaning; an unrecognised
+One knob selects the workload. An empty value resolves to `benchmark` in a build
+tree, so every invocation written before the scenes existed keeps its meaning (and
+to `app` in an INSTALLED layout, `MainWindow.EffectiveScene`); an unrecognised
 value is refused by name on the render thread (`Canvas.cs:1711-1758`).
 
 | scene | what it runs | needs |
