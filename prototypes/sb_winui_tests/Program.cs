@@ -1376,6 +1376,27 @@ static class Program
         // (`keyboard.rs`: Tab on a widget is the platform's focus traversal).
         Eq("tab: sent and kept from the canvas, left to the platform elsewhere", "True|False",
             KeyWire.TakesTab(fromCanvas: true) + "|" + KeyWire.TakesTab(fromCanvas: false));
+        // jas row 111 (spec #912): Window ▸ <panel> brings the panel's group into
+        // the dock's view. Which group an act SHOWED, and how far to scroll.
+        {
+            static LayoutWire.Anchored D(params (string[] Panels, int Active)[] gs) =>
+                new(0, gs.Select(g => new LayoutWire.Group(g.Panels, g.Active, false)).ToList());
+            var before = D((["color", "swatches"], 0), (["align"], 0), (["artboards", "layers"], 0));
+            Eq("show: a raised background tab names its group", "2",
+                LayoutWire.ShownGroup(before, D((["color", "swatches"], 0), (["align"], 0), (["artboards", "layers"], 1)))?.ToString() ?? "none");
+            Eq("show: an appended panel names its group", "1",
+                LayoutWire.ShownGroup(before, D((["color", "swatches"], 0), (["align", "magic_wand"], 1), (["artboards", "layers"], 0)))?.ToString() ?? "none");
+            Eq("show: a close names none (the group it leaves is not scrolled to)", "none",
+                LayoutWire.ShownGroup(before, D((["swatches"], 0), (["align"], 0), (["artboards", "layers"], 0)))?.ToString() ?? "none");
+            Eq("show: an unchanged layout names none", "none", LayoutWire.ShownGroup(before, before)?.ToString() ?? "none");
+            Eq("show: with no layout before, none", "none", LayoutWire.ShownGroup(null, before)?.ToString() ?? "none");
+            static string S(double? v) => v is { } d ? d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : "none";
+            Eq("scroll: a group inside the viewport stays put", "none", S(LayoutWire.ScrollToShow(100, 200, 0, 600)));
+            Eq("scroll: a group below the fold aligns its bottom", "300", S(LayoutWire.ScrollToShow(700, 200, 0, 600)));
+            Eq("scroll: a group above the view aligns its top", "50", S(LayoutWire.ScrollToShow(50, 100, 400, 600)));
+            Eq("scroll: a group taller than the viewport aligns its top", "700", S(LayoutWire.ScrollToShow(700, 900, 0, 600)));
+            Eq("scroll: a group partly below aligns its bottom", "50", S(LayoutWire.ScrollToShow(500, 150, 0, 600)));
+        }
         // FP-3: the dock is drawn from the ENGINE's layout (`jas_layout_state`),
         // its first anchored dock read strictly: a group is its panels (content
         // ids), its active index and its collapsed flag, all the engine's.
