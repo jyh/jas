@@ -1492,6 +1492,57 @@ static class Program
             string.Join("|", LayoutWire.EdgePaneWidths(q2Docks, q2Rects, 4, 1).Select(kv => $"{kv.Key}={kv.Value}")));
         Eq("edge pane widths: a collapsed (36) left column still plans; an edge with no rect plans nothing", "edgeL1g0=27|edgeL1g1=27",
             string.Join("|", LayoutWire.EdgePaneWidths(q2Docks, LayoutWire.EdgeRects("""{"edge_rects":{"left":{"x":0,"y":0,"w":36,"h":900},"bottom":null,"canvas":{"x":36,"y":0,"w":964,"h":900}}}""")!, 4, 1).Select(kv => $"{kv.Key}={kv.Value}")));
+        // (A) W1a (flask 853): the agent session's wire on the C# side. The
+        // bar reads `jas_mcp_pending`, `{"id","name"}` or `null`; anything else
+        // is refused by name, never drawn as "no proposal".
+        string ShowPending(McpWire.PendingRead r) => r.Why is not null ? "REFUSED " + r.Why : r.Id is null ? "none" : $"{r.Id}:{r.Name}";
+        Eq("mcp pending: a proposal reads its id and name; null reads none",
+            "p-0:nudge|none",
+            ShowPending(McpWire.Pending("""{"id":"p-0","name":"nudge"}""")) + "|" + ShowPending(McpWire.Pending("null")));
+        Eq("mcp pending: the empty span, a missing or non-string id or name, or bad JSON is refused by name",
+            "REFUSED empty|REFUSED no id|REFUSED no name|REFUSED no id|REFUSED not JSON",
+            string.Join("|", new[] { "", """{"name":"x"}""", """{"id":"p-1"}""", """{"id":3,"name":"x"}""", "{oops" }
+                .Select(j => ShowPending(McpWire.Pending(j)))));
+        // Client bytes arrive in arbitrary pieces; each whole LF-terminated line
+        // goes to the engine AS BYTES (the engine answers bad UTF-8 itself),
+        // once; a trailing CR is not part of it, an empty line is no line, and
+        // a line past the cap is refused (null), not cut.
+        string ShowLine(byte[]? l) => l is null ? "OVERFLOW" : System.Text.Encoding.UTF8.GetString(l);
+        var split = new McpWire.LineSplitter(16);
+        var got = new List<string>();
+        foreach (var piece in new[] { "ab", "c\nde\r\n", "\n", "f" }) { got.AddRange(split.Feed(System.Text.Encoding.UTF8.GetBytes(piece)).Select(ShowLine)); }
+        Eq("mcp lines: pieces join into whole lines, CRLF and empty lines handled, a partial line held",
+            "abc|de|held=1", string.Join("|", got) + $"|held={split.Held}");
+        var capped = new McpWire.LineSplitter(4);
+        var over = capped.Feed(System.Text.Encoding.UTF8.GetBytes("abcdefg\nok\n"));
+        Eq("mcp lines: a line past the cap is refused by name and the next line still reads",
+            "OVERFLOW|ok|overflows=1", string.Join("|", over.Select(ShowLine)) + $"|overflows={capped.Overflows}");
+        var rawLine = new McpWire.LineSplitter(16).Feed(new byte[] { 0x7B, 0xFF, 0x7D, 0x0A });
+        Eq("mcp lines: a line's bytes pass through untouched, bad UTF-8 included (the engine answers it)",
+            "7B-FF-7D", rawLine.Count == 1 && rawLine[0] is { } r0 ? BitConverter.ToString(r0) : "(lost)");
+        // The bar's rows, written only when what it shows changes.
+        Eq("mcp bar rows: shown, unchanged (no row), replaced, gone",
+            "PROPOSAL SHOWN id=p-0 name=nudge|(none)|PROPOSAL GONE id=p-0; PROPOSAL SHOWN id=p-1 name=lift|PROPOSAL GONE id=p-1",
+            string.Join("|", new[]
+            {
+                McpWire.BarRow(null, ("p-0", "nudge")) ?? "(none)",
+                McpWire.BarRow(("p-0", "nudge"), ("p-0", "nudge")) ?? "(none)",
+                McpWire.BarRow(("p-0", "nudge"), ("p-1", "lift")) ?? "(none)",
+                McpWire.BarRow(("p-1", "lift"), null) ?? "(none)",
+            }));
+        Eq("mcp pipe: the pipe is named for the shell's own process", "jas-mcp-4242", McpWire.PipeName(4242));
+        // jas 861: a load, an open, or a run panel-menu item can edit the
+        // document (and so withdraw a pending proposal), so the drain that
+        // holds one observes for the client -- as every drain does, failing safe.
+        Eq("mcp observe: every drain observes while attached, a load, an open and a panel menu run included",
+            "True|True|True|True|True",
+            string.Join("|", new[] { "LoadCmd", "OpenCmd", "PanelMenuCmd", "ResizeCmd", "KeyCmd" }.Select(k => McpWire.ObserveAfter(k).ToString())));
+        // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
+        Eq("mcp bar: the label names the proposal; none pending shows no bar",
+            "Proposed: nudge|(no bar)",
+            (McpWire.BarText(McpWire.Pending("""{"id":"p-0","name":"nudge"}""")) ?? "(no bar)") + "|" + (McpWire.BarText(McpWire.Pending("null")) ?? "(no bar)"));
+        Eq("mcp bar: a refused read shows no bar (its refusal is the shell's row, not a label)",
+            "(no bar)", McpWire.BarText(McpWire.Pending("")) ?? "(no bar)");
         // R1-4b S5 (flask 829): an edge group's gestures are addressed by ITS dock
         // id, never the Right dock's. A key names the (dock id, group index) every
         // layout verb takes; a floating key is not addressed here (FP-4a).

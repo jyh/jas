@@ -268,6 +268,26 @@ public sealed partial class MainWindow : Window
     /// <summary>R1-4b S2: the engine's rects for the edge docks, as last answered.</summary>
     private LayoutWire.EdgeRectSet? _edgeRects;
 
+    /// <summary>(A) W1b: the agent pipe, when SB_MCP_PIPE=1.</summary>
+    private McpPipe? _mcpPipe;
+
+    /// <summary>
+    /// (A) W1c: what the engine says is pending, drawn as the accept bar. A
+    /// refused read hides the bar (its refusal is the canvas's row).
+    /// </summary>
+    private void OnMcpPendingChanged(McpWire.PendingRead read)
+    {
+        var text = McpWire.BarText(read);
+        ProposalText.Text = text ?? "";
+        ProposalBar.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>(A) W1c: the artist accepts the pending proposal; it lands as ONE undoable `ai` step.</summary>
+    private void OnProposalAccept(object sender, RoutedEventArgs e) => _canvas.McpDecide(true, "hand");
+
+    /// <summary>(A) W1c: the artist rejects it; the document returns to before the preview.</summary>
+    private void OnProposalReject(object sender, RoutedEventArgs e) => _canvas.McpDecide(false, "hand");
+
     /// <summary>R1-4b S3 (jas 836 Low 2): the newest ask's number; an answer to an older one is stale.</summary>
     private int _edgeAskSeq;
 
@@ -1274,6 +1294,17 @@ public sealed partial class MainWindow : Window
         _canvas.DockChanged = OnDockChanged;
         _canvas.LayoutChanged = OnLayoutChanged;
         _canvas.EdgeRectsChanged = OnEdgeRectsChanged;
+        // SB_MCP_PIPE=1 ((A) W1b): serve the agent pipe, one client at a time.
+        // Its lines go to the render queue; the engine's answers come back
+        // through the canvas to the pipe's outbox.
+        if (Environment.GetEnvironmentVariable("SB_MCP_PIPE") == "1")
+        {
+            var pipe = new McpPipe(McpWire.PipeName(Environment.ProcessId), a => _canvas.McpAttach(a), l => _canvas.McpLine(l), Report);
+            _canvas.McpOut = pipe.Write;
+            _canvas.McpPendingChanged = OnMcpPendingChanged;
+            _mcpPipe = pipe;
+            pipe.Start();
+        }
         // R1-4b S2: a resized cell re-asks the rects, while an edge dock exists.
         // The window's own size law decides the size first (O2b), as the
         // floating clamp's does: a zero is refused, never asked about.
