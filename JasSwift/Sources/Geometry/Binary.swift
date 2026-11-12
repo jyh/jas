@@ -1014,7 +1014,34 @@ private func packElement(_ elem: Element) -> MsgValue {
     default:
         break
     }
+    // The fill and stroke gradients, LAST on every tag (I1b, 2026-11-12).
+    slots += gradientSlots(elem)
     return .array(slots)
+}
+
+/// The fill and stroke gradients as the canonical test-JSON gradient TEXT
+/// (`gradientJson`), the one form every implementation writes
+/// byte-identically -- the SVG codec's `jas:fill-gradient` precedent (I1b-1),
+/// which is why no stop-colour width had to be chosen. Session restore is
+/// binary in both apps, so before these slots a gradient was lost on every
+/// quit and relaunch. nil when the element has none or cannot carry one.
+/// Mirrors Rust's `gradient_slots` and the reference's `_gradient_slot`.
+private func gradientSlots(_ elem: Element) -> [MsgValue] {
+    [optStr(elem.fillGradient.map(gradientJson)), optStr(elem.strokeGradient.map(gradientJson))]
+}
+
+/// Slots a tag's extension carries before the gradient pair.
+private func tagExtLen(_ tag: Int) -> Int {
+    (tag == tagPath || tag == tagGroup || tag == tagLayer) ? commonExtLen + 2 : commonExtLen
+}
+
+/// The inverse of ``gradientSlots(_:)``, read TOLERANTLY: absent, nil, not a
+/// string, or text that is not a JSON object all read as no gradient, so a
+/// blob written before the slots loads as it was authored.
+private func unpackGradientSlot(_ v: MsgValue?) -> Gradient? {
+    guard let raw = tolerantOptStr(v), let data = raw.data(using: .utf8),
+          let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+    return parseGradient(obj)
 }
 
 /// The tag's slots up to `tagBaseArity(tag)` -- everything the format carried
@@ -1356,6 +1383,24 @@ private func unpackTransformed(_ arr: [MsgValue], name: String?, id: String?, tr
         locked: locked, visibility: visibility, blendMode: blendMode, mask: mask)))
 }
 
+/// The fill and stroke gradient slots (I1b), applied to an unpacked LEAF.
+/// Called from the leaf arms of `unpackElement` and never wrapped around it:
+/// that function recurses once per nested element and its debug frame is
+/// ~34 KB, so a wrapper frame per level overflowed the 10-deep chain in
+/// `aNestedRealDocumentStillRoundTrips` (measured). Containers carry no
+/// gradient, so only the arms that cannot recurse pay for the read.
+private func withGradientSlots(_ elem: Element, _ arr: [MsgValue], _ tag: Int) -> Element {
+    let gi = tagBaseArity(tag) + tagExtLen(tag)
+    var out = elem
+    if let g = unpackGradientSlot(gi < arr.count ? arr[gi] : nil) {
+        out = withFillGradient(out, fillGradient: g)
+    }
+    if let g = unpackGradientSlot(gi + 1 < arr.count ? arr[gi + 1] : nil) {
+        out = withStrokeGradient(out, strokeGradient: g)
+    }
+    return out
+}
+
 private func unpackElement(_ v: MsgValue) throws -> Element {
     let arr = try asArray(v)
     let tag = try asInt(at(arr, 0))
@@ -1392,20 +1437,20 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
                             mask: mask, name: name, id: id))
     case tagLine:
         let wp = arr.count > 12 ? try unpackWidthPoints(arr[12]) : []
-        return .line(Line(x1: try asF64(at(arr, 7)), y1: try asF64(at(arr, 8)),
+        return try withGradientSlots(.line(Line(x1: try asF64(at(arr, 7)), y1: try asF64(at(arr, 8)),
                           x2: try asF64(at(arr, 9)), y2: try asF64(at(arr, 10)),
                           stroke: try unpackStroke(at(arr, 11)), widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
-                          name: name, id: id))
+                          name: name, id: id)), arr, tag)
     case tagRect:
-        return .rect(Rect(x: try asF64(at(arr, 7)), y: try asF64(at(arr, 8)),
+        return try withGradientSlots(.rect(Rect(x: try asF64(at(arr, 7)), y: try asF64(at(arr, 8)),
                           width: try asF64(at(arr, 9)), height: try asF64(at(arr, 10)),
                           rx: try asF64(at(arr, 11)), ry: try asF64(at(arr, 12)),
                           fill: try unpackFill(at(arr, 13)), stroke: try unpackStroke(at(arr, 14)),
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
-                          name: name, id: id))
+                          name: name, id: id)), arr, tag)
     // READ-ONLY LEGACY TAG. Nothing packs tag 3 since the one-round-kind
     // migration (2026-07-30), but this is a PERSISTED USER FORMAT and a file
     // saved before that day must still open. Read as equal radii, which is
@@ -1420,33 +1465,33 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
     // `parseElementBase` in Geometry/TestJson.swift.
     case tagCircle:
         let legacyR = try asF64(at(arr, 9))
-        return .ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
+        return try withGradientSlots(.ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
                               rx: legacyR, ry: legacyR,
                               fill: try unpackFill(at(arr, 10)), stroke: try unpackStroke(at(arr, 11)),
                               opacity: opacity, transform: xform, locked: locked, visibility: vis,
                               blendMode: mode, mask: mask,
-                              name: name, id: id))
+                              name: name, id: id)), arr, tag)
     case tagEllipse:
-        return .ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
+        return try withGradientSlots(.ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
                                 rx: try asF64(at(arr, 9)), ry: try asF64(at(arr, 10)),
                                 fill: try unpackFill(at(arr, 11)), stroke: try unpackStroke(at(arr, 12)),
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                 blendMode: mode, mask: mask,
-                                name: name, id: id))
+                                name: name, id: id)), arr, tag)
     case tagPolyline:
         let points = try unpackPoints(at(arr, 7))
-        return .polyline(Polyline(points: points, fill: try unpackFill(at(arr, 8)),
+        return try withGradientSlots(.polyline(Polyline(points: points, fill: try unpackFill(at(arr, 8)),
                                   stroke: try unpackStroke(at(arr, 9)),
                                   opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                   blendMode: mode, mask: mask,
-                                  name: name, id: id))
+                                  name: name, id: id)), arr, tag)
     case tagPolygon:
         let points = try unpackPoints(at(arr, 7))
-        return .polygon(Polygon(points: points, fill: try unpackFill(at(arr, 8)),
+        return try withGradientSlots(.polygon(Polygon(points: points, fill: try unpackFill(at(arr, 8)),
                                 stroke: try unpackStroke(at(arr, 9)),
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                 blendMode: mode, mask: mask,
-                                name: name, id: id))
+                                name: name, id: id)), arr, tag)
     case tagPath:
         let cmds = try asArray(at(arr, 7)).map { try unpackPathCommand($0) }
         let wp = arr.count > 10 ? try unpackWidthPoints(arr[10]) : []
@@ -1457,7 +1502,7 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
             let i = base + off
             return i < arr.count ? arr[i] : nil
         }
-        return .path(Path(d: cmds, fill: try unpackFill(at(arr, 8)),
+        return try withGradientSlots(.path(Path(d: cmds, fill: try unpackFill(at(arr, 8)),
                           stroke: try unpackStroke(at(arr, 9)),
                           widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
@@ -1465,7 +1510,7 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
                           strokeBrush: tolerantOptStr(pathSlot(extStrokeBrush)),
                           strokeBrushOverrides: tolerantOptStr(pathSlot(extStrokeBrushOverrides)),
                           toolOrigin: toolOrigin,
-                          name: name, id: id, fillRule: rule))
+                          name: name, id: id, fillRule: rule)), arr, tag)
     case tagText:
         // Prefer the trailing tspans field when present; otherwise
         // fall back to the single-default-tspan seeded from content
