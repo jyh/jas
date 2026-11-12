@@ -1389,7 +1389,7 @@ public sealed partial class MainWindow : Window
         // `StartFirstLayout` -- because the engine does not exist yet.
         // The SAME comparison the scene dispatch makes (no trim), so the pane
         // is shown exactly when the `app` scene is the one that will run.
-        if (string.Equals(Environment.GetEnvironmentVariable("SB_SCENE"), "app",
+        if (string.Equals(EffectiveScene(), "app",
                           StringComparison.OrdinalIgnoreCase))
         {
             _paneWanted = true;
@@ -2309,8 +2309,7 @@ public sealed partial class MainWindow : Window
             // keeps its meaning, and the sweep now names the scene explicitly so
             // its receipts say what they ran. An unrecognised value is refused by
             // name on the render thread.
-            var scene = Environment.GetEnvironmentVariable("SB_SCENE");
-            if (string.IsNullOrWhiteSpace(scene)) { scene = "benchmark"; }
+            var scene = EffectiveScene();
 
             // O1's walk hashes at every stop. Decided HERE, from the scene name,
             // rather than inside the walk: the walk is generic and the hashing
@@ -2786,6 +2785,21 @@ public sealed partial class MainWindow : Window
     /// which cannot see session 1's titles. Both, because they answer different
     /// questions.
     /// </summary>
+    /// <summary>
+    /// The scene that runs: <c>SB_SCENE</c> when set, else the APP in an
+    /// installed layout (the zip a person unzips sets no variables, and found
+    /// the benchmark scene with an empty menu bar, STATUS-flask 882) and the
+    /// benchmark in a build tree, as before. The ONE reading of the default:
+    /// the pane decision and the scene dispatch both call it, so they cannot
+    /// disagree about which scene runs.
+    /// </summary>
+    internal static string EffectiveScene()
+    {
+        var scene = Environment.GetEnvironmentVariable("SB_SCENE");
+        if (!string.IsNullOrWhiteSpace(scene)) { return scene; }
+        return JasCore.IsInstalled ? "app" : "benchmark";
+    }
+
     // =======================================================================
     // FINDING 1 (the 10-30 sitting; the engine half is #771): PRESS-AND-HOLD.
     // A slot's `mouse_down` reply asks for a timer; this side runs the clock

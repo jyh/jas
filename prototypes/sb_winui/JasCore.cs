@@ -842,10 +842,17 @@ internal static unsafe class JasCore
     /// tree is NOT taken: the marker is explicit so that which binary runs is
     /// never decided by a stray file. A marker with no DLL throws by name.
     /// </summary>
+    /// <summary>
+    /// True in the INSTALLED layout: <c>jas-install.json</c> sits beside the exe.
+    /// Only the CI build that makes the zip writes it.
+    /// </summary>
+    internal static bool IsInstalled =>
+        File.Exists(Path.Combine(AppContext.BaseDirectory, "jas-install.json"));
+
     private static string? InstalledCoreDll()
     {
         var dir = AppContext.BaseDirectory;
-        if (!File.Exists(Path.Combine(dir, "jas-install.json"))) { return null; }
+        if (!IsInstalled) { return null; }
         var dll = Path.Combine(dir, "jas_dioxus.dll");
         if (!File.Exists(dll))
         {
