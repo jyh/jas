@@ -41,6 +41,10 @@ pub mod paragraph_host;
 pub mod mask_facts;
 pub mod menu_state;
 
+// The toolbar double-click's options resolver: the web's renderer and the
+// engine's panel door both read it. NOT gated.
+pub mod tool_options;
+
 #[cfg(feature = "web")]
 pub mod renderer;
 #[cfg(feature = "web")]
