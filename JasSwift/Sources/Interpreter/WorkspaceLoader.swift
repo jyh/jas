@@ -400,7 +400,7 @@ func panelKindToContentId(_ kind: PanelKind) -> String {
     }
 }
 
-/// What a canvas tab says for a document (row 112's sibling, row 115): the
+/// What a canvas tab says for a document (row 115): the
 /// spec's `canvas_tab_bar` label evaluated with `doc = {name, is_modified}`,
 /// the same entry `workspace.open_documents` carries. Falls back to the bare
 /// name only if the compiled layout has no template.
