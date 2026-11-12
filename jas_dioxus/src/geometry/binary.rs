@@ -1656,9 +1656,9 @@ mod tests {
             let Value::Array(children) = &layer[7] else { panic!("children not an array") };
             let Value::Array(path) = &children[0] else { panic!("path not an array") };
             assert_eq!(path[0].as_i64(), Some(TAG_PATH));
-            assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2,
+            assert_eq!(path.len(), tag_base_arity(TAG_PATH) + tag_ext_len(TAG_PATH) + 2,
                        "TAG_PATH should carry its base arity (fill_rule last, slot 11) \
-                        plus the trailing common extension and the two brush slots");
+                        plus the trailing common extension, the two brush slots and the two gradient slots");
             assert_eq!(path[11].as_i64(), Some(want),
                        "fill_rule tag for {rule:?} should be {want}");
         }
@@ -1681,7 +1681,7 @@ mod tests {
         let Value::Array(mut layer) = layers[0].clone() else { panic!() };
         let Value::Array(mut children) = layer[7].clone() else { panic!() };
         let Value::Array(mut path) = children[0].clone() else { panic!() };
-        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2);
+        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + tag_ext_len(TAG_PATH) + 2);
         path.truncate(11);
         children[0] = Value::Array(path);
         layer[7] = Value::Array(children);
@@ -2198,7 +2198,7 @@ mod tests {
         let Value::Array(mut layer) = layers[0].clone() else { panic!() };
         let Value::Array(mut children) = layer[7].clone() else { panic!() };
         let Value::Array(mut path) = children[0].clone() else { panic!() };
-        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2,
+        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + tag_ext_len(TAG_PATH) + 2,
                    "TAG_PATH should carry its base arity plus the extension");
         // Truncate BOTH the path and its enclosing layer back to their
         // pre-extension arities.
