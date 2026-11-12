@@ -819,7 +819,8 @@ internal static unsafe class JasCore
     internal static void Bind()
     {
         var explicitPath = Environment.GetEnvironmentVariable("JAS_CORE_DLL");
-        var dll = !string.IsNullOrWhiteSpace(explicitPath) ? explicitPath : FindCoreDll();
+        var dll = !string.IsNullOrWhiteSpace(explicitPath) ? explicitPath
+            : InstalledCoreDll() ?? FindCoreDll();
 
         if (!File.Exists(dll))
         {
@@ -832,6 +833,34 @@ internal static unsafe class JasCore
         NativeLibrary.SetDllImportResolver(
             Assembly.GetExecutingAssembly(),
             (name, _, _) => name == Lib ? NativeLibrary.Load(dll) : IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// True in the INSTALLED layout: <c>jas-install.json</c> sits beside the exe.
+    /// Only the CI build that makes the zip writes it.
+    /// </summary>
+    internal static bool IsInstalled =>
+        File.Exists(Path.Combine(AppContext.BaseDirectory, "jas-install.json"));
+
+    /// <summary>
+    /// The INSTALLED layout (W5, the self-contained zip): the CI build that makes the zip writes
+    /// <c>jas-install.json</c> beside the exe, and only then is the cdylib taken
+    /// from beside the exe. A DLL that merely happens to sit there in a build
+    /// tree is NOT taken: the marker is explicit so that which binary runs is
+    /// never decided by a stray file. A marker with no DLL throws by name.
+    /// </summary>
+    private static string? InstalledCoreDll()
+    {
+        var dir = AppContext.BaseDirectory;
+        if (!IsInstalled) { return null; }
+        var dll = Path.Combine(dir, "jas_dioxus.dll");
+        if (!File.Exists(dll))
+        {
+            throw new FileNotFoundException(
+                $"this is an installed jas (jas-install.json is beside the exe) but " +
+                $"jas_dioxus.dll is not: the install is incomplete. Expected '{dll}'.", dll);
+        }
+        return dll;
     }
 
     /// <summary>

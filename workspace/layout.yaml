@@ -144,6 +144,9 @@ layout:
                   (250ms) opens a menu to switch between Partial Selection
                   and Interior Selection tools. The button shows checked state
                   when any tool in this slot is active.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "partial_selection_arrow"
                 grid: { row: 0, col: 1 }
                 style:
@@ -163,9 +166,10 @@ layout:
                       - cancel_timer: "long_press_btn_arrow_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: partial_selection }
+                    params: { tool: 'if mem(state.active_tool, ["partial_selection", "interior_selection", "magic_wand"]) then state.active_tool else "partial_selection"' }
                 bind:
                   checked: 'mem(state.active_tool, ["partial_selection", "interior_selection", "magic_wand"])'
+                  icon: 'if state.active_tool == "interior_selection" then "interior_selection_arrow" else if state.active_tool == "magic_wand" then "magic_wand" else "partial_selection_arrow"'
                 alternates:
                   menu_id: arrow_alternates
                   items:
@@ -197,6 +201,9 @@ layout:
                   handles. Long-press (250ms) opens a menu to switch between
                   Pen, Add Anchor Point, Delete Anchor Point, and Anchor
                   Point tools.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "pen"
                 grid: { row: 1, col: 0 }
                 style:
@@ -216,9 +223,10 @@ layout:
                       - cancel_timer: "long_press_btn_pen_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: pen }
+                    params: { tool: 'if mem(state.active_tool, ["pen", "add_anchor", "delete_anchor", "anchor_point"]) then state.active_tool else "pen"' }
                 bind:
                   checked: 'mem(state.active_tool, ["pen", "add_anchor", "delete_anchor", "anchor_point"])'
+                  icon: 'if mem(state.active_tool, ["pen", "add_anchor", "delete_anchor", "anchor_point"]) then state.active_tool else "pen"'
                 alternates:
                   menu_id: pen_alternates
                   items:
@@ -240,6 +248,9 @@ layout:
                   movement. The path is smoothed after drawing. Long-press
                   (250ms) opens a menu to switch between Pencil, Paintbrush,
                   Blob Brush, Path Eraser, and Smooth tools.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "pencil"
                 grid: { row: 1, col: 1 }
                 style:
@@ -259,9 +270,10 @@ layout:
                       - cancel_timer: "long_press_btn_pencil_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: pencil }
+                    params: { tool: 'if mem(state.active_tool, ["pencil", "paintbrush", "blob_brush", "path_eraser", "smooth"]) then state.active_tool else "pencil"' }
                 bind:
                   checked: 'mem(state.active_tool, ["pencil", "paintbrush", "blob_brush", "path_eraser", "smooth"])'
+                  icon: 'if mem(state.active_tool, ["pencil", "paintbrush", "blob_brush", "path_eraser", "smooth"]) then state.active_tool else "pencil"'
                 alternates:
                   menu_id: pencil_alternates
                   items:
@@ -285,6 +297,9 @@ layout:
                   a text insertion point; click-drag to create a text area
                   box. Long-press (250ms) opens a menu to switch between
                   Type and Type on a Path tools.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "type"
                 grid: { row: 2, col: 0 }
                 style:
@@ -304,9 +319,10 @@ layout:
                       - cancel_timer: "long_press_btn_text_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: type }
+                    params: { tool: 'if mem(state.active_tool, ["type", "type_on_path"]) then state.active_tool else "type"' }
                 bind:
                   checked: 'mem(state.active_tool, ["type", "type_on_path"])'
+                  icon: 'if mem(state.active_tool, ["type", "type_on_path"]) then state.active_tool else "type"'
                 alternates:
                   menu_id: text_alternates
                   items:
@@ -347,6 +363,9 @@ layout:
                   Alt/Option to draw from center. Long-press (250ms) opens
                   a menu to switch between Rectangle, Rounded Rectangle,
                   Polygon, and Star tools.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "rect"
                 grid: { row: 3, col: 0 }
                 style:
@@ -366,9 +385,10 @@ layout:
                       - cancel_timer: "long_press_btn_shape_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: rect }
+                    params: { tool: 'if mem(state.active_tool, ["rect", "rounded_rect", "ellipse", "polygon", "star"]) then state.active_tool else "rect"' }
                 bind:
                   checked: 'mem(state.active_tool, ["rect", "rounded_rect", "ellipse", "polygon", "star"])'
+                  icon: 'if mem(state.active_tool, ["rect", "rounded_rect", "ellipse", "polygon", "star"]) then state.active_tool else "rect"'
                 alternates:
                   menu_id: shape_alternates
                   items:
@@ -420,6 +440,9 @@ layout:
                   Rotate tool lives in its own adjacent slot. The button
                   shows checked state when either tool in this slot is
                   active. See SCALE_TOOL.md and SHEAR_TOOL.md.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "scale"
                 grid: { row: 4, col: 0 }
                 style:
@@ -439,9 +462,10 @@ layout:
                       - cancel_timer: "long_press_btn_transform_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: scale }
+                    params: { tool: 'if mem(state.active_tool, ["scale", "shear"]) then state.active_tool else "scale"' }
                 bind:
                   checked: 'mem(state.active_tool, ["scale", "shear"])'
+                  icon: 'if mem(state.active_tool, ["scale", "shear"]) then state.active_tool else "scale"'
                 alternates:
                   menu_id: scale_alternates
                   items:
@@ -491,6 +515,9 @@ layout:
                   the icon to invoke fit_active_artboard. The button shows
                   checked state when either tool in this slot is active.
                   See HAND_TOOL.md and ZOOM_TOOL.md.
+                  The slot's icon is its ACTIVE tool's. A click keeps that tool when
+                  one of this slot's tools is active, so a double-click opens that
+                  tool's options; otherwise it selects the slot's default tool.
                 icon: "hand"
                 grid: { row: 5, col: 0 }
                 style:
@@ -510,13 +537,14 @@ layout:
                       - cancel_timer: "long_press_btn_hand_slot"
                   - event: click
                     action: select_tool
-                    params: { tool: hand }
+                    params: { tool: 'if mem(state.active_tool, ["hand", "zoom"]) then state.active_tool else "hand"' }
                   # Double-click is dispatched by each app's toolbar
                   # dispatcher reading the active tool's
                   # tool_options_action field — see
                   # workspace/tools/hand.yaml and zoom.yaml.
                 bind:
                   checked: 'mem(state.active_tool, ["hand", "zoom"])'
+                  icon: 'if mem(state.active_tool, ["hand", "zoom"]) then state.active_tool else "hand"'
                 alternates:
                   menu_id: hand_alternates
                   items:

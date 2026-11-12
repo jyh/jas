@@ -7987,7 +7987,7 @@
                   "id": "btn_arrow_slot",
                   "type": "icon_button",
                   "summary": "Partial Selection (A)",
-                  "description": "White arrow for selecting individual anchor points and path segments. Click an anchor to select it; drag to move it; drag control handles to adjust curves. Long-press (250ms) opens a menu to switch between Partial Selection and Interior Selection tools. The button shows checked state when any tool in this slot is active.\n",
+                  "description": "White arrow for selecting individual anchor points and path segments. Click an anchor to select it; drag to move it; drag control handles to adjust curves. Long-press (250ms) opens a menu to switch between Partial Selection and Interior Selection tools. The button shows checked state when any tool in this slot is active. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "partial_selection_arrow",
                   "grid": {
                     "row": 0,
@@ -8031,12 +8031,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "partial_selection"
+                        "tool": "if mem(state.active_tool, [\"partial_selection\", \"interior_selection\", \"magic_wand\"]) then state.active_tool else \"partial_selection\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"partial_selection\", \"interior_selection\", \"magic_wand\"])"
+                    "checked": "mem(state.active_tool, [\"partial_selection\", \"interior_selection\", \"magic_wand\"])",
+                    "icon": "if state.active_tool == \"interior_selection\" then \"interior_selection_arrow\" else if state.active_tool == \"magic_wand\" then \"magic_wand\" else \"partial_selection_arrow\""
                   },
                   "alternates": {
                     "menu_id": "arrow_alternates",
@@ -8066,7 +8067,7 @@
                   "id": "btn_pen_slot",
                   "type": "icon_button",
                   "summary": "Pen (P)",
-                  "description": "Draw precise paths by clicking to place anchor points. Click-and-drag to create smooth bezier curves with control handles. Long-press (250ms) opens a menu to switch between Pen, Add Anchor Point, Delete Anchor Point, and Anchor Point tools.\n",
+                  "description": "Draw precise paths by clicking to place anchor points. Click-and-drag to create smooth bezier curves with control handles. Long-press (250ms) opens a menu to switch between Pen, Add Anchor Point, Delete Anchor Point, and Anchor Point tools. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "pen",
                   "grid": {
                     "row": 1,
@@ -8110,12 +8111,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "pen"
+                        "tool": "if mem(state.active_tool, [\"pen\", \"add_anchor\", \"delete_anchor\", \"anchor_point\"]) then state.active_tool else \"pen\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"pen\", \"add_anchor\", \"delete_anchor\", \"anchor_point\"])"
+                    "checked": "mem(state.active_tool, [\"pen\", \"add_anchor\", \"delete_anchor\", \"anchor_point\"])",
+                    "icon": "if mem(state.active_tool, [\"pen\", \"add_anchor\", \"delete_anchor\", \"anchor_point\"]) then state.active_tool else \"pen\""
                   },
                   "alternates": {
                     "menu_id": "pen_alternates",
@@ -8151,7 +8153,7 @@
                   "id": "btn_pencil_slot",
                   "type": "icon_button",
                   "summary": "Pencil (N)",
-                  "description": "Freehand drawing tool that creates paths by tracking mouse movement. The path is smoothed after drawing. Long-press (250ms) opens a menu to switch between Pencil, Paintbrush, Blob Brush, Path Eraser, and Smooth tools.\n",
+                  "description": "Freehand drawing tool that creates paths by tracking mouse movement. The path is smoothed after drawing. Long-press (250ms) opens a menu to switch between Pencil, Paintbrush, Blob Brush, Path Eraser, and Smooth tools. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "pencil",
                   "grid": {
                     "row": 1,
@@ -8195,12 +8197,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "pencil"
+                        "tool": "if mem(state.active_tool, [\"pencil\", \"paintbrush\", \"blob_brush\", \"path_eraser\", \"smooth\"]) then state.active_tool else \"pencil\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"pencil\", \"paintbrush\", \"blob_brush\", \"path_eraser\", \"smooth\"])"
+                    "checked": "mem(state.active_tool, [\"pencil\", \"paintbrush\", \"blob_brush\", \"path_eraser\", \"smooth\"])",
+                    "icon": "if mem(state.active_tool, [\"pencil\", \"paintbrush\", \"blob_brush\", \"path_eraser\", \"smooth\"]) then state.active_tool else \"pencil\""
                   },
                   "alternates": {
                     "menu_id": "pencil_alternates",
@@ -8242,7 +8245,7 @@
                   "id": "btn_text_slot",
                   "type": "icon_button",
                   "summary": "Type (T)",
-                  "description": "Create and edit text objects. Click on the canvas to place a text insertion point; click-drag to create a text area box. Long-press (250ms) opens a menu to switch between Type and Type on a Path tools.\n",
+                  "description": "Create and edit text objects. Click on the canvas to place a text insertion point; click-drag to create a text area box. Long-press (250ms) opens a menu to switch between Type and Type on a Path tools. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "type",
                   "grid": {
                     "row": 2,
@@ -8286,12 +8289,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "type"
+                        "tool": "if mem(state.active_tool, [\"type\", \"type_on_path\"]) then state.active_tool else \"type\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"type\", \"type_on_path\"])"
+                    "checked": "mem(state.active_tool, [\"type\", \"type_on_path\"])",
+                    "icon": "if mem(state.active_tool, [\"type\", \"type_on_path\"]) then state.active_tool else \"type\""
                   },
                   "alternates": {
                     "menu_id": "text_alternates",
@@ -8345,7 +8349,7 @@
                   "id": "btn_shape_slot",
                   "type": "icon_button",
                   "summary": "Rectangle (M)",
-                  "description": "Draw rectangular shapes. Click-drag to define the bounding box. Hold Shift to constrain to a square; hold Alt/Option to draw from center. Long-press (250ms) opens a menu to switch between Rectangle, Rounded Rectangle, Polygon, and Star tools.\n",
+                  "description": "Draw rectangular shapes. Click-drag to define the bounding box. Hold Shift to constrain to a square; hold Alt/Option to draw from center. Long-press (250ms) opens a menu to switch between Rectangle, Rounded Rectangle, Polygon, and Star tools. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "rect",
                   "grid": {
                     "row": 3,
@@ -8389,12 +8393,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "rect"
+                        "tool": "if mem(state.active_tool, [\"rect\", \"rounded_rect\", \"ellipse\", \"polygon\", \"star\"]) then state.active_tool else \"rect\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"rect\", \"rounded_rect\", \"ellipse\", \"polygon\", \"star\"])"
+                    "checked": "mem(state.active_tool, [\"rect\", \"rounded_rect\", \"ellipse\", \"polygon\", \"star\"])",
+                    "icon": "if mem(state.active_tool, [\"rect\", \"rounded_rect\", \"ellipse\", \"polygon\", \"star\"]) then state.active_tool else \"rect\""
                   },
                   "alternates": {
                     "menu_id": "shape_alternates",
@@ -8466,7 +8471,7 @@
                   "id": "btn_transform_slot",
                   "type": "icon_button",
                   "summary": "Scale (S)",
-                  "description": "Resize selected objects relative to a reference point. Drag a handle to scale interactively; hold Shift to scale uniformly. Long-press (250ms) opens a menu to switch between Scale and Shear tools (the transform tool pair). Both tools share the transform-family conventions (state.transform_reference_point, and the dblclick-icon / Alt-click-canvas dialog gestures). The Rotate tool lives in its own adjacent slot. The button shows checked state when either tool in this slot is active. See SCALE_TOOL.md and SHEAR_TOOL.md.\n",
+                  "description": "Resize selected objects relative to a reference point. Drag a handle to scale interactively; hold Shift to scale uniformly. Long-press (250ms) opens a menu to switch between Scale and Shear tools (the transform tool pair). Both tools share the transform-family conventions (state.transform_reference_point, and the dblclick-icon / Alt-click-canvas dialog gestures). The Rotate tool lives in its own adjacent slot. The button shows checked state when either tool in this slot is active. See SCALE_TOOL.md and SHEAR_TOOL.md. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "scale",
                   "grid": {
                     "row": 4,
@@ -8510,12 +8515,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "scale"
+                        "tool": "if mem(state.active_tool, [\"scale\", \"shear\"]) then state.active_tool else \"scale\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"scale\", \"shear\"])"
+                    "checked": "mem(state.active_tool, [\"scale\", \"shear\"])",
+                    "icon": "if mem(state.active_tool, [\"scale\", \"shear\"]) then state.active_tool else \"scale\""
                   },
                   "alternates": {
                     "menu_id": "scale_alternates",
@@ -8569,7 +8575,7 @@
                   "id": "btn_hand_slot",
                   "type": "icon_button",
                   "summary": "Hand (H)",
-                  "description": "Pan the canvas by click-and-drag. Spacebar held while another tool is active temporarily switches to Hand. Long-press (250ms) opens a menu to switch between Hand and Zoom tools (the navigation tool pair). Double-click the icon to invoke fit_active_artboard. The button shows checked state when either tool in this slot is active. See HAND_TOOL.md and ZOOM_TOOL.md.\n",
+                  "description": "Pan the canvas by click-and-drag. Spacebar held while another tool is active temporarily switches to Hand. Long-press (250ms) opens a menu to switch between Hand and Zoom tools (the navigation tool pair). Double-click the icon to invoke fit_active_artboard. The button shows checked state when either tool in this slot is active. See HAND_TOOL.md and ZOOM_TOOL.md. The slot's icon is its ACTIVE tool's. A click keeps that tool when one of this slot's tools is active, so a double-click opens that tool's options; otherwise it selects the slot's default tool.\n",
                   "icon": "hand",
                   "grid": {
                     "row": 5,
@@ -8613,12 +8619,13 @@
                       "event": "click",
                       "action": "select_tool",
                       "params": {
-                        "tool": "hand"
+                        "tool": "if mem(state.active_tool, [\"hand\", \"zoom\"]) then state.active_tool else \"hand\""
                       }
                     }
                   ],
                   "bind": {
-                    "checked": "mem(state.active_tool, [\"hand\", \"zoom\"])"
+                    "checked": "mem(state.active_tool, [\"hand\", \"zoom\"])",
+                    "icon": "if mem(state.active_tool, [\"hand\", \"zoom\"]) then state.active_tool else \"hand\""
                   },
                   "alternates": {
                     "menu_id": "hand_alternates",

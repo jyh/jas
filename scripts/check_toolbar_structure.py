@@ -68,10 +68,26 @@ def _find_node(node, node_id):
 
 
 def _click_tool(button):
-    """Primary tool = the tool param of the button's click→select_tool behavior."""
+    """Primary tool = what the button's click→select_tool behavior selects
+    when NONE of the slot's tools is active.
+
+    The tool param is an expression (row 108: a slot's click keeps its active
+    alternate, `if mem(state.active_tool, [...]) then state.active_tool else
+    "<default>"`), so it is EVALUATED with no active tool, by the reference
+    interpreter's own evaluator, never read as text. A bare identifier that
+    evaluates to null is its own name, as `dispatch_param_value` rules for
+    every port."""
     for ev in button.get("behavior", []) or []:
         if ev.get("event") == "click" and ev.get("action") == "select_tool":
-            return (ev.get("params") or {}).get("tool", "")
+            raw = (ev.get("params") or {}).get("tool", "")
+            if not isinstance(raw, str) or not raw:
+                return ""
+            if raw.replace("_", "").isalnum():
+                return raw
+            sys.path.insert(0, _ROOT.as_posix())
+            from workspace_interpreter.expr import evaluate
+            v = evaluate(raw, {"state": {"active_tool": None}})
+            return v.value if isinstance(v.value, str) else ""
     return ""
 
 
@@ -195,6 +211,12 @@ def _self_test() -> int:
     if _click_tool({"behavior": [{"event": "click", "action": "select_tool",
                                   "params": {"tool": "pen"}}]}) != "pen":
         failures.append("_click_tool did not read the tool from a real click")
+    # Row 108: an expression param is EVALUATED with no tool active, never
+    # echoed as its own text (which would make `primary` an expression).
+    expr_param = 'if mem(state.active_tool, ["pen", "anchor_point"]) then state.active_tool else "pen"'
+    if _click_tool({"behavior": [{"event": "click", "action": "select_tool",
+                                  "params": {"tool": expr_param}}]}) != "pen":
+        failures.append("_click_tool did not evaluate an expression tool param to its default")
 
     # 4. Each projected field is LOAD-BEARING: changing it moves the snapshot.
     def mutate(fn):
