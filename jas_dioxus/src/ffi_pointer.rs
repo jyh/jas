@@ -1434,11 +1434,28 @@ mod tests {
         let e = jas_engine_new();
         let engine = unsafe { &*e };
         assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
-        // Type on a Path is native and not a shell tool yet.
-        engine.set_active_tool_state("type_on_path");
+        // A name no tool answers (Type on a Path was this arm's subject until
+        // 2026-11-12, when it became a shell tool: STATUS-flask 865).
+        engine.set_active_tool_state("no_such_tool");
         assert_eq!(sync_tool_to_state(engine), ToolSync::Refused);
         assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| *i), Some(0));
         assert_eq!(engine.active_tool_state().as_deref(), Some("selection"), "written back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Type on a Path is a shell tool (2026-11-12, measured refused on Windows
+    /// in STATUS-flask 865): the toolbar popover's pick writes `type_on_path`,
+    /// and the pointer now drives it rather than writing the old tool back.
+    #[test]
+    fn type_on_a_path_is_a_shell_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let engine = unsafe { &*e };
+        assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+        engine.set_active_tool_state("type_on_path");
+        assert_eq!(sync_tool_to_state(engine), ToolSync::Switched);
+        assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| TOOL_IDS[*i]), Some("type_on_path"));
+        assert_eq!(engine.active_tool_state().as_deref(), Some("type_on_path"), "not written back");
         unsafe { jas_engine_free(e) };
     }
 
