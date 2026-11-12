@@ -1,4 +1,4 @@
-﻿using SbWinUi;
+using SbWinUi;
 
 // ===========================================================================
 // THE TITLE ORACLE'S RULE, DRIVEN

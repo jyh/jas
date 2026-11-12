@@ -104,8 +104,13 @@ gradient_slider: commit
   through the resolver the web's toolbar reads
   (`interpreter::tool_options::tool_options_dest_for_yaml_id`) and opens the
   ACTIVE tool's options: a dialog, an action, or a panel. On the engine's
-  panel door a panel destination is refused by name (`ToolOptionsPanel`)
-  for now. The panel plan names `double_click` in the slot's `events`.
+  panel door a panel destination is SHOWN through the Window menu's
+  `layout:` effect family (`show_panel`, never a toggle), and the reply's
+  `layout` is the dock the shell redraws. With no layout loaded it is
+  refused by name (`UnknownEffect:layout`). Because a slot's `click`
+  selects the slot's fixed default tool, a double-click reaches only that
+  tool's options, never an alternate's. The panel plan names
+  `double_click` in the slot's `events`.
 
 - **The stops kind** is `gradient_slider`. Its one behavior event,
   `commit`, names "a gesture finished". A shell reports gestures, not
