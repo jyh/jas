@@ -1400,7 +1400,7 @@ public sealed partial class MainWindow : Window
             // (#343). `SB_TOOLBAR=0` turns it off; `PaneKnobs.Toolbar` decides.
             // THE DOCK's tab groups, behind SB_DOCK=<layout name> (e.g. Default):
             // the dock column then holds the groups instead of the one pane.
-            var dockKnob = Environment.GetEnvironmentVariable("SB_DOCK");
+            var dockKnob = EffectiveDock();
             if (!string.IsNullOrWhiteSpace(dockKnob))
             {
                 _dockWanted = true;
@@ -2794,6 +2794,18 @@ public sealed partial class MainWindow : Window
     /// the pane decision and the scene dispatch both call it, so they cannot
     /// disagree about which scene runs.
     /// </summary>
+    /// <summary>
+    /// The dock layout: <c>SB_DOCK</c> when set, else <c>Default</c> in an
+    /// installed layout (a bare launch of the zip showed one panel behind a
+    /// picker, STATUS-flask 884) and none in a build tree, as before.
+    /// </summary>
+    internal static string? EffectiveDock()
+    {
+        var dock = Environment.GetEnvironmentVariable("SB_DOCK");
+        if (!string.IsNullOrWhiteSpace(dock)) { return dock; }
+        return JasCore.IsInstalled ? "Default" : null;
+    }
+
     internal static string EffectiveScene()
     {
         var scene = Environment.GetEnvironmentVariable("SB_SCENE");
