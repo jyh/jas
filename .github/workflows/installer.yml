@@ -47,12 +47,27 @@ jobs:
           set -o pipefail
           (cd jas_dioxus && cargo build --release --no-default-features --features d2d,ffi --lib) 2>&1 | tee engine-build.log
 
-      - name: The shell publishes self-contained
+      # A self-contained BUILD, not `dotnet publish`. Measured on the Windows box
+      # (STATUS-flask 880, 2026-11-12): every `dotnet publish` variant dropped
+      # App.xbf, MainWindow.xbf and SbWinUi.pri, and the app then died in
+      # MainWindow.InitializeComponent (XamlParseException, 0xC000027B in
+      # Microsoft.UI.Xaml.dll) on any account. The same properties under
+      # `dotnet build -c Release` produce a folder that launches with no
+      # runtime installed. Why publish omits them is not identified.
+      - name: The shell builds self-contained
         id: publish
         if: ${{ !cancelled() && steps.engine.conclusion == 'success' }}
         run: |
           set -o pipefail
-          dotnet publish prototypes/sb_winui/SbWinUi.csproj -c Release -p:JasPublish=true -o dist/jas 2>&1 | tee publish.log
+          dotnet build prototypes/sb_winui/SbWinUi.csproj -c Release -p:JasPublish=true 2>&1 | tee publish.log
+          exe=$(find prototypes/sb_winui/bin/Release -name SbWinUi.exe -path '*win-x64*' | head -2)
+          n=$(printf '%s\n' "$exe" | grep -c . || true)
+          if [ "$n" -ne 1 ]; then
+            echo "::error::expected exactly one Release win-x64 SbWinUi.exe, found $n: $exe"
+            exit 1
+          fi
+          mkdir -p dist
+          cp -r "$(dirname "$exe")" dist/jas
 
       # The installed layout: the cdylib beside the exe, and the marker that
       # tells the loader to take it from there (JasCore.InstalledCoreDll).
@@ -74,11 +89,11 @@ jobs:
           ls -la dist/jas | head -200
           n=$(ls dist/jas | wc -l)
           if [ "$n" -lt 20 ]; then
-            echo "::error::dist/jas holds $n entries; a self-contained publish holds hundreds -- this is not one"
+            echo "::error::dist/jas holds $n entries; a self-contained build holds hundreds -- this is not one"
             exit 1
           fi
           missing=0
-          for f in SbWinUi.exe jas_dioxus.dll jas-install.json hostfxr.dll coreclr.dll Microsoft.WindowsAppRuntime.dll Microsoft.UI.Xaml.dll; do
+          for f in SbWinUi.exe jas_dioxus.dll jas-install.json hostfxr.dll coreclr.dll Microsoft.WindowsAppRuntime.dll Microsoft.UI.Xaml.dll App.xbf MainWindow.xbf SbWinUi.pri; do
             if [ ! -s "dist/jas/$f" ]; then
               echo "::error::MISSING from the installed layout: $f"
               missing=$((missing + 1))
@@ -87,6 +102,15 @@ jobs:
             fi
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
+          # The PRI must be the self-contained build's MERGED one (1.36 MB
+          # measured), not the framework-dependent 4.7 KB one, which launches
+          # into "themeresources.xaml not found" (STATUS-flask 880).
+          pri=$(wc -c < dist/jas/SbWinUi.pri)
+          echo "SbWinUi.pri: $pri bytes"
+          if [ "$pri" -lt 500000 ]; then
+            echo "::error::SbWinUi.pri is $pri bytes; the self-contained merged PRI is ~1.36 MB, so this is the framework-dependent one"
+            exit 1
+          fi
 
       - name: Zip
         id: zip

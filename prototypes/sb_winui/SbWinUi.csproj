@@ -47,8 +47,10 @@
   </PropertyGroup>
 
   <!--
-    W5, THE INSTALLER (a): a SELF-CONTAINED publish, used only by the CI job
-    that builds the zip (`dotnet publish -p:JasPublish=true`). It carries the
+    W5, THE INSTALLER (a): a SELF-CONTAINED build, used only by the CI job
+    that builds the zip (`dotnet build -c Release -p:JasPublish=true`; NOT
+    `dotnet publish`, which drops App.xbf, MainWindow.xbf and the merged
+    SbWinUi.pri, measured on the Windows box 2026-11-12). It carries the
     .NET runtime and the Windows App SDK runtime inside the folder, so a
     machine with neither can run the app, and the DOTNET_ROOT quirk above does
     not apply. A plain `dotnet build` (the harness, the compile lane) is

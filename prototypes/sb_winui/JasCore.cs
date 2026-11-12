@@ -836,7 +836,7 @@ internal static unsafe class JasCore
     }
 
     /// <summary>
-    /// The INSTALLED layout (W5, the self-contained zip): the publish step writes
+    /// The INSTALLED layout (W5, the self-contained zip): the CI build that makes the zip writes
     /// <c>jas-install.json</c> beside the exe, and only then is the cdylib taken
     /// from beside the exe. A DLL that merely happens to sit there in a build
     /// tree is NOT taken: the marker is explicit so that which binary runs is
