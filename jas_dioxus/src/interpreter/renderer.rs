@@ -3901,46 +3901,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     }
 }
 
-/// Where a tool's options live, resolved from the compiled bundle in
-/// priority order. Double-clicking a toolbar tool button opens the
-/// ACTIVE tool's options via one of these three mutually-exclusive
-/// destinations:
-///   1. `tool_options_panel`  → show the named panel (Magic Wand).
-///   2. `tool_options_action` → invoke a one-shot action (Hand →
-///      fit_active_artboard, Zoom → zoom_to_actual_size, Artboard →
-///      fit_all_artboards).
-///   3. `tool_options_dialog` → open a modal options dialog
-///      (Paintbrush / Blob Brush / Scale / Rotate / Shear / Eyedropper).
-/// A tool declaring none of these has no dblclick options (no-op).
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ToolOptionsDest {
-    Panel(String),
-    Action(String),
-    Dialog(String),
-}
-
-/// Resolve the active tool's options destination from the compiled
-/// bundle `tools` map, keyed by the tool's YAML id (the value of
-/// `ToolKind::panel_state_name`). The lookup mirrors the pre-bundle
-/// native toolbar: panel beats action beats dialog when more than one
-/// is present, though the spec keeps them mutually exclusive. Returns
-/// `None` when the tool isn't in the bundle or declares no options —
-/// the toolbar dblclick is then a silent no-op. Builds the list from
-/// the bundle, never a hardcoded tool table.
-fn tool_options_dest_for_yaml_id(yaml_id: &str) -> Option<ToolOptionsDest> {
-    let ws = super::workspace::Workspace::load()?;
-    let tool = ws.data().get("tools")?.get(yaml_id)?;
-    if let Some(p) = tool.get("tool_options_panel").and_then(|v| v.as_str()) {
-        return Some(ToolOptionsDest::Panel(p.to_string()));
-    }
-    if let Some(a) = tool.get("tool_options_action").and_then(|v| v.as_str()) {
-        return Some(ToolOptionsDest::Action(a.to_string()));
-    }
-    if let Some(d) = tool.get("tool_options_dialog").and_then(|v| v.as_str()) {
-        return Some(ToolOptionsDest::Dialog(d.to_string()));
-    }
-    None
-}
+// The options resolver and the tool-slot test are shared with the engine's
+// panel door: `super::tool_options`.
+use super::tool_options::{is_toolbar_tool_slot, tool_options_dest_for_yaml_id, ToolOptionsDest};
 
 /// Map a YAML panel id (the value of `tool_options_panel`) to its
 /// `PanelKind`. Returns `None` when the id matches no known panel — the
@@ -3952,24 +3915,6 @@ fn panel_id_to_kind(id: &str) -> Option<PanelKind> {
         // Add other tool panels here as they gain tool_options_panel.
         _ => return None,
     })
-}
-
-/// True when this icon_button is a TOOLBAR TOOL SLOT — a button whose
-/// `behavior` declares an `action: select_tool` (every layout toolbar
-/// slot). This is the discriminator the dblclick-opens-tool-options
-/// gesture is scoped to: panels' op_* buttons, dialog toggles, and the
-/// long-press flyout items (which `set` active_tool + `close_dialog`
-/// but carry no `select_tool` action) all return false and never get
-/// the dblclick.
-fn is_toolbar_tool_slot(el: &serde_json::Value) -> bool {
-    el.get("behavior")
-        .and_then(|b| b.as_array())
-        .map(|behaviors| {
-            behaviors.iter().any(|b| {
-                b.get("action").and_then(|a| a.as_str()) == Some("select_tool")
-            })
-        })
-        .unwrap_or(false)
 }
 
 /// Resolve an icon_button's checked state and the color its highlight uses

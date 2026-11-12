@@ -780,15 +780,16 @@ struct JasBytes jas_layout_edge_rects(struct JasEngine *e, const uint8_t *cell, 
  * # A timer (`start_timer` / `cancel_timer`)
  *
  * A behavior that starts a timer (a tool slot's press-and-hold, `mouse_down`)
- * makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>}]`, and
+ * makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>, "seq": <n>}]`, and
  * one that cancels it (`mouse_up`) carries `{"cancel": <id>}`. The key is
  * present only when the act started or cancelled one. The ENGINE keeps the
  * timer's effects; the shell keeps only the clock and, when it fires, sends
- * `{"event": "timer", "value": <id>}` through this door with the same panel
- * id. That tick runs the kept effects (the reply is the act reply) if the
- * timer is still pending; one cancelled, already fired or never started is
- * the empty span with `StaleTimer`, so a tick that races a release runs
- * nothing.
+ * `{"event": "timer", "value": <id>, "seq": <seq>}` through this door with
+ * the same panel id, echoing the start's `seq`. That tick runs the kept
+ * effects (the reply is the act reply) if THAT start is still pending; one
+ * cancelled, already fired, never started, or re-armed by a later press of
+ * the same slot (a different `seq`, or none) is the empty span with
+ * `StaleTimer`, so a tick that races a release runs nothing.
  *
  * # ⛔ A refusal runs NOTHING
  *

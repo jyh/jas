@@ -211,8 +211,12 @@ pub struct JasEngine {
     /// The PENDING timers (finding 1 of the 10-30 sitting), by (panel, timer
     /// id): the effects a `start_timer` keeps until the shell's tick. The
     /// shell holds only the clock, so a tick for an id not here (cancelled,
-    /// already fired, never started) runs nothing.
-    timers: RefCell<std::collections::BTreeMap<(String, String), Vec<serde_json::Value>>>,
+    /// already fired, never started) runs nothing. Each start has a `seq`
+    /// (jas §864 item 4): every press re-arms the SAME id, so only a tick that
+    /// echoes the pending start's `seq` runs it.
+    timers: RefCell<std::collections::BTreeMap<(String, String), (u64, Vec<serde_json::Value>)>>,
+    /// The last timer `seq` handed out; the next start takes one more.
+    timer_seq: std::cell::Cell<u64>,
     /// The agent session beside the document (O25 A6 R2): the attached
     /// client's subscription and proposal counter. It BORROWS `model` per call
     /// (`mcp::SessionState`), so the engine stays the document's one owner and
@@ -443,6 +447,7 @@ impl JasEngine {
             tool: RefCell::new(None),
             layout: RefCell::new(None),
             timers: RefCell::new(std::collections::BTreeMap::new()),
+            timer_seq: std::cell::Cell::new(0),
             mcp: RefCell::new(crate::mcp::SessionState::new()),
         }
     }
@@ -1281,15 +1286,16 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
 /// # A timer (`start_timer` / `cancel_timer`)
 ///
 /// A behavior that starts a timer (a tool slot's press-and-hold, `mouse_down`)
-/// makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>}]`, and
+/// makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>, "seq": <n>}]`, and
 /// one that cancels it (`mouse_up`) carries `{"cancel": <id>}`. The key is
 /// present only when the act started or cancelled one. The ENGINE keeps the
 /// timer's effects; the shell keeps only the clock and, when it fires, sends
-/// `{"event": "timer", "value": <id>}` through this door with the same panel
-/// id. That tick runs the kept effects (the reply is the act reply) if the
-/// timer is still pending; one cancelled, already fired or never started is
-/// the empty span with `StaleTimer`, so a tick that races a release runs
-/// nothing.
+/// `{"event": "timer", "value": <id>, "seq": <seq>}` through this door with
+/// the same panel id, echoing the start's `seq`. That tick runs the kept
+/// effects (the reply is the act reply) if THAT start is still pending; one
+/// cancelled, already fired, never started, or re-armed by a later press of
+/// the same slot (a different `seq`, or none) is the empty span with
+/// `StaleTimer`, so a tick that races a release runs nothing.
 ///
 /// # ⛔ A refusal runs NOTHING
 ///
@@ -1346,7 +1352,18 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let tick = ev.get("event").and_then(|v| v.as_str()) == Some("timer");
     let (parsed, stored) = if tick {
         let timer = ev.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let Some(effects) = engine.timers.borrow_mut().remove(&(id.to_string(), timer.clone())) else {
+        // Only the PENDING start's tick runs it (jas §864 item 4): a tick that
+        // names another `seq` (an earlier press of the same slot, whose clock
+        // outran its release) or none at all leaves the pending timer alone.
+        let seq = ev.get("seq").and_then(serde_json::Value::as_u64);
+        let key = (id.to_string(), timer.clone());
+        let mut pending = engine.timers.borrow_mut();
+        let effects = match pending.get(&key) {
+            Some((s, _)) if Some(*s) == seq => pending.remove(&key).map(|(_, fx)| fx),
+            _ => None,
+        };
+        drop(pending);
+        let Some(effects) = effects else {
             set_panel_event_error(engine, "StaleTimer", &timer);
             return JasBytes::empty();
         };
@@ -1356,6 +1373,14 @@ pub unsafe extern "C" fn jas_panel_behavior(
             Ok(ev) => (Some(ev), None),
             Err(r) => return refuse(r),
         }
+    };
+    // jas §864 item 2: a DOUBLE-CLICK on a toolbar tool slot opens the ACTIVE
+    // tool's options. Its destination becomes effects, run as a timer's kept
+    // effects are, so a dialog comes back as the reply's `dialog`.
+    let (parsed, stored) = match tool_options_effects(engine, spec, parsed.as_ref()) {
+        Some(Ok(run)) => (None, Some(run)),
+        Some(Err(r)) => return refuse(r),
+        None => (parsed, stored),
     };
 
     if let Some(ev) = &parsed {
@@ -1370,7 +1395,9 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let (ran, named, timer_ops) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost::accepting_timers();
+        // The panel door lends the engine's layout (jas §869 item 5: a tool's
+        // PANEL options run `layout: show_panel`, as the Window menu does).
+        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone()).and_timers();
         let ran = match (&parsed, &stored) {
             (Some(ev), _) => crate::panel_behavior::run_widget_behavior(
                 id, spec, ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host),
@@ -1379,6 +1406,10 @@ pub unsafe extern "C" fn jas_panel_behavior(
             (None, None) => unreachable!("a tick or a parsed event"),
         };
         let timer_ops = std::mem::take(&mut host.timers);
+        // A `layout:` effect ran on the lent copy: the engine holds it now.
+        if ran.is_ok() && host.layout_ran {
+            *engine.layout.borrow_mut() = host.layout.clone();
+        }
         (ran, Named::of(host), timer_ops)
     };
     let ran = match ran {
@@ -1421,18 +1452,57 @@ pub unsafe extern "C" fn jas_panel_behavior(
     out
 }
 
+/// The effects a toolbar DOUBLE-CLICK runs (jas §864 item 2), or `None` when
+/// `ev` is not a `double_click` on a TOOL SLOT (`is_toolbar_tool_slot`, the web's
+/// scope), so the event takes the ordinary path.
+///
+/// The destination is the ACTIVE tool's (`tool_options_dest_for_yaml_id`, the
+/// resolver the web's toolbar reads): a dialog is `open_dialog`, an action is
+/// `dispatch`, and a tool with no options is no effects, which the door reports
+/// as `Unchanged`. A PANEL destination is `layout: show_panel` (jas §869 item
+/// 5), so the reply's `layout` is the dock the shell redraws. An engine with
+/// no layout loaded refuses that effect by name, as it refuses the Window
+/// menu's. A panel id no literal can carry is `ToolOptionsPanel`.
+fn tool_options_effects(engine: &JasEngine, spec: &serde_json::Value,
+                        ev: Option<&crate::panel_behavior::UserEvent>)
+                        -> Option<Result<(String, Vec<serde_json::Value>), crate::panel_behavior::Refusal>> {
+    use crate::interpreter::tool_options::{is_toolbar_tool_slot, tool_options_dest_for_yaml_id, ToolOptionsDest};
+    let ev = ev?;
+    if ev.event != "double_click" { return None; }
+    if !is_toolbar_tool_slot(crate::panel_behavior::widget_node(spec, &ev.widget)?) { return None; }
+    let tool = engine.active_tool_state().unwrap_or_default();
+    let effects = match tool_options_dest_for_yaml_id(&tool) {
+        None => vec![],
+        Some(ToolOptionsDest::Dialog(d)) => vec![serde_json::json!({"open_dialog": {"id": d}})],
+        Some(ToolOptionsDest::Action(a)) => vec![serde_json::json!({"dispatch": {"action": a, "params": {}}})],
+        // A panel is SHOWN through the `layout:` effect the Window menu's
+        // panel items run (`show_panel`, never a toggle). The id is a quoted
+        // literal: an effect's values are expressions.
+        Some(ToolOptionsDest::Panel(p)) if !p.contains('\'') => {
+            vec![serde_json::json!({"layout": {"op": "show_panel", "kind": format!("'{p}'")}})]
+        }
+        Some(ToolOptionsDest::Panel(p)) => {
+            return Some(Err(crate::panel_behavior::Refusal { class: "ToolOptionsPanel", detail: p }));
+        }
+    };
+    Some(Ok((ev.widget.clone(), effects)))
+}
+
 /// Apply a run's timer acts to the engine's pending set for `panel`, and
-/// return them as the reply's `timers`: `{"start": <id>, "delay_ms": <n>}`
-/// (the shell starts, or restarts, a timer of that id) and `{"cancel": <id>}`
-/// (the shell stops it). The effects stay in the engine.
+/// return them as the reply's `timers`: `{"start": <id>, "delay_ms": <n>,
+/// "seq": <n>}` (the shell starts, or restarts, a timer of that id, and echoes
+/// `seq` on its tick) and `{"cancel": <id>}` (the shell stops it). The effects
+/// stay in the engine.
 fn apply_timers(engine: &JasEngine, panel: &str,
                 ops: &[crate::panel_behavior::TimerOp]) -> Vec<serde_json::Value> {
     use crate::panel_behavior::TimerOp;
     let mut pending = engine.timers.borrow_mut();
     ops.iter().map(|op| match op {
         TimerOp::Start { id, delay_ms, effects } => {
-            pending.insert((panel.to_string(), id.clone()), effects.clone());
-            serde_json::json!({"start": id, "delay_ms": delay_ms})
+            let seq = engine.timer_seq.get() + 1;
+            engine.timer_seq.set(seq);
+            pending.insert((panel.to_string(), id.clone()), (seq, effects.clone()));
+            serde_json::json!({"start": id, "delay_ms": delay_ms, "seq": seq})
         }
         TimerOp::Cancel(id) => {
             pending.remove(&(panel.to_string(), id.clone()));
@@ -4805,6 +4875,13 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The tick a shell sends for the timer a press's reply started: its id
+    /// and its `seq` echoed (jas §864 item 4).
+    fn tick_for(reply: &str) -> String {
+        let t = &serde_json::from_str::<serde_json::Value>(reply).unwrap_or_default()["timers"][0];
+        serde_json::json!({"event": "timer", "value": t["start"], "seq": t["seq"]}).to_string()
+    }
+
     /// (reply, error channel) for one behavior crossing.
     fn behave(e: *mut JasEngine, panel: &str, event: &str) -> (String, String) {
         let reply = take(unsafe {
@@ -7550,6 +7627,150 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// jas §864 item 2 (flask §538): a DOUBLE-CLICK on a toolbar tool slot
+    /// opens the ACTIVE tool's options, as the web's toolbar does
+    /// (`tool_options_dest_for_yaml_id`). The engine resolves the tool to its
+    /// options and runs them, so the shell sends `double_click` and carries no YAML
+    /// knowledge (it sends `double_click`, the panels' name for it). A dialog destination comes back as the act reply's `dialog`.
+    #[test]
+    fn a_double_click_on_a_tool_slot_opens_the_active_tools_options_dialog() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("rotate"));
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"double_click"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply:?} {err}"));
+        assert_eq!(v["dialog"], "rotate_options", "the reply names the dialog: {reply}");
+        assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), Some("rotate_options"), "and it is open in the engine");
+        assert!(!err.contains("panel_event"), "a dialog that opened is no refusal: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The PLAN tells the shell a tool slot answers `double_click`, so the
+    /// shell wires the gesture from the plan alone (a slot declares no
+    /// `double_click` in YAML: the engine supplies it). A non-slot button
+    /// on the same pane does not answer it.
+    #[test]
+    fn the_toolbar_plan_names_double_click_on_each_tool_slot_only() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, TOOLBAR, 72, 900)).expect("plan JSON");
+        let leaves = plan["leaves"].as_array().expect("leaves");
+        let answers = |id: &str| leaves.iter().find(|r| r["id"] == id)
+            .and_then(|r| r["events"].as_array())
+            .is_some_and(|evs| evs.iter().any(|v| v == "double_click"));
+        for slot in ["btn_selection", "btn_rotate", "btn_pencil_slot", "btn_hand_slot", "btn_text_slot"] {
+            assert!(answers(slot), "{slot} answers double_click");
+        }
+        assert!(!answers("swap_btn"), "a non-slot button does not");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The destination is the ACTIVE tool's, not the slot's: with Paintbrush
+    /// active, the pencil slot's double-click names Paintbrush's options. (By
+    /// hand the slot's own clicks select Pencil first, as in a browser's
+    /// click, click, dblclick, so this pins the resolver's input, not a
+    /// gesture a person makes.)
+    #[test]
+    fn a_double_click_opens_the_active_alternates_options_not_the_slots_default() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let brush = TOOL_IDS.iter().position(|t| *t == "paintbrush").expect("the Paintbrush tool");
+        assert_eq!(unsafe { jas_set_tool(e, brush) }, JasStatus::Ok);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_pencil_slot","event":"double_click"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply:?} {err}"));
+        assert_eq!(v["dialog"], "paintbrush_tool_options", "{reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A tool that declares no options opens nothing, and says so
+    /// (`Unchanged`), as the web's double-click is then a no-op.
+    #[test]
+    fn a_double_click_on_a_tool_with_no_options_opens_nothing_by_name() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"double_click"}"#);
+        assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "nothing opened: {reply}");
+        assert!(err.contains(r#""panel_event":"Unchanged""#), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Only a TOOL SLOT takes it (a button whose behavior selects a tool), as
+    /// the web scopes it (`is_toolbar_tool_slot`): a double-click on the
+    /// toolbar's Swap button opens no tool's options.
+    #[test]
+    fn a_double_click_on_a_non_tool_button_opens_no_tool_options() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"swap_btn","event":"double_click"}"#);
+        assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "Rotate's options did not open: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// An ACTION destination runs the action, as the menu runs it: Hand's
+    /// `tool_options_action` is `fit_active_artboard`, so a double-click on the
+    /// Hand slot after a Zoom In lands the view where View > Fit Artboard does.
+    #[test]
+    fn a_double_click_whose_options_are_an_action_runs_it_as_the_menu_does() {
+        use crate::ffi_pointer::jas_set_viewport_size;
+        let _g = crate::ffi_instr::test_lock::lock();
+        let view = |e: *mut JasEngine| unsafe { &*e }.with_model(|m| (m.zoom_level, m.view_offset_x, m.view_offset_y));
+        let fitted = {
+            let e = jas_engine_new();
+            assert_eq!(unsafe { jas_set_viewport_size(e, 2379.0, 1333.0) }, JasStatus::Ok);
+            let _ = dispatch(e, r#"{"menu_item":"menu_fit_artboard"}"#);
+            let v = view(e);
+            unsafe { jas_engine_free(e) };
+            v
+        };
+        let e = jas_engine_new();
+        assert_eq!(unsafe { jas_set_viewport_size(e, 2379.0, 1333.0) }, JasStatus::Ok);
+        let _ = dispatch(e, r#"{"menu_item":"menu_zoom_in"}"#);
+        let zoomed = view(e);
+        assert_ne!(zoomed, fitted, "the arm needs a view Fit would move");
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"click"}"#);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("hand"));
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"double_click"}"#);
+        assert!(!reply.is_empty(), "it ran: {err}");
+        assert_eq!(view(e), fitted, "the view is Fit Artboard's: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// jas §869 item 5 (STATUS-jas row 107): a PANEL destination (Magic Wand's
+    /// `tool_options_panel`) SHOWS that panel, through the `layout:` effect the
+    /// Window menu's panel items run, as `show_panel`, never a toggle. So a
+    /// second double-click keeps it shown, as the web's does. The act reply's
+    /// `layout` is the dock the shell redraws.
+    #[test]
+    fn a_double_click_whose_options_are_a_panel_shows_that_panel() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let shown = |l: &serde_json::Value| l["anchored"].as_array().into_iter().flatten()
+            .flat_map(|d| d["groups"].as_array().into_iter().flatten())
+            .flat_map(|g| g["panels"].as_array().into_iter().flatten())
+            .any(|p| p == "magic_wand_panel_content");
+        let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
+        assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
+        // Before a layout load there is no dock to show it in: refused by name,
+        // as the Window menu's `layout:` effect is.
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
+        assert_eq!(reply, "", "nothing ran with no layout");
+        assert!(err.contains("UnknownEffect:layout"), "{err}");
+        let loaded = json(&layout_load(e, "Default"));
+        assert!(!shown(&loaded), "the arm needs a layout without the panel: {loaded}");
+        for n in 1..=2 {
+            let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
+            assert!(!reply.is_empty(), "double-click {n} ran: {err}");
+            let layout = json(&reply)["layout"].clone();
+            assert!(shown(&layout), "double-click {n} shows the Magic Wand panel: {reply}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
     /// FINDING 1 (the 10-30 Windows feel sitting): no toolbar flyouts. A tool
     /// slot opens its alternates on a 250 ms press-and-hold (`mouse_down` runs
     /// `start_timer`, `mouse_up` runs `cancel_timer`, `layout.yaml`), and the
@@ -7563,14 +7784,17 @@ mod tests {
         let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
         assert!(!reply.is_empty(), "the press ran: {err}");
         let r = json(&reply);
-        assert_eq!(r["timers"], serde_json::json!([{"start": "long_press_btn_arrow_slot", "delay_ms": 250}]),
+        let seq = r["timers"][0]["seq"].clone();
+        assert!(seq.is_u64(), "the start names its seq: {reply}");
+        assert_eq!(r["timers"], serde_json::json!([{"start": "long_press_btn_arrow_slot", "delay_ms": 250, "seq": seq}]),
                    "the shell is told to run one 250 ms timer: {reply}");
         assert_eq!(r["dialog"], serde_json::Value::Null, "nothing opens before the tick");
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let tick = tick_for(&reply);
+        let (reply, err) = behave(e, TOOLBAR, &tick);
         assert!(!reply.is_empty(), "the tick ran: {err}");
         assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "{reply}");
         // A fired timer is no longer pending, so a second tick runs nothing.
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (reply, err) = behave(e, TOOLBAR, &tick);
         assert_eq!(reply, "", "a spent timer's tick runs nothing");
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
         unsafe { jas_engine_free(e) };
@@ -7584,11 +7808,11 @@ mod tests {
     fn a_release_before_the_tick_cancels_the_flyout() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
         let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_up"}"#);
         assert!(!reply.is_empty(), "the release ran: {err}");
         assert_eq!(json(&reply)["timers"], serde_json::json!([{"cancel": "long_press_btn_arrow_slot"}]), "{reply}");
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (reply, err) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(reply, "", "the raced tick runs nothing");
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
         assert!(unsafe { &*e }.store.borrow().dialog_id().is_none(), "no flyout opened");
@@ -7599,17 +7823,47 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// jas §864 item 4 (flask §866): a quick double press on a press-and-hold
+    /// slot opened its flyout. Every press re-arms the SAME timer id, so the
+    /// FIRST press's tick, arriving after the second press re-armed that id,
+    /// ran the second press's timer (measured on the Windows box: the shell
+    /// started press 1's clock from the reply, and the engine's queue put that
+    /// tick after `mouse_down` 2). Each start names a `seq`, the shell echoes
+    /// it on the tick, and a tick whose `seq` is not the pending timer's is
+    /// `StaleTimer`.
+    #[test]
+    fn a_tick_from_an_earlier_press_does_not_run_a_later_presss_timer() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let tick = |seq: &serde_json::Value| format!(
+            r#"{{"event":"timer","value":"long_press_btn_arrow_slot","seq":{seq}}}"#);
+        let (r1, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let seq1 = json(&r1)["timers"][0]["seq"].clone();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_up"}"#);
+        let (r2, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let seq2 = json(&r2)["timers"][0]["seq"].clone();
+        let (reply, err) = behave(e, TOOLBAR, &tick(&seq1));
+        assert_eq!(reply, "", "the first press's tick runs nothing: {err}");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        assert!(unsafe { &*e }.store.borrow().dialog_id().is_none(), "no flyout opened");
+        assert!(seq1.is_u64() && seq2.is_u64() && seq1 != seq2, "each start names its own seq: {r1} {r2}");
+        // The second press's own tick still opens the flyout (a real hold).
+        let (reply, err) = behave(e, TOOLBAR, &tick(&seq2));
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "{reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A timer is the PANEL's: a tick through another panel's door does not
     /// run the toolbar's pending effects.
     #[test]
     fn a_tick_runs_only_the_timer_its_own_panel_started() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
-        let (reply, err) = behave(e, "layers_panel_content", r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, "layers_panel_content", &tick_for(&down));
         assert_eq!(reply, "", "another panel's door: {err}");
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
-        let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (reply, _) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "still pending on its own door");
         unsafe { jas_engine_free(e) };
     }
@@ -7626,8 +7880,8 @@ mod tests {
         let e = jas_engine_new();
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
         assert_eq!(slot_tool(e), Some("selection"), "the pointer starts on the Selection tool");
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_hand_slot"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(json(&reply)["dialog"], serde_json::json!("hand_alternates"), "the flyout opened: {reply} {err}");
         let zoom = dialog_leaf_path(e, "icon_button", "Zoom");
         let (reply, err) = dialog_event(e, &serde_json::json!({"path": zoom, "event": "click"}).to_string());
@@ -7648,8 +7902,8 @@ mod tests {
     fn a_shipped_flyout_row_plans_its_icon_and_label_parts_from_its_own_yaml() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
-        let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_hand_slot"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
+        let (reply, _) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(json(&reply)["dialog"], serde_json::json!("hand_alternates"), "{reply}");
         let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace");
         let spec = ws.dialog("hand_alternates").expect("the Hand flyout");

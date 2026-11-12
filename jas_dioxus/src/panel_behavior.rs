@@ -285,6 +285,14 @@ impl EngineHost {
     pub fn accepting_timers() -> EngineHost {
         EngineHost { accepts_timers: true, ..Default::default() }
     }
+
+    /// This host also claims `start_timer` / `cancel_timer`, as
+    /// [`EngineHost::accepting_timers`] does: the panel door lends a layout
+    /// AND passes timers on (jas §869 item 5).
+    pub fn and_timers(mut self) -> EngineHost {
+        self.accepts_timers = true;
+        self
+    }
 }
 
 impl EffectHost for EngineHost {

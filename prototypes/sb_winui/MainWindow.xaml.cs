@@ -2789,7 +2789,8 @@ public sealed partial class MainWindow : Window
     // =======================================================================
     // FINDING 1 (the 10-30 sitting; the engine half is #771): PRESS-AND-HOLD.
     // A slot's `mouse_down` reply asks for a timer; this side runs the clock
-    // and, on the tick, sends `{"event": "timer", "value": id}` back through
+    // and, on the tick, sends `{"event": "timer", "value": id, "seq": n}` (the
+    // start's own seq, jas 864 item 4) back through
     // the same panel door. The engine keeps the effects and decides; a tick
     // that raced a release is its StaleTimer, a no-op.
     // =======================================================================
@@ -2820,6 +2821,7 @@ public sealed partial class MainWindow : Window
             timer.Interval = TimeSpan.FromMilliseconds(act.DelayMs);
             timer.IsRepeating = false;
             var id = act.Id;
+            var seq = act.Seq;
             timer.Tick += (_, _) =>
             {
                 timer.Stop();
@@ -2834,6 +2836,7 @@ public sealed partial class MainWindow : Window
                     Via = "hand",
                     Event = "timer",
                     Value = id,
+                    Seq = seq,
                 });
             };
             _behaviorTimers.Put(panel, id, timer);
