@@ -1025,6 +1025,13 @@ actions:
       or dock) is NOT on screen: it is raised where it stands (made its
       group's active tab, its group and dock expanded), never closed.
 
+      Whenever this leaves the panel on screen (shown or raised), the dock
+      that holds it scrolls, if it scrolls at all, so that the panel's group
+      is inside the dock's visible area: a person who asked for a panel sees
+      it. This is a view act; the layout is unchanged. "On screen" above is
+      still the layout's fact, so a click on an active panel that is scrolled
+      out of view hides it (a stated limit, not yet decided otherwise).
+
       The layout op `toggle_panel` decides, on the dock layout: it hides the
       panel if it is on screen and reveals it otherwise, exactly as above.
       This is the single generic panel-toggle path — there are no per-panel
@@ -1242,6 +1249,8 @@ actions:
       Show a hidden panel by adding it to the last group of the anchored
       dock. Makes the dock visible and expanded, and activates the newly
       shown panel.
+      The dock then scrolls, if it scrolls at all, so that the panel's group
+      is inside its visible area (a view act, as in toggle_panel).
     category: panel
     params:
       panel: { type: enum, values: [layers, color, stroke, properties, align] }
