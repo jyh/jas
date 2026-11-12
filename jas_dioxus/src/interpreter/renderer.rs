@@ -522,6 +522,11 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
                 &mut st.workspace_layout,
                 &crate::workspace::layout_apply::op_toggle_panel(kind),
             );
+            // Row 111 (actions.yaml toggle_panel): a panel the act left on
+            // screen is brought into the dock's visible area after the render.
+            if let Some(tab) = toggle_panel_view_target(&st.workspace_layout, kind) {
+                schedule_scroll_into_view(tab);
+            }
         }
         return Vec::new();
     }
@@ -7688,6 +7693,47 @@ fn schedule_focus_rename_input(path: &[usize]) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn schedule_focus_rename_input(_path: &[usize]) {}
+
+/// Row 111 (STATUS-flask 886; `actions.yaml` toggle_panel): the dock GROUP that
+/// a Window > <panel> act should bring into view, when the act left the panel
+/// ON SCREEN; `None` when it hid it. Its DOM id is `test_hook::dock_group_dom_id`,
+/// the id the dock's render gives the group's root.
+pub(crate) fn toggle_panel_view_target(
+    layout: &crate::workspace::workspace::WorkspaceLayout,
+    kind: crate::workspace::workspace::PanelKind,
+) -> Option<String> {
+    if !layout.panel_on_screen(kind) {
+        return None;
+    }
+    let addr = crate::workspace::layout_apply::find_panel(layout, kind)?;
+    Some(crate::workspace::test_hook::dock_group_dom_id(addr.group.dock_id.0, addr.group.group_idx))
+}
+
+/// Scroll the element with this DOM id into its scroll container after the
+/// next frame (the render that draws the raised group). `block: nearest` is
+/// the SMALLEST scroll, and none at all when the group is already in view: the
+/// shape the Windows shell measured (#913, `LayoutWire.ScrollToShow`).
+#[cfg(target_arch = "wasm32")]
+fn schedule_scroll_into_view(id: String) {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
+    let cb = Closure::once(Box::new(move || {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id(&id) {
+                let opts = web_sys::ScrollIntoViewOptions::new();
+                opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                el.scroll_into_view_with_scroll_into_view_options(&opts);
+            }
+        }
+    }) as Box<dyn FnOnce()>);
+    if let Some(win) = web_sys::window() {
+        let _ = win.request_animation_frame(cb.as_ref().unchecked_ref());
+    }
+    cb.forget();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn schedule_scroll_into_view(_id: String) {}
 
 /// Render a tree_view widget showing the live document element tree.
 ///

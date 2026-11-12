@@ -1246,6 +1246,29 @@ mod tests {
         st
     }
 
+    /// Row 111 (STATUS-flask 886; spec `actions.yaml` toggle_panel): when
+    /// Window > <panel> leaves the panel ON SCREEN, the web names that panel's
+    /// dock GROUP to bring into view; when it hides the panel, it names nothing.
+    /// The Default layout keeps Layers as a background tab of a low group,
+    /// which is the case a person hit: raised, and below the dock's fold.
+    #[test]
+    fn toggle_panel_names_the_group_to_bring_into_view_only_when_left_on_screen() {
+        use crate::workspace::workspace::PanelKind;
+        let mut st = seeded_state();
+        let target = |st: &AppState, k: PanelKind| {
+            crate::interpreter::renderer::toggle_panel_view_target(&st.workspace_layout, k)
+        };
+        assert!(!st.workspace_layout.panel_on_screen(PanelKind::Gradient), "the control: gradient starts hidden");
+        toggle_panel(&mut st, "gradient");
+        let addr = crate::workspace::layout_apply::find_panel(&st.workspace_layout, PanelKind::Gradient)
+            .expect("gradient is in a group once shown");
+        assert_eq!(target(&st, PanelKind::Gradient),
+                   Some(crate::workspace::test_hook::dock_group_dom_id(addr.group.dock_id.0, addr.group.group_idx)),
+                   "shown: its GROUP is the one to bring into view");
+        toggle_panel(&mut st, "gradient");
+        assert_eq!(target(&st, PanelKind::Gradient), None, "hidden: nothing to bring into view");
+    }
+
     #[test]
     fn toggle_panel_gradient_shows_in_last_group_then_hides() {
         use crate::workspace::workspace::PanelKind;
