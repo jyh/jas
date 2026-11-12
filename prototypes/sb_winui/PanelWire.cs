@@ -1,4 +1,4 @@
-namespace SbWinUi;
+﻿namespace SbWinUi;
 
 /// <summary>
 /// W2b-2: what a panel control SENDS the core, what a row SAYS it sent, and
@@ -95,7 +95,7 @@ internal static class PanelWire
     /// (<see cref="KeyName"/>); every other event carries none.
     internal static byte[] EventJson(string widget, string eventName, string? value,
                                      bool alt, bool shift, bool ctrl, bool meta,
-                                     string? path = null, string? key = null)
+                                     string? path = null, string? key = null, long? seq = null)
     {
         var ev = new Dictionary<string, object>
         {
@@ -1962,7 +1962,10 @@ internal static class KeyWire
 /// </summary>
 internal static class TimerWire
 {
-    internal readonly record struct Act(string Id, int DelayMs, bool Cancel);
+    /// <summary>One timer act. `Seq` is a start's sequence number (jas 864
+    /// item 4), echoed on its tick so the engine runs only that start; null
+    /// on a cancel.</summary>
+    internal readonly record struct Act(string Id, int DelayMs, bool Cancel, long? Seq = null);
 
     internal readonly record struct Reading(IReadOnlyList<Act> Acts, IReadOnlyList<string> Refused);
 
