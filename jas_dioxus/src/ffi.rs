@@ -7554,6 +7554,26 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 115: THE TAB MARKS A MODIFIED DOCUMENT, from the spec's label
+    /// (`{{doc.name}}{{if doc.is_modified then ' *' else ''}}`), so a shell
+    /// drawing the plan shows "name *" with no rule of its own.
+    #[test]
+    fn the_canvas_tab_marks_a_modified_document() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let name = unsafe { &*e }.model.borrow().filename.clone();
+        let text_of = |e| canvas_tabs(e).into_iter().next().expect("one tab").1.into_iter()
+            .find(|k| k["type"] == "text").expect("the tab's text")["values"]["content"].clone();
+        assert_eq!(unsafe { jas_document_modified(e) }, 0, "CONTROL: clean");
+        assert_eq!(text_of(e), serde_json::json!(name), "a clean tab is the bare name");
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let _ = dispatch(e, r#"{"action":"delete_selection"}"#);
+        assert_eq!(unsafe { jas_document_modified(e) }, 1, "CONTROL: modified");
+        assert_eq!(text_of(e), serde_json::json!(format!("{name} *")), "a modified tab carries the mark");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn dispatch_action_refuses_an_unknown_action_and_runs_nothing() {
         let _counters = crate::ffi_instr::test_lock::lock();
