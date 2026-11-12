@@ -3214,18 +3214,37 @@ fn a_tspan_font_override_on_a_path_changes_where_later_glyphs_land() {
              used for every tspan");
 }
 
+/// ⭐ EMPTY CONTENT ON A REAL PATH LOWERS: the guide line, and no glyph
+/// (STATUS-flask 886). The Type on a Path tool converts a path to an EMPTY
+/// text_path on its first click, and the router sent that to legacy, so the
+/// Windows walk refused the WHOLE frame: the canvas stayed pixel-identical to
+/// before (the old path, selected, no caret) until the first key, measured at
+/// 300 ms and 2.8 s. Legacy draws the guide line even when no text can be
+/// placed, and so does `emit_text_on_path`, so the native route is the same
+/// picture. No measurer is needed: there is nothing to measure.
+#[test]
+fn an_empty_text_path_on_a_real_path_lowers_to_its_guide_line() {
+    let empty = crate::geometry::tspan::Tspan::default_tspan();
+    let e = text_path(flat_path(100.0), vec![empty]);
+    assert!(!element_needs_legacy(&e, all_caps()), "empty content on a real path lowers");
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &e, 1.0);
+    let cmds = rec.commands();
+    let strokes = cmds.iter().filter(|c| matches!(c, Command::StrokePath { .. })).count();
+    assert_eq!(strokes, 1, "the guide line, once: {cmds:?}");
+    assert!(glyph_frames(&cmds).is_empty(), "no glyph is placed: {cmds:?}");
+    assert!(!cmds.iter().any(|c| matches!(c, Command::DrawTextRun { .. })), "{cmds:?}");
+}
+
 /// ⛔ THE ROUTER STILL REFUSES WHAT ROW DR DID NOT TAKE. The clause narrowed.
 #[test]
 fn a_type_on_path_feature_row_dr_did_not_take_stays_legacy() {
     let mut base = crate::geometry::tspan::Tspan::default_tspan();
     base.content = "hi".into();
 
-    // An empty path, and empty content, both paint nothing either way.
+    // An empty path has nowhere to draw even its guide line.
     assert!(element_needs_legacy(&text_path(vec![], vec![base.clone()]), all_caps()),
             "an empty path has nowhere to place glyphs");
-    let empty = crate::geometry::tspan::Tspan::default_tspan();
-    assert!(element_needs_legacy(&text_path(flat_path(100.0), vec![empty]), all_caps()),
-            "empty content places nothing");
 
     // A real decoration is an extra primitive that must follow the CURVE.
     let Element::TextPath(mut e) = text_path(flat_path(100.0), vec![base.clone()]) else {

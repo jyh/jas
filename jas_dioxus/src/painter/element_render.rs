@@ -1011,10 +1011,18 @@ fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextEl
 /// which does not merely space the glyphs wrongly, it ROTATES them wrongly and
 /// slides the tail off the end of the curve.
 fn text_path_needs_legacy(e: &crate::geometry::element::TextPathElem) -> bool {
-    if e.d.is_empty() || e.content().is_empty() {
-        // Nothing to place. Legacy paints nothing either way, and refusing keeps
-        // the reference goldens from modelling an empty route.
+    if e.d.is_empty() {
+        // No path: nowhere to draw even the guide line. Refusing keeps the
+        // reference goldens from modelling an empty route.
         return true;
+    }
+    if e.content().is_empty() {
+        // ⭐ EMPTY CONTENT ON A REAL PATH LOWERS (STATUS-flask 886): Type on a
+        // Path makes exactly this on its first click, and a refusal here made
+        // the Windows walk refuse the WHOLE frame until the first key. Legacy
+        // draws the guide line and no glyph, and so does `emit_text_on_path`;
+        // nothing is measured, so no feature or font question applies.
+        return false;
     }
     // Per-tspan FONT overrides are carried (row DR capability 2 reuses
     // capability 1's per-run measurer); the five FEATURES are not, and are
