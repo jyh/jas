@@ -2,7 +2,7 @@
 //!
 //! Double-clicking a TOOLBAR TOOL SLOT opens the ACTIVE tool's options. The
 //! web's toolbar ran this from its own renderer; the engine's panel door
-//! (`jas_panel_behavior`, `dblclick`) runs it for a native shell. Both read
+//! (`jas_panel_behavior`, `double_click`) runs it for a native shell. Both read
 //! the resolver here, so the two cannot disagree on a tool's destination.
 //! Not gated: the FFI build has no renderer.
 

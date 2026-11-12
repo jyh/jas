@@ -1430,7 +1430,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
 }
 
 /// The effects a toolbar DOUBLE-CLICK runs (jas §864 item 2), or `None` when
-/// `ev` is not a `dblclick` on a TOOL SLOT (`is_toolbar_tool_slot`, the web's
+/// `ev` is not a `double_click` on a TOOL SLOT (`is_toolbar_tool_slot`, the web's
 /// scope), so the event takes the ordinary path.
 ///
 /// The destination is the ACTIVE tool's (`tool_options_dest_for_yaml_id`, the
@@ -1444,7 +1444,7 @@ fn tool_options_effects(engine: &JasEngine, spec: &serde_json::Value,
                         -> Option<Result<(String, Vec<serde_json::Value>), crate::panel_behavior::Refusal>> {
     use crate::interpreter::tool_options::{is_toolbar_tool_slot, tool_options_dest_for_yaml_id, ToolOptionsDest};
     let ev = ev?;
-    if ev.event != "dblclick" { return None; }
+    if ev.event != "double_click" { return None; }
     if !is_toolbar_tool_slot(crate::panel_behavior::widget_node(spec, &ev.widget)?) { return None; }
     let tool = engine.active_tool_state().unwrap_or_default();
     let effects = match tool_options_dest_for_yaml_id(&tool) {
@@ -7590,19 +7590,39 @@ mod tests {
     /// jas §864 item 2 (flask §538): a DOUBLE-CLICK on a toolbar tool slot
     /// opens the ACTIVE tool's options, as the web's toolbar does
     /// (`tool_options_dest_for_yaml_id`). The engine resolves the tool to its
-    /// options and runs them, so the shell sends `dblclick` and carries no YAML
-    /// knowledge. A dialog destination comes back as the act reply's `dialog`.
+    /// options and runs them, so the shell sends `double_click` and carries no YAML
+    /// knowledge (it sends `double_click`, the panels' name for it). A dialog destination comes back as the act reply's `dialog`.
     #[test]
     fn a_double_click_on_a_tool_slot_opens_the_active_tools_options_dialog() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
         assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("rotate"));
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"dblclick"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"double_click"}"#);
         let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply:?} {err}"));
         assert_eq!(v["dialog"], "rotate_options", "the reply names the dialog: {reply}");
         assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), Some("rotate_options"), "and it is open in the engine");
         assert!(!err.contains("panel_event"), "a dialog that opened is no refusal: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The PLAN tells the shell a tool slot answers `double_click`, so the
+    /// shell wires the gesture from the plan alone (a slot declares no
+    /// `double_click` in YAML: the engine supplies it). A non-slot button
+    /// on the same pane does not answer it.
+    #[test]
+    fn the_toolbar_plan_names_double_click_on_each_tool_slot_only() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, TOOLBAR, 72, 900)).expect("plan JSON");
+        let leaves = plan["leaves"].as_array().expect("leaves");
+        let answers = |id: &str| leaves.iter().find(|r| r["id"] == id)
+            .and_then(|r| r["events"].as_array())
+            .is_some_and(|evs| evs.iter().any(|v| v == "double_click"));
+        for slot in ["btn_selection", "btn_rotate", "btn_pencil_slot", "btn_hand_slot", "btn_text_slot"] {
+            assert!(answers(slot), "{slot} answers double_click");
+        }
+        assert!(!answers("swap_btn"), "a non-slot button does not");
         unsafe { jas_engine_free(e) };
     }
 
@@ -7615,7 +7635,7 @@ mod tests {
         let e = jas_engine_new();
         let brush = TOOL_IDS.iter().position(|t| *t == "paintbrush").expect("the Paintbrush tool");
         assert_eq!(unsafe { jas_set_tool(e, brush) }, JasStatus::Ok);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_pencil_slot","event":"dblclick"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_pencil_slot","event":"double_click"}"#);
         let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply:?} {err}"));
         assert_eq!(v["dialog"], "paintbrush_tool_options", "{reply}");
         unsafe { jas_engine_free(e) };
@@ -7628,7 +7648,7 @@ mod tests {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"dblclick"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"double_click"}"#);
         assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "nothing opened: {reply}");
         assert!(err.contains(r#""panel_event":"Unchanged""#), "{err}");
         unsafe { jas_engine_free(e) };
@@ -7642,7 +7662,7 @@ mod tests {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"swap_btn","event":"dblclick"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"swap_btn","event":"double_click"}"#);
         assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "Rotate's options did not open: {reply} {err}");
         unsafe { jas_engine_free(e) };
     }
@@ -7670,7 +7690,7 @@ mod tests {
         assert_ne!(zoomed, fitted, "the arm needs a view Fit would move");
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"click"}"#);
         assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("hand"));
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"dblclick"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"double_click"}"#);
         assert!(!reply.is_empty(), "it ran: {err}");
         assert_eq!(view(e), fitted, "the view is Fit Artboard's: {err}");
         unsafe { jas_engine_free(e) };
@@ -7686,7 +7706,7 @@ mod tests {
         let e = jas_engine_new();
         let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
         assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"dblclick"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
         assert_eq!(reply, "", "nothing ran");
         assert!(err.contains(r#""panel_event":"ToolOptionsPanel""#) && err.contains("magic_wand"), "{err}");
         unsafe { jas_engine_free(e) };
