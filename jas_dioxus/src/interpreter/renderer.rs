@@ -7694,31 +7694,32 @@ fn schedule_focus_rename_input(path: &[usize]) {
 #[cfg(not(target_arch = "wasm32"))]
 fn schedule_focus_rename_input(_path: &[usize]) {}
 
-/// Row 111 (STATUS-flask 886; `actions.yaml` toggle_panel): the dock TAB that a
-/// Window > <panel> act should bring into view, when the act left the panel ON
-/// SCREEN; `None` when it hid it. The tab's DOM id is the panel's content id
-/// plus `_tab` (`test_hook::tab_dom_id`), so no id is listed here.
+/// Row 111 (STATUS-flask 886; `actions.yaml` toggle_panel): the dock GROUP that
+/// a Window > <panel> act should bring into view, when the act left the panel
+/// ON SCREEN; `None` when it hid it. Its DOM id is `test_hook::dock_group_dom_id`,
+/// the id the dock's render gives the group's root.
 pub(crate) fn toggle_panel_view_target(
     layout: &crate::workspace::workspace::WorkspaceLayout,
     kind: crate::workspace::workspace::PanelKind,
 ) -> Option<String> {
-    layout.panel_on_screen(kind).then(|| {
-        crate::workspace::test_hook::tab_dom_id(crate::interpreter::workspace::panel_kind_to_content_id(kind))
-    })
+    if !layout.panel_on_screen(kind) {
+        return None;
+    }
+    let addr = crate::workspace::layout_apply::find_panel(layout, kind)?;
+    Some(crate::workspace::test_hook::dock_group_dom_id(addr.group.dock_id.0, addr.group.group_idx))
 }
 
 /// Scroll the element with this DOM id into its scroll container after the
-/// next frame (the render that draws the raised tab). `block: start`, so a tab
-/// below the dock's fold comes to the top with its group's body under it.
-/// ⚠️ Stated limit: a raise on a group already in view also scrolls it to the
-/// top; telling the two apart needs the dock's viewport rect, not measured here.
+/// next frame (the render that draws the raised group). `block: nearest` is
+/// the SMALLEST scroll, and none at all when the group is already in view: the
+/// shape the Windows shell measured (#913, `LayoutWire.ScrollToShow`).
 #[cfg(target_arch = "wasm32")]
 fn schedule_scroll_into_view(id: String) {
     let cb = Closure::once(Box::new(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id(&id) {
                 let opts = web_sys::ScrollIntoViewOptions::new();
-                opts.set_block(web_sys::ScrollLogicalPosition::Start);
+                opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
                 el.scroll_into_view_with_scroll_into_view_options(&opts);
             }
         }
