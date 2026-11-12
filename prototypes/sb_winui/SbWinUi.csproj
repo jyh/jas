@@ -46,6 +46,20 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <!--
+    W5, THE INSTALLER (a): a SELF-CONTAINED publish, used only by the CI job
+    that builds the zip (`dotnet publish -p:JasPublish=true`). It carries the
+    .NET runtime and the Windows App SDK runtime inside the folder, so a
+    machine with neither can run the app, and the DOTNET_ROOT quirk above does
+    not apply. A plain `dotnet build` (the harness, the compile lane) is
+    unchanged: framework-dependent, as before. Design:
+    the 2026-11-12 W5 installer design block (seat repo).
+  -->
+  <PropertyGroup Condition="'$(JasPublish)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
   <ItemGroup>
     <!--
       Floating 1.8.* rather than a pinned build. The installed runtime here is
