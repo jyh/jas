@@ -1395,7 +1395,9 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let (ran, named, timer_ops) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost::accepting_timers();
+        // The panel door lends the engine's layout (jas §869 item 5: a tool's
+        // PANEL options run `layout: show_panel`, as the Window menu does).
+        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone()).and_timers();
         let ran = match (&parsed, &stored) {
             (Some(ev), _) => crate::panel_behavior::run_widget_behavior(
                 id, spec, ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host),
@@ -1404,6 +1406,10 @@ pub unsafe extern "C" fn jas_panel_behavior(
             (None, None) => unreachable!("a tick or a parsed event"),
         };
         let timer_ops = std::mem::take(&mut host.timers);
+        // A `layout:` effect ran on the lent copy: the engine holds it now.
+        if ran.is_ok() && host.layout_ran {
+            *engine.layout.borrow_mut() = host.layout.clone();
+        }
         (ran, Named::of(host), timer_ops)
     };
     let ran = match ran {
@@ -1453,9 +1459,10 @@ pub unsafe extern "C" fn jas_panel_behavior(
 /// The destination is the ACTIVE tool's (`tool_options_dest_for_yaml_id`, the
 /// resolver the web's toolbar reads): a dialog is `open_dialog`, an action is
 /// `dispatch`, and a tool with no options is no effects, which the door reports
-/// as `Unchanged`. A PANEL destination needs the shell to show a panel, which
-/// the act reply cannot name yet, so it is refused by name
-/// (`ToolOptionsPanel`, the panel id), never a silent no-op.
+/// as `Unchanged`. A PANEL destination is `layout: show_panel` (jas §869 item
+/// 5), so the reply's `layout` is the dock the shell redraws. An engine with
+/// no layout loaded refuses that effect by name, as it refuses the Window
+/// menu's. A panel id no literal can carry is `ToolOptionsPanel`.
 fn tool_options_effects(engine: &JasEngine, spec: &serde_json::Value,
                         ev: Option<&crate::panel_behavior::UserEvent>)
                         -> Option<Result<(String, Vec<serde_json::Value>), crate::panel_behavior::Refusal>> {
@@ -1468,6 +1475,12 @@ fn tool_options_effects(engine: &JasEngine, spec: &serde_json::Value,
         None => vec![],
         Some(ToolOptionsDest::Dialog(d)) => vec![serde_json::json!({"open_dialog": {"id": d}})],
         Some(ToolOptionsDest::Action(a)) => vec![serde_json::json!({"dispatch": {"action": a, "params": {}}})],
+        // A panel is SHOWN through the `layout:` effect the Window menu's
+        // panel items run (`show_panel`, never a toggle). The id is a quoted
+        // literal: an effect's values are expressions.
+        Some(ToolOptionsDest::Panel(p)) if !p.contains('\'') => {
+            vec![serde_json::json!({"layout": {"op": "show_panel", "kind": format!("'{p}'")}})]
+        }
         Some(ToolOptionsDest::Panel(p)) => {
             return Some(Err(crate::panel_behavior::Refusal { class: "ToolOptionsPanel", detail: p }));
         }
@@ -7726,19 +7739,35 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// A PANEL destination (Magic Wand's `tool_options_panel`) needs the shell
-    /// to show a panel, which this door cannot name yet: it is REFUSED BY
-    /// NAME, never a silent no-op.
+    /// jas §869 item 5 (STATUS-jas row 107): a PANEL destination (Magic Wand's
+    /// `tool_options_panel`) SHOWS that panel, through the `layout:` effect the
+    /// Window menu's panel items run, as `show_panel`, never a toggle. So a
+    /// second double-click keeps it shown, as the web's does. The act reply's
+    /// `layout` is the dock the shell redraws.
     #[test]
-    fn a_double_click_whose_options_are_a_panel_is_refused_by_name() {
+    fn a_double_click_whose_options_are_a_panel_shows_that_panel() {
         use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
+        let shown = |l: &serde_json::Value| l["anchored"].as_array().into_iter().flatten()
+            .flat_map(|d| d["groups"].as_array().into_iter().flatten())
+            .flat_map(|g| g["panels"].as_array().into_iter().flatten())
+            .any(|p| p == "magic_wand_panel_content");
         let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
         assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
+        // Before a layout load there is no dock to show it in: refused by name,
+        // as the Window menu's `layout:` effect is.
         let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
-        assert_eq!(reply, "", "nothing ran");
-        assert!(err.contains(r#""panel_event":"ToolOptionsPanel""#) && err.contains("magic_wand"), "{err}");
+        assert_eq!(reply, "", "nothing ran with no layout");
+        assert!(err.contains("UnknownEffect:layout"), "{err}");
+        let loaded = json(&layout_load(e, "Default"));
+        assert!(!shown(&loaded), "the arm needs a layout without the panel: {loaded}");
+        for n in 1..=2 {
+            let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
+            assert!(!reply.is_empty(), "double-click {n} ran: {err}");
+            let layout = json(&reply)["layout"].clone();
+            assert!(shown(&layout), "double-click {n} shows the Magic Wand panel: {reply}");
+        }
         unsafe { jas_engine_free(e) };
     }
 
