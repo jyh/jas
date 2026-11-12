@@ -7699,19 +7699,30 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// A PANEL destination (Magic Wand's `tool_options_panel`) needs the shell
-    /// to show a panel, which this door cannot name yet: it is REFUSED BY
-    /// NAME, never a silent no-op.
+    /// jas §869 item 5 (STATUS-jas row 107): a PANEL destination (Magic Wand's
+    /// `tool_options_panel`) SHOWS that panel, through the `layout:` effect the
+    /// Window menu's panel items run, as `show_panel`, never a toggle. So a
+    /// second double-click keeps it shown, as the web's does. The act reply's
+    /// `layout` is the dock the shell redraws.
     #[test]
-    fn a_double_click_whose_options_are_a_panel_is_refused_by_name() {
+    fn a_double_click_whose_options_are_a_panel_shows_that_panel() {
         use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
+        let shown = |l: &serde_json::Value| l["anchored"].as_array().into_iter().flatten()
+            .flat_map(|d| d["groups"].as_array().into_iter().flatten())
+            .flat_map(|g| g["panels"].as_array().into_iter().flatten())
+            .any(|p| p == "magic_wand_panel_content");
+        let loaded = json(&layout_load(e, "Default"));
+        assert!(!shown(&loaded), "the arm needs a layout without the panel: {loaded}");
         let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
         assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
-        assert_eq!(reply, "", "nothing ran");
-        assert!(err.contains(r#""panel_event":"ToolOptionsPanel""#) && err.contains("magic_wand"), "{err}");
+        for n in 1..=2 {
+            let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
+            assert!(!reply.is_empty(), "double-click {n} ran: {err}");
+            let layout = json(&reply)["layout"].clone();
+            assert!(shown(&layout), "double-click {n} shows the Magic Wand panel: {reply}");
+        }
         unsafe { jas_engine_free(e) };
     }
 
