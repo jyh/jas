@@ -187,6 +187,12 @@ fn events_of(node: &Value) -> Vec<Value> {
     if node.get("action").and_then(Value::as_str).is_some() {
         add("click");
     }
+    // A toolbar TOOL SLOT answers `double_click` (the active tool's options,
+    // `interpreter::tool_options`), which the engine runs without a declared
+    // behavior, so the shell learns it here.
+    if crate::interpreter::tool_options::is_toolbar_tool_slot(node) {
+        add("double_click");
+    }
     out
 }
 
