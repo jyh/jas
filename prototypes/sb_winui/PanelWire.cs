@@ -2130,6 +2130,25 @@ internal static class LayoutWire
 
     internal sealed record Group(IReadOnlyList<string> Panels, int Active, bool Collapsed);
     internal sealed record Anchored(int DockId, IReadOnlyList<Group> Groups);
+
+    /// <summary>
+    /// jas row 111 (spec #912): the anchored group a layout ACT left a panel
+    /// newly on screen in: the first group whose active panel was not the active
+    /// panel of any group before (a raised background tab, or a panel appended),
+    /// or null. A CLOSE (any panel present before is gone after) names none, so
+    /// the group a close leaves behind is never scrolled to.
+    /// </summary>
+    internal static int? ShownGroup(Anchored? before, Anchored after) => null;
+
+    /// <summary>
+    /// jas row 111: the vertical offset that brings a group (its top and height
+    /// in the dock's content, DIPs) inside a viewport at <paramref name="offset"/>
+    /// of <paramref name="viewport"/> height, or null when it is inside already.
+    /// The smallest scroll: a group below the fold aligns its bottom to the
+    /// viewport's bottom, one above aligns its top, and one taller than the
+    /// viewport aligns its top.
+    /// </summary>
+    internal static double? ScrollToShow(double top, double height, double offset, double viewport) => null;
     internal sealed record Floated(int DockId, double X, double Y, double Width, int Z, IReadOnlyList<Group> Groups);
 
     /// <summary>A dock's groups, or null for any group the engine would never send.</summary>
