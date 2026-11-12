@@ -315,7 +315,15 @@ public sealed partial class MainWindow : Window
     /// <summary>The engine's id for the anchored dock the groups belong to (FP-3).</summary>
     private int _dockId;
 
-    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron, Button Menu);
+    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron, Button Menu, FrameworkElement Frame);
+
+    /// <summary>jas row 111: the dock column's scroller, the layout last drawn, and
+    /// the group an act just showed, scrolled into view while it settles.</summary>
+    private ScrollViewer? _dockScroll;
+    private LayoutWire.Anchored? _dockLast;
+    private string? _dockShowKey;
+    private DateTime _dockShowUntil;
+    private double? _dockShowLast;
     private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
 
     private PaneView? DockGroupView(string key) => _dockGroups.TryGetValue(key, out var g) ? g.View : null;
@@ -792,6 +800,25 @@ public sealed partial class MainWindow : Window
              + $"at=[{string.Join(";", placed)}] via={via}");
     }
 
+    /// <summary>
+    /// jas row 111: while an act's shown group settles (its plan and the groups
+    /// above it still drawing), keep it inside the dock's viewport with the
+    /// smallest scroll (<see cref="LayoutWire.ScrollToShow"/>). Stops after 2 s.
+    /// </summary>
+    private void ScrollShownGroupIntoView()
+    {
+        if (_dockShowKey is not { } key || _dockScroll is null || _dockStack is null) { return; }
+        if (DateTime.UtcNow > _dockShowUntil) { _dockShowKey = null; return; }
+        if (!_dockGroups.TryGetValue(key, out var group) || group.Frame.ActualHeight <= 0) { return; }
+        var top = group.Frame.TransformToVisual(_dockStack).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+        var target = LayoutWire.ScrollToShow(top, group.Frame.ActualHeight, _dockScroll.VerticalOffset, _dockScroll.ViewportHeight);
+        if (target is not { } y || y == _dockShowLast) { return; }
+        _dockShowLast = y;
+        Report($"DOCK SHOW key={key} top={top:0} height={group.Frame.ActualHeight:0} viewport={_dockScroll.ViewportHeight:0} "
+             + $"offset={_dockScroll.VerticalOffset:0}->{y:0}");
+        _dockScroll.ChangeView(null, y, null, disableAnimation: true);
+    }
+
     /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
     private void OnDockChanged()
     {
@@ -908,7 +935,7 @@ public sealed partial class MainWindow : Window
                 host.Children.Add(frame);
                 // In range by construction: `LayoutWire.Dock` refuses an `active` outside its group.
                 var active = g.Active;
-                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
+                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton, frame);
                 MarkDockTab(key, ids[active]);
                 // The engine's collapse, drawn silently at build (the YAML seeds every group open).
                 // #774: the menu is hidden while its group is collapsed.
@@ -920,6 +947,18 @@ public sealed partial class MainWindow : Window
             }
             var i = 0;
             foreach (var g in read.Groups) { BuildGroup(SbWinUi.Canvas.DockPaneKey(i++), g, _dockStack); }
+            // jas row 111 (spec #912): an ACT (Window > <panel>) that left a panel
+            // newly on screen scrolls its group into the dock's view. A view act:
+            // the layout is unchanged. It settles as the groups' plans arrive.
+            var shown = snap.Cause == "act" ? LayoutWire.ShownGroup(_dockLast, read) : null;
+            _dockLast = read;
+            if (shown is { } showIdx)
+            {
+                _dockShowKey = SbWinUi.Canvas.DockPaneKey(showIdx);
+                _dockShowUntil = DateTime.UtcNow.AddSeconds(2);
+                _dockShowLast = null;
+                Report($"DOCK SHOW ASKED key={_dockShowKey} panel={read.Groups[showIdx].Panels[read.Groups[showIdx].Active]}");
+            }
             // DOCK DRAWN counts the ANCHORED groups only: Q6.D compares it with the
             // `dock{i}` panes, and a floating group is not one.
             var docked = _dockGroups.Where(d => d.Key.StartsWith("dock", StringComparison.Ordinal)).ToList();
@@ -1406,12 +1445,14 @@ public sealed partial class MainWindow : Window
                 _dockWanted = true;
                 _dockName = dockKnob.Trim();
                 _dockStack = new StackPanel();
-                PaneHost.Child = new ScrollViewer
+                _dockScroll = new ScrollViewer
                 {
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     Content = _dockStack,
                 };
+                PaneHost.Child = _dockScroll;
+                _dockStack.LayoutUpdated += (_, _) => ScrollShownGroupIntoView();
             }
             if (PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_TOOLBAR"), true) == "on")
             {
