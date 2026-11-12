@@ -132,6 +132,7 @@ web-sys = { version = "0.3", optional = true, features = [
     "Clipboard",
     "TextMetrics",
     "Storage",
+    "CssStyleDeclaration",
 ] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
