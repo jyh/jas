@@ -3102,8 +3102,9 @@ internal sealed unsafe class Canvas : IDisposable
         bool ok;
         try
         {
-            // ⭐ AN EMPTY SB_SCENE RESOLVES TO `benchmark` BEFORE IT ARRIVES
-            // HERE (MainWindow), so every historical invocation -- including the
+            // ⭐ AN EMPTY SB_SCENE RESOLVES TO `benchmark` IN A BUILD TREE (and to
+            // `app` in an installed layout) BEFORE IT ARRIVES HERE
+            // (`MainWindow.EffectiveScene`), so every historical invocation -- including the
             // committed 4K sweep, which never set the knob -- keeps meaning what
             // it meant. The sweep now sets it explicitly so its receipts say
             // what they ran.

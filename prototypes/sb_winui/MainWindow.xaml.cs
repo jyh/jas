@@ -1389,7 +1389,7 @@ public sealed partial class MainWindow : Window
         // `StartFirstLayout` -- because the engine does not exist yet.
         // The SAME comparison the scene dispatch makes (no trim), so the pane
         // is shown exactly when the `app` scene is the one that will run.
-        if (string.Equals(Environment.GetEnvironmentVariable("SB_SCENE"), "app",
+        if (string.Equals(EffectiveScene(), "app",
                           StringComparison.OrdinalIgnoreCase))
         {
             _paneWanted = true;
@@ -1400,7 +1400,7 @@ public sealed partial class MainWindow : Window
             // (#343). `SB_TOOLBAR=0` turns it off; `PaneKnobs.Toolbar` decides.
             // THE DOCK's tab groups, behind SB_DOCK=<layout name> (e.g. Default):
             // the dock column then holds the groups instead of the one pane.
-            var dockKnob = Environment.GetEnvironmentVariable("SB_DOCK");
+            var dockKnob = EffectiveDock();
             if (!string.IsNullOrWhiteSpace(dockKnob))
             {
                 _dockWanted = true;
@@ -2303,14 +2303,14 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            // ⭐ AN EMPTY SB_SCENE RESOLVES TO `benchmark` (FREEZE §1.2 / A8).
+            // ⭐ AN EMPTY SB_SCENE RESOLVES TO `benchmark` IN A BUILD TREE (FREEZE
+            // §1.2 / A8), and to `app` in an installed layout (`EffectiveScene`).
             // `RenderFrame` was what ran when the knob was unset, and the
             // committed 4K sweep never set it -- so every historical invocation
             // keeps its meaning, and the sweep now names the scene explicitly so
             // its receipts say what they ran. An unrecognised value is refused by
             // name on the render thread.
-            var scene = Environment.GetEnvironmentVariable("SB_SCENE");
-            if (string.IsNullOrWhiteSpace(scene)) { scene = "benchmark"; }
+            var scene = EffectiveScene();
 
             // O1's walk hashes at every stop. Decided HERE, from the scene name,
             // rather than inside the walk: the walk is generic and the hashing
@@ -2753,6 +2753,33 @@ public sealed partial class MainWindow : Window
     // =======================================================================
     // THE RECEIPT
     // =======================================================================
+
+    /// <summary>
+    /// The dock layout: <c>SB_DOCK</c> when set, else <c>Default</c> in an
+    /// installed layout (a bare launch of the zip showed one panel behind a
+    /// picker, STATUS-flask 884) and none in a build tree, as before.
+    /// </summary>
+    internal static string? EffectiveDock()
+    {
+        var dock = Environment.GetEnvironmentVariable("SB_DOCK");
+        if (!string.IsNullOrWhiteSpace(dock)) { return dock; }
+        return JasCore.IsInstalled ? "Default" : null;
+    }
+
+    /// <summary>
+    /// The scene that runs: <c>SB_SCENE</c> when set, else the APP in an
+    /// installed layout (the zip a person unzips sets no variables, and found
+    /// the benchmark scene with an empty menu bar, STATUS-flask 882) and the
+    /// benchmark in a build tree, as before. The ONE reading of the default:
+    /// the pane decision and the scene dispatch both call it, so they cannot
+    /// disagree about which scene runs.
+    /// </summary>
+    internal static string EffectiveScene()
+    {
+        var scene = Environment.GetEnvironmentVariable("SB_SCENE");
+        if (!string.IsNullOrWhiteSpace(scene)) { return scene; }
+        return JasCore.IsInstalled ? "app" : "benchmark";
+    }
 
     /// <summary>
     /// Publish the outcome INTO THE LOG AND THE WINDOW TITLE -- split, serialised,
