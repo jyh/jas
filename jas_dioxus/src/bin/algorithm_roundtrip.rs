@@ -1254,12 +1254,19 @@ fn run_path_text_layout(vectors: &[Value]) -> Vec<Value> {
                 })
                 .collect();
 
+            // Row 112: the caret at index 0, which an EMPTY session draws at
+            // start_offset along the tangent; null only on a degenerate path.
+            let caret = layout
+                .cursor_pos(0)
+                .map_or(Value::Null, |(x, y, angle)| json!({"x": x, "y": y, "angle": angle}));
+
             json!({
                 "name": name,
                 "result": {
                     "total_length": layout.total_length,
                     "char_count": layout.char_count,
-                    "glyphs": glyphs
+                    "glyphs": glyphs,
+                    "caret": caret
                 }
             })
         })

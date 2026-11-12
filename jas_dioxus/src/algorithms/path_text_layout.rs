@@ -215,6 +215,23 @@ mod tests {
         assert!(y.abs() < 1e-6);
     }
 
+    /// Row 112 (flask §895): an EMPTY session draws its caret at the path point
+    /// of `start_offset`, along the tangent, before the first character.
+    #[test]
+    fn cursor_pos_on_an_empty_layout_is_the_start_point_along_the_tangent() {
+        let m = fixed(10.0);
+        let l = layout_path_text(&straight(), "", 0.25, 16.0, m.as_ref());
+        let (x, y, a) = l.cursor_pos(0).expect("an empty session still has a caret");
+        assert!((x - 25.0).abs() < 1e-6 && y.abs() < 1e-6 && a.abs() < 1e-6, "({x}, {y}, {a})");
+        let vertical = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+        ];
+        let l = layout_path_text(&vertical, "", 0.5, 16.0, m.as_ref());
+        let (x, y, a) = l.cursor_pos(0).expect("a caret on the vertical path");
+        assert!(x.abs() < 1e-6 && (y - 50.0).abs() < 1e-6 && (a - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "({x}, {y}, {a})");
+    }
+
     #[test]
     fn cursor_pos_at_end_is_after_last_glyph() {
         let m = fixed(10.0);

@@ -13,7 +13,8 @@
       "expected": {
         "total_length": 100.0,
         "char_count": 0,
-        "glyphs": []
+        "glyphs": [],
+        "caret": {"x": 0.0, "y": 0.0, "angle": 0.0}
       }
     },
     {
@@ -30,7 +31,8 @@
           {"idx": 0, "cx": 5.0, "cy": 0.0, "angle": 0.0, "overflow": false},
           {"idx": 1, "cx": 15.0, "cy": 0.0, "angle": 0.0, "overflow": false},
           {"idx": 2, "cx": 25.0, "cy": 0.0, "angle": 0.0, "overflow": false}
-        ]
+        ],
+        "caret": {"x": 0.0, "y": 0.0, "angle": 0.0}
       }
     },
     {
@@ -46,7 +48,8 @@
         "glyphs": [
           {"idx": 0, "cx": 55.0, "cy": 0.0, "angle": 0.0, "overflow": false},
           {"idx": 1, "cx": 65.0, "cy": 0.0, "angle": 0.0, "overflow": false}
-        ]
+        ],
+        "caret": {"x": 50.0, "y": 0.0, "angle": 0.0}
       }
     },
     {
@@ -64,7 +67,8 @@
           {"idx": 1, "cx": 15.0, "cy": 0.0, "angle": 0.0, "overflow": false},
           {"idx": 2, "cx": 20.0, "cy": 0.0, "angle": 0.0, "overflow": true},
           {"idx": 3, "cx": 20.0, "cy": 0.0, "angle": 0.0, "overflow": true}
-        ]
+        ],
+        "caret": {"x": 0.0, "y": 0.0, "angle": 0.0}
       }
     },
     {
@@ -80,8 +84,39 @@
         "glyphs": [
           {"idx": 0, "cx": 0.0, "cy": 5.0, "angle": 1.5707963267948966, "overflow": false},
           {"idx": 1, "cx": 0.0, "cy": 15.0, "angle": 1.5707963267948966, "overflow": false}
-        ]
+        ],
+        "caret": {"x": 0.0, "y": 0.0, "angle": 1.5707963267948966}
+      }
+    },
+    {
+      "name": "empty_content_caret_at_start_offset",
+      "derivation": "row 112: an EMPTY session's caret sits at the path point of start_offset (0.25 of a 100-long horizontal line = (25, 0)), along the tangent (0 rad). Before the fix cursor_pos answered nothing with no glyphs.",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}],
+      "content": "",
+      "start_offset": 0.25,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 100.0,
+        "char_count": 0,
+        "glyphs": [],
+        "caret": {"x": 25.0, "y": 0.0, "angle": 0.0}
+      }
+    },
+    {
+      "name": "empty_content_caret_follows_the_tangent",
+      "derivation": "row 112: the same on a vertical line, so the caret's angle is the path's tangent (pi/2), not a default 0: start_offset 0.5 of (0,0)-(0,100) = (0, 50).",
+      "path": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 0.0, "y": 100.0}],
+      "content": "",
+      "start_offset": 0.5,
+      "font_size": 16.0,
+      "char_width": 10.0,
+      "expected": {
+        "total_length": 100.0,
+        "char_count": 0,
+        "glyphs": [],
+        "caret": {"x": 0.0, "y": 50.0, "angle": 1.5707963267948966}
       }
     }
-  ]
+]
 }
