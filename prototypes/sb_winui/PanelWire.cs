@@ -1,4 +1,4 @@
-namespace SbWinUi;
+﻿namespace SbWinUi;
 
 /// <summary>
 /// W2b-2: what a panel control SENDS the core, what a row SAYS it sent, and
@@ -95,7 +95,7 @@ internal static class PanelWire
     /// (<see cref="KeyName"/>); every other event carries none.
     internal static byte[] EventJson(string widget, string eventName, string? value,
                                      bool alt, bool shift, bool ctrl, bool meta,
-                                     string? path = null, string? key = null)
+                                     string? path = null, string? key = null, long? seq = null)
     {
         var ev = new Dictionary<string, object>
         {
@@ -108,6 +108,7 @@ internal static class PanelWire
         };
         if (value is not null) { ev["value"] = value; }
         if (key is not null) { ev["key"] = key; }
+        if (seq is { } n) { ev["seq"] = n; }
         if (PlanPath(path) is { } p) { ev["path"] = p; }
         return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
     }
@@ -1951,10 +1952,11 @@ internal static class KeyWire
 /// <summary>
 /// Press-and-hold (the 10-30 sitting, finding 1; the engine half is #771). A
 /// `mouse_down` / `mouse_up` reply carries `"timers"`: `{"start": id,
-/// "delay_ms": n}` (start, or restart, that timer) or `{"cancel": id}`, and no
-/// key at all when no timer act happened. The shell only runs the clock: the
-/// engine keeps the effects and, on the tick `{"event": "timer", "value": id}`,
-/// runs them only if that id is still pending. Pure, so `sb_winui_tests`
+/// "delay_ms": n, "seq": k}` (start, or restart, that timer) or `{"cancel": id}`,
+/// and no key at all when no timer act happened. The shell only runs the clock:
+/// the engine keeps the effects and, on the tick `{"event": "timer", "value": id,
+/// "seq": k}`, runs them only if THAT start is still pending (jas 864 item 4: a
+/// later press of the same slot re-arms the same id with a new seq). Pure, so `sb_winui_tests`
 /// drives it. A start with no delay, or a negative one, is refused, never
 /// defaulted. A malformed act (no id, no whole delay, both `start` and
 /// `cancel`, not an object) is REFUSED BY NAME: its own JSON text goes in
@@ -1962,7 +1964,10 @@ internal static class KeyWire
 /// </summary>
 internal static class TimerWire
 {
-    internal readonly record struct Act(string Id, int DelayMs, bool Cancel);
+    /// <summary>One timer act. `Seq` is a start's sequence number (jas 864
+    /// item 4), echoed on its tick so the engine runs only that start; null
+    /// on a cancel.</summary>
+    internal readonly record struct Act(string Id, int DelayMs, bool Cancel, long? Seq = null);
 
     internal readonly record struct Reading(IReadOnlyList<Act> Acts, IReadOnlyList<string> Refused);
 
@@ -2004,10 +2009,18 @@ internal static class TimerWire
                 ? new Act(cancelId, 0, Cancel: true)
                 : null;
         }
+        // A start's `seq` is optional to read (an older engine names none) but
+        // never guessed: one that is present and not a whole number refuses the act.
+        long? seq = null;
+        if (e.TryGetProperty("seq", out var q))
+        {
+            if (q.ValueKind != System.Text.Json.JsonValueKind.Number || !q.TryGetInt64(out var n)) { return null; }
+            seq = n;
+        }
         return s.ValueKind == System.Text.Json.JsonValueKind.String && s.GetString() is { Length: > 0 } startId
             && e.TryGetProperty("delay_ms", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number
             && d.TryGetInt32(out var ms) && ms >= 0
-            ? new Act(startId, ms, Cancel: false)
+            ? new Act(startId, ms, Cancel: false, seq)
             : null;
     }
 }

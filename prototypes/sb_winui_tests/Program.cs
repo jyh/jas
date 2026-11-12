@@ -1,4 +1,4 @@
-using SbWinUi;
+﻿using SbWinUi;
 
 // ===========================================================================
 // THE TITLE ORACLE'S RULE, DRIVEN
@@ -777,6 +777,23 @@ static class Program
         // #778's review: a malformed act is REFUSED BY NAME (its own JSON text),
         // never dropped silently. The engine emits none; the arm is the shape.
         static string TR(string reply) => string.Join(" | ", TimerWire.Parse(reply).Refused);
+        // jas 864 item 4: a start names a `seq` and the tick echoes it, so a
+        // tick from an earlier press of the same slot cannot run a later one.
+        static string TS(string reply) => string.Join(",", TimerWire.Parse(reply).Acts.Select(a => a.Seq?.ToString() ?? "none"));
+        Eq("timers: a start carries its seq", "7",
+            TS("""{"timers":[{"start":"long_press_btn_hand_slot","delay_ms":250,"seq":7}]}"""));
+        Eq("timers: a cancel names no seq", "none", TS("""{"timers":[{"cancel":"a"}]}"""));
+        Eq("timers: a start with no seq still reads, seq none", "none", TS("""{"timers":[{"start":"a","delay_ms":5}]}"""));
+        Eq("timers: a seq that is not a whole number is refused by name", """{"start":"a","delay_ms":5,"seq":"x"}""",
+            TR("""{"timers":[{"start":"a","delay_ms":5,"seq":"x"}]}"""));
+        {
+            var tick = System.Text.Encoding.UTF8.GetString(
+                PanelWire.EventJson("btn_hand_slot", "timer", "long_press_btn_hand_slot", false, false, false, false, seq: 7));
+            Eq("timers: the tick echoes its seq", "True", tick.Contains("\"seq\":7").ToString());
+            var plain = System.Text.Encoding.UTF8.GetString(
+                PanelWire.EventJson("btn_hand_slot", "click", null, false, false, false, false));
+            Eq("timers: a press carries no seq", "False", plain.Contains("seq").ToString());
+        }
         Eq("timers: a start with its delay", "start:long_press_btn_hand_slot@250",
             TP("""{"doc_changed":false,"changed":[],"timers":[{"start":"long_press_btn_hand_slot","delay_ms":250}]}"""));
         Eq("timers: a cancel", "cancel:long_press_btn_hand_slot", TP("""{"timers":[{"cancel":"long_press_btn_hand_slot"}]}"""));
