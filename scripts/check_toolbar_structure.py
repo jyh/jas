@@ -84,7 +84,7 @@ def _click_tool(button):
                 return ""
             if raw.replace("_", "").isalnum():
                 return raw
-            sys.path.insert(0, str(_ROOT))
+            sys.path.insert(0, _ROOT.as_posix())
             from workspace_interpreter.expr import evaluate
             v = evaluate(raw, {"state": {"active_tool": None}})
             return v.value if isinstance(v.value, str) else ""
