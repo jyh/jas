@@ -569,6 +569,24 @@ public sealed partial class MainWindow
                         el = BuildBrushPreview(leaf, ref previewEmpty);
                         break;
 
+                    // jas 887 item 16: an element's preview (the Layers row's
+                    // `lp_preview`) is an EMPTY white square with a 1-DIP border,
+                    // as the web (`renderer.rs` `render_element_preview`: #fff,
+                    // 1px border) and the Mac (`YamlPanelBodyView.swift`
+                    // `renderElementPreview`: white, gray 1pt stroke) draw it. Its
+                    // size is the plan's rect. No port draws the thumbnail yet,
+                    // so it counts as an empty preview, as an empty brush tile does.
+                    case "element_preview":
+                        previews++;
+                        previewEmpty++;
+                        el = new Border
+                        {
+                            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                            BorderBrush = _paneMutedBrush,
+                            BorderThickness = new Thickness(1),
+                        };
+                        break;
+
                     // The gradient slider (the 10-20 sitting, item 6: it was a
                     // `[gradient_slider]` placeholder). ApplyLeafValues draws it
                     // from `bind.stops`; its gestures (council 10-21 ⑤, node 3b)
