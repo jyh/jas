@@ -1393,6 +1393,13 @@ public sealed partial class MainWindow
             // (a toolbar slot's alternates); its click goes through the gate.
             if (PanelWire.RoutesEvent(leaf.Events, id, path, "mouse_down")) { WirePressAndHold(btn, id, path, sendsClick); }
             else if (sendsClick) { btn.Click += (_, _) => OnPaneClick(id, path); }
+            // jas 864 item 2: a toolbar tool slot's double-click opens the active
+            // tool's options. The plan names the event and the engine runs it
+            // (its reply names the dialog), so the shell holds no tool table.
+            if (PanelWire.RoutesEvent(leaf.Events, id, path, "double_click"))
+            {
+                btn.DoubleTapped += (_, _) => SendPane(id, "double_click", null, path);
+            }
 
             // Row 56 (#796): a labelled row (a tool-alternates flyout's) draws the
             // icon, then the label, each in the rect the engine planned for it; the

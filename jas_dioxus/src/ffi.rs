@@ -7626,8 +7626,11 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// The ACTIVE tool, not the slot's default: the pencil slot's alternate,
-    /// Paintbrush, opens Paintbrush's options from that slot.
+    /// The destination is the ACTIVE tool's, not the slot's: with Paintbrush
+    /// active, the pencil slot's double-click names Paintbrush's options. (By
+    /// hand the slot's own clicks select Pencil first, as in a browser's
+    /// click, click, dblclick, so this pins the resolver's input, not a
+    /// gesture a person makes.)
     #[test]
     fn a_double_click_opens_the_active_alternates_options_not_the_slots_default() {
         use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
