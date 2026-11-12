@@ -7764,6 +7764,36 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// jas §864 item 4 (flask §866): a quick double press on a press-and-hold
+    /// slot opened its flyout. Every press re-arms the SAME timer id, so the
+    /// FIRST press's tick, arriving after the second press re-armed that id,
+    /// ran the second press's timer (measured on the Windows box: the shell
+    /// started press 1's clock from the reply, and the engine's queue put that
+    /// tick after `mouse_down` 2). Each start names a `seq`, the shell echoes
+    /// it on the tick, and a tick whose `seq` is not the pending timer's is
+    /// `StaleTimer`.
+    #[test]
+    fn a_tick_from_an_earlier_press_does_not_run_a_later_presss_timer() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let tick = |seq: &serde_json::Value| format!(
+            r#"{{"event":"timer","value":"long_press_btn_arrow_slot","seq":{seq}}}"#);
+        let (r1, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let seq1 = json(&r1)["timers"][0]["seq"].clone();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_up"}"#);
+        let (r2, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let seq2 = json(&r2)["timers"][0]["seq"].clone();
+        let (reply, err) = behave(e, TOOLBAR, &tick(&seq1));
+        assert_eq!(reply, "", "the first press's tick runs nothing: {err}");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        assert!(unsafe { &*e }.store.borrow().dialog_id().is_none(), "no flyout opened");
+        assert!(seq1.is_u64() && seq2.is_u64() && seq1 != seq2, "each start names its own seq: {r1} {r2}");
+        // The second press's own tick still opens the flyout (a real hold).
+        let (reply, err) = behave(e, TOOLBAR, &tick(&seq2));
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "{reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A timer is the PANEL's: a tick through another panel's door does not
     /// run the toolbar's pending effects.
     #[test]
