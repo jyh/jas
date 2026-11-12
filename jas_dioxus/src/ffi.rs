@@ -7550,6 +7550,82 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// jas §864 item 2 (flask §538): a DOUBLE-CLICK on a toolbar tool slot
+    /// opens the ACTIVE tool's options, as the web's toolbar does
+    /// (`tool_options_dest_for_yaml_id`). The engine resolves the tool to its
+    /// options and runs them, so the shell sends `dblclick` and carries no YAML
+    /// knowledge. A dialog destination comes back as the act reply's `dialog`.
+    #[test]
+    fn a_double_click_on_a_tool_slot_opens_the_active_tools_options_dialog() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("rotate"));
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"dblclick"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply:?} {err}"));
+        assert_eq!(v["dialog"], "rotate_options", "the reply names the dialog: {reply}");
+        assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), Some("rotate_options"), "and it is open in the engine");
+        assert!(!err.contains("panel_event"), "a dialog that opened is no refusal: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The ACTIVE tool, not the slot's default: the pencil slot's alternate,
+    /// Paintbrush, opens Paintbrush's options from that slot.
+    #[test]
+    fn a_double_click_opens_the_active_alternates_options_not_the_slots_default() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let brush = TOOL_IDS.iter().position(|t| *t == "paintbrush").expect("the Paintbrush tool");
+        assert_eq!(unsafe { jas_set_tool(e, brush) }, JasStatus::Ok);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_pencil_slot","event":"dblclick"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply:?} {err}"));
+        assert_eq!(v["dialog"], "paintbrush_tool_options", "{reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A tool that declares no options opens nothing, and says so
+    /// (`Unchanged`), as the web's double-click is then a no-op.
+    #[test]
+    fn a_double_click_on_a_tool_with_no_options_opens_nothing_by_name() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"dblclick"}"#);
+        assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "nothing opened: {reply}");
+        assert!(err.contains(r#""panel_event":"Unchanged""#), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Only a TOOL SLOT takes it (a button whose behavior selects a tool), as
+    /// the web scopes it (`is_toolbar_tool_slot`): a double-click on the
+    /// toolbar's Swap button opens no tool's options.
+    #[test]
+    fn a_double_click_on_a_non_tool_button_opens_no_tool_options() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"swap_btn","event":"dblclick"}"#);
+        assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "Rotate's options did not open: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A PANEL destination (Magic Wand's `tool_options_panel`) needs the shell
+    /// to show a panel, which this door cannot name yet: it is REFUSED BY
+    /// NAME, never a silent no-op.
+    #[test]
+    fn a_double_click_whose_options_are_a_panel_is_refused_by_name() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
+        assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"dblclick"}"#);
+        assert_eq!(reply, "", "nothing ran");
+        assert!(err.contains(r#""panel_event":"ToolOptionsPanel""#) && err.contains("magic_wand"), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// FINDING 1 (the 10-30 Windows feel sitting): no toolbar flyouts. A tool
     /// slot opens its alternates on a 250 ms press-and-hold (`mouse_down` runs
     /// `start_timer`, `mouse_up` runs `cancel_timer`, `layout.yaml`), and the
