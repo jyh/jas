@@ -31,6 +31,9 @@ pub struct PathTextLayout {
     pub total_length: f64,
     pub font_size: f64,
     pub char_count: usize,
+    /// Row 112: the (x, y, tangent angle) at `start_offset`, so an EMPTY layout
+    /// still has a caret position (`cursor_pos(0)`); `None` on a degenerate path.
+    pub start: Option<(f64, f64, f64)>,
 }
 
 /// Compute glyph positions for `content` flowing along `d`.
@@ -53,10 +56,11 @@ pub fn layout_path_text(
     let n = chars.len();
 
     if total <= 0.0 || pts.is_empty() {
-        return PathTextLayout { glyphs, total_length: total, font_size, char_count: n };
+        return PathTextLayout { glyphs, total_length: total, font_size, char_count: n, start: None };
     }
 
     let start_arc = start_offset.clamp(0.0, 1.0) * total;
+    let start = Some(sample_at_arc(&pts, &lengths, start_arc));
     let mut cur_arc = start_arc;
 
     for (i, ch) in chars.iter().enumerate() {
@@ -77,7 +81,7 @@ pub fn layout_path_text(
         cur_arc += cw;
     }
 
-    PathTextLayout { glyphs, total_length: total, font_size, char_count: n }
+    PathTextLayout { glyphs, total_length: total, font_size, char_count: n, start }
 }
 
 /// Sample (x, y, tangent_angle) at a given arc length.
@@ -117,8 +121,10 @@ impl PathTextLayout {
     /// Cursor visual position at index `cursor` (0..=char_count).
     /// Returns (x, y, angle) of the cursor base.
     pub fn cursor_pos(&self, cursor: usize) -> Option<(f64, f64, f64)> {
+        // Row 112: with no glyphs the caret sits at the start point, along the
+        // path's tangent there (the session's first character goes there).
         if self.glyphs.is_empty() {
-            return None;
+            return self.start;
         }
         if cursor == 0 {
             let g = &self.glyphs[0];
