@@ -69,7 +69,7 @@ pub(crate) const KEY_NOT_SELECTABLE: &[&str] = &[];
 /// Tools in `TOOL_IDS` that are NATIVE, not workspace YAML tools, so the
 /// workspace's tool table does not list them: built by name in `build_tool`.
 #[cfg(test)]
-const NATIVE_TOOL_IDS: &[&str] = &["type"];
+const NATIVE_TOOL_IDS: &[&str] = &["type", "type_on_path"];
 
 /// The tools the shell may select, by index. Order is ABI.
 ///
@@ -114,9 +114,11 @@ pub const TOOL_IDS: &[&str] = &[
     "star",
     // 2026-10-20 (the 10-20 feel sitting, finding 3): the Type tool, APPENDED
     // so every index above keeps its meaning. It is native, not a workspace
-    // YAML tool, so `build_tool` builds it by name. Type on a Path is not
-    // here yet: it needs a path to place on, and is its own node.
+    // YAML tool, so `build_tool` builds it by name.
     "type",
+    // 2026-11-12 (STATUS-flask 865: the popover pick was refused on Windows):
+    // Type on a Path, native like Type, APPENDED.
+    "type_on_path",
 ];
 
 /// How many tools the shell may select. Pairs with [`jas_tool_name`].
@@ -634,6 +636,9 @@ fn artboard_rect(ab: &crate::document::artboard::Artboard) -> crate::painter::Re
 fn build_tool(id: &str) -> Option<Box<dyn CanvasTool>> {
     if id == "type" {
         return Some(Box::new(crate::tools::type_tool::TypeTool::new()));
+    }
+    if id == "type_on_path" {
+        return Some(Box::new(crate::tools::type_on_path_tool::TypeOnPathTool::new()));
     }
     let ws = crate::interpreter::workspace::Workspace::load()?;
     let spec = ws.data().get("tools")?.get(id)?;
