@@ -98,7 +98,14 @@ gradient_slider: commit
   widget's `click` behaviors, else its node-level `action` (see §Clicking a
   button). `mouse_down` and `mouse_up` carry press-and-hold handling. A
   click never runs them. This document defines only how a hold relates to
-  the click (see §A press-and-hold consumes its click).
+  the click (see §A press-and-hold consumes its click). A toolbar **tool
+  slot** (a click-kind widget whose behavior is `action: select_tool`) also
+  answers `double_click`, which no YAML declares. The engine supplies it
+  through the resolver the web's toolbar reads
+  (`interpreter::tool_options::tool_options_dest_for_yaml_id`) and opens the
+  ACTIVE tool's options: a dialog, an action, or a panel. On the engine's
+  panel door a panel destination is refused by name (`ToolOptionsPanel`)
+  for now. The panel plan names `double_click` in the slot's `events`.
 
 - **The stops kind** is `gradient_slider`. Its one behavior event,
   `commit`, names "a gesture finished". A shell reports gestures, not
@@ -368,6 +375,14 @@ pointer is either a hold or a click, never both:
 3. **Each fired hold consumes one click at most**, and only that press's
    click. A click with no press of its own (an accessibility press) is a
    click, and so is the next press of the same slot.
+4. **A quick double press is two presses, never a hold.** Every press of a
+   slot re-arms the SAME timer id. So where a port runs the clock apart from
+   the timer's owner (the engine's panel door, with the shell holding the
+   clock), each start names a `seq`, and only a tick that echoes the
+   pending start's `seq` runs it. The first press's tick then cannot fire
+   the timer the second press re-armed. Measured on the Windows box before
+   this rule: 4 of 10 quick double presses on the Hand slot opened its
+   flyout.
 
 A port enforces this explicitly, by the timer ids the widget's `mouse_down`
 starts. It may not rely on the flyout covering the button: where the release

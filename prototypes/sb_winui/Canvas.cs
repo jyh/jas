@@ -409,6 +409,12 @@ internal sealed class PanelClickCmd : Cmd
     internal string? Value;
 
     /// <summary>
+    /// A timer tick's `seq` (jas 864 item 4): the start's own number, echoed so
+    /// the engine runs only that start. Null on every other act.
+    /// </summary>
+    internal long? Seq;
+
+    /// <summary>
     /// A slider gesture's RAW parameters (`WIDGET_EVENTS.md` §The stops kind),
     /// sent as an OBJECT `value` by <see cref="PanelWire.GestureJson"/>; null for
     /// every other act. Set, it replaces <see cref="Value"/> on the wire and in
@@ -6007,7 +6013,7 @@ internal sealed unsafe class Canvas : IDisposable
             ? PanelWire.GestureJson(click.Widget, click.Event, gesture,
                                     click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path)
             : PanelWire.EventJson(click.Widget, click.Event, click.Value,
-                                  click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path, click.Key);
+                                  click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path, click.Key, click.Seq);
 
     /// <summary>
     /// The fields every click row opens with. `event=` and `value=` come AFTER

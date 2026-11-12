@@ -211,8 +211,12 @@ pub struct JasEngine {
     /// The PENDING timers (finding 1 of the 10-30 sitting), by (panel, timer
     /// id): the effects a `start_timer` keeps until the shell's tick. The
     /// shell holds only the clock, so a tick for an id not here (cancelled,
-    /// already fired, never started) runs nothing.
-    timers: RefCell<std::collections::BTreeMap<(String, String), Vec<serde_json::Value>>>,
+    /// already fired, never started) runs nothing. Each start has a `seq`
+    /// (jas §864 item 4): every press re-arms the SAME id, so only a tick that
+    /// echoes the pending start's `seq` runs it.
+    timers: RefCell<std::collections::BTreeMap<(String, String), (u64, Vec<serde_json::Value>)>>,
+    /// The last timer `seq` handed out; the next start takes one more.
+    timer_seq: std::cell::Cell<u64>,
     /// The agent session beside the document (O25 A6 R2): the attached
     /// client's subscription and proposal counter. It BORROWS `model` per call
     /// (`mcp::SessionState`), so the engine stays the document's one owner and
@@ -443,6 +447,7 @@ impl JasEngine {
             tool: RefCell::new(None),
             layout: RefCell::new(None),
             timers: RefCell::new(std::collections::BTreeMap::new()),
+            timer_seq: std::cell::Cell::new(0),
             mcp: RefCell::new(crate::mcp::SessionState::new()),
         }
     }
@@ -1281,15 +1286,16 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
 /// # A timer (`start_timer` / `cancel_timer`)
 ///
 /// A behavior that starts a timer (a tool slot's press-and-hold, `mouse_down`)
-/// makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>}]`, and
+/// makes the reply carry `"timers": [{"start": <id>, "delay_ms": <n>, "seq": <n>}]`, and
 /// one that cancels it (`mouse_up`) carries `{"cancel": <id>}`. The key is
 /// present only when the act started or cancelled one. The ENGINE keeps the
 /// timer's effects; the shell keeps only the clock and, when it fires, sends
-/// `{"event": "timer", "value": <id>}` through this door with the same panel
-/// id. That tick runs the kept effects (the reply is the act reply) if the
-/// timer is still pending; one cancelled, already fired or never started is
-/// the empty span with `StaleTimer`, so a tick that races a release runs
-/// nothing.
+/// `{"event": "timer", "value": <id>, "seq": <seq>}` through this door with
+/// the same panel id, echoing the start's `seq`. That tick runs the kept
+/// effects (the reply is the act reply) if THAT start is still pending; one
+/// cancelled, already fired, never started, or re-armed by a later press of
+/// the same slot (a different `seq`, or none) is the empty span with
+/// `StaleTimer`, so a tick that races a release runs nothing.
 ///
 /// # ⛔ A refusal runs NOTHING
 ///
@@ -1346,7 +1352,18 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let tick = ev.get("event").and_then(|v| v.as_str()) == Some("timer");
     let (parsed, stored) = if tick {
         let timer = ev.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let Some(effects) = engine.timers.borrow_mut().remove(&(id.to_string(), timer.clone())) else {
+        // Only the PENDING start's tick runs it (jas §864 item 4): a tick that
+        // names another `seq` (an earlier press of the same slot, whose clock
+        // outran its release) or none at all leaves the pending timer alone.
+        let seq = ev.get("seq").and_then(serde_json::Value::as_u64);
+        let key = (id.to_string(), timer.clone());
+        let mut pending = engine.timers.borrow_mut();
+        let effects = match pending.get(&key) {
+            Some((s, _)) if Some(*s) == seq => pending.remove(&key).map(|(_, fx)| fx),
+            _ => None,
+        };
+        drop(pending);
+        let Some(effects) = effects else {
             set_panel_event_error(engine, "StaleTimer", &timer);
             return JasBytes::empty();
         };
@@ -1459,17 +1476,20 @@ fn tool_options_effects(engine: &JasEngine, spec: &serde_json::Value,
 }
 
 /// Apply a run's timer acts to the engine's pending set for `panel`, and
-/// return them as the reply's `timers`: `{"start": <id>, "delay_ms": <n>}`
-/// (the shell starts, or restarts, a timer of that id) and `{"cancel": <id>}`
-/// (the shell stops it). The effects stay in the engine.
+/// return them as the reply's `timers`: `{"start": <id>, "delay_ms": <n>,
+/// "seq": <n>}` (the shell starts, or restarts, a timer of that id, and echoes
+/// `seq` on its tick) and `{"cancel": <id>}` (the shell stops it). The effects
+/// stay in the engine.
 fn apply_timers(engine: &JasEngine, panel: &str,
                 ops: &[crate::panel_behavior::TimerOp]) -> Vec<serde_json::Value> {
     use crate::panel_behavior::TimerOp;
     let mut pending = engine.timers.borrow_mut();
     ops.iter().map(|op| match op {
         TimerOp::Start { id, delay_ms, effects } => {
-            pending.insert((panel.to_string(), id.clone()), effects.clone());
-            serde_json::json!({"start": id, "delay_ms": delay_ms})
+            let seq = engine.timer_seq.get() + 1;
+            engine.timer_seq.set(seq);
+            pending.insert((panel.to_string(), id.clone()), (seq, effects.clone()));
+            serde_json::json!({"start": id, "delay_ms": delay_ms, "seq": seq})
         }
         TimerOp::Cancel(id) => {
             pending.remove(&(panel.to_string(), id.clone()));
@@ -4842,6 +4862,13 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The tick a shell sends for the timer a press's reply started: its id
+    /// and its `seq` echoed (jas §864 item 4).
+    fn tick_for(reply: &str) -> String {
+        let t = &serde_json::from_str::<serde_json::Value>(reply).unwrap_or_default()["timers"][0];
+        serde_json::json!({"event": "timer", "value": t["start"], "seq": t["seq"]}).to_string()
+    }
+
     /// (reply, error channel) for one behavior crossing.
     fn behave(e: *mut JasEngine, panel: &str, event: &str) -> (String, String) {
         let reply = take(unsafe {
@@ -7728,14 +7755,17 @@ mod tests {
         let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
         assert!(!reply.is_empty(), "the press ran: {err}");
         let r = json(&reply);
-        assert_eq!(r["timers"], serde_json::json!([{"start": "long_press_btn_arrow_slot", "delay_ms": 250}]),
+        let seq = r["timers"][0]["seq"].clone();
+        assert!(seq.is_u64(), "the start names its seq: {reply}");
+        assert_eq!(r["timers"], serde_json::json!([{"start": "long_press_btn_arrow_slot", "delay_ms": 250, "seq": seq}]),
                    "the shell is told to run one 250 ms timer: {reply}");
         assert_eq!(r["dialog"], serde_json::Value::Null, "nothing opens before the tick");
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let tick = tick_for(&reply);
+        let (reply, err) = behave(e, TOOLBAR, &tick);
         assert!(!reply.is_empty(), "the tick ran: {err}");
         assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "{reply}");
         // A fired timer is no longer pending, so a second tick runs nothing.
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (reply, err) = behave(e, TOOLBAR, &tick);
         assert_eq!(reply, "", "a spent timer's tick runs nothing");
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
         unsafe { jas_engine_free(e) };
@@ -7749,11 +7779,11 @@ mod tests {
     fn a_release_before_the_tick_cancels_the_flyout() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
         let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_up"}"#);
         assert!(!reply.is_empty(), "the release ran: {err}");
         assert_eq!(json(&reply)["timers"], serde_json::json!([{"cancel": "long_press_btn_arrow_slot"}]), "{reply}");
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (reply, err) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(reply, "", "the raced tick runs nothing");
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
         assert!(unsafe { &*e }.store.borrow().dialog_id().is_none(), "no flyout opened");
@@ -7764,17 +7794,47 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// jas §864 item 4 (flask §866): a quick double press on a press-and-hold
+    /// slot opened its flyout. Every press re-arms the SAME timer id, so the
+    /// FIRST press's tick, arriving after the second press re-armed that id,
+    /// ran the second press's timer (measured on the Windows box: the shell
+    /// started press 1's clock from the reply, and the engine's queue put that
+    /// tick after `mouse_down` 2). Each start names a `seq`, the shell echoes
+    /// it on the tick, and a tick whose `seq` is not the pending timer's is
+    /// `StaleTimer`.
+    #[test]
+    fn a_tick_from_an_earlier_press_does_not_run_a_later_presss_timer() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let tick = |seq: &serde_json::Value| format!(
+            r#"{{"event":"timer","value":"long_press_btn_arrow_slot","seq":{seq}}}"#);
+        let (r1, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let seq1 = json(&r1)["timers"][0]["seq"].clone();
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_up"}"#);
+        let (r2, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let seq2 = json(&r2)["timers"][0]["seq"].clone();
+        let (reply, err) = behave(e, TOOLBAR, &tick(&seq1));
+        assert_eq!(reply, "", "the first press's tick runs nothing: {err}");
+        assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
+        assert!(unsafe { &*e }.store.borrow().dialog_id().is_none(), "no flyout opened");
+        assert!(seq1.is_u64() && seq2.is_u64() && seq1 != seq2, "each start names its own seq: {r1} {r2}");
+        // The second press's own tick still opens the flyout (a real hold).
+        let (reply, err) = behave(e, TOOLBAR, &tick(&seq2));
+        assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "{reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A timer is the PANEL's: a tick through another panel's door does not
     /// run the toolbar's pending effects.
     #[test]
     fn a_tick_runs_only_the_timer_its_own_panel_started() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
-        let (reply, err) = behave(e, "layers_panel_content", r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, "layers_panel_content", &tick_for(&down));
         assert_eq!(reply, "", "another panel's door: {err}");
         assert!(err.contains(r#""panel_event":"StaleTimer""#), "{err}");
-        let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_arrow_slot"}"#);
+        let (reply, _) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(json(&reply)["dialog"], serde_json::json!("arrow_alternates"), "still pending on its own door");
         unsafe { jas_engine_free(e) };
     }
@@ -7791,8 +7851,8 @@ mod tests {
         let e = jas_engine_new();
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
         assert_eq!(slot_tool(e), Some("selection"), "the pointer starts on the Selection tool");
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
-        let (reply, err) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_hand_slot"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
+        let (reply, err) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(json(&reply)["dialog"], serde_json::json!("hand_alternates"), "the flyout opened: {reply} {err}");
         let zoom = dialog_leaf_path(e, "icon_button", "Zoom");
         let (reply, err) = dialog_event(e, &serde_json::json!({"path": zoom, "event": "click"}).to_string());
@@ -7813,8 +7873,8 @@ mod tests {
     fn a_shipped_flyout_row_plans_its_icon_and_label_parts_from_its_own_yaml() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
-        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
-        let (reply, _) = behave(e, TOOLBAR, r#"{"event":"timer","value":"long_press_btn_hand_slot"}"#);
+        let (down, _) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"mouse_down"}"#);
+        let (reply, _) = behave(e, TOOLBAR, &tick_for(&down));
         assert_eq!(json(&reply)["dialog"], serde_json::json!("hand_alternates"), "{reply}");
         let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace");
         let spec = ws.dialog("hand_alternates").expect("the Hand flyout");
