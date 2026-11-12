@@ -836,19 +836,19 @@ internal static unsafe class JasCore
     }
 
     /// <summary>
-    /// The INSTALLED layout (W5, the self-contained zip): the CI build that makes the zip writes
-    /// <c>jas-install.json</c> beside the exe, and only then is the cdylib taken
-    /// from beside the exe. A DLL that merely happens to sit there in a build
-    /// tree is NOT taken: the marker is explicit so that which binary runs is
-    /// never decided by a stray file. A marker with no DLL throws by name.
-    /// </summary>
-    /// <summary>
     /// True in the INSTALLED layout: <c>jas-install.json</c> sits beside the exe.
     /// Only the CI build that makes the zip writes it.
     /// </summary>
     internal static bool IsInstalled =>
         File.Exists(Path.Combine(AppContext.BaseDirectory, "jas-install.json"));
 
+    /// <summary>
+    /// The INSTALLED layout (W5, the self-contained zip): the CI build that makes the zip writes
+    /// <c>jas-install.json</c> beside the exe, and only then is the cdylib taken
+    /// from beside the exe. A DLL that merely happens to sit there in a build
+    /// tree is NOT taken: the marker is explicit so that which binary runs is
+    /// never decided by a stray file. A marker with no DLL throws by name.
+    /// </summary>
     private static string? InstalledCoreDll()
     {
         var dir = AppContext.BaseDirectory;

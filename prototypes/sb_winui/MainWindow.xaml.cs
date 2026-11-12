@@ -2755,6 +2755,33 @@ public sealed partial class MainWindow : Window
     // =======================================================================
 
     /// <summary>
+    /// The dock layout: <c>SB_DOCK</c> when set, else <c>Default</c> in an
+    /// installed layout (a bare launch of the zip showed one panel behind a
+    /// picker, STATUS-flask 884) and none in a build tree, as before.
+    /// </summary>
+    internal static string? EffectiveDock()
+    {
+        var dock = Environment.GetEnvironmentVariable("SB_DOCK");
+        if (!string.IsNullOrWhiteSpace(dock)) { return dock; }
+        return JasCore.IsInstalled ? "Default" : null;
+    }
+
+    /// <summary>
+    /// The scene that runs: <c>SB_SCENE</c> when set, else the APP in an
+    /// installed layout (the zip a person unzips sets no variables, and found
+    /// the benchmark scene with an empty menu bar, STATUS-flask 882) and the
+    /// benchmark in a build tree, as before. The ONE reading of the default:
+    /// the pane decision and the scene dispatch both call it, so they cannot
+    /// disagree about which scene runs.
+    /// </summary>
+    internal static string EffectiveScene()
+    {
+        var scene = Environment.GetEnvironmentVariable("SB_SCENE");
+        if (!string.IsNullOrWhiteSpace(scene)) { return scene; }
+        return JasCore.IsInstalled ? "app" : "benchmark";
+    }
+
+    /// <summary>
     /// Publish the outcome INTO THE LOG AND THE WINDOW TITLE -- split, serialised,
     /// and never silent (FREEZE §1.3 / A9).
     ///
@@ -2786,33 +2813,6 @@ public sealed partial class MainWindow : Window
     /// which cannot see session 1's titles. Both, because they answer different
     /// questions.
     /// </summary>
-    /// <summary>
-    /// The scene that runs: <c>SB_SCENE</c> when set, else the APP in an
-    /// installed layout (the zip a person unzips sets no variables, and found
-    /// the benchmark scene with an empty menu bar, STATUS-flask 882) and the
-    /// benchmark in a build tree, as before. The ONE reading of the default:
-    /// the pane decision and the scene dispatch both call it, so they cannot
-    /// disagree about which scene runs.
-    /// </summary>
-    /// <summary>
-    /// The dock layout: <c>SB_DOCK</c> when set, else <c>Default</c> in an
-    /// installed layout (a bare launch of the zip showed one panel behind a
-    /// picker, STATUS-flask 884) and none in a build tree, as before.
-    /// </summary>
-    internal static string? EffectiveDock()
-    {
-        var dock = Environment.GetEnvironmentVariable("SB_DOCK");
-        if (!string.IsNullOrWhiteSpace(dock)) { return dock; }
-        return JasCore.IsInstalled ? "Default" : null;
-    }
-
-    internal static string EffectiveScene()
-    {
-        var scene = Environment.GetEnvironmentVariable("SB_SCENE");
-        if (!string.IsNullOrWhiteSpace(scene)) { return scene; }
-        return JasCore.IsInstalled ? "app" : "benchmark";
-    }
-
     // =======================================================================
     // FINDING 1 (the 10-30 sitting; the engine half is #771): PRESS-AND-HOLD.
     // A slot's `mouse_down` reply asks for a timer; this side runs the clock
