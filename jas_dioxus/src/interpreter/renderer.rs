@@ -522,6 +522,11 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
                 &mut st.workspace_layout,
                 &crate::workspace::layout_apply::op_toggle_panel(kind),
             );
+            // Row 111 (actions.yaml toggle_panel): a panel the act left on
+            // screen is brought into the dock's visible area after the render.
+            if let Some(tab) = toggle_panel_view_target(&st.workspace_layout, kind) {
+                schedule_scroll_into_view(tab);
+            }
         }
         return Vec::new();
     }
@@ -7688,6 +7693,44 @@ fn schedule_focus_rename_input(path: &[usize]) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn schedule_focus_rename_input(_path: &[usize]) {}
+
+/// Row 111 (STATUS-flask 886; `actions.yaml` toggle_panel): the dock TAB that a
+/// Window > <panel> act should bring into view, when the act left the panel ON
+/// SCREEN; `None` when it hid it. The tab's DOM id is the panel's content id
+/// plus `_tab` (`test_hook::tab_dom_id`), so no id is listed here.
+pub(crate) fn toggle_panel_view_target(
+    layout: &crate::workspace::workspace::WorkspaceLayout,
+    kind: crate::workspace::workspace::PanelKind,
+) -> Option<String> {
+    layout.panel_on_screen(kind).then(|| {
+        crate::workspace::test_hook::tab_dom_id(crate::interpreter::workspace::panel_kind_to_content_id(kind))
+    })
+}
+
+/// Scroll the element with this DOM id into its scroll container after the
+/// next frame (the render that draws the raised tab). `block: start`, so a tab
+/// below the dock's fold comes to the top with its group's body under it.
+/// ⚠️ Stated limit: a raise on a group already in view also scrolls it to the
+/// top; telling the two apart needs the dock's viewport rect, not measured here.
+#[cfg(target_arch = "wasm32")]
+fn schedule_scroll_into_view(id: String) {
+    let cb = Closure::once(Box::new(move || {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            if let Some(el) = doc.get_element_by_id(&id) {
+                let opts = web_sys::ScrollIntoViewOptions::new();
+                opts.set_block(web_sys::ScrollLogicalPosition::Start);
+                el.scroll_into_view_with_scroll_into_view_options(&opts);
+            }
+        }
+    }) as Box<dyn FnOnce()>);
+    if let Some(win) = web_sys::window() {
+        let _ = win.request_animation_frame(cb.as_ref().unchecked_ref());
+    }
+    cb.forget();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn schedule_scroll_into_view(_id: String) {}
 
 /// Render a tree_view widget showing the live document element tree.
 ///
