@@ -50,6 +50,28 @@ impl Workspace {
         self.layout_pane(content_id)
     }
 
+    /// The canvas tab's label TEMPLATE: the `content` of the text under
+    /// `canvas_tab_bar`'s `do:` (layout.yaml). The spec owns the rule for what
+    /// a tab says (its name, and its modified mark), so the web's native tab
+    /// bar evaluates this rather than restating it. None if the layout lacks it.
+    pub fn canvas_tab_label_template(&self) -> Option<&str> {
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if node.get("id").and_then(|v| v.as_str()) == Some(id) {
+                return Some(node);
+            }
+            if let Some(kids) = node.get("children").and_then(|v| v.as_array()) {
+                if let Some(found) = kids.iter().find_map(|k| find(k, id)) {
+                    return Some(found);
+                }
+            }
+            node.get("content").and_then(|c| find(c, id))
+        }
+        let bar = find(self.data.get("layout")?, "canvas_tab_bar")?;
+        bar.get("do")?.get("children")?.as_array()?.iter()
+            .find(|k| k.get("type").and_then(|v| v.as_str()) == Some("text"))?
+            .get("content")?.as_str()
+    }
+
     /// A direct child of the layout root with this `id` that has `content`.
     pub fn layout_pane(&self, id: &str) -> Option<&serde_json::Value> {
         self.data.get("layout")?.get("children")?.as_array()?.iter().find(|c| {
@@ -228,9 +250,39 @@ pub fn concepts_list() -> serde_json::Value {
     serde_json::Value::Array(list)
 }
 
+/// What a canvas tab says for a document (row 115): the spec's
+/// `canvas_tab_bar` label evaluated with `doc = {name, is_modified}`, the same
+/// entry `workspace.open_documents` carries. Falls back to the bare name only
+/// if the compiled layout has no template.
+pub fn canvas_tab_label(name: &str, is_modified: bool) -> String {
+    let Some(ws) = Workspace::load() else { return name.to_string() };
+    let Some(template) = ws.canvas_tab_label_template() else { return name.to_string() };
+    let ctx = serde_json::json!({ "doc": { "name": name, "is_modified": is_modified } });
+    crate::interpreter::expr::eval_text(template, &ctx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Row 115: the canvas tab shows the document's modified mark, from the
+    // spec. Twin of JasSwift/Tests/Canvas/CanvasTabLabelTests.swift.
+    #[test]
+    fn canvas_tab_label_is_the_bare_name_when_clean() {
+        assert_eq!(canvas_tab_label("a.svg", false), "a.svg");
+    }
+
+    #[test]
+    fn canvas_tab_label_marks_a_modified_document() {
+        assert_eq!(canvas_tab_label("a.svg", true), "a.svg *");
+    }
+
+    #[test]
+    fn canvas_tab_label_comes_from_the_spec() {
+        let ws = Workspace::load().expect("workspace");
+        let template = ws.canvas_tab_label_template().expect("the compiled layout carries the tab label");
+        assert!(template.contains("doc.is_modified"), "the spec names the mark: {template}");
+    }
 
     #[test]
     fn load_workspace() {

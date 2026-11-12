@@ -818,7 +818,8 @@ struct CanvasTabLabel: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SwiftUI.Text(model.isModified ? "\(model.filename) *" : model.filename)
+            // Row 115: the label is the spec's (layout.yaml `canvas_tab_bar`).
+            SwiftUI.Text(canvasTabLabel(name: model.filename, isModified: model.isModified))
                 .font(.system(size: 11))
                 .lineLimit(1)
             Button(action: onClose) {

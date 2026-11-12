@@ -700,7 +700,11 @@ layout:
             description: >
               Horizontal row of tab buttons at the top of the canvas pane,
               one per open document (workspace.open_documents, in tab order).
-              Each tab shows the document name and a close (X) button.
+              Each tab shows the document name and a close (X) button. A
+              document with unsaved changes (is_modified) shows its name
+              followed by a space and an asterisk, "name *"; saving it, or
+              undoing back to the saved state, removes the mark. Every port's
+              tab bar reads this one label, including a tab bar drawn natively.
               Clicking a tab sets active_tab to that tab's index; the active
               tab gets highlighted styling. The tab bar is hidden when no
               documents are open (tab_count == 0). The tabs are DRAWN FROM
@@ -732,7 +736,7 @@ layout:
                 active: "state.active_tab == doc.index"
               children:
                 - type: text
-                  content: "{{doc.name}}"
+                  content: "{{doc.name}}{{if doc.is_modified then ' *' else ''}}"
                 - type: icon_button
                   icon: "close"
                   summary: "Close tab"
