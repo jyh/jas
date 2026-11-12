@@ -7715,6 +7715,8 @@ pub(crate) fn toggle_panel_view_target(
 /// shape the Windows shell measured (#913, `LayoutWire.ScrollToShow`).
 #[cfg(target_arch = "wasm32")]
 fn schedule_scroll_into_view(id: String) {
+    use wasm_bindgen::prelude::*;
+    use wasm_bindgen::JsCast;
     let cb = Closure::once(Box::new(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             if let Some(el) = doc.get_element_by_id(&id) {
