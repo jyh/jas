@@ -1357,6 +1357,14 @@ pub unsafe extern "C" fn jas_panel_behavior(
             Err(r) => return refuse(r),
         }
     };
+    // jas §864 item 2: a DOUBLE-CLICK on a toolbar tool slot opens the ACTIVE
+    // tool's options. Its destination becomes effects, run as a timer's kept
+    // effects are, so a dialog comes back as the reply's `dialog`.
+    let (parsed, stored) = match tool_options_effects(engine, spec, parsed.as_ref()) {
+        Some(Ok(run)) => (None, Some(run)),
+        Some(Err(r)) => return refuse(r),
+        None => (parsed, stored),
+    };
 
     if let Some(ev) = &parsed {
         if id == crate::panel_scope::COLOUR_PANEL && is_value_commit(spec, ev) {
@@ -1419,6 +1427,35 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
+}
+
+/// The effects a toolbar DOUBLE-CLICK runs (jas §864 item 2), or `None` when
+/// `ev` is not a `dblclick` on a TOOL SLOT (`is_toolbar_tool_slot`, the web's
+/// scope), so the event takes the ordinary path.
+///
+/// The destination is the ACTIVE tool's (`tool_options_dest_for_yaml_id`, the
+/// resolver the web's toolbar reads): a dialog is `open_dialog`, an action is
+/// `dispatch`, and a tool with no options is no effects, which the door reports
+/// as `Unchanged`. A PANEL destination needs the shell to show a panel, which
+/// the act reply cannot name yet, so it is refused by name
+/// (`ToolOptionsPanel`, the panel id), never a silent no-op.
+fn tool_options_effects(engine: &JasEngine, spec: &serde_json::Value,
+                        ev: Option<&crate::panel_behavior::UserEvent>)
+                        -> Option<Result<(String, Vec<serde_json::Value>), crate::panel_behavior::Refusal>> {
+    use crate::interpreter::tool_options::{is_toolbar_tool_slot, tool_options_dest_for_yaml_id, ToolOptionsDest};
+    let ev = ev?;
+    if ev.event != "dblclick" { return None; }
+    if !is_toolbar_tool_slot(crate::panel_behavior::widget_node(spec, &ev.widget)?) { return None; }
+    let tool = engine.active_tool_state().unwrap_or_default();
+    let effects = match tool_options_dest_for_yaml_id(&tool) {
+        None => vec![],
+        Some(ToolOptionsDest::Dialog(d)) => vec![serde_json::json!({"open_dialog": {"id": d}})],
+        Some(ToolOptionsDest::Action(a)) => vec![serde_json::json!({"dispatch": {"action": a, "params": {}}})],
+        Some(ToolOptionsDest::Panel(p)) => {
+            return Some(Err(crate::panel_behavior::Refusal { class: "ToolOptionsPanel", detail: p }));
+        }
+    };
+    Some(Ok((ev.widget.clone(), effects)))
 }
 
 /// Apply a run's timer acts to the engine's pending set for `panel`, and
@@ -7607,6 +7644,35 @@ mod tests {
         let _ = behave(e, TOOLBAR, r#"{"widget":"btn_rotate","event":"click"}"#);
         let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"swap_btn","event":"dblclick"}"#);
         assert_eq!(unsafe { &*e }.store.borrow().dialog_id(), None, "Rotate's options did not open: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// An ACTION destination runs the action, as the menu runs it: Hand's
+    /// `tool_options_action` is `fit_active_artboard`, so a double-click on the
+    /// Hand slot after a Zoom In lands the view where View > Fit Artboard does.
+    #[test]
+    fn a_double_click_whose_options_are_an_action_runs_it_as_the_menu_does() {
+        use crate::ffi_pointer::jas_set_viewport_size;
+        let _g = crate::ffi_instr::test_lock::lock();
+        let view = |e: *mut JasEngine| unsafe { &*e }.with_model(|m| (m.zoom_level, m.view_offset_x, m.view_offset_y));
+        let fitted = {
+            let e = jas_engine_new();
+            assert_eq!(unsafe { jas_set_viewport_size(e, 2379.0, 1333.0) }, JasStatus::Ok);
+            let _ = dispatch(e, r#"{"menu_item":"menu_fit_artboard"}"#);
+            let v = view(e);
+            unsafe { jas_engine_free(e) };
+            v
+        };
+        let e = jas_engine_new();
+        assert_eq!(unsafe { jas_set_viewport_size(e, 2379.0, 1333.0) }, JasStatus::Ok);
+        let _ = dispatch(e, r#"{"menu_item":"menu_zoom_in"}"#);
+        let zoomed = view(e);
+        assert_ne!(zoomed, fitted, "the arm needs a view Fit would move");
+        let _ = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"click"}"#);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("hand"));
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_hand_slot","event":"dblclick"}"#);
+        assert!(!reply.is_empty(), "it ran: {err}");
+        assert_eq!(view(e), fitted, "the view is Fit Artboard's: {err}");
         unsafe { jas_engine_free(e) };
     }
 
