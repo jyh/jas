@@ -7646,6 +7646,73 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 108 phase 1 (`layout.yaml`): a toolbar slot's click KEEPS its active
+    /// tool when one of the slot's tools is active, and selects the default
+    /// otherwise. Before it, every slot click selected its fixed default, so a
+    /// double-click (click, click, dblclick) reset Magic Wand, Paintbrush or
+    /// Blob Brush before their options could open, on every port. Twin of
+    /// JasSwift `aSlotClickKeepsItsActiveAlternate`.
+    #[test]
+    fn a_slot_click_keeps_its_active_alternate() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        for (slot, tool, after_other) in [("btn_arrow_slot", "magic_wand", "partial_selection"),
+                                          ("btn_pencil_slot", "paintbrush", "pencil"),
+                                          ("btn_pencil_slot", "blob_brush", "pencil"),
+                                          ("btn_text_slot", "type_on_path", "type")] {
+            let e = jas_engine_new();
+            let at = TOOL_IDS.iter().position(|t| *t == tool).expect("a shell tool");
+            assert_eq!(unsafe { jas_set_tool(e, at) }, JasStatus::Ok);
+            let (_, err) = behave(e, TOOLBAR, &format!(r#"{{"widget":"{slot}","event":"click"}}"#));
+            assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some(tool), "{slot} kept {tool}: {err}");
+            // The control: from ANOTHER slot's tool, the click selects the default.
+            assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+            let _ = behave(e, TOOLBAR, &format!(r#"{{"widget":"{slot}","event":"click"}}"#));
+            assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some(after_other), "{slot} from selection");
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
+    /// Row 108: the slot's ICON is its active tool's, through `bind.icon`, which
+    /// the plan resolves. So the Windows shell, which draws what the plan names,
+    /// shows it; before it, every slot kept its default icon on Windows
+    /// (measured, STATUS-flask 877).
+    #[test]
+    fn the_toolbar_plan_names_a_slots_active_tool_icon() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let icon_of = |e: *mut JasEngine| {
+            let plan: serde_json::Value = serde_json::from_str(&plan_of(e, TOOLBAR, 72, 900)).expect("plan JSON");
+            plan["leaves"].as_array().expect("leaves").iter()
+                .find(|r| r["id"] == "btn_arrow_slot").map(|r| r["values"]["bind.icon"].clone())
+        };
+        assert_eq!(icon_of(e), Some(serde_json::json!("partial_selection_arrow")), "the default at rest");
+        let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
+        assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
+        assert_eq!(icon_of(e), Some(serde_json::json!("magic_wand")), "the active alternate's icon");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 108 end to end, the gesture a person makes: with Magic Wand active,
+    /// click, click, double-click on its slot shows the Magic Wand panel (it
+    /// opened nothing before, because the clicks reset the tool).
+    #[test]
+    fn click_click_double_click_on_magic_wands_slot_shows_its_panel() {
+        use crate::ffi_pointer::{jas_set_tool, TOOL_IDS};
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let _ = layout_load(e, "Default");
+        let wand = TOOL_IDS.iter().position(|t| *t == "magic_wand").expect("the Magic Wand tool");
+        assert_eq!(unsafe { jas_set_tool(e, wand) }, JasStatus::Ok);
+        for _ in 0..2 { let _ = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"click"}"#); }
+        let (reply, err) = behave(e, TOOLBAR, r#"{"widget":"btn_arrow_slot","event":"double_click"}"#);
+        assert!(!reply.is_empty(), "the double-click ran: {err}");
+        let shown = json(&reply)["layout"].to_string().contains("magic_wand_panel_content");
+        assert!(shown, "the Magic Wand panel is shown: {reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The PLAN tells the shell a tool slot answers `double_click`, so the
     /// shell wires the gesture from the plan alone (a slot declares no
     /// `double_click` in YAML: the engine supplies it). A non-slot button
