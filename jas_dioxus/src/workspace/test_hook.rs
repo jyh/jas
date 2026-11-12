@@ -48,6 +48,13 @@ pub fn tab_dom_id(content_id: &str) -> String {
     format!("{content_id}_tab")
 }
 
+/// The DOM id of a dock GROUP's root element (row 111: Window > <panel>
+/// scrolls the group it leaves a panel in into view). One statement, used by
+/// the render and by the scroll.
+pub fn dock_group_dom_id(dock_id: usize, group_idx: usize) -> String {
+    format!("dock_group_{dock_id}_{group_idx}")
+}
+
 /// `open`: what File > Open does with the bytes it read
 /// (`clipboard.rs`, the file input's onload), without the dialog.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // called by the wasm binding

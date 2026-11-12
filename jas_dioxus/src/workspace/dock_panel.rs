@@ -1281,10 +1281,12 @@ pub(crate) fn build_dock_groups(
         let is_dragged_group = matches!(cur_drag,
             Some(DragPayload::Group(addr)) if addr.dock_id == did && addr.group_idx == gi);
         let opacity = if is_dragged_group { "0.4" } else { "1.0" };
+        let group_dom_id = crate::workspace::test_hook::dock_group_dom_id(did.0, gi);
 
         rsx! {
             div {
                 key: "dock-group-{did:?}-{gi}",
+                id: "{group_dom_id}",
                 style: "border-bottom:1px solid {THEME_BORDER}; opacity:{opacity};",
                 ondragover: move |evt: Event<DragData>| {
                     evt.prevent_default();
