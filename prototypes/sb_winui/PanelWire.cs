@@ -526,6 +526,20 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// Row 52: an `element_preview` leaf's thumbnail, the core's
+    /// `display["thumbnail.svg"]`, or null for the blank square.
+    ///
+    /// ⛔ IT IS ONE WHOLE SVG DOCUMENT, NOT THE BRUSH PAIR. It is drawn as sent:
+    /// never wrapped (it declares its own `jas:` and `inkscape:` namespaces, and
+    /// a strict reader refuses an undeclared prefix) and never recoloured (the
+    /// element keeps its own colours). No key, a blank string, or anything that
+    /// is not an `&lt;svg` document is the blank square the core means by
+    /// sending none.
+    /// </summary>
+    internal static string? Thumbnail(string? svg) =>
+        svg is not null && svg.TrimStart().StartsWith("<svg", StringComparison.Ordinal) ? svg : null;
+
+    /// <summary>
     /// A `brush_preview` leaf's drawing: the core's `preview.viewbox` and
     /// `preview.svg` (the elements, painted in `currentColor`), the same pair an
     /// icon is drawn from, or null. BOTH OR NEITHER: a drawing with no box, or a
