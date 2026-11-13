@@ -189,7 +189,9 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
     let width_style = if let Some(w) = dlg_def.get("width").and_then(|w| w.as_f64()) {
         format!("width:{w}px;")
     } else {
-        String::new()
+        // The container can be reused for the next dialog, and a fragment
+        // absent from the new style is RESTORED by dioxus (row 121).
+        "width:auto;".to_string()
     };
 
     // Backdrop and container styles differ for modal vs popover

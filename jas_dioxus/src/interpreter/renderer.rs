@@ -3742,6 +3742,7 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         .map(|c| format!("col-{c}"))
         .unwrap_or_default();
     let row_class = if etype == "row" { "row" } else { "" };
+    // style-fragment: fixed per element (`etype` is the element's own YAML type)
     let gutter_reset = if etype == "row" { "--bs-gutter-x:0;" } else { "" };
     // If any child uses position: {x, y}, this container needs position:relative
     let has_abs_children = el.get("children")
@@ -3753,6 +3754,7 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     .map_or(false, |p| p.is_object())
             })
         });
+    // style-fragment: fixed per element (its YAML children's positioning)
     let pos_style = if has_abs_children { "position:relative;" } else { "" };
     // Apply default text color if not explicitly set in the element's style
     let has_color = el.get("style")
@@ -3783,15 +3785,20 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // live wiring decision are one and the same.
     let interactive =
         has_pointer_behavior(el) || on_mousedown.is_some() || on_mouseup.is_some();
+    // style-fragment: fixed per element (its declared behaviours)
     let cursor = if interactive { "cursor:pointer;" } else { "" };
 
     // bind.selected_in: draw the 2px accent outline when this tile's
     // identity is a member of the bound list (shared with color_swatch via
     // eval_selected_in). Appended last so it overrides the base border.
+    // An OUTLINE, not a border: the off branch must state its value (a
+    // fragment absent from the new style is RESTORED by dioxus's style
+    // update, row 121), and `border:none` would erase the tile's own border.
+    // The inset offset keeps the 2px ring inside the tile, as the border was.
     let selected_border = if eval_selected_in(el, ctx) {
-        "border:2px solid #007aff;"
+        "outline:2px solid #007aff;outline-offset:-2px;"
     } else {
-        ""
+        "outline:none;"
     };
 
     let style = if visible {
@@ -3948,10 +3955,12 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         .and_then(|v| v.as_str())
         .map(|expr_str| expr::eval(expr_str, ctx).to_bool())
         .unwrap_or(false);
+    // A fragment absent from the new style is RESTORED by dioxus's style update
+    // (row 121), so the off branch states its value.
     let disabled_style = if bind_disabled {
         "opacity:0.35;pointer-events:none;"
     } else {
-        ""
+        "opacity:1;pointer-events:auto;"
     };
 
     // Opacity panel: op_make_mask dispatches Controller::make or release
@@ -4424,6 +4433,7 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     } else {
         String::new()
     };
+    // style-fragment: fixed per element (the tool's declared alternates)
     let position_style = if has_alternates {
         "position:relative;"
     } else {
@@ -4559,7 +4569,9 @@ fn render_icon_button_group(el: &serde_json::Value, ctx: &serde_json::Value, rct
             })
             .unwrap_or_default();
         let active = value == current_value;
-        let bg = if active { "background:#505050;" } else { "" };
+        // The inactive option states its colour, or the option left would keep
+        // its highlight: dioxus's style update restores a dropped fragment (row 121).
+        let bg = if active { "background:#505050;" } else { "background:transparent;" };
         let key = format!("{id}-{i}");
         let dlg_field = dlg_field.clone();
         let value_for_dlg = value.clone();
@@ -5710,7 +5722,9 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let cv = current_value.clone();
     let panel_kind = rctx.panel_kind;
 
-    let dim = if disabled { "opacity:0.4;cursor:not-allowed;" } else { "" };
+    // A fragment absent from the new style is RESTORED by dioxus's style update
+    // (row 121), so the off branch states its value. (`cursor:pointer` is in the base style.)
+    let dim = if disabled { "opacity:0.4;cursor:not-allowed;" } else { "opacity:1;" };
     let select_cursor = if disabled { "not-allowed" } else { "pointer" };
 
     rsx! {
@@ -5971,7 +5985,9 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     } else {
         "background-color:transparent;".to_string()
     };
-    let dim = if disabled { "opacity:0.4;" } else { "" };
+    // A fragment absent from the new style is RESTORED by dioxus's style update
+    // (row 121), so the off branch states its value.
+    let dim = if disabled { "opacity:0.4;" } else { "opacity:1;" };
 
     let onclick = move |evt: Event<MouseData>| {
         if disabled { return; }
@@ -6213,7 +6229,9 @@ fn render_radio(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCt
     let ctx_snapshot = ctx.clone();
     let extra_style = build_style(el, ctx);
 
-    let dim = if disabled { "opacity:0.4;" } else { "" };
+    // A fragment absent from the new style is RESTORED by dioxus's style update
+    // (row 121), so the off branch states its value.
+    let dim = if disabled { "opacity:0.4;" } else { "opacity:1;" };
     let cursor = if disabled { "default" } else { "pointer" };
 
     let onclick = move |_evt: Event<MouseData>| {
@@ -8425,10 +8443,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let row_path = row.path.clone();
                     let row_app = app.clone();
                     let mut row_rev = revision;
+                    // Measured 11-13 on main: a row selected and then left kept its
+                    // highlight, because the restore brought it back (row 121).
                     let row_bg = if row.is_panel_selected {
                         "background:rgba(51,122,183,0.4);"
                     } else {
-                        ""
+                        "background-color:transparent;"
                     };
                     // Snapshot the current rows' ordered paths for shift-range selection
                     let row_all_paths: Vec<Vec<usize>> = rows.iter().map(|r| r.path.clone()).collect();
@@ -9492,7 +9512,7 @@ fn render_tabs(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx
                         // Each branch states its colour: a fragment absent from the
                         // new style is RESTORED by dioxus's style update (row 120).
                         let bg = if active { "background-color:var(--jas-pane-bg,#3a3a3a);" } else { "background-color:transparent;" };
-                        let weight = if active { "font-weight:600;" } else { "" };
+                        let weight = if active { "font-weight:600;" } else { "font-weight:normal;" };
                         rsx! {
                             div {
                                 key: "{target}",
