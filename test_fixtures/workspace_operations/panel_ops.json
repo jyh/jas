@@ -162,6 +162,40 @@
   "expected_json": "panel_set_floating_position.json"
  },
  {
+  "name": "detach_group_above_the_pane_area_floors_y",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": -30.0,
+    "y": -20.0
+   }
+  ],
+  "expected_json": "panel_detach_group_above_the_pane_area.json"
+ },
+ {
+  "name": "set_floating_position_above_the_pane_area_floors_y",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 100.0,
+    "y": 200.0
+   },
+   {
+    "op": "set_floating_position",
+    "dock_id": 1,
+    "x": 400.0,
+    "y": -35.0
+   }
+  ],
+  "expected_json": "panel_set_floating_position_above_the_pane_area.json"
+ },
+ {
   "name": "bring_to_front",
   "setup": "workspace_default.json",
   "ops": [

@@ -144,7 +144,17 @@ impl Dock {
     }
 }
 
-/// A floating dock: a [`Dock`] plus screen position.
+/// A floating dock's top in the pane area's frame is never above the area
+/// (WORKSPACE.md "Floating dock positions"): `y` is floored at 0, the same
+/// floor as `clamp_floating_docks`, so the title bar that moves the dock stays
+/// inside the area and the dock cannot cover a menubar drawn above it. `x` is
+/// not floored; the clamp's own bound on it lets a dock hang off the left.
+/// Swift's twin is `WorkspaceLayout.floatingTop`.
+pub(crate) fn floating_top(y: f64) -> f64 {
+    y.max(0.0)
+}
+
+/// A floating dock: a [`Dock`] plus its position in the pane area's frame.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FloatingDock {
     pub dock: Dock,
@@ -565,7 +575,7 @@ impl WorkspaceLayout {
         self.floating.push(FloatingDock {
             dock: Dock::new(id, vec![group], DEFAULT_FLOATING_WIDTH),
             x,
-            y,
+            y: floating_top(y),
         });
         self.z_order.push(id);
         self.cleanup(from.dock_id);
@@ -702,7 +712,7 @@ impl WorkspaceLayout {
         self.floating.push(FloatingDock {
             dock: Dock::new(id, vec![PanelGroup::new(vec![panel])], DEFAULT_FLOATING_WIDTH),
             x,
-            y,
+            y: floating_top(y),
         });
         self.z_order.push(id);
         self.cleanup(from.group.dock_id);
@@ -714,11 +724,12 @@ impl WorkspaceLayout {
     // Floating dock position
     // -----------------------------------------------------------------------
 
-    /// Move a floating dock. Ignored for anchored docks.
+    /// Move a floating dock. Ignored for anchored docks. `y` is floored as
+    /// [`floating_top`] floors it.
     pub fn set_floating_position(&mut self, id: DockId, x: f64, y: f64) {
         if let Some(fd) = self.floating.iter_mut().find(|fd| fd.dock.id == id) {
             fd.x = x;
-            fd.y = y;
+            fd.y = floating_top(y);
         }
         self.bump();
     }
@@ -2582,6 +2593,10 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), -500.0, -100.0).unwrap();
+        // The detach floors y itself (`floating_top`), so put a stored y
+        // above the area back by hand: a layout saved before that floor can
+        // still load one, and the clamp's own y floor is what this witnesses.
+        l.floating.iter_mut().find(|fd| fd.dock.id == fid).unwrap().y = -100.0;
         l.clamp_floating_docks(1000.0, 800.0);
         let fd = l.floating_dock(fid).unwrap();
         // x should be clamped so at least 50px is visible

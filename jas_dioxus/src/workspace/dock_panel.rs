@@ -940,6 +940,11 @@ pub(crate) struct DragState {
     pub was_dropped: Signal<bool>,
     pub last_drag_pos: Signal<(f64, f64)>,
     pub title_drag: Signal<Option<(DockId, f64, f64)>>,
+    /// Bumped by `layout_act`, which a title drag moves a floating dock
+    /// through and which does NOT bump `revision` (the 04-15 split for drag
+    /// performance). `FloatingDocksView` reads it, or a dragged floating dock
+    /// stays put until something else re-renders it (row 118, measured 11-13).
+    pub layout_revision: Signal<u64>,
 }
 
 /// The evaluation context a panel BODY renders with, and so the one its click
@@ -1600,7 +1605,11 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
 // FloatingDocksView — all floating dock overlays
 // ---------------------------------------------------------------------------
 
-/// Renders every floating dock as a position:fixed overlay.
+/// Renders every floating dock as a position:absolute overlay in the pane
+/// area, whose frame its `x`, `y` are in (WORKSPACE.md "Floating dock
+/// positions", row 118). Until 11-13 it was position:fixed, in the WINDOW's
+/// frame, while `clamp_floating_docks` was handed the area's size, so a drop
+/// with the pointer over the menubar left the dock covering the menu titles.
 #[component]
 pub(crate) fn FloatingDocksView() -> Element {
     let act = use_context::<Act>();
@@ -1611,6 +1620,8 @@ pub(crate) fn FloatingDocksView() -> Element {
     // Subscribe to revision so we re-render when state changes.
     let revision = use_context::<Signal<u64>>();
     let _ = revision();
+    // A title drag moves the dock through `layout_act`, which bumps only this.
+    let _ = (ds.layout_revision)();
     let mut title_drag = ds.title_drag;
 
     let (focused_panel, floating_snapshot, live_panel_overrides, panel_state_table,
@@ -1656,7 +1667,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         rsx! {
             div {
                 key: "floating-{fid:?}",
-                style: "position:fixed; left:{fx}px; top:{fy}px; width:{fw}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1669,6 +1680,12 @@ pub(crate) fn FloatingDocksView() -> Element {
                     style: "height:20px; background:{THEME_BG_DARK}; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:{THEME_TEXT_DIM}; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
+                        // No native drag from this press (row 118, measured 11-13): the
+                        // dock now redraws under the pointer during a title drag, and
+                        // Chrome resolves a drag's source at the PRESS point, where a
+                        // fast first move can have put this dock's tab. That started a
+                        // tab drag, and its dragend detached the panel into a new dock.
+                        evt.prevent_default();
                         let coords = evt.data().page_coordinates();
                         title_drag.set(Some((fid, coords.x - fx, coords.y - fy)));
                     },
