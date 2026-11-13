@@ -895,6 +895,29 @@ fn a_key_after_a_panel_step_goes_to_the_panels_keyboard_rows() {
     assert_eq!(panel_reads(&out)[0]["layers_panel_selection"], serde_json::json!([next]), "{out:?}");
 }
 
+/// Row 119 (STATUS-jas; the recommendation of row 76, bus 11-12 15:38): a key
+/// no focused panel binds FALLS THROUGH to the menubar's shortcut, so S1's
+/// `layers.eye_undo` (Ctrl+Z with the Layers tree focused after an eye click)
+/// undoes the click, as the web app does through its panel door (measured
+/// 11-13 on main 4abab25a). RED by design until the key law in
+/// `jas_dispatch_action` changes, and NOT merged before the Mac reading lands.
+/// Its expectation is a relation inside one run: the last read equals the
+/// read taken before the click. Swift's twin is
+/// `formsAnUnboundPanelKeyFallsThroughToTheMenubarShortcut`.
+#[test]
+fn an_unbound_panel_key_falls_through_to_the_menubar_shortcut() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"read": "document"}, {"panel": LAYERS, "widget": "lp_eye", "row": [1, 0], "event": "click"},
+        {"read": "document"}, {"key": "Z", "ctrl": true}, {"read": "document"},
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "Ctrl+Z on the focused tree was refused: {out:?}");
+    let docs = doc_reads(&out);
+    assert_eq!(docs.len(), 3, "three document reads: {out:?}");
+    assert_ne!(docs[1], docs[0], "the eye click changed nothing, so this arm cannot tell an undo from a no-op");
+    assert_eq!(docs[2], docs[0], "Ctrl+Z did not undo the eye click");
+}
+
 #[test]
 fn read_panel_reads_exactly_the_declared_state_keys_with_paths_as_arrays() {
     let _counters = crate::ffi_instr::test_lock::lock();
