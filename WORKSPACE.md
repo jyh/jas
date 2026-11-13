@@ -208,6 +208,22 @@ When a pane is resized or the window is resized, snap constraints propagate
 position changes to maintain alignment. Panes can be undocked (losing snaps)
 and re-snapped by dragging near an edge.
 
+## Moving a Panel to Another Group
+
+`move_panel_to_group` removes a panel from its group and adds it to another
+group, which becomes the panel's group with the moved panel active. Its
+optional `to_index` is the position among the target group's panels: the
+panel is inserted there, and an index past the end appends. With no
+`to_index` the panel is appended, as before. A move within one group is a
+no-op here; reordering inside a group is `reorder_panel`.
+
+A shell that knows where in the tab bar a panel was dropped passes that
+position as `to_index`, so the panel lands where the drop indicator was drawn.
+The web computes it from the hovered tab (the left half inserts before it,
+the right half after). A shell that computes no position omits it.
+(Conformance: `panel_ops.json` `move_panel_to_group`,
+`move_panel_to_group_at_index`, `move_panel_to_group_index_past_the_end_appends`.)
+
 ## Anchored Docks by Edge
 
 `anchored` holds at most one dock per `DockEdge`: `Right`, `Left` or
