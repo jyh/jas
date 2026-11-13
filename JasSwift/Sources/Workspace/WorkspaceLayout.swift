@@ -536,7 +536,11 @@ public struct WorkspaceLayout: Codable {
 
     // MARK: - Move Panel Between Groups
 
-    public mutating func movePanelToGroup(_ from: PanelAddr, to: GroupAddr) {
+    /// Move a panel into another group (WORKSPACE.md "Moving a Panel to
+    /// Another Group"): inserted at `index` among the target's panels, an index
+    /// past the end appends, and `nil` appends. Rust's twin is
+    /// `move_panel_to_group_at`.
+    public mutating func movePanelToGroup(_ from: PanelAddr, to: GroupAddr, at index: Int? = nil) {
         guard from.group != to else { return }
         guard var srcDock = dock(from.group.dockId),
               from.group.groupIdx < srcDock.groups.count,
@@ -550,8 +554,9 @@ public struct WorkspaceLayout: Codable {
             setDockGroups(from.group.dockId, srcDock.groups)
             return
         }
-        dstDock.groups[to.groupIdx].panels.append(panel)
-        dstDock.groups[to.groupIdx].active = dstDock.groups[to.groupIdx].panels.count - 1
+        let at = min(index ?? Int.max, dstDock.groups[to.groupIdx].panels.count)
+        dstDock.groups[to.groupIdx].panels.insert(panel, at: at)
+        dstDock.groups[to.groupIdx].active = at
         setDockGroups(to.dockId, dstDock.groups)
         cleanup(from.group.dockId)
         bump()
