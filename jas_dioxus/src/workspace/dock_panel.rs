@@ -1680,6 +1680,12 @@ pub(crate) fn FloatingDocksView() -> Element {
                     style: "height:20px; background:{THEME_BG_DARK}; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:{THEME_TEXT_DIM}; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
+                        // No native drag from this press (row 118, measured 11-13): the
+                        // dock now redraws under the pointer during a title drag, and
+                        // Chrome resolves a drag's source at the PRESS point, where a
+                        // fast first move can have put this dock's tab. That started a
+                        // tab drag, and its dragend detached the panel into a new dock.
+                        evt.prevent_default();
                         let coords = evt.data().page_coordinates();
                         title_drag.set(Some((fid, coords.x - fx, coords.y - fy)));
                     },
