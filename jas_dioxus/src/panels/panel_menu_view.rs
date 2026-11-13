@@ -78,10 +78,12 @@ pub fn PanelMenuOverlay() -> Element {
                 #[cfg(not(target_arch = "wasm32"))]
                 let viewport_w: f64 = 1280.0;
                 let flip_left = x + menu_width + 200.0 > viewport_w;
+                // Each side states BOTH offsets: a property the new style drops is
+                // RESTORED by dioxus's style update (rows 121-122).
                 let submenu_pos = if flip_left {
-                    "position:absolute; right:100%; top:0;"
+                    "position:absolute; left:auto; right:100%; top:0;"
                 } else {
-                    "position:absolute; left:100%; top:0;"
+                    "position:absolute; right:auto; left:100%; top:0;"
                 };
                 // Already-open ids from panel.open_libraries
                 let open_ids: std::collections::HashSet<String> = st.swatches_panel.open_libraries
