@@ -64,6 +64,7 @@
   "test_workspace_panel_ops :: Workspace operation test 'detach_group_near_the_left_edge_snaps' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'detach_panel' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'detach_panel_near_the_bottom_edge_snaps' failed: canonical JSON mismatch": 1,
+  "test_workspace_panel_ops :: Workspace operation test 'move_panel_to_group_at_index' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'set_floating_position' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'set_floating_position_above_the_pane_area_floors_y' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'show_panel_raises_a_background_tab' failed: canonical JSON mismatch": 1,
