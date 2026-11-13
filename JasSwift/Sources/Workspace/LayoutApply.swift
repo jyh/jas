@@ -148,13 +148,15 @@ public func opReorderPanel(_ group: GroupAddr, from: Int, to: Int) -> [String: A
 }
 
 /// `{op:"move_panel_to_group", from_*, to_*}`.
-public func opMovePanelToGroup(_ from: PanelAddr, to: GroupAddr) -> [String: Any] {
-    ["op": "move_panel_to_group",
+public func opMovePanelToGroup(_ from: PanelAddr, to: GroupAddr, at index: Int? = nil) -> [String: Any] {
+    var op: [String: Any] = ["op": "move_panel_to_group",
      "from_dock_id": from.group.dockId.value,
      "from_group_idx": from.group.groupIdx,
      "from_panel_idx": from.panelIdx,
      "to_dock_id": to.dockId.value,
      "to_group_idx": to.groupIdx]
+    if let index { op["to_index"] = index }
+    return op
 }
 
 /// `{op:"redock", dock_id}`.
@@ -337,7 +339,9 @@ public func layoutApply(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
                 panelIdx: intOf(op, "from_panel_idx")),
             to: GroupAddr(
                 dockId: DockId(intOf(op, "to_dock_id")),
-                groupIdx: intOf(op, "to_group_idx")))
+                groupIdx: intOf(op, "to_group_idx")),
+            // Optional; absent or negative appends (Rust: `as_u64` is None).
+            at: op["to_index"] == nil ? nil : { let i = intOf(op, "to_index"); return i >= 0 ? i : nil }())
 
     case "detach_group":
         let fid = layout.detachGroup(

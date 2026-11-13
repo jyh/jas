@@ -1316,7 +1316,9 @@ pub(crate) fn build_dock_groups(
                                     } else {
                                         crate::workspace::layout_apply::layout_apply(
                                             &mut st.workspace_layout,
-                                            &crate::workspace::layout_apply::op_move_panel_to_group(from, to_group),
+                                            // The hovered position (row 128): the panel lands where
+                                            // the overlay's caret was drawn.
+                                            &crate::workspace::layout_apply::op_move_panel_to_group_at(from, to_group, to_idx),
                                         );
                                     }
                                 }
@@ -1665,15 +1667,9 @@ pub(crate) fn DockDropOverlay() -> Element {
                 let r = doc.as_ref()?.get_element_by_id(&id)?.get_bounding_client_rect();
                 Some((r.left() - origin.0, r.top() - origin.1, r.width(), r.height()))
             };
-            // A panel from ANOTHER group is appended (`op_move_panel_to_group`
-            // takes no index), so the caret is drawn where the drop lands, past
-            // the last tab; only a same-group reorder honours `index`. Measured
-            // 11-13: the caret at Boolean's left edge while the drop appended.
-            let lands_at = match &source {
-                Some(DragPayload::Panel(from)) if from.group != group => kinds.len(),
-                _ => index,
-            };
-            if let Some(c) = tab_caret(tab, lands_at) {
+            // Every panel drop lands at `index` (a cross-group move passes it
+            // as `to_index` since row 128), so the caret is drawn there.
+            if let Some(c) = tab_caret(tab, index) {
                 bars.push(c);
             }
         }

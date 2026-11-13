@@ -207,6 +207,14 @@ pub fn op_move_panel_to_group(from: PanelAddr, to: GroupAddr) -> serde_json::Val
     })
 }
 
+/// `{op:"move_panel_to_group", from_*, to_*, to_index}`: the panel lands at
+/// `to_index` among the target group's panels (row 128).
+pub fn op_move_panel_to_group_at(from: PanelAddr, to: GroupAddr, to_index: usize) -> serde_json::Value {
+    let mut op = op_move_panel_to_group(from, to);
+    op["to_index"] = serde_json::json!(to_index);
+    op
+}
+
 /// `{op:"redock", dock_id}`.
 pub fn op_redock(id: DockId) -> serde_json::Value {
     serde_json::json!({ "op": "redock", "dock_id": id.0 })
@@ -353,7 +361,8 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
             );
         }
         "move_panel_to_group" => {
-            layout.move_panel_to_group(
+            // `to_index` is optional; absent or not a non-negative integer appends.
+            layout.move_panel_to_group_at(
                 PanelAddr {
                     group: GroupAddr {
                         dock_id: DockId(u(op, "from_dock_id")),
@@ -365,6 +374,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
                     dock_id: DockId(u(op, "to_dock_id")),
                     group_idx: u(op, "to_group_idx"),
                 },
+                op.get("to_index").and_then(serde_json::Value::as_u64).map(|i| i as usize),
             );
         }
         "detach_group" => {
