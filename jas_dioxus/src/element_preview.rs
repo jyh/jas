@@ -29,7 +29,7 @@ pub fn preview_svg(elem: &Element) -> String {
     let (x, y, w, h) = (x * PT_TO_PX, y * PT_TO_PX, w * PT_TO_PX, h * PT_TO_PX);
     let pad = (w.max(h) * 0.02).max(0.5);
     let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
-    let inner = crate::geometry::svg::element_svg(elem, "");
+    let inner = body_with_defs(elem);
     format!(
         // DECLARES xmlns:inkscape, because `element_svg` emits
         // `inkscape:label` for any element that HAS a name. Without it every
@@ -43,6 +43,31 @@ pub fn preview_svg(elem: &Element) -> String {
     )
 }
 
+
+/// The thumbnail's body with the gradients it paints with, in a `<defs>`
+/// (flask STATUS-flask §911: without them a gradient fill drew blank). Each
+/// gradient id is renamed `jt<FNV-1a of its own markup>-<n>`: the web inlines
+/// every row into one page, where ids are global, and an id derived from the
+/// gradient itself makes two thumbnails collide only when they define the same
+/// gradient, which is harmless. Twin of Swift's `thumbnailBodyWithDefs`.
+fn body_with_defs(elem: &Element) -> String {
+    let (mut body, defs0) = crate::geometry::svg::element_svg_with_defs(elem, "");
+    if defs0.is_empty() {
+        return body;
+    }
+    let mut defs = String::new();
+    for (i, d) in defs0.iter().enumerate() {
+        let mut h: u32 = 0x811c9dc5;
+        for b in d.bytes() {
+            h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+        }
+        let old = format!("jas-g{}", i + 1);
+        let new = format!("jt{:x}-{}", h, i + 1);
+        defs.push_str(&d.replace(&format!("id=\"{old}\""), &format!("id=\"{new}\"")));
+        body = body.replace(&format!("url(#{old})"), &format!("url(#{new})"));
+    }
+    format!("<defs>{defs}</defs>{body}")
+}
 
 /// The element path a plan leaf's `bind.element_path` names. A bind value
 /// reaches the plan as a canonical STRING (`bind_values`: a list is `[0,1]`),
@@ -97,6 +122,53 @@ pub fn attach_to_plan(plan: &mut Value, doc: &Document) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn graded(rgb: (f64, f64, f64)) -> Element {
+        use crate::geometry::element::{Color, CommonProps, Gradient, RectElem};
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: Some(Box::new(Gradient::seed(Some(Color::rgb(rgb.0, rgb.1, rgb.2))))),
+            stroke_gradient: None,
+        })
+    }
+
+    fn between<'a>(s: &'a str, open: &str, close: char) -> Vec<&'a str> {
+        s.match_indices(open).filter_map(|(i, _)| {
+            let from = i + open.len();
+            s[from..].find(close).map(|j| &s[from..from + j])
+        }).collect()
+    }
+
+    /// flask STATUS-flask §911: a gradient fill's thumbnail drew blank, because
+    /// the bare serializer writes no `<linearGradient>` outside an export.
+    /// Every `url(#id)` it paints with is defined in the same document. Twin
+    /// of the Mac's `aGradientThumbnailDefinesTheGradientItPaints`.
+    #[test]
+    fn a_gradient_thumbnail_defines_the_gradient_it_paints() {
+        let svg = preview_svg(&graded((1.0, 0.0, 0.0)));
+        assert!(svg.contains("<linearGradient"), "the gradient is defined: {svg}");
+        let refs = between(&svg, "url(#", ')');
+        assert!(!refs.is_empty(), "the fill points at a gradient: {svg}");
+        for id in refs {
+            assert!(svg.contains(&format!("id=\"{id}\"")), "url(#{id}) is defined here: {svg}");
+        }
+    }
+
+    /// Two thumbnails with DIFFERENT gradients do not share an id (the web
+    /// inlines every row into one page). Twin of the Mac's
+    /// `differentGradientsGetDifferentThumbnailIds`.
+    #[test]
+    fn different_gradients_get_different_thumbnail_ids() {
+        let a = preview_svg(&graded((1.0, 0.0, 0.0)));
+        let b = preview_svg(&graded((0.0, 1.0, 0.0)));
+        let ids = |s: &str| -> Vec<String> {
+            between(s, "Gradient id=\"", '"').into_iter().map(str::to_string).collect()
+        };
+        let (ia, ib) = (ids(&a), ids(&b));
+        assert!(!ia.is_empty() && !ib.is_empty(), "both define a gradient: {a} / {b}");
+        assert!(ia.iter().all(|x| !ib.contains(x)), "{ia:?} vs {ib:?}");
+    }
 
     #[test]
     fn path_of_reads_the_canonical_list_string() {

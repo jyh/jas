@@ -3815,6 +3815,28 @@ private func cycleVisibility(_ vis: Visibility) -> Visibility {
     vis.cycled
 }
 
+/// The thumbnail's body with the gradients it paints with, in a `<defs>`
+/// (flask STATUS-flask §911: without them a gradient fill drew blank). Each
+/// gradient id is renamed `jt<FNV-1a of its own markup>-<n>`: the web inlines
+/// every row into one page, where ids are global, and an id derived from the
+/// gradient itself makes two thumbnails collide only when they define the same
+/// gradient, which is harmless. Twin of Rust's `element_preview::body_with_defs`.
+func thumbnailBodyWithDefs(_ elem: Element) -> String {
+    let (body0, defs0) = elementSvgWithDefs(elem, indent: "")
+    if defs0.isEmpty { return body0 }
+    var body = body0
+    var defs: [String] = []
+    for (i, d) in defs0.enumerated() {
+        var h: UInt32 = 0x811c9dc5
+        for byte in d.utf8 { h = (h ^ UInt32(byte)) &* 0x01000193 }
+        let old = "jas-g\(i + 1)"
+        let new = "jt" + String(h, radix: 16) + "-\(i + 1)"
+        defs.append(d.replacingOccurrences(of: "id=\"\(old)\"", with: "id=\"\(new)\""))
+        body = body.replacingOccurrences(of: "url(#\(old))", with: "url(#\(new))")
+    }
+    return "<defs>" + defs.joined() + "</defs>" + body
+}
+
 /// Build a fitted-viewBox SVG fragment for a single element.
 /// Internal rather than `private` so `LayersThumbnailNamespaceTests` can
 /// assert its output. Being unreachable is why the undeclared-prefix defect
@@ -3831,7 +3853,7 @@ func buildPreviewSvg(_ elem: Element) -> String {
     let x = b.x * ptToPx, y = b.y * ptToPx, w = b.width * ptToPx, h = b.height * ptToPx
     let pad = max(max(w, h) * 0.02, 0.5)
     let vb = "\(x - pad) \(y - pad) \(w + 2 * pad) \(h + 2 * pad)"
-    let inner = elementSvg(elem, indent: "")
+    let inner = thumbnailBodyWithDefs(elem)
     // DECLARES xmlns:inkscape: the element serializer emits `inkscape:label`
     // for any NAMED element, and an undeclared prefix is invalid XML that a
     // strict parser rejects whole. Same lesson this codebase already recorded
