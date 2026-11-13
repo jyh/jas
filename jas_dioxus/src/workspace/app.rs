@@ -293,6 +293,21 @@ fn pane_area_size(win: &web_sys::Window) -> (f64, f64) {
     (vw, vh)
 }
 
+/// The pane area's top-left in window coordinates (row 118): the offset that
+/// turns a pointer's page position into the pane area's frame, where floating
+/// docks are placed and drawn (WORKSPACE.md "Floating dock positions").
+/// `(0, 0)` before the area exists, which is the window's own frame.
+#[cfg(target_arch = "wasm32")]
+fn pane_area_origin(win: &web_sys::Window) -> (f64, f64) {
+    win.document()
+        .and_then(|d| d.get_element_by_id(PANE_AREA_ID))
+        .map(|el| {
+            let r = el.get_bounding_client_rect();
+            (r.left(), r.top())
+        })
+        .unwrap_or((0.0, 0.0))
+}
+
 #[component]
 fn YamlToolbarContent(revision: u64) -> Element {
     use std::sync::OnceLock;
@@ -1458,7 +1473,16 @@ pub fn App() -> Element {
                     use super::workspace::DragPayload;
                     if !was_dropped() {
                         if let Some(payload) = drag_source() {
-                            let (x, y) = last_drag_pos();
+                            // The pointer is in window coordinates; a floating dock
+                            // is placed in the pane area's frame (row 118). The snap
+                            // band already decided `cur_tgt` in the window's frame,
+                            // which is flush with the area on every band's side.
+                            let (px, py) = last_drag_pos();
+                            #[cfg(target_arch = "wasm32")]
+                            let (ox, oy) = web_sys::window().map(|w| pane_area_origin(&w)).unwrap_or((0.0, 0.0));
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let (ox, oy) = (0.0, 0.0);
+                            let (x, y) = (px - ox, py - oy);
                             let cur_tgt = drop_target_sig();
                             // 3d-2 DEVIATION (deferred, OP_LOG.md §12 Fork 5): the
                             // `detach_group` calls below are NOT routed through
@@ -1841,7 +1865,7 @@ pub fn App() -> Element {
                 }
             }
 
-            // Floating docks (position:fixed overlays)
+            // Floating docks (position:absolute in the pane area, row 118)
             FloatingDocksView {}
 
             } // close pane container div

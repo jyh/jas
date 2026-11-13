@@ -1600,7 +1600,11 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
 // FloatingDocksView — all floating dock overlays
 // ---------------------------------------------------------------------------
 
-/// Renders every floating dock as a position:fixed overlay.
+/// Renders every floating dock as a position:absolute overlay in the pane
+/// area, whose frame its `x`, `y` are in (WORKSPACE.md "Floating dock
+/// positions", row 118). Until 11-13 it was position:fixed, in the WINDOW's
+/// frame, while `clamp_floating_docks` was handed the area's size, so a drop
+/// with the pointer over the menubar left the dock covering the menu titles.
 #[component]
 pub(crate) fn FloatingDocksView() -> Element {
     let act = use_context::<Act>();
@@ -1656,7 +1660,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         rsx! {
             div {
                 key: "floating-{fid:?}",
-                style: "position:fixed; left:{fx}px; top:{fy}px; width:{fw}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
