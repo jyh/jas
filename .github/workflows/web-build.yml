@@ -57,6 +57,14 @@ jobs:
         working-directory: jas_dioxus
         run: dx build --release --web --base-path jas
 
+      # The BUILT binary carries no unformatted {THEME_X}: a plain string
+      # literal holding one shipped invalid CSS for seven months (STATUS-jas
+      # row 122). Self-test first, then the binary this job just built.
+      - name: No unformatted theme placeholder in the built wasm
+        run: |
+          python3 scripts/check_wasm_theme_placeholders.py --self-test
+          python3 scripts/check_wasm_theme_placeholders.py jas_dioxus/target/dx/jas_dioxus/release/web/public
+
       # Post-build injection: dx owns index.html during the build, so the
       # social-preview tags are spliced in afterwards, anchored on the
       # literal </head>. The preview image ships under an UNHASHED root
