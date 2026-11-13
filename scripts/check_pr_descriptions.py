@@ -487,12 +487,43 @@ def msg_file_mode(path: str) -> int:
 
 def body_file_mode(path: str, title: str = "") -> int:
     """A PR description DRAFT, before `gh pr create` / `gh pr edit` (desk AGL).
-    STUB (red step): checks nothing yet."""
+
+    The same four checks `--open` runs on a live PR (private paths through the
+    sibling's own rules, session trailers, infra names, lane words), on a file,
+    so a draft is refused BEFORE it is public. `--msg-file` is the commit-message
+    mode and does not run the private-path rules; checking a PR body with it
+    passed #923's first body, which named a rootless private-record path."""
+    tag = f"[pr-gate {self_id()}]"
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            fh.read()
-    except OSError:
+            text = fh.read()
+    except OSError as e:
+        print(f"REFUSED {tag}: cannot read the draft: {e}")
         return 1
+    pr = {"number": "draft", "title": title, "body": text, "head": {"ref": ""}}
+    bad = scan_description("draft", title, text)
+    sess = scan_session("draft", title, text)
+    infra_f = scan_infra("draft", title, text)
+    words = subject_scan(pr_rows(pr))
+    if bad:
+        print(f"FAIL {tag}: {len(bad)} private-record path(s) in the PR draft.\n")
+        print("\n".join(gate.finding_lines(bad)))
+    if sess:
+        print(f"FAIL {tag}: {len(sess)} chat-session trailer/URL finding(s) in the PR "
+              "draft (matched text withheld).\n")
+        print("\n".join(session_finding_lines(sess)))
+    if infra_f:
+        print(f"FAIL {tag}: {len(infra_f)} infrastructure name(s) in the PR draft "
+              "(matched text withheld).\n")
+        print("\n".join(infra_finding_lines(infra_f)))
+    if words:
+        print(f"FAIL {tag}: the PR draft carries a refused word (withheld).\n")
+        print("\n".join(subject_finding_lines(words)))
+    if bad or sess or infra_f or words:
+        print("\nRewrite the draft before `gh pr create` / `gh pr edit`.")
+        return 1
+    print(f"check_pr_descriptions --body-file {tag}: OK -- the draft is clean "
+          "(the --open rules: private paths, session, infra names, lane words).")
     return 0
 
 
