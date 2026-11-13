@@ -925,6 +925,7 @@ pub fn App() -> Element {
         was_dropped,
         last_drag_pos,
         title_drag,
+        layout_revision,
     });
 
 

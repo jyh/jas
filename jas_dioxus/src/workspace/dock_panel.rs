@@ -940,6 +940,11 @@ pub(crate) struct DragState {
     pub was_dropped: Signal<bool>,
     pub last_drag_pos: Signal<(f64, f64)>,
     pub title_drag: Signal<Option<(DockId, f64, f64)>>,
+    /// Bumped by `layout_act`, which a title drag moves a floating dock
+    /// through and which does NOT bump `revision` (the 04-15 split for drag
+    /// performance). `FloatingDocksView` reads it, or a dragged floating dock
+    /// stays put until something else re-renders it (row 118, measured 11-13).
+    pub layout_revision: Signal<u64>,
 }
 
 /// The evaluation context a panel BODY renders with, and so the one its click
@@ -1615,6 +1620,8 @@ pub(crate) fn FloatingDocksView() -> Element {
     // Subscribe to revision so we re-render when state changes.
     let revision = use_context::<Signal<u64>>();
     let _ = revision();
+    // A title drag moves the dock through `layout_act`, which bumps only this.
+    let _ = (ds.layout_revision)();
     let mut title_drag = ds.title_drag;
 
     let (focused_panel, floating_snapshot, live_panel_overrides, panel_state_table,
