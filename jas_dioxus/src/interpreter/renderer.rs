@@ -3472,7 +3472,163 @@ fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
             _ => {}
         }
     }
-    parts.join(";")
+    // A YAML style's own `background` / `border` can resolve to a var() value
+    // (row 120): expand it to longhands so a later style update keeps it.
+    longhand_var_shorthands(&parts.join(";"))
+}
+
+/// Rewrite every `var()`-valued SHORTHAND in an inline style to its LONGHANDS
+/// (STATUS-jas row 120; the static twin is `scripts/check_inline_var_shorthands.py`).
+///
+/// dioxus-interpreter-js 0.7.10 updates a changed `style` attribute by saving
+/// each old longhand, setting the new string, and calling
+/// `style.setProperty(prop, old)` for every longhand that reads empty. A
+/// longhand of a `var()` shorthand always reads "" (pending substitution), so
+/// that restore REMOVES it and the whole shorthand goes: measured 11-13, every
+/// pane drew with no background and no border after its first update.
+///
+/// Exactly two shapes are rewritten, and only when the colour is a `var()`:
+/// `background:<var>` becomes `background-color:<var>`, and
+/// `<p>:<width> <solid|dashed|dotted> <var>` for `p` in `border`,
+/// `border-top|right|bottom|left` and `outline` becomes
+/// `<p>-width:<width>; <p>-style:<style>; <p>-color:<var>`. Everything else,
+/// literal shorthands and `url(...)` values included, passes through
+/// byte-for-byte; the string is never split on `;`, which a data URI holds.
+pub(crate) fn longhand_var_shorthands(css: &str) -> String {
+    // Longest name first, so `border-top` is never read as `border`.
+    const PROPS: [&str; 7] = ["border-bottom", "border-right", "border-left", "border-top", "border", "outline", "background"];
+    let b = css.as_bytes();
+    let mut out = String::with_capacity(css.len() + 32);
+    let (mut i, mut copied) = (0usize, 0usize);
+    while i < b.len() {
+        let at_start = i == 0 || !(b[i - 1].is_ascii_alphabetic() || b[i - 1] == b'-');
+        if at_start {
+            if let Some((prop, end, text)) = PROPS.iter().find_map(|p| var_shorthand_at(css, i, p).map(|(e, t)| (*p, e, t))) {
+                let _ = prop;
+                out.push_str(&css[copied..i]);
+                out.push_str(&text);
+                i = end;
+                copied = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&css[copied..]);
+    out
+}
+
+/// At byte `i`, `prop` followed by a rewritable var() value: the byte just
+/// past the value and the longhand text. `None` leaves the bytes untouched.
+fn var_shorthand_at(css: &str, i: usize, prop: &str) -> Option<(usize, String)> {
+    let b = css.as_bytes();
+    let rest = css.get(i..)?;
+    if !rest.starts_with(prop) {
+        return None;
+    }
+    let skip_ws = |mut j: usize| { while j < b.len() && b[j] == b' ' { j += 1; } j };
+    let mut j = skip_ws(i + prop.len());
+    if b.get(j) != Some(&b':') {
+        return None;
+    }
+    j = skip_ws(j + 1);
+    let ends_here = |k: usize| { let k = skip_ws(k); k == b.len() || b[k] == b';' };
+    if prop == "background" {
+        let v_end = var_end(b, j)?;
+        return ends_here(v_end).then(|| (v_end, format!("background-color:{}", &css[j..v_end])));
+    }
+    let w_start = j;
+    while j < b.len() && (b[j].is_ascii_digit() || b[j] == b'.') { j += 1; }
+    if j == w_start || !css[j..].starts_with("px") {
+        return None;
+    }
+    j += 2;
+    let width = &css[w_start..j];
+    if b.get(j) != Some(&b' ') {
+        return None;
+    }
+    j = skip_ws(j);
+    let style = ["solid", "dashed", "dotted"].into_iter().find(|s| css[j..].starts_with(s))?;
+    j += style.len();
+    if b.get(j) != Some(&b' ') {
+        return None;
+    }
+    j = skip_ws(j);
+    let v_end = var_end(b, j)?;
+    ends_here(v_end).then(|| (v_end, format!("{prop}-width:{width}; {prop}-style:{style}; {prop}-color:{}", &css[j..v_end])))
+}
+
+/// The byte just past a `var(--name)` or `var(--name, fallback)` starting at
+/// `j`, the fallback balanced in parentheses (`rgba(...)`).
+fn var_end(b: &[u8], j: usize) -> Option<usize> {
+    if !b.get(j..)?.starts_with(b"var(--") {
+        return None;
+    }
+    let (mut k, mut depth) = (j + 4, 1usize);
+    while k < b.len() {
+        match b[k] {
+            b'(' => depth += 1,
+            b')' => { depth -= 1; if depth == 0 { return Some(k + 1); } }
+            _ => {}
+        }
+        k += 1;
+    }
+    None
+}
+
+#[cfg(test)]
+mod longhand_var_shorthand_tests {
+    use super::longhand_var_shorthands as l;
+
+    #[test]
+    fn a_var_background_becomes_background_color() {
+        assert_eq!(l("left:2px;background:var(--jas-pane-bg,#3c3c3c);z-index:3"), // css-shorthand-fixture
+                   "left:2px;background-color:var(--jas-pane-bg,#3c3c3c);z-index:3");
+        assert_eq!(l("background: var(--jas-check-bg)"), "background-color:var(--jas-check-bg)"); // css-shorthand-fixture
+    }
+
+    #[test]
+    fn a_var_border_and_its_sides_and_outline_become_three_longhands() {
+        assert_eq!(l("border:1px solid var(--jas-border,#555);"), // css-shorthand-fixture
+                   "border-width:1px; border-style:solid; border-color:var(--jas-border,#555);");
+        assert_eq!(l("a:b;border-bottom:2px dashed var(--x)"), // css-shorthand-fixture
+                   "a:b;border-bottom-width:2px; border-bottom-style:dashed; border-bottom-color:var(--x)");
+        assert_eq!(l("outline: 1px dotted var(--jas-accent,#4a90d9);"), // css-shorthand-fixture
+                   "outline-width:1px; outline-style:dotted; outline-color:var(--jas-accent,#4a90d9);");
+    }
+
+    #[test]
+    fn a_var_fallback_with_parentheses_is_one_value() {
+        assert_eq!(l("background:var(--jas-pane-shadow,rgba(0,0,0,0.3));"), // css-shorthand-fixture
+                   "background-color:var(--jas-pane-shadow,rgba(0,0,0,0.3));");
+    }
+
+    /// The pass-through half: what must NOT change, byte for byte.
+    #[test]
+    fn literals_longhands_urls_and_other_properties_pass_through() {
+        for s in [
+            "background:transparent;border:1px solid #555",
+            "background-color:var(--x);border-color:var(--y)",
+            "border-bottom-color:var(--x)",
+            "box-shadow:4px 4px 12px var(--jas-pane-shadow,rgba(0,0,0,0.3))",
+            "background:url(\"data:image/svg+xml;utf8,<svg/>\") no-repeat",
+            "border:6px solid var(--x) inset", // css-shorthand-fixture
+            "",
+        ] {
+            assert_eq!(l(s), s, "must pass through unchanged");
+        }
+    }
+
+    /// Through the two callers: a YAML style and a colour swatch.
+    #[test]
+    fn build_style_and_swatch_style_return_longhands() {
+        let el = serde_json::json!({"style": {"border": "1px solid var(--app-border,#555)"}});
+        assert_eq!(super::build_style(&el, &serde_json::json!({})),
+                   "border-width:1px; border-style:solid; border-color:var(--app-border,#555)");
+        let style = super::swatch_style(16, "#fff", super::SwatchBorder::Placeholder, false, "", "");
+        assert!(style.contains("border-width:1px; border-style:dashed; border-color:var(--jas-border,#555);"), "{style}");
+        assert!(!style.contains("border:1px dashed var("), "{style}");
+    }
 }
 
 fn px_value(v: &str) -> String {
@@ -4414,7 +4570,7 @@ fn render_icon_button_group(el: &serde_json::Value, ctx: &serde_json::Value, rct
         rsx! {
             div {
                 key: "{key}",
-                style: "display:flex;align-items:center;justify-content:center;width:24px;height:20px;border:1px solid var(--jas-border,#555);border-radius:2px;cursor:pointer;{bg}",
+                style: "display:flex;align-items:center;justify-content:center;width:24px;height:20px;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:2px;cursor:pointer;{bg}",
                 onclick: move |_| {
                     // Dialog binding: write the chosen value into the dialog state.
                     if !dlg_field.is_empty() {
@@ -4504,12 +4660,12 @@ fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value
         let app_for_click = app.clone();
         let behaviors = change_behaviors.clone();
         let ctx_snapshot = ctx.clone();
-        let bg = if active { "background:var(--jas-accent,#4a90d9);" } else { "background:transparent;" };
+        let bg = if active { "background-color:var(--jas-accent,#4a90d9);" } else { "background:transparent;" };
         rsx! {
             div {
                 key: "{key}",
                 title: "{name}",
-                style: "width:8px;height:8px;border:1px solid var(--jas-border,#555);border-radius:1px;cursor:pointer;{bg}",
+                style: "width:8px;height:8px;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;cursor:pointer;{bg}",
                 onclick: move |_| {
                     let mut ctx_snap = ctx_snapshot.clone();
                     if let serde_json::Value::Object(obj) = &mut ctx_snap {
@@ -4862,7 +5018,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 // box-sizing:border-box so the yaml `width` includes
                 // the border + padding, matching the visual size the
                 // author asked for.
-                style: "flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);padding:1px 4px;{style}",
+                style: "flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);padding:1px 4px;{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -4878,7 +5034,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 max: "{max}",
                 step: "{step_attr}",
                 value: "{value}",
-                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
                     // Same commit rule as the panel branch above and as
                     // JasSwift's `renderNumberInput`: accepted by the
@@ -5045,7 +5201,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 r#type: "text",
                 placeholder: "{placeholder}",
                 value: "{display_value}",
-                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -5062,7 +5218,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 placeholder: "{placeholder}",
                 value: "{display_value}",
                 readonly: true,
-                style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{style}",
                 oninput: move |_evt: Event<FormData>| {
                     revision += 1;
                 },
@@ -5190,7 +5346,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             placeholder: "{placeholder}",
             initial_value: "{value}",
             autofocus: is_artboard_rename,
-            style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{visibility_style}{style}",
+            style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{visibility_style}{style}",
             onkeydown: move |evt: Event<KeyboardData>| {
                 if !is_artboard_rename { return; }
                 let key = evt.data().key();
@@ -5417,7 +5573,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             id: "{id}",
             value: "{current_value}",
             disabled: disabled,
-            style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
+            style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
             onchange: move |evt: Event<FormData>| {
                 let new_val = evt.value();
                 match &bind_target {
@@ -5669,7 +5825,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 list: "{list_id}",
                 value: "{current_value}",
                 disabled: disabled,
-                style: "color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);font-size:11px;padding:2px 4px;width:100%",
+                style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;width:100%",
                 onchange: move |evt: Event<FormData>| {
                     let new_val = evt.value();
                     match &bind_target {
@@ -5807,10 +5963,13 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         String::new()
     };
 
+    // Unchecked states its colour: a fragment absent from the new style is
+    // RESTORED by dioxus's style update (row 120). The YAML `{style}` follows
+    // and still wins.
     let bg_style = if checked {
-        "background:var(--jas-button-checked,#505050);".to_string()
+        "background-color:var(--jas-button-checked,#505050);".to_string()
     } else {
-        String::new()
+        "background-color:transparent;".to_string()
     };
     let dim = if disabled { "opacity:0.4;" } else { "" };
 
@@ -6303,14 +6462,15 @@ pub(crate) fn swatch_style(
     z_style: &str, extra_style: &str,
 ) -> String {
     if hollow {
-        format!("width:{size}px;height:{size}px;background:transparent;\
+        longhand_var_shorthands(&format!("width:{size}px;height:{size}px;background:transparent;\
                  border:6px solid {face};cursor:pointer;box-sizing:border-box;\
-                 position:relative;{z_style}{extra_style}")
+                 position:relative;{z_style}{extra_style}"))
     } else {
         let border = border.css();
-        format!("width:{size}px;height:{size}px;background:{face};\
+        // `border` (and `face`) may be a var() value: longhands, row 120.
+        longhand_var_shorthands(&format!("width:{size}px;height:{size}px;background:{face};\
                  border:{border};cursor:pointer;box-sizing:border-box;\
-                 position:relative;{z_style}{extra_style}")
+                 position:relative;{z_style}{extra_style}"))
     }
 }
 
@@ -6558,7 +6718,7 @@ fn render_gradient_tile(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
             class: "jas-gradient-tile",
             "data-type": "gradient-tile",
             "data-bind-gradient": "{data_bind}",
-            style: "width:{sz}px;height:{sz}px;background:{bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:pointer;",
+            style: "width:{sz}px;height:{sz}px;background:{bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);box-sizing:border-box;cursor:pointer;",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
         }
     }
@@ -6831,7 +6991,7 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
                 class: "jas-gradient-slider-bar",
                 "data-role": "bar",
                 onpointerdown: on_bar_down,
-                style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
+                style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
             }
             div {
                 class: "jas-gradient-midpoint-band",
@@ -6882,7 +7042,7 @@ fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &Re
     rsx! {
         div {
             id: "jas-yaml-color-bar",
-            style: "width:100%;height:64px;cursor:crosshair;border:1px solid var(--jas-border,#555);border-radius:1px;background-image:url('{data_uri}');background-size:100% 100%;background-repeat:no-repeat;user-select:none;-webkit-user-drag:none;",
+            style: "width:100%;height:64px;cursor:crosshair;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;background-image:url('{data_uri}');background-size:100% 100%;background-repeat:no-repeat;user-select:none;-webkit-user-drag:none;",
             // Pointer-driven drag: down → set_active_color_live, move
             // (with button held) → live updates, up → final
             // set_active_color which pushes to recent. The element is
@@ -6998,7 +7158,7 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
     rsx! {
         div {
             id: "{id}",
-            style: "width:180px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
+            style: "width:180px;height:180px;background:{bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
             onmousedown: on_mousedown,
             onmousemove: on_mousemove,
             // Position indicator circle
@@ -7129,7 +7289,7 @@ fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
     rsx! {
         div {
             id: "{id}",
-            style: "width:32px;height:180px;background:{bg};border:1px solid var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
+            style: "width:32px;height:180px;background:{bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
             onmousedown: on_mousedown,
             onmousemove: on_mousemove,
             // Position indicator arrow
@@ -7143,9 +7303,9 @@ fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
 fn render_separator(el: &serde_json::Value, _ctx: &serde_json::Value) -> Element {
     let orientation = el.get("orientation").and_then(|o| o.as_str()).unwrap_or("horizontal");
     let style = if orientation == "vertical" {
-        "width:1px;background:var(--jas-border,#555);align-self:stretch;"
+        "width:1px;background-color:var(--jas-border,#555);align-self:stretch;"
     } else {
-        "height:1px;background:var(--jas-border,#555);width:100%;"
+        "height:1px;background-color:var(--jas-border,#555);width:100%;"
     };
     rsx! { div { style: "{style}" } }
 }
@@ -8067,7 +8227,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let mut home_rev = revision;
                     rsx! {
                         div {
-                            style: "display:flex;align-items:center;gap:4px;padding:2px 6px;background:var(--jas-pane-bg-dark,#2a2a2a);border-bottom:1px solid var(--jas-border,#555);font-size:10px;color:var(--jas-text-dim,#999);flex-shrink:0;",
+                            style: "display:flex;align-items:center;gap:4px;padding:2px 6px;background-color:var(--jas-pane-bg-dark,#2a2a2a);border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:var(--jas-border,#555);font-size:10px;color:var(--jas-text-dim,#999);flex-shrink:0;",
                             span {
                                 style: "cursor:pointer;color:var(--jas-text,#ccc);",
                                 onclick: move |_: Event<MouseData>| {
@@ -8140,7 +8300,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let row_opacity = if row.ancestor_only { "0.5" } else { "1.0" };
                     let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color};opacity:{row_opacity}");
                     let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };
-                    let sq_style = format!("width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
+                    let sq_style = format!("width:12px;height:12px;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
                     let eye_svg = row.eye_icon_svg.clone();
                     let lock_svg = row.lock_icon_svg.clone();
                     let twirl_svg = row.twirl_svg.clone();
@@ -8664,13 +8824,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 })
                             })
                             .unwrap_or(false);
+                        // Each state sets BOTH sides: a side absent from the new
+                        // style is RESTORED by dioxus's style update (row 120), so
+                        // an indicator left unset would stay drawn.
                         if row.is_container && !any_source_is_layer {
-                            "border-bottom:2px solid var(--jas-accent,#3a7bd5);"
+                            "border-top-width:0; border-bottom-width:2px; border-bottom-style:solid; border-bottom-color:var(--jas-accent,#3a7bd5);"
                         } else {
-                            "border-top:2px solid var(--jas-accent,#3a7bd5);"
+                            "border-bottom-width:0; border-top-width:2px; border-top-style:solid; border-top-color:var(--jas-accent,#3a7bd5);"
                         }
                     } else {
-                        ""
+                        "border-top-width:0; border-bottom-width:0;"
                     };
 
                     let row_dom_id = format!("lp_row_{}", row.path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
@@ -8757,7 +8920,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 let preview_svg = row.preview_svg.clone();
                                 rsx! {
                                     div {
-                                        style: "width:24px;height:24px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;overflow:hidden;",
+                                        style: "width:24px;height:24px;background:#fff;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;flex-shrink:0;overflow:hidden;",
                                         dangerous_inner_html: "{preview_svg}",
                                     }
                                 }
@@ -8786,7 +8949,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             id: "{input_id}",
                                             r#type: "text",
                                             value: "{initial_name}",
-                                            style: "flex:1;font-size:11px;background:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border:1px solid var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
+                                            style: "flex:1;font-size:11px;background-color:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border-width:1px; border-style:solid; border-color:var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
                                             autofocus: true,
                                             // The draft, on every target: the commit reads it
                                             // rather than the DOM, which a non-wasm build cannot.
@@ -8878,7 +9041,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             if let Some((cx, cy, cpath)) = context_menu_state.clone() {
                 {
                     let menu_style = format!(
-                        "position:fixed;left:{}px;top:{}px;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                        "position:fixed;left:{}px;top:{}px;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                         cx, cy
                     );
                     let is_container = {
@@ -8974,13 +9137,13 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 onclick: do_action("delete_layer_selection"),
                                 "Delete Selection"
                             }
-                            div { style: "height:1px;background:var(--jas-border,#555);margin:2px 0;" }
+                            div { style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
                             div {
                                 style: if is_container { item_style } else { item_style_disabled },
                                 onclick: do_action("enter_isolation_mode"),
                                 "Enter Isolation Mode"
                             }
-                            div { style: "height:1px;background:var(--jas-border,#555);margin:2px 0;" }
+                            div { style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
                             div {
                                 style: "{item_style}",
                                 onclick: do_action("flatten_artwork"),
@@ -9035,7 +9198,7 @@ fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx
     rsx! {
         div {
             id: "{id}",
-            style: "width:{sz}px;height:{sz}px;background:#fff;border:1px solid var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
+            style: "width:{sz}px;height:{sz}px;background:#fff;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
         }
     }
 }
@@ -9131,7 +9294,7 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                             },
                         }
                         div {
-                            style: "position:absolute;top:22px;right:0;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                            style: "position:absolute;top:22px;right:0;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                             // ONE LOOP, IN DECLARATION ORDER, each row rendered
                             // as the KIND its `type` declares. The "All" row is
                             // the menu's own first item now rather than a
@@ -9160,7 +9323,7 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                             rsx! {
                                                 div {
                                                     key: "{v_for_key}",
-                                                    style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--jas-border,#555);margin-bottom:2px;",
+                                                    style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:var(--jas-border,#555);margin-bottom:2px;",
                                                     onclick: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
                                                         let a = item_app.clone();
@@ -9319,14 +9482,16 @@ fn render_tabs(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx
             style: "display:flex;flex-direction:row;align-items:stretch;gap:0;{style}",
             // Left rail.
             div {
-                style: "display:flex;flex-direction:column;min-width:140px;border-right:1px solid var(--jas-border,#555);padding:4px 0;background:var(--jas-pane-bg-dark,#2a2a2a);",
+                style: "display:flex;flex-direction:column;min-width:140px;border-right-width:1px; border-right-style:solid; border-right-color:var(--jas-border,#555);padding:4px 0;background-color:var(--jas-pane-bg-dark,#2a2a2a);",
                 for (tid, label, active) in nav {
                     {
                         let target = tid.clone();
                         let bind_field2 = bind_field.clone();
                         let mut sig = dialog_signal;
                         let mut rev = revision;
-                        let bg = if active { "background:var(--jas-pane-bg,#3a3a3a);" } else { "" };
+                        // Each branch states its colour: a fragment absent from the
+                        // new style is RESTORED by dioxus's style update (row 120).
+                        let bg = if active { "background-color:var(--jas-pane-bg,#3a3a3a);" } else { "background-color:transparent;" };
                         let weight = if active { "font-weight:600;" } else { "" };
                         rsx! {
                             div {
@@ -15367,7 +15532,7 @@ mod tests {
             16, super::swatch_face_color("", true),
             super::swatch_border("", true, false), false, "", "");
         assert!(style.contains("background:#fff;"), "white face, got: {style}");
-        assert!(style.contains("border:1px solid var(--jas-border,#666);"),
+        assert!(style.contains("border-width:1px; border-style:solid; border-color:var(--jas-border,#666);"),
                 "a real swatch's solid border, got: {style}");
         assert!(style.contains("width:16px;height:16px;"), "got: {style}");
     }
@@ -15378,7 +15543,7 @@ mod tests {
             16, super::swatch_face_color("", false),
             super::swatch_border("", false, false), false, "", "");
         assert!(style.contains("background:transparent;"), "got: {style}");
-        assert!(style.contains("border:1px dashed var(--jas-border,#555);"),
+        assert!(style.contains("border-width:1px; border-style:dashed; border-color:var(--jas-border,#555);"),
                 "an empty slot keeps the dashed placeholder border, got: {style}");
     }
 

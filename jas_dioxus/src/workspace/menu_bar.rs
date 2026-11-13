@@ -425,7 +425,7 @@ pub(crate) fn MenuBarView(
                 if label.as_str() == "---" {
                     vec![rsx! {
                         div {
-                            style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;",
+                            style: "height:1px; background-color:{THEME_BORDER}; margin:4px 8px;",
                         }
                     }]
                 } else if cmd.as_str() == "workspace_submenu" {
@@ -462,7 +462,7 @@ pub(crate) fn MenuBarView(
 
                                 if sub_open {
                                     div {
-                                        style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        style: "position:absolute; left:100%; top:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
                                         onmouseenter: move |_| { workspace_submenu_open.set(true); },
 
                                         // List saved layouts with check mark
@@ -493,7 +493,7 @@ pub(crate) fn MenuBarView(
                                         }
 
                                         // Separator
-                                        div { style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;" }
+                                        div { style: "height:1px; background-color:{THEME_BORDER}; margin:4px 8px;" }
 
                                         // Save As...
                                         {
@@ -524,7 +524,7 @@ pub(crate) fn MenuBarView(
                                         }
 
                                         // Separator
-                                        div { style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;" }
+                                        div { style: "height:1px; background-color:{THEME_BORDER}; margin:4px 8px;" }
 
                                         // Reset to Default
                                         {
@@ -628,7 +628,7 @@ pub(crate) fn MenuBarView(
 
                                 if sub_open {
                                     div {
-                                        style: "position:absolute; left:100%; top:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        style: "position:absolute; left:100%; top:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
                                         onmouseenter: move |_| { appearance_submenu_open.set(true); },
 
                                         for (name, app_label, is_active) in appearance_rows.clone() {
@@ -737,7 +737,7 @@ pub(crate) fn MenuBarView(
                 }
                 if is_open {
                     div {
-                        style: "position:absolute; top:100%; left:0; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:200px; z-index:1000; padding:4px 0;",
+                        style: "position:absolute; top:100%; left:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:200px; z-index:1000; padding:4px 0;",
                         for node in item_nodes {
                             {node}
                         }
@@ -749,7 +749,7 @@ pub(crate) fn MenuBarView(
 
     rsx! {
         div {
-            style: "display:flex; background:{THEME_BG}; border-bottom:1px solid {THEME_BORDER}; padding:0 4px; min-height:24px; align-items:center; flex-shrink:0; z-index:300;",
+            style: "display:flex; background-color:{THEME_BG}; border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER}; padding:0 4px; min-height:24px; align-items:center; flex-shrink:0; z-index:300;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },

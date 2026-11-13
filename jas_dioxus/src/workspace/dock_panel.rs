@@ -1161,7 +1161,7 @@ pub(crate) fn build_dock_groups(
                 nodes.push(rsx! {
                     div {
                         key: "tab-caret-{gi}-{pi}",
-                        style: "width:3px; align-self:stretch; background:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
+                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
                     }
                 });
             }
@@ -1243,7 +1243,7 @@ pub(crate) fn build_dock_groups(
                 nodes.push(rsx! {
                     div {
                         key: "tab-caret-{gi}-end",
-                        style: "width:3px; align-self:stretch; background:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
+                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
                     }
                 });
             }
@@ -1266,7 +1266,7 @@ pub(crate) fn build_dock_groups(
         let show_drop_before = cur_drag.is_some()
             && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi });
         let drop_indicator_style = if show_drop_before {
-            "height:3px; background:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
+            "height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
         } else {
             "height:0px; margin:0 4px; transition:height 0.1s ease;"
         };
@@ -1274,7 +1274,7 @@ pub(crate) fn build_dock_groups(
             && cur_drag.is_some()
             && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_count });
         let drop_after_style = if show_drop_after {
-            "height:3px; background:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
+            "height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
         } else {
             "height:0px; margin:0 4px; transition:height 0.1s ease;"
         };
@@ -1292,7 +1292,7 @@ pub(crate) fn build_dock_groups(
             div {
                 key: "dock-group-{did:?}-{gi}",
                 id: "{group_dom_id}",
-                style: "border-bottom:1px solid {THEME_BORDER}; opacity:{opacity};",
+                style: "border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER}; opacity:{opacity};",
                 ondragover: move |evt: Event<DragData>| {
                     evt.prevent_default();
                     let coords = evt.data().page_coordinates();
@@ -1353,7 +1353,7 @@ pub(crate) fn build_dock_groups(
                 // Tab bar with grip handle
                 {let panel_count = group.panels.len();
                 rsx! { div {
-                    style: "display:flex; background:{THEME_BG_DARK}; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
+                    style: "display:flex; background-color:{THEME_BG_DARK}; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
                     ondragover: move |evt: Event<DragData>| {
                         evt.prevent_default();
                         evt.stop_propagation();
@@ -1462,7 +1462,7 @@ pub(crate) fn build_dock_groups(
                             rsx! {
                                 div {
                                     id: "{content_id}",
-                                    style: "background:{THEME_BG};",
+                                    style: "background-color:{THEME_BG};",
                                     crate::interpreter::renderer::MemoYamlElement {
                                         el: content,
                                         ctx: eval_ctx,
@@ -1537,7 +1537,7 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
                     rsx! {
                         div {
                             key: "dock-icon-{gi}-{pi}",
-                            style: "width:28px; height:28px; margin:2px auto; background:{THEME_BG_TAB}; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:{THEME_TEXT};",
+                            style: "width:28px; height:28px; margin:2px auto; background-color:{THEME_BG_TAB}; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:{THEME_TEXT};",
                             title: "{label}",
                             onclick: move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1667,7 +1667,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         rsx! {
             div {
                 key: "floating-{fid:?}",
-                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1677,7 +1677,7 @@ pub(crate) fn FloatingDocksView() -> Element {
 
                 // Title bar: drag to reposition, double-click to redock
                 div {
-                    style: "height:20px; background:{THEME_BG_DARK}; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:{THEME_TEXT_DIM}; user-select:none;",
+                    style: "height:20px; background-color:{THEME_BG_DARK}; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:{THEME_TEXT_DIM}; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         // No native drag from this press (row 118, measured 11-13): the
