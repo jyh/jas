@@ -574,17 +574,12 @@ public sealed partial class MainWindow
                     // as the web (`renderer.rs` `render_element_preview`: #fff,
                     // 1px border) and the Mac (`YamlPanelBodyView.swift`
                     // `renderElementPreview`: white, gray 1pt stroke) draw it. Its
-                    // size is the plan's rect. No port draws the thumbnail yet,
-                    // so it counts as an empty preview, as an empty brush tile does.
+                    // size is the plan's rect. Row 52 (jas 910): inside it, the
+                    // core's `thumbnail.svg`, fitted with its aspect kept; a row
+                    // the core sent none for stays blank, counted preview-empty.
                     case "element_preview":
                         previews++;
-                        previewEmpty++;
-                        el = new Border
-                        {
-                            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
-                            BorderBrush = _paneMutedBrush,
-                            BorderThickness = new Thickness(1),
-                        };
+                        el = BuildElementPreview(leaf, ref previewEmpty);
                         break;
 
                     // The gradient slider (the 10-20 sitting, item 6: it was a
@@ -1094,6 +1089,38 @@ public sealed partial class MainWindow
         }
 
         /// <summary>
+        /// An `element_preview` (the Layers row's `lp_preview`): a white square with
+        /// a 1-DIP border, as the web and the Mac draw it, holding the core's
+        /// `thumbnail.svg` (<see cref="PanelWire.Thumbnail"/>) fitted inside, its
+        /// aspect kept. No thumbnail is the blank square, counted in `empty`.
+        /// </summary>
+        private Border BuildElementPreview(PaneLeaf leaf, ref int empty)
+        {
+            var host = new ContentControl
+            {
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false,
+            };
+            if (PanelWire.Thumbnail(leaf.Shown("thumbnail.svg")) is { } doc)
+            {
+                _paneIconsPending++;
+                LoadIcon(host, "", "", leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild, preview: true, document: doc);
+            }
+            else
+            {
+                empty++;
+            }
+            return new Border
+            {
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                BorderBrush = _paneMutedBrush,
+                BorderThickness = new Thickness(1),
+                Child = host,
+            };
+        }
+
+        /// <summary>
         /// A `color_swatch`: a bordered square, filled on every draw by
         /// ApplyLeafValues from `bind.color`. A tap sends the leaf's `click` by its
         /// plan path, like every other control; a leaf with neither an id nor a
@@ -1579,12 +1606,15 @@ public sealed partial class MainWindow
         // icon_button call site is unchanged and this widens the type rather than
         // duplicating the loader -- the alternative was a second copy of the SVG
         // wrapping, the currentColor substitution and the staleness guard.
-        private async void LoadIcon(ContentControl host, string viewbox, string svg, double box, int build, bool preview = false)
+        // `document`, when given, is a WHOLE SVG drawn as sent (row 52's element
+        // thumbnail): no wrapping, no ink, and `viewbox`/`svg` are unused.
+        private async void LoadIcon(ContentControl host, string viewbox, string svg, double box, int build, bool preview = false, string? document = null)
         {
             var ok = false;
             try
             {
-                var markup = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"" + viewbox
+                var markup = document
+                           ?? "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"" + viewbox
                            + "\" color=\"" + PaneInk + "\">" + svg.Replace("currentColor", PaneInk)
                            + "</svg>";
                 var bytes = System.Text.Encoding.UTF8.GetBytes(markup);
