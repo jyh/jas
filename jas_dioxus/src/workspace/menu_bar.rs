@@ -462,7 +462,7 @@ pub(crate) fn MenuBarView(
 
                                 if sub_open {
                                     div {
-                                        style: "position:absolute; left:100%; top:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        style: "position:absolute; left:100%; top:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
                                         onmouseenter: move |_| { workspace_submenu_open.set(true); },
 
                                         // List saved layouts with check mark
@@ -628,7 +628,7 @@ pub(crate) fn MenuBarView(
 
                                 if sub_open {
                                     div {
-                                        style: "position:absolute; left:100%; top:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
+                                        style: "position:absolute; left:100%; top:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1001; padding:4px 0; border-radius:4px;",
                                         onmouseenter: move |_| { appearance_submenu_open.set(true); },
 
                                         for (name, app_label, is_active) in appearance_rows.clone() {
@@ -737,7 +737,7 @@ pub(crate) fn MenuBarView(
                 }
                 if is_open {
                     div {
-                        style: "position:absolute; top:100%; left:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:200px; z-index:1000; padding:4px 0;",
+                        style: "position:absolute; top:100%; left:0; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:200px; z-index:1000; padding:4px 0;",
                         for node in item_nodes {
                             {node}
                         }

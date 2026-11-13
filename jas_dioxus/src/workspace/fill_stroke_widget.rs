@@ -227,7 +227,7 @@ pub(crate) fn FillStrokeWidgetView(
                 style: "display:flex; gap:2px; margin-top:6px;",
                 // Color button
                 div {
-                    style: "width:18px; height:18px; background:{color_btn_bg}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; cursor:pointer; border-radius:2px;",
+                    style: "width:18px; height:18px; background:{color_btn_bg}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; cursor:pointer; border-radius:2px;",
                     title: "Color",
                     // Solid color icon
                     div {
@@ -236,7 +236,7 @@ pub(crate) fn FillStrokeWidgetView(
                 }
                 // Gradient button (disabled)
                 div {
-                    style: "width:18px; height:18px; background:transparent; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; cursor:default; border-radius:2px; opacity:0.4;",
+                    style: "width:18px; height:18px; background:transparent; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; cursor:default; border-radius:2px; opacity:0.4;",
                     title: "Gradient (not implemented)",
                     div {
                         style: "margin:3px; width:12px; height:12px; background:linear-gradient(to right, #000, #fff);",
@@ -244,7 +244,7 @@ pub(crate) fn FillStrokeWidgetView(
                 }
                 // None button
                 div {
-                    style: "width:18px; height:18px; background:{none_btn_bg}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; cursor:pointer; border-radius:2px;",
+                    style: "width:18px; height:18px; background:{none_btn_bg}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; cursor:pointer; border-radius:2px;",
                     title: "None",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
