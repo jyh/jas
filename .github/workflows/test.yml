@@ -1119,6 +1119,9 @@ jobs:
           python scripts/check_shell_no_interpreter.py
           python scripts/check_inline_var_shorthands.py --self-test
           python scripts/check_inline_var_shorthands.py
+          # Self-test only here: the live arm reads the built .wasm, which only the
+          # ubuntu web-build job produces (web-build.yml, row 122).
+          python scripts/check_wasm_theme_placeholders.py --self-test
           python scripts/check_style_fragment_off_values.py --self-test
           python scripts/check_style_fragment_off_values.py
           python scripts/check_cs_doc_summaries.py --self-test

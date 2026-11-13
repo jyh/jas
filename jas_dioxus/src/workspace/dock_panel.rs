@@ -1265,18 +1265,24 @@ pub(crate) fn build_dock_groups(
         // Drop indicator logic
         let show_drop_before = cur_drag.is_some()
             && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi });
+        // format!, not a plain literal: a plain string keeps `{THEME_ACCENT}` as
+        // text and the browser got invalid CSS, so the indicator had no colour
+        // (row 122; `scripts/check_wasm_theme_placeholders.py` reads the binary).
         let drop_indicator_style = if show_drop_before {
-            "height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
+            format!("height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;")
         } else {
-            "height:0px; margin:0 4px; transition:height 0.1s ease;"
+            "height:0px; margin:0 4px; transition:height 0.1s ease;".to_string()
         };
         let show_drop_after = gi == group_count - 1
             && cur_drag.is_some()
             && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_count });
+        // format!, not a plain literal: a plain string keeps `{THEME_ACCENT}` as
+        // text and the browser got invalid CSS, so the indicator had no colour
+        // (row 122; `scripts/check_wasm_theme_placeholders.py` reads the binary).
         let drop_after_style = if show_drop_after {
-            "height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
+            format!("height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;")
         } else {
-            "height:0px; margin:0 4px; transition:height 0.1s ease;"
+            "height:0px; margin:0 4px; transition:height 0.1s ease;".to_string()
         };
         // Highlight tab bar when it's a TabBar drop target
         let tab_bar_drop = cur_drag.is_some()

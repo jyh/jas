@@ -3798,7 +3798,7 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let selected_border = if eval_selected_in(el, ctx) {
         "outline:2px solid #007aff;outline-offset:-2px;"
     } else {
-        "outline:none;"
+        "outline:none;outline-offset:0;"
     };
 
     let style = if visible {
@@ -5724,7 +5724,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 
     // A fragment absent from the new style is RESTORED by dioxus's style update
     // (row 121), so the off branch states its value. (`cursor:pointer` is in the base style.)
-    let dim = if disabled { "opacity:0.4;cursor:not-allowed;" } else { "opacity:1;" };
+    let dim = if disabled { "opacity:0.4;cursor:not-allowed;" } else { "opacity:1;cursor:pointer;" };
     let select_cursor = if disabled { "not-allowed" } else { "pointer" };
 
     rsx! {
