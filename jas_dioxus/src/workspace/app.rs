@@ -1869,6 +1869,10 @@ pub fn App() -> Element {
             // Floating docks (position:absolute in the pane area, row 118)
             FloatingDocksView {}
 
+            // The dock's drop feedback, the one subscriber to the drag signals
+            // (row 124): a sibling, so its re-render never touches the dock tree.
+            super::dock_panel::DockDropOverlay {}
+
             } // close pane container div
 
             // Panel menu overlay (z-index 1100-1101, above floating docks)

@@ -1112,7 +1112,6 @@ pub(crate) fn build_dock_groups(
     active_doc_view: &serde_json::Value,
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
-    let group_count = groups.len();
     // peek() reads drag_source / drop_target_sig without subscribing
     // the dock_panel render to them. Subscribing causes a full
     // dock_panel re-render mid-drag (when ondragstart writes the
@@ -1262,43 +1261,18 @@ pub(crate) fn build_dock_groups(
         // Pre-compute active panel info for hamburger menu button
         let active_panel_info = group.active_panel().map(|kind| (kind, group.active));
 
-        // Drop indicator logic
-        let show_drop_before = cur_drag.is_some()
-            && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi });
-        // format!, not a plain literal: a plain string keeps `{THEME_ACCENT}` as
-        // text and the browser got invalid CSS, so the indicator had no colour
-        // (row 122; `scripts/check_wasm_theme_placeholders.py` reads the binary).
-        let drop_indicator_style = if show_drop_before {
-            format!("height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;")
-        } else {
-            "height:0px; margin:0 4px; transition:height 0.1s ease;".to_string()
-        };
-        let show_drop_after = gi == group_count - 1
-            && cur_drag.is_some()
-            && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_count });
-        // format!, not a plain literal: a plain string keeps `{THEME_ACCENT}` as
-        // text and the browser got invalid CSS, so the indicator had no colour
-        // (row 122; `scripts/check_wasm_theme_placeholders.py` reads the binary).
-        let drop_after_style = if show_drop_after {
-            format!("height:3px; background-color:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;")
-        } else {
-            "height:0px; margin:0 4px; transition:height 0.1s ease;".to_string()
-        };
         // Highlight tab bar when it's a TabBar drop target
         let tab_bar_drop = cur_drag.is_some()
             && matches!(cur_drop, Some(DropTarget::TabBar { group, .. }) if group == GroupAddr { dock_id: did, group_idx: gi });
         let tab_bar_border = if tab_bar_drop { format!("2px solid {THEME_ACCENT}") } else { format!("1px solid {THEME_BORDER}") };
 
-        let is_dragged_group = matches!(cur_drag,
-            Some(DragPayload::Group(addr)) if addr.dock_id == did && addr.group_idx == gi);
-        let opacity = if is_dragged_group { "0.4" } else { "1.0" };
         let group_dom_id = crate::workspace::test_hook::dock_group_dom_id(did.0, gi);
 
         rsx! {
             div {
                 key: "dock-group-{did:?}-{gi}",
                 id: "{group_dom_id}",
-                style: "border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER}; opacity:{opacity};",
+                style: "border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER};",
                 ondragover: move |evt: Event<DragData>| {
                     evt.prevent_default();
                     let coords = evt.data().page_coordinates();
@@ -1354,7 +1328,6 @@ pub(crate) fn build_dock_groups(
                     drop_target_sig.set(None);
                 },
 
-                div { style: "{drop_indicator_style}" }
 
                 // Tab bar with grip handle
                 {let panel_count = group.panels.len();
@@ -1486,7 +1459,6 @@ pub(crate) fn build_dock_groups(
                     }
                 }
 
-                div { style: "{drop_after_style}" }
             }
         }
     }).collect()
@@ -1604,6 +1576,114 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
         for node in nodes {
             {node}
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DockDropOverlay — the dock's drop feedback, drawn OUTSIDE the dock tree
+// ---------------------------------------------------------------------------
+
+/// A drop-feedback rectangle in the pane area's frame: `(x, y, w, h)`.
+pub(crate) type FeedbackRect = (f64, f64, f64, f64);
+
+/// Where a group-slot bar goes (STATUS-jas row 124). `rect_of(g)` is group
+/// `g`'s rectangle in the dock, `None` past its last group. A slot at an
+/// existing group draws a 3px bar on that group's TOP edge; the slot past the
+/// end draws it on the last group's BOTTOM edge; a dock with no groups draws
+/// nothing.
+pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_idx: usize) -> Option<FeedbackRect> {
+    if let Some((x, y, w, _)) = rect_of(group_idx) {
+        return Some((x, y, w, 3.0));
+    }
+    let prev = group_idx.checked_sub(1)?;
+    let (x, y, w, h) = rect_of(prev)?;
+    Some((x, y + h - 3.0, w, 3.0))
+}
+
+/// The dock's drop feedback during a drag (row 124; design note
+/// `2026-11-13-jas-DESIGN-row124-dock-drop-overlay.md` in the seat record).
+///
+/// The dock tree reads the drag signals with `peek()` and MUST keep doing so:
+/// a subscribed dock re-render mid-drag destroys the drag's source element and
+/// the drag dies (`build_dock_groups`). This overlay is a SIBLING inside the
+/// pane area, so it is the one reader that subscribes; its re-render touches
+/// only itself. It draws the group-slot bar and a cover over the dragged
+/// group, reading the groups' rectangles from the DOM at render time.
+#[component]
+pub(crate) fn DockDropOverlay() -> Element {
+    let ds = use_context::<DragState>();
+    let source = (ds.drag_source)();
+    let target = (ds.drop_target)();
+    // Filled only on wasm (the DOM read); native builds render none.
+    #[allow(unused_mut)]
+    let mut bars: Vec<FeedbackRect> = Vec::new();
+    #[allow(unused_mut)]
+    let mut covers: Vec<FeedbackRect> = Vec::new();
+    #[cfg(target_arch = "wasm32")]
+    if source.is_some() {
+        let doc = web_sys::window().and_then(|w| w.document());
+        let origin = doc.as_ref()
+            .and_then(|d| d.get_element_by_id("jas-pane-area"))
+            .map(|a| { let r = a.get_bounding_client_rect(); (r.left(), r.top()) })
+            .unwrap_or((0.0, 0.0));
+        let rect = |dock: usize, g: usize| -> Option<FeedbackRect> {
+            let el = doc.as_ref()?.get_element_by_id(&crate::workspace::test_hook::dock_group_dom_id(dock, g))?;
+            let r = el.get_bounding_client_rect();
+            Some((r.left() - origin.0, r.top() - origin.1, r.width(), r.height()))
+        };
+        if let Some(DropTarget::GroupSlot { dock_id, group_idx }) = target {
+            if let Some(b) = slot_bar(|g| rect(dock_id.0, g), group_idx) {
+                bars.push(b);
+            }
+        }
+        if let Some(DragPayload::Group(addr)) = source {
+            if let Some(c) = rect(addr.dock_id.0, addr.group_idx) {
+                covers.push(c);
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    { let _ = (&source, &target); }
+    rsx! {
+        for (i, (x, y, w, h)) in bars.into_iter().enumerate() {
+            div {
+                key: "drop-bar-{i}",
+                style: "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:{THEME_ACCENT}; border-radius:1px; pointer-events:none; z-index:890;",
+            }
+        }
+        for (i, (x, y, w, h)) in covers.into_iter().enumerate() {
+            div {
+                key: "drag-cover-{i}",
+                style: "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:rgba(0,0,0,0.45); pointer-events:none; z-index:889;",
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dock_drop_overlay_tests {
+    use super::slot_bar;
+
+    fn rects(g: usize) -> Option<(f64, f64, f64, f64)> {
+        // three groups stacked at x=10, width 200: heights 100, 50, 80
+        [(10.0, 0.0, 200.0, 100.0), (10.0, 100.0, 200.0, 50.0), (10.0, 150.0, 200.0, 80.0)].get(g).copied()
+    }
+
+    #[test]
+    fn a_slot_at_a_group_is_a_bar_on_its_top_edge() {
+        assert_eq!(slot_bar(rects, 0), Some((10.0, 0.0, 200.0, 3.0)));
+        assert_eq!(slot_bar(rects, 2), Some((10.0, 150.0, 200.0, 3.0)));
+    }
+
+    #[test]
+    fn the_slot_past_the_end_is_a_bar_on_the_last_groups_bottom_edge() {
+        assert_eq!(slot_bar(rects, 3), Some((10.0, 227.0, 200.0, 3.0)));
+    }
+
+    #[test]
+    fn a_dock_with_no_groups_and_a_slot_far_past_the_end_draw_nothing() {
+        assert_eq!(slot_bar(|_| None, 0), None);
+        assert_eq!(slot_bar(rects, 5), None);
     }
 }
 
