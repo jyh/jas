@@ -77,7 +77,7 @@ The top-level layout structure combining both layers:
 | `version` | int | Format version (currently 3). Mismatched versions are rejected on load. |
 | `name` | string | Layout name. Always `"Workspace"` for the working copy. |
 | `anchored` | list of (DockEdge, Dock) | Docks snapped to window edges. |
-| `floating` | list of FloatingDock | Free-floating docks with screen positions. |
+| `floating` | list of FloatingDock | Free-floating docks, each with an `x`, `y` in the pane area's frame (see *Floating dock positions*). |
 | `hidden_panels` | list of PanelKind | Panels not currently visible. |
 | `z_order` | list of DockId | Z-order for floating docks, back to front. |
 | `focused_panel` | optional PanelAddr | Currently focused panel. |
@@ -230,6 +230,31 @@ collapsed state. `redock` is `snap_to_edge` onto the `Right` edge.
 (Conformance: `panel_ops.json` `snap_to_edge_left`; engine arms
 `snap_to_left_edge`, `snap_creates_anchored_dock` and
 `a_detach_dropped_near_an_edge_snaps_there`.)
+
+### Floating dock positions
+
+A floating dock's `x` and `y` are its top-left corner in the **pane area's
+frame**: the region the panes are laid out in, which is the window less any
+menubar the app draws inside it. It is the same frame as the panes'
+positions and the viewport that `clamp_floating_docks` receives, so a
+floating dock is clamped in the frame it is drawn in. An app whose menubar
+is outside the window (the system menubar) has a pane area equal to the
+window.
+
+* A dock detached by a drop is placed with its top-left corner at the
+  pointer, converted into the pane area's frame.
+* A floating dock moved by its title bar keeps the pointer's offset from the
+  corner it had when the drag started.
+* In both cases `y` is never below 0, the same floor as
+  `clamp_floating_docks`. A floating dock cannot cover the menubar, and its
+  title bar, the only handle that moves it, stays inside the pane area. A
+  drop with the pointer over the menubar places the dock at the top of the
+  pane area.
+
+The snap band (*Snapping onto an edge*) is measured against the window.
+The pane area is flush with the window on the left, right and bottom, so
+the three bands are the pane area's edges. There is no top band, so a
+menubar above the area takes nothing from any band.
 
 ### Where each edge dock is drawn
 
