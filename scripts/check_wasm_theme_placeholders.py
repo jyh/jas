@@ -34,6 +34,7 @@ WHAT IT DOES NOT COVER
 import argparse
 import glob
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -45,15 +46,15 @@ ANCHOR = b"var(--jas-"
 def scan(root):
     files = sorted(glob.glob(os.path.join(root, "**", "*.wasm"), recursive=True))
     if not files:
-        return None, f"no .wasm under {root}"
+        return None, f"no .wasm under {pathlib.Path(root).as_posix()}"
     out = []
     for f in files:
         b = open(f, "rb").read()
         if ANCHOR not in b:
-            return None, f"{f} holds no `var(--jas-`: not the app binary"
+            return None, f"{pathlib.Path(f).as_posix()} holds no `var(--jas-`: not the app binary"
         for m in PAT.finditer(b):
             ctx = b[max(0, m.start() - 40):m.end() + 10].decode("ascii", "replace")
-            out.append(f"{os.path.basename(f)}@{m.start()}: {m.group().decode()} in ...{ctx}...")
+            out.append(f"{pathlib.Path(f).name}@{m.start()}: {m.group().decode()} in ...{ctx}...")
     return out, f"{len(files)} .wasm file(s)"
 
 
