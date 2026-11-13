@@ -681,6 +681,14 @@ static class Program
         Eq("preview: no viewbox is no drawing", "(null)", ShowPreview(PanelWire.Preview(null, "<ellipse/>")));
         Eq("preview: an empty svg is no drawing", "(null)", ShowPreview(PanelWire.Preview("0 0 40 40", "")));
         Eq("preview: a blank viewbox is no drawing", "(null)", ShowPreview(PanelWire.Preview("  ", "<ellipse/>")));
+        // Row 52 (jas 910): an element_preview's `thumbnail.svg` is ONE WHOLE
+        // SVG DOCUMENT, drawn as sent: never wrapped (its namespaces are its
+        // own) and never recoloured (the element keeps its colours).
+        const string thumb = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:jas=\"urn:jas:1\" viewBox=\"0 0 30 40\" preserveAspectRatio=\"xMidYMid meet\"><rect fill=\"currentColor\" jas:x=\"1\"/></svg>";
+        Eq("thumbnail: a whole document is drawn verbatim", thumb, PanelWire.Thumbnail(thumb) ?? "(null)");
+        Eq("thumbnail: no key is the blank square", "(null)", PanelWire.Thumbnail(null) ?? "(null)");
+        Eq("thumbnail: an empty string is the blank square", "(null)", PanelWire.Thumbnail("  ") ?? "(null)");
+        Eq("thumbnail: a fragment is not a document", "(null)", PanelWire.Thumbnail("<rect/>") ?? "(null)");
         Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
         // ─────────────────────────────────────────────────────────────
         // §1.2: a dropdown's `items` channel, read from the core's OWN bytes:
