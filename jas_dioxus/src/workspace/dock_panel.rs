@@ -1665,7 +1665,15 @@ pub(crate) fn DockDropOverlay() -> Element {
                 let r = doc.as_ref()?.get_element_by_id(&id)?.get_bounding_client_rect();
                 Some((r.left() - origin.0, r.top() - origin.1, r.width(), r.height()))
             };
-            if let Some(c) = tab_caret(tab, index) {
+            // A panel from ANOTHER group is appended (`op_move_panel_to_group`
+            // takes no index), so the caret is drawn where the drop lands, past
+            // the last tab; only a same-group reorder honours `index`. Measured
+            // 11-13: the caret at Boolean's left edge while the drop appended.
+            let lands_at = match &source {
+                Some(DragPayload::Panel(from)) if from.group != group => kinds.len(),
+                _ => index,
+            };
+            if let Some(c) = tab_caret(tab, lands_at) {
                 bars.push(c);
             }
         }
