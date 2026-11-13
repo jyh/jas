@@ -19,6 +19,40 @@ import Testing
         }
     }
 
+    /// The namespace prefixes a document USES (`p:attr=`) and DECLARES
+    /// (`xmlns:p=`), read from its bytes. Measured 11-12: XMLParser accepts an
+    /// undeclared prefix (it cannot be this check's instrument), and
+    /// `NSImage(data:)` still draws one but libxml2 logs a "namespace error"
+    /// to the console per thumbnail built, which is what the inkscape: fix was for.
+    private func prefixes(_ s: String) -> (used: Set<String>, declared: Set<String>) {
+        func all(_ pattern: String) -> Set<String> {
+            guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+            return Set(re.matches(in: s, range: NSRange(s.startIndex..., in: s)).compactMap {
+                Range($0.range(at: 1), in: s).map { String(s[$0]) }
+            })
+        }
+        return (all(#"\s([A-Za-z][A-Za-z0-9]*):[A-Za-z-]+="#).subtracting(["xmlns", "xml"]),
+                all(#"xmlns:([A-Za-z][A-Za-z0-9]*)="#))
+    }
+
+    @Test func everyPrefixAThumbnailUsesIsDeclared() {
+        // Positive control: the named rect the inkscape: lesson already covers.
+        let named = buildPreviewSvg(.rect(Rect(x: 0, y: 0, width: 10, height: 10, name: "hull")))
+        let n = prefixes(named)
+        #expect(n.used.contains("inkscape"), "the control must exercise its prefix: \(named)")
+        #expect(n.used.isSubset(of: n.declared), "control: \(named)")
+        // The class: a gradient fill writes jas:fill-gradient.
+        let g = Gradient(type: .linear, angle: 0, stops: [
+            GradientStop(color: "#ff0000", location: 0),
+            GradientStop(color: "#0000ff", location: 100),
+        ])
+        let graded = buildPreviewSvg(.rect(Rect(x: 0, y: 0, width: 10, height: 10, fillGradient: g)))
+        let p = prefixes(graded)
+        #expect(p.used.contains("jas"), "the case must exercise the jas: prefix: \(graded)")
+        #expect(p.used.isSubset(of: p.declared),
+                "undeclared: \(p.used.subtracting(p.declared).sorted()) in \(graded)")
+    }
+
     @Test func aRectSitsInsideItsThumbnailsViewBox() {
         let svg = buildPreviewSvg(.rect(Rect(x: 10, y: 10, width: 30, height: 30)))
         let vb = numbers(svg, #"viewBox="([-0-9.e]+) ([-0-9.e]+) ([-0-9.e]+) ([-0-9.e]+)""#)
