@@ -1005,7 +1005,7 @@ pub fn App() -> Element {
         rsx! {
             div {
                 key: "tab-{idx}",
-                style: "display:inline-flex; align-items:center; padding:4px 8px; margin-right:1px; background:{bg}; border:1px solid {THEME_BORDER}; border-bottom:{border_bottom}; cursor:pointer; font-size:12px; color:{THEME_TEXT}; user-select:none;",
+                style: "display:inline-flex; align-items:center; padding:4px 8px; margin-right:1px; background:{bg}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; border-bottom:{border_bottom}; cursor:pointer; font-size:12px; color:{THEME_TEXT}; user-select:none;",
                 onclick: move |_| {
                     let act = act.clone();
                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1131,7 +1131,7 @@ pub fn App() -> Element {
     // Rule 7: above the canvas, below every floating dock (z 900 and up).
     let edge_dock_style = |r: super::edge_dock::EdgeRect| format!(
         "position:absolute; left:{}px; top:{}px; width:{}px; height:{}px; z-index:800; \
-         display:flex; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; \
+         display:flex; overflow:hidden; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; \
          box-sizing:border-box;",
         r.x, r.y, r.w, r.h,
     );
@@ -1506,7 +1506,7 @@ pub fn App() -> Element {
                     was_dropped.set(false);
                 }
             },
-            style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; background:{THEME_BG_DARK}; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",
+            style: "position:relative; width:100%; height:100%; overflow:hidden; outline:none; font-family:sans-serif; background-color:{THEME_BG_DARK}; border-left:{snap_left}; border-right:{snap_right}; border-bottom:{snap_bottom}; box-sizing:border-box; display:flex; flex-direction:column;",
 
             // ===== Menu bar (full width, top of window) =====
             MenuBarView {
@@ -1522,7 +1522,7 @@ pub fn App() -> Element {
             // ===== Toolbar pane (position:absolute) =====
             if pane_snapshot.as_ref().is_some_and(|pl| pl.is_pane_visible(PaneKind::Toolbar)) {
             div {
-                style: "position:absolute; left:{tx}px; top:{ty}px; width:{tw}px; height:{th}px; z-index:{toolbar_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-sizing:border-box;",
+                style: "position:absolute; left:{tx}px; top:{ty}px; width:{tw}px; height:{th}px; z-index:{toolbar_z}; display:flex; flex-direction:column; overflow:hidden; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |_| {
@@ -1539,7 +1539,7 @@ pub fn App() -> Element {
 
                 // Title bar
                 div {
-                    style: "height:20px; min-height:20px; cursor:grab; background:{THEME_BG_DARK}; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
+                    style: "height:20px; min-height:20px; cursor:grab; background-color:{THEME_BG_DARK}; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
@@ -1575,7 +1575,7 @@ pub fn App() -> Element {
 
             // ===== Canvas pane (position:absolute) =====
             div {
-                style: "position:absolute; left:{ccx}px; top:{ccy}px; width:{ccw}px; height:{cch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:{canvas_border}; box-sizing:border-box;",
+                style: "position:absolute; left:{ccx}px; top:{ccy}px; width:{ccw}px; height:{cch}px; z-index:{canvas_z}; display:flex; flex-direction:column; overflow:hidden; background-color:{THEME_BG}; border:{canvas_border}; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |_: Event<MouseData>| {
@@ -1595,7 +1595,7 @@ pub fn App() -> Element {
                 // Title bar (hidden when maximized)
                 if !canvas_maximized {
                     div {
-                        style: "height:20px; min-height:20px; cursor:grab; background:{THEME_BG_DARK}; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
+                        style: "height:20px; min-height:20px; cursor:grab; background-color:{THEME_BG_DARK}; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none;",
                         onmousedown: move |evt: Event<MouseData>| {
                             evt.stop_propagation();
                             let coords = evt.data().page_coordinates();
@@ -1623,7 +1623,7 @@ pub fn App() -> Element {
                 // Restore button (visible only when maximized)
                 if canvas_maximized {
                     button {
-                        style: "position:absolute; top:4px; right:4px; z-index:200; background:{THEME_BG_DARK}; border:1px solid {THEME_BORDER}; color:{THEME_TEXT}; cursor:pointer; padding:2px 8px; font-size:10px; border-radius:3px;",
+                        style: "position:absolute; top:4px; right:4px; z-index:200; background-color:{THEME_BG_DARK}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; color:{THEME_TEXT}; cursor:pointer; padding:2px 8px; font-size:10px; border-radius:3px;",
                         title: "Restore canvas (double-click tab bar)",
                         onclick: {
                             let act = act.clone();
@@ -1642,7 +1642,7 @@ pub fn App() -> Element {
 
                 // Tab bar
                 div {
-                    style: "display:flex; background:{THEME_BG_DARK}; border-bottom:1px solid {THEME_BORDER}; padding:2px 4px 0; min-height:28px; align-items:flex-end; flex-shrink:0;",
+                    style: "display:flex; background-color:{THEME_BG_DARK}; border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER}; padding:2px 4px 0; min-height:28px; align-items:flex-end; flex-shrink:0;",
                     for btn in tab_buttons {
                         {btn}
                     }
@@ -1727,7 +1727,7 @@ pub fn App() -> Element {
             // ===== Dock pane (position:absolute) =====
             if pane_snapshot.as_ref().is_some_and(|pl| pl.is_pane_visible(PaneKind::Dock)) {
             div {
-                style: "position:absolute; left:{dx}px; top:{dy}px; width:{dw}px; height:{dh}px; z-index:{dock_z}; display:flex; flex-direction:column; overflow:hidden; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-sizing:border-box;",
+                style: "position:absolute; left:{dx}px; top:{dy}px; width:{dw}px; height:{dh}px; z-index:{dock_z}; display:flex; flex-direction:column; overflow:hidden; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-sizing:border-box;",
                 onmousedown: {
                     let act = act.clone();
                     move |evt: Event<MouseData>| {
@@ -1743,7 +1743,7 @@ pub fn App() -> Element {
 
                 // Title bar with collapse chevron and close button
                 div {
-                    style: "height:20px; min-height:20px; cursor:grab; background:{THEME_BG_DARK}; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none; border-bottom:1px solid {THEME_BORDER};",
+                    style: "height:20px; min-height:20px; cursor:grab; background-color:{THEME_BG_DARK}; flex-shrink:0; display:flex; align-items:center; padding:0 4px; user-select:none; border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER};",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();

@@ -128,7 +128,7 @@ pub fn PanelMenuOverlay() -> Element {
                         }
                         if is_open {
                             div {
-                                style: "{submenu_pos} background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
+                                style: "{submenu_pos} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
                                 onmouseenter: move |_| { submenu_open_for.set(Some(cmd)); },
                                 onmouseleave: move |_| { submenu_open_for.set(None); },
                                 onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
@@ -248,7 +248,7 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Separator => {
                 rsx! {
                     div {
-                        style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;",
+                        style: "height:1px; background-color:{THEME_BORDER}; margin:4px 8px;",
                     }
                 }
             }
@@ -267,7 +267,7 @@ pub fn PanelMenuOverlay() -> Element {
         }
         // Menu dropdown
         div {
-            style: "position:fixed; left:{x}px; top:{y}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
+            style: "position:fixed; left:{x}px; top:{y}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
