@@ -3821,19 +3821,23 @@ private func cycleVisibility(_ vis: Visibility) -> Visibility {
 /// shipped: nothing could look at what this function emitted.
 func buildPreviewSvg(_ elem: Element) -> String {
     let b = elem.bounds
-    let w = b.width, h = b.height
-    if !w.isFinite || !h.isFinite || w <= 0 || h <= 0 {
+    if !b.width.isFinite || !b.height.isFinite || b.width <= 0 || b.height <= 0 {
         return ""
     }
+    // `elementSvg` writes every coordinate in px (pt x 96/72), so the viewBox
+    // takes the same scale or the content overruns it by a third (the twin of
+    // jas_dioxus's `tree_preview_svg`; LayersThumbnailBoxTests).
+    let ptToPx = 96.0 / 72.0
+    let x = b.x * ptToPx, y = b.y * ptToPx, w = b.width * ptToPx, h = b.height * ptToPx
     let pad = max(max(w, h) * 0.02, 0.5)
-    let vb = "\(b.x - pad) \(b.y - pad) \(w + 2 * pad) \(h + 2 * pad)"
+    let vb = "\(x - pad) \(y - pad) \(w + 2 * pad) \(h + 2 * pad)"
     let inner = elementSvg(elem, indent: "")
     // DECLARES xmlns:inkscape: the element serializer emits `inkscape:label`
     // for any NAMED element, and an undeclared prefix is invalid XML that a
     // strict parser rejects whole. Same lesson this codebase already recorded
     // for `jas:`; found by JYH when console noise appeared right after
     // renaming became possible on every element.
-    return #"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
+    return #"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
 }
 
 /// SwiftUI view that renders an element as a fitted SVG thumbnail.
