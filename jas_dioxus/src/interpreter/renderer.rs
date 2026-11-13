@@ -61,14 +61,31 @@ pub fn MemoYamlElement(el: serde_json::Value, ctx: serde_json::Value) -> Element
     render_element(&el, &ctx)
 }
 
+/// Whether the web renders this node by expanding its `foreach` + `do`.
+///
+/// NOT a `tree_view`: the web's Layers tree is `render_tree_view`, which
+/// builds its rows from the live document and carries the tree's own law
+/// (the canvas-selection reveal, the keyboard rows, row drag-and-drop, the row
+/// context menu, double-click isolation). `lp_tree` gained `foreach` + `do` on
+/// 10-27 (567b4031) for the PLAN a native shell expands, and this branch then
+/// took it first, so none of that ran on the live web panel (STATUS-jas row
+/// 117, measured: no row reveal, focus never in the tree).
+pub(crate) fn expands_as_foreach(el: &serde_json::Value) -> bool {
+    el.get("foreach").is_some()
+        && el.get("do").is_some()
+        && el.get("type").and_then(|t| t.as_str()) != Some("tree_view")
+}
+
 fn render_el(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
     rctx: &RenderCtx,
 ) -> Element {
     // Handle repeat directive: expand template for each item in source
-    if let (Some(repeat), Some(template)) = (el.get("foreach"), el.get("do")) {
-        return render_repeat(repeat, template, el, ctx, rctx);
+    if expands_as_foreach(el) {
+        if let (Some(repeat), Some(template)) = (el.get("foreach"), el.get("do")) {
+            return render_repeat(repeat, template, el, ctx, rctx);
+        }
     }
 
     // _template tag available for native widget overrides when needed.
@@ -9507,6 +9524,33 @@ mod tests {
     use super::*;
     use crate::geometry::element::{Color, Fill, Stroke};
     use crate::workspace::app_state::AppState;
+
+    /// Row 117: the web's Layers tree is `render_tree_view`, never the generic
+    /// foreach expansion, although `lp_tree` carries `foreach` + `do` for the
+    /// plan. Read from the shipped workspace, so a re-typed widget reds this.
+    #[test]
+    fn a_tree_view_with_a_foreach_is_the_native_tree_on_the_web() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        fn find<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) { return Some(n); }
+            for k in ["children", "content", "do"] {
+                if let Some(c) = n.get(k) {
+                    if let Some(a) = c.as_array() {
+                        if let Some(f) = a.iter().find_map(|x| find(x, id)) { return Some(f); }
+                    } else if let Some(f) = find(c, id) { return Some(f); }
+                }
+            }
+            None
+        }
+        let tree = find(ws.panel("layers_panel_content").expect("layers"), "lp_tree").expect("lp_tree");
+        assert!(tree.get("foreach").is_some() && tree.get("do").is_some(),
+                "the fixture must carry the shape that took the wrong branch: {tree}");
+        assert!(!expands_as_foreach(tree), "lp_tree must reach render_tree_view");
+        // The control: an ordinary foreach still expands.
+        let list = serde_json::json!({"type": "container", "foreach": {"source": "x", "as": "i"}, "do": {"type": "text"}});
+        assert!(expands_as_foreach(&list));
+        assert!(!expands_as_foreach(&serde_json::json!({"type": "container"})), "no foreach, no expansion");
+    }
 
     /// Row 111 (web): the dock scrolls by the SMALLEST amount, and not at all
     /// when the group is already in view. Coordinates are one space; the view
