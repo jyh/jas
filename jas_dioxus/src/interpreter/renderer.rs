@@ -5963,10 +5963,13 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         String::new()
     };
 
+    // Unchecked states its colour: a fragment absent from the new style is
+    // RESTORED by dioxus's style update (row 120). The YAML `{style}` follows
+    // and still wins.
     let bg_style = if checked {
         "background-color:var(--jas-button-checked,#505050);".to_string()
     } else {
-        String::new()
+        "background-color:transparent;".to_string()
     };
     let dim = if disabled { "opacity:0.4;" } else { "" };
 
@@ -8821,13 +8824,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 })
                             })
                             .unwrap_or(false);
+                        // Each state sets BOTH sides: a side absent from the new
+                        // style is RESTORED by dioxus's style update (row 120), so
+                        // an indicator left unset would stay drawn.
                         if row.is_container && !any_source_is_layer {
-                            "border-bottom-width:2px; border-bottom-style:solid; border-bottom-color:var(--jas-accent,#3a7bd5);"
+                            "border-top-width:0; border-bottom-width:2px; border-bottom-style:solid; border-bottom-color:var(--jas-accent,#3a7bd5);"
                         } else {
-                            "border-top-width:2px; border-top-style:solid; border-top-color:var(--jas-accent,#3a7bd5);"
+                            "border-bottom-width:0; border-top-width:2px; border-top-style:solid; border-top-color:var(--jas-accent,#3a7bd5);"
                         }
                     } else {
-                        ""
+                        "border-top-width:0; border-bottom-width:0;"
                     };
 
                     let row_dom_id = format!("lp_row_{}", row.path.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_"));
@@ -9483,7 +9489,9 @@ fn render_tabs(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx
                         let bind_field2 = bind_field.clone();
                         let mut sig = dialog_signal;
                         let mut rev = revision;
-                        let bg = if active { "background-color:var(--jas-pane-bg,#3a3a3a);" } else { "" };
+                        // Each branch states its colour: a fragment absent from the
+                        // new style is RESTORED by dioxus's style update (row 120).
+                        let bg = if active { "background-color:var(--jas-pane-bg,#3a3a3a);" } else { "background-color:transparent;" };
                         let weight = if active { "font-weight:600;" } else { "" };
                         rsx! {
                             div {
