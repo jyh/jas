@@ -9698,6 +9698,38 @@ mod tests {
     /// obliges `xmlns:jas`, and records that an undeclared prefix "makes the
     /// strict parser reject the whole file". The lesson was pinned for one
     /// prefix and not for the class.
+    /// The thumbnail's viewBox is in the units its content is written in:
+    /// `element_svg` writes px (pt x 96/72), so an unscaled viewBox is a third
+    /// too small and the thumbnail shows its upper-left corner. Twin of the
+    /// Mac's `LayersThumbnailBoxTests` (the Mac had exactly that defect).
+    /// Both sides are read from the emitted SVG.
+    #[test]
+    fn a_rect_sits_inside_its_thumbnails_view_box() {
+        use crate::geometry::element::{CommonProps, Element, RectElem};
+        let rect = Element::Rect(RectElem {
+            x: 10.0, y: 10.0, width: 30.0, height: 30.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let svg = tree_preview_svg(&rect);
+        let attr = |tag: &str, name: &str| -> f64 {
+            let at = svg.find(tag).unwrap_or_else(|| panic!("no {tag} in {svg}"));
+            let key = format!(" {name}=\"");
+            let i = svg[at..].find(&key).unwrap_or_else(|| panic!("no {name} on {tag}: {svg}")) + at + key.len();
+            let j = svg[i..].find('"').unwrap() + i;
+            svg[i..j].parse().unwrap_or_else(|_| panic!("{name} is not a number: {svg}"))
+        };
+        let vb: Vec<f64> = {
+            let i = svg.find("viewBox=\"").expect("a viewBox") + "viewBox=\"".len();
+            let j = svg[i..].find('"').unwrap() + i;
+            svg[i..j].split(' ').map(|n| n.parse().expect("a number")).collect()
+        };
+        assert_eq!(vb.len(), 4, "{svg}");
+        let (x, y, w, h) = (attr("<rect", "x"), attr("<rect", "y"), attr("<rect", "width"), attr("<rect", "height"));
+        assert!(x >= vb[0] && y >= vb[1], "content starts inside the box: {svg}");
+        assert!(x + w <= vb[0] + vb[2] + 1e-9 && y + h <= vb[1] + vb[3] + 1e-9, "content ends inside the box: {svg}");
+    }
+
     #[test]
     fn a_named_elements_thumbnail_declares_every_prefix_it_uses() {
         use crate::geometry::element::{CommonProps, Element, RectElem};
