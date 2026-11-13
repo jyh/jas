@@ -485,6 +485,17 @@ def msg_file_mode(path: str) -> int:
     return 0
 
 
+def body_file_mode(path: str, title: str = "") -> int:
+    """A PR description DRAFT, before `gh pr create` / `gh pr edit` (desk AGL).
+    STUB (red step): checks nothing yet."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            fh.read()
+    except OSError:
+        return 1
+    return 0
+
+
 def ref_mode(name: str) -> int:
     """One ref name: a branch a push creates, or a PR's head. Subject-class,
     because a merge commit's subject quotes it and the forge writes that
@@ -898,6 +909,10 @@ def _subject_arms() -> list[str]:
         m_lane = bl("msg-lane.txt", "tidy " + w0 + "\n")
         m_kin = bl("msg-kin.txt", "the " + k0 + " agreed\n\nbody\n")
         m_clean = bl("msg-clean.txt", "clean\n\nbody\n")
+        # desk AGL: a PR body draft. The private path is built from pieces, as
+        # ARM 4 does, so this source carries no path of its own.
+        d_path = bl("body-path.md", "see " + "bri" + "efs" + "/2026-11-12-x/y.md here\n")
+        d_clean = bl("body-clean.md", "A clean description of a change.\n")
 
         if history_verdict(set(), d) != (sorted([k1, k4]), [], [], 5):
             failures.append("history over an empty baseline must report both planted subjects as NEW")
@@ -930,6 +945,9 @@ def _subject_arms() -> list[str]:
             ("msg-file, a family-reference subject", msg_file_mode, (m_kin,), 1),
             ("msg-file, a clean message", msg_file_mode, (m_clean,), 0),
             ("msg-file, unreadable", msg_file_mode, (b_none,), 1),
+            ("body-file, a rootless private path (the #923 shape)", body_file_mode, (d_path,), 1),
+            ("body-file, a clean draft", body_file_mode, (d_clean,), 0),
+            ("body-file, unreadable", body_file_mode, (b_none,), 1),
             ("ref, a lane word joined into a branch name", ref_mode, (ref,), 1),
             ("ref, a family word", ref_mode, ("refs/heads/tidy-" + k0,), 1),
             ("ref, clean", ref_mode, ("refs/heads/jas/tidy-branch",), 0),
@@ -1289,9 +1307,17 @@ def main() -> int:
                            "baseline, both directions (needs full depth)")
     mode.add_argument("--msg-file", metavar="PATH",
                       help="one commit-message file (the commit-msg hook)")
+    mode.add_argument("--body-file", metavar="PATH",
+                      help="a PR description DRAFT, checked BEFORE `gh pr create` or "
+                           "`gh pr edit` with the same rules --open applies on the forge "
+                           "(private paths, session trailers, infra names, lane words); "
+                           "--msg-file is the commit-message mode and does NOT run the "
+                           "private-path rules")
     mode.add_argument("--ref", metavar="NAME",
                       help="one ref name (the pushed branch, or a PR's head): a merge "
                            "subject will quote it")
+    ap.add_argument("--title", default="",
+                    help="with --body-file: the PR title the draft will carry")
     ap.add_argument("--baseline", metavar="PATH",
                     help="accepted-debt baseline for --range/--history "
                          "(default: subject_debt_baseline.tsv beside this file)")
@@ -1311,6 +1337,8 @@ def main() -> int:
         return history_mode(None, args.baseline)
     if args.msg_file is not None:
         return msg_file_mode(args.msg_file)
+    if args.body_file is not None:
+        return body_file_mode(args.body_file, args.title)
     if args.ref is not None:
         return ref_mode(args.ref)
     if args.open:
