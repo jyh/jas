@@ -1600,6 +1600,19 @@ pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_id
     Some((x, y + h - 3.0, w, 3.0))
 }
 
+/// Where a tab-bar caret goes (row 127): `rect_of(i)` is tab `i`'s rectangle,
+/// `None` past the last tab. An index at an existing tab draws a 3px caret on
+/// that tab's LEFT edge; the index past the end draws it on the last tab's
+/// RIGHT edge; a group with no tabs draws nothing.
+pub(crate) fn tab_caret(rect_of: impl Fn(usize) -> Option<FeedbackRect>, index: usize) -> Option<FeedbackRect> {
+    if let Some((x, y, _, h)) = rect_of(index) {
+        return Some((x, y, 3.0, h));
+    }
+    let prev = index.checked_sub(1)?;
+    let (x, y, w, h) = rect_of(prev)?;
+    Some((x + w - 3.0, y, 3.0, h))
+}
+
 /// The dock's drop feedback during a drag (row 124; design note
 /// `2026-11-13-jas-DESIGN-row124-dock-drop-overlay.md` in the seat record).
 ///
@@ -1607,11 +1620,14 @@ pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_id
 /// a subscribed dock re-render mid-drag destroys the drag's source element and
 /// the drag dies (`build_dock_groups`). This overlay is a SIBLING inside the
 /// pane area, so it is the one reader that subscribes; its re-render touches
-/// only itself. It draws the group-slot bar and a cover over the dragged
-/// group, reading the groups' rectangles from the DOM at render time.
+/// only itself. It draws the group-slot bar, the tab-bar caret (row 127) and a
+/// cover over the dragged group, reading the rectangles from the DOM at render
+/// time.
 #[component]
 pub(crate) fn DockDropOverlay() -> Element {
     let ds = use_context::<DragState>();
+    #[allow(unused_variables)] // read only on wasm, for the tab-bar caret's panels
+    let app = use_context::<Rc<RefCell<AppState>>>();
     let source = (ds.drag_source)();
     let target = (ds.drop_target)();
     // Filled only on wasm (the DOM read); native builds render none.
@@ -1634,6 +1650,31 @@ pub(crate) fn DockDropOverlay() -> Element {
         if let Some(DropTarget::GroupSlot { dock_id, group_idx }) = target {
             if let Some(b) = slot_bar(|g| rect(dock_id.0, g), group_idx) {
                 bars.push(b);
+            }
+        }
+        if let Some(DropTarget::TabBar { group, index }) = target {
+            // The tab at `index` in that group, by the dock's own tab id rule.
+            let kinds: Vec<crate::workspace::workspace::PanelKind> = app.borrow().workspace_layout
+                .dock(group.dock_id)
+                .and_then(|d| d.groups.get(group.group_idx))
+                .map(|g| g.panels.clone())
+                .unwrap_or_default();
+            let tab = |i: usize| -> Option<FeedbackRect> {
+                let kind = *kinds.get(i)?;
+                let id = crate::workspace::test_hook::tab_dom_id(panel_kind_to_content_id(kind));
+                let r = doc.as_ref()?.get_element_by_id(&id)?.get_bounding_client_rect();
+                Some((r.left() - origin.0, r.top() - origin.1, r.width(), r.height()))
+            };
+            // A panel from ANOTHER group is appended (`op_move_panel_to_group`
+            // takes no index), so the caret is drawn where the drop lands, past
+            // the last tab; only a same-group reorder honours `index`. Measured
+            // 11-13: the caret at Boolean's left edge while the drop appended.
+            let lands_at = match &source {
+                Some(DragPayload::Panel(from)) if from.group != group => kinds.len(),
+                _ => index,
+            };
+            if let Some(c) = tab_caret(tab, lands_at) {
+                bars.push(c);
             }
         }
         if let Some(DragPayload::Group(addr)) = source {
@@ -1678,6 +1719,21 @@ mod dock_drop_overlay_tests {
     #[test]
     fn the_slot_past_the_end_is_a_bar_on_the_last_groups_bottom_edge() {
         assert_eq!(slot_bar(rects, 3), Some((10.0, 227.0, 200.0, 3.0)));
+    }
+
+    fn tabs(i: usize) -> Option<(f64, f64, f64, f64)> {
+        // two tabs in a row at y=20, height 25: widths 55 and 74
+        [(100.0, 20.0, 55.0, 25.0), (155.0, 20.0, 74.0, 25.0)].get(i).copied()
+    }
+
+    #[test]
+    fn a_tab_caret_is_on_the_tabs_left_edge_and_past_the_end_on_the_last_tabs_right() {
+        use super::tab_caret;
+        assert_eq!(tab_caret(tabs, 0), Some((100.0, 20.0, 3.0, 25.0)));
+        assert_eq!(tab_caret(tabs, 1), Some((155.0, 20.0, 3.0, 25.0)));
+        assert_eq!(tab_caret(tabs, 2), Some((226.0, 20.0, 3.0, 25.0)));
+        assert_eq!(tab_caret(|_| None, 0), None);
+        assert_eq!(tab_caret(tabs, 4), None);
     }
 
     #[test]
