@@ -607,8 +607,16 @@ impl WorkspaceLayout {
     // Move panel between groups
     // -----------------------------------------------------------------------
 
-    /// Remove a panel from one group and add it to another.
+    /// Remove a panel from one group and append it to another.
     pub fn move_panel_to_group(&mut self, from: PanelAddr, to: GroupAddr) {
+        self.move_panel_to_group_at(from, to, None);
+    }
+
+    /// Move a panel into another group (WORKSPACE.md "Moving a Panel to
+    /// Another Group"): inserted at `index` among the target's panels, an index
+    /// past the end appends, and `None` appends. Swift's twin is
+    /// `movePanelToGroup(_:to:at:)`.
+    pub fn move_panel_to_group_at(&mut self, from: PanelAddr, to: GroupAddr, index: Option<usize>) {
         // Same group — no-op.
         if from.group == to {
             return;
@@ -628,8 +636,9 @@ impl WorkspaceLayout {
         // Insert into target group.
         if let Some(dst_dock) = self.dock_mut(to.dock_id) {
             if let Some(dst_group) = dst_dock.groups.get_mut(to.group_idx) {
-                dst_group.panels.push(panel);
-                dst_group.active = dst_group.panels.len() - 1;
+                let at = index.unwrap_or(usize::MAX).min(dst_group.panels.len());
+                dst_group.panels.insert(at, panel);
+                dst_group.active = at;
             } else {
                 // Target group not found — put panel back.
                 if let Some(src_dock) = self.dock_mut(from.group.dock_id)
