@@ -100,10 +100,12 @@ LEDGER: dict[str, dict[str, str]] = {
             "transform must compose about the RESOLVED box, which is more than "
             "swapping the accessor.",
     },
-    "interpreter/renderer.rs": {
+    "element_preview.rs": {
         "let (x, y, w, h) = elem.bounds();":
             "REACHABLE, UNCONVERTED — the Layers-panel thumbnail "
-            "(`tree_preview_svg`). An instance yields w=h=0 and the function "
+            "(`preview_svg`, moved here from renderer.rs's `tree_preview_svg` "
+            "for row 52 so the FFI build reaches it; the web tree and the "
+            "plan's `thumbnail.svg` both call it). An instance yields w=h=0 and the function "
             "returns an empty string, so instances show no thumbnail. MEASURED "
             "2026-08-05: resolving the box alone would NOT fix it. The body "
             "calls `geometry::svg::element_svg`, whose Reference arm emits "

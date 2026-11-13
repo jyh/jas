@@ -7433,35 +7433,11 @@ fn tree_type_label(elem: &GeoElement) -> &'static str {
 use crate::algorithms::layers_filter::{type_filter_keep as tree_type_filter_keep,
                                       type_value as tree_type_value};
 
-/// Build a fitted-viewBox SVG thumbnail for a single element.
-/// Returns an empty string for zero-extent or degenerate bounds.
+/// The Layers row thumbnail: one copy, in [`crate::element_preview`], which
+/// the FFI build also compiles (this module is web-only), so the plan a native
+/// shell draws carries the same SVG this tree draws.
 fn tree_preview_svg(elem: &GeoElement) -> String {
-    let (x, y, w, h) = elem.bounds();
-    if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
-        return String::new();
-    }
-    // element_svg() applies a pt → px scale (96/72 ≈ 1.333) to every
-    // coordinate, since its primary callers export to standard SVG
-    // files. The viewBox needs the same scale so the inner geometry
-    // sits inside the declared box — otherwise content extends 1.333×
-    // past the right/bottom and the SVG viewport clips it to the
-    // upper-left of the thumbnail container.
-    const PT_TO_PX: f64 = 96.0 / 72.0;
-    let (x, y, w, h) = (x * PT_TO_PX, y * PT_TO_PX, w * PT_TO_PX, h * PT_TO_PX);
-    let pad = (w.max(h) * 0.02).max(0.5);
-    let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
-    let inner = crate::geometry::svg::element_svg(elem, "");
-    format!(
-        // DECLARES xmlns:inkscape, because `element_svg` emits
-        // `inkscape:label` for any element that HAS a name. Without it every
-        // named element's row thumbnail is XML with an undeclared namespace
-        // prefix -- which a strict parser rejects outright, and which this
-        // codebase already learned once for the `jas:` prefix (see the
-        // xmlns:jas assertion in CrossLanguageTests). It surfaced the day
-        // renaming became easy in both ports: the thumbnails only carry a
-        // label once elements have names.
-        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
-    )
+    crate::element_preview::preview_svg(elem)
 }
 
 fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {

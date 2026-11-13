@@ -1024,7 +1024,11 @@ pub unsafe extern "C" fn jas_panel_plan(
         return JasBytes::empty();
     };
     let ctx = panel_ctx(engine, &ws, id);
-    let (plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx, ws.icons(), ws.actions());
+    let (mut plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx, ws.icons(), ws.actions());
+    // Row 52: an `element_preview` leaf carries its element's thumbnail. The
+    // plan builder never sees the document, so the engine, which holds it,
+    // fills the thumbnails in here.
+    crate::element_preview::attach_to_plan(&mut plan, engine.model.borrow().document());
     engine.registry.borrow_mut().record(id, &rows);
     let out = JasBytes::from_string(serde_json::to_string(&plan).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelPlan, out.len);
@@ -7571,6 +7575,31 @@ mod tests {
         let _ = dispatch(e, r#"{"action":"delete_selection"}"#);
         assert_eq!(unsafe { jas_document_modified(e) }, 1, "CONTROL: modified");
         assert_eq!(text_of(e), serde_json::json!(format!("{name} *")), "a modified tab carries the mark");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 52: THE LAYERS ROW'S THUMBNAIL REACHES THE SHELL. The plan's
+    /// `element_preview` leaves carry `display["thumbnail.svg"]`, a complete
+    /// SVG document of the element at the row's path, so a shell draws it
+    /// with no renderer of its own.
+    #[test]
+    fn the_layers_plan_carries_each_rows_thumbnail() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "layers_panel_content", 400, 600)).expect("plan JSON");
+        let previews: Vec<&serde_json::Value> = plan["leaves"].as_array().expect("leaves").iter()
+            .filter(|l| l["type"] == "element_preview").collect();
+        assert!(!previews.is_empty(), "the Layers plan places a preview per row");
+        let thumbs: Vec<&str> = previews.iter()
+            .filter_map(|l| l["display"]["thumbnail.svg"].as_str()).collect();
+        assert!(!thumbs.is_empty(), "some row carries its thumbnail: {previews:?}");
+        for t in &thumbs {
+            assert!(t.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""), "a whole document: {t}");
+            assert!(t.contains("xmlns:jas="), "self-declaring: {t}");
+        }
+        assert!(thumbs.iter().any(|t| t.contains("<rect")), "the rect's row draws the rect: {thumbs:?}");
         unsafe { jas_engine_free(e) };
     }
 

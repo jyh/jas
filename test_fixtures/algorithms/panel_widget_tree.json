@@ -11605,7 +11605,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "element_id"
+          "element_path"
         ],
         "style": [
           "size"
@@ -11805,7 +11805,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "element_id"
+          "element_path"
         ],
         "style": [
           "size"
@@ -12005,7 +12005,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "element_id"
+          "element_path"
         ],
         "style": [
           "size"
@@ -12205,7 +12205,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "element_id"
+          "element_path"
         ],
         "style": [
           "size"
@@ -12405,7 +12405,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
-          "element_id"
+          "element_path"
         ],
         "style": [
           "size"
