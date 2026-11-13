@@ -962,8 +962,15 @@ type: element_preview
 style:
   size: <number>                   # width and height in px (default 32)
 bind:
-  element_id: <expression>        # ID of the element to preview
+  element_path: <expression>      # PATH of the element to preview (preferred:
+                                  # ids are optional, a path always names it)
+  element_id: <expression>        # or its ID, where it has one
 ```
+
+A native shell does not render the element itself: the engine puts the
+thumbnail in the plan leaf's `display` map as `thumbnail.svg`, one complete SVG
+document with every namespace prefix it uses declared, and the shell draws it in
+the widget's square. No key means the blank square.
 
 Elements with outline or invisible visibility are rendered as if in preview
 mode for the thumbnail. Empty containers show a blank (white) preview.

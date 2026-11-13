@@ -17,6 +17,7 @@ pub mod surface;
 // The Brushes panel's thumbnail as SVG markup. NOT gated: the web view draws
 // it and the panel plan sends it to a native shell, so both builds need it.
 pub mod brush_preview;
+pub mod element_preview;
 // The Color panel's colour bar picture. NOT gated, for the same reason: the
 // web view draws it and the panel plan sends it to a native shell.
 pub mod color_bar_picture;

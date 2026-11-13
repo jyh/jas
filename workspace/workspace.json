@@ -17696,12 +17696,12 @@
                   "id": "lp_preview",
                   "type": "element_preview",
                   "summary": "Element preview",
-                  "description": "24px square rasterized thumbnail of the element, scaled to fit on a white background, the height of the 24-high row (both native trees draw 24). Outline/invisible elements are rendered as if in preview mode. Empty containers show blank.\n",
+                  "description": "24px square rasterized thumbnail of the element, scaled to fit on a white background, the height of the 24-high row (both native trees draw 24). Outline/invisible elements are rendered as if in preview mode. Empty containers show blank. The thumbnail is of the element at the row's PATH (ids are optional; the tree is keyed by path), so every row has one.\n",
                   "style": {
                     "size": 24
                   },
                   "bind": {
-                    "element_id": "node.id"
+                    "element_path": "node.path"
                   }
                 },
                 {

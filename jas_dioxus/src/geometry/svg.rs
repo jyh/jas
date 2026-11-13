@@ -917,6 +917,16 @@ fn apply_gradient_attrs(node: &XmlNode, elem: Element) -> Element {
     elem
 }
 
+/// One element's SVG together with the standard gradients it paints with, for
+/// a STANDALONE thumbnail (the Layers row, `element_preview`): the same scope
+/// `document_to_svg` opens, so the fill points at a `<linearGradient>` the
+/// caller puts in a `<defs>`. Twin of Swift's `elementSvgWithDefs`.
+pub fn element_svg_with_defs(elem: &Element, indent: &str) -> (String, Vec<String>) {
+    let defs = ExportDefsScope::enter();
+    let body = element_svg(elem, indent);
+    (body, defs.take())
+}
+
 pub fn element_svg(elem: &Element, indent: &str) -> String {
     let mut out = element_svg_body(elem, indent);
     // A leaf's body ends in a newline and its container joins with one, so

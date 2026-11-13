@@ -794,6 +794,17 @@ private func stdGradientToJas(_ def: StdGradientDef, _ bbox: GradientBBox) -> Gr
 private final class ExportDefs: @unchecked Sendable { var defs: [String] = [] }
 private enum SvgExportDefs { @TaskLocal static var box: ExportDefs? = nil }
 
+/// One element's SVG together with the standard gradients it paints with, for
+/// a STANDALONE thumbnail (the Layers row): the same scope `documentToSvg`
+/// opens, so the fill points at a `<linearGradient>` the caller puts in a
+/// `<defs>`. Twin of Rust's `svg::element_svg_with_defs`.
+func elementSvgWithDefs(_ elem: Element, indent: String) -> (body: String, defs: [String]) {
+    let box = ExportDefs()
+    var body = ""
+    SvgExportDefs.$box.withValue(box) { body = elementSvg(elem, indent: indent) }
+    return (body, box.defs)
+}
+
 /// A jas gradient as the standard SVG element that paints the same ramp on
 /// `bbox` (pt), or nil for freeform or fewer than two stops. Mirrors Rust's
 /// `standard_gradient_xml`, where the geometry is explained.

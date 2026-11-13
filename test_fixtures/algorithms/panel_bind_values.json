@@ -3813,9 +3813,9 @@
           5
         ],
         "id": "lp_preview",
-        "key": "bind.element_id",
-        "type": "null",
-        "value": ""
+        "key": "bind.element_path",
+        "type": "list",
+        "value": "[1]"
       },
       {
         "path": [
@@ -3965,9 +3965,9 @@
           5
         ],
         "id": "lp_preview",
-        "key": "bind.element_id",
-        "type": "null",
-        "value": ""
+        "key": "bind.element_path",
+        "type": "list",
+        "value": "[0]"
       },
       {
         "path": [
@@ -4117,9 +4117,9 @@
           5
         ],
         "id": "lp_preview",
-        "key": "bind.element_id",
-        "type": "null",
-        "value": ""
+        "key": "bind.element_path",
+        "type": "list",
+        "value": "[0,1]"
       },
       {
         "path": [
@@ -4269,9 +4269,9 @@
           5
         ],
         "id": "lp_preview",
-        "key": "bind.element_id",
-        "type": "null",
-        "value": ""
+        "key": "bind.element_path",
+        "type": "list",
+        "value": "[0,1,0]"
       },
       {
         "path": [
@@ -4421,9 +4421,9 @@
           5
         ],
         "id": "lp_preview",
-        "key": "bind.element_id",
-        "type": "null",
-        "value": ""
+        "key": "bind.element_path",
+        "type": "list",
+        "value": "[0,0]"
       },
       {
         "path": [
