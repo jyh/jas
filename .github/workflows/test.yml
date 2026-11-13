@@ -1113,6 +1113,8 @@ jobs:
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
+          python scripts/check_inline_var_shorthands.py --self-test
+          python scripts/check_inline_var_shorthands.py
           python scripts/check_cs_doc_summaries.py --self-test
           python scripts/check_cs_doc_summaries.py
           python scripts/check_op_vocabulary.py --self-test
