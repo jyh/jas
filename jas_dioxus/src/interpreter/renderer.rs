@@ -3491,7 +3491,9 @@ fn build_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
 /// `background:<var>` becomes `background-color:<var>`, and
 /// `<p>:<width> <solid|dashed|dotted> <var>` for `p` in `border`,
 /// `border-top|right|bottom|left` and `outline` becomes
-/// `<p>-width:<width>; <p>-style:<style>; <p>-color:<var>`. Everything else,
+/// `<p>-width:<width>; <p>-style:<style>; <p>-color:<var>`, except that
+/// `border` writes the FOUR side colours, because `border-color` is itself a
+/// shorthand (row 125). Everything else,
 /// literal shorthands and `url(...)` values included, passes through
 /// byte-for-byte; the string is never split on `;`, which a data URI holds.
 pub(crate) fn longhand_var_shorthands(css: &str) -> String {
@@ -3555,7 +3557,15 @@ fn var_shorthand_at(css: &str, i: usize, prop: &str) -> Option<(usize, String)> 
     }
     j = skip_ws(j);
     let v_end = var_end(b, j)?;
-    ends_here(v_end).then(|| (v_end, format!("{prop}-width:{width}; {prop}-style:{style}; {prop}-color:{}", &css[j..v_end])))
+    let v = &css[j..v_end];
+    // `border-color` is itself a SHORTHAND (of the four side colours), so a
+    // var() in it is lost the same way (row 125): `border` writes all four.
+    let colour = if prop == "border" {
+        format!("border-top-color:{v}; border-right-color:{v}; border-bottom-color:{v}; border-left-color:{v}")
+    } else {
+        format!("{prop}-color:{v}")
+    };
+    ends_here(v_end).then(|| (v_end, format!("{prop}-width:{width}; {prop}-style:{style}; {colour}")))
 }
 
 /// The byte just past a `var(--name)` or `var(--name, fallback)` starting at
@@ -3590,7 +3600,7 @@ mod longhand_var_shorthand_tests {
     #[test]
     fn a_var_border_and_its_sides_and_outline_become_three_longhands() {
         assert_eq!(l("border:1px solid var(--jas-border,#555);"), // css-shorthand-fixture
-                   "border-width:1px; border-style:solid; border-color:var(--jas-border,#555);");
+                   "border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);");
         assert_eq!(l("a:b;border-bottom:2px dashed var(--x)"), // css-shorthand-fixture
                    "a:b;border-bottom-width:2px; border-bottom-style:dashed; border-bottom-color:var(--x)");
         assert_eq!(l("outline: 1px dotted var(--jas-accent,#4a90d9);"), // css-shorthand-fixture
@@ -3608,7 +3618,7 @@ mod longhand_var_shorthand_tests {
     fn literals_longhands_urls_and_other_properties_pass_through() {
         for s in [
             "background:transparent;border:1px solid #555",
-            "background-color:var(--x);border-color:var(--y)",
+            "background-color:var(--x);border-top-color:var(--y); border-right-color:var(--y); border-bottom-color:var(--y); border-left-color:var(--y)",
             "border-bottom-color:var(--x)",
             "box-shadow:4px 4px 12px var(--jas-pane-shadow,rgba(0,0,0,0.3))",
             "background:url(\"data:image/svg+xml;utf8,<svg/>\") no-repeat",
@@ -3624,9 +3634,9 @@ mod longhand_var_shorthand_tests {
     fn build_style_and_swatch_style_return_longhands() {
         let el = serde_json::json!({"style": {"border": "1px solid var(--app-border,#555)"}});
         assert_eq!(super::build_style(&el, &serde_json::json!({})),
-                   "border-width:1px; border-style:solid; border-color:var(--app-border,#555)");
+                   "border-width:1px; border-style:solid; border-top-color:var(--app-border,#555); border-right-color:var(--app-border,#555); border-bottom-color:var(--app-border,#555); border-left-color:var(--app-border,#555)");
         let style = super::swatch_style(16, "#fff", super::SwatchBorder::Placeholder, false, "", "");
-        assert!(style.contains("border-width:1px; border-style:dashed; border-color:var(--jas-border,#555);"), "{style}");
+        assert!(style.contains("border-width:1px; border-style:dashed; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);"), "{style}");
         assert!(!style.contains("border:1px dashed var("), "{style}");
     }
 }
@@ -4582,7 +4592,7 @@ fn render_icon_button_group(el: &serde_json::Value, ctx: &serde_json::Value, rct
         rsx! {
             div {
                 key: "{key}",
-                style: "display:flex;align-items:center;justify-content:center;width:24px;height:20px;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:2px;cursor:pointer;{bg}",
+                style: "display:flex;align-items:center;justify-content:center;width:24px;height:20px;border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:2px;cursor:pointer;{bg}",
                 onclick: move |_| {
                     // Dialog binding: write the chosen value into the dialog state.
                     if !dlg_field.is_empty() {
@@ -4677,7 +4687,7 @@ fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value
             div {
                 key: "{key}",
                 title: "{name}",
-                style: "width:8px;height:8px;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;cursor:pointer;{bg}",
+                style: "width:8px;height:8px;border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:1px;cursor:pointer;{bg}",
                 onclick: move |_| {
                     let mut ctx_snap = ctx_snapshot.clone();
                     if let serde_json::Value::Object(obj) = &mut ctx_snap {
@@ -5030,7 +5040,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 // box-sizing:border-box so the yaml `width` includes
                 // the border + padding, matching the visual size the
                 // author asked for.
-                style: "flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);padding:1px 4px;{style}",
+                style: "flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);padding:1px 4px;{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -5046,7 +5056,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 max: "{max}",
                 step: "{step_attr}",
                 value: "{value}",
-                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
                     // Same commit rule as the panel branch above and as
                     // JasSwift's `renderNumberInput`: accepted by the
@@ -5213,7 +5223,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 r#type: "text",
                 placeholder: "{placeholder}",
                 value: "{display_value}",
-                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -5230,7 +5240,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 placeholder: "{placeholder}",
                 value: "{display_value}",
                 readonly: true,
-                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{style}",
+                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
                 oninput: move |_evt: Event<FormData>| {
                     revision += 1;
                 },
@@ -5358,7 +5368,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             placeholder: "{placeholder}",
             initial_value: "{value}",
             autofocus: is_artboard_rename,
-            style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);{visibility_style}{style}",
+            style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{visibility_style}{style}",
             onkeydown: move |evt: Event<KeyboardData>| {
                 if !is_artboard_rename { return; }
                 let key = evt.data().key();
@@ -5585,7 +5595,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             id: "{id}",
             value: "{current_value}",
             disabled: disabled,
-            style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
+            style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
             onchange: move |evt: Event<FormData>| {
                 let new_val = evt.value();
                 match &bind_target {
@@ -5839,7 +5849,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                 list: "{list_id}",
                 value: "{current_value}",
                 disabled: disabled,
-                style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;width:100%",
+                style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;width:100%",
                 onchange: move |evt: Event<FormData>| {
                     let new_val = evt.value();
                     match &bind_target {
@@ -6736,7 +6746,7 @@ fn render_gradient_tile(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
             class: "jas-gradient-tile",
             "data-type": "gradient-tile",
             "data-bind-gradient": "{data_bind}",
-            style: "width:{sz}px;height:{sz}px;background:{bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);box-sizing:border-box;cursor:pointer;",
+            style: "width:{sz}px;height:{sz}px;background:{bg};border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);box-sizing:border-box;cursor:pointer;",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
         }
     }
@@ -7009,7 +7019,7 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
                 class: "jas-gradient-slider-bar",
                 "data-role": "bar",
                 onpointerdown: on_bar_down,
-                style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
+                style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
             }
             div {
                 class: "jas-gradient-midpoint-band",
@@ -7060,7 +7070,7 @@ fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &Re
     rsx! {
         div {
             id: "jas-yaml-color-bar",
-            style: "width:100%;height:64px;cursor:crosshair;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;background-image:url('{data_uri}');background-size:100% 100%;background-repeat:no-repeat;user-select:none;-webkit-user-drag:none;",
+            style: "width:100%;height:64px;cursor:crosshair;border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:1px;background-image:url('{data_uri}');background-size:100% 100%;background-repeat:no-repeat;user-select:none;-webkit-user-drag:none;",
             // Pointer-driven drag: down → set_active_color_live, move
             // (with button held) → live updates, up → final
             // set_active_color which pushes to recent. The element is
@@ -7176,7 +7186,7 @@ fn render_color_gradient(el: &serde_json::Value, ctx: &serde_json::Value, rctx: 
     rsx! {
         div {
             id: "{id}",
-            style: "width:180px;height:180px;background:{bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
+            style: "width:180px;height:180px;background:{bg};border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
             onmousedown: on_mousedown,
             onmousemove: on_mousemove,
             // Position indicator circle
@@ -7307,7 +7317,7 @@ fn render_color_hue_bar(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
     rsx! {
         div {
             id: "{id}",
-            style: "width:32px;height:180px;background:{bg};border-width:1px; border-style:solid; border-color:var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
+            style: "width:32px;height:180px;background:{bg};border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);cursor:crosshair;position:relative;user-select:none;-webkit-user-drag:none;{style}",
             onmousedown: on_mousedown,
             onmousemove: on_mousemove,
             // Position indicator arrow
@@ -8318,7 +8328,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let row_opacity = if row.ancestor_only { "0.5" } else { "1.0" };
                     let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color};opacity:{row_opacity}");
                     let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };
-                    let sq_style = format!("width:12px;height:12px;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
+                    let sq_style = format!("width:12px;height:12px;border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
                     let eye_svg = row.eye_icon_svg.clone();
                     let lock_svg = row.lock_icon_svg.clone();
                     let twirl_svg = row.twirl_svg.clone();
@@ -8940,7 +8950,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 let preview_svg = row.preview_svg.clone();
                                 rsx! {
                                     div {
-                                        style: "width:24px;height:24px;background:#fff;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;flex-shrink:0;overflow:hidden;",
+                                        style: "width:24px;height:24px;background:#fff;border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:1px;flex-shrink:0;overflow:hidden;",
                                         dangerous_inner_html: "{preview_svg}",
                                     }
                                 }
@@ -8969,7 +8979,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                             id: "{input_id}",
                                             r#type: "text",
                                             value: "{initial_name}",
-                                            style: "flex:1;font-size:11px;background-color:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border-width:1px; border-style:solid; border-color:var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
+                                            style: "flex:1;font-size:11px;background-color:var(--jas-input-bg,#333);color:var(--jas-text,#ccc);border-width:1px; border-style:solid; border-top-color:var(--jas-accent,#3a7bd5); border-right-color:var(--jas-accent,#3a7bd5); border-bottom-color:var(--jas-accent,#3a7bd5); border-left-color:var(--jas-accent,#3a7bd5);outline:none;padding:0 2px;min-width:0",
                                             autofocus: true,
                                             // The draft, on every target: the commit reads it
                                             // rather than the DOM, which a non-wasm build cannot.
@@ -9061,7 +9071,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             if let Some((cx, cy, cpath)) = context_menu_state.clone() {
                 {
                     let menu_style = format!(
-                        "position:fixed;left:{}px;top:{}px;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                        "position:fixed;left:{}px;top:{}px;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                         cx, cy
                     );
                     let is_container = {
@@ -9218,7 +9228,7 @@ fn render_element_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx
     rsx! {
         div {
             id: "{id}",
-            style: "width:{sz}px;height:{sz}px;background:#fff;border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
+            style: "width:{sz}px;height:{sz}px;background:#fff;border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:1px;flex-shrink:0;{style}",
         }
     }
 }
@@ -9314,7 +9324,7 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                             },
                         }
                         div {
-                            style: "position:absolute;top:22px;right:0;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-color:var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                            style: "position:absolute;top:22px;right:0;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                             // ONE LOOP, IN DECLARATION ORDER, each row rendered
                             // as the KIND its `type` declares. The "All" row is
                             // the menu's own first item now rather than a
@@ -15552,7 +15562,7 @@ mod tests {
             16, super::swatch_face_color("", true),
             super::swatch_border("", true, false), false, "", "");
         assert!(style.contains("background:#fff;"), "white face, got: {style}");
-        assert!(style.contains("border-width:1px; border-style:solid; border-color:var(--jas-border,#666);"),
+        assert!(style.contains("border-width:1px; border-style:solid; border-top-color:var(--jas-border,#666); border-right-color:var(--jas-border,#666); border-bottom-color:var(--jas-border,#666); border-left-color:var(--jas-border,#666);"),
                 "a real swatch's solid border, got: {style}");
         assert!(style.contains("width:16px;height:16px;"), "got: {style}");
     }
@@ -15563,7 +15573,7 @@ mod tests {
             16, super::swatch_face_color("", false),
             super::swatch_border("", false, false), false, "", "");
         assert!(style.contains("background:transparent;"), "got: {style}");
-        assert!(style.contains("border-width:1px; border-style:dashed; border-color:var(--jas-border,#555);"),
+        assert!(style.contains("border-width:1px; border-style:dashed; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);"),
                 "an empty slot keeps the dashed placeholder border, got: {style}");
     }
 

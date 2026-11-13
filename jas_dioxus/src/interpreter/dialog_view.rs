@@ -231,7 +231,7 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
 
             // Dialog container
             div {
-                style: "background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style} {container_pos_style}",
+                style: "background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style} {container_pos_style}",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                 },

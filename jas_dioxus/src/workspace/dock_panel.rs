@@ -1673,7 +1673,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         rsx! {
             div {
                 key: "floating-{fid:?}",
-                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:{THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {

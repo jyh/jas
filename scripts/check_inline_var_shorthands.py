@@ -16,9 +16,9 @@ because the next update has nothing to restore. A bare-page replay of the
 three moves loses a `var()` shorthand and keeps a `var()` longhand and a
 literal shorthand.
 
-So a `var()` colour is written as a LONGHAND (`background-color`,
-`border-width` + `border-style` + `border-color`, and the side and `outline`
-forms). The generic renderer expands the YAML's own shorthands
+So a `var()` colour is written as a LONGHAND (`background-color`; `border-width` + `border-style` + the FOUR side colours
+`border-top-color` ... `border-left-color`, since `border-color` is itself a
+shorthand; and the side and `outline` forms). The generic renderer expands the YAML's own shorthands
 (`renderer::longhand_var_shorthands`).
 
 WHAT IT ASSERTS
@@ -55,7 +55,14 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(REPO, "jas_dioxus", "src")
 THEME = os.path.join(SRC, "workspace", "theme.rs")
-SHORTHAND = r"(?<![a-z-])(background|border|border-(?:top|right|bottom|left)|outline)\s*:\s*([^;\"]*)"
+# Every CSS SHORTHAND a style here can hold. `border-color` is one (of the four
+# side colours), and #926 wrote 45 `border-color:var(...)` sites thinking it a
+# longhand: a pane's border COLOUR kept flipping (row 125, measured 11-13).
+SHORTHANDS = ("background", "border", "border-top", "border-right", "border-bottom", "border-left",
+              "border-color", "border-width", "border-style", "border-radius", "outline",
+              "margin", "padding", "inset", "gap", "font", "transition", "flex", "text-decoration",
+              "list-style", "overflow", "place-items", "place-content", "columns", "grid", "mask")
+SHORTHAND = r"(?<![a-z-])(" + "|".join(sorted((re.escape(x) for x in SHORTHANDS), key=len, reverse=True)) + r")\s*:\s*([^;\"]*)"
 
 
 def var_themes(theme_text):
@@ -105,13 +112,19 @@ def self_test():
         'style: "border-bottom:1px solid {THEME_BG}"',
         'style: "outline: 2px solid var(--jas-accent,#4a90d9)"',
         'format!("background: var(--jas-check-bg,#fff)")',
+        'style: "border-width:1px; border-style:solid; border-color:var(--jas-border,#555);"',
+        'style: "padding:var(--p,4px)"',
     ]
     good = [
-        'style: "background-color:{THEME_BG}; border-width:1px; border-style:solid; border-color:var(--jas-border,#555)"',
+        # Until 11-13 this CLEAN fixture said `border-color:var(...)`, so it certified the
+        # very defect row 125 found: `border-color` is a shorthand.
+        'style: "background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555)"',
         'style: "border:1px solid #555; background:#333"',
         'style: "background:{THEME_PLAIN}"',
         '// a comment: background:{THEME_BG}',
         'style: "border-bottom-color:{THEME_BG}"',
+        'style: "border-top-color:{THEME_BG}; border-right-color:{THEME_BG}; border-bottom-color:{THEME_BG}; border-left-color:{THEME_BG}"',
+        'style: "padding:4px; border-radius:2px"',
     ]
     for s in bad:
         assert len(findings(s, themes)) == 1, ("missed", s, findings(s, themes))
