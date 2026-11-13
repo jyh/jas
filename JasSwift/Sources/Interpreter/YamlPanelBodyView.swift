@@ -3837,7 +3837,7 @@ func buildPreviewSvg(_ elem: Element) -> String {
     // strict parser rejects whole. Same lesson this codebase already recorded
     // for `jas:`; found by JYH when console noise appeared right after
     // renaming became possible on every element.
-    return #"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
+    return #"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
 }
 
 /// SwiftUI view that renders an element as a fitted SVG thumbnail.

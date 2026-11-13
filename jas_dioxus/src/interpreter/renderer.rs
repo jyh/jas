@@ -7460,7 +7460,7 @@ fn tree_preview_svg(elem: &GeoElement) -> String {
         // xmlns:jas assertion in CrossLanguageTests). It surfaced the day
         // renaming became easy in both ports: the thumbnails only carry a
         // label once elements have names.
-        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
     )
 }
 
@@ -9755,6 +9755,24 @@ mod tests {
                         xmlns:{prefix}; emitted: {svg}");
             }
         }
+    }
+
+    /// The CLASS, not the instance: a gradient fill writes `jas:fill-gradient`,
+    /// so the thumbnail must declare `xmlns:jas` too. Twin of the Mac's
+    /// `everyPrefixAThumbnailUsesIsDeclared`; both prefix sets are read from
+    /// the emitted bytes.
+    #[test]
+    fn a_gradient_thumbnail_declares_the_jas_prefix() {
+        use crate::geometry::element::{Color, CommonProps, Element, Gradient, RectElem};
+        let g = Gradient::seed(Some(Color::rgb(1.0, 0.0, 0.0)));
+        let graded = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: Some(Box::new(g)), stroke_gradient: None,
+        });
+        let svg = tree_preview_svg(&graded);
+        assert!(svg.contains(" jas:"), "the case must exercise the jas: prefix: {svg}");
+        assert!(svg.contains("xmlns:jas="), "a jas:-prefixed attribute obliges xmlns:jas: {svg}");
     }
 
     /// A SELF-REFERENTIAL PARAM MUST RESOLVE TO THE NEW VALUE.
