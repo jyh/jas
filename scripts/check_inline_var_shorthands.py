@@ -24,7 +24,9 @@ forms). The generic renderer expands the YAML's own shorthands
 WHAT IT ASSERTS
 ---------------
 Over `jas_dioxus/src/**/*.rs`, code lines only (a line whose first non-blank
-characters are `//` is skipped): ZERO occurrences of `background:`,
+characters are `//` is skipped, and so is a line carrying the marker
+`// css-shorthand-fixture`, a test INPUT for `longhand_var_shorthands`; the
+verdict prints how many lines it skipped that way): ZERO occurrences of `background:`,
 `border:`, `border-<side>:` or `outline:` whose value (up to `;` or `"`)
 holds `var(--` or `{THEME_X}`, where THEME_X is any `theme.rs` constant
 whose value holds `var(` -- DERIVED from that file at run time, never listed.
@@ -62,6 +64,14 @@ def var_themes(theme_text):
             if "var(" in m.group(2)}
 
 
+MARK = "// css-shorthand-fixture"
+
+
+def marked(text):
+    """Lines carrying the fixture marker: a test INPUT for the expansion, never rendered."""
+    return sum(1 for l in text.splitlines() if MARK in l)
+
+
 def findings(text, themes, name="<text>"):
     out = []
     in_sheet = False
@@ -75,7 +85,7 @@ def findings(text, themes, name="<text>"):
         if re.search(r'\bstyle\s*\{\s*r#"', line):
             in_sheet = '"#' not in line.split('r#"', 1)[1]
             continue
-        if line.lstrip().startswith("//"):
+        if line.lstrip().startswith("//") or MARK in line:
             continue
         for m in re.finditer(SHORTHAND, line):
             val = m.group(2)
@@ -110,9 +120,11 @@ def self_test():
     sheet = 'style { r#"\n  .x { background: var(--jas-check-bg) }\n"# }\nstyle: "background:{THEME_BG}"'
     got = findings(sheet, themes)
     assert len(got) == 1 and got[0].startswith("<text>:4:"), ("stylesheet block", got)
+    fx = 'assert_eq!(l("background:var(--x)"), "background-color:var(--x)"); ' + MARK
+    assert findings(fx, themes) == [] and marked(fx) == 1, ("marker", findings(fx, themes))
     two = 'style: "background:{THEME_BG}; border:1px solid {THEME_BG}"'
     assert len(findings(two, themes)) == 2, findings(two, themes)
-    print(f"check_inline_var_shorthands SELF-TEST: OK ({len(bad)} planted shapes caught, {len(good)} clean shapes passed, one two-hit line counted twice, a stylesheet block skipped and the line after it caught)")
+    print(f"check_inline_var_shorthands SELF-TEST: OK ({len(bad)} planted shapes caught, {len(good)} clean shapes passed, one two-hit line counted twice, a stylesheet block skipped and the line after it caught, a marked fixture skipped and counted)")
 
 
 def main():
@@ -127,12 +139,13 @@ def main():
         print("check_inline_var_shorthands: REFUSED -- no var() THEME constant derived from theme.rs; the gate would be vacuous")
         return 2
     files = sorted(glob.glob(os.path.join(SRC, "**", "*.rs"), recursive=True))
-    allf, longhand_files = [], 0
+    allf, longhand_files, n_marked = [], 0, 0
     for f in files:
         t = open(f, encoding="utf-8").read()
         if "{THEME_" in t:
             longhand_files += 1
         allf += findings(t, themes, os.path.relpath(f, REPO))
+        n_marked += marked(t)
     if longhand_files == 0:
         print(f"check_inline_var_shorthands: REFUSED -- {len(files)} files read and none uses a `{{THEME_` constant; the scan did not reach the styles it is about")
         return 2
@@ -140,7 +153,7 @@ def main():
         print("  " + x)
     verdict = "OK" if not allf else f"FAIL ({len(allf)})"
     print(f"check_inline_var_shorthands: {verdict} -- {len(files)} .rs files, {len(themes)} var() THEME constants derived; "
-          f"{longhand_files} file(s) use a THEME constant. NOT COVERED: a property name held in a variable; "
+          f"{longhand_files} file(s) use a THEME constant; {n_marked} line(s) skipped as `{MARK}` test inputs. NOT COVERED: a property name held in a variable; "
           f"a var() value through a non-THEME constant or a variable; stylesheet CSS")
     return 0 if not allf else 1
 

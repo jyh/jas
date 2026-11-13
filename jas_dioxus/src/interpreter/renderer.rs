@@ -3582,24 +3582,24 @@ mod longhand_var_shorthand_tests {
 
     #[test]
     fn a_var_background_becomes_background_color() {
-        assert_eq!(l("left:2px;background:var(--jas-pane-bg,#3c3c3c);z-index:3"),
+        assert_eq!(l("left:2px;background:var(--jas-pane-bg,#3c3c3c);z-index:3"), // css-shorthand-fixture
                    "left:2px;background-color:var(--jas-pane-bg,#3c3c3c);z-index:3");
-        assert_eq!(l("background: var(--jas-check-bg)"), "background-color:var(--jas-check-bg)");
+        assert_eq!(l("background: var(--jas-check-bg)"), "background-color:var(--jas-check-bg)"); // css-shorthand-fixture
     }
 
     #[test]
     fn a_var_border_and_its_sides_and_outline_become_three_longhands() {
-        assert_eq!(l("border:1px solid var(--jas-border,#555);"),
+        assert_eq!(l("border:1px solid var(--jas-border,#555);"), // css-shorthand-fixture
                    "border-width:1px; border-style:solid; border-color:var(--jas-border,#555);");
-        assert_eq!(l("a:b;border-bottom:2px dashed var(--x)"),
+        assert_eq!(l("a:b;border-bottom:2px dashed var(--x)"), // css-shorthand-fixture
                    "a:b;border-bottom-width:2px; border-bottom-style:dashed; border-bottom-color:var(--x)");
-        assert_eq!(l("outline: 1px dotted var(--jas-accent,#4a90d9);"),
+        assert_eq!(l("outline: 1px dotted var(--jas-accent,#4a90d9);"), // css-shorthand-fixture
                    "outline-width:1px; outline-style:dotted; outline-color:var(--jas-accent,#4a90d9);");
     }
 
     #[test]
     fn a_var_fallback_with_parentheses_is_one_value() {
-        assert_eq!(l("background:var(--jas-pane-shadow,rgba(0,0,0,0.3));"),
+        assert_eq!(l("background:var(--jas-pane-shadow,rgba(0,0,0,0.3));"), // css-shorthand-fixture
                    "background-color:var(--jas-pane-shadow,rgba(0,0,0,0.3));");
     }
 
@@ -3612,7 +3612,7 @@ mod longhand_var_shorthand_tests {
             "border-bottom-color:var(--x)",
             "box-shadow:4px 4px 12px var(--jas-pane-shadow,rgba(0,0,0,0.3))",
             "background:url(\"data:image/svg+xml;utf8,<svg/>\") no-repeat",
-            "border:6px solid var(--x) inset",
+            "border:6px solid var(--x) inset", // css-shorthand-fixture
             "",
         ] {
             assert_eq!(l(s), s, "must pass through unchanged");
