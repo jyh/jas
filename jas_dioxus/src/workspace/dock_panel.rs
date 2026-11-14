@@ -1282,6 +1282,8 @@ pub(crate) fn build_dock_groups(
         let tab_bar_border = if tab_bar_drop { format!("2px solid {THEME_ACCENT}") } else { format!("1px solid {THEME_BORDER}") };
 
         let group_dom_id = crate::workspace::test_hook::dock_group_dom_id(did.0, gi);
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+        let group_dom_id_drop = group_dom_id.clone(); // the dragover's rect lookup (row 132)
 
         rsx! {
             div {
@@ -1292,13 +1294,22 @@ pub(crate) fn build_dock_groups(
                     evt.prevent_default();
                     let coords = evt.data().page_coordinates();
                     last_drag_pos.set((coords.x, coords.y));
-                    let y = evt.data().element_coordinates().y;
-                    let mid = 30.0;
-                    if y < mid {
-                        drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi }));
-                    } else {
-                        drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi + 1 }));
-                    }
+                    // The side is read against the GROUP's own rect (row 132), not
+                    // the event target's: the target is whichever body widget is
+                    // under the pointer.
+                    #[cfg(target_arch = "wasm32")]
+                    let (y, height) = {
+                        let c = evt.data().client_coordinates();
+                        web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.get_element_by_id(&group_dom_id_drop))
+                            .map(|el| { let r = el.get_bounding_client_rect(); (c.y - r.top(), r.height()) })
+                            .unwrap_or((evt.data().element_coordinates().y, 60.0))
+                    };
+                    // No DOM off the web, where no drag event arrives; the old 30 px split.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let (y, height) = (evt.data().element_coordinates().y, 60.0);
+                    drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_body_slot(gi, y, height) }));
                 },
                 ondrop: move |evt: Event<DragData>| {
                     evt.prevent_default();
@@ -1623,6 +1634,15 @@ pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_id
 /// `None` past the last tab. An index at an existing tab draws a 3px caret on
 /// that tab's LEFT edge; the index past the end draws it on the last tab's
 /// RIGHT edge; a group with no tabs draws nothing.
+/// The dock slot for a new group made by a drop on group `group_idx`'s body
+/// at `y` px below the GROUP's top edge, the group being `height` px tall:
+/// above the group in its upper half, below it from the midpoint on
+/// (WORKSPACE.md "Moving a Panel to Another Group"; row 132). The twin of
+/// Swift's `dockGroupDropTarget` body case.
+pub(crate) fn group_body_slot(group_idx: usize, y: f64, height: f64) -> usize {
+    if y < height / 2.0 { group_idx } else { group_idx + 1 }
+}
+
 /// The insertion slot for a drop at `x` px from the left edge of tab
 /// `tab_index`, `width` px wide: the left half inserts before the tab, and
 /// from its midpoint on, after it (WORKSPACE.md "Moving a Panel to Another
@@ -1771,6 +1791,21 @@ mod dock_drop_overlay_tests {
         assert_eq!(tab_drop_slot(0, 70.0, 73.5), 1);
         assert_eq!(tab_drop_slot(2, 25.0, 40.0), 3, "past a narrow tab's midpoint: after it");
         assert_eq!(tab_drop_slot(2, 15.0, 40.0), 2, "before a narrow tab's midpoint: before it");
+    }
+
+    /// Row 132: a tab dropped on a group's body makes a new group above the
+    /// group in the upper half of the GROUP's own height, below it from the
+    /// midpoint on. Measured on the web before the fix (probe `body132.py`,
+    /// a 224 px group): a drop at its middle (+112) went ABOVE, because the side
+    /// came from the hovered child widget's local y. Twin of Swift's
+    /// `dockGroupDropTarget` body arms, case for case.
+    #[test]
+    fn a_group_body_slot_splits_the_group_at_its_own_midpoint() {
+        use super::group_body_slot;
+        assert_eq!(group_body_slot(3, 28.0, 224.0), 3, "just under the tab bar: above");
+        assert_eq!(group_body_slot(3, 111.9, 224.0), 3);
+        assert_eq!(group_body_slot(3, 112.0, 224.0), 4, "the midpoint belongs to the lower half");
+        assert_eq!(group_body_slot(3, 214.0, 224.0), 4, "near the bottom: below");
     }
 
     #[test]
