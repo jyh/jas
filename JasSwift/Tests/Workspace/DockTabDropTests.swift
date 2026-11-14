@@ -49,12 +49,46 @@ private let g1 = GroupAddr(dockId: DockId(0), groupIdx: 1)
     #expect(op["to_group_idx"] as? Int == 1)
 }
 
-@Test func aSameGroupDropReordersToTheSlot() {
-    // As the web: the slot goes to `reorder_panel` unchanged.
-    let op = dockPanelDropOp(from: PanelAddr(group: g1, panelIdx: 2), onto: g1, slot: 0)
-    #expect(op["op"] as? String == "reorder_panel")
-    #expect(op["from"] as? Int == 2)
-    #expect(op["to"] as? Int == 0)
+@Test func aSameGroupDropReordersToThePostRemovalIndex() {
+    // Row 130: a slot counts gaps with the panel still in place; `reorder_panel`'s
+    // `to` is an index after it is removed. Backward slots are unchanged.
+    let back = dockPanelDropOp(from: PanelAddr(group: g1, panelIdx: 2), onto: g1, slot: 0)
+    #expect(back["op"] as? String == "reorder_panel")
+    #expect(back["from"] as? Int == 2)
+    #expect(back["to"] as? Int == 0)
+    let fwd = dockPanelDropOp(from: PanelAddr(group: g1, panelIdx: 0), onto: g1, slot: 2)
+    #expect(fwd["to"] as? Int == 1)
+}
+
+@Test func aDropSlotMapsToTheReorderIndex() {
+    // The twin of Rust's `a_drop_slot_maps_to_the_reorder_index`, case for case.
+    #expect(reorderToForDropSlot(from: 0, slot: 2) == 1)
+    #expect(reorderToForDropSlot(from: 0, slot: 3) == 2)
+    #expect(reorderToForDropSlot(from: 2, slot: 0) == 0)
+    #expect(reorderToForDropSlot(from: 2, slot: 1) == 1)
+    #expect(reorderToForDropSlot(from: 1, slot: 1) == 1)
+    #expect(reorderToForDropSlot(from: 1, slot: 2) == 1)
+}
+
+/// Three tabs, as the web probe built them: the default group 0 is two tabs,
+/// so group 1's first panel is moved to its end.
+private func threeTabLayout() -> (WorkspaceLayout, GroupAddr) {
+    var layout = WorkspaceLayout.defaultLayout()
+    let did = layout.anchored[0].1.id
+    layoutApply(&layout, opMovePanelToGroup(PanelAddr(group: GroupAddr(dockId: did, groupIdx: 1), panelIdx: 0),
+                                            to: GroupAddr(dockId: did, groupIdx: 0)))
+    return (layout, GroupAddr(dockId: did, groupIdx: 0))
+}
+
+@Test func aSameGroupDropLandsAtTheCaret() {
+    var (layout, g) = threeTabLayout()
+    let before = layout.anchored[0].1.groups[0].panels
+    #expect(before.count == 3)
+    layoutApply(&layout, dockPanelDropOp(from: PanelAddr(group: g, panelIdx: 0), onto: g, slot: 2))
+    #expect(layout.anchored[0].1.groups[0].panels == [before[1], before[0], before[2]])
+    var (own, _) = threeTabLayout()
+    layoutApply(&own, dockPanelDropOp(from: PanelAddr(group: g, panelIdx: 0), onto: g, slot: 1))
+    #expect(own.anchored[0].1.groups[0].panels == before, "its own right half is a no-op")
 }
 
 @Test func aCrossGroupDropLandsAtTheHoveredTab() {

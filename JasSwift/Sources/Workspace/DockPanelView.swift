@@ -53,12 +53,21 @@ func dockTabDropSlot(at point: CGPoint, tabFrames: [CGRect]) -> Int {
     return tabFrames.count
 }
 
+/// The `reorder_panel` `to` for a panel at `from` dropped at tab-bar `slot`
+/// in its own group (row 130). A slot counts the gaps between tabs with the
+/// dragged panel still in place, while `to` is an index after it is removed,
+/// so a slot past the panel drops by one. The twin of Rust's
+/// `reorder_to_for_drop_slot`; WORKSPACE.md "Moving a Panel to Another Group".
+func reorderToForDropSlot(from: Int, slot: Int) -> Int {
+    slot > from ? slot - 1 : slot
+}
+
 /// The layout op for a panel dropped at `slot` on group `target`, as the
-/// web's `ondrop`: within one group the slot goes to `reorder_panel`
-/// unchanged; across groups it is `move_panel_to_group`'s `to_index`.
+/// web's `ondrop`: within one group a `reorder_panel` to the converted
+/// index; across groups `move_panel_to_group` with the slot as `to_index`.
 func dockPanelDropOp(from: PanelAddr, onto target: GroupAddr, slot: Int) -> [String: Any] {
     from.group == target
-        ? opReorderPanel(target, from: from.panelIdx, to: slot)
+        ? opReorderPanel(target, from: from.panelIdx, to: reorderToForDropSlot(from: from.panelIdx, slot: slot))
         : opMovePanelToGroup(from, to: target, at: slot)
 }
 

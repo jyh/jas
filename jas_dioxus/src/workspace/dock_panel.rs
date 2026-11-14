@@ -1308,10 +1308,12 @@ pub(crate) fn build_dock_groups(
                                 }
                                 (DragPayload::Panel(from), DropTarget::TabBar { group: to_group, index: to_idx }) => {
                                     if from.group == to_group {
-                                        // Same group: reorder
+                                        // Same group: reorder. The slot is converted to the
+                                        // post-removal index, so the panel lands at the caret (row 130).
+                                        let to = crate::workspace::layout_apply::reorder_to_for_drop_slot(from.panel_idx, to_idx);
                                         crate::workspace::layout_apply::layout_apply(
                                             &mut st.workspace_layout,
-                                            &crate::workspace::layout_apply::op_reorder_panel(to_group, from.panel_idx, to_idx),
+                                            &crate::workspace::layout_apply::op_reorder_panel(to_group, from.panel_idx, to),
                                         );
                                     } else {
                                         crate::workspace::layout_apply::layout_apply(
