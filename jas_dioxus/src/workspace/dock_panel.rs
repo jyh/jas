@@ -1128,17 +1128,10 @@ pub(crate) fn build_dock_groups(
         let act_drop = act.clone();
         let group_collapsed = group.collapsed;
 
-        // Tab insertion indicator: which index has the drop caret?
-        let tab_drop_idx: Option<usize> = if cur_drag.is_some() {
-            match cur_drop {
-                Some(DropTarget::TabBar { group: g, index }) if g == (GroupAddr { dock_id: did, group_idx: gi }) => Some(index),
-                _ => None,
-            }
-        } else {
-            None
-        };
-        let panel_count = group.panels.len();
-
+        // The tab drop caret is the overlay's (`DockDropOverlay`, row 124): the
+        // tree reads the drag signals with `peek()` and does not re-render mid-drag,
+        // so an in-bar caret here never drew, and if anything did re-render the tree
+        // it would shift the tabs under the pointer (row 134).
         // Tab bar buttons — each tab is individually draggable
         let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().flat_map(|(pi, &kind)| {
             let act_click = act_tabs.clone();
@@ -1153,17 +1146,7 @@ pub(crate) fn build_dock_groups(
             });
             let outline = "";
 
-            // Insertion indicator before this tab
-            let show_caret = tab_drop_idx == Some(pi);
             let mut nodes: Vec<Result<VNode, RenderError>> = Vec::new();
-            if show_caret {
-                nodes.push(rsx! {
-                    div {
-                        key: "tab-caret-{gi}-{pi}",
-                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
-                    }
-                });
-            }
             // The tab's DOM id derives from the panel's YAML content id,
             // as the Mac tab's accessibility identifier does (test_hook.rs).
             let tab_id = crate::workspace::test_hook::tab_dom_id(panel_kind_to_content_id(kind));
@@ -1252,15 +1235,6 @@ pub(crate) fn build_dock_groups(
                     }
                 }
             });
-            // After-last caret (only on the final tab)
-            if pi == panel_count - 1 && tab_drop_idx == Some(panel_count) {
-                nodes.push(rsx! {
-                    div {
-                        key: "tab-caret-{gi}-end",
-                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
-                    }
-                });
-            }
             nodes
         }).collect();
 
