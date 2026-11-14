@@ -1796,8 +1796,10 @@ mod dock_drop_overlay_tests {
     /// Row 132: a tab dropped on a group's body makes a new group above the
     /// group in the upper half of the GROUP's own height, below it from the
     /// midpoint on. Measured on the web before the fix (probe `body132.py`,
-    /// a 224 px group): a drop at its middle (+112) went ABOVE, because the side
-    /// came from the hovered child widget's local y. Twin of Swift's
+    /// a 225 px group): drops at +138 and +166, in the LOWER half, went ABOVE,
+    /// because the side came from the hovered child widget's local y (10 px into
+    /// the hex row and the colour bar). After the fix both go below. (A drop at
+    /// the exact middle sits on the boundary and separates nothing.) Twin of Swift's
     /// `dockGroupDropTarget` body arms, case for case.
     #[test]
     fn a_group_body_slot_splits_the_group_at_its_own_midpoint() {
