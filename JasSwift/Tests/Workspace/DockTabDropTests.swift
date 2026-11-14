@@ -121,8 +121,8 @@ private func threeTabLayout() -> (WorkspaceLayout, GroupAddr) {
 }
 
 @Test func aDropOnTheBodysUpperHalfMakesAGroupAbove() {
-    // The web probe's case: just under the bar, and the body's middle (above the
-    // group's own midpoint 112 for a 224-high group).
+    // Just under the bar, and just above the group's own midpoint (112 for a
+    // 224-high group).
     #expect(dockGroupDropTarget(at: CGPoint(x: 120, y: 28), tabFrames: frames, barHeight: 25,
                                 groupHeight: 224, groupIdx: 3) == .newGroup(at: 3))
     #expect(dockGroupDropTarget(at: CGPoint(x: 120, y: 111.9), tabFrames: frames, barHeight: 25,
