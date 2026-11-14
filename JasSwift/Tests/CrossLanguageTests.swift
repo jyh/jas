@@ -8122,6 +8122,28 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
 /// release, `double_click` on complex_document.svg's group `[0, 2]`, then a
 /// click, read back, selects `[0, 2, 0]`; the CONTROL without the double
 /// selects `[0, 2]`. The point is the group's line's midpoint, from the fixture.
+/// Row 119 (STATUS-jas; the recommendation of row 76, bus 11-12 15:38): a key
+/// no focused panel binds FALLS THROUGH to the menubar's shortcut, so S1's
+/// `layers.eye_undo` (Ctrl+Z with the Layers tree focused after an eye click)
+/// undoes the click, as the web app does through its panel door (measured
+/// 11-13 on main 4abab25a). RED by design until the key law changes, and NOT
+/// merged before the Mac reading lands (it may refuse, which would change the
+/// recommendation). Its expectation is a relation inside one run, never a
+/// typed document: the last read equals the read taken before the click.
+@Test func formsAnUnboundPanelKeyFallsThroughToTheMenubarShortcut() {
+    let eye: [String: Any] = ["panel": formsLayers, "widget": "lp_eye", "row": [1, 0], "event": "click"]
+    let out = formsRun(formsLayersScript([["read": "document"], eye, ["read": "document"],
+                                          ["key": "Z", "ctrl": true], ["read": "document"]]))
+    #expect(formsRefusal(out) == nil, "Ctrl+Z on the focused tree was refused: \(formsRefusal(out) ?? "")")
+    let docs = formsDocReads(out)
+    guard docs.count == 3 else {
+        Issue.record("expected three document reads, got \(docs.count): \(out)")
+        return
+    }
+    #expect(docs[1] != docs[0], "the eye click changed nothing, so this arm cannot tell an undo from a no-op")
+    #expect(docs[2] == docs[0], "Ctrl+Z did not undo the eye click")
+}
+
 @Test func formsReplayDeliversADoubleClickStep() throws {
     let probe = svgToDocument(readFixture("svg/complex_document.svg"))
     guard case .group(let g) = probe.getElement([0, 2]), case .line(let ln) = g.children[0] else {
