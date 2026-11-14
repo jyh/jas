@@ -36,6 +36,64 @@ func decodeDrag(_ s: String) -> DecodedDrag? {
     return nil
 }
 
+// MARK: - Tab drop position (row 129)
+
+/// The insertion slot for a panel dropped at `point` on a group, where
+/// `tabFrames[i]` is tab `i`'s frame in the same coordinate space. On a
+/// tab, the left half inserts before it and the right half (from the
+/// midpoint on) after it, as the web's tab `ondragover` does
+/// (WORKSPACE.md "Moving a Panel to Another Group"). Anywhere else (the
+/// grip, the bar's empty space, the panel body) appends. The web
+/// approximates the half with a fixed 30 px; this reads the tab's real
+/// midpoint.
+func dockTabDropSlot(at point: CGPoint, tabFrames: [CGRect]) -> Int {
+    for (i, f) in tabFrames.enumerated() where f.contains(point) {
+        return point.x < f.midX ? i : i + 1
+    }
+    return tabFrames.count
+}
+
+/// The layout op for a panel dropped at `slot` on group `target`, as the
+/// web's `ondrop`: within one group the slot goes to `reorder_panel`
+/// unchanged; across groups it is `move_panel_to_group`'s `to_index`.
+func dockPanelDropOp(from: PanelAddr, onto target: GroupAddr, slot: Int) -> [String: Any] {
+    from.group == target
+        ? opReorderPanel(target, from: from.panelIdx, to: slot)
+        : opMovePanelToGroup(from, to: target, at: slot)
+}
+
+/// The coordinate space a dock group's drop point and tab frames share.
+private let dockGroupSpace = "dockGroupSpace"
+
+/// Each tab's frame in its group's `dockGroupSpace`, keyed by tab index.
+private struct DockTabFramesKey: PreferenceKey {
+    static let defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// The drop delegate on a dock group: it reads the drop point so a
+/// panel lands at the hovered tab (row 129).
+private struct DockGroupDropDelegate: DropDelegate {
+    let tabFrames: () -> [CGRect]
+    let onDrop: (DecodedDrag, Int) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [dockDragUTType])
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [dockDragUTType]).first else { return false }
+        let slot = dockTabDropSlot(at: info.location, tabFrames: tabFrames())
+        provider.loadObject(ofClass: NSString.self) { obj, _ in
+            guard let s = obj as? String, let decoded = decodeDrag(s) else { return }
+            DispatchQueue.main.async { onDrop(decoded, slot) }
+        }
+        return true
+    }
+}
+
 // MARK: - Dock Panel View (anchored dock)
 
 public struct DockPanelView: View {
@@ -166,6 +224,8 @@ public struct PanelGroupView: View {
     /// ``open_dialog`` effect. Nil when the enclosing dock doesn't
     /// forward one (e.g., the floating-dock variant).
     var yamlDialogState: Binding<YamlDialogState?>? = nil
+    /// Each tab's frame in `dockGroupSpace`, read by the drop delegate (row 129).
+    @State private var tabFrames: [Int: CGRect] = [:]
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -183,6 +243,11 @@ public struct PanelGroupView: View {
                 // Tab buttons (drag to reorder/move panels)
                 ForEach(Array(group.panels.enumerated()), id: \.offset) { pi, kind in
                     tabButton(pi: pi, kind: kind)
+                        .background(GeometryReader { geo in
+                            SwiftUI.Color.clear.preference(
+                                key: DockTabFramesKey.self,
+                                value: [pi: geo.frame(in: .named(dockGroupSpace))])
+                        })
                         .onDrag {
                             NSItemProvider(object: encodePanelDrag(PanelAddr(group: GroupAddr(dockId: dockId, groupIdx: groupIdx), panelIdx: pi)) as NSString)
                         }
@@ -251,9 +316,11 @@ public struct PanelGroupView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(SwiftUI.Color(nsColor: theme.border)).frame(height: 1)
         }
-        .onDrop(of: [dockDragUTType], isTargeted: nil) { providers in
-            handleDrop(providers)
-        }
+        .coordinateSpace(name: dockGroupSpace)
+        .onPreferenceChange(DockTabFramesKey.self) { tabFrames = $0 }
+        .onDrop(of: [dockDragUTType], delegate: DockGroupDropDelegate(
+            tabFrames: { (0..<group.panels.count).compactMap { tabFrames[$0] } },
+            onDrop: handleDrop))
     }
 
     /// Build the evaluation context for a panel body. Ensures the
@@ -266,37 +333,25 @@ public struct PanelGroupView: View {
                               opacityPanel: workspaceLayout.opacityPanel)
     }
 
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        provider.loadObject(ofClass: NSString.self) { obj, _ in
-            guard let s = obj as? String, let decoded = decodeDrag(s) else { return }
-            DispatchQueue.main.async {
-                let targetGroup = GroupAddr(dockId: dockId, groupIdx: groupIdx)
-                switch decoded {
-                case .group(let from):
-                    // Deferred (OP_LOG 3d-2): the dock GROUP-MOVE verbs
-                    // (moveGroupWithinDock / moveGroupToDock) are NOT in the
-                    // 15-verb dispatcher vocabulary, so they stay direct.
-                    if from.dockId == dockId {
-                        workspaceLayout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
-                    } else {
-                        workspaceLayout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
-                    }
-                case .panel(let from):
-                    // reorder_panel / move_panel_to_group ARE dispatcher verbs;
-                    // route through the shared layout-op runtime (OP_LOG 3d-2).
-                    if from.group == targetGroup {
-                        // Reorder within same group — drop at end
-                        layoutApply(&workspaceLayout,
-                                    opReorderPanel(targetGroup, from: from.panelIdx, to: group.panels.count))
-                    } else {
-                        layoutApply(&workspaceLayout, opMovePanelToGroup(from, to: targetGroup))
-                    }
-                }
-                workspaceLayout.saveIfNeeded()
+    private func handleDrop(_ decoded: DecodedDrag, slot: Int) {
+        let targetGroup = GroupAddr(dockId: dockId, groupIdx: groupIdx)
+        switch decoded {
+        case .group(let from):
+            // Deferred (OP_LOG 3d-2): the dock GROUP-MOVE verbs
+            // (moveGroupWithinDock / moveGroupToDock) are NOT in the
+            // 15-verb dispatcher vocabulary, so they stay direct.
+            if from.dockId == dockId {
+                workspaceLayout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
+            } else {
+                workspaceLayout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
             }
+        case .panel(let from):
+            // reorder_panel / move_panel_to_group ARE dispatcher verbs;
+            // route through the shared layout-op runtime (OP_LOG 3d-2).
+            // The panel lands at the hovered tab (row 129).
+            layoutApply(&workspaceLayout, dockPanelDropOp(from: from, onto: targetGroup, slot: slot))
         }
-        return true
+        workspaceLayout.saveIfNeeded()
     }
 
     private func tabButton(pi: Int, kind: PanelKind) -> some View {
