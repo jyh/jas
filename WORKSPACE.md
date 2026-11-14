@@ -221,6 +221,14 @@ A shell that knows where in the tab bar a panel was dropped passes that
 position as `to_index`, so the panel lands where the drop indicator was drawn.
 The web computes it from the hovered tab (the left half inserts before it,
 the right half after). A shell that computes no position omits it.
+
+A drop within the panel's own group is a `reorder_panel`. Its `to` is the
+panel's index after it is taken out of the group, but the drop position counts
+the gaps between tabs with the panel still in place. So the shell converts: a
+position after the panel's own index is reduced by one, and any other position
+is used as it is. Both gaps beside the panel then leave it where it is. With
+tabs `[a, b, c]`, `a` dropped on `b`'s right half (position 2) becomes
+`to: 1` and gives `[b, a, c]`, the order the drop indicator showed.
 (Conformance: `panel_ops.json` `move_panel_to_group`,
 `move_panel_to_group_at_index`, `move_panel_to_group_index_past_the_end_appends`.)
 
