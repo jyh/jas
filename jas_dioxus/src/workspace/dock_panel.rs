@@ -1321,7 +1321,9 @@ pub(crate) fn build_dock_groups(
                             match (src, tgt) {
                                 (DragPayload::Group(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
                                     if from.dock_id == to_dock {
-                                        st.workspace_layout.move_group_within_dock(to_dock, from.group_idx, to_idx);
+                                        // The slot is converted to the post-removal index,
+                                        // so the group lands at the bar (row 133).
+                                        st.workspace_layout.move_group_within_dock(to_dock, from.group_idx, group_slot_drop_index(from, to_dock, to_idx));
                                     } else {
                                         st.workspace_layout.move_group_to_dock(from, to_dock, to_idx);
                                     }
@@ -1634,6 +1636,19 @@ pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_id
 /// `None` past the last tab. An index at an existing tab draws a 3px caret on
 /// that tab's LEFT edge; the index past the end draws it on the last tab's
 /// RIGHT edge; a group with no tabs draws nothing.
+/// The `to` for a whole group dragged from `from` and dropped at dock `slot`
+/// of `to_dock` (a gap between groups, counted with the dragged group still in
+/// place). Within its own dock the move takes an index AFTER the group is
+/// removed, so a slot past it drops by one; into another dock the slot is the
+/// index. WORKSPACE.md "Moving a Panel to Another Group"; row 133.
+pub(crate) fn group_slot_drop_index(from: GroupAddr, to_dock: DockId, slot: usize) -> usize {
+    if from.dock_id == to_dock {
+        crate::workspace::layout_apply::reorder_to_for_drop_slot(from.group_idx, slot)
+    } else {
+        slot
+    }
+}
+
 /// The dock slot for a new group made by a drop on group `group_idx`'s body
 /// at `y` px below the GROUP's top edge, the group being `height` px tall:
 /// above the group in its upper half, below it from the midpoint on
@@ -1808,6 +1823,34 @@ mod dock_drop_overlay_tests {
         assert_eq!(group_body_slot(3, 111.9, 224.0), 3);
         assert_eq!(group_body_slot(3, 112.0, 224.0), 4, "the midpoint belongs to the lower half");
         assert_eq!(group_body_slot(3, 214.0, 224.0), 4, "near the bottom: below");
+    }
+
+    /// Row 133: a whole group dropped at a dock slot lands at the bar. Measured
+    /// on the web before the fix (probe `group133.py`): group 0 onto group 2's
+    /// lower half (slot 3) landed below group 3, one past the bar; the backward
+    /// control was right. Twins of Swift's row 133 arms, case for case.
+    #[test]
+    fn a_group_dropped_at_a_slot_lands_at_the_bar() {
+        use super::group_slot_drop_index;
+        use crate::workspace::workspace::{DockId, GroupAddr, WorkspaceLayout};
+        let order = |l: &WorkspaceLayout| l.anchored[0].1.groups.iter().map(|g| g.panels.clone()).collect::<Vec<_>>();
+        let moved = |from: usize, slot: usize| {
+            let mut l = WorkspaceLayout::default_layout();
+            let did = l.anchored[0].1.id;
+            let f = GroupAddr { dock_id: did, group_idx: from };
+            l.move_group_within_dock(did, from, group_slot_drop_index(f, did, slot));
+            order(&l)
+        };
+        let g = order(&WorkspaceLayout::default_layout());
+        assert_eq!(moved(0, 3)[..4], [g[1].clone(), g[2].clone(), g[0].clone(), g[3].clone()], "forward, lower half of group 2");
+        assert_eq!(moved(3, 0)[..4], [g[3].clone(), g[0].clone(), g[1].clone(), g[2].clone()], "backward, upper half of group 0");
+        assert_eq!(moved(0, 2)[..4], [g[1].clone(), g[0].clone(), g[2].clone(), g[3].clone()], "forward, upper half of group 2");
+        assert_eq!(moved(3, 1)[..4], [g[0].clone(), g[3].clone(), g[1].clone(), g[2].clone()], "backward, lower half of group 0");
+        assert_eq!(moved(1, 1), g, "its own upper half");
+        assert_eq!(moved(1, 2), g, "its own lower half");
+        // Into another dock the slot is the index unchanged.
+        let other = DockId(99);
+        assert_eq!(group_slot_drop_index(GroupAddr { dock_id: DockId(1), group_idx: 0 }, other, 3), 3);
     }
 
     #[test]

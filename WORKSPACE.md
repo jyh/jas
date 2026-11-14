@@ -230,6 +230,14 @@ group it was dropped on. In the upper half of that group's height it goes
 above the group; from the midpoint on, below it. The half is measured on the
 group's own height, never on whatever widget in the body is under the pointer.
 
+A whole group dragged by its grip and dropped on another group's body is
+placed the same way: above that group in the upper half of its height, below
+it from the midpoint on, where the drop indicator is drawn. Within one dock the
+move's position is the group's index after it is taken out, so the shell
+converts as it does for a tab: a position after the group's own index is
+reduced by one, and both gaps beside the group leave it where it is. A group
+dropped on another group's tab bar takes that group's index.
+
 A drop within the panel's own group is a `reorder_panel`. Its `to` is the
 panel's index after it is taken out of the group, but the drop position counts
 the gaps between tabs with the panel still in place. So the shell converts: a

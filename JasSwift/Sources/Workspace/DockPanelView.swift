@@ -91,9 +91,11 @@ func dockGroupDropTarget(at point: CGPoint, tabFrames: [CGRect], barHeight: CGFl
     return .newGroup(at: point.y < groupHeight / 2 ? groupIdx : groupIdx + 1)
 }
 
-/// Apply a drop on group `groupIdx` of dock `dockId`. A whole-group drag moves
-/// the group, as before (its slot rule is not yet specified); a panel drag is a
-/// tab drop or a new group, per `target`.
+/// Apply a drop on group `groupIdx` of dock `dockId`, as the web's dock
+/// `ondrop` does. A panel drag is a tab drop or a new group, per `target`
+/// (rows 129, 132). A whole-group drag on a BODY lands at the dock slot where
+/// the bar is drawn, converted to the index after the dragged group is removed
+/// when it stays in its dock (row 133); on a TAB BAR it takes the target's index.
 func applyDockGroupDrop(_ layout: inout WorkspaceLayout, _ decoded: DecodedDrag,
                         target: DockGroupDropTarget, dockId: DockId, groupIdx: Int) {
     let targetGroup = GroupAddr(dockId: dockId, groupIdx: groupIdx)
@@ -102,10 +104,14 @@ func applyDockGroupDrop(_ layout: inout WorkspaceLayout, _ decoded: DecodedDrag,
         // Deferred (OP_LOG 3d-2): the dock GROUP-MOVE verbs
         // (moveGroupWithinDock / moveGroupToDock) are NOT in the
         // 15-verb dispatcher vocabulary, so they stay direct.
+        let slot: Int
+        if case .newGroup(let at) = target { slot = at } else { slot = groupIdx }
         if from.dockId == dockId {
-            layout.moveGroupWithinDock(dockId, from: from.groupIdx, to: groupIdx)
+            let to: Int
+            if case .newGroup = target { to = reorderToForDropSlot(from: from.groupIdx, slot: slot) } else { to = slot }
+            layout.moveGroupWithinDock(dockId, from: from.groupIdx, to: to)
         } else {
-            layout.moveGroupToDock(from, toDock: dockId, toIdx: groupIdx)
+            layout.moveGroupToDock(from, toDock: dockId, toIdx: slot)
         }
     case .panel(let from):
         switch target {
