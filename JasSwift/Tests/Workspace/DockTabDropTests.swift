@@ -155,3 +155,69 @@ private func threeTabLayout() -> (WorkspaceLayout, GroupAddr) {
     #expect(after[1] == [before[1][0]])
     #expect(after[2] == Array(before[1].dropFirst()))
 }
+
+// Row 133 (WORKSPACE.md "Moving a Panel to Another Group"): a whole GROUP dropped
+// on another group's body in the same dock lands where the bar is drawn, above in
+// the upper half and below from the midpoint on; the slot is converted to the
+// index after the dragged group is removed, as for tabs (row 130). Measured on the
+// web before the fix (probe `group133.py`): group 0 onto group 2's lower half
+// landed BELOW group 3, one past the bar; the backward control was right.
+
+private func groupOrder(_ l: WorkspaceLayout) -> [[PanelKind]] { l.anchored[0].1.groups.map(\.panels) }
+
+@Test func aForwardGroupDropOnABodyLandsAtTheBar() {
+    var layout = WorkspaceLayout.defaultLayout()
+    let did = layout.anchored[0].1.id
+    let g = groupOrder(layout)
+    applyDockGroupDrop(&layout, .group(GroupAddr(dockId: did, groupIdx: 0)), target: .newGroup(at: 3),
+                       dockId: did, groupIdx: 2)
+    #expect(Array(groupOrder(layout).prefix(4)) == [g[1], g[2], g[0], g[3]])
+}
+
+@Test func aBackwardGroupDropOnABodyLandsAtTheBar() {
+    var layout = WorkspaceLayout.defaultLayout()
+    let did = layout.anchored[0].1.id
+    let g = groupOrder(layout)
+    applyDockGroupDrop(&layout, .group(GroupAddr(dockId: did, groupIdx: 3)), target: .newGroup(at: 0),
+                       dockId: did, groupIdx: 0)
+    #expect(Array(groupOrder(layout).prefix(4)) == [g[3], g[0], g[1], g[2]])
+}
+
+@Test func aGroupDroppedOnItsOwnBodyStaysPut() {
+    // Both halves of its own body are the gaps beside it.
+    for slot in [1, 2] {
+        var layout = WorkspaceLayout.defaultLayout()
+        let did = layout.anchored[0].1.id
+        let g = groupOrder(layout)
+        applyDockGroupDrop(&layout, .group(GroupAddr(dockId: did, groupIdx: 1)), target: .newGroup(at: slot),
+                           dockId: did, groupIdx: 1)
+        #expect(groupOrder(layout) == g, "slot \(slot)")
+    }
+}
+
+@Test func aGroupDroppedOnATabBarMovesToThatGroupsIndex() {
+    // Unchanged, as the web's TabBar arm: the group takes the target's index.
+    var layout = WorkspaceLayout.defaultLayout()
+    let did = layout.anchored[0].1.id
+    let g = groupOrder(layout)
+    applyDockGroupDrop(&layout, .group(GroupAddr(dockId: did, groupIdx: 0)), target: .tab(slot: 0),
+                       dockId: did, groupIdx: 2)
+    #expect(Array(groupOrder(layout).prefix(3)) == [g[1], g[2], g[0]])
+}
+
+@Test func theHalfDecidesTheSideOfTheTargetGroup() {
+    // The cases that separate the spec from "take the target's index" (the Mac's
+    // rule before row 133): the OTHER half of the target in each direction.
+    var fwd = WorkspaceLayout.defaultLayout()
+    let did = fwd.anchored[0].1.id
+    let g = groupOrder(fwd)
+    // group 0 onto group 2's UPPER half (slot 2): above group 2.
+    applyDockGroupDrop(&fwd, .group(GroupAddr(dockId: did, groupIdx: 0)), target: .newGroup(at: 2),
+                       dockId: did, groupIdx: 2)
+    #expect(Array(groupOrder(fwd).prefix(4)) == [g[1], g[0], g[2], g[3]])
+    // group 3 onto group 0's LOWER half (slot 1): below group 0.
+    var back = WorkspaceLayout.defaultLayout()
+    applyDockGroupDrop(&back, .group(GroupAddr(dockId: did, groupIdx: 3)), target: .newGroup(at: 1),
+                       dockId: did, groupIdx: 0)
+    #expect(Array(groupOrder(back).prefix(4)) == [g[0], g[3], g[1], g[2]])
+}
