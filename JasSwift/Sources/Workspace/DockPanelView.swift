@@ -43,9 +43,8 @@ func decodeDrag(_ s: String) -> DecodedDrag? {
 /// tab, the left half inserts before it and the right half (from the
 /// midpoint on) after it, as the web's tab `ondragover` does
 /// (WORKSPACE.md "Moving a Panel to Another Group"). Anywhere else (the
-/// grip, the bar's empty space, the panel body) appends. The web
-/// approximates the half with a fixed 30 px; this reads the tab's real
-/// midpoint.
+/// grip, the bar's empty space, the panel body) appends. Both shells
+/// split at the tab's own midpoint (the web's `tab_drop_slot`, row 131).
 func dockTabDropSlot(at point: CGPoint, tabFrames: [CGRect]) -> Int {
     for (i, f) in tabFrames.enumerated() where f.contains(point) {
         return point.x < f.midX ? i : i + 1

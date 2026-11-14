@@ -1167,6 +1167,8 @@ pub(crate) fn build_dock_groups(
             // The tab's DOM id derives from the panel's YAML content id,
             // as the Mac tab's accessibility identifier does (test_hook.rs).
             let tab_id = crate::workspace::test_hook::tab_dom_id(panel_kind_to_content_id(kind));
+            #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+            let tab_id_drop = tab_id.clone(); // the dragover's rect lookup (row 131)
             nodes.push(rsx! {
                 div {
                     key: "dock-tab-{gi}-{pi}",
@@ -1192,10 +1194,23 @@ pub(crate) fn build_dock_groups(
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
                         last_drag_pos.set((coords.x, coords.y));
-                        // Left half → insert before this tab; right half → insert after
-                        let x = evt.data().element_coordinates().x;
-                        let mid = 30.0; // approximate tab half-width
-                        let idx = if x < mid { pi } else { pi + 1 };
+                        // Left half → insert before this tab; right half → insert after,
+                        // split at the tab's own midpoint (row 131). The offset is read
+                        // against the TAB's rect, not the event target's, which can be a
+                        // child (the close button).
+                        #[cfg(target_arch = "wasm32")]
+                        let (x, width) = {
+                            let c = evt.data().client_coordinates();
+                            web_sys::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.get_element_by_id(&tab_id_drop))
+                                .map(|el| { let r = el.get_bounding_client_rect(); (c.x - r.left(), r.width()) })
+                                .unwrap_or((evt.data().element_coordinates().x, 60.0))
+                        };
+                        // No DOM off the web, where no drag event arrives; the old 30 px half.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let (x, width) = (evt.data().element_coordinates().x, 60.0);
+                        let idx = tab_drop_slot(pi, x, width);
                         drop_target_sig.set(Some(DropTarget::TabBar {
                             group: GroupAddr { dock_id: did, group_idx: gi },
                             index: idx,
@@ -1608,6 +1623,14 @@ pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_id
 /// `None` past the last tab. An index at an existing tab draws a 3px caret on
 /// that tab's LEFT edge; the index past the end draws it on the last tab's
 /// RIGHT edge; a group with no tabs draws nothing.
+/// The insertion slot for a drop at `x` px from the left edge of tab
+/// `tab_index`, `width` px wide: the left half inserts before the tab, and
+/// from its midpoint on, after it (WORKSPACE.md "Moving a Panel to Another
+/// Group"; row 131). The twin of Swift's `dockTabDropSlot`.
+pub(crate) fn tab_drop_slot(tab_index: usize, x: f64, width: f64) -> usize {
+    if x < width / 2.0 { tab_index } else { tab_index + 1 }
+}
+
 pub(crate) fn tab_caret(rect_of: impl Fn(usize) -> Option<FeedbackRect>, index: usize) -> Option<FeedbackRect> {
     if let Some((x, y, _, h)) = rect_of(index) {
         return Some((x, y, 3.0, h));
@@ -1732,6 +1755,22 @@ mod dock_drop_overlay_tests {
         assert_eq!(tab_caret(tabs, 2), Some((226.0, 20.0, 3.0, 25.0)));
         assert_eq!(tab_caret(|_| None, 0), None);
         assert_eq!(tab_caret(tabs, 4), None);
+    }
+
+    /// Row 131: the half is the tab's own midpoint, not a fixed 30 px. Measured
+    /// on the web before the fix (probe `half131.py`): a 73.5 px Swatches tab
+    /// took a drop at +33 px, LEFT of its midpoint 36.75, as "after" it. The
+    /// twin of Swift's `dockTabDropSlot` arms (`theMidpointBelongsToTheRightHalf`).
+    #[test]
+    fn a_tab_drop_slot_splits_the_tab_at_its_own_midpoint() {
+        use super::tab_drop_slot;
+        assert_eq!(tab_drop_slot(1, 33.0, 73.5), 1, "left of a wide tab's midpoint: before it");
+        assert_eq!(tab_drop_slot(1, 36.75, 73.5), 2, "the midpoint belongs to the right half");
+        assert_eq!(tab_drop_slot(1, 36.7, 73.5), 1);
+        assert_eq!(tab_drop_slot(0, 2.0, 73.5), 0);
+        assert_eq!(tab_drop_slot(0, 70.0, 73.5), 1);
+        assert_eq!(tab_drop_slot(2, 25.0, 40.0), 3, "past a narrow tab's midpoint: after it");
+        assert_eq!(tab_drop_slot(2, 15.0, 40.0), 2, "before a narrow tab's midpoint: before it");
     }
 
     #[test]
