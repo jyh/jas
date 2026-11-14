@@ -144,7 +144,17 @@ impl Dock {
     }
 }
 
-/// A floating dock: a [`Dock`] plus screen position.
+/// A floating dock's top in the pane area's frame is never above the area
+/// (WORKSPACE.md "Floating dock positions"): `y` is floored at 0, the same
+/// floor as `clamp_floating_docks`, so the title bar that moves the dock stays
+/// inside the area and the dock cannot cover a menubar drawn above it. `x` is
+/// not floored; the clamp's own bound on it lets a dock hang off the left.
+/// Swift's twin is `WorkspaceLayout.floatingTop`.
+pub(crate) fn floating_top(y: f64) -> f64 {
+    y.max(0.0)
+}
+
+/// A floating dock: a [`Dock`] plus its position in the pane area's frame.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FloatingDock {
     pub dock: Dock,
@@ -565,7 +575,7 @@ impl WorkspaceLayout {
         self.floating.push(FloatingDock {
             dock: Dock::new(id, vec![group], DEFAULT_FLOATING_WIDTH),
             x,
-            y,
+            y: floating_top(y),
         });
         self.z_order.push(id);
         self.cleanup(from.dock_id);
@@ -597,8 +607,16 @@ impl WorkspaceLayout {
     // Move panel between groups
     // -----------------------------------------------------------------------
 
-    /// Remove a panel from one group and add it to another.
+    /// Remove a panel from one group and append it to another.
     pub fn move_panel_to_group(&mut self, from: PanelAddr, to: GroupAddr) {
+        self.move_panel_to_group_at(from, to, None);
+    }
+
+    /// Move a panel into another group (WORKSPACE.md "Moving a Panel to
+    /// Another Group"): inserted at `index` among the target's panels, an index
+    /// past the end appends, and `None` appends. Swift's twin is
+    /// `movePanelToGroup(_:to:at:)`.
+    pub fn move_panel_to_group_at(&mut self, from: PanelAddr, to: GroupAddr, index: Option<usize>) {
         // Same group — no-op.
         if from.group == to {
             return;
@@ -618,8 +636,9 @@ impl WorkspaceLayout {
         // Insert into target group.
         if let Some(dst_dock) = self.dock_mut(to.dock_id) {
             if let Some(dst_group) = dst_dock.groups.get_mut(to.group_idx) {
-                dst_group.panels.push(panel);
-                dst_group.active = dst_group.panels.len() - 1;
+                let at = index.unwrap_or(usize::MAX).min(dst_group.panels.len());
+                dst_group.panels.insert(at, panel);
+                dst_group.active = at;
             } else {
                 // Target group not found — put panel back.
                 if let Some(src_dock) = self.dock_mut(from.group.dock_id)
@@ -702,7 +721,7 @@ impl WorkspaceLayout {
         self.floating.push(FloatingDock {
             dock: Dock::new(id, vec![PanelGroup::new(vec![panel])], DEFAULT_FLOATING_WIDTH),
             x,
-            y,
+            y: floating_top(y),
         });
         self.z_order.push(id);
         self.cleanup(from.group.dock_id);
@@ -714,11 +733,12 @@ impl WorkspaceLayout {
     // Floating dock position
     // -----------------------------------------------------------------------
 
-    /// Move a floating dock. Ignored for anchored docks.
+    /// Move a floating dock. Ignored for anchored docks. `y` is floored as
+    /// [`floating_top`] floors it.
     pub fn set_floating_position(&mut self, id: DockId, x: f64, y: f64) {
         if let Some(fd) = self.floating.iter_mut().find(|fd| fd.dock.id == id) {
             fd.x = x;
-            fd.y = y;
+            fd.y = floating_top(y);
         }
         self.bump();
     }
@@ -2582,6 +2602,10 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let fid = l.detach_group(ga(id.0, 0), -500.0, -100.0).unwrap();
+        // The detach floors y itself (`floating_top`), so put a stored y
+        // above the area back by hand: a layout saved before that floor can
+        // still load one, and the clamp's own y floor is what this witnesses.
+        l.floating.iter_mut().find(|fd| fd.dock.id == fid).unwrap().y = -100.0;
         l.clamp_floating_docks(1000.0, 800.0);
         let fd = l.floating_dock(fid).unwrap();
         // x should be clamped so at least 50px is visible

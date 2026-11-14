@@ -189,7 +189,9 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
     let width_style = if let Some(w) = dlg_def.get("width").and_then(|w| w.as_f64()) {
         format!("width:{w}px;")
     } else {
-        String::new()
+        // The container can be reused for the next dialog, and a fragment
+        // absent from the new style is RESTORED by dioxus (row 121).
+        "width:auto;".to_string()
     };
 
     // Backdrop and container styles differ for modal vs popover
@@ -229,7 +231,7 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
 
             // Dialog container
             div {
-                style: "background:{THEME_BG}; border:1px solid {THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style} {container_pos_style}",
+                style: "background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style} {container_pos_style}",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                 },
@@ -237,7 +239,7 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
                 // Title bar (modal dialogs only)
                 if show_title_bar {
                     div {
-                        style: "display:flex; align-items:center; padding:8px 12px; border-bottom:1px solid {THEME_BORDER}; background:{THEME_TITLE_BAR_BG}; border-radius:8px 8px 0 0;",
+                        style: "display:flex; align-items:center; padding:8px 12px; border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER}; background-color:{THEME_TITLE_BAR_BG}; border-radius:8px 8px 0 0;",
 
                         // Brand logo
                         span {

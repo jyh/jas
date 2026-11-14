@@ -207,6 +207,23 @@ pub fn op_move_panel_to_group(from: PanelAddr, to: GroupAddr) -> serde_json::Val
     })
 }
 
+/// `{op:"move_panel_to_group", from_*, to_*, to_index}`: the panel lands at
+/// `to_index` among the target group's panels (row 128).
+pub fn op_move_panel_to_group_at(from: PanelAddr, to: GroupAddr, to_index: usize) -> serde_json::Value {
+    let mut op = op_move_panel_to_group(from, to);
+    op["to_index"] = serde_json::json!(to_index);
+    op
+}
+
+/// The `reorder_panel` `to` for a panel at `from` dropped at tab-bar `slot`
+/// in its own group (row 130). A slot counts the gaps between tabs with the
+/// dragged panel still in place, while `to` is an index after it is removed,
+/// so a slot past the panel drops by one. WORKSPACE.md "Moving a Panel to
+/// Another Group".
+pub fn reorder_to_for_drop_slot(from: usize, slot: usize) -> usize {
+    if slot > from { slot - 1 } else { slot }
+}
+
 /// `{op:"redock", dock_id}`.
 pub fn op_redock(id: DockId) -> serde_json::Value {
     serde_json::json!({ "op": "redock", "dock_id": id.0 })
@@ -353,7 +370,8 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
             );
         }
         "move_panel_to_group" => {
-            layout.move_panel_to_group(
+            // `to_index` is optional; absent or not a non-negative integer appends.
+            layout.move_panel_to_group_at(
                 PanelAddr {
                     group: GroupAddr {
                         dock_id: DockId(u(op, "from_dock_id")),
@@ -365,6 +383,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
                     dock_id: DockId(u(op, "to_dock_id")),
                     group_idx: u(op, "to_group_idx"),
                 },
+                op.get("to_index").and_then(serde_json::Value::as_u64).map(|i| i as usize),
             );
         }
         "detach_group" => {
@@ -574,6 +593,48 @@ mod tests {
 
     fn edges(l: &WorkspaceLayout) -> Vec<DockEdge> {
         l.anchored.iter().map(|(e, _)| *e).collect()
+    }
+
+    /// Row 130 (WORKSPACE.md "Moving a Panel to Another Group"): a tab-bar
+    /// slot counts gaps BEFORE the dragged panel is removed, and
+    /// `reorder_panel`'s `to` is an index AFTER it is removed. So a forward
+    /// slot drops by one, a slot at or before the panel is unchanged, and a
+    /// drop on either side of the panel itself is a no-op. Measured on the
+    /// web before the fix: `[a,b,c]`, `a` onto `b`'s right half, gave
+    /// `[b,c,a]` (one past the caret).
+    #[test]
+    fn a_drop_slot_maps_to_the_reorder_index() {
+        assert_eq!(reorder_to_for_drop_slot(0, 2), 1, "forward: one past b");
+        assert_eq!(reorder_to_for_drop_slot(0, 3), 2, "forward to the end");
+        assert_eq!(reorder_to_for_drop_slot(2, 0), 0, "backward is unchanged");
+        assert_eq!(reorder_to_for_drop_slot(2, 1), 1, "backward is unchanged");
+        assert_eq!(reorder_to_for_drop_slot(1, 1), 1, "its own left half");
+        assert_eq!(reorder_to_for_drop_slot(1, 2), 1, "its own right half");
+    }
+
+    /// The panel lands where the caret was drawn, end to end through the op.
+    #[test]
+    fn a_same_group_drop_lands_at_the_caret() {
+        // Three tabs, as the web probe built them: the default group 0 is
+        // [Color, Swatches], so the next group's first panel is moved to its end.
+        let three = || {
+            let mut l = WorkspaceLayout::default_layout();
+            let did = l.anchored[0].1.id;
+            layout_apply(&mut l, &op_move_panel_to_group(
+                PanelAddr { group: GroupAddr { dock_id: did, group_idx: 1 }, panel_idx: 0 },
+                GroupAddr { dock_id: did, group_idx: 0 }));
+            l
+        };
+        let mut l = three();
+        let g = GroupAddr { dock_id: l.anchored[0].1.id, group_idx: 0 };
+        let before = l.anchored[0].1.groups[0].panels.clone();
+        assert_eq!(before.len(), 3, "the fixture has three tabs");
+        layout_apply(&mut l, &op_reorder_panel(g, 0, reorder_to_for_drop_slot(0, 2)));
+        let after = l.anchored[0].1.groups[0].panels.clone();
+        assert_eq!(after, vec![before[1], before[0], before[2]]);
+        let mut l2 = three();
+        layout_apply(&mut l2, &op_reorder_panel(g, 0, reorder_to_for_drop_slot(0, 1)));
+        assert_eq!(l2.anchored[0].1.groups[0].panels, before, "its own right half is a no-op");
     }
 
     /// The Window menu's Toolbar item dispatches `op_toggle_pane`: once hides

@@ -513,7 +513,7 @@ public struct WorkspaceLayout: Codable {
         let group = srcDock.groups.remove(at: from.groupIdx)
         setDockGroups(from.dockId, srcDock.groups)
         let id = nextDockId()
-        floating.append(FloatingDock(dock: Dock(id: id, groups: [group], width: defaultFloatingWidth), x: x, y: y))
+        floating.append(FloatingDock(dock: Dock(id: id, groups: [group], width: defaultFloatingWidth), x: x, y: WorkspaceLayout.floatingTop(y)))
         zOrder.append(id)
         cleanup(from.dockId)
         bump()
@@ -536,7 +536,11 @@ public struct WorkspaceLayout: Codable {
 
     // MARK: - Move Panel Between Groups
 
-    public mutating func movePanelToGroup(_ from: PanelAddr, to: GroupAddr) {
+    /// Move a panel into another group (WORKSPACE.md "Moving a Panel to
+    /// Another Group"): inserted at `index` among the target's panels, an index
+    /// past the end appends, and `nil` appends. Rust's twin is
+    /// `move_panel_to_group_at`.
+    public mutating func movePanelToGroup(_ from: PanelAddr, to: GroupAddr, at index: Int? = nil) {
         guard from.group != to else { return }
         guard var srcDock = dock(from.group.dockId),
               from.group.groupIdx < srcDock.groups.count,
@@ -550,8 +554,9 @@ public struct WorkspaceLayout: Codable {
             setDockGroups(from.group.dockId, srcDock.groups)
             return
         }
-        dstDock.groups[to.groupIdx].panels.append(panel)
-        dstDock.groups[to.groupIdx].active = dstDock.groups[to.groupIdx].panels.count - 1
+        let at = min(index ?? Int.max, dstDock.groups[to.groupIdx].panels.count)
+        dstDock.groups[to.groupIdx].panels.insert(panel, at: at)
+        dstDock.groups[to.groupIdx].active = at
         setDockGroups(to.dockId, dstDock.groups)
         cleanup(from.group.dockId)
         bump()
@@ -588,7 +593,7 @@ public struct WorkspaceLayout: Codable {
         let panel = srcDock.groups[from.group.groupIdx].panels.remove(at: from.panelIdx)
         setDockGroups(from.group.dockId, srcDock.groups)
         let id = nextDockId()
-        floating.append(FloatingDock(dock: Dock(id: id, groups: [PanelGroup(panels: [panel])], width: defaultFloatingWidth), x: x, y: y))
+        floating.append(FloatingDock(dock: Dock(id: id, groups: [PanelGroup(panels: [panel])], width: defaultFloatingWidth), x: x, y: WorkspaceLayout.floatingTop(y)))
         zOrder.append(id)
         cleanup(from.group.dockId)
         bump()
@@ -597,10 +602,17 @@ public struct WorkspaceLayout: Codable {
 
     // MARK: - Floating Position
 
+    /// A floating dock's top in the pane area's frame is never above the area
+    /// (WORKSPACE.md "Floating dock positions"): `y` is floored at 0, the same
+    /// floor as `clampFloatingDocks`, so the title bar that moves the dock
+    /// stays inside the area. `x` is not floored; the clamp's own bound on it
+    /// lets a dock hang off the left. Rust's twin is `floating_top`.
+    static func floatingTop(_ y: Double) -> Double { max(0, y) }
+
     public mutating func setFloatingPosition(_ id: DockId, x: Double, y: Double) {
         if let i = floating.firstIndex(where: { $0.dock.id == id }) {
             floating[i].x = x
-            floating[i].y = y
+            floating[i].y = WorkspaceLayout.floatingTop(y)
         }
         bump()
     }

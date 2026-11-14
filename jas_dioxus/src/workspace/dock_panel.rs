@@ -940,6 +940,11 @@ pub(crate) struct DragState {
     pub was_dropped: Signal<bool>,
     pub last_drag_pos: Signal<(f64, f64)>,
     pub title_drag: Signal<Option<(DockId, f64, f64)>>,
+    /// Bumped by `layout_act`, which a title drag moves a floating dock
+    /// through and which does NOT bump `revision` (the 04-15 split for drag
+    /// performance). `FloatingDocksView` reads it, or a dragged floating dock
+    /// stays put until something else re-renders it (row 118, measured 11-13).
+    pub layout_revision: Signal<u64>,
 }
 
 /// The evaluation context a panel BODY renders with, and so the one its click
@@ -1107,7 +1112,6 @@ pub(crate) fn build_dock_groups(
     active_doc_view: &serde_json::Value,
 ) -> Vec<Result<VNode, RenderError>> {
     let did = dock_id;
-    let group_count = groups.len();
     // peek() reads drag_source / drop_target_sig without subscribing
     // the dock_panel render to them. Subscribing causes a full
     // dock_panel re-render mid-drag (when ondragstart writes the
@@ -1156,7 +1160,7 @@ pub(crate) fn build_dock_groups(
                 nodes.push(rsx! {
                     div {
                         key: "tab-caret-{gi}-{pi}",
-                        style: "width:3px; align-self:stretch; background:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
+                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
                     }
                 });
             }
@@ -1238,7 +1242,7 @@ pub(crate) fn build_dock_groups(
                 nodes.push(rsx! {
                     div {
                         key: "tab-caret-{gi}-end",
-                        style: "width:3px; align-self:stretch; background:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
+                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
                     }
                 });
             }
@@ -1257,37 +1261,18 @@ pub(crate) fn build_dock_groups(
         // Pre-compute active panel info for hamburger menu button
         let active_panel_info = group.active_panel().map(|kind| (kind, group.active));
 
-        // Drop indicator logic
-        let show_drop_before = cur_drag.is_some()
-            && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi });
-        let drop_indicator_style = if show_drop_before {
-            "height:3px; background:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
-        } else {
-            "height:0px; margin:0 4px; transition:height 0.1s ease;"
-        };
-        let show_drop_after = gi == group_count - 1
-            && cur_drag.is_some()
-            && cur_drop == Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_count });
-        let drop_after_style = if show_drop_after {
-            "height:3px; background:{THEME_ACCENT}; border-radius:1px; margin:1px 4px; transition:height 0.1s ease;"
-        } else {
-            "height:0px; margin:0 4px; transition:height 0.1s ease;"
-        };
         // Highlight tab bar when it's a TabBar drop target
         let tab_bar_drop = cur_drag.is_some()
             && matches!(cur_drop, Some(DropTarget::TabBar { group, .. }) if group == GroupAddr { dock_id: did, group_idx: gi });
         let tab_bar_border = if tab_bar_drop { format!("2px solid {THEME_ACCENT}") } else { format!("1px solid {THEME_BORDER}") };
 
-        let is_dragged_group = matches!(cur_drag,
-            Some(DragPayload::Group(addr)) if addr.dock_id == did && addr.group_idx == gi);
-        let opacity = if is_dragged_group { "0.4" } else { "1.0" };
         let group_dom_id = crate::workspace::test_hook::dock_group_dom_id(did.0, gi);
 
         rsx! {
             div {
                 key: "dock-group-{did:?}-{gi}",
                 id: "{group_dom_id}",
-                style: "border-bottom:1px solid {THEME_BORDER}; opacity:{opacity};",
+                style: "border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:{THEME_BORDER};",
                 ondragover: move |evt: Event<DragData>| {
                     evt.prevent_default();
                     let coords = evt.data().page_coordinates();
@@ -1323,15 +1308,19 @@ pub(crate) fn build_dock_groups(
                                 }
                                 (DragPayload::Panel(from), DropTarget::TabBar { group: to_group, index: to_idx }) => {
                                     if from.group == to_group {
-                                        // Same group: reorder
+                                        // Same group: reorder. The slot is converted to the
+                                        // post-removal index, so the panel lands at the caret (row 130).
+                                        let to = crate::workspace::layout_apply::reorder_to_for_drop_slot(from.panel_idx, to_idx);
                                         crate::workspace::layout_apply::layout_apply(
                                             &mut st.workspace_layout,
-                                            &crate::workspace::layout_apply::op_reorder_panel(to_group, from.panel_idx, to_idx),
+                                            &crate::workspace::layout_apply::op_reorder_panel(to_group, from.panel_idx, to),
                                         );
                                     } else {
                                         crate::workspace::layout_apply::layout_apply(
                                             &mut st.workspace_layout,
-                                            &crate::workspace::layout_apply::op_move_panel_to_group(from, to_group),
+                                            // The hovered position (row 128): the panel lands where
+                                            // the overlay's caret was drawn.
+                                            &crate::workspace::layout_apply::op_move_panel_to_group_at(from, to_group, to_idx),
                                         );
                                     }
                                 }
@@ -1343,12 +1332,11 @@ pub(crate) fn build_dock_groups(
                     drop_target_sig.set(None);
                 },
 
-                div { style: "{drop_indicator_style}" }
 
                 // Tab bar with grip handle
                 {let panel_count = group.panels.len();
                 rsx! { div {
-                    style: "display:flex; background:{THEME_BG_DARK}; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
+                    style: "display:flex; background-color:{THEME_BG_DARK}; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
                     ondragover: move |evt: Event<DragData>| {
                         evt.prevent_default();
                         evt.stop_propagation();
@@ -1457,7 +1445,7 @@ pub(crate) fn build_dock_groups(
                             rsx! {
                                 div {
                                     id: "{content_id}",
-                                    style: "background:{THEME_BG};",
+                                    style: "background-color:{THEME_BG};",
                                     crate::interpreter::renderer::MemoYamlElement {
                                         el: content,
                                         ctx: eval_ctx,
@@ -1475,7 +1463,6 @@ pub(crate) fn build_dock_groups(
                     }
                 }
 
-                div { style: "{drop_after_style}" }
             }
         }
     }).collect()
@@ -1532,7 +1519,7 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
                     rsx! {
                         div {
                             key: "dock-icon-{gi}-{pi}",
-                            style: "width:28px; height:28px; margin:2px auto; background:{THEME_BG_TAB}; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:{THEME_TEXT};",
+                            style: "width:28px; height:28px; margin:2px auto; background-color:{THEME_BG_TAB}; border-radius:3px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; font-weight:bold; color:{THEME_TEXT};",
                             title: "{label}",
                             onclick: move |_| {
                                 (act.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1597,10 +1584,172 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
 }
 
 // ---------------------------------------------------------------------------
+// DockDropOverlay — the dock's drop feedback, drawn OUTSIDE the dock tree
+// ---------------------------------------------------------------------------
+
+/// A drop-feedback rectangle in the pane area's frame: `(x, y, w, h)`.
+pub(crate) type FeedbackRect = (f64, f64, f64, f64);
+
+/// Where a group-slot bar goes (STATUS-jas row 124). `rect_of(g)` is group
+/// `g`'s rectangle in the dock, `None` past its last group. A slot at an
+/// existing group draws a 3px bar on that group's TOP edge; the slot past the
+/// end draws it on the last group's BOTTOM edge; a dock with no groups draws
+/// nothing.
+pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_idx: usize) -> Option<FeedbackRect> {
+    if let Some((x, y, w, _)) = rect_of(group_idx) {
+        return Some((x, y, w, 3.0));
+    }
+    let prev = group_idx.checked_sub(1)?;
+    let (x, y, w, h) = rect_of(prev)?;
+    Some((x, y + h - 3.0, w, 3.0))
+}
+
+/// Where a tab-bar caret goes (row 127): `rect_of(i)` is tab `i`'s rectangle,
+/// `None` past the last tab. An index at an existing tab draws a 3px caret on
+/// that tab's LEFT edge; the index past the end draws it on the last tab's
+/// RIGHT edge; a group with no tabs draws nothing.
+pub(crate) fn tab_caret(rect_of: impl Fn(usize) -> Option<FeedbackRect>, index: usize) -> Option<FeedbackRect> {
+    if let Some((x, y, _, h)) = rect_of(index) {
+        return Some((x, y, 3.0, h));
+    }
+    let prev = index.checked_sub(1)?;
+    let (x, y, w, h) = rect_of(prev)?;
+    Some((x + w - 3.0, y, 3.0, h))
+}
+
+/// The dock's drop feedback during a drag (row 124; design note
+/// `2026-11-13-jas-DESIGN-row124-dock-drop-overlay.md` in the seat record).
+///
+/// The dock tree reads the drag signals with `peek()` and MUST keep doing so:
+/// a subscribed dock re-render mid-drag destroys the drag's source element and
+/// the drag dies (`build_dock_groups`). This overlay is a SIBLING inside the
+/// pane area, so it is the one reader that subscribes; its re-render touches
+/// only itself. It draws the group-slot bar, the tab-bar caret (row 127) and a
+/// cover over the dragged group, reading the rectangles from the DOM at render
+/// time.
+#[component]
+pub(crate) fn DockDropOverlay() -> Element {
+    let ds = use_context::<DragState>();
+    #[allow(unused_variables)] // read only on wasm, for the tab-bar caret's panels
+    let app = use_context::<Rc<RefCell<AppState>>>();
+    let source = (ds.drag_source)();
+    let target = (ds.drop_target)();
+    // Filled only on wasm (the DOM read); native builds render none.
+    #[allow(unused_mut)]
+    let mut bars: Vec<FeedbackRect> = Vec::new();
+    #[allow(unused_mut)]
+    let mut covers: Vec<FeedbackRect> = Vec::new();
+    #[cfg(target_arch = "wasm32")]
+    if source.is_some() {
+        let doc = web_sys::window().and_then(|w| w.document());
+        let origin = doc.as_ref()
+            .and_then(|d| d.get_element_by_id("jas-pane-area"))
+            .map(|a| { let r = a.get_bounding_client_rect(); (r.left(), r.top()) })
+            .unwrap_or((0.0, 0.0));
+        let rect = |dock: usize, g: usize| -> Option<FeedbackRect> {
+            let el = doc.as_ref()?.get_element_by_id(&crate::workspace::test_hook::dock_group_dom_id(dock, g))?;
+            let r = el.get_bounding_client_rect();
+            Some((r.left() - origin.0, r.top() - origin.1, r.width(), r.height()))
+        };
+        if let Some(DropTarget::GroupSlot { dock_id, group_idx }) = target {
+            if let Some(b) = slot_bar(|g| rect(dock_id.0, g), group_idx) {
+                bars.push(b);
+            }
+        }
+        if let Some(DropTarget::TabBar { group, index }) = target {
+            // The tab at `index` in that group, by the dock's own tab id rule.
+            let kinds: Vec<crate::workspace::workspace::PanelKind> = app.borrow().workspace_layout
+                .dock(group.dock_id)
+                .and_then(|d| d.groups.get(group.group_idx))
+                .map(|g| g.panels.clone())
+                .unwrap_or_default();
+            let tab = |i: usize| -> Option<FeedbackRect> {
+                let kind = *kinds.get(i)?;
+                let id = crate::workspace::test_hook::tab_dom_id(panel_kind_to_content_id(kind));
+                let r = doc.as_ref()?.get_element_by_id(&id)?.get_bounding_client_rect();
+                Some((r.left() - origin.0, r.top() - origin.1, r.width(), r.height()))
+            };
+            // Every panel drop lands at `index` (a cross-group move passes it
+            // as `to_index` since row 128), so the caret is drawn there.
+            if let Some(c) = tab_caret(tab, index) {
+                bars.push(c);
+            }
+        }
+        if let Some(DragPayload::Group(addr)) = source {
+            if let Some(c) = rect(addr.dock_id.0, addr.group_idx) {
+                covers.push(c);
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    { let _ = (&source, &target); }
+    rsx! {
+        for (i, (x, y, w, h)) in bars.into_iter().enumerate() {
+            div {
+                key: "drop-bar-{i}",
+                style: "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:{THEME_ACCENT}; border-radius:1px; pointer-events:none; z-index:890;",
+            }
+        }
+        for (i, (x, y, w, h)) in covers.into_iter().enumerate() {
+            div {
+                key: "drag-cover-{i}",
+                style: "position:absolute; left:{x}px; top:{y}px; width:{w}px; height:{h}px; background-color:rgba(0,0,0,0.45); pointer-events:none; z-index:889;",
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dock_drop_overlay_tests {
+    use super::slot_bar;
+
+    fn rects(g: usize) -> Option<(f64, f64, f64, f64)> {
+        // three groups stacked at x=10, width 200: heights 100, 50, 80
+        [(10.0, 0.0, 200.0, 100.0), (10.0, 100.0, 200.0, 50.0), (10.0, 150.0, 200.0, 80.0)].get(g).copied()
+    }
+
+    #[test]
+    fn a_slot_at_a_group_is_a_bar_on_its_top_edge() {
+        assert_eq!(slot_bar(rects, 0), Some((10.0, 0.0, 200.0, 3.0)));
+        assert_eq!(slot_bar(rects, 2), Some((10.0, 150.0, 200.0, 3.0)));
+    }
+
+    #[test]
+    fn the_slot_past_the_end_is_a_bar_on_the_last_groups_bottom_edge() {
+        assert_eq!(slot_bar(rects, 3), Some((10.0, 227.0, 200.0, 3.0)));
+    }
+
+    fn tabs(i: usize) -> Option<(f64, f64, f64, f64)> {
+        // two tabs in a row at y=20, height 25: widths 55 and 74
+        [(100.0, 20.0, 55.0, 25.0), (155.0, 20.0, 74.0, 25.0)].get(i).copied()
+    }
+
+    #[test]
+    fn a_tab_caret_is_on_the_tabs_left_edge_and_past_the_end_on_the_last_tabs_right() {
+        use super::tab_caret;
+        assert_eq!(tab_caret(tabs, 0), Some((100.0, 20.0, 3.0, 25.0)));
+        assert_eq!(tab_caret(tabs, 1), Some((155.0, 20.0, 3.0, 25.0)));
+        assert_eq!(tab_caret(tabs, 2), Some((226.0, 20.0, 3.0, 25.0)));
+        assert_eq!(tab_caret(|_| None, 0), None);
+        assert_eq!(tab_caret(tabs, 4), None);
+    }
+
+    #[test]
+    fn a_dock_with_no_groups_and_a_slot_far_past_the_end_draw_nothing() {
+        assert_eq!(slot_bar(|_| None, 0), None);
+        assert_eq!(slot_bar(rects, 5), None);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FloatingDocksView — all floating dock overlays
 // ---------------------------------------------------------------------------
 
-/// Renders every floating dock as a position:fixed overlay.
+/// Renders every floating dock as a position:absolute overlay in the pane
+/// area, whose frame its `x`, `y` are in (WORKSPACE.md "Floating dock
+/// positions", row 118). Until 11-13 it was position:fixed, in the WINDOW's
+/// frame, while `clamp_floating_docks` was handed the area's size, so a drop
+/// with the pointer over the menubar left the dock covering the menu titles.
 #[component]
 pub(crate) fn FloatingDocksView() -> Element {
     let act = use_context::<Act>();
@@ -1611,6 +1760,8 @@ pub(crate) fn FloatingDocksView() -> Element {
     // Subscribe to revision so we re-render when state changes.
     let revision = use_context::<Signal<u64>>();
     let _ = revision();
+    // A title drag moves the dock through `layout_act`, which bumps only this.
+    let _ = (ds.layout_revision)();
     let mut title_drag = ds.title_drag;
 
     let (focused_panel, floating_snapshot, live_panel_overrides, panel_state_table,
@@ -1656,7 +1807,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         rsx! {
             div {
                 key: "floating-{fid:?}",
-                style: "position:fixed; left:{fx}px; top:{fy}px; width:{fw}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
+                style: "position:absolute; left:{fx}px; top:{fy}px; width:{fw}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:4px 4px 12px rgba(0,0,0,0.4); border-radius:4px; z-index:{z}; display:flex; flex-direction:column; overflow:hidden;",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
                     (act_front.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1666,9 +1817,15 @@ pub(crate) fn FloatingDocksView() -> Element {
 
                 // Title bar: drag to reposition, double-click to redock
                 div {
-                    style: "height:20px; background:{THEME_BG_DARK}; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:{THEME_TEXT_DIM}; user-select:none;",
+                    style: "height:20px; background-color:{THEME_BG_DARK}; cursor:grab; display:flex; align-items:center; padding:0 6px; font-size:10px; color:{THEME_TEXT_DIM}; user-select:none;",
                     onmousedown: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
+                        // No native drag from this press (row 118, measured 11-13): the
+                        // dock now redraws under the pointer during a title drag, and
+                        // Chrome resolves a drag's source at the PRESS point, where a
+                        // fast first move can have put this dock's tab. That started a
+                        // tab drag, and its dragend detached the panel into a new dock.
+                        evt.prevent_default();
                         let coords = evt.data().page_coordinates();
                         title_drag.set(Some((fid, coords.x - fx, coords.y - fy)));
                     },

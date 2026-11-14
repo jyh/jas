@@ -286,6 +286,15 @@ jobs:
       # MainWindow.xaml, the self-test REDDED and named this missing step. It
       # fired on its first real occasion, in the PR that caused it.
       - run: python scripts/check_shell_no_interpreter.py
+      # No inline style in the web app writes a var() colour inside a
+      # shorthand: dioxus's style update removes it (STATUS-jas row 120; every
+      # pane drew with no background or border after its first update).
+      - run: python scripts/check_inline_var_shorthands.py --self-test
+      - run: python scripts/check_inline_var_shorthands.py
+      # A conditional style fragment states its off value: dioxus restores a
+      # dropped one, so an empty branch sticks (STATUS-jas row 121).
+      - run: python scripts/check_style_fragment_off_values.py --self-test
+      - run: python scripts/check_style_fragment_off_values.py
       # No WinUI C# member carries two `/// <summary>` blocks: a member
       # inserted between a doc comment and its member leaves the summary on the
       # wrong one, compiles, and warns nowhere (#452, #465; flask's census of
@@ -1108,6 +1117,13 @@ jobs:
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
+          python scripts/check_inline_var_shorthands.py --self-test
+          python scripts/check_inline_var_shorthands.py
+          # Self-test only here: the live arm reads the built .wasm, which only the
+          # ubuntu web-build job produces (web-build.yml, row 122).
+          python scripts/check_wasm_theme_placeholders.py --self-test
+          python scripts/check_style_fragment_off_values.py --self-test
+          python scripts/check_style_fragment_off_values.py
           python scripts/check_cs_doc_summaries.py --self-test
           python scripts/check_cs_doc_summaries.py
           python scripts/check_op_vocabulary.py --self-test

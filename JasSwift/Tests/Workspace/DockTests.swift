@@ -998,6 +998,10 @@ private func testLayout() -> WorkspaceLayout {
     var l = testLayout()
     let id = rightDockId(l)
     let fid = l.detachGroup(ga(id.value, 0), x: -500, y: -100)!
+    // The detach floors y itself (`floatingTop`), so put a stored y above the
+    // area back by hand: a layout saved before that floor can still load one,
+    // and the clamp's own y floor is what this witnesses.
+    l.floating[l.floating.firstIndex(where: { $0.dock.id == fid })!].y = -100
     l.clampFloatingDocks(viewportW: 1000, viewportH: 800)
     let fd = l.floatingDock(fid)!
     #expect(fd.x >= -fd.dock.width + 50)

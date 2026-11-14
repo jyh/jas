@@ -324,7 +324,7 @@ pub(crate) fn ColorPanelView() -> Element {
                 }
                 // Separator
                 div {
-                    style: "width:1px; height:16px; background:{THEME_BORDER}; flex-shrink:0; margin:0 2px;",
+                    style: "width:1px; height:16px; background-color:{THEME_BORDER}; flex-shrink:0; margin:0 2px;",
                 }
                 // Recent color slots
                 for i in 0..10 {
@@ -351,7 +351,7 @@ pub(crate) fn ColorPanelView() -> Element {
                         } else {
                             rsx! {
                                 div {
-                                    style: "width:16px; height:16px; border:1px solid {THEME_BORDER}; background:transparent; flex-shrink:0; box-sizing:border-box;",
+                                    style: "width:16px; height:16px; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; background:transparent; flex-shrink:0; box-sizing:border-box;",
                                 }
                             }
                         }
@@ -487,7 +487,7 @@ pub(crate) fn ColorPanelView() -> Element {
                             value: "{hex_val}",
                             disabled: disabled,
                             maxlength: "6",
-                            style: "width:52px; background:{THEME_BG_DARK}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; font-size:10px; padding:2px 4px; font-family:monospace;",
+                            style: "width:52px; background-color:{THEME_BG_DARK}; color:{THEME_TEXT}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; font-size:10px; padding:2px 4px; font-family:monospace;",
                             onkeydown: move |evt: Event<KeyboardData>| {
                                 if evt.data().key() == Key::Enter {
                                     let raw = panel_state().hex.clone();
@@ -521,7 +521,7 @@ pub(crate) fn ColorPanelView() -> Element {
 
             // ── Color bar ──
             div {
-                style: "position:relative; width:100%; height:64px; cursor:crosshair; border:1px solid {THEME_BORDER}; border-radius:1px; opacity:{bar_opacity}; overflow:hidden;",
+                style: "position:relative; width:100%; height:64px; cursor:crosshair; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; border-radius:1px; opacity:{bar_opacity}; overflow:hidden;",
                 // Pixel-accurate color bar image
                 img {
                     src: "{color_bar_data_uri}",
@@ -649,7 +649,7 @@ fn slider_row(
                 min: "{min_str}",
                 max: "{max_str}",
                 disabled: disabled,
-                style: "width:36px; background:{THEME_BG_DARK}; color:{THEME_TEXT}; border:1px solid {THEME_BORDER}; font-size:10px; text-align:right; padding:1px 2px;",
+                style: "width:36px; background-color:{THEME_BG_DARK}; color:{THEME_TEXT}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; font-size:10px; text-align:right; padding:1px 2px;",
                 onchange: move |evt: Event<FormData>| {
                     if let Ok(v) = evt.value().parse::<f64>() {
                         let v = v.clamp(min, max);

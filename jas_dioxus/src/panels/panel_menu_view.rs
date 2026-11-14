@@ -78,10 +78,12 @@ pub fn PanelMenuOverlay() -> Element {
                 #[cfg(not(target_arch = "wasm32"))]
                 let viewport_w: f64 = 1280.0;
                 let flip_left = x + menu_width + 200.0 > viewport_w;
+                // Each side states BOTH offsets: a property the new style drops is
+                // RESTORED by dioxus's style update (rows 121-122).
                 let submenu_pos = if flip_left {
-                    "position:absolute; right:100%; top:0;"
+                    "position:absolute; left:auto; right:100%; top:0;"
                 } else {
-                    "position:absolute; left:100%; top:0;"
+                    "position:absolute; right:auto; left:100%; top:0;"
                 };
                 // Already-open ids from panel.open_libraries
                 let open_ids: std::collections::HashSet<String> = st.swatches_panel.open_libraries
@@ -128,7 +130,7 @@ pub fn PanelMenuOverlay() -> Element {
                         }
                         if is_open {
                             div {
-                                style: "{submenu_pos} background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
+                                style: "{submenu_pos} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
                                 onmouseenter: move |_| { submenu_open_for.set(Some(cmd)); },
                                 onmouseleave: move |_| { submenu_open_for.set(None); },
                                 onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
@@ -248,7 +250,7 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Separator => {
                 rsx! {
                     div {
-                        style: "height:1px; background:{THEME_BORDER}; margin:4px 8px;",
+                        style: "height:1px; background-color:{THEME_BORDER}; margin:4px 8px;",
                     }
                 }
             }
@@ -267,7 +269,7 @@ pub fn PanelMenuOverlay() -> Element {
         }
         // Menu dropdown
         div {
-            style: "position:fixed; left:{x}px; top:{y}px; background:{THEME_BG}; border:1px solid {THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
+            style: "position:fixed; left:{x}px; top:{y}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
