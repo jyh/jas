@@ -106,3 +106,52 @@ private func threeTabLayout() -> (WorkspaceLayout, GroupAddr) {
     let after = layout.dock(dock.id)?.groups[1].panels ?? []
     #expect(after == [before[0], moved] + before.dropFirst())
 }
+
+// Row 132 (WORKSPACE.md "Moving a Panel to Another Group"): a tab dropped on a
+// group's BODY makes a new group: above the group when the drop is in the upper
+// half of the GROUP's own height, below it from the midpoint on. A drop in the
+// tab bar is a tab drop (the slot rule above).
+
+
+@Test func aDropInTheTabBarIsATabDrop() {
+    #expect(dockGroupDropTarget(at: CGPoint(x: 85, y: 12), tabFrames: frames, barHeight: 25,
+                                groupHeight: 224, groupIdx: 3) == .tab(slot: 1))
+    #expect(dockGroupDropTarget(at: CGPoint(x: 230, y: 12), tabFrames: frames, barHeight: 25,
+                                groupHeight: 224, groupIdx: 3) == .tab(slot: 3))
+}
+
+@Test func aDropOnTheBodysUpperHalfMakesAGroupAbove() {
+    // The web probe's case: just under the bar, and the body's middle (above the
+    // group's own midpoint 112 for a 224-high group).
+    #expect(dockGroupDropTarget(at: CGPoint(x: 120, y: 28), tabFrames: frames, barHeight: 25,
+                                groupHeight: 224, groupIdx: 3) == .newGroup(at: 3))
+    #expect(dockGroupDropTarget(at: CGPoint(x: 120, y: 111.9), tabFrames: frames, barHeight: 25,
+                                groupHeight: 224, groupIdx: 3) == .newGroup(at: 3))
+}
+
+@Test func aDropOnTheBodysLowerHalfMakesAGroupBelow() {
+    #expect(dockGroupDropTarget(at: CGPoint(x: 120, y: 112), tabFrames: frames, barHeight: 25,
+                                groupHeight: 224, groupIdx: 3) == .newGroup(at: 4))
+    #expect(dockGroupDropTarget(at: CGPoint(x: 120, y: 214), tabFrames: frames, barHeight: 25,
+                                groupHeight: 224, groupIdx: 3) == .newGroup(at: 4))
+}
+
+@Test func aCollapsedGroupIsAllTabBar() {
+    // No body: every point in it is in the bar.
+    #expect(dockGroupDropTarget(at: CGPoint(x: 230, y: 20), tabFrames: frames, barHeight: 25,
+                                groupHeight: 25, groupIdx: 0) == .tab(slot: 3))
+}
+
+@Test func aBodyDropOfAPanelInsertsANewGroupThere() {
+    // End to end: Align (group 1, alone in its tab) dropped below group 0 makes
+    // a new group at index 1 holding only it.
+    var layout = WorkspaceLayout.defaultLayout()
+    let did = layout.anchored[0].1.id
+    let before = layout.anchored[0].1.groups.map(\.panels)
+    applyDockGroupDrop(&layout, .panel(PanelAddr(group: GroupAddr(dockId: did, groupIdx: 1), panelIdx: 0)),
+                       target: .newGroup(at: 1), dockId: did, groupIdx: 0)
+    let after = layout.anchored[0].1.groups.map(\.panels)
+    #expect(after[0] == before[0])
+    #expect(after[1] == [before[1][0]])
+    #expect(after[2] == Array(before[1].dropFirst()))
+}
