@@ -305,8 +305,18 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   * `{"panel_menu": P, "action": A, "params": {...}}` picks the one item whose action is `A` and whose declared params
     equal every param the step names. Labels are never used. Zero or two matches, or a disabled item, are refused by
     name. The item runs as a shell's pick does.
-* **Still refused by name there:** `at`, `hold_ms`, the `dialog` and `context_menu` steps, a row `secondary_press`,
-  and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Both runners deliver the row context menu (row 139).**
+  * A row `secondary_press` opens the `context_menu:` declared on the nearest node along the widget's path, with the
+    row as its `node`. It dispatches nothing of its own.
+  * The VERY NEXT step may be `{"context_menu": "<action>", "params": {...}}`. It picks the one item whose action,
+    resolved when the menu opened, is the step's, and whose declared params equal every param the step names.
+  * The item runs through the engine's door: `jas_panel_behavior` event `context_menu` with the item index in Rust,
+    `PanelWidgetEvents.contextMenuItem` in Swift. The door runs it in the row's scope. It refuses a separator, an index
+    past the list, or an item whose `enabled_when` fails. It resolves a template action as a menu label is resolved,
+    and evaluates the params as a behaviour's.
+  * Any other step closes the menu.
+  * ⚠️ Both shells still hand-build the Layers row context menu, so this form drives the yaml's route, not theirs.
+* **Still refused by name there:** `at`, `hold_ms`, the `dialog` step, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
 * **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. Both runners also
   deliver the text and dropdown forms (rows 135 and 136):
   * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,
