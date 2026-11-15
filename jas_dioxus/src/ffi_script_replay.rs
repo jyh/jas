@@ -21,7 +21,7 @@
 
 use crate::ffi::{
     jas_dispatch_action, jas_document_json, jas_engine_free, jas_engine_new, jas_free,
-    jas_last_error_json, jas_panel_behavior, JasBytes, JasEngine, JasStatus,
+    jas_last_error_json, jas_panel_behavior, jas_panel_menu, JasBytes, JasEngine, JasStatus,
 };
 use crate::ffi_pointer::{
     jas_pointer_event, jas_set_tool, KIND_DOUBLE_CLICK, KIND_MOVE, KIND_PRESS, KIND_RELEASE, MOD_ALT, MOD_DRAGGING,
@@ -570,6 +570,32 @@ fn row_chain(content: &Value, widget: &str, row: &[u64], scope: &Value)
     Ok((path, chain))
 }
 
+/// Each item of panel `pid`'s menu as (menu index, canonical item, yaml node)
+/// (design section 8 form 4): the rows `jas_panel_menu` draws for a shell,
+/// separators omitted, as `{action, params, enabled, checked}`, with the
+/// node's declared `params`. `Err` names an unknown panel.
+fn panel_menu_items(e: *mut JasEngine, pid: &str) -> Result<Vec<(u64, Value, Value)>, String> {
+    let Some(rows) = take(unsafe { jas_panel_menu(e, pid.as_ptr(), pid.len()) }) else {
+        return Err(format!("UnknownPanel {pid}"));
+    };
+    let rows: Vec<Value> = serde_json::from_str(&rows).map_err(|x| x.to_string())?;
+    let menu = crate::interpreter::workspace::Workspace::load().map(|ws| ws.panel_menu(pid)).unwrap_or_default();
+    Ok(rows.iter().filter(|r| r["kind"] == "item").map(|r| {
+        let at = r["index"].as_u64().unwrap_or(0);
+        let node = menu.get(at as usize).cloned().unwrap_or(Value::Null);
+        let item = serde_json::json!({"action": r["action"].clone(),
+            "params": node.get("params").cloned().unwrap_or_else(|| serde_json::json!({})),
+            "enabled": r["enabled"].clone(), "checked": r["checked"].clone()});
+        (at, item, node)
+    }).collect())
+}
+
+/// A param value as text, for matching a step's param against a declared one
+/// (a string is itself, any other value its JSON), as Swift's `"\(v)"`.
+fn plain(v: &Value) -> String {
+    v.as_str().map_or_else(|| v.to_string(), str::to_string)
+}
+
 /// A store value in the canonical form `read: panel` emits: path markers as
 /// index arrays, at any depth, and every object's keys sorted. Sorted HERE,
 /// never by trusting serde_json's map: a dependency can switch on its
@@ -693,6 +719,14 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         out.push(json!({"step": i, "read": "panel", "panel": pid,
                                         "value": canonical_panel_value(&Value::Object(state))}));
                     }
+                    "panel_menu" => {
+                        let pid = st["panel"].as_str().unwrap_or("");
+                        match panel_menu_items(e, pid) {
+                            Ok(items) => out.push(json!({"step": i, "read": "panel_menu", "panel": pid,
+                                "value": items.into_iter().map(|(_, item, _)| item).collect::<Vec<_>>()})),
+                            Err(why) => { refuse(&mut out, why); break; }
+                        }
+                    }
                     // Form (e): `read: tree` reads `drawn_rows`, the rows the
                     // tree DRAWS in its visible area, which only a level-2
                     // driver can see.
@@ -774,6 +808,35 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     }
                     None => json!({"key": key, "mods": mods}),
                 }.to_string();
+                let reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
+                if !ran(&mut out, reply, last_error(e)) {
+                    break;
+                }
+            } else if let Some(pid) = st.get("panel_menu").and_then(Value::as_str) {
+                // Design section 8 form 3: the item whose action is the step's
+                // and whose declared params equal every param the step names;
+                // labels are never used. It runs as a shell's pick does
+                // (`jas_dispatch_action({"panel", "menu_index"})`).
+                focus = None;
+                field = None;
+                let items = match panel_menu_items(e, pid) {
+                    Ok(v) => v,
+                    Err(why) => { refuse(&mut out, why); break; }
+                };
+                let want = st["action"].as_str().unwrap_or("");
+                let named = st.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+                let hits: Vec<&(u64, Value, Value)> = items.iter().filter(|(_, item, node)| item["action"] == want
+                    && named.iter().all(|(k, v)| node.get("params").and_then(|p| p.get(k))
+                        .is_some_and(|d| plain(d) == plain(v)))).collect();
+                let &[hit] = hits.as_slice() else {
+                    refuse(&mut out, format!("`{want}` is {} item(s) of {pid}'s menu, not one", hits.len()));
+                    break;
+                };
+                if hit.1["enabled"] != true {
+                    refuse(&mut out, format!("the menu item `{want}` is disabled"));
+                    break;
+                }
+                let req = json!({"panel": pid, "menu_index": hit.0}).to_string();
                 let reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
                 if !ran(&mut out, reply, last_error(e)) {
                     break;
@@ -980,7 +1043,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 }
                 focus = Some(panel.to_string());
             } else {
-                let form = ["dialog", "context_menu", "panel_menu"].into_iter().find(|k| st.get(*k).is_some());
+                let form = ["dialog", "context_menu"].into_iter().find(|k| st.get(*k).is_some());
                 refuse(&mut out, match form {
                     Some(f) => format!("the `{f}` form is not delivered by this runner"),
                     None => format!("{st} is not a step this runner knows"),
@@ -1200,7 +1263,6 @@ fn each_unrunnable_form_is_refused_by_name() {
         (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "event": "click"}), "NotAddressable"),
         (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "at": [0], "event": "click"}), "`at` is not delivered"),
         (serde_json::json!({"context_menu": "x", "params": {}}), "the `context_menu` form is not delivered"),
-        (serde_json::json!({"read": "panel_menu", "panel": LAYERS}), "read: panel_menu is not delivered"),
     ] {
         let out = replay_forms(&layers_script(serde_json::json!([step.clone(), read_layers()]))).unwrap();
         let why = refusal(&out).unwrap_or_default();
@@ -1351,6 +1413,69 @@ fn a_row_drag_the_runner_cannot_deliver_is_refused_by_name() {
     assert!(!declares_an_act(&quiet, "drag_end"));
     assert!(declares_an_act(&serde_json::json!({"behavior": [{"event": "drag_move", "effects": []}]}), "drag_move"),
         "effects count as an act");
+}
+
+// The S3 panel-menu forms (design section 8 forms 3 and 4, row 139): the
+// twins of Swift's `formsReadPanelMenu…`, `formsAPanelMenuStepRuns…` and
+// `formsAPanelMenuStepThatCannot…`.
+
+/// The Layers panel menu's item actions in declared order, from the bundle.
+fn layers_menu_actions() -> Vec<Value> {
+    crate::interpreter::workspace::Workspace::load().unwrap().panel_menu(LAYERS).iter()
+        .filter(|n| n.get("label").is_some()).map(|n| n.get("action").cloned().unwrap_or(Value::Null)).collect()
+}
+
+fn panel_menu_reads(out: &[Value]) -> Vec<Vec<Value>> {
+    out.iter().filter(|r| r["read"] == "panel_menu").map(|r| r["value"].as_array().cloned().unwrap_or_default()).collect()
+}
+
+#[test]
+fn read_panel_menu_reads_the_items_in_order_with_their_state() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let want = layers_menu_actions();
+    assert!(want.len() >= 8 && want.contains(&serde_json::json!("new_group")), "{want:?}");
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"read": "panel_menu", "panel": LAYERS}, click_row(serde_json::json!([0, 1]), &[]),
+        {"read": "panel_menu", "panel": LAYERS},
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    let reads = panel_menu_reads(&out);
+    assert_eq!(reads.len(), 2, "{out:?}");
+    assert_eq!(reads[0].iter().map(|r| r["action"].clone()).collect::<Vec<_>>(), want, "declared order: {reads:?}");
+    for r in &reads[0] {
+        let mut keys: Vec<&String> = r.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["action", "checked", "enabled", "params"], "{r}");
+    }
+    let enabled = |rs: &[Value], a: &str| rs.iter().find(|r| r["action"] == a).map(|r| r["enabled"].clone());
+    assert_eq!(enabled(&reads[0], "new_group"), Some(serde_json::json!(false)), "nothing panel-selected: {reads:?}");
+    assert_eq!(enabled(&reads[1], "new_group"), Some(serde_json::json!(true)), "one row panel-selected: {reads:?}");
+}
+
+#[test]
+fn a_panel_menu_step_runs_the_matched_item() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"read": "document"}, {"panel_menu": LAYERS, "action": "new_layer"}, {"read": "document"},
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    let n: Vec<usize> = doc_reads(&out).iter().map(|d| d["layers"].as_array().map_or(0, Vec::len)).collect();
+    assert!(n.len() == 2 && n[1] == n[0] + 1, "one more layer: {n:?}");
+}
+
+#[test]
+fn a_panel_menu_step_that_cannot_run_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    for (step, needle) in [
+        (serde_json::json!({"panel_menu": LAYERS, "action": "no_such_action"}), "0 item(s)"),
+        (serde_json::json!({"panel_menu": LAYERS, "action": "new_group"}), "disabled"),
+        (serde_json::json!({"panel_menu": LAYERS, "action": "close_panel", "params": {"panel": "nope"}}), "0 item(s)"),
+        (serde_json::json!({"panel_menu": "no_such_panel", "action": "new_layer"}), "UnknownPanel"),
+    ] {
+        let out = replay_forms(&layers_script(serde_json::json!([step.clone(), {"read": "document"}]))).unwrap();
+        assert!(refusal(&out).unwrap_or_default().contains(needle), "{step}: wanted `{needle}`, got {out:?}");
+        assert!(doc_reads(&out).is_empty(), "a refusal ends the replay: {out:?}");
+    }
 }
 
 /// THE M3 DOOR: `JAS_FORMS_DIR=<dir>` replays every `*.json` script there that
