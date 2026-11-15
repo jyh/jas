@@ -673,8 +673,9 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
         // text it holds: (panel, widget, row, text). Re-resolved at each use,
         // because the row's scope (`panel.renaming_element`) moves under it.
         let mut field: Option<(String, String, Option<Vec<u64>>, String)> = None;
-        // The context menu a row `secondary_press` opened: (panel, the path of
-        // the node that declares `context_menu:`, its items, the row's scope).
+        // The context menu a row `secondary_press` opened: (panel, the row
+        // widget's path, the items of the nearest `context_menu:` on it, the
+        // row's scope).
         // Only the very next step can pick from it (design section 8 form 2).
         #[allow(clippy::type_complexity)]
         let mut menu_open: Option<(String, Vec<usize>, Vec<Value>, Value)> = None;
@@ -898,9 +899,11 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         refuse(&mut out, format!("no node on `{widget}`'s path in row {r:?} declares a context_menu"));
                         break;
                     };
-                    let (len, node, row_scope) = &chain[at];
-                    let items = node["context_menu"].as_array().cloned().unwrap_or_default();
-                    menu_open = Some((panel.to_string(), path[..*len].to_vec(), items, row_scope.clone()));
+                    // The items are the holder's; the scope and the path are the
+                    // ROW's (the widget's), so the item runs with the row as `node`.
+                    let items = chain[at].1["context_menu"].as_array().cloned().unwrap_or_default();
+                    let row_scope = chain.last().map(|c| c.2.clone()).unwrap_or(Value::Null);
+                    menu_open = Some((panel.to_string(), path.clone(), items, row_scope));
                     field = None;
                     focus = Some(panel.to_string());
                     continue;

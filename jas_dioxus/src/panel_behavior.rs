@@ -751,6 +751,7 @@ fn run_widget_behavior_in(
     // W2b-16: an event addressed by `path` resolves the node AND the row scope
     // it runs in; one addressed by id finds the first node with that id, which
     // under a `foreach` names a template, not a row.
+    let panel_scope: &Value = scope;
     let resolved: (Value, Value);
     let (node, scope, ev): (&Value, &Value, std::borrow::Cow<UserEvent>) = match &ev.path {
         Some(path) => {
@@ -777,14 +778,22 @@ fn run_widget_behavior_in(
     }
 
     // Design section 8 form 2 (row 139): `event: "context_menu"`, with `value`
-    // an item index, runs that item of THIS node's `context_menu:` in the
-    // node's scope (a row's, when addressed by `path`). A separator, an index
-    // past the list, or an item whose `enabled_when` fails is refused by name.
-    // The action is resolved as a template (`{{…}}`, as a menu label is), and
-    // the item's declared params ride in a `dispatch` effect, which the effects
-    // runner evaluates exactly as a behaviour's.
+    // an item index, runs that item of the `context_menu:` declared on the
+    // NEAREST node along the addressed path (Layers declares it on `lp_tree`,
+    // the foreach, not on the row), in the scope at the END of the path, so
+    // `node` is the row. A separator, an index past the list, or an item whose
+    // `enabled_when` fails is refused by name. The action is resolved as a
+    // template (`{{…}}`, as a menu label is), and the item's declared params
+    // ride in a `dispatch` effect, which the effects runner evaluates exactly
+    // as a behaviour's.
     if ev.event == "context_menu" {
-        let items = node.get("context_menu").and_then(Value::as_array)
+        let holder = match &ev.path {
+            Some(p) => (0..=p.len()).rev().find_map(|k| resolve_path(content, &p[..k], panel_scope).ok()
+                .map(|r| r.0).filter(|n| n.get("context_menu").is_some())),
+            None => Some(node.clone()).filter(|n| n.get("context_menu").is_some()),
+        };
+        let holder = holder.ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
+        let items = holder.get("context_menu").and_then(Value::as_array)
             .ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
         let at = ev.value.as_ref().and_then(Value::as_u64)
             .ok_or_else(|| Refusal::new("MissingValue", ev.widget.clone()))?;
