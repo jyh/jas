@@ -7752,6 +7752,17 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
     return .success((target.0, chain.last!.1, bubbled))
 }
 
+/// Why a row drag's `drag_move` / `drag_end` on `node` cannot be delivered by
+/// this runner, or nil: an entry that declares an action or effects would read
+/// `event.drop_*` / `event.hover_ms`, which ``PanelWidgetEvents/behavior``
+/// cannot pass (the fork's `drag_end` → `move_elements`).
+private func formsDragEntryRefusal(_ node: [String: Any], event: String) -> String? {
+    let acting = ((node["behavior"] as? [Any]) ?? []).compactMap { $0 as? [String: Any] }
+        .filter { ($0["event"] as? String) == event && ($0["action"] != nil || $0["effects"] != nil) }
+    return acting.isEmpty ? nil
+        : "`\(event)` declares an action that reads the drop's event fields, which this runner cannot pass yet"
+}
+
 private struct FormsRefusal: Error { let why: String; init(_ w: String) { why = w } }
 
 /// A panel's declared `state:` keys from the store, canonical: paths as index
@@ -7920,17 +7931,43 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             }
             if flag("meta") { return refuse("meta on a panel step is refused (TESTING.md section 6)") }
             if st["at"] != nil { return refuse("`at` is not delivered by this runner") }
-            // F1 (row 135): refused by its own name. Run as the pressed row's
-            // own events, the drop's `to` would be dropped and read as measured.
-            if event == "drag" || st["to"] != nil || st["hover_ms"] != nil {
-                return refuse("a row drag is not delivered by this runner")
-            }
             let row: [Int]?
             if let r = st["row"] {
                 guard let p = formsPath(r) else { return refuse("row \(r) is not a path") }
                 row = p
             } else {
                 row = nil
+            }
+            // F1 (row 137, section 6): the row's three declared events,
+            // `drag_start` on the pressed row, `drag_move` and `drag_end` on
+            // the target. A drag event whose entry declares an action is
+            // refused by name: this route cannot pass its `event.drop_*`.
+            if event == "drag" || st["to"] != nil || st["hover_ms"] != nil {
+                guard event == "drag", let to = st["to"] as? [String: Any], let toRow = formsPath(to["row"]) else {
+                    return refuse("a row drag needs `to`: {row, zone}")
+                }
+                guard let zone = to["zone"] as? String, ["before", "into", "after"].contains(zone) else {
+                    return refuse("a row drag's zone is before, into or after")
+                }
+                guard let pressed = row else { return refuse("a row drag names its pressed `row`") }
+                field = nil
+                let ws = WorkspaceData.load()!
+                guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
+                if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+                for (name, at) in [("drag_start", pressed), ("drag_move", toRow), ("drag_end", toRow)] {
+                    let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+                    switch formsRowTarget(panel["content"], widget: widget, event: name, row: at, scope: scope) {
+                    case .failure(let r): return refuse(r.why)
+                    case .success(let t):
+                        if name != "drag_start", let why = formsDragEntryRefusal(t.node, event: name) { return refuse(why) }
+                        if let to = t.bubbledTo { out.append(["step": i, "event": name, "bubbled_to": to]) }
+                        record(PanelWidgetEvents(model: model, panelId: pid, scope: t.scope)
+                            .behavior(t.node, event: name, modifiers: mods))
+                        if stopped { return }
+                    }
+                }
+                focus = pid
+                return
             }
             let kind = WidgetEvent.findWidget(in: WorkspaceData.load()?.panel(pid)?["content"], id: widget)?["type"] as? String
             let textForm = kind == "text_input" && ["input", "blur", "commit"].contains(event)
@@ -8271,14 +8308,48 @@ private func formsEdit(_ event: String, _ value: String?) -> [String: Any] {
     #expect(formsNameAt(plain, [0, 1]) != "Ring", "\(plain)")
 }
 
-/// A row drag is refused by NAME until it is built: a runner that ran the
-/// pressed row's own events and dropped `to` would read as measured.
-@Test func formsARowDragIsRefusedByName() {
+private func formsDrag(_ from: [Int], _ to: [Int], _ zone: String, hover: Int = 0) -> [String: Any] {
+    ["panel": formsLayers, "widget": "lp_name", "row": from, "event": "drag",
+     "to": ["row": to, "zone": zone], "hover_ms": hover]
+}
+
+/// F1 (row 137, TESTING.md section 6): a row drag is the row's three declared
+/// events, `drag_start` on the pressed row, then `drag_move` and `drag_end` on
+/// the target. `drag_start` selects the pressed row (`layers_panel_select`).
+/// Where `drag_move` / `drag_end` declare no action (main and the control
+/// today), each reads `unchanged` and the document does not move.
+@Test func formsARowDragDeliversTheRowsDeclaredDragEvents() {
     let out = formsRun(formsLayersScript([
-        ["panel": formsLayers, "widget": "lp_name", "row": [0, 0], "event": "drag",
-         "to": ["row": [0, 2], "zone": "into"], "hover_ms": 0], formsReadLayers,
+        ["read": "document"], formsDrag([0, 0], [0, 2], "into"), formsReadLayers, ["read": "document"],
     ]))
-    #expect((formsRefusal(out) ?? "").contains("a row drag is not delivered by this runner"), "\(out)")
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let unchanged = out.filter { $0["step"] as? Int == 1 && $0["unchanged"] as? Bool == true }.count
+    #expect(unchanged == 2, "drag_move and drag_end each read unchanged: \(out)")
+    #expect(formsPanelReads(out).first.map(formsSelection) == [[0, 0]], "drag_start selects the pressed row: \(out)")
+    let docs = formsDocReads(out)
+    #expect(docs.count == 2 && formsDocElement(docs[0], [0, 0])?["type"] as? String
+            == formsDocElement(docs[1], [0, 0])?["type"] as? String, "nothing moved: \(out)")
+}
+
+/// A drag the runner cannot deliver is refused by name, never run without its
+/// drop: a malformed `to`, and (the fork's case) a `drag_move` / `drag_end`
+/// that declares an action, whose `event.drop_*` this route cannot pass.
+@Test func formsARowDragTheRunnerCannotDeliverIsRefusedByName() {
+    for (step, needle) in [
+        (formsDrag([0, 0], [0, 2], "sideways"), "zone"),
+        (["panel": formsLayers, "widget": "lp_name", "row": [0, 0], "event": "drag"] as [String: Any], "`to`"),
+        (formsDrag([0, 0], [9], "into"), "0 row(s)"),
+    ] {
+        let out = formsRun(formsLayersScript([step, formsReadLayers]))
+        #expect((formsRefusal(out) ?? "").contains(needle), "\(step): wanted `\(needle)`, got \(out)")
+    }
+    let acting: [String: Any] = ["event": "drag_end", "action": "move_elements",
+                                 "params": ["target_parent": "event.drop_parent"]]
+    let quiet: [String: Any] = ["event": "drag_end", "description": "no action"]
+    #expect(formsDragEntryRefusal(["behavior": [acting]], event: "drag_end") != nil)
+    #expect(formsDragEntryRefusal(["behavior": [quiet]], event: "drag_end") == nil)
+    #expect(formsDragEntryRefusal(["behavior": [["event": "drag_move", "effects": [["set": ["x": "1"]]]]]],
+                                  event: "drag_move") != nil, "effects count as an action")
 }
 
 /// THE M3 DOOR, Swift's twin of Rust's `forms_replay_of_a_named_script_directory`:
