@@ -298,8 +298,15 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   starting with the widget, whose `behavior:` declares that event. A Layers row's `click` is declared on the row's
   container, so a click on `lp_name` selects the row. `lp_eye` declares its own `click`, so an eye click never reaches the
   row. The runner records where a step bubbled to. A step addressed by id alone does not bubble.
-* **Still refused by name there:** `at`, `hold_ms`, a row drag, the `dialog` / `context_menu` / `panel_menu` steps,
-  `{"read": "panel_menu"}`, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Both runners deliver the panel-menu forms (row 139).**
+  * `{"read": "panel_menu", "panel": P}` reads the menu's items in declared order, separators omitted, as
+    `{action, params, enabled, checked}`. `enabled` and `checked` come from the menu's own predicates, and `checked` is
+    null for an item with no `checked_when`.
+  * `{"panel_menu": P, "action": A, "params": {...}}` picks the one item whose action is `A` and whose declared params
+    equal every param the step names. Labels are never used. Zero or two matches, or a disabled item, are refused by
+    name. The item runs as a shell's pick does.
+* **Still refused by name there:** `at`, `hold_ms`, the `dialog` and `context_menu` steps, a row `secondary_press`,
+  and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
 * **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. Both runners also
   deliver the text and dropdown forms (rows 135 and 136):
   * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,
