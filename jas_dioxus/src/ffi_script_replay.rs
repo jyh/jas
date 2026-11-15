@@ -446,6 +446,12 @@ fn every_area_text_paragraph_script_moves_the_legacy_layout_and_no_two_move_it_a
 /// such event on the whole path is refused by name.
 fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope: &Value)
     -> Result<(Vec<usize>, Option<String>), String> {
+    row_declaring(content, widget, event, row, scope).map(|(p, to, _)| (p, to))
+}
+
+/// [`row_plan_path`] and the node the event goes to.
+fn row_declaring(content: &Value, widget: &str, event: &str, row: &[u64], scope: &Value)
+    -> Result<(Vec<usize>, Option<String>, Value), String> {
     let (path, chain) = row_chain(content, widget, row, scope)?;
     // The walk ends on the widget, so the chain's last node is the widget.
     let Some(at) = chain.iter().rposition(|(_, node, _)| declares(node, event)) else {
@@ -454,7 +460,16 @@ fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope:
     let (len, node, _) = &chain[at];
     let to = (at + 1 != chain.len()).then(|| node.get("id").and_then(Value::as_str)
         .map_or_else(|| format!("{:?}", &path[..*len]), str::to_string));
-    Ok((path[..*len].to_vec(), to))
+    Ok((path[..*len].to_vec(), to, node.clone()))
+}
+
+/// Whether `node`'s entries for `event` declare an action or effects. A drag
+/// event whose entries declare none runs nothing, in every port, so the runner
+/// records it `unchanged` without a door call.
+fn declares_an_act(node: &Value, event: &str) -> bool {
+    node.get("behavior").and_then(Value::as_array).is_some_and(|b| b.iter().any(|entry|
+        entry.get("event").and_then(Value::as_str).unwrap_or("click") == event
+            && (entry.get("action").is_some() || entry.get("effects").is_some())))
 }
 
 /// Whether `node`'s `behavior:` declares `event` (an entry with no `event` is
@@ -784,13 +799,6 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     refuse(&mut out, "`at` is not delivered by this runner".to_string());
                     break;
                 }
-                // F1 (row 135): refused by its own name. Run as the pressed
-                // row's own events, the drop's `to` would be dropped and read
-                // as measured.
-                if event == "drag" || st.get("to").is_some() || st.get("hover_ms").is_some() {
-                    refuse(&mut out, "a row drag is not delivered by this runner".to_string());
-                    break;
-                }
                 let row = match st.get("row") {
                     None => None,
                     Some(r) => match r.as_array().and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()) {
@@ -798,6 +806,68 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         None => { refuse(&mut out, format!("row {r} is not a path")); break; }
                     },
                 };
+                // F1 (row 137, section 6): the row's three declared events,
+                // `drag_start` on the pressed row, `drag_move` and `drag_end`
+                // on the target. A drag event whose entry declares an action
+                // is refused by name: this route cannot pass its `event.drop_*`.
+                if event == "drag" || st.get("to").is_some() || st.get("hover_ms").is_some() {
+                    let to_row = st.get("to").and_then(|t| t.get("row")).and_then(Value::as_array)
+                        .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>());
+                    let Some(to_row) = to_row.filter(|_| event == "drag") else {
+                        refuse(&mut out, "a row drag needs `to`: {row, zone}".to_string());
+                        break;
+                    };
+                    let zone = st["to"].get("zone").and_then(Value::as_str).unwrap_or("");
+                    if !["before", "into", "after"].contains(&zone) {
+                        refuse(&mut out, "a row drag's zone is before, into or after".to_string());
+                        break;
+                    }
+                    let Some(pressed) = row.clone() else {
+                        refuse(&mut out, "a row drag names its pressed `row`".to_string());
+                        break;
+                    };
+                    field = None;
+                    let mut ok = true;
+                    for (name, at) in [("drag_start", &pressed), ("drag_move", &to_row), ("drag_end", &to_row)] {
+                        let (Some(spec), Some(scope)) = (
+                            crate::interpreter::workspace::Workspace::load().and_then(|ws| ws.panel(panel).cloned()),
+                            engine.script_panel_scope(panel)) else {
+                            refuse(&mut out, format!("UnknownPanel {panel}"));
+                            ok = false;
+                            break;
+                        };
+                        let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
+                        let (p, to, node) = match row_declaring(spec.get("content").unwrap_or(&Value::Null), widget, name, at, &scope) {
+                            Ok(t) => t,
+                            Err(why) => { refuse(&mut out, why); ok = false; break; }
+                        };
+                        if let Some(to) = to {
+                            out.push(json!({"step": i, "event": name, "bubbled_to": to}));
+                        }
+                        if !declares_an_act(&node, name) {
+                            out.push(json!({"step": i, "unchanged": true}));
+                            continue;
+                        }
+                        if name != "drag_start" {
+                            refuse(&mut out, format!("`{name}` declares an action that reads the drop's event fields, \
+                                which this runner cannot pass yet"));
+                            ok = false;
+                            break;
+                        }
+                        let ev = json!({"widget": widget, "event": name, "path": p,
+                            "shift": flag(st, "shift"), "alt": flag(st, "alt"), "ctrl": flag(st, "ctrl")}).to_string();
+                        let reply = take(unsafe { jas_panel_behavior(e, panel.as_ptr(), panel.len(), ev.as_ptr(), ev.len()) });
+                        if !ran(&mut out, reply, last_error(e)) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                    focus = Some(panel.to_string());
+                    continue;
+                }
                 let kind = crate::interpreter::workspace::Workspace::load()
                     .and_then(|ws| ws.panel(panel).and_then(|p| find_widget(&p["content"], widget))
                         .and_then(|n| n.get("type")).and_then(Value::as_str).map(str::to_string));
@@ -1238,16 +1308,49 @@ fn an_input_on_a_field_with_no_input_sets_its_text_and_the_next_key_goes_to_it()
     assert_ne!(name_at(&plain, &[0, 1]), serde_json::json!("Ring"), "{plain:?}");
 }
 
-/// A row drag is refused by NAME until it is built: run as the pressed row's
-/// own events, the drop's `to` would be dropped and read as measured.
+fn drag(from: Value, to: Value, zone: &str) -> Value {
+    serde_json::json!({"panel": LAYERS, "widget": "lp_name", "row": from, "event": "drag",
+                       "to": {"row": to, "zone": zone}, "hover_ms": 0})
+}
+
+/// F1 (row 137, TESTING.md section 6): the twin of Swift's
+/// `formsARowDragDeliversTheRowsDeclaredDragEvents`. `drag_start` selects the
+/// pressed row; `drag_move` and `drag_end` declare no action on this build, so
+/// each reads `unchanged` and nothing moves.
 #[test]
-fn a_row_drag_is_refused_by_name() {
+fn a_row_drag_delivers_the_rows_declared_drag_events() {
     let _counters = crate::ffi_instr::test_lock::lock();
     let out = replay_forms(&layers_script(serde_json::json!([
-        {"panel": LAYERS, "widget": "lp_name", "row": [0, 0], "event": "drag",
-         "to": {"row": [0, 2], "zone": "into"}, "hover_ms": 0}, read_layers(),
+        {"read": "document"}, drag(serde_json::json!([0, 0]), serde_json::json!([0, 2]), "into"), read_layers(),
+        {"read": "document"},
     ]))).unwrap();
-    assert!(refusal(&out).unwrap_or_default().contains("a row drag is not delivered by this runner"), "{out:?}");
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(out.iter().filter(|r| r["step"] == 1 && r["unchanged"] == true).count(), 2,
+        "drag_move and drag_end each read unchanged: {out:?}");
+    assert_eq!(panel_reads(&out)[0]["layers_panel_selection"], serde_json::json!([[0, 0]]), "{out:?}");
+    let docs = doc_reads(&out);
+    assert_eq!(docs.len(), 2);
+    assert_eq!(doc_element(&docs[0], &[0, 0])["type"], doc_element(&docs[1], &[0, 0])["type"], "nothing moved: {out:?}");
+}
+
+/// The twin of Swift's `formsARowDragTheRunnerCannotDeliverIsRefusedByName`.
+#[test]
+fn a_row_drag_the_runner_cannot_deliver_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    for (step, needle) in [
+        (drag(serde_json::json!([0, 0]), serde_json::json!([0, 2]), "sideways"), "zone"),
+        (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "row": [0, 0], "event": "drag"}), "`to`"),
+        (drag(serde_json::json!([0, 0]), serde_json::json!([9]), "into"), "0 row(s)"),
+    ] {
+        let out = replay_forms(&layers_script(serde_json::json!([step.clone(), read_layers()]))).unwrap();
+        assert!(refusal(&out).unwrap_or_default().contains(needle), "{step}: wanted `{needle}`, got {out:?}");
+    }
+    let acting = serde_json::json!({"behavior": [{"event": "drag_end", "action": "move_elements"}]});
+    let quiet = serde_json::json!({"behavior": [{"event": "drag_end", "description": "no action"}]});
+    assert!(declares_an_act(&acting, "drag_end"));
+    assert!(!declares_an_act(&quiet, "drag_end"));
+    assert!(declares_an_act(&serde_json::json!({"behavior": [{"event": "drag_move", "effects": []}]}), "drag_move"),
+        "effects count as an act");
 }
 
 /// THE M3 DOOR: `JAS_FORMS_DIR=<dir>` replays every `*.json` script there that
