@@ -7902,6 +7902,12 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
         func refuse(_ why: String) { out.append(["step": i, "refused": why]); stopped = true }
         if i == -1 {
             for (pid, key, val) in seeds {
+                // A key the app holds on the Model is seeded there, as `read:
+                // panel` reads it there (``modelHeldPanelState``).
+                if let items = val as? [Any], modelHeldPanelState(pid, model: model)[key] != nil {
+                    let paths = items.compactMap(formsPath)
+                    if paths.count == items.count, setModelHeldPanelState(pid, key, paths: paths, model: model) { continue }
+                }
                 if !model.stateStore.hasPanel(pid) {
                     model.stateStore.initPanel(pid, defaults: WorkspaceData.load()!.panelStateDefaults(pid))
                 }
@@ -8542,6 +8548,17 @@ private func formsLayersMenuActions() -> [String] {
         ["panel": formsLayers, "widget": "lp_name", "row": [0, 2], "event": "click"],
         ["panel": formsLayers, "widget": "lp_preview", "row": [0, 2], "event": "double_click"], formsReadLayers,
     ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let stack = ((formsPanelReads(out).first?["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath)
+    #expect(stack == [[0, 2]], "\(out)")
+}
+
+/// `app_state` seeds a declared key where the app HOLDS it, as `read: panel`
+/// reads it there: a seeded Layers `isolation_stack` reaches the Model (spec,
+/// 11-15: S3 run 2 read `[]` from a seed of `[[0,2]]`).
+@Test func formsAppStateSeedsAModelHeldKeyWhereTheAppHoldsIt() {
+    let out = formsRun(formsLayersScript([formsReadLayers],
+        appState: ["panels": [formsLayers: ["isolation_stack": [[0, 2]]]]]))
     #expect(formsRefusal(out) == nil, "\(out)")
     let stack = ((formsPanelReads(out).first?["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath)
     #expect(stack == [[0, 2]], "\(out)")

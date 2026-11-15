@@ -474,6 +474,21 @@ func modelHeldPanelState(_ contentId: String,
     }
 }
 
+/// Write a declared `panel.*` key this app keeps on the MODEL (the writer
+/// beside ``modelHeldPanelState``, one map for both directions). Returns false
+/// for a key the model does not hold, which then belongs to the store.
+/// `paths` are index arrays.
+@discardableResult
+func setModelHeldPanelState(_ contentId: String, _ key: String, paths: [[Int]], model: Model) -> Bool {
+    switch (contentId, key) {
+    case ("layers_panel_content", "isolation_stack"):
+        model.layersIsolationStack = paths
+        return true
+    default:
+        return false
+    }
+}
+
 /// The `panel.*` values this app keeps on ``WorkspaceLayout`` rather than in
 /// the shared panel store, keyed exactly as the panel's YAML state table
 /// declares them.
