@@ -300,8 +300,8 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   row. The runner records where a step bubbled to. A step addressed by id alone does not bubble.
 * **Still refused by name there:** `at`, `hold_ms`, a row drag, the `dialog` / `context_menu` / `panel_menu` steps,
   `{"read": "panel_menu"}`, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
-* **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. It also delivers the
-  text and dropdown forms, which the Rust runner does not deliver yet (row 135):
+* **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. Both runners also
+  deliver the text and dropdown forms (rows 135 and 136):
   * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,
     so a field that declares no `input` fires nothing and the step is recorded `unchanged`.
   * After an `input`, the field holds key focus. The next key goes to the field as its `keydown`, carrying the field's
