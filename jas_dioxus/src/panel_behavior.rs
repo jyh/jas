@@ -751,6 +751,7 @@ fn run_widget_behavior_in(
     // W2b-16: an event addressed by `path` resolves the node AND the row scope
     // it runs in; one addressed by id finds the first node with that id, which
     // under a `foreach` names a template, not a row.
+    let panel_scope: &Value = scope;
     let resolved: (Value, Value);
     let (node, scope, ev): (&Value, &Value, std::borrow::Cow<UserEvent>) = match &ev.path {
         Some(path) => {
@@ -774,6 +775,47 @@ fn run_widget_behavior_in(
     let ev: &UserEvent = &ev;
     if widget_disabled(node, scope) {
         return Err(Refusal::new("Disabled", ev.widget.clone()));
+    }
+
+    // Design section 8 form 2 (row 139): `event: "context_menu"`, with `value`
+    // an item index, runs that item of the `context_menu:` declared on the
+    // NEAREST node along the addressed path (Layers declares it on `lp_tree`,
+    // the foreach, not on the row), in the scope at the END of the path, so
+    // `node` is the row. A separator, an index past the list, or an item whose
+    // `enabled_when` fails is refused by name. The action is resolved as a
+    // template (`{{…}}`, as a menu label is), and the item's declared params
+    // ride in a `dispatch` effect, which the effects runner evaluates exactly
+    // as a behaviour's.
+    if ev.event == "context_menu" {
+        let holder = match &ev.path {
+            Some(p) => (0..=p.len()).rev().find_map(|k| resolve_path(content, &p[..k], panel_scope).ok()
+                .map(|r| r.0).filter(|n| n.get("context_menu").is_some())),
+            None => Some(node.clone()).filter(|n| n.get("context_menu").is_some()),
+        };
+        let holder = holder.ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
+        let items = holder.get("context_menu").and_then(Value::as_array)
+            .ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
+        let at = ev.value.as_ref().and_then(Value::as_u64)
+            .ok_or_else(|| Refusal::new("MissingValue", ev.widget.clone()))?;
+        let Some(item) = items.get(at as usize).and_then(Value::as_object) else {
+            return Err(Refusal::new("NoContextMenuItem", format!("{} {at}", ev.widget)));
+        };
+        if let Some(cond) = item.get("enabled_when").and_then(Value::as_str) {
+            if !eval(cond, scope).to_bool() {
+                return Err(Refusal::new("Disabled", format!("{} context_menu {at}", ev.widget)));
+            }
+        }
+        let action = item.get("action").and_then(Value::as_str)
+            .map(|a| crate::interpreter::expr::eval_text(a, scope))
+            .filter(|a| !a.is_empty())
+            .ok_or_else(|| Refusal::new("EmptyBehavior", ev.widget.clone()))?;
+        let mut d = Map::new();
+        d.insert("action".into(), Value::String(action));
+        if let Some(params) = item.get("params") {
+            d.insert("params".into(), params.clone());
+        }
+        let batch = vec![json!({"dispatch": Value::Object(d)})];
+        return run_batch(panel_id, &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs, host);
     }
 
     // The value events (WIDGET_EVENTS.md). A commit on an input kind and a

@@ -7694,7 +7694,7 @@ private func formsPath(_ v: Any?) -> [Int]? {
 /// the widget first, that declares it. `bubbledTo` names that node when it is
 /// not the widget. Refusals mirror the Rust runner's, by name.
 private func formsRowTarget(_ content: Any?, widget: String, event: String, row: [Int],
-                            scope: [String: Any], exact: Bool = false)
+                            scope: [String: Any], exact: Bool = false, withKey: String? = nil)
     -> Result<(node: [String: Any], scope: [String: Any], bubbledTo: String?), FormsRefusal> {
     func contains(_ n: Any?) -> Bool {
         guard let d = n as? [String: Any] else { return false }
@@ -7740,6 +7740,14 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
     // A text field's own events do not bubble (§6: an `input` on a field that
     // declares none fires nothing), so the target is the widget itself.
     if exact { return .success((chain.last!.0, chain.last!.1, nil)) }
+    // The nearest node on the path that carries `withKey` (a row's
+    // `context_menu:`), in the row's scope.
+    if let key = withKey {
+        guard let at = chain.lastIndex(where: { $0.0[key] != nil }) else {
+            return .failure(FormsRefusal("no node on `\(widget)`'s path in row \(row) declares a \(key)"))
+        }
+        return .success((chain[at].0, chain.last!.1, nil))
+    }
     func declares(_ n: [String: Any]) -> Bool {
         ((n["behavior"] as? [Any]) ?? []).contains { (($0 as? [String: Any])?["event"] as? String ?? "click") == event }
     }
@@ -7816,6 +7824,9 @@ private func formsPanelState(_ pid: String, model: Model) -> [String: Any]? {
     }
     var out: [String: Any] = [:]
     for k in defaults.keys { out[k] = canon(model.stateStore.getPanel(pid, k)) }
+    // A declared key the app holds on the MODEL is read there, as the panel
+    // menu's context reads it (``panelMenuContext``): Layers' isolation_stack.
+    for (k, v) in modelHeldPanelState(pid, model: model) where defaults[k] != nil { out[k] = canon(v) }
     return out
 }
 
@@ -7854,6 +7865,10 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
     var field: (pid: String, widget: String, row: [Int]?, text: String)? = nil
     // The dock layout a panel-menu pick dispatches through, as the app holds one.
     var layout = WorkspaceLayout.defaultLayout()
+    // The context menu a row `secondary_press` opened: (panel, the node that
+    // declares `context_menu:`, the row's scope). Only the very next step can
+    // pick from it (design section 8 form 2).
+    var menuOpen: (pid: String, node: [String: Any], scope: [String: Any])? = nil
     // The focus is a fact of step ORDER (a panel step takes it, a pointer or
     // menu step gives it to the canvas), so a key with no panel focus goes to
     // the gesture runner as a canvas key, as the Rust runner sends it.
@@ -7887,6 +7902,12 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
         func refuse(_ why: String) { out.append(["step": i, "refused": why]); stopped = true }
         if i == -1 {
             for (pid, key, val) in seeds {
+                // A key the app holds on the Model is seeded there, as `read:
+                // panel` reads it there (``modelHeldPanelState``).
+                if let items = val as? [Any], modelHeldPanelState(pid, model: model)[key] != nil {
+                    let paths = items.compactMap(formsPath)
+                    if paths.count == items.count, setModelHeldPanelState(pid, key, paths: paths, model: model) { continue }
+                }
                 if !model.stateStore.hasPanel(pid) {
                     model.stateStore.initPanel(pid, defaults: WorkspaceData.load()!.panelStateDefaults(pid))
                 }
@@ -7894,6 +7915,8 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             }
             return
         }
+        let opened = menuOpen
+        menuOpen = nil
         if st["__pointer"] != nil { focus = nil; field = nil; return }
         if let why = st["__refuse"] as? String { return refuse(why) }
         let flag = { (k: String) in (st[k] as? Bool) ?? false }
@@ -7981,6 +8004,25 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             guard items[hits[0]]["enabled"] as? Bool == true else { return refuse("the menu item `\(want)` is disabled") }
             guard let (kind, addr) = formsPanelKindAndAddr(pid, layout) else { return refuse("no dock holds \(pid)") }
             panelDispatch(kind, cmd: commandWithParams(nodes[hits[0]]), addr: addr, layout: &layout, model: model)
+        } else if let want = st["context_menu"] as? String {
+            // Design section 8 form 2: the item whose action, RESOLVED at open,
+            // is the step's and whose declared params equal every param the step
+            // names. It runs through the engine's door
+            // (``PanelWidgetEvents/contextMenuItem``), which refuses a disabled
+            // item and evaluates the params as a behaviour's.
+            guard let m = opened else { return refuse("a context_menu step must directly follow a row secondary_press") }
+            let items = (m.node["context_menu"] as? [Any]) ?? []
+            let named = (st["params"] as? [String: Any]) ?? [:]
+            let hits = items.indices.filter { n in
+                guard let item = items[n] as? [String: Any], let a = item["action"] as? String,
+                      evaluateText(a, context: m.scope) == want else { return false }
+                return named.allSatisfy { k, v in
+                    ((item["params"] as? [String: Any])?[k]).map { "\($0)" == "\(v)" } ?? false
+                }
+            }
+            guard hits.count == 1 else { return refuse("`\(want)` is \(hits.count) item(s) of the row's context_menu, not one") }
+            record(PanelWidgetEvents(model: model, panelId: m.pid, scope: m.scope).contextMenuItem(m.node, index: hits[0]))
+            focus = m.pid
         } else if let menuId = st["menu"] as? String {
             focus = nil
             field = nil
@@ -7997,6 +8039,23 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 row = p
             } else {
                 row = nil
+            }
+            // Design section 8 form 1: a row `secondary_press` opens the
+            // `context_menu:` of the nearest node on the widget's path, with
+            // the row as its `node`. It dispatches nothing of its own.
+            if event == "secondary_press" {
+                guard let r = row else { return refuse("a secondary_press names its `row`") }
+                let ws = WorkspaceData.load()!
+                guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
+                if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+                let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+                switch formsRowTarget(panel["content"], widget: widget, event: "", row: r, scope: scope, withKey: "context_menu") {
+                case .failure(let x): return refuse(x.why)
+                case .success(let t): menuOpen = (pid, t.node, t.scope)
+                }
+                field = nil
+                focus = pid
+                return
             }
             // F1 (row 137, section 6): the row's three declared events,
             // `drag_start` on the pressed row, `drag_move` and `drag_end` on
@@ -8283,7 +8342,7 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
         (["panel": formsLayers, "widget": "lp_search_input", "row": [0], "event": "click"], "which no foreach repeats"),
         (["panel": formsLayers, "widget": "lp_name", "event": "click"], "NotAddressable"),
         (["panel": formsLayers, "widget": "lp_name", "at": [0], "event": "click"], "`at` is not delivered"),
-        (["context_menu": "x", "params": [:] as [String: Any]], "the `context_menu` form is not delivered"),
+        (["context_menu": "x", "params": [:] as [String: Any]], "must directly follow a row secondary_press"),
     ]
     for (step, needle) in cases {
         let out = formsRun(formsLayersScript([step, formsReadLayers]))
@@ -8475,6 +8534,74 @@ private func formsLayersMenuActions() -> [String] {
     ] {
         let out = formsRun(formsLayersScript([step, ["read": "document"]]))
         #expect((formsRefusal(out) ?? "").contains(needle), "\(step): wanted `\(needle)`, got \(out)")
+        #expect(formsDocReads(out).isEmpty, "a refusal ends the replay: \(out)")
+    }
+}
+
+/// `read: panel` reads a declared key where the app HOLDS it: Swift keeps the
+/// Layers `isolation_stack` on the model (``modelHeldPanelState``), not in the
+/// store, so a store-only reader read `[]` after every isolation (S3 run 1's
+/// three isolation scripts, all `[]`). A row double-click on group [0, 2]
+/// enters isolation; the read must say so.
+@Test func formsReadPanelReadsAModelHeldKeyWhereTheAppHoldsIt() {
+    let out = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_name", "row": [0, 2], "event": "click"],
+        ["panel": formsLayers, "widget": "lp_preview", "row": [0, 2], "event": "double_click"], formsReadLayers,
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let stack = ((formsPanelReads(out).first?["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath)
+    #expect(stack == [[0, 2]], "\(out)")
+}
+
+/// `app_state` seeds a declared key where the app HOLDS it, as `read: panel`
+/// reads it there: a seeded Layers `isolation_stack` reaches the Model (spec,
+/// 11-15: S3 run 2 read `[]` from a seed of `[[0,2]]`).
+@Test func formsAppStateSeedsAModelHeldKeyWhereTheAppHoldsIt() {
+    let out = formsRun(formsLayersScript([formsReadLayers],
+        appState: ["panels": [formsLayers: ["isolation_stack": [[0, 2]]]]]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let stack = ((formsPanelReads(out).first?["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath)
+    #expect(stack == [[0, 2]], "\(out)")
+}
+
+// MARK: - G3, the row context menu (design section 8 forms 1 and 2, row 139)
+
+private func formsSecondaryPress(_ row: [Int]) -> [String: Any] {
+    ["panel": formsLayers, "widget": "lp_name", "row": row, "event": "secondary_press"]
+}
+
+/// The twin of Rust's `a_row_secondary_press_opens_its_context_menu_and_the_picked_item_runs`.
+@Test func formsARowSecondaryPressOpensItsContextMenuAndThePickedItemRuns() {
+    let out = formsRun(formsLayersScript([
+        ["read": "document"], formsClickRow([0, 1]), formsSecondaryPress([0, 1]),
+        ["context_menu": "duplicate_layer_selection"], ["read": "document"],
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let n = formsDocReads(out).compactMap { $0.data(using: .utf8) }
+        .compactMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        .map { (((($0["layers"] as? [Any])?.first as? [String: Any])?["children"]) as? [Any])?.count ?? -1 }
+    #expect(n.count == 2 && n[1] == n[0] + 1, "the row was duplicated: \(n) \(out)")
+
+    let iso = formsRun(formsLayersScript([
+        formsSecondaryPress([0, 2]), ["context_menu": "enter_isolation_mode"], formsReadLayers,
+    ]))
+    #expect(formsRefusal(iso) == nil, "\(iso)")
+    let stack = ((formsPanelReads(iso).first?["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath)
+    #expect(stack == [[0, 2]], "the row is node: \(iso)")
+}
+
+/// The twin of Rust's `a_context_menu_step_the_menu_cannot_take_is_refused_by_name`.
+@Test func formsAContextMenuStepTheMenuCannotTakeIsRefusedByName() {
+    let cases: [([[String: Any]], String)] = [
+        ([["context_menu": "duplicate_layer_selection"]], "directly follow"),
+        ([formsSecondaryPress([0, 1]), formsReadLayers, ["context_menu": "duplicate_layer_selection"]], "directly follow"),
+        ([formsSecondaryPress([0, 1]), ["context_menu": "open_layer_options", "params": ["mode": "edit"]]], "Disabled"),
+        ([formsSecondaryPress([1]), ["context_menu": "open_layer_options", "params": ["mode": "nope"]]], "0 item(s)"),
+        ([formsSecondaryPress([1]), ["context_menu": "no_such_action"]], "0 item(s)"),
+    ]
+    for (steps, needle) in cases {
+        let out = formsRun(formsLayersScript(steps + [["read": "document"]]))
+        #expect((formsRefusal(out) ?? "").contains(needle), "\(steps): wanted `\(needle)`, got \(out)")
         #expect(formsDocReads(out).isEmpty, "a refusal ends the replay: \(out)")
     }
 }

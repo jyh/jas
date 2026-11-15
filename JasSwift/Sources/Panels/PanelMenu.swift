@@ -463,7 +463,7 @@ func artboardsPanelSelection(model: Model?) -> [String] {
 /// shared panel store, keyed exactly as the panel's YAML state table
 /// declares them. One panel: the layers isolation stack, which the YAML
 /// `list_push` / `list_pop` effects route to `model.layersIsolationStack`.
-private func modelHeldPanelState(_ contentId: String,
+func modelHeldPanelState(_ contentId: String,
                                  model: Model?) -> [String: Any] {
     switch contentId {
     case "layers_panel_content":
@@ -471,6 +471,21 @@ private func modelHeldPanelState(_ contentId: String,
         return ["isolation_stack": m.layersIsolationStack]
     default:
         return [:]
+    }
+}
+
+/// Write a declared `panel.*` key this app keeps on the MODEL (the writer
+/// beside ``modelHeldPanelState``, one map for both directions). Returns false
+/// for a key the model does not hold, which then belongs to the store.
+/// `paths` are index arrays.
+@discardableResult
+func setModelHeldPanelState(_ contentId: String, _ key: String, paths: [[Int]], model: Model) -> Bool {
+    switch (contentId, key) {
+    case ("layers_panel_content", "isolation_stack"):
+        model.layersIsolationStack = paths
+        return true
+    default:
+        return false
     }
 }
 

@@ -673,6 +673,12 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
         // text it holds: (panel, widget, row, text). Re-resolved at each use,
         // because the row's scope (`panel.renaming_element`) moves under it.
         let mut field: Option<(String, String, Option<Vec<u64>>, String)> = None;
+        // The context menu a row `secondary_press` opened: (panel, the row
+        // widget's path, the items of the nearest `context_menu:` on it, the
+        // row's scope).
+        // Only the very next step can pick from it (design section 8 form 2).
+        #[allow(clippy::type_complexity)]
+        let mut menu_open: Option<(String, Vec<usize>, Vec<Value>, Value)> = None;
         // A widget by id, or by `row` with no bubbling: its path (by row
         // only), its node and the scope its expressions read.
         #[allow(clippy::type_complexity)]
@@ -692,6 +698,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
             }
         };
         for (i, st) in steps.iter().enumerate() {
+            let opened = menu_open.take();
             let refuse = |out: &mut Vec<Value>, why: String| out.push(json!({"step": i, "refused": why}));
             let ran = |out: &mut Vec<Value>, reply: Option<String>, err: String| -> bool {
                 if reply.is_none() {
@@ -869,6 +876,38 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         None => { refuse(&mut out, format!("row {r} is not a path")); break; }
                     },
                 };
+                // Design section 8 form 1: a row `secondary_press` opens the
+                // `context_menu:` of the nearest node on the widget's path, with
+                // the row as its `node`. It dispatches nothing of its own.
+                if event == "secondary_press" {
+                    let Some(r) = row.clone() else {
+                        refuse(&mut out, "a secondary_press names its `row`".to_string());
+                        break;
+                    };
+                    let (Some(spec), Some(scope)) = (
+                        crate::interpreter::workspace::Workspace::load().and_then(|ws| ws.panel(panel).cloned()),
+                        engine.script_panel_scope(panel)) else {
+                        refuse(&mut out, format!("UnknownPanel {panel}"));
+                        break;
+                    };
+                    let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
+                    let (path, chain) = match row_chain(spec.get("content").unwrap_or(&Value::Null), widget, &r, &scope) {
+                        Ok(t) => t,
+                        Err(why) => { refuse(&mut out, why); break; }
+                    };
+                    let Some(at) = chain.iter().rposition(|(_, node, _)| node.get("context_menu").is_some()) else {
+                        refuse(&mut out, format!("no node on `{widget}`'s path in row {r:?} declares a context_menu"));
+                        break;
+                    };
+                    // The items are the holder's; the scope and the path are the
+                    // ROW's (the widget's), so the item runs with the row as `node`.
+                    let items = chain[at].1["context_menu"].as_array().cloned().unwrap_or_default();
+                    let row_scope = chain.last().map(|c| c.2.clone()).unwrap_or(Value::Null);
+                    menu_open = Some((panel.to_string(), path.clone(), items, row_scope));
+                    field = None;
+                    focus = Some(panel.to_string());
+                    continue;
+                }
                 // F1 (row 137, section 6): the row's three declared events,
                 // `drag_start` on the pressed row, `drag_move` and `drag_end`
                 // on the target. A drag event whose entry declares an action
@@ -1042,6 +1081,33 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     break;
                 }
                 focus = Some(panel.to_string());
+            } else if let Some(want) = st.get("context_menu").and_then(Value::as_str) {
+                // Design section 8 form 2: the item whose action, RESOLVED at
+                // open, is the step's and whose declared params equal every
+                // param the step names. It runs through the engine's own door
+                // (`jas_panel_behavior`, event `context_menu`), which refuses a
+                // disabled item and evaluates the params as a behaviour's.
+                let Some((pid, path, items, scope)) = opened else {
+                    refuse(&mut out, "a context_menu step must directly follow a row secondary_press".to_string());
+                    break;
+                };
+                let named = st.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+                let hits: Vec<usize> = items.iter().enumerate().filter(|(_, item)| {
+                    item.get("action").and_then(Value::as_str)
+                        .is_some_and(|a| crate::interpreter::expr::eval_text(a, &scope) == want)
+                        && named.iter().all(|(k, v)| item.get("params").and_then(|p| p.get(k))
+                            .is_some_and(|d| plain(d) == plain(v)))
+                }).map(|(n, _)| n).collect();
+                let &[at] = hits.as_slice() else {
+                    refuse(&mut out, format!("`{want}` is {} item(s) of the row's context_menu, not one", hits.len()));
+                    break;
+                };
+                let ev = json!({"widget": "context_menu", "path": path, "event": "context_menu", "value": at}).to_string();
+                let reply = take(unsafe { jas_panel_behavior(e, pid.as_ptr(), pid.len(), ev.as_ptr(), ev.len()) });
+                if !ran(&mut out, reply, last_error(e)) {
+                    break;
+                }
+                focus = Some(pid);
             } else {
                 let form = ["dialog", "context_menu"].into_iter().find(|k| st.get(*k).is_some());
                 refuse(&mut out, match form {
@@ -1262,7 +1328,7 @@ fn each_unrunnable_form_is_refused_by_name() {
         (serde_json::json!({"panel": LAYERS, "widget": "lp_search_input", "row": [0], "event": "click"}), "which no foreach repeats"),
         (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "event": "click"}), "NotAddressable"),
         (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "at": [0], "event": "click"}), "`at` is not delivered"),
-        (serde_json::json!({"context_menu": "x", "params": {}}), "the `context_menu` form is not delivered"),
+        (serde_json::json!({"context_menu": "x", "params": {}}), "must directly follow a row secondary_press"),
     ] {
         let out = replay_forms(&layers_script(serde_json::json!([step.clone(), read_layers()]))).unwrap();
         let why = refusal(&out).unwrap_or_default();
@@ -1474,6 +1540,58 @@ fn a_panel_menu_step_that_cannot_run_is_refused_by_name() {
     ] {
         let out = replay_forms(&layers_script(serde_json::json!([step.clone(), {"read": "document"}]))).unwrap();
         assert!(refusal(&out).unwrap_or_default().contains(needle), "{step}: wanted `{needle}`, got {out:?}");
+        assert!(doc_reads(&out).is_empty(), "a refusal ends the replay: {out:?}");
+    }
+}
+
+// G3, the row context menu (design section 8 forms 1 and 2, row 139).
+
+fn secondary_press(row: Value) -> Value {
+    serde_json::json!({"panel": LAYERS, "widget": "lp_name", "row": row, "event": "secondary_press"})
+}
+
+/// A row `secondary_press` opens that row's `context_menu:`, and the step
+/// after it picks an item by action: Duplicate duplicates the panel-selected
+/// row; a TEMPLATE action (Enter/Exit Isolation Mode) is matched as resolved
+/// at open, in the row's scope, and runs with the row as `node`.
+#[test]
+fn a_row_secondary_press_opens_its_context_menu_and_the_picked_item_runs() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"read": "document"}, click_row(serde_json::json!([0, 1]), &[]), secondary_press(serde_json::json!([0, 1])),
+        {"context_menu": "duplicate_layer_selection"}, {"read": "document"},
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    let n: Vec<usize> = doc_reads(&out).iter().map(|d| d["layers"][0]["children"].as_array().map_or(0, Vec::len)).collect();
+    assert!(n.len() == 2 && n[1] == n[0] + 1, "the row was duplicated: {n:?} {out:?}");
+
+    let iso = replay_forms(&layers_script(serde_json::json!([
+        secondary_press(serde_json::json!([0, 2])), {"context_menu": "enter_isolation_mode"}, read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&iso), None, "{iso:?}");
+    assert_eq!(panel_reads(&iso)[0]["isolation_stack"], serde_json::json!([[0, 2]]), "the row is node: {iso:?}");
+}
+
+/// A context-menu step the menu cannot take is refused by name: with no
+/// secondary press directly before it, an item whose `enabled_when` fails
+/// (Options for Layer on a non-layer row), and a param that matches no item.
+#[test]
+fn a_context_menu_step_the_menu_cannot_take_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    for (steps, needle) in [
+        (serde_json::json!([{"context_menu": "duplicate_layer_selection"}]), "directly follow"),
+        (serde_json::json!([secondary_press(serde_json::json!([0, 1])), read_layers(),
+                            {"context_menu": "duplicate_layer_selection"}]), "directly follow"),
+        (serde_json::json!([secondary_press(serde_json::json!([0, 1])),
+                            {"context_menu": "open_layer_options", "params": {"mode": "edit"}}]), "Disabled"),
+        (serde_json::json!([secondary_press(serde_json::json!([1])),
+                            {"context_menu": "open_layer_options", "params": {"mode": "nope"}}]), "0 item(s)"),
+        (serde_json::json!([secondary_press(serde_json::json!([1])), {"context_menu": "no_such_action"}]), "0 item(s)"),
+    ] {
+        let mut st = steps.as_array().unwrap().clone();
+        st.push(serde_json::json!({"read": "document"}));
+        let out = replay_forms(&layers_script(Value::Array(st))).unwrap();
+        assert!(refusal(&out).unwrap_or_default().contains(needle), "{steps}: wanted `{needle}`, got {out:?}");
         assert!(doc_reads(&out).is_empty(), "a refusal ends the replay: {out:?}");
     }
 }
