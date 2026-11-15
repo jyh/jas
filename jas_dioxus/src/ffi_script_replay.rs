@@ -446,6 +446,53 @@ fn every_area_text_paragraph_script_moves_the_legacy_layout_and_no_two_move_it_a
 /// such event on the whole path is refused by name.
 fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope: &Value)
     -> Result<(Vec<usize>, Option<String>), String> {
+    let (path, chain) = row_chain(content, widget, row, scope)?;
+    // The walk ends on the widget, so the chain's last node is the widget.
+    let Some(at) = chain.iter().rposition(|(_, node, _)| declares(node, event)) else {
+        return Err(format!("no node on `{widget}`'s path in row {row:?} declares `{event}`"));
+    };
+    let (len, node, _) = &chain[at];
+    let to = (at + 1 != chain.len()).then(|| node.get("id").and_then(Value::as_str)
+        .map_or_else(|| format!("{:?}", &path[..*len]), str::to_string));
+    Ok((path[..*len].to_vec(), to))
+}
+
+/// Whether `node`'s `behavior:` declares `event` (an entry with no `event` is
+/// a click).
+fn declares(node: &Value, event: &str) -> bool {
+    node.get("behavior").and_then(Value::as_array).is_some_and(|b| b.iter()
+        .any(|entry| entry.get("event").and_then(Value::as_str).unwrap_or("click") == event))
+}
+
+/// The widget ITSELF in row `row`, with no bubbling: its path, its node and
+/// its row's scope. A text field's own events do not bubble (section 6: an
+/// `input` on a field that declares none fires nothing).
+fn row_widget(content: &Value, widget: &str, row: &[u64], scope: &Value)
+    -> Result<(Vec<usize>, Value, Value), String> {
+    let (path, mut chain) = row_chain(content, widget, row, scope)?;
+    let (_, node, scope) = chain.pop().expect("the walk ends on the widget");
+    Ok((path, node, scope))
+}
+
+/// The first node whose `id` is `widget`, anywhere under `node`.
+fn find_widget<'a>(node: &'a Value, widget: &str) -> Option<&'a Value> {
+    match node {
+        Value::Object(m) => {
+            if m.get("id").and_then(Value::as_str) == Some(widget) {
+                return Some(node);
+            }
+            m.values().find_map(|v| find_widget(v, widget))
+        }
+        Value::Array(a) => a.iter().find_map(|v| find_widget(v, widget)),
+        _ => None,
+    }
+}
+
+/// The walk from `content` to `widget` in row `row`: the widget's path, and
+/// each node on the way with the path length at it and the scope it renders in.
+#[allow(clippy::type_complexity)]
+fn row_chain(content: &Value, widget: &str, row: &[u64], scope: &Value)
+    -> Result<(Vec<usize>, Vec<(usize, Value, Value)>), String> {
     fn contains(node: &Value, widget: &str) -> bool {
         if node.get("id").and_then(Value::as_str) == Some(widget) {
             return true;
@@ -457,8 +504,8 @@ fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope:
         })
     }
     fn walk(node: &Value, widget: &str, row: &[u64], scope: &Value, path: &mut Vec<usize>, repeats: &mut usize,
-            chain: &mut Vec<(usize, Value)>) -> Result<bool, String> {
-        chain.push((path.len(), node.clone()));
+            chain: &mut Vec<(usize, Value, Value)>) -> Result<bool, String> {
+        chain.push((path.len(), node.clone(), scope.clone()));
         if node.get("id").and_then(Value::as_str) == Some(widget) {
             return Ok(true);
         }
@@ -505,16 +552,7 @@ fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope:
         1 => {}
         n => return Err(format!("`{widget}` sits under {n} foreach repeats; that address is `at`, not delivered")),
     }
-    let declares = |node: &Value| node.get("behavior").and_then(Value::as_array).is_some_and(|b| b.iter()
-        .any(|entry| entry.get("event").and_then(Value::as_str).unwrap_or("click") == event));
-    // The walk ends on the widget, so the chain's last node is the widget.
-    let Some(at) = chain.iter().rposition(|(_, node)| declares(node)) else {
-        return Err(format!("no node on `{widget}`'s path in row {row:?} declares `{event}`"));
-    };
-    let (len, node) = &chain[at];
-    let to = (at + 1 != chain.len()).then(|| node.get("id").and_then(Value::as_str)
-        .map_or_else(|| format!("{:?}", &path[..*len]), str::to_string));
-    Ok((path[..*len].to_vec(), to))
+    Ok((path, chain))
 }
 
 /// A store value in the canonical form `read: panel` emits: path markers as
@@ -590,6 +628,28 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
         // The panel a key goes to: the last panel step's, until a pointer or
         // menu step moves the focus to the canvas or the menubar.
         let mut focus: Option<String> = None;
+        // The text field that holds key focus after an `input` step, and the
+        // text it holds: (panel, widget, row, text). Re-resolved at each use,
+        // because the row's scope (`panel.renaming_element`) moves under it.
+        let mut field: Option<(String, String, Option<Vec<u64>>, String)> = None;
+        // A widget by id, or by `row` with no bubbling: its path (by row
+        // only), its node and the scope its expressions read.
+        #[allow(clippy::type_complexity)]
+        let resolve = |panel: &str, widget: &str, row: &Option<Vec<u64>>|
+            -> Result<(Option<Vec<usize>>, Value, Value), String> {
+            let (Some(spec), Some(scope)) = (
+                crate::interpreter::workspace::Workspace::load().and_then(|ws| ws.panel(panel).cloned()),
+                engine.script_panel_scope(panel)) else {
+                return Err(format!("UnknownPanel {panel}"));
+            };
+            let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
+            let content = spec.get("content").cloned().unwrap_or(Value::Null);
+            match row {
+                Some(r) => row_widget(&content, widget, r, &scope).map(|(p, n, sc)| (Some(p), n, sc)),
+                None => find_widget(&content, widget).cloned().map(|n| (None, n, scope.clone()))
+                    .ok_or_else(|| format!("widget `{widget}` is not in the panel")),
+            }
+        };
         for (i, st) in steps.iter().enumerate() {
             let refuse = |out: &mut Vec<Value>, why: String| out.push(json!({"step": i, "refused": why}));
             let ran = |out: &mut Vec<Value>, reply: Option<String>, err: String| -> bool {
@@ -631,6 +691,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 }
             } else if let Some(kind) = st.get("kind").and_then(Value::as_str) {
                 focus = None;
+                field = None;
                 let k = match kind {
                     "press" => KIND_PRESS,
                     "move" => KIND_MOVE,
@@ -653,6 +714,38 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     refuse(&mut out, format!("the pointer was refused: {}", last_error(e)));
                     break;
                 }
+            } else if let (Some(key), Some((fpanel, fwidget, frow, ftext))) =
+                (st.get("key").and_then(Value::as_str), field.clone()) {
+                // The field that holds key focus takes the key as its
+                // `keydown`, with its text as `event.value`. Typing is the
+                // `input` form, so a key the field declares nothing for is
+                // refused, never dropped.
+                let (path, node, _) = match resolve(&fpanel, &fwidget, &frow) {
+                    Ok(t) => t,
+                    Err(why) => { refuse(&mut out, why); break; }
+                };
+                let unbound = format!("UnboundFieldKey {fwidget}: {key}");
+                if !declares(&node, "keydown") {
+                    refuse(&mut out, unbound);
+                    break;
+                }
+                let mut ev = json!({"widget": fwidget, "event": "keydown", "key": key, "value": ftext,
+                    "shift": flag(st, "shift"), "alt": flag(st, "alt"), "ctrl": flag(st, "ctrl")});
+                if let Some(p) = path {
+                    ev["path"] = json!(p);
+                }
+                let ev = ev.to_string();
+                let reply = take(unsafe { jas_panel_behavior(e, fpanel.as_ptr(), fpanel.len(), ev.as_ptr(), ev.len()) });
+                let err = last_error(e);
+                if reply.is_some() && err.contains("Unchanged") {
+                    refuse(&mut out, unbound);
+                    break;
+                }
+                if !ran(&mut out, reply, err) {
+                    break;
+                }
+                field = None;
+                focus = Some(fpanel);
             } else if let Some(key) = st.get("key").and_then(Value::as_str) {
                 let mods = json!({"shift": flag(st, "shift"), "alt": flag(st, "alt"),
                                   "ctrl": flag(st, "ctrl"), "meta": flag(st, "meta")});
@@ -672,6 +765,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 }
             } else if let Some(menu_id) = st.get("menu").and_then(Value::as_str) {
                 focus = None;
+                field = None;
                 let req = json!({"menu_item": menu_id}).to_string();
                 let reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
                 if !ran(&mut out, reply, last_error(e)) {
@@ -690,6 +784,13 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     refuse(&mut out, "`at` is not delivered by this runner".to_string());
                     break;
                 }
+                // F1 (row 135): refused by its own name. Run as the pressed
+                // row's own events, the drop's `to` would be dropped and read
+                // as measured.
+                if event == "drag" || st.get("to").is_some() || st.get("hover_ms").is_some() {
+                    refuse(&mut out, "a row drag is not delivered by this runner".to_string());
+                    break;
+                }
                 let row = match st.get("row") {
                     None => None,
                     Some(r) => match r.as_array().and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()) {
@@ -697,6 +798,76 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         None => { refuse(&mut out, format!("row {r} is not a path")); break; }
                     },
                 };
+                let kind = crate::interpreter::workspace::Workspace::load()
+                    .and_then(|ws| ws.panel(panel).and_then(|p| find_widget(&p["content"], widget))
+                        .and_then(|n| n.get("type")).and_then(Value::as_str).map(str::to_string));
+                let text_form = kind.as_deref() == Some("text_input") && ["input", "blur", "commit"].contains(&event);
+                let pick_form = kind.as_deref() == Some("dropdown") && event == "commit";
+                if text_form || pick_form {
+                    let (path, node, scope) = match resolve(panel, widget, &row) {
+                        Ok(t) => t,
+                        Err(why) => { refuse(&mut out, why); break; }
+                    };
+                    let mut ev = json!({"widget": widget,
+                        "shift": flag(st, "shift"), "alt": flag(st, "alt"), "ctrl": flag(st, "ctrl")});
+                    if let Some(p) = path {
+                        ev["path"] = json!(p);
+                    }
+                    if pick_form {
+                        field = None;
+                        ev["event"] = json!(if flag(st, "alt") { "alt_toggle" } else { "toggle" });
+                        ev["value"] = st.get("value").cloned().unwrap_or(Value::Null);
+                    } else {
+                        // The field's text: what an `input` typed into this
+                        // same field, else what its `bind.value` shows.
+                        let mut text = node.get("bind").and_then(|b| b.get("value")).and_then(Value::as_str)
+                            .map(|x| crate::interpreter::expr::eval(x, &scope).to_string_coerce())
+                            .unwrap_or_default();
+                        if let Some((fp, fw, fr, ft)) = &field {
+                            if fp == panel && fw == widget && *fr == row {
+                                text = ft.clone();
+                            }
+                        }
+                        if let Some(v) = st.get("value").and_then(Value::as_str) {
+                            text = v.to_string();
+                        }
+                        let name = match event {
+                            // section 6: sets the text, fires the declared
+                            // `input` once, and the field keeps key focus.
+                            "input" => {
+                                field = Some((panel.to_string(), widget.to_string(), row.clone(), text.clone()));
+                                "input"
+                            }
+                            // section 6: a commit types the value, then
+                            // presses Enter.
+                            "commit" => {
+                                field = None;
+                                ev["key"] = json!("Enter");
+                                "keydown"
+                            }
+                            _ => {
+                                field = None;
+                                "blur"
+                            }
+                        };
+                        ev["event"] = json!(name);
+                        ev["value"] = json!(text);
+                        if !declares(&node, name) {
+                            // A field that declares no such event fires nothing.
+                            out.push(json!({"step": i, "unchanged": true}));
+                            focus = Some(panel.to_string());
+                            continue;
+                        }
+                    }
+                    let ev = ev.to_string();
+                    let reply = take(unsafe { jas_panel_behavior(e, panel.as_ptr(), panel.len(), ev.as_ptr(), ev.len()) });
+                    if !ran(&mut out, reply, last_error(e)) {
+                        break;
+                    }
+                    focus = Some(panel.to_string());
+                    continue;
+                }
+                field = None;
                 // Form 6: a double click delivers ONE click, then the double.
                 let events: &[&str] = if event == "double_click" { &["click", "double_click"] } else { &[event] };
                 let mut ok = true;
@@ -966,6 +1137,117 @@ fn each_unrunnable_form_is_refused_by_name() {
         assert!(why.contains(needle), "{step}: wanted a refusal naming `{needle}`, got {out:?}");
         assert!(panel_reads(&out).is_empty(), "a refusal ends the replay: {out:?}");
     }
+}
+
+// The S2 text and dropdown forms (TESTING.md section 6, row 136): the twins
+// of Swift's `formsAnInputStep…`, `formsADropdownCommit…`, `formsARowCommit…`,
+// `formsAnInputOnAField…` and `formsARowDrag…`.
+
+/// The name at `path` in the LAST document read of a replay.
+fn name_at(out: &[Value], path: &[usize]) -> Value {
+    doc_reads(out).last().map(|d| doc_element(d, path)["name"].clone()).unwrap_or(Value::Null)
+}
+
+/// Row [0, 1]'s rename field, open: a click, then the double-click that runs
+/// `rename_element` (S2's own preamble, SI-4).
+fn open_rename_01() -> Vec<Value> {
+    vec![
+        click_row(serde_json::json!([0, 1]), &[]),
+        serde_json::json!({"panel": LAYERS, "widget": "lp_name", "row": [0, 1], "event": "double_click"}),
+    ]
+}
+
+fn edit_01(event: &str, value: Option<&str>) -> Value {
+    let mut st = serde_json::json!({"panel": LAYERS, "widget": "lp_name_edit", "row": [0, 1], "event": event});
+    if let Some(v) = value {
+        st["value"] = Value::String(v.to_string());
+    }
+    st
+}
+
+fn with(mut steps: Vec<Value>, more: Vec<Value>) -> Value {
+    steps.extend(more);
+    Value::Array(steps)
+}
+
+#[test]
+fn an_input_step_fires_the_fields_declared_input_with_its_value() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"panel": LAYERS, "widget": "lp_search_input", "event": "input", "value": "line"}, read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(panel_reads(&out)[0]["search_query"], serde_json::json!("line"), "{out:?}");
+}
+
+#[test]
+fn a_dropdown_commit_picks_the_item_by_value() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let pick = |v: &str, alt: bool| serde_json::json!(
+        {"panel": LAYERS, "widget": "lp_filter_button", "event": "commit", "value": v, "alt": alt});
+    let filter = |steps: Vec<Value>| -> Value {
+        let out = replay_forms(&layers_script(with(steps, vec![read_layers()]))).unwrap();
+        assert_eq!(refusal(&out), None, "{out:?}");
+        let mut f: Vec<String> = panel_reads(&out).last().and_then(|r| r["type_filter"].as_array().cloned())
+            .unwrap_or_default().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        f.sort();
+        serde_json::json!(f)
+    };
+    assert_eq!(filter(vec![pick("circle", false)]), serde_json::json!(["circle"]));
+    assert_eq!(filter(vec![pick("circle", false), pick("circle", false)]), serde_json::json!([]), "a second toggle unticks");
+    assert_eq!(filter(vec![pick("circle", false), pick("__all__", false)]), serde_json::json!([]), "All restores the default");
+    assert_eq!(filter(vec![pick("circle", false), pick("rectangle", false)]), serde_json::json!(["circle", "rectangle"]));
+    assert_eq!(filter(vec![pick("circle", false), pick("rectangle", true)]), serde_json::json!(["rectangle"]), "Alt solos");
+    let bad = replay_forms(&layers_script(serde_json::json!([pick("no_such_type", false), read_layers()]))).unwrap();
+    assert!(refusal(&bad).is_some(), "an item no menu holds is refused: {bad:?}");
+}
+
+#[test]
+fn a_row_commit_types_the_value_then_presses_enter() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(with(open_rename_01(),
+        vec![edit_01("commit", Some("Ring")), read_layers(), serde_json::json!({"read": "document"})]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(name_at(&out, &[0, 1]), serde_json::json!("Ring"), "{out:?}");
+    assert_eq!(panel_reads(&out)[0]["renaming_element"], Value::Null, "the field closes: {out:?}");
+}
+
+#[test]
+fn an_input_on_a_field_with_no_input_sets_its_text_and_the_next_key_goes_to_it() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let esc = replay_forms(&layers_script(with(open_rename_01(), vec![
+        edit_01("input", Some("Ring")), serde_json::json!({"key": "Escape"}), read_layers(),
+        serde_json::json!({"read": "document"}),
+    ]))).unwrap();
+    assert_eq!(refusal(&esc), None, "{esc:?}");
+    assert!(esc.iter().any(|r| r["step"] == 2 && r["unchanged"] == true), "the input fires nothing: {esc:?}");
+    assert_ne!(name_at(&esc, &[0, 1]), serde_json::json!("Ring"), "Escape: {esc:?}");
+    assert_eq!(panel_reads(&esc)[0]["renaming_element"], Value::Null, "Escape closes the field: {esc:?}");
+
+    let blur = replay_forms(&layers_script(with(open_rename_01(), vec![
+        edit_01("input", Some("Ring")), edit_01("blur", None), serde_json::json!({"read": "document"}),
+    ]))).unwrap();
+    assert_eq!(refusal(&blur), None, "{blur:?}");
+    assert_eq!(name_at(&blur, &[0, 1]), serde_json::json!("Ring"), "a blur confirms the typed text: {blur:?}");
+
+    // The control: the same blur with no typing confirms the name unchanged.
+    let plain = replay_forms(&layers_script(with(open_rename_01(), vec![
+        edit_01("blur", None), serde_json::json!({"read": "document"}),
+    ]))).unwrap();
+    assert_eq!(refusal(&plain), None, "{plain:?}");
+    assert_ne!(name_at(&plain, &[0, 1]), serde_json::json!("Ring"), "{plain:?}");
+}
+
+/// A row drag is refused by NAME until it is built: run as the pressed row's
+/// own events, the drop's `to` would be dropped and read as measured.
+#[test]
+fn a_row_drag_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"panel": LAYERS, "widget": "lp_name", "row": [0, 0], "event": "drag",
+         "to": {"row": [0, 2], "zone": "into"}, "hover_ms": 0}, read_layers(),
+    ]))).unwrap();
+    assert!(refusal(&out).unwrap_or_default().contains("a row drag is not delivered by this runner"), "{out:?}");
 }
 
 /// THE M3 DOOR: `JAS_FORMS_DIR=<dir>` replays every `*.json` script there that
