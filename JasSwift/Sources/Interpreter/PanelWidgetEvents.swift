@@ -78,6 +78,21 @@ struct PanelWidgetEvents {
         }
     }
 
+    /// Deliver `input`, `keydown` or `blur` to a text field
+    /// (``WidgetEvent/textEntry``) in this route's scope: a Layers row's
+    /// rename field, reached by a script's `row` step, has the row's `node`
+    /// in ``scope``.
+    @discardableResult
+    func textEntry(_ widget: [String: Any], event: String, text: String?, key: String? = nil,
+                   modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
+        run { host, panel, ws in
+            WidgetEvent.textEntry(widget: widget, event: event, store: model.stateStore,
+                                  panel: panel, text: text, key: key, modifiers: modifiers,
+                                  actions: ws?.actions(), dialogs: ws?.dialogs(),
+                                  platformEffects: platformEffects, model: model, host: host)
+        }
+    }
+
     @discardableResult
     func click(_ widget: [String: Any], modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
         run { host, panel, ws in

@@ -7694,7 +7694,7 @@ private func formsPath(_ v: Any?) -> [Int]? {
 /// the widget first, that declares it. `bubbledTo` names that node when it is
 /// not the widget. Refusals mirror the Rust runner's, by name.
 private func formsRowTarget(_ content: Any?, widget: String, event: String, row: [Int],
-                            scope: [String: Any])
+                            scope: [String: Any], exact: Bool = false)
     -> Result<(node: [String: Any], scope: [String: Any], bubbledTo: String?), FormsRefusal> {
     func contains(_ n: Any?) -> Bool {
         guard let d = n as? [String: Any] else { return false }
@@ -7737,6 +7737,9 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
     }
     if repeats == 0 { return .failure(FormsRefusal("`row` on `\(widget)`, which no foreach repeats")) }
     if repeats > 1 { return .failure(FormsRefusal("`\(widget)` sits under \(repeats) foreach repeats; that address is `at`, not delivered")) }
+    // A text field's own events do not bubble (§6: an `input` on a field that
+    // declares none fires nothing), so the target is the widget itself.
+    if exact { return .success((chain.last!.0, chain.last!.1, nil)) }
     func declares(_ n: [String: Any]) -> Bool {
         ((n["behavior"] as? [Any]) ?? []).contains { (($0 as? [String: Any])?["event"] as? String ?? "click") == event }
     }
@@ -7799,6 +7802,11 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
     var out: [[String: Any]] = []
     var stopped = false
     var focus: String? = nil
+    // The text field that holds key focus after an `input` step, and the text
+    // it holds (§6: `input` sets a field's text; the key after it goes to the
+    // widget that holds key focus). Re-resolved at each use, because the row's
+    // scope (`panel.renaming_element`) moves under it.
+    var field: (pid: String, widget: String, row: [Int]?, text: String)? = nil
     // The focus is a fact of step ORDER (a panel step takes it, a pointer or
     // menu step gives it to the canvas), so a key with no panel focus goes to
     // the gesture runner as a canvas key, as the Rust runner sends it.
@@ -7839,9 +7847,34 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             }
             return
         }
-        if st["__pointer"] != nil { focus = nil; return }
+        if st["__pointer"] != nil { focus = nil; field = nil; return }
         if let why = st["__refuse"] as? String { return refuse(why) }
         let flag = { (k: String) in (st[k] as? Bool) ?? false }
+        let mods: [String: Any] = ["shift": flag("shift"), "alt": flag("alt"), "ctrl": flag("ctrl"), "meta": false]
+        // A widget by id, or by `row` with no bubbling, in the scope the dock
+        // renders the panel with.
+        func resolve(_ pid: String, _ widget: String, _ row: [Int]?)
+            -> Result<(node: [String: Any], scope: [String: Any]), FormsRefusal> {
+            let ws = WorkspaceData.load()!
+            guard let panel = ws.panel(pid) else { return .failure(FormsRefusal("UnknownPanel \(pid)")) }
+            if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+            let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+            if let row = row {
+                return formsRowTarget(panel["content"], widget: widget, event: "", row: row, scope: scope, exact: true)
+                    .map { (node: $0.node, scope: $0.scope) }
+            }
+            guard let node = WidgetEvent.findWidget(in: panel["content"], id: widget) else {
+                return .failure(FormsRefusal("widget `\(widget)` is not in the panel"))
+            }
+            return .success((node: node, scope: scope))
+        }
+        func record(_ r: WidgetEvent.Result) {
+            switch r.outcome {
+            case "committed": break
+            case "inert": out.append(["step": i, "unchanged": true])
+            default: refuse("\(r.outcome): \(r.reason ?? "")")
+            }
+        }
         if let kind = st["read"] as? String {
             switch kind {
             case "document":
@@ -7856,6 +7889,20 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             default:
                 refuse("read: \(kind) is not delivered by this runner")
             }
+        } else if let key = st["key"] as? String, let f = field {
+            // The field that holds key focus takes the key as its `keydown`,
+            // with its text as `event.value`. Typing is the `input` form, so
+            // a key the field declares nothing for is refused, never dropped.
+            switch resolve(f.pid, f.widget, f.row) {
+            case .failure(let r): return refuse(r.why)
+            case .success(let t):
+                let r = PanelWidgetEvents(model: model, panelId: f.pid, scope: t.scope)
+                    .textEntry(t.node, event: "keydown", text: f.text, key: key, modifiers: mods)
+                if r.outcome == "inert" { return refuse("UnboundFieldKey \(f.widget): \(key)") }
+                record(r)
+                field = nil
+                focus = f.pid
+            }
         } else if let key = st["key"] as? String {
             guard let pid = focus else {
                 return refuse("a key with no panel focus is a gesture key; this runner takes keys after a panel step only")
@@ -7865,6 +7912,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             if !LayersPanel.treeKey(chord, model: model) { refuse("UnboundPanelKey \(pid): \(key)") }
         } else if let menuId = st["menu"] as? String {
             focus = nil
+            field = nil
             if !runScriptMenuStep(menuId, model: model) { refuse("the menu item did not run") }
         } else if let pid = st["panel"] as? String {
             guard let widget = st["widget"] as? String, let event = st["event"] as? String else {
@@ -7872,18 +7920,69 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             }
             if flag("meta") { return refuse("meta on a panel step is refused (TESTING.md section 6)") }
             if st["at"] != nil { return refuse("`at` is not delivered by this runner") }
-            guard let row = st["row"] else {
+            // F1 (row 135): refused by its own name. Run as the pressed row's
+            // own events, the drop's `to` would be dropped and read as measured.
+            if event == "drag" || st["to"] != nil || st["hover_ms"] != nil {
+                return refuse("a row drag is not delivered by this runner")
+            }
+            let row: [Int]?
+            if let r = st["row"] {
+                guard let p = formsPath(r) else { return refuse("row \(r) is not a path") }
+                row = p
+            } else {
+                row = nil
+            }
+            let kind = WidgetEvent.findWidget(in: WorkspaceData.load()?.panel(pid)?["content"], id: widget)?["type"] as? String
+            let textForm = kind == "text_input" && ["input", "blur", "commit"].contains(event)
+            let pickForm = kind.map { WidgetEvent.itemKinds.contains($0) } == true && event == "commit"
+            if textForm || pickForm {
+                switch resolve(pid, widget, row) {
+                case .failure(let r): return refuse(r.why)
+                case .success(let t):
+                    let route = PanelWidgetEvents(model: model, panelId: pid, scope: t.scope)
+                    let value = st["value"] as? String
+                    if pickForm {
+                        field = nil
+                        record(route.pick(t.node, value: value ?? "", alt: flag("alt")))
+                        focus = pid
+                        return
+                    }
+                    // The field's text: what an `input` typed into this same
+                    // field, else what its `bind.value` shows.
+                    var text = ((t.node["bind"] as? [String: Any])?["value"] as? String)
+                        .map { evaluate($0, context: t.scope).toStringCoerce() } ?? ""
+                    if let f = field, f.pid == pid, f.widget == widget, f.row == row { text = f.text }
+                    if let v = value { text = v }
+                    switch event {
+                    case "input":
+                        // §6: sets the text, fires the declared `input` once,
+                        // and the field keeps key focus.
+                        let r = route.textEntry(t.node, event: "input", text: text, modifiers: mods)
+                        record(r)
+                        field = (pid, widget, row, text)
+                    case "commit":
+                        // §6: a commit types the value, then presses Enter.
+                        field = nil
+                        record(route.textEntry(t.node, event: "keydown", text: text, key: "Enter", modifiers: mods))
+                    default:
+                        field = nil
+                        record(route.textEntry(t.node, event: "blur", text: text, modifiers: mods))
+                    }
+                    focus = pid
+                }
+                return
+            }
+            field = nil
+            guard let rowPath = row else {
                 // Addressed by id: the existing level-1 route, which refuses a
                 // repeated widget as the engine does.
                 if !runScriptPanelStep(st, model: model) { refuse("the panel act did not run (NotAddressable or refused)") }
                 focus = pid
                 return
             }
-            guard let rowPath = formsPath(row) else { return refuse("row \(row) is not a path") }
             let ws = WorkspaceData.load()!
             guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
             if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
-            let mods: [String: Any] = ["shift": flag("shift"), "alt": flag("alt"), "ctrl": flag("ctrl"), "meta": false]
             for name in event == "double_click" ? ["click", "double_click"] : [event] {
                 let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
                 switch formsRowTarget(panel["content"], widget: widget, event: name, row: rowPath, scope: scope) {
@@ -8088,6 +8187,98 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
         #expect((formsRefusal(out) ?? "").contains(needle), "\(step): wanted `\(needle)`, got \(out)")
         #expect(formsPanelReads(out).isEmpty, "a refusal ends the replay: \(out)")
     }
+}
+
+// MARK: - The S2 text and dropdown forms (TESTING.md §6, row 135)
+
+private func formsNameAt(_ out: [[String: Any]], _ path: [Int]) -> String {
+    formsDocElement(formsDocReads(out).last, path).map { "\($0["name"] ?? "nil")" } ?? "no element"
+}
+
+/// The rename field of row [0, 1], open: a click, then the double-click that
+/// runs `rename_element` (S2's own preamble, SI-4).
+private let formsOpenRename01: [[String: Any]] = [
+    formsClickRow([0, 1]),
+    ["panel": formsLayers, "widget": "lp_name", "row": [0, 1], "event": "double_click"],
+]
+
+private func formsEdit(_ event: String, _ value: String?) -> [String: Any] {
+    var st: [String: Any] = ["panel": formsLayers, "widget": "lp_name_edit", "row": [0, 1], "event": event]
+    if let v = value { st["value"] = v }
+    return st
+}
+
+/// `input` by id sets the field's text and fires its declared `input` once,
+/// with `event.value` the whole text: `lp_search_input` writes the query.
+@Test func formsAnInputStepFiresTheFieldsDeclaredInputWithItsValue() {
+    let out = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_search_input", "event": "input", "value": "line"], formsReadLayers,
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    #expect(formsPanelReads(out).first?["search_query"] as? String == "line", "\(out)")
+}
+
+/// A `commit` on a dropdown names the item by its VALUE and picks it, as a
+/// person picks it: a toggle item toggles, Alt solos, an action item runs.
+@Test func formsADropdownCommitPicksTheItemByValue() {
+    func filter(_ steps: [[String: Any]]) -> [String]? {
+        let out = formsRun(formsLayersScript(steps + [formsReadLayers]))
+        if let why = formsRefusal(out) { Issue.record("refused: \(why)"); return nil }
+        return (formsPanelReads(out).last?["type_filter"] as? [Any])?.compactMap { $0 as? String }
+    }
+    func pick(_ v: String, alt: Bool = false) -> [String: Any] {
+        var st: [String: Any] = ["panel": formsLayers, "widget": "lp_filter_button", "event": "commit", "value": v]
+        if alt { st["alt"] = true }
+        return st
+    }
+    #expect(filter([pick("circle")]) == ["circle"])
+    #expect(filter([pick("circle"), pick("circle")]) == [], "a second toggle unticks")
+    #expect(filter([pick("circle"), pick("__all__")]) == [], "All restores the default")
+    #expect(filter([pick("circle"), pick("rectangle")]).map(Set.init) == ["circle", "rectangle"])
+    #expect(filter([pick("circle"), pick("rectangle", alt: true)]) == ["rectangle"], "Alt solos")
+    let bad = formsRun(formsLayersScript([pick("no_such_type"), formsReadLayers]))
+    #expect(formsRefusal(bad) != nil, "an item no menu holds is refused: \(bad)")
+}
+
+/// A per-row `commit` types the value into the row's field and presses
+/// Enter: `lp_name_edit` declares `keydown` Enter → `confirm_rename`.
+@Test func formsARowCommitTypesTheValueThenPressesEnter() {
+    let out = formsRun(formsLayersScript(formsOpenRename01 + [formsEdit("commit", "Ring"), formsReadLayers, ["read": "document"]]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    #expect(formsNameAt(out, [0, 1]) == "Ring", "\(out)")
+    #expect(formsPanelReads(out).first?["renaming_element"] is NSNull, "the field closes: \(out)")
+}
+
+/// `input` on a field that declares none sets its text and fires nothing
+/// (§6); the key that follows goes to that FIELD, so Escape cancels and the
+/// typed text never lands, while a blur confirms the typed text.
+@Test func formsAnInputOnAFieldWithNoInputSetsItsTextAndTheNextKeyGoesToIt() {
+    let esc = formsRun(formsLayersScript(formsOpenRename01 + [formsEdit("input", "Ring"), ["key": "Escape"],
+                                                               formsReadLayers, ["read": "document"]]))
+    #expect(formsRefusal(esc) == nil, "\(esc)")
+    #expect(esc.contains { $0["step"] as? Int == 2 && $0["unchanged"] as? Bool == true }, "the input fires nothing: \(esc)")
+    #expect(formsNameAt(esc, [0, 1]) != "Ring", "Escape: \(esc)")
+    #expect(formsPanelReads(esc).first?["renaming_element"] is NSNull, "Escape closes the field: \(esc)")
+
+    let blur = formsRun(formsLayersScript(formsOpenRename01 + [formsEdit("input", "Ring"), formsEdit("blur", nil),
+                                                                ["read": "document"]]))
+    #expect(formsRefusal(blur) == nil, "\(blur)")
+    #expect(formsNameAt(blur, [0, 1]) == "Ring", "a blur confirms the typed text: \(blur)")
+
+    // The control: the same blur with no typing confirms the name unchanged.
+    let plain = formsRun(formsLayersScript(formsOpenRename01 + [formsEdit("blur", nil), ["read": "document"]]))
+    #expect(formsRefusal(plain) == nil, "\(plain)")
+    #expect(formsNameAt(plain, [0, 1]) != "Ring", "\(plain)")
+}
+
+/// A row drag is refused by NAME until it is built: a runner that ran the
+/// pressed row's own events and dropped `to` would read as measured.
+@Test func formsARowDragIsRefusedByName() {
+    let out = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_name", "row": [0, 0], "event": "drag",
+         "to": ["row": [0, 2], "zone": "into"], "hover_ms": 0], formsReadLayers,
+    ]))
+    #expect((formsRefusal(out) ?? "").contains("a row drag is not delivered by this runner"), "\(out)")
 }
 
 /// THE M3 DOOR, Swift's twin of Rust's `forms_replay_of_a_named_script_directory`:

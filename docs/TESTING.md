@@ -255,7 +255,8 @@ marked PROPOSED and never gates.
 * **`"event": "input"` with `"value"`** sets a field's text and fires its declared `input` behaviour once, with the final
   value (`lp_search_input`). It fires nothing when the field declares no `input` (`lp_name_edit`, which can still be typed
   into and then left by Escape or blur). **`"event": "blur"`** (optionally with `row`) fires the declared `blur`
-  behaviour (the rename field). A step names the event the widget DECLARES, and `commit` is never a stand-in for `input`.
+  behaviour (the rename field). Its `event.value` is the field's text: what an `input` step typed into that same field,
+  else what the field's `bind.value` shows. A step names the event the widget DECLARES, and `commit` is never a stand-in for `input`.
 * **`{"read": "panel", "panel": "<content id>"}`** compares that panel's declared `state:` keys with the script's
   `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
   the panel selection, for one, is in no document.
@@ -271,6 +272,16 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   row. The runner records where a step bubbled to. A step addressed by id alone does not bubble.
 * **Still refused by name there:** `at`, `hold_ms`, a row drag, the `dialog` / `context_menu` / `panel_menu` steps,
   `{"read": "panel_menu"}`, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. It also delivers the
+  text and dropdown forms, which the Rust runner does not deliver yet (row 135):
+  * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,
+    so a field that declares no `input` fires nothing and the step is recorded `unchanged`.
+  * After an `input`, the field holds key focus. The next key goes to the field as its `keydown`, carrying the field's
+    text, and a key the field declares nothing for is refused (`UnboundFieldKey`).
+  * A per-row `commit` types the value and then sends `keydown` Enter.
+  * `blur` carries the typed text, or the field's `bind.value` when nothing was typed.
+  * A dropdown `commit` picks the item by `value`, and Alt picks it as `alt_toggle`.
+  * A row drag is refused by its own name: `a row drag is not delivered by this runner`.
 * `JAS_FORMS_DIR=<dir>` (with `JAS_FORMS_SHA=<sha>`) replays a directory of PROPOSED scripts. It writes their read-backs
   to one JSON file for a settling day to read, and it is not a gate. Swift's runner follows (Rust first).
 
