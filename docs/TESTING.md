@@ -242,6 +242,34 @@ marked PROPOSED and never gates.
 * **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
   "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
   hovering there that long.
+  * **A level-1 runner delivers it as the row's three declared events.**
+    1. `drag_start` goes to the pressed row.
+    2. `drag_move` goes to the target row, with `event.hover_ms`.
+    3. `drag_end` goes to the target row, with `event.zone`, `event.drop_parent`, `event.drop_index` and
+       `event.drop_valid`.
+  * **The runner computes the `drop_*` fields by this rule (row 137). A shell realises the same rule from the pointer.**
+    * **Resolve the drop to ELEMENTS before anything moves:** the target parent, and the target row's element by
+      identity (spec's S2-12).
+    * **`into`** (a container only; a leaf row has only `before` and `after`): `drop_parent` is the target. The
+      dragged elements become its topmost children, which are the last children in document order. So
+      `drop_index` is the parent's child count after the dragged elements are removed.
+    * **`before`** puts the dragged elements above the target in z order, and **`after`** puts them below it. The
+      tree draws topmost first. `drop_parent` is the target's parent.
+    * `drop_index` is the target element's index among its siblings, **read AFTER the dragged elements are
+      removed** (S2-14), counted among the parent's children in DOCUMENT order with 0 = the bottom child (drawn
+      last): plus 1 for `before`, unchanged for `after`. An index taken before the removal is off by
+      one for every same-parent move from below the target (`drag_leaf_after`, `drag_shifts_collapsed_sibling`).
+    * **`drop_valid`** is `move_elements`' own validity check (the S2 spec's one authority for validity), never a
+      second copy of its rules. It is false when ANY dragged element fails one of the S2 spec's five rules:
+      1. the parent is the element itself or one of its descendants;
+      2. the parent is locked, by its own flag or an ancestor's;
+      3. a layer goes anywhere but the root or a layer, or a non-layer goes to the root;
+      4. a search or type filter is active;
+      5. in isolation, the parent is outside the isolated container.
+  * **Where no node declares an action for `drag_move` or `drag_end`, the step changes nothing and reads
+    `unchanged`.** That is the case at the control and on main today. The drop's document read then cannot be told
+    from a refusal. This rule tests the receiving `move_elements` and never a shell's own conversion from the
+    pointer, which only a level-2 driver sees.
 * **A key step after a panel step** (spec's S1: the tree's arrows and Ctrl+A) is delivered to the widget that holds key
   focus after that panel step, not to the canvas. Today a key after a panel step is refused by name, as above.
 * **A dropdown item by value**: a `commit` on a `dropdown` names the item by its `value`, never its label, and carries the
