@@ -93,6 +93,17 @@ struct PanelWidgetEvents {
         }
     }
 
+    /// Run item `index` of `widget`'s `context_menu:` in this route's scope
+    /// (``WidgetEvent/contextMenuItem``): a Layers row's, with its `node`.
+    @discardableResult
+    func contextMenuItem(_ widget: [String: Any], index: Int) -> WidgetEvent.Result {
+        run { host, _, ws in
+            WidgetEvent.contextMenuItem(widget: widget, index: index, store: model.stateStore,
+                                        actions: ws?.actions(), dialogs: ws?.dialogs(),
+                                        platformEffects: platformEffects, model: model, host: host)
+        }
+    }
+
     @discardableResult
     func click(_ widget: [String: Any], modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
         run { host, panel, ws in

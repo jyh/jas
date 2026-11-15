@@ -720,6 +720,37 @@ enum WidgetEvent {
 
     // MARK: - Behaviors
 
+    /// Design section 8 form 2 (row 139): run item `index` of `widget`'s
+    /// `context_menu:` in this event's scope (`host.scope`, a row's). The twin
+    /// of Rust's `jas_panel_behavior` event `context_menu`. A separator, an
+    /// index past the list, or an item whose `enabled_when` fails is refused by
+    /// name. The action is resolved as a template (as a menu label is) and runs
+    /// with the item's declared params, evaluated as a behaviour's.
+    static func contextMenuItem(
+        widget: [String: Any], index: Int, store: StateStore,
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        guard let items = widget["context_menu"] as? [Any] else {
+            return Result(outcome: "refused", reason: "NoContextMenu")
+        }
+        guard index >= 0, index < items.count, let item = items[index] as? [String: Any] else {
+            return Result(outcome: "refused", reason: "NoContextMenuItem")
+        }
+        let ctx = host.scope ?? store.evalContext()
+        if let cond = item["enabled_when"] as? String, !evaluate(cond, context: ctx).toBool() {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        let action = (item["action"] as? String).map { evaluateText($0, context: ctx) } ?? ""
+        guard !action.isEmpty else { return Result(outcome: "refused", reason: "EmptyBehavior") }
+        var entry: [String: Any] = ["action": action]
+        if let p = item["params"] { entry["params"] = p }
+        let ran = runBehaviors([entry], value: nil, store: store, actions: actions, dialogs: dialogs,
+                               platformEffects: platformEffects, model: model, host: host)
+        return Result(outcome: ran > 0 ? "committed" : "inert", behaviorsRun: ran)
+    }
+
     private static func declared(_ widget: [String: Any], events: [String]) -> [[String: Any]] {
         (widget["behavior"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
             .filter { ($0["event"] as? String).map(events.contains) ?? false }
