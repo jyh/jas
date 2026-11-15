@@ -7959,8 +7959,15 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                     switch formsRowTarget(panel["content"], widget: widget, event: name, row: at, scope: scope) {
                     case .failure(let r): return refuse(r.why)
                     case .success(let t):
-                        if name != "drag_start", let why = formsDragEntryRefusal(t.node, event: name) { return refuse(why) }
                         if let to = t.bubbledTo { out.append(["step": i, "event": name, "bubbled_to": to]) }
+                        // An entry that declares no act runs nothing in any
+                        // port: recorded `unchanged` without a door call, as
+                        // Rust's runner records it.
+                        guard name == "drag_start" || formsDragEntryRefusal(t.node, event: name) != nil else {
+                            out.append(["step": i, "unchanged": true])
+                            continue
+                        }
+                        if name != "drag_start", let why = formsDragEntryRefusal(t.node, event: name) { return refuse(why) }
                         record(PanelWidgetEvents(model: model, panelId: pid, scope: t.scope)
                             .behavior(t.node, event: name, modifiers: mods))
                         if stopped { return }
