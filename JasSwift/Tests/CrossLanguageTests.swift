@@ -7763,6 +7763,40 @@ private func formsDragEntryRefusal(_ node: [String: Any], event: String) -> Stri
         : "`\(event)` declares an action that reads the drop's event fields, which this runner cannot pass yet"
 }
 
+/// A panel menu's items, canonical (design section 8 form 4): each node with a
+/// label, in declared order (separators omitted), as `{action, params,
+/// enabled, checked}`. `enabled` and `checked` are the app's own predicates
+/// in the menu's context (``panelMenuContext``); `checked` is null for an item
+/// with no `checked_when`. Nil when there is no such panel.
+private func formsPanelMenuItems(_ pid: String, model: Model, layout: WorkspaceLayout) -> [[String: Any]]? {
+    guard let panel = WorkspaceData.load()?.panel(pid) else { return nil }
+    let ctx = panelMenuContext(pid, layout: layout, model: model)
+    return formsPanelMenuNodes(panel).map { o in
+        let cmd = commandWithParams(o)
+        let checked: Any = panelMenuCheckedExpr(pid, cmd) == nil ? NSNull() : panelMenuIsChecked(pid, cmd, ctx: ctx)
+        return ["action": o["action"] ?? NSNull(), "params": o["params"] ?? [String: Any](),
+                "enabled": panelMenuIsEnabled(pid, cmd, ctx: ctx), "checked": checked]
+    }
+}
+
+/// A panel's `menu:` nodes that are items (they carry a label).
+private func formsPanelMenuNodes(_ panel: [String: Any]) -> [[String: Any]] {
+    ((panel["menu"] as? [Any]) ?? []).compactMap { $0 as? [String: Any] }.filter { $0["label"] != nil }
+}
+
+/// The dock kind and address that hold panel content `pid` in `layout`, as
+/// the app dispatches a panel-menu pick (``panelDispatch``).
+private func formsPanelKindAndAddr(_ pid: String, _ layout: WorkspaceLayout) -> (PanelKind, PanelAddr)? {
+    for (_, dock) in layout.anchored {
+        for (gi, group) in dock.groups.enumerated() {
+            if let pi = group.panels.firstIndex(where: { panelKindToContentId($0) == pid }) {
+                return (group.panels[pi], PanelAddr(group: GroupAddr(dockId: dock.id, groupIdx: gi), panelIdx: pi))
+            }
+        }
+    }
+    return nil
+}
+
 private struct FormsRefusal: Error { let why: String; init(_ w: String) { why = w } }
 
 /// A panel's declared `state:` keys from the store, canonical: paths as index
@@ -7818,6 +7852,8 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
     // widget that holds key focus). Re-resolved at each use, because the row's
     // scope (`panel.renaming_element`) moves under it.
     var field: (pid: String, widget: String, row: [Int]?, text: String)? = nil
+    // The dock layout a panel-menu pick dispatches through, as the app holds one.
+    var layout = WorkspaceLayout.defaultLayout()
     // The focus is a fact of step ORDER (a panel step takes it, a pointer or
     // menu step gives it to the canvas), so a key with no panel focus goes to
     // the gesture runner as a canvas key, as the Rust runner sends it.
@@ -7838,7 +7874,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             events.append(ev)
         } else {
             if st["panel"] != nil { focused = true }
-            if st["menu"] != nil { focused = false }
+            if st["menu"] != nil || st["panel_menu"] != nil { focused = false }
             events.append(["kind": "script_step", "index": i, "step": st])
         }
     }
@@ -7894,6 +7930,10 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 let pid = st["panel"] as? String ?? ""
                 guard let state = formsPanelState(pid, model: model) else { return refuse("UnknownPanel \(pid)") }
                 out.append(["step": i, "read": "panel", "panel": pid, "value": state])
+            case "panel_menu":
+                let pid = st["panel"] as? String ?? ""
+                guard let items = formsPanelMenuItems(pid, model: model, layout: layout) else { return refuse("UnknownPanel \(pid)") }
+                out.append(["step": i, "read": "panel_menu", "panel": pid, "value": items])
             case "tree":
                 // Form (e): the rows the tree DRAWS, level 2 only.
                 out.append(["step": i, "read": "tree", "value": "NOT APPLICABLE (read: tree is level 2 only)"])
@@ -7921,6 +7961,26 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             guard pid == "layers_panel_content" else { return refuse("no panel key route for \(pid)") }
             let chord = KeyChord(key: key, ctrl: flag("ctrl") || flag("meta"), shift: flag("shift"), alt: flag("alt"))
             if !LayersPanel.treeKey(chord, model: model) { refuse("UnboundPanelKey \(pid): \(key)") }
+        } else if let pid = st["panel_menu"] as? String {
+            // Design section 8 form 3: the item whose action is the step's and
+            // whose declared params equal every param the step names; labels
+            // are never used. It runs as a person's pick does (``panelDispatch``).
+            focus = nil
+            field = nil
+            guard let panel = WorkspaceData.load()?.panel(pid),
+                  let items = formsPanelMenuItems(pid, model: model, layout: layout) else { return refuse("UnknownPanel \(pid)") }
+            let nodes = formsPanelMenuNodes(panel)
+            let want = st["action"] as? String ?? ""
+            let named = (st["params"] as? [String: Any]) ?? [:]
+            let hits = nodes.indices.filter { n in
+                nodes[n]["action"] as? String == want && named.allSatisfy { k, v in
+                    ((nodes[n]["params"] as? [String: Any])?[k]).map { "\($0)" == "\(v)" } ?? false
+                }
+            }
+            guard hits.count == 1 else { return refuse("`\(want)` is \(hits.count) item(s) of \(pid)'s menu, not one") }
+            guard items[hits[0]]["enabled"] as? Bool == true else { return refuse("the menu item `\(want)` is disabled") }
+            guard let (kind, addr) = formsPanelKindAndAddr(pid, layout) else { return refuse("no dock holds \(pid)") }
+            panelDispatch(kind, cmd: commandWithParams(nodes[hits[0]]), addr: addr, layout: &layout, model: model)
         } else if let menuId = st["menu"] as? String {
             focus = nil
             field = nil
@@ -8046,7 +8106,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             }
             focus = pid
         } else {
-            let form = ["dialog", "context_menu", "panel_menu"].first { st[$0] != nil }
+            let form = ["dialog", "context_menu"].first { st[$0] != nil }
             refuse(form.map { "the `\($0)` form is not delivered by this runner" } ?? "\(st) is not a step this runner knows")
         }
     }
@@ -8224,7 +8284,6 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
         (["panel": formsLayers, "widget": "lp_name", "event": "click"], "NotAddressable"),
         (["panel": formsLayers, "widget": "lp_name", "at": [0], "event": "click"], "`at` is not delivered"),
         (["context_menu": "x", "params": [:] as [String: Any]], "the `context_menu` form is not delivered"),
-        (["read": "panel_menu", "panel": formsLayers], "read: panel_menu is not delivered"),
     ]
     for (step, needle) in cases {
         let out = formsRun(formsLayersScript([step, formsReadLayers]))
@@ -8357,6 +8416,67 @@ private func formsDrag(_ from: [Int], _ to: [Int], _ zone: String, hover: Int = 
     #expect(formsDragEntryRefusal(["behavior": [quiet]], event: "drag_end") == nil)
     #expect(formsDragEntryRefusal(["behavior": [["event": "drag_move", "effects": [["set": ["x": "1"]]]]]],
                                   event: "drag_move") != nil, "effects count as an action")
+}
+
+// MARK: - The S3 panel-menu forms (design section 8 forms 3 and 4, row 139)
+
+private func formsPanelMenuReads(_ out: [[String: Any]]) -> [[[String: Any]]] {
+    out.filter { $0["read"] as? String == "panel_menu" }.compactMap { $0["value"] as? [[String: Any]] }
+}
+
+/// The Layers panel menu's ACTION items in declared order, from the bundle
+/// (never typed here): the population `read: panel_menu` must reproduce.
+private func formsLayersMenuActions() -> [String] {
+    let menu = (WorkspaceData.load()?.panel(formsLayers)?["menu"] as? [Any]) ?? []
+    return menu.compactMap { ($0 as? [String: Any])?["label"] != nil ? (($0 as? [String: Any])?["action"] as? String ?? "") : nil }
+}
+
+/// `{"read": "panel_menu", "panel": P}` reads the menu's items in declared
+/// order, separators omitted, each exactly `{action, params, enabled,
+/// checked}`; `enabled` is the item's `enabled_when` in the menu's context.
+@Test func formsReadPanelMenuReadsTheItemsInOrderWithTheirState() {
+    let want = formsLayersMenuActions()
+    #expect(want.count >= 8 && want.contains("new_group"), "\(want)")
+    let out = formsRun(formsLayersScript([
+        ["read": "panel_menu", "panel": formsLayers], formsClickRow([0, 1]), ["read": "panel_menu", "panel": formsLayers],
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let reads = formsPanelMenuReads(out)
+    #expect(reads.count == 2, "\(out)")
+    #expect(reads.first?.map { $0["action"] as? String ?? "" } == want, "declared order, separators omitted: \(reads)")
+    #expect(reads.first?.allSatisfy { Set($0.keys) == ["action", "params", "enabled", "checked"] } == true, "\(reads)")
+    func enabled(_ r: [[String: Any]]?, _ a: String) -> Bool? { r?.first { $0["action"] as? String == a }?["enabled"] as? Bool }
+    #expect(enabled(reads.first, "new_group") == false, "nothing panel-selected: \(reads)")
+    #expect(enabled(reads.last, "new_group") == true, "one row panel-selected: \(reads)")
+}
+
+/// `{"panel_menu": P, "action": A}` runs the item whose action is A (and
+/// whose literal params equal any the step names), as a person picks it:
+/// New Layer adds a layer.
+@Test func formsAPanelMenuStepRunsTheMatchedItem() {
+    let out = formsRun(formsLayersScript([
+        ["read": "document"], ["panel_menu": formsLayers, "action": "new_layer"], ["read": "document"],
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let layers = formsDocReads(out).compactMap { $0.data(using: .utf8) }
+        .compactMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        .map { ($0["layers"] as? [Any])?.count ?? -1 }
+    #expect(layers.count == 2 && layers[1] == layers[0] + 1, "one more layer: \(layers)")
+}
+
+/// A panel-menu step that matches no item, or a disabled one, is refused by
+/// name and runs nothing.
+@Test func formsAPanelMenuStepThatCannotRunIsRefusedByName() {
+    for (step, needle) in [
+        (["panel_menu": formsLayers, "action": "no_such_action"] as [String: Any], "0 item(s)"),
+        (["panel_menu": formsLayers, "action": "new_group"] as [String: Any], "disabled"),
+        (["panel_menu": formsLayers, "action": "close_panel", "params": ["panel": "nope"]] as [String: Any], "0 item(s)"),
+        (["panel_menu": "no_such_panel", "action": "new_layer"] as [String: Any], "UnknownPanel"),
+    ] {
+        let out = formsRun(formsLayersScript([step, ["read": "document"]]))
+        #expect((formsRefusal(out) ?? "").contains(needle), "\(step): wanted `\(needle)`, got \(out)")
+        #expect(formsDocReads(out).isEmpty, "a refusal ends the replay: \(out)")
+    }
 }
 
 /// THE M3 DOOR, Swift's twin of Rust's `forms_replay_of_a_named_script_directory`:
