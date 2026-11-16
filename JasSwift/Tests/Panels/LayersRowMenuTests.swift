@@ -39,7 +39,9 @@ private func index(_ es: [WidgetEvent.ContextMenuEntry], _ label: String) -> Int
     let menu = try #require(LayersRowMenu.at([1], model: model))
     #expect(labels(menu.entries) == ["Options for Layer...", "Duplicate", "Delete Selection", "—",
                                      "Enter Isolation Mode", "—", "Flatten Artwork", "Collect in New Layer"])
-    // The row is bound as `node`: the leaf row disables the layer-only item.
+    // The row is bound as `node`: the layer row enables the layer-only item
+    // (an unbound `node` disables it everywhere) and the leaf row disables it.
+    #expect(menu.entries[0] == .item(label: "Options for Layer...", enabled: true, index: 0))
     let leaf = try #require(LayersRowMenu.at([1, 0], model: model))
     let opts = leaf.entries.first { if case .item(let l, _, _) = $0 { return l == "Options for Layer..." } else { return false } }
     #expect(opts == .item(label: "Options for Layer...", enabled: false, index: 0))
