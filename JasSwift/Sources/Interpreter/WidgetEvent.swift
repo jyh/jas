@@ -859,6 +859,11 @@ enum WidgetEvent {
         let locals = scopeLocals(host.scope, store: store).merging(extra) { _, new in new }
         var ran = 0
         for b in behaviors {
+            // A body-less entry (no `action`, no non-empty `effects`) runs
+            // nothing and is not counted (WIDGET_EVENTS.md, "A behavior with
+            // no body"; the reference's `_run_behaviors`).
+            let hasEffects = !((b["effects"] as? [Any]) ?? []).isEmpty
+            if !hasEffects && !(b["action"] is String) { continue }
             var ctx = locals
             // A click's event is its modifiers and carries no value.
             ctx["event"] = event ?? (["value": value ?? NSNull()] as [String: Any])
