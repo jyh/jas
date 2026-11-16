@@ -866,23 +866,14 @@ private func evalPath(_ segments: [String], _ ctx: [String: Any]) -> Value {
 
     // If the namespace resolves to a Value (e.g. .path or .closure set by
     // foreach/let), handle the typed-value drill cases here.
-    if let v = obj as? Value {
-        if segments.count == 1 { return v }
-        // Drill into path Value by property name (.depth/.parent/.id/.indices)
-        if case .path(let indices) = v, segments.count == 2 {
-            switch segments[1] {
-            case "depth": return .number(Double(indices.count))
-            case "parent":
-                return indices.isEmpty ? .null : .path(Array(indices.dropLast()))
-            case "id": return .string(indices.map { String($0) }.joined(separator: "."))
-            case "indices": return .list(indices.map { AnyJSON($0) })
-            default: return .null
-            }
-        }
-        return .null
-    }
+    if let v = obj as? Value { return typedDrill(v, segments.dropFirst()) }
 
-    for seg in segments.dropFirst() {
+    for (i, seg) in segments.enumerated().dropFirst() {
+        // A typed Value met mid-walk: a behavior param resolved by `toAny()`,
+        // which keeps a PATH typed, read back as `param.<name>` (STATUS-jas
+        // row 144). It returned null here, so a row drop's `target_parent`
+        // reached `move_elements` as nothing.
+        if let v = obj as? Value { return typedDrill(v, segments[i...]) }
         if let dict = obj as? [String: Any] {
             guard let next = dict[seg] else { return .null }
             obj = next
@@ -924,7 +915,24 @@ private func evalPath(_ segments: [String], _ ctx: [String: Any]) -> Value {
         }
     }
 
+    if let v = obj as? Value { return v }
     return Value.fromJson(obj)
+}
+
+/// A typed Value reached by a dotted name, and the segments after it: the
+/// value itself when none remain, a PATH's member (`depth`, `parent`, `id`,
+/// `indices`) when one does, and null otherwise.
+private func typedDrill(_ v: Value, _ rest: ArraySlice<String>) -> Value {
+    guard let member = rest.first else { return v }
+    guard rest.count == 1, case .path(let indices) = v else { return .null }
+    switch member {
+    case "depth": return .number(Double(indices.count))
+    case "parent":
+        return indices.isEmpty ? .null : .path(Array(indices.dropLast()))
+    case "id": return .string(indices.map { String($0) }.joined(separator: "."))
+    case "indices": return .list(indices.map { AnyJSON($0) })
+    default: return .null
+    }
 }
 
 // MARK: - Dot access on computed values
