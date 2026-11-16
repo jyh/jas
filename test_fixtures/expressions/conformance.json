@@ -798,6 +798,51 @@
     "type": "number"
   },
   {
+    "expr": "filter(state.sel, fun p -> p.depth == 1).length",
+    "state": {
+      "sel": [
+        {
+          "__path__": [
+            0
+          ]
+        },
+        {
+          "__path__": [
+            1,
+            0
+          ]
+        },
+        {
+          "__path__": [
+            2
+          ]
+        }
+      ]
+    },
+    "expected": 2,
+    "type": "number"
+  },
+  {
+    "expr": "any(state.sel, fun p -> p.depth == 2)",
+    "state": {
+      "sel": [
+        {
+          "__path__": [
+            0
+          ]
+        },
+        {
+          "__path__": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    "expected": true,
+    "type": "bool"
+  },
+  {
     "expr": "reverse([1, 2, 3])[0]",
     "expected": 3,
     "type": "number"
