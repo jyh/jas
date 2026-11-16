@@ -725,7 +725,12 @@ public enum LayersPanel {
 
         let docOpHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
-            opApply(model, controller, docOpArgs(spec, context: callCtx))
+            // The store's namespaces under the caller's (STATUS-jas row 144): the
+            // engine's panel door leaves `panel` to the store (`scopeLocals`), so
+            // read the call context alone, `panel.*` was null. Taken when the
+            // effect runs, so a write earlier in the same batch is seen.
+            opApply(model, controller,
+                    docOpArgs(spec, context: model.stateStore.evalContext(extra: callCtx)))
             return nil
         }
 

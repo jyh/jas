@@ -7677,15 +7677,7 @@ private func wireUnhex(_ s: String) -> Data {
 
 /// A path from a row item, a plain index list or a `__path__` marker.
 private func formsPath(_ v: Any?) -> [Int]? {
-    let v = (v as? [String: Any])?["__path__"] ?? v
-    guard let a = v as? [Any] else { return nil }
-    var out: [Int] = []
-    for x in a {
-        guard let n = x as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.intValue >= 0,
-              Double(n.intValue) == n.doubleValue else { return nil }
-        out.append(n.intValue)
-    }
-    return out
+    WidgetEvent.rowPath(v)
 }
 
 /// The node an event on `widget` in row `row` goes to, and the scope it runs
@@ -7712,21 +7704,14 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
     while true {
         chain.append((node, sc))
         if node["id"] as? String == widget { break }
-        if let spec = node["foreach"] as? [String: Any], let template = node["do"] as? [String: Any] {
+        if node["foreach"] is [String: Any], let template = node["do"] as? [String: Any] {
             guard contains(template) else { return .failure(FormsRefusal("widget `\(widget)` is not in the panel")) }
             repeats += 1
-            let varName = spec["as"] as? String ?? "item"
-            var items: [Any] = []
-            if case .list(let arr) = evaluate(spec["source"] as? String ?? "", context: sc) {
-                items = arr.map { $0.value }
+            // The one row binding the shell also uses (``WidgetEvent/rowBinding``).
+            switch WidgetEvent.rowBinding(node, scope: sc, row: row) {
+            case .failure(let x): return .failure(FormsRefusal(x.why))
+            case .success(let (name, data)): sc[name] = data
             }
-            let hits = items.indices.filter { formsPath(((items[$0] as? [String: Any]) ?? [:])["path"]) == row }
-            guard hits.count == 1 else {
-                return .failure(FormsRefusal("row \(row) is \(hits.count) row(s) of `\(spec["source"] as? String ?? "?")`, not one"))
-            }
-            var data = items[hits[0]] as? [String: Any] ?? ["_value": items[hits[0]]]
-            data["_index"] = hits[0]
-            sc[varName] = data
             node = template
             continue
         }

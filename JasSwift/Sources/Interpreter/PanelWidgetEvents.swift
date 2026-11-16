@@ -429,6 +429,25 @@ func dispatchPanelAction(
         // dispatcher that holds the `doc.*` handlers.
         LayersPanel.dispatchYamlAction(name, model: model)
         return
+    case "delete_layer_selection":
+        // The reference-aware gate (delete_layer_orphan_confirm.yaml), in the
+        // DISPATCH, as the web keeps it (`renderer.rs`), so every route that
+        // reaches the action meets it (STATUS-jas row 141 part 2b). The
+        // deletion paths are the PANEL selection. Orphans: open the confirm with
+        // their count and run nothing; its OK runs the distinct
+        // `delete_layer_orphan_confirm_ok`, so this does not re-fire. None:
+        // fall through to the action.
+        let orphans = DependencyIndex.orphanedReferences(
+            model.document, layersPanelSelection(model: model)).count
+        if orphans > 0 {
+            let ws = WorkspaceData.load()
+            runEffects([["open_dialog": ["id": "delete_layer_orphan_confirm",
+                                         "params": ["count": orphans]] as [String: Any]]],
+                       ctx: ctx, store: store, actions: actions,
+                       dialogs: ws?.data["dialogs"] as? [String: Any])
+            onDialogOpened?()
+            return
+        }
     default:
         break
     }
