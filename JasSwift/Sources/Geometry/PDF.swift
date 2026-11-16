@@ -820,7 +820,7 @@ private func emitSeparationLabel(_ ctx: CGContext, _ page: Page, _ name: String)
     let labelX = page.trimXOff + page.srcW - 80
     let labelY = page.trimYOff - 14
     let attrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont(name: "Helvetica", size: 6) ?? NSFont.systemFont(ofSize: 6),
+        .font: withFontLookup { NSFont(name: "Helvetica", size: 6) ?? NSFont.systemFont(ofSize: 6) },
         .foregroundColor: NSColor.black,
     ]
     let line = CTLineCreateWithAttributedString(
@@ -941,7 +941,7 @@ private func emitPageInfo(_ ctx: CGContext, tx: Double, ty: Double) {
     // Renderer-specific font metric work is deferred.
     let str = "Jas — page" as NSString
     let attrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont(name: "Helvetica", size: 6) ?? NSFont.systemFont(ofSize: 6),
+        .font: withFontLookup { NSFont(name: "Helvetica", size: 6) ?? NSFont.systemFont(ofSize: 6) },
         .foregroundColor: NSColor.black,
     ]
     let line = CTLineCreateWithAttributedString(NSAttributedString(string: str as String, attributes: attrs))
