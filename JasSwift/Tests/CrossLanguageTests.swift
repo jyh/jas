@@ -7778,6 +7778,22 @@ private func formsShownField(_ content: Any?, row: [Int], scope: [String: Any])
     return .success(shown.first)
 }
 
+/// F1c (row 145): the hover that expands a collapsed container (layers.yaml,
+/// "Hovering over a collapsed container for 500ms auto-expands it").
+private let formsHoverExpandMs = 500.0
+
+/// F1c (row 145, spec's SPEC-coll rule): an `into` drag that hovers `target`
+/// long enough removes it from `collapsed_paths`; nothing else is touched.
+/// The runner computes it from the rule, never from a shell's hover tick.
+private func formsHoverExpand(_ pid: String, _ target: [Int], model: Model) {
+    guard let state = formsPanelState(pid, model: model) else { return }
+    let paths = ((state["collapsed_paths"] as? [Any]) ?? []).compactMap { formsPath($0) }
+    guard paths.contains(target) else { return }
+    let kept = paths.filter { $0 != target }
+    if setModelHeldPanelState(pid, "collapsed_paths", paths: kept, model: model) { return }
+    model.stateStore.setPanel(pid, "collapsed_paths", kept.map { ["__path__": $0] as [String: Any] })
+}
+
 /// Why a row drag's `drag_move` / `drag_end` on `node` cannot be delivered by
 /// this runner, or nil: an entry that declares an action or effects would read
 /// `event.drop_*` / `event.hover_ms`, which ``PanelWidgetEvents/behavior``
@@ -8092,6 +8108,10 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
                 if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
                 for (name, at) in [("drag_start", pressed), ("drag_move", toRow), ("drag_end", toRow)] {
+                    // F1c (row 145): the hover over the target expands it before the drop.
+                    if name == "drag_end", zone == "into", ((st["hover_ms"] as? NSNumber)?.doubleValue ?? 0) >= formsHoverExpandMs {
+                        formsHoverExpand(pid, toRow, model: model)
+                    }
                     let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
                     switch formsRowTarget(panel["content"], widget: widget, event: name, row: at, scope: scope) {
                     case .failure(let r): return refuse(r.why)
@@ -8511,6 +8531,26 @@ private func formsDrag(_ from: [Int], _ to: [Int], _ zone: String, hover: Int = 
     let docs = formsDocReads(out)
     #expect(docs.count == 2 && formsDocElement(docs[0], [0, 0])?["type"] as? String
             == formsDocElement(docs[1], [0, 0])?["type"] as? String, "nothing moved: \(out)")
+}
+
+/// F1c (row 145, spec's SPEC-coll rule): an `into` drag that hovers a
+/// COLLAPSED container for 500 ms or more expands it, removing it from
+/// `collapsed_paths` before `drag_end` (layers.yaml: "Hovering over a collapsed
+/// container for 500ms auto-expands it"). Computed by the runner from that
+/// rule, never by a shell's hover tick. Boundary both ways, the zone, and an
+/// unrelated collapsed row that must stay.
+@Test func formsAnIntoDragHoveringACollapsedContainerExpandsIt() {
+    func collapsed(_ zone: String, _ hover: Int, seed: [[Int]] = [[0, 2], [1]]) -> [[Int]]? {
+        let out = formsRun(formsLayersScript([formsDrag([0, 0], [0, 2], zone, hover: hover), formsReadLayers],
+                                             appState: ["panels": [formsLayers: ["collapsed_paths": seed]]]))
+        if let why = formsRefusal(out) { Issue.record("refused: \(why)"); return nil }
+        return ((formsPanelReads(out).last?["collapsed_paths"] as? [Any]) ?? []).compactMap { formsPath($0) }
+    }
+    #expect(collapsed("into", 600) == [[1]], "600 ms expands the target only")
+    #expect(collapsed("into", 500) == [[1]], "500 ms is enough (the rule is 'for 500ms')")
+    #expect(collapsed("into", 499) == [[0, 2], [1]], "499 ms is not")
+    #expect(collapsed("after", 600) == [[0, 2], [1]], "only an `into` hover expands")
+    #expect(collapsed("into", 600, seed: [[1]]) == [[1]], "a target already expanded stays so, nothing is added")
 }
 
 /// A drag the runner cannot deliver is refused by name, never run without its
