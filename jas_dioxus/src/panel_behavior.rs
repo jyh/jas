@@ -894,17 +894,20 @@ fn run_widget_behavior_in(
             continue;
         }
         declared += 1;
+        let effects = b.get("effects").and_then(Value::as_array);
+        let action = b.get("action").and_then(Value::as_str);
+        // A body-less entry owns the event (`declared`) but runs nothing and is
+        // not chosen (WIDGET_EVENTS.md, "A behavior with no body"), so one beside
+        // a bodied entry no longer refuses the event.
+        if effects.map_or(true, |e| e.is_empty()) && action.is_none() {
+            continue;
+        }
         if let Some(cond) = b.get("condition").and_then(Value::as_str) {
             if !eval(cond, &cond_scope).to_bool() {
                 continue;
             }
         }
         chosen += 1;
-        let effects = b.get("effects").and_then(Value::as_array);
-        let action = b.get("action").and_then(Value::as_str);
-        if effects.map_or(true, |e| e.is_empty()) && action.is_none() {
-            return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
-        }
         batch.extend(effects.into_iter().flatten().cloned());
         if let Some(action) = action {
             let mut d = Map::new();
@@ -1024,8 +1027,7 @@ fn model_state(model: &Model) -> (Vec<String>, Option<crate::geometry::element::
 /// behavior, so it is evaluated when that behavior's turn comes, after the
 /// bind write and the behaviors before it, as the reference evaluates it.
 /// Returns the batch and how many behaviors the widget DECLARES for `events`.
-fn value_behaviors(node: &Value, events: &[&str], widget: &str)
-                   -> Result<(Vec<Value>, usize), Refusal> {
+fn value_behaviors(node: &Value, events: &[&str]) -> (Vec<Value>, usize) {
     let mut batch = vec![];
     let mut declared = 0;
     for b in node.get("behavior").and_then(Value::as_array).into_iter().flatten() {
@@ -1045,14 +1047,17 @@ fn value_behaviors(node: &Value, events: &[&str], widget: &str)
             body.push(json!({"dispatch": Value::Object(d)}));
         }
         if body.is_empty() {
-            return Err(Refusal::new("EmptyBehavior", widget.to_string()));
+            // Body-less: it owns the event (`declared`) and runs nothing
+            // (WIDGET_EVENTS.md, "A behavior with no body"). The caller's
+            // empty batch is then `EmptyBehavior`, the door's `inert`.
+            continue;
         }
         match b.get("condition").and_then(Value::as_str) {
             Some(cond) => batch.push(json!({"if": {"condition": cond, "then": body}})),
             None => batch.extend(body),
         }
     }
-    Ok((batch, declared))
+    (batch, declared)
 }
 
 /// The bind write as effects: the evaluated `event.value` into the widget's
@@ -1243,7 +1248,7 @@ fn commit_value(
     } else {
         bind_write(node, spec, panel_id)
     };
-    let (behaviors, _) = value_behaviors(node, &COMMIT_EVENTS, &ev.widget)?;
+    let (behaviors, _) = value_behaviors(node, &COMMIT_EVENTS);
     batch.extend(behaviors);
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
@@ -1305,7 +1310,7 @@ fn stops_gesture(
     if !step.commit {
         return Ok(wrote);
     }
-    let (batch, _) = value_behaviors(node, &STOPS_EVENTS, &ev.widget)?;
+    let (batch, _) = value_behaviors(node, &STOPS_EVENTS);
     if batch.is_empty() {
         return Ok(wrote);
     }
@@ -1333,7 +1338,7 @@ fn press(
 ) -> Result<Ran, Refusal> {
     let current = widget_commit::bound_target(node).is_some_and(|e| eval(e, scope).to_bool());
     let value = Value::Bool(!current);
-    let (behaviors, declared) = value_behaviors(node, &PRESS_EVENTS, &ev.widget)?;
+    let (behaviors, declared) = value_behaviors(node, &PRESS_EVENTS);
     let batch = if declared > 0 {
         behaviors
     } else {
@@ -1372,7 +1377,7 @@ fn check(
         Some(effects) if !effects.is_empty() => effects.clone(),
         _ => bind_write(node, spec, panel_id),
     };
-    batch.extend(value_behaviors(node, &PRESS_EVENTS, &ev.widget)?.0);
+    batch.extend(value_behaviors(node, &PRESS_EVENTS).0);
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
@@ -1419,7 +1424,7 @@ fn choose(
         return Err(Refusal::new("AlreadyChecked", ev.widget.clone()));
     }
     let mut batch = bind_write(node, spec, panel_id);
-    batch.extend(value_behaviors(node, &CHOOSE_EVENTS, &ev.widget)?.0);
+    batch.extend(value_behaviors(node, &CHOOSE_EVENTS).0);
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
@@ -1485,7 +1490,7 @@ fn pick(
         }
         vec![json!({"dispatch": Value::Object(d)})]
     } else {
-        value_behaviors(node, &[ev.event.as_str()], &ev.widget)?.0
+        value_behaviors(node, &[ev.event.as_str()]).0
     };
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
