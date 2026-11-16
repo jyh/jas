@@ -1436,6 +1436,45 @@ fn an_input_on_a_field_with_no_input_sets_its_text_and_the_next_key_goes_to_it()
     assert_ne!(name_at(&plain, &[0, 1]), serde_json::json!("Ring"), "{plain:?}");
 }
 
+/// F6 (row 145): the twin of Swift's `formsARowStepThatShowsAFieldGivesItKeyFocus`.
+/// A row step that leaves a field shown on its row (the double-click that opens
+/// a rename shows `lp_name_edit`) gives that FIELD key focus. Enter tells the
+/// routes apart: the field confirms and closes, the tree's Enter would run
+/// `rename_element` again and leave it open. A key the field declares nothing
+/// for is refused, never handed to the tree.
+#[test]
+fn a_row_step_that_shows_a_field_gives_it_key_focus() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let key = |k: &str| serde_json::json!({"key": k});
+    let enter = replay_forms(&layers_script(with(open_rename_01(), vec![
+        key("Enter"), read_layers(), serde_json::json!({"read": "document"}),
+    ]))).unwrap();
+    assert_eq!(refusal(&enter), None, "{enter:?}");
+    assert_eq!(panel_reads(&enter)[0]["renaming_element"], Value::Null, "the field's Enter confirms and closes: {enter:?}");
+
+    let esc = replay_forms(&layers_script(with(open_rename_01(), vec![read_layers(), key("Escape"), read_layers()]))).unwrap();
+    assert_eq!(refusal(&esc), None, "{esc:?}");
+    assert_eq!(panel_reads(&esc)[0]["renaming_element"], serde_json::json!([0, 1]), "a read keeps the field open: {esc:?}");
+    assert_eq!(panel_reads(&esc)[1]["renaming_element"], Value::Null, "Escape cancels: {esc:?}");
+
+    let arrow = replay_forms(&layers_script(with(open_rename_01(), vec![key("ArrowDown"), read_layers()]))).unwrap();
+    assert_eq!(refusal(&arrow).as_deref(), Some("UnboundFieldKey lp_name_edit: ArrowDown"), "{arrow:?}");
+
+    // The control: a row step that shows no field (a click selects, a
+    // container's double-click isolates) leaves the key with the tree.
+    let tree = replay_forms(&layers_script(serde_json::json!([
+        click_row(serde_json::json!([0, 1]), &[]), key("Enter"), read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&tree), None, "{tree:?}");
+    assert_eq!(panel_reads(&tree)[0]["renaming_element"], serde_json::json!([0, 1]), "the tree's Enter opens a rename: {tree:?}");
+    let iso = replay_forms(&layers_script(serde_json::json!([
+        click_row(serde_json::json!([0]), &[]),
+        {"panel": LAYERS, "widget": "lp_preview", "row": [0], "event": "double_click"},
+        key("ArrowDown"), read_layers(),
+    ]))).unwrap();
+    assert_eq!(refusal(&iso), None, "no field is shown, so the tree takes the arrow: {iso:?}");
+}
+
 fn drag(from: Value, to: Value, zone: &str) -> Value {
     serde_json::json!({"panel": LAYERS, "widget": "lp_name", "row": from, "event": "drag",
                        "to": {"row": to, "zone": zone}, "hover_ms": 0})
