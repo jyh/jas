@@ -4226,28 +4226,10 @@ struct TreeViewContent: View {
         LayersPanel.eyeClick(path: path, option: modifierFlags.contains(.option), model: model)
     }
 
+    /// Delete/Backspace in the tree: through the panel dispatch, where the
+    /// one orphan gate lives (``LayersPanel/keyboardDelete``, STATUS-jas row 141).
     private func performDeleteSelection() {
-        guard !panelSelection.isEmpty else { return }
-        let topDeletes = panelSelection.filter { $0.count == 1 }.count
-        if topDeletes >= model.document.layers.count { return }
-        // Reference-aware delete (warn-then-orphan): if deleting these tree
-        // rows via the in-panel keyboard Delete/Backspace would leave live
-        // instances pointing at a now-gone target, confirm first. The row
-        // menu meets the same gate in the panel dispatch (`dispatchPanelAction`,
-        // row 141 part 2b); this key path dispatches past it, so it keeps its
-        // own copy. Empty orphan set -> delete as today (no dialog). Uses the
-        // PANEL selection paths, not doc.selection.
-        let paths = panelSelection.map { Array($0) }
-        let orphaned = DependencyIndex.orphanedReferences(model.document, paths)
-        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
-            return
-        }
-        LayersPanel.dispatchYamlAction(
-            "delete_layer_selection",
-            model: model,
-            panelSelection: paths
-        )
-        panelSelection.removeAll()
+        LayersPanel.keyboardDelete(model: model, onDialogOpened: { onStoreDialogOpened?(nil) })
     }
 
     /// Run `exit_isolation_to_level`, which keeps `level` levels of the
