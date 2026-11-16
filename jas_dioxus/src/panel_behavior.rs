@@ -894,17 +894,20 @@ fn run_widget_behavior_in(
             continue;
         }
         declared += 1;
+        let effects = b.get("effects").and_then(Value::as_array);
+        let action = b.get("action").and_then(Value::as_str);
+        // A body-less entry owns the event (`declared`) but runs nothing and is
+        // not chosen (WIDGET_EVENTS.md, "A behavior with no body"), so one beside
+        // a bodied entry no longer refuses the event.
+        if effects.map_or(true, |e| e.is_empty()) && action.is_none() {
+            continue;
+        }
         if let Some(cond) = b.get("condition").and_then(Value::as_str) {
             if !eval(cond, &cond_scope).to_bool() {
                 continue;
             }
         }
         chosen += 1;
-        let effects = b.get("effects").and_then(Value::as_array);
-        let action = b.get("action").and_then(Value::as_str);
-        if effects.map_or(true, |e| e.is_empty()) && action.is_none() {
-            return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
-        }
         batch.extend(effects.into_iter().flatten().cloned());
         if let Some(action) = action {
             let mut d = Map::new();
@@ -1024,8 +1027,7 @@ fn model_state(model: &Model) -> (Vec<String>, Option<crate::geometry::element::
 /// behavior, so it is evaluated when that behavior's turn comes, after the
 /// bind write and the behaviors before it, as the reference evaluates it.
 /// Returns the batch and how many behaviors the widget DECLARES for `events`.
-fn value_behaviors(node: &Value, events: &[&str], widget: &str)
-                   -> Result<(Vec<Value>, usize), Refusal> {
+fn value_behaviors(node: &Value, events: &[&str]) -> (Vec<Value>, usize) {
     let mut batch = vec![];
     let mut declared = 0;
     for b in node.get("behavior").and_then(Value::as_array).into_iter().flatten() {
@@ -1045,14 +1047,17 @@ fn value_behaviors(node: &Value, events: &[&str], widget: &str)
             body.push(json!({"dispatch": Value::Object(d)}));
         }
         if body.is_empty() {
-            return Err(Refusal::new("EmptyBehavior", widget.to_string()));
+            // Body-less: it owns the event (`declared`) and runs nothing
+            // (WIDGET_EVENTS.md, "A behavior with no body"). The caller's
+            // empty batch is then `EmptyBehavior`, the door's `inert`.
+            continue;
         }
         match b.get("condition").and_then(Value::as_str) {
             Some(cond) => batch.push(json!({"if": {"condition": cond, "then": body}})),
             None => batch.extend(body),
         }
     }
-    Ok((batch, declared))
+    (batch, declared)
 }
 
 /// The bind write as effects: the evaluated `event.value` into the widget's
@@ -1243,7 +1248,7 @@ fn commit_value(
     } else {
         bind_write(node, spec, panel_id)
     };
-    let (behaviors, _) = value_behaviors(node, &COMMIT_EVENTS, &ev.widget)?;
+    let (behaviors, _) = value_behaviors(node, &COMMIT_EVENTS);
     batch.extend(behaviors);
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
@@ -1305,7 +1310,7 @@ fn stops_gesture(
     if !step.commit {
         return Ok(wrote);
     }
-    let (batch, _) = value_behaviors(node, &STOPS_EVENTS, &ev.widget)?;
+    let (batch, _) = value_behaviors(node, &STOPS_EVENTS);
     if batch.is_empty() {
         return Ok(wrote);
     }
@@ -1333,7 +1338,7 @@ fn press(
 ) -> Result<Ran, Refusal> {
     let current = widget_commit::bound_target(node).is_some_and(|e| eval(e, scope).to_bool());
     let value = Value::Bool(!current);
-    let (behaviors, declared) = value_behaviors(node, &PRESS_EVENTS, &ev.widget)?;
+    let (behaviors, declared) = value_behaviors(node, &PRESS_EVENTS);
     let batch = if declared > 0 {
         behaviors
     } else {
@@ -1372,7 +1377,7 @@ fn check(
         Some(effects) if !effects.is_empty() => effects.clone(),
         _ => bind_write(node, spec, panel_id),
     };
-    batch.extend(value_behaviors(node, &PRESS_EVENTS, &ev.widget)?.0);
+    batch.extend(value_behaviors(node, &PRESS_EVENTS).0);
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
@@ -1419,7 +1424,7 @@ fn choose(
         return Err(Refusal::new("AlreadyChecked", ev.widget.clone()));
     }
     let mut batch = bind_write(node, spec, panel_id);
-    batch.extend(value_behaviors(node, &CHOOSE_EVENTS, &ev.widget)?.0);
+    batch.extend(value_behaviors(node, &CHOOSE_EVENTS).0);
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
@@ -1485,7 +1490,7 @@ fn pick(
         }
         vec![json!({"dispatch": Value::Object(d)})]
     } else {
-        value_behaviors(node, &[ev.event.as_str()], &ev.widget)?.0
+        value_behaviors(node, &[ev.event.as_str()]).0
     };
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
@@ -1949,6 +1954,37 @@ mod tests {
         assert_eq!(store.get("hit"), &json!(true));
     }
 
+    /// WIDGET_EVENTS.md, "A behavior with no body" (STATUS-jas row 138): an
+    /// entry with no `action` and no non-empty `effects` runs nothing and is
+    /// not counted, but still owns its event. Alone it is `EmptyBehavior` (the
+    /// door's `inert`) and the node action does not run. Beside an entry with
+    /// a body it is skipped, and does not refuse the event.
+    #[test]
+    fn a_bodyless_click_entry_owns_the_click_and_is_skipped_beside_a_bodied_one() {
+        let spec = |behavior: Value| json!({"content": {"type": "container", "id": "root",
+            "children": [{"id": "b", "type": "button", "action": "rec", "behavior": behavior}]}});
+        let actions = json!({"rec": {"effects": [{"set": {"hit": "true"}}]}});
+        let run = |behavior: Value, store: &mut StateStore| {
+            let ev = parse_event(&json!({"widget": "b", "event": "click"})).unwrap();
+            let mut model = Model::default();
+            run_widget_behavior("zz_panel", &spec(behavior), &ev,
+                                &json!({"state": {}, "panel": {}}), store, &mut model,
+                                &actions, &json!({}), &mut EngineHost::default())
+        };
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", std::collections::HashMap::new());
+        let alone = json!([{"event": "click", "description": "the shell does it"}]);
+        assert_eq!(run(alone, &mut store).unwrap_err(), Refusal::new("EmptyBehavior", "b"));
+        let empty = json!([{"event": "click", "effects": []}]);
+        assert_eq!(run(empty, &mut store).unwrap_err(), Refusal::new("EmptyBehavior", "b"));
+        assert_eq!(store.get("hit"), &Value::Null, "the node action did not run");
+        let beside = json!([{"event": "click", "description": "the shell does it"},
+                            {"event": "click", "effects": [{"set": {"other": "true"}}]}]);
+        assert!(run(beside, &mut store).is_ok(), "the bodied sibling runs");
+        assert_eq!(store.get("other"), &json!(true));
+        assert_eq!(store.get("hit"), &Value::Null, "and the node action still does not");
+    }
+
     /// A pick's item list may carry bare `separator` strings, as `options`
     /// do, and one is never an item. The shipped filter declares none, so
     /// the door test's separator row cannot witness this: it is `BadValue`
@@ -2392,6 +2428,26 @@ mod tests {
         let (r, store) = door(node, json!({"widget": "b"}), json!({"on": true, "armed": false}));
         assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: false }));
         assert_eq!(store.get_panel(PROBE, "on"), &json!(true));
+    }
+
+    /// The value-kind half of row 138: a press whose click entries are one
+    /// body-less and one with a body runs the bodied one (it refused the
+    /// whole press before), and a press whose only entry is body-less owns
+    /// the press, writes no bind, and is `EmptyBehavior`.
+    #[test]
+    fn a_bodyless_press_entry_is_skipped_and_still_owns_the_press() {
+        let node = |behavior: Value| json!({"type": "toggle", "id": "b",
+            "bind": {"checked": "panel.on"}, "behavior": behavior});
+        let (r, store) = door(node(json!([
+            {"event": "click", "description": "native"},
+            {"event": "click", "effects": [{"set_panel_state": {"key": "hit", "value": "true"}}]}])),
+            json!({"widget": "b"}), json!({"on": false, "hit": false}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get_panel(PROBE, "hit"), &json!(true));
+        let (r, store) = door(node(json!([{"event": "click", "description": "native"}])),
+                              json!({"widget": "b"}), json!({"on": false}));
+        assert_eq!(r, Err(Refusal::new("EmptyBehavior", "b")));
+        assert_eq!(store.get_panel(PROBE, "on"), &json!(false), "no bind write behind it");
     }
 
     #[test]

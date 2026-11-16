@@ -193,3 +193,47 @@ private func num(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
     #expect(num(got["n"]) == 7, "a string param is an expression")
     #expect(got["copy"] as? Bool == false, "a YAML literal is that value")
 }
+
+// MARK: - A behavior with no body (WIDGET_EVENTS.md; the reference's
+// `TestBodylessBehavior`; STATUS-jas row 138)
+//
+// An entry with no `action` and no non-empty `effects` runs nothing and is not
+// counted, but still owns its event. The shipped ones are the Layers and
+// Artboards rows' drag entries, which the shells realise natively.
+
+@Test func aBodylessClickIsInertAndStillOwnsTheClick() {
+    let store = clickStore()
+    let w = recordButton(["behavior": [["event": "click", "description": "the shell does it"]]])
+    let r = WidgetEvent.click(widget: w, event: "click", store: store, panel: nil,
+                              actions: recordActions)
+    #expect(r.outcome == "inert" && r.behaviorsRun == 0, "\(r.outcome) \(r.behaviorsRun)")
+    #expect(store.get("got_n") == nil, "the node-level action did not run")
+}
+
+@Test func anEmptyEffectsListIsBodylessToo() {
+    let store = clickStore()
+    let w: [String: Any] = ["type": "button", "behavior": [["event": "click", "effects": [] as [Any]]]]
+    let r = WidgetEvent.click(widget: w, event: "click", store: store, panel: nil,
+                              actions: recordActions)
+    #expect(r.outcome == "inert" && r.behaviorsRun == 0, "\(r.outcome) \(r.behaviorsRun)")
+}
+
+@Test func aBodylessEntryBesideABodiedOneDoesNotStopIt() {
+    let store = clickStore()
+    let w: [String: Any] = ["type": "button", "behavior": [
+        ["event": "click", "description": "the shell does it"],
+        ["event": "click", "action": "record", "params": ["n": "dialog.n"]]]]
+    let r = WidgetEvent.click(widget: w, event: "click", store: store, panel: nil,
+                              actions: recordActions)
+    #expect(r.outcome == "committed" && r.behaviorsRun == 1, "\(r.outcome) \(r.behaviorsRun)")
+    #expect(num(store.get("got_n")) == 7)
+}
+
+@Test func aBodylessRowDragEntryIsInertAtTheBehaviorDoor() {
+    // The row 138 shape: a Layers row's `drag_end` declares only a description.
+    let store = clickStore()
+    let row: [String: Any] = ["type": "container", "behavior": [
+        ["event": "drag_end", "description": "Validate constraints and reparent/reorder elements"]]]
+    let r = WidgetEvent.behaviorEvent(widget: row, event: "drag_end", store: store)
+    #expect(r.outcome == "inert" && r.behaviorsRun == 0, "\(r.outcome) \(r.behaviorsRun)")
+}
