@@ -7745,6 +7745,55 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
     return .success((target.0, chain.last!.1, bubbled))
 }
 
+/// F6 (row 145, TESTING.md section 6): the field a row step leaves SHOWN on its
+/// row, which then holds key focus, as every shell focuses the field an inline
+/// rename shows. A shown field is a repeated `text_input` that declares
+/// `bind.visible` and whose `visible` holds in the row's scope; its text is
+/// what its `bind.value` shows. A field with no `visible` bind is always shown
+/// and takes focus only by an `input` step. Two shown fields on one row are
+/// refused by name, because which one has focus is not then a fact the yaml states.
+private func formsShownField(_ content: Any?, row: [Int], scope: [String: Any])
+    -> Result<(widget: String, text: String)?, FormsRefusal> {
+    var ids: [String] = []
+    func walk(_ n: Any?) {
+        if let a = n as? [Any] { a.forEach(walk); return }
+        guard let d = n as? [String: Any] else { return }
+        if d["type"] as? String == "text_input", let id = d["id"] as? String,
+           (d["bind"] as? [String: Any])?["visible"] != nil { ids.append(id) }
+        walk(d["children"]); walk(d["do"])
+    }
+    walk(content)
+    var shown: [(widget: String, text: String)] = []
+    for id in ids {
+        // A field no foreach repeats is not on a row; that miss is not an error.
+        guard case .success(let t) = formsRowTarget(content, widget: id, event: "", row: row, scope: scope, exact: true),
+              let bind = t.node["bind"] as? [String: Any], let vis = bind["visible"] as? String else { continue }
+        guard evaluate(vis, context: t.scope).toBool() else { continue }
+        let text = (bind["value"] as? String).map { evaluate($0, context: t.scope).toStringCoerce() } ?? ""
+        shown.append((id, text))
+    }
+    if shown.count > 1 {
+        return .failure(FormsRefusal("row \(row) shows \(shown.count) fields (\(shown.map(\.widget).joined(separator: ", "))); which holds key focus is not stated"))
+    }
+    return .success(shown.first)
+}
+
+/// F1c (row 145): the hover that expands a collapsed container (layers.yaml,
+/// "Hovering over a collapsed container for 500ms auto-expands it").
+private let formsHoverExpandMs = 500.0
+
+/// F1c (row 145, spec's SPEC-coll rule): an `into` drag that hovers `target`
+/// long enough removes it from `collapsed_paths`; nothing else is touched.
+/// The runner computes it from the rule, never from a shell's hover tick.
+private func formsHoverExpand(_ pid: String, _ target: [Int], model: Model) {
+    guard let state = formsPanelState(pid, model: model) else { return }
+    let paths = ((state["collapsed_paths"] as? [Any]) ?? []).compactMap { formsPath($0) }
+    guard paths.contains(target) else { return }
+    let kept = paths.filter { $0 != target }
+    if setModelHeldPanelState(pid, "collapsed_paths", paths: kept, model: model) { return }
+    model.stateStore.setPanel(pid, "collapsed_paths", kept.map { ["__path__": $0] as [String: Any] })
+}
+
 /// Why a row drag's `drag_move` / `drag_end` on `node` cannot be delivered by
 /// this runner, or nil: an entry that declares an action or effects would read
 /// `event.drop_*` / `event.hover_ms`, which ``PanelWidgetEvents/behavior``
@@ -8059,6 +8108,10 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
                 if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
                 for (name, at) in [("drag_start", pressed), ("drag_move", toRow), ("drag_end", toRow)] {
+                    // F1c (row 145): the hover over the target expands it before the drop.
+                    if name == "drag_end", zone == "into", ((st["hover_ms"] as? NSNumber)?.doubleValue ?? 0) >= formsHoverExpandMs {
+                        formsHoverExpand(pid, toRow, model: model)
+                    }
                     let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
                     switch formsRowTarget(panel["content"], widget: widget, event: name, row: at, scope: scope) {
                     case .failure(let r): return refuse(r.why)
@@ -8149,6 +8202,12 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 }
             }
             focus = pid
+            // F6 (row 145): a field the step left shown on its row holds key focus.
+            let after = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+            switch formsShownField(panel["content"], row: rowPath, scope: after) {
+            case .failure(let r): return refuse(r.why)
+            case .success(let f): field = f.map { (pid, $0.widget, rowPath, $0.text) }
+            }
         } else {
             let form = ["dialog", "context_menu"].first { st[$0] != nil }
             refuse(form.map { "the `\($0)` form is not delivered by this runner" } ?? "\(st) is not a step this runner knows")
@@ -8418,6 +8477,39 @@ private func formsEdit(_ event: String, _ value: String?) -> [String: Any] {
     #expect(formsNameAt(plain, [0, 1]) != "Ring", "\(plain)")
 }
 
+/// F6 (row 145, TESTING.md section 6): a row step that leaves a field shown on
+/// that row (a `text_input` whose `bind.visible` now holds, as the double-click
+/// that opens a rename shows `lp_name_edit`) gives that FIELD key focus, so
+/// the next key is its `keydown` with its shown text. Enter tells the two
+/// routes apart: the field confirms and closes (`confirm_rename`), while the
+/// tree's Enter would run `rename_element` again and leave it open. A key the
+/// field declares nothing for is refused, never handed to the tree.
+@Test func formsARowStepThatShowsAFieldGivesItKeyFocus() {
+    let enter = formsRun(formsLayersScript(formsOpenRename01 + [["key": "Enter"], formsReadLayers, ["read": "document"]]))
+    #expect(formsRefusal(enter) == nil, "\(enter)")
+    #expect(formsPanelReads(enter).first?["renaming_element"] is NSNull, "the field's Enter confirms and closes: \(enter)")
+    #expect(formsNameAt(enter, [0, 1]) != "no element", "\(enter)")
+
+    let esc = formsRun(formsLayersScript(formsOpenRename01 + [formsReadLayers, ["key": "Escape"], formsReadLayers]))
+    #expect(formsRefusal(esc) == nil, "\(esc)")
+    #expect(formsPath(formsPanelReads(esc).first?["renaming_element"] as Any) == [0, 1], "a read keeps the field open: \(esc)")
+    #expect(formsPanelReads(esc).last?["renaming_element"] is NSNull, "Escape cancels: \(esc)")
+
+    let arrow = formsRun(formsLayersScript(formsOpenRename01 + [["key": "ArrowDown"], formsReadLayers]))
+    #expect(formsRefusal(arrow) == "UnboundFieldKey lp_name_edit: ArrowDown", "\(arrow)")
+
+    // The control: a row step that shows no field (a click selects, a
+    // container's double-click isolates) leaves the key with the tree.
+    let tree = formsRun(formsLayersScript([formsClickRow([0, 1]), ["key": "Enter"], formsReadLayers]))
+    #expect(formsRefusal(tree) == nil, "\(tree)")
+    #expect(formsPath(formsPanelReads(tree).first?["renaming_element"] as Any) == [0, 1], "the tree's Enter opens a rename: \(tree)")
+    let iso = formsRun(formsLayersScript([
+        formsClickRow([0]), ["panel": formsLayers, "widget": "lp_preview", "row": [0], "event": "double_click"],
+        ["key": "ArrowDown"], formsReadLayers,
+    ]))
+    #expect(formsRefusal(iso) == nil, "no field is shown, so the tree takes the arrow: \(iso)")
+}
+
 private func formsDrag(_ from: [Int], _ to: [Int], _ zone: String, hover: Int = 0) -> [String: Any] {
     ["panel": formsLayers, "widget": "lp_name", "row": from, "event": "drag",
      "to": ["row": to, "zone": zone], "hover_ms": hover]
@@ -8439,6 +8531,26 @@ private func formsDrag(_ from: [Int], _ to: [Int], _ zone: String, hover: Int = 
     let docs = formsDocReads(out)
     #expect(docs.count == 2 && formsDocElement(docs[0], [0, 0])?["type"] as? String
             == formsDocElement(docs[1], [0, 0])?["type"] as? String, "nothing moved: \(out)")
+}
+
+/// F1c (row 145, spec's SPEC-coll rule): an `into` drag that hovers a
+/// COLLAPSED container for 500 ms or more expands it, removing it from
+/// `collapsed_paths` before `drag_end` (layers.yaml: "Hovering over a collapsed
+/// container for 500ms auto-expands it"). Computed by the runner from that
+/// rule, never by a shell's hover tick. Boundary both ways, the zone, and an
+/// unrelated collapsed row that must stay.
+@Test func formsAnIntoDragHoveringACollapsedContainerExpandsIt() {
+    func collapsed(_ zone: String, _ hover: Int, seed: [[Int]] = [[0, 2], [1]]) -> [[Int]]? {
+        let out = formsRun(formsLayersScript([formsDrag([0, 0], [0, 2], zone, hover: hover), formsReadLayers],
+                                             appState: ["panels": [formsLayers: ["collapsed_paths": seed]]]))
+        if let why = formsRefusal(out) { Issue.record("refused: \(why)"); return nil }
+        return ((formsPanelReads(out).last?["collapsed_paths"] as? [Any]) ?? []).compactMap { formsPath($0) }
+    }
+    #expect(collapsed("into", 600) == [[1]], "600 ms expands the target only")
+    #expect(collapsed("into", 500) == [[1]], "500 ms is enough (the rule is 'for 500ms')")
+    #expect(collapsed("into", 499) == [[0, 2], [1]], "499 ms is not")
+    #expect(collapsed("after", 600) == [[0, 2], [1]], "only an `into` hover expands")
+    #expect(collapsed("into", 600, seed: [[1]]) == [[1]], "a target already expanded stays so, nothing is added")
 }
 
 /// A drag the runner cannot deliver is refused by name, never run without its

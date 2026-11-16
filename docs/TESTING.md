@@ -266,6 +266,11 @@ marked PROPOSED and never gates.
       3. a layer goes anywhere but the root or a layer, or a non-layer goes to the root;
       4. a search or type filter is active;
       5. in isolation, the parent is outside the isolated container.
+  * **F1c (row 145): the hover expands a collapsed target, computed by the runner.** When the zone is `into`, `hover_ms`
+    is 500 or more, and the target row's path is in `collapsed_paths`, the runner removes that one path before
+    `drag_end`, as layers.yaml states: "Hovering over a collapsed container for 500ms auto-expands it". Any other
+    zone, or a shorter hover, changes nothing. The rule is spec's SPEC-coll. A shell's own hover timer is never
+    called; only a level-2 driver sees one.
   * **Where no node declares an action for `drag_move` or `drag_end`, the step changes nothing and reads
     `unchanged`.** That is the case at the control and on main today. The drop's document read then cannot be told
     from a refusal. This rule tests the receiving `move_elements` and never a shell's own conversion from the
@@ -323,6 +328,12 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
     so a field that declares no `input` fires nothing and the step is recorded `unchanged`.
   * After an `input`, the field holds key focus. The next key goes to the field as its `keydown`, carrying the field's
     text, and a key the field declares nothing for is refused (`UnboundFieldKey`).
+  * **F6 (row 145): a row step that leaves a field SHOWN on its row also gives that field key focus**, as every shell
+    focuses the field an inline rename shows (the double-click that opens a rename shows `lp_name_edit`). A field is
+    shown when it is a repeated `text_input` that declares `bind.visible` and that expression holds in the row's scope.
+    Its text is what its `bind.value` shows. The next key then goes to the field as above, so Escape cancels the
+    rename through the field, Enter confirms it, and an arrow is refused. A field with no `visible` bind is always
+    shown, so it takes focus only from an `input` step. Two shown fields on one row are refused by name.
   * A per-row `commit` types the value and then sends `keydown` Enter.
   * `blur` carries the typed text, or the field's `bind.value` when nothing was typed.
   * A dropdown `commit` picks the item by `value`, and Alt picks it as `alt_toggle`.
