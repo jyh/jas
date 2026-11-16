@@ -230,6 +230,21 @@ public enum LayersPanel {
     /// when no row binds the chord, so the caller lets the key pass. Mirrors Rust
     /// `layers_tree_key`.
     @discardableResult
+    /// The tree's keyboard Delete/Backspace (STATUS-jas row 141): the
+    /// last-layer rule, then `delete_layer_selection` through the PANEL
+    /// dispatch, where the one orphan gate lives (part 2b). An orphaning
+    /// delete opens the yaml confirm and runs nothing.
+    static func keyboardDelete(model: Model, onDialogOpened: (() -> Void)?) {
+        let paths = layersPanelSelection(model: model)
+        guard !paths.isEmpty else { return }
+        if paths.filter({ $0.count == 1 }).count >= model.document.layers.count { return }
+        guard let ws = WorkspaceData.load() else { return }
+        let ctx = buildPanelBodyContext(ws: ws, model: model, contentId: "layers_panel_content",
+                                        opacityPanel: OpacityPanelState())
+        dispatchPanelAction("delete_layer_selection", params: [:], actions: ws.actions(), ctx: ctx,
+                            store: model.stateStore, model: model, onDialogOpened: onDialogOpened)
+    }
+
     public static func treeKey(_ chord: KeyChord, model: Model,
                                onCloseDialog: (() -> Void)? = nil) -> Bool {
         guard let ws = WorkspaceData.load(),
