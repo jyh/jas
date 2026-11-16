@@ -844,7 +844,12 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 let ev = ev.to_string();
                 let reply = take(unsafe { jas_panel_behavior(e, fpanel.as_ptr(), fpanel.len(), ev.as_ptr(), ev.len()) });
                 let err = last_error(e);
-                if reply.is_some() && err.contains("Unchanged") {
+                // The engine refuses a `keydown` no entry matches with
+                // `EmptyBehavior` (no reply, so the error is this call's), and
+                // Swift's door answers `inert`: both are the key the field
+                // declares nothing for (row 145).
+                if (reply.is_some() && err.contains("Unchanged"))
+                    || (reply.is_none() && err.contains("\"EmptyBehavior\"")) {
                     refuse(&mut out, unbound);
                     break;
                 }
