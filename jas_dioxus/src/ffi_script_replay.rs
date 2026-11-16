@@ -489,6 +489,57 @@ fn row_widget(content: &Value, widget: &str, row: &[u64], scope: &Value)
     Ok((path, node, scope))
 }
 
+/// F1c (row 145): the hover that expands a collapsed container (layers.yaml,
+/// "Hovering over a collapsed container for 500ms auto-expands it").
+const HOVER_EXPAND_MS: f64 = 500.0;
+
+/// F1c (row 145, spec's SPEC-coll rule): an `into` drag that hovers `target`
+/// long enough removes it from `collapsed_paths`; nothing else is touched.
+/// The runner computes it from the rule, never from a shell's hover tick.
+/// Twin of Swift's `formsHoverExpand`.
+fn hover_expand(engine: &JasEngine, panel: &str, target: &[u64]) -> Result<(), String> {
+    let state = engine.script_panel_state(panel).ok_or_else(|| format!("UnknownPanel {panel}"))?;
+    let paths = canonical_panel_value(state.get("collapsed_paths").unwrap_or(&Value::Null));
+    let paths = paths.as_array().cloned().unwrap_or_default();
+    let target = serde_json::json!(target);
+    if !paths.contains(&target) {
+        return Ok(());
+    }
+    let kept: Vec<Value> = paths.into_iter().filter(|p| *p != target).collect();
+    engine.script_seed_panel(panel, "collapsed_paths", seed_value(&Value::Array(kept)))
+}
+
+/// F6 (row 145, TESTING.md section 6): the ids of the fields a row step can
+/// leave SHOWN on its row, which then hold key focus, as every shell focuses the
+/// field an inline rename shows: each `text_input` that declares
+/// `bind.visible`. The caller keeps the ones a foreach repeats and whose
+/// `visible` holds in the row's scope. A field with no `visible` bind is always
+/// shown and takes focus only by an `input` step. Twin of Swift's `formsShownField`.
+fn shown_field_candidates(node: &Value) -> Vec<String> {
+    let mut ids = vec![];
+    fn walk(n: &Value, ids: &mut Vec<String>) {
+        match n {
+            Value::Array(a) => a.iter().for_each(|c| walk(c, ids)),
+            Value::Object(m) => {
+                if m.get("type").and_then(Value::as_str) == Some("text_input")
+                    && m.get("bind").and_then(|b| b.get("visible")).is_some() {
+                    if let Some(id) = m.get("id").and_then(Value::as_str) {
+                        ids.push(id.to_string());
+                    }
+                }
+                for k in ["children", "do"] {
+                    if let Some(c) = m.get(k) {
+                        walk(c, ids);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    walk(node, &mut ids);
+    ids
+}
+
 /// The first node whose `id` is `widget`, anywhere under `node`.
 fn find_widget<'a>(node: &'a Value, widget: &str) -> Option<&'a Value> {
     match node {
@@ -931,6 +982,15 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     field = None;
                     let mut ok = true;
                     for (name, at) in [("drag_start", &pressed), ("drag_move", &to_row), ("drag_end", &to_row)] {
+                        // F1c (row 145): the hover over the target expands it before the drop.
+                        if name == "drag_end" && zone == "into"
+                            && st.get("hover_ms").and_then(Value::as_f64).unwrap_or(0.0) >= HOVER_EXPAND_MS {
+                            if let Err(why) = hover_expand(engine, panel, &to_row) {
+                                refuse(&mut out, why);
+                                ok = false;
+                                break;
+                            }
+                        }
                         let (Some(spec), Some(scope)) = (
                             crate::interpreter::workspace::Workspace::load().and_then(|ws| ws.panel(panel).cloned()),
                             engine.script_panel_scope(panel)) else {
@@ -1081,6 +1141,34 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     break;
                 }
                 focus = Some(panel.to_string());
+                // F6 (row 145): a field the step left shown on its row holds
+                // key focus (`shown_field_candidates`).
+                if row.is_some() {
+                    let ids = crate::interpreter::workspace::Workspace::load()
+                        .and_then(|ws| ws.panel(panel).map(|p| shown_field_candidates(&p["content"])))
+                        .unwrap_or_default();
+                    let mut shown: Vec<(String, String)> = vec![];
+                    for id in ids {
+                        // A field no foreach repeats is not on a row; that miss is not an error.
+                        let Ok((_, node, sc)) = resolve(panel, &id, &row) else { continue };
+                        let bind = node.get("bind");
+                        let Some(vis) = bind.and_then(|b| b.get("visible")).and_then(Value::as_str) else { continue };
+                        if !crate::interpreter::expr::eval(vis, &sc).to_bool() {
+                            continue;
+                        }
+                        let text = bind.and_then(|b| b.get("value")).and_then(Value::as_str)
+                            .map(|x| crate::interpreter::expr::eval(x, &sc).to_string_coerce())
+                            .unwrap_or_default();
+                        shown.push((id, text));
+                    }
+                    if shown.len() > 1 {
+                        let names: Vec<&str> = shown.iter().map(|(w, _)| w.as_str()).collect();
+                        refuse(&mut out, format!("row {:?} shows {} fields ({}); which holds key focus is not stated",
+                            row.as_deref().unwrap_or(&[]), shown.len(), names.join(", ")));
+                        break;
+                    }
+                    field = shown.pop().map(|(w, t)| (panel.to_string(), w, row.clone(), t));
+                }
             } else if let Some(want) = st.get("context_menu").and_then(Value::as_str) {
                 // Design section 8 form 2: the item whose action, RESOLVED at
                 // open, is the step's and whose declared params equal every
@@ -1473,6 +1561,31 @@ fn a_row_step_that_shows_a_field_gives_it_key_focus() {
         key("ArrowDown"), read_layers(),
     ]))).unwrap();
     assert_eq!(refusal(&iso), None, "no field is shown, so the tree takes the arrow: {iso:?}");
+}
+
+/// F1c (row 145): the twin of Swift's `formsAnIntoDragHoveringACollapsedContainerExpandsIt`.
+/// An `into` drag that hovers a COLLAPSED container for 500 ms or more removes
+/// it from `collapsed_paths` before `drag_end`. Boundary both ways, the zone,
+/// and an unrelated collapsed row that must stay.
+#[test]
+fn an_into_drag_hovering_a_collapsed_container_expands_it() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let collapsed = |zone: &str, hover: u64, seed: Value| -> Value {
+        let mut d = drag(serde_json::json!([0, 0]), serde_json::json!([0, 2]), zone);
+        d["hover_ms"] = serde_json::json!(hover);
+        let mut s = layers_script(serde_json::json!([d, read_layers()]));
+        s["app_state"] = serde_json::json!({"panels": {LAYERS: {"collapsed_paths": seed}}});
+        let out = replay_forms(&s).unwrap();
+        assert_eq!(refusal(&out), None, "{zone} {hover}: {out:?}");
+        panel_reads(&out).last().map(|r| r["collapsed_paths"].clone()).unwrap_or(Value::Null)
+    };
+    let two = || serde_json::json!([[0, 2], [1]]);
+    assert_eq!(collapsed("into", 600, two()), serde_json::json!([[1]]), "600 ms expands the target only");
+    assert_eq!(collapsed("into", 500, two()), serde_json::json!([[1]]), "500 ms is enough (the rule is 'for 500ms')");
+    assert_eq!(collapsed("into", 499, two()), two(), "499 ms is not");
+    assert_eq!(collapsed("after", 600, two()), two(), "only an `into` hover expands");
+    assert_eq!(collapsed("into", 600, serde_json::json!([[1]])), serde_json::json!([[1]]),
+        "a target already expanded stays so, nothing is added");
 }
 
 fn drag(from: Value, to: Value, zone: &str) -> Value {
