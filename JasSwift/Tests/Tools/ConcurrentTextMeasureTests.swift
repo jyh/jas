@@ -13,14 +13,16 @@ import Foundation
 // warm lookup may never reach the code that hangs. It waits with a TIMEOUT,
 // so a deadlock fails the test by name instead of hanging the run.
 //
-// MEASURED 2026-11-16, and it is NOT the fix the row asked for. The hang did
-// not reproduce. This arm PASSED on the unchanged code (8 threads, 56 cold
-// pairs), and three parallel `swift test` runs of the whole suite (3,720
-// tests) all passed. So concurrent `NSFont(name:size:)` alone does not hang,
-// and the row's read mechanism is refuted at this scale. No lock was added,
-// because a fix that cannot go red first is not tested. The arm stays as a
-// guard on the property. Its failure path is proved by a mutant: a 1 s sleep
-// in `renderedTextWidth` failed it by name at 30.001 s, without hanging.
+// MEASURED 2026-11-16. The hang is real, and THIS ARM DOES NOT REPRODUCE IT.
+// The arm passed on the unfixed code at 8 and at 32 threads. The instrument that
+// does reproduce it is a PARALLEL `swift test --filter 'Forms|forms'` from a
+// cold process. Unfixed it hung 3 runs of 3: 14 threads each sat in
+// `renderedTextWidth` → `NSFont(name:size:)` → a synchronous XPC to the font
+// service, with no reply. With `withFontLookup` (Element.swift) it passed 4 runs
+// of 4, and a mutant that removes the lock hung again. So this arm guards a
+// PROPERTY (concurrent widths equal serial ones, and no deadlock) and does not
+// witness the defect. Its failure path is proved by a 1 s sleep mutant, which
+// fails it by name at 30.001 s.
 
 private let families = ["Helvetica", "Times New Roman", "Courier", "Georgia", "Menlo",
                         "Avenir", "Futura", "Optima", "Palatino", "Gill Sans",

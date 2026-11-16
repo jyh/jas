@@ -12,19 +12,37 @@ func renderedTextWidth(_ s: String, family: String, weight: String, style: Strin
     var traits: NSFontDescriptor.SymbolicTraits = []
     if weight == "bold" { traits.insert(.bold) }
     if style == "italic" { traits.insert(.italic) }
-    let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
-    let font: NSFont
-    if !traits.isEmpty {
+    let font: NSFont = withFontLookup {
+        let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
+        if traits.isEmpty { return baseFont }
         let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
-        font = NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
-    } else {
-        font = baseFont
+        return NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
     }
     return Double(NSAttributedString(string: s, attributes: [.font: font]).size().width)
     #else
     return Double(s.count) * size * approxCharWidthFactor
     #endif
 }
+
+#if canImport(AppKit)
+/// One font lookup at a time in this process (STATUS-jas row 140).
+///
+/// Measured 2026-11-16: a parallel `swift test` of the forms tests hung 3 runs
+/// of 3. Each time, 14 threads sat in `renderedTextWidth` → `NSFont(name:size:)`
+/// → CoreText → a SYNCHRONOUS XPC to the system font service
+/// (`XTypeXPCClient XTCopyFontWithName` / `XTCopyFontProviders`), and none got a
+/// reply. A fresh process got fonts in milliseconds meanwhile, so the service
+/// was healthy and the wedge was this process's concurrent lookups. Every
+/// `NSFont` construction in the app goes through this lock. The measuring that
+/// follows a lookup does not, because no hung stack was in it.
+private let fontLookupLock = NSLock()
+
+func withFontLookup<T>(_ body: () -> T) -> T {
+    fontLookupLock.lock()
+    defer { fontLookupLock.unlock() }
+    return body()
+}
+#endif
 
 /// Line segments per Bezier curve when flattening paths.
 public let elementFlattenSteps = 20
