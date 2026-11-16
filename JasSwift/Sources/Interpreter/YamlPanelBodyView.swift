@@ -3886,71 +3886,6 @@ struct ElementThumbnail: View {
     }
 }
 
-/// Wrapper that makes an ElementPath Identifiable for use with .sheet(item:).
-struct IdentifiablePath: Identifiable {
-    let id: String
-    let path: ElementPath
-}
-
-/// Modal sheet for editing a layer's name, lock state, and visibility.
-struct LayerOptionsSheet: View {
-    @ObservedObject var model: Model
-    let path: ElementPath
-    let onClose: () -> Void
-
-    @State private var name: String = ""
-    @State private var lock: Bool = false
-    @State private var show: Bool = true
-    @State private var preview: Bool = true
-
-    var body: some View {
-        let e = model.document.getElement(path)
-        VStack(alignment: .leading, spacing: 10) {
-            SwiftUI.Text("Layer Options").font(.headline)
-            HStack {
-                SwiftUI.Text("Name:")
-                TextField("", text: $name)
-            }
-            Toggle("Lock", isOn: $lock)
-            Toggle("Show", isOn: $show)
-            Toggle("Preview", isOn: $preview).disabled(!show)
-            HStack {
-                Spacer()
-                Button("Cancel") { onClose() }
-                Button("OK") {
-                    // Route through the YAML layer_options_confirm action
-                    // so Swift shares the commit logic with the spec.
-                    let layerIdStr = path.map(String.init)
-                        .joined(separator: ".")
-                    LayersPanel.dispatchYamlAction(
-                        "layer_options_confirm",
-                        model: model,
-                        params: [
-                            "layer_id": layerIdStr,
-                            "name": name,
-                            "lock": lock,
-                            "show": show,
-                            "preview": preview,
-                        ],
-                        onCloseDialog: onClose
-                    )
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 320)
-        .onAppear {
-            if case .layer(let le) = e {
-                name = le.name ?? ""
-                lock = le.locked
-                show = le.visibility != .invisible
-                preview = le.visibility == .preview
-            }
-        }
-    }
-}
-
 /// Flat row descriptor used when rendering the tree. Pre-computing this
 /// list lets us apply filters (search, type, isolation) without recursive
 /// SwiftUI views.
@@ -4037,7 +3972,6 @@ struct TreeViewContent: View {
         get { model.layersIsolationStack }
         nonmutating set { model.layersIsolationStack = newValue }
     }
-    @State private var showLayerOptionsFor: ElementPath? = nil
     @FocusState private var treeFocused: Bool
     // Tracks current modifier keys from an NSEvent monitor (macOS).
     @State private var modifierFlags: NSEvent.ModifierFlags = []
@@ -4212,12 +4146,6 @@ struct TreeViewContent: View {
                 return evt
             }
         }
-        .sheet(item: Binding<IdentifiablePath?>(
-            get: { showLayerOptionsFor.map { IdentifiablePath(id: $0.map(String.init).joined(separator: "_"), path: $0) } },
-            set: { showLayerOptionsFor = $0?.path }
-        )) { ip in
-            LayerOptionsSheet(model: model, path: ip.path, onClose: { showLayerOptionsFor = nil })
-        }
     }
 
     private func performDrop(onto target: ElementPath) -> Bool {
@@ -4293,9 +4221,11 @@ struct TreeViewContent: View {
         if topDeletes >= model.document.layers.count { return }
         // Reference-aware delete (warn-then-orphan): if deleting these tree
         // rows via the in-panel keyboard Delete/Backspace would leave live
-        // instances pointing at a now-gone target, confirm first. Mirrors the
-        // context-menu `deleteSelection()` guard. Empty orphan set -> delete as
-        // today (no dialog). Uses the PANEL selection paths, not doc.selection.
+        // instances pointing at a now-gone target, confirm first. The row
+        // menu meets the same gate in the panel dispatch (`dispatchPanelAction`,
+        // row 141 part 2b); this key path dispatches past it, so it keeps its
+        // own copy. Empty orphan set -> delete as today (no dialog). Uses the
+        // PANEL selection paths, not doc.selection.
         let paths = panelSelection.map { Array($0) }
         let orphaned = DependencyIndex.orphanedReferences(model.document, paths)
         if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
@@ -4528,61 +4458,6 @@ struct TreeViewContent: View {
     }
 
     // MARK: - Context menu actions
-
-    private func deleteSelection() {
-        guard !panelSelection.isEmpty else { return }
-        let topDeletes = panelSelection.filter { $0.count == 1 }.count
-        if topDeletes >= model.document.layers.count { return }
-        // Reference-aware delete (warn-then-orphan): if deleting these tree
-        // rows would leave live instances pointing at a now-gone target,
-        // confirm first. Empty orphan set -> delete as today (no dialog).
-        let paths = panelSelection.map { Array($0) }
-        let orphaned = DependencyIndex.orphanedReferences(model.document, paths)
-        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
-            return
-        }
-        LayersPanel.dispatchYamlAction(
-            "delete_layer_selection",
-            model: model,
-            panelSelection: paths
-        )
-        panelSelection.removeAll()
-    }
-
-    private func duplicateSelection() {
-        guard !panelSelection.isEmpty else { return }
-        LayersPanel.dispatchYamlAction(
-            "duplicate_layer_selection",
-            model: model,
-            panelSelection: panelSelection.map { Array($0) }
-        )
-    }
-
-    private func flattenArtwork() {
-        guard !panelSelection.isEmpty else { return }
-        // OP_LOG.md §9 Phase P5 — route through the `flatten_artwork` YAML action
-        // (a foreach of `doc.unpack_group_at` over reverse(selection)) so the
-        // gesture JOURNALS one `unpack_group_at` op per group through the SHARED
-        // `opApply` dispatcher (one named undo step). Behavior is unchanged: the
-        // action's reverse-order unpack matches the prior native loop, and the
-        // shared `apply_unpack_group_at` body re-inserts children in place.
-        LayersPanel.dispatchYamlAction(
-            "flatten_artwork",
-            model: model,
-            panelSelection: panelSelection.map { Array($0) }
-        )
-        panelSelection.removeAll()
-    }
-
-    private func collectInNewLayer() {
-        guard !panelSelection.isEmpty else { return }
-        LayersPanel.dispatchYamlAction(
-            "collect_in_new_layer",
-            model: model,
-            panelSelection: panelSelection.map { Array($0) }
-        )
-        panelSelection.removeAll()
-    }
 
     @available(*, deprecated, message: "unused, kept as stub")
     @ViewBuilder
