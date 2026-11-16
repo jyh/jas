@@ -9074,16 +9074,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         "position:fixed;left:{}px;top:{}px;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                         cx, cy
                     );
-                    let is_container = {
-                        let st = app.borrow();
-                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
-                            .map(|e| e.is_group_or_layer()).unwrap_or(false)
-                    };
-                    let is_layer = {
-                        let st = app.borrow();
-                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
-                            .map(|e| e.is_layer()).unwrap_or(false)
-                    };
+                    // Row 141 part 3 (web half): the entries are layers.yaml's
+                    // `context_menu:` in the right-clicked row's scope.
+                    let (entries, row_scope) = layers_row_menu(el, ctx, &cpath).unwrap_or_default();
                     let item_style = "padding:4px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;";
                     let item_style_disabled = "padding:4px 12px;font-size:11px;color:var(--jas-text-dim,#777);";
 
@@ -9092,21 +9085,20 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let close_app2 = app.clone();
                     let mut close_rev2 = revision;
 
-                    let cpath_for_action = cpath.clone();
                     let mut ctx_dialog_signal = rctx.dialog_ctx.0;
-                    let do_action = |action: &'static str| {
+                    let do_action = |action: String, params: serde_json::Map<String, serde_json::Value>| {
                         let a = app.clone();
                         let mut r = revision;
-                        let path_str = cpath_for_action.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+                        let scope = row_scope.clone();
                         move |_: Event<MouseData>| {
                             let a2 = a.clone();
-                            let ps = path_str.clone();
+                            let action = action.clone();
+                            let params = params.clone();
+                            let scope = scope.clone();
                             spawn(async move {
                                 let deferred = {
                                     let mut st = a2.borrow_mut();
-                                    let mut params = serde_json::Map::new();
-                                    params.insert("layer_id".into(), serde_json::Value::String(ps));
-                                    let d = dispatch_action(action, &params, &mut st);
+                                    let d = dispatch_action_in(&action, &params, Some(&scope), &mut st);
                                     st.layers_context_menu = None;
                                     d
                                 };
@@ -9130,6 +9122,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         }
                     };
 
+                    let menu_items: Vec<Element> = entries.into_iter().enumerate().map(|(i, entry)| match entry {
+                        RowMenuEntry::Separator => rsx! {
+                            div { key: "{i}", style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
+                        },
+                        RowMenuEntry::Item { label, enabled: true, action, params } => {
+                            let on_pick = do_action(action, params);
+                            rsx! { div { key: "{i}", style: "{item_style}", onclick: on_pick, "{label}" } }
+                        }
+                        RowMenuEntry::Item { label, enabled: false, .. } => rsx! {
+                            div { key: "{i}", style: "{item_style_disabled}", "{label}" }
+                        },
+                    }).collect();
+
                     rsx! {
                         // Backdrop to close menu on click
                         div {
@@ -9152,44 +9157,54 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         }
                         div {
                             style: "{menu_style}",
-                            div {
-                                style: if is_layer { item_style } else { item_style_disabled },
-                                onclick: do_action("open_layer_options"),
-                                "Options for Layer..."
-                            }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("duplicate_layer_selection"),
-                                "Duplicate"
-                            }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("delete_layer_selection"),
-                                "Delete Selection"
-                            }
-                            div { style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
-                            div {
-                                style: if is_container { item_style } else { item_style_disabled },
-                                onclick: do_action("enter_isolation_mode"),
-                                "Enter Isolation Mode"
-                            }
-                            div { style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("flatten_artwork"),
-                                "Flatten Artwork"
-                            }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("collect_in_new_layer"),
-                                "Collect in New Layer"
-                            }
+                            {menu_items.into_iter()}
                         }
                     }
                 }
             }
         }
     }
+}
+
+/// One entry of the Layers row's yaml `context_menu:` as the web draws it
+/// (STATUS-jas row 141 part 3, web half; the twin of Swift's `LayersRowMenu`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RowMenuEntry {
+    Separator,
+    Item { label: String, enabled: bool, action: String, params: serde_json::Map<String, serde_json::Value> },
+}
+
+/// The `context_menu:` of `holder` (`lp_tree`) for row `path`, read in that
+/// row's scope: `node` is bound by the holder's own foreach, the expansion the
+/// tree draws. Labels and actions are interpolated, `enabled_when` is evaluated
+/// (an item without one is enabled), and params are resolved as a behaviour's
+/// are (`resolve_behavior_params`). Returns the entries and the row's scope, or
+/// `None` when the holder declares no menu or the row is not one of its rows.
+pub(crate) fn layers_row_menu(holder: &serde_json::Value, ctx: &serde_json::Value, path: &[usize])
+    -> Option<(Vec<RowMenuEntry>, serde_json::Value)> {
+    let items = holder.get("context_menu")?.as_array()?;
+    let var = holder.get("foreach").and_then(|f| f.get("as")).and_then(|v| v.as_str()).unwrap_or("item");
+    let want: Vec<serde_json::Value> = path.iter().map(|&i| serde_json::json!(i)).collect();
+    let scope = crate::interpreter::foreach::row_scopes(holder, ctx)?.into_iter().find(|r| {
+        let p = &r[var]["path"];
+        let p = p.get("__path__").unwrap_or(p);
+        p.as_array().is_some_and(|a| a.as_slice() == want.as_slice())
+    })?;
+    let empty = serde_json::Map::new();
+    let entries = items.iter().filter_map(|raw| {
+        if raw.as_str() == Some("separator") {
+            return Some(RowMenuEntry::Separator);
+        }
+        let item = raw.as_object()?;
+        let text = |k: &str| item.get(k).and_then(|v| v.as_str())
+            .map(|t| crate::interpreter::expr::eval_text(t, &scope)).unwrap_or_default();
+        let enabled = item.get("enabled_when").and_then(|v| v.as_str())
+            .map_or(true, |c| crate::interpreter::expr::eval(c, &scope).to_bool());
+        let decl = item.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
+        Some(RowMenuEntry::Item { label: text("label"), enabled, action: text("action"),
+                                  params: resolve_behavior_params(decl, &scope) })
+    }).collect();
+    Some((entries, scope))
 }
 
 /// Render a brush_preview widget: a small preview of the brush tip / stroke,
@@ -15946,5 +15961,92 @@ mod layers_tree_key_tests {
         let ctrl_a = KeyChord::new("a", true, false, false, false);
         assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
         assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
+    }
+}
+
+
+#[cfg(test)]
+mod layers_row_menu_tests {
+    use super::{layers_row_menu, RowMenuEntry};
+
+    /// `lp_tree` as the workspace declares it, and a scope with the shared
+    /// element_tree fixture's first case as `active_document.element_tree`
+    /// (rows [1] Front, [0] Back, [0,1] G, [0,1,0] a leaf) and the panel's
+    /// declared defaults.
+    fn holder_and_ctx(isolated: bool) -> (serde_json::Value, serde_json::Value) {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        fn find(n: &serde_json::Value) -> Option<serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some("lp_tree") {
+                return Some(n.clone());
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(find),
+                serde_json::Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let holder = find(&ws.panel("layers_panel_content").expect("layers panel")["content"]).expect("lp_tree");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fixture: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let rows = fixture["cases"][0]["expected"].clone();
+        let mut panel: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults("layers_panel_content").into_iter().collect();
+        if isolated {
+            panel.insert("isolation_stack".into(), serde_json::json!([[0]]));
+        }
+        let ctx = serde_json::json!({"panel": panel, "active_document": {"element_tree": rows}});
+        (holder, ctx)
+    }
+
+    fn item<'a>(es: &'a [RowMenuEntry], label: &str) -> Option<&'a RowMenuEntry> {
+        es.iter().find(|e| matches!(e, RowMenuEntry::Item { label: l, .. } if l == label))
+    }
+
+    fn labels(es: &[RowMenuEntry]) -> Vec<String> {
+        es.iter().map(|e| match e {
+            RowMenuEntry::Separator => "-".to_string(),
+            RowMenuEntry::Item { label, .. } => label.clone(),
+        }).collect()
+    }
+
+    #[test]
+    fn the_row_menu_is_the_yamls_menu_in_the_rows_scope() {
+        let (holder, ctx) = holder_and_ctx(false);
+        let (es, _) = layers_row_menu(&holder, &ctx, &[0]).expect("row [0] has a menu");
+        assert_eq!(labels(&es), ["Options for Layer...", "Duplicate", "Delete Selection", "-",
+                                 "Enter Isolation Mode", "-", "Flatten Artwork", "Collect in New Layer"]);
+        // The row is bound as `node`: a layer row enables the layer-only item
+        // (an unbound node disables it everywhere), a group row does not.
+        assert!(matches!(item(&es, "Options for Layer..."), Some(RowMenuEntry::Item { enabled: true, .. })), "{es:?}");
+        let (group, _) = layers_row_menu(&holder, &ctx, &[0, 1]).expect("row [0,1] has a menu");
+        assert!(matches!(item(&group, "Options for Layer..."), Some(RowMenuEntry::Item { enabled: false, .. })), "{group:?}");
+        // The params are resolved in the row's scope: the isolation item names THIS row.
+        match item(&group, "Enter Isolation Mode") {
+            Some(RowMenuEntry::Item { action, params, .. }) => {
+                assert_eq!(action, "enter_isolation_mode");
+                assert!(params.get("container_id").and_then(|v| v.as_str()).is_some_and(|c| c.contains('0') && c.contains('1')),
+                        "the row's own path: {params:?}");
+            }
+            other => panic!("no isolation item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_isolation_item_follows_the_isolation_stack() {
+        let (holder, ctx) = holder_and_ctx(true);
+        let (es, _) = layers_row_menu(&holder, &ctx, &[0, 1]).expect("row [0,1] has a menu");
+        match item(&es, "Exit Isolation Mode") {
+            Some(RowMenuEntry::Item { action, enabled, .. }) => {
+                assert_eq!(action, "exit_isolation_mode");
+                assert!(*enabled);
+            }
+            other => panic!("no Exit item while isolated: {other:?} in {es:?}"),
+        }
+    }
+
+    #[test]
+    fn a_row_that_is_not_in_the_tree_has_no_menu() {
+        let (holder, ctx) = holder_and_ctx(false);
+        assert!(layers_row_menu(&holder, &ctx, &[7]).is_none());
     }
 }
