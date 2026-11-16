@@ -2490,7 +2490,8 @@ struct YamlElementView: View {
     @ViewBuilder
     private func renderTreeView() -> some View {
         if let model = model {
-            TreeViewContent(model: model)
+            TreeViewContent(model: model, onDialogWrite: onDialogWrite,
+                            onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
         } else {
             SwiftUI.Text("[Element hierarchy]")
                 .foregroundColor(.gray)
@@ -3977,6 +3978,11 @@ struct FlatRow: Identifiable {
 
 struct TreeViewContent: View {
     @ObservedObject var model: Model
+    /// The dock's dialog callbacks, so a row menu item that opens a dialog
+    /// (Options for Layer...) opens the yaml dialog as the panel menu does.
+    var onDialogWrite: ((String, Any?) -> Void)? = nil
+    var onStoreDialogOpened: ((CGPoint?) -> Void)? = nil
+    var onStoreDialogClosed: (() -> Void)? = nil
     /// The collapsed containers, the panel selection and the row being renamed
     /// are the Layers panel's STORE values (`panel.collapsed_paths`,
     /// `panel.layers_panel_selection`, `panel.renaming_element`), the ones
@@ -4473,23 +4479,23 @@ struct TreeViewContent: View {
             handleRowTap(path: path)
         }
         .contextMenu {
-            if case .layer = elem {
-                Button("Options for Layer...") { showLayerOptionsFor = path }
-            } else {
-                Button("Options for Layer...") {}.disabled(true)
+            // Row 141 part 3: layers.yaml's `context_menu:`, drawn in this
+            // row's scope and run through the engine's door (LayersRowMenu).
+            if let menu = LayersRowMenu.at(path, model: model) {
+                ForEach(Array(menu.entries.enumerated()), id: \.offset) { _, entry in
+                    switch entry {
+                    case .separator:
+                        Divider()
+                    case .item(let label, let enabled, let index):
+                        Button(label) {
+                            menu.pick(index, model: model, onDialogWrite: onDialogWrite,
+                                      onDialogOpened: { onStoreDialogOpened?(nil) },
+                                      onDialogClosed: onStoreDialogClosed)
+                        }
+                        .disabled(!enabled)
+                    }
+                }
             }
-            Button("Duplicate") { duplicateSelection() }
-            Button("Delete Selection") { deleteSelection() }
-            Divider()
-            if isolationStack.isEmpty {
-                Button("Enter Isolation Mode") { isolationStack.append(path) }
-                    .disabled(!row.isContainer)
-            } else {
-                Button("Exit Isolation Mode") { isolationStack.removeLast() }
-            }
-            Divider()
-            Button("Flatten Artwork") { flattenArtwork() }
-            Button("Collect in New Layer") { collectInNewLayer() }
         }
         .onDrag {
             dragSource = path

@@ -78,3 +78,25 @@ private func index(_ es: [WidgetEvent.ContextMenuEntry], _ label: String) -> Int
     #expect(menu.pick(del, model: model).outcome == "refused")
     #expect(model.document.layers.count == 2)
 }
+
+/// The orphan gate (part 2b) reaches the Mac menu: a pick of Delete Selection
+/// whose deletion would orphan a live instance opens the confirm and deletes
+/// nothing, as the old hand-built menu's own guard did.
+@Test func aRowMenuDeleteThatWouldOrphanAnInstanceOpensTheConfirm() throws {
+    let a = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "a"))
+    let r1 = Element.live(.reference(ReferenceElem(target: ElementRef("a"), name: nil, id: "r1")))
+    let m = Model(document: Document(layers: [Layer(name: "L0", children: [a]), Layer(name: "L1", children: [r1])],
+                                     selectedLayer: 0, selection: [], artboards: []))
+    if let ws = WorkspaceData.load(), let panels = ws.panels() {
+        for pid in panels.keys.sorted() { m.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+    }
+    m.stateStore.setActivePanel("layers_panel_content")
+    setLayersPanelSelection(model: m, [[0, 0]])
+    let menu = try #require(LayersRowMenu.at([0, 0], model: m))
+    let del = try #require(index(menu.entries, "Delete Selection"))
+    var opened = false
+    menu.pick(del, model: m, onDialogOpened: { opened = true })
+    #expect(m.document.layers[0].children.count == 1, "nothing was deleted")
+    #expect(m.stateStore.getDialogId() == "delete_layer_orphan_confirm")
+    #expect(opened, "the dock is told a dialog opened")
+}
