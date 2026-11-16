@@ -9192,6 +9192,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     }
 }
 
+#[allow(dead_code)] // red-first stub (row 141 part 3)
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RowMenuEntry {
+    Separator,
+    Item { label: String, enabled: bool, action: String, params: serde_json::Map<String, serde_json::Value> },
+}
+
+#[allow(dead_code)] // red-first stub (row 141 part 3)
+pub(crate) fn layers_row_menu(_holder: &serde_json::Value, _ctx: &serde_json::Value, _path: &[usize])
+    -> Option<(Vec<RowMenuEntry>, serde_json::Value)> {
+    None
+}
+
 /// Render a brush_preview widget: a small preview of the brush tip / stroke,
 /// read from the enclosing tile's `brush` loop variable. The drawing is
 /// [`crate::brush_preview::preview_svg`], the same markup the panel plan sends
@@ -15946,5 +15959,92 @@ mod layers_tree_key_tests {
         let ctrl_a = KeyChord::new("a", true, false, false, false);
         assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
         assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
+    }
+}
+
+
+#[cfg(test)]
+mod layers_row_menu_tests {
+    use super::{layers_row_menu, RowMenuEntry};
+
+    /// `lp_tree` as the workspace declares it, and a scope with the shared
+    /// element_tree fixture's first case as `active_document.element_tree`
+    /// (rows [1] Front, [0] Back, [0,1] G, [0,1,0] a leaf) and the panel's
+    /// declared defaults.
+    fn holder_and_ctx(isolated: bool) -> (serde_json::Value, serde_json::Value) {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        fn find(n: &serde_json::Value) -> Option<serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some("lp_tree") {
+                return Some(n.clone());
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(find),
+                serde_json::Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let holder = find(&ws.panel("layers_panel_content").expect("layers panel")["content"]).expect("lp_tree");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fixture: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let rows = fixture["cases"][0]["expected"].clone();
+        let mut panel: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults("layers_panel_content").into_iter().collect();
+        if isolated {
+            panel.insert("isolation_stack".into(), serde_json::json!([[0]]));
+        }
+        let ctx = serde_json::json!({"panel": panel, "active_document": {"element_tree": rows}});
+        (holder, ctx)
+    }
+
+    fn item<'a>(es: &'a [RowMenuEntry], label: &str) -> Option<&'a RowMenuEntry> {
+        es.iter().find(|e| matches!(e, RowMenuEntry::Item { label: l, .. } if l == label))
+    }
+
+    fn labels(es: &[RowMenuEntry]) -> Vec<String> {
+        es.iter().map(|e| match e {
+            RowMenuEntry::Separator => "-".to_string(),
+            RowMenuEntry::Item { label, .. } => label.clone(),
+        }).collect()
+    }
+
+    #[test]
+    fn the_row_menu_is_the_yamls_menu_in_the_rows_scope() {
+        let (holder, ctx) = holder_and_ctx(false);
+        let (es, _) = layers_row_menu(&holder, &ctx, &[0]).expect("row [0] has a menu");
+        assert_eq!(labels(&es), ["Options for Layer...", "Duplicate", "Delete Selection", "-",
+                                 "Enter Isolation Mode", "-", "Flatten Artwork", "Collect in New Layer"]);
+        // The row is bound as `node`: a layer row enables the layer-only item
+        // (an unbound node disables it everywhere), a group row does not.
+        assert!(matches!(item(&es, "Options for Layer..."), Some(RowMenuEntry::Item { enabled: true, .. })), "{es:?}");
+        let (group, _) = layers_row_menu(&holder, &ctx, &[0, 1]).expect("row [0,1] has a menu");
+        assert!(matches!(item(&group, "Options for Layer..."), Some(RowMenuEntry::Item { enabled: false, .. })), "{group:?}");
+        // The params are resolved in the row's scope: the isolation item names THIS row.
+        match item(&group, "Enter Isolation Mode") {
+            Some(RowMenuEntry::Item { action, params, .. }) => {
+                assert_eq!(action, "enter_isolation_mode");
+                assert!(params.get("container_id").and_then(|v| v.as_str()).is_some_and(|c| c.contains('0') && c.contains('1')),
+                        "the row's own path: {params:?}");
+            }
+            other => panic!("no isolation item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_isolation_item_follows_the_isolation_stack() {
+        let (holder, ctx) = holder_and_ctx(true);
+        let (es, _) = layers_row_menu(&holder, &ctx, &[0, 1]).expect("row [0,1] has a menu");
+        match item(&es, "Exit Isolation Mode") {
+            Some(RowMenuEntry::Item { action, enabled, .. }) => {
+                assert_eq!(action, "exit_isolation_mode");
+                assert!(*enabled);
+            }
+            other => panic!("no Exit item while isolated: {other:?} in {es:?}"),
+        }
+    }
+
+    #[test]
+    fn a_row_that_is_not_in_the_tree_has_no_menu() {
+        let (holder, ctx) = holder_and_ctx(false);
+        assert!(layers_row_menu(&holder, &ctx, &[7]).is_none());
     }
 }
