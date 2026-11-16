@@ -100,3 +100,31 @@ private func index(_ es: [WidgetEvent.ContextMenuEntry], _ label: String) -> Int
     #expect(m.stateStore.getDialogId() == "delete_layer_orphan_confirm")
     #expect(opened, "the dock is told a dialog opened")
 }
+
+/// Row 142 (layers.yaml, Panel Selection): "If the right-clicked element is not
+/// already panel-selected, it becomes the sole panel-selected element first,
+/// then the menu acts on the selection." A right-click on a row INSIDE the
+/// selection keeps the selection whole, so a multi-row Duplicate still works.
+@Test func aSecondaryPressSelectsAnUnselectedRowAndKeepsASelectedOne() {
+    let model = twoLayers()
+    setLayersPanelSelection(model: model, [[0], [1]])
+    LayersRowMenu.selectForSecondaryPress([1, 0], model: model)
+    #expect(Set(layersPanelSelection(model: model)) == [[1, 0]], "an unselected row becomes the sole selection")
+
+    setLayersPanelSelection(model: model, [[0], [1]])
+    LayersRowMenu.selectForSecondaryPress([1], model: model)
+    #expect(Set(layersPanelSelection(model: model)) == [[0], [1]], "a selected row keeps the selection")
+}
+
+/// And the menu then acts on that selection: Duplicate on a right-clicked
+/// unselected row duplicates THAT row, not the prior selection.
+@Test func aRightClickedUnselectedRowIsWhatTheMenuActsOn() throws {
+    let model = twoLayers()
+    setLayersPanelSelection(model: model, [[0]])
+    LayersRowMenu.selectForSecondaryPress([1, 0], model: model)
+    let menu = try #require(LayersRowMenu.at([1, 0], model: model))
+    let dup = try #require(index(menu.entries, "Duplicate"))
+    #expect(menu.pick(dup, model: model).outcome == "committed")
+    #expect(model.document.layers.count == 2, "no layer was duplicated")
+    #expect(model.document.layers[1].children.count == 2, "the right-clicked leaf was duplicated")
+}
