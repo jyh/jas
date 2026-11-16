@@ -29,6 +29,12 @@ public func makeMeasurer(family: String, weight: String, style: String, size: Do
 /// resolves to actual bold / italic SF variants.
 public func resolveFont(family: String, bold: Bool, italic: Bool,
                         size: Double) -> NSFont {
+    // One lookup at a time (``withFontLookup``, STATUS-jas row 140).
+    withFontLookup { resolveFontUnlocked(family: family, bold: bold, italic: italic, size: size) }
+}
+
+private func resolveFontUnlocked(family: String, bold: Bool, italic: Bool,
+                                 size: Double) -> NSFont {
     var traits: NSFontDescriptor.SymbolicTraits = []
     if bold { traits.insert(.bold) }
     if italic { traits.insert(.italic) }
