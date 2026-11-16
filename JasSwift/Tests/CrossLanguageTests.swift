@@ -7745,6 +7745,39 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
     return .success((target.0, chain.last!.1, bubbled))
 }
 
+/// F6 (row 145, TESTING.md section 6): the field a row step leaves SHOWN on its
+/// row, which then holds key focus, as every shell focuses the field an inline
+/// rename shows. A shown field is a repeated `text_input` that declares
+/// `bind.visible` and whose `visible` holds in the row's scope; its text is
+/// what its `bind.value` shows. A field with no `visible` bind is always shown
+/// and takes focus only by an `input` step. Two shown fields on one row are
+/// refused by name, because which one has focus is not then a fact the yaml states.
+private func formsShownField(_ content: Any?, row: [Int], scope: [String: Any])
+    -> Result<(widget: String, text: String)?, FormsRefusal> {
+    var ids: [String] = []
+    func walk(_ n: Any?) {
+        if let a = n as? [Any] { a.forEach(walk); return }
+        guard let d = n as? [String: Any] else { return }
+        if d["type"] as? String == "text_input", let id = d["id"] as? String,
+           (d["bind"] as? [String: Any])?["visible"] != nil { ids.append(id) }
+        walk(d["children"]); walk(d["do"])
+    }
+    walk(content)
+    var shown: [(widget: String, text: String)] = []
+    for id in ids {
+        // A field no foreach repeats is not on a row; that miss is not an error.
+        guard case .success(let t) = formsRowTarget(content, widget: id, event: "", row: row, scope: scope, exact: true),
+              let bind = t.node["bind"] as? [String: Any], let vis = bind["visible"] as? String else { continue }
+        guard evaluate(vis, context: t.scope).toBool() else { continue }
+        let text = (bind["value"] as? String).map { evaluate($0, context: t.scope).toStringCoerce() } ?? ""
+        shown.append((id, text))
+    }
+    if shown.count > 1 {
+        return .failure(FormsRefusal("row \(row) shows \(shown.count) fields (\(shown.map(\.widget).joined(separator: ", "))); which holds key focus is not stated"))
+    }
+    return .success(shown.first)
+}
+
 /// Why a row drag's `drag_move` / `drag_end` on `node` cannot be delivered by
 /// this runner, or nil: an entry that declares an action or effects would read
 /// `event.drop_*` / `event.hover_ms`, which ``PanelWidgetEvents/behavior``
@@ -8149,6 +8182,12 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 }
             }
             focus = pid
+            // F6 (row 145): a field the step left shown on its row holds key focus.
+            let after = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+            switch formsShownField(panel["content"], row: rowPath, scope: after) {
+            case .failure(let r): return refuse(r.why)
+            case .success(let f): field = f.map { (pid, $0.widget, rowPath, $0.text) }
+            }
         } else {
             let form = ["dialog", "context_menu"].first { st[$0] != nil }
             refuse(form.map { "the `\($0)` form is not delivered by this runner" } ?? "\(st) is not a step this runner knows")
@@ -8416,6 +8455,39 @@ private func formsEdit(_ event: String, _ value: String?) -> [String: Any] {
     let plain = formsRun(formsLayersScript(formsOpenRename01 + [formsEdit("blur", nil), ["read": "document"]]))
     #expect(formsRefusal(plain) == nil, "\(plain)")
     #expect(formsNameAt(plain, [0, 1]) != "Ring", "\(plain)")
+}
+
+/// F6 (row 145, TESTING.md section 6): a row step that leaves a field shown on
+/// that row (a `text_input` whose `bind.visible` now holds, as the double-click
+/// that opens a rename shows `lp_name_edit`) gives that FIELD key focus, so
+/// the next key is its `keydown` with its shown text. Enter tells the two
+/// routes apart: the field confirms and closes (`confirm_rename`), while the
+/// tree's Enter would run `rename_element` again and leave it open. A key the
+/// field declares nothing for is refused, never handed to the tree.
+@Test func formsARowStepThatShowsAFieldGivesItKeyFocus() {
+    let enter = formsRun(formsLayersScript(formsOpenRename01 + [["key": "Enter"], formsReadLayers, ["read": "document"]]))
+    #expect(formsRefusal(enter) == nil, "\(enter)")
+    #expect(formsPanelReads(enter).first?["renaming_element"] is NSNull, "the field's Enter confirms and closes: \(enter)")
+    #expect(formsNameAt(enter, [0, 1]) != "no element", "\(enter)")
+
+    let esc = formsRun(formsLayersScript(formsOpenRename01 + [formsReadLayers, ["key": "Escape"], formsReadLayers]))
+    #expect(formsRefusal(esc) == nil, "\(esc)")
+    #expect(formsPath(formsPanelReads(esc).first?["renaming_element"] as Any) == [0, 1], "a read keeps the field open: \(esc)")
+    #expect(formsPanelReads(esc).last?["renaming_element"] is NSNull, "Escape cancels: \(esc)")
+
+    let arrow = formsRun(formsLayersScript(formsOpenRename01 + [["key": "ArrowDown"], formsReadLayers]))
+    #expect(formsRefusal(arrow) == "UnboundFieldKey lp_name_edit: ArrowDown", "\(arrow)")
+
+    // The control: a row step that shows no field (a click selects, a
+    // container's double-click isolates) leaves the key with the tree.
+    let tree = formsRun(formsLayersScript([formsClickRow([0, 1]), ["key": "Enter"], formsReadLayers]))
+    #expect(formsRefusal(tree) == nil, "\(tree)")
+    #expect(formsPath(formsPanelReads(tree).first?["renaming_element"] as Any) == [0, 1], "the tree's Enter opens a rename: \(tree)")
+    let iso = formsRun(formsLayersScript([
+        formsClickRow([0]), ["panel": formsLayers, "widget": "lp_preview", "row": [0], "event": "double_click"],
+        ["key": "ArrowDown"], formsReadLayers,
+    ]))
+    #expect(formsRefusal(iso) == nil, "no field is shown, so the tree takes the arrow: \(iso)")
 }
 
 private func formsDrag(_ from: [Int], _ to: [Int], _ zone: String, hover: Int = 0) -> [String: Any] {
