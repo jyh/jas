@@ -437,6 +437,29 @@ The two inline rename fields are the shipped users: the Layers row's
 on blur, and cancel on Escape. The reference's procedure is
 `widget_event.text_entry`.
 
+## A behavior with no body
+
+A behavior entry can declare an `event` and a `description` and nothing
+else: no `action`, and no `effects` (or an empty list). The shipped ones
+are the Layers and Artboards rows' `drag_move` and `drag_end`, which
+describe what the shell does natively.
+
+- **A body-less entry runs nothing, and it is not counted.** It does not
+  add to `behaviors_run`, and it does not turn the result into
+  `committed`.
+- **It still OWNS its event,** exactly as a behavior whose `condition` is
+  false does. A body-less `click` entry stops the node-level `action`
+  from running.
+- **An event whose chosen entries are all body-less is therefore `inert`.**
+  At the engine's panel door that is the refusal `EmptyBehavior`, as
+  every other `inert` is.
+- **A body-less entry beside an entry with a body does not stop it.** The
+  entry with the body runs and is counted, and the result is `committed`.
+
+Why: `committed` means something was written or run. A drop that the
+shell performs natively ran nothing in this layer, and `committed` would
+report that it had.
+
 ## What a behavior can read
 
 Every expression a behavior evaluates starts from one of these names.

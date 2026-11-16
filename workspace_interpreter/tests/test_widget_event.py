@@ -1110,6 +1110,55 @@ def _button_labelled(node, label):
     return found[0]
 
 
+class TestBodylessBehavior:
+    """WIDGET_EVENTS.md, "A behavior with no body": an entry with no `action`
+    and no `effects` runs nothing and is not counted, but still owns its event
+    (STATUS-jas row 138; the shipped ones are the Layers and Artboards rows'
+    drag entries)."""
+
+    ACTIONS = TestClickSynthetic.ACTIONS
+
+    def _store(self):
+        store = StateStore()
+        store.init_dialog("d", {"n": 7, "hits": 0})
+        return store
+
+    def test_a_bodyless_click_is_inert_and_still_owns_the_click(self):
+        store = self._store()
+        w = {"type": "button", "action": "record", "params": {"n": "dialog.n"},
+             "behavior": [{"event": "click", "description": "the shell does it"}]}
+        r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("inert", behaviors_run=0)
+        assert store.get("got_n") is None, "the node-level action did not run"
+
+    def test_an_empty_effects_list_is_bodyless_too(self):
+        store = self._store()
+        w = {"type": "button", "behavior": [{"event": "click", "effects": []}]}
+        r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("inert", behaviors_run=0)
+
+    def test_a_bodyless_entry_beside_a_bodied_one_does_not_stop_it(self):
+        store = self._store()
+        w = {"type": "button", "behavior": [
+            {"event": "click", "description": "the shell does it"},
+            {"event": "click", "action": "record", "params": {"n": "dialog.n"}}]}
+        r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("committed", behaviors_run=1)
+        assert store.get("got_n") == 7
+
+    def test_a_bodyless_press_behavior_is_inert_and_writes_no_bind(self):
+        # CONTROL for the counter's other caller: a boolean press whose only
+        # click behavior is body-less owns the press (no bind write) and ran
+        # nothing.
+        store = StateStore()
+        store.init_panel("p", {"on": False})
+        w = {"type": "toggle", "bind": {"checked": "panel.on"},
+             "behavior": [{"event": "click", "description": "native"}]}
+        r = we.press(w, store, panel={"id": "p"})
+        assert r.outcome == "inert" and r.behaviors_run == 0
+        assert store.get_panel("p", "on") is False
+
+
 class TestShippedRotateButtons:
     """Rotate Options' Copy and OK both run `rotate_options_confirm`; only the
     literal `copy:` differs, so a port that reads a YAML `false` as the text
