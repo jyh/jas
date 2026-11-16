@@ -17805,7 +17805,8 @@
               },
               {
                 "label": "Delete Selection",
-                "action": "delete_layer_selection"
+                "action": "delete_layer_selection",
+                "enabled_when": "filter(panel.layers_panel_selection, fun p -> p.depth == 1).length < active_document.top_level_layer_paths.length"
               },
               "separator",
               {
@@ -17831,11 +17832,13 @@
             "keyboard": [
               {
                 "key": "Delete",
-                "action": "delete_layer_selection"
+                "action": "delete_layer_selection",
+                "enabled_when": "filter(panel.layers_panel_selection, fun p -> p.depth == 1).length < active_document.top_level_layer_paths.length"
               },
               {
                 "key": "Backspace",
-                "action": "delete_layer_selection"
+                "action": "delete_layer_selection",
+                "enabled_when": "filter(panel.layers_panel_selection, fun p -> p.depth == 1).length < active_document.top_level_layer_paths.length"
               },
               {
                 "key": "F2",
