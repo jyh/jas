@@ -890,6 +890,12 @@ func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
     } else {
         panelMap = ws.panelStateDefaults(contentId)
     }
+    // The `panel.*` keys this app holds on the Model (the Layers isolation
+    // stack), overlaid as ``panelMenuContext`` overlays them. Without this the
+    // body read the store's copy, which nothing writes, so every body read of
+    // `panel.isolation_stack` was `[]` (STATUS-jas row 141; the store-keyed
+    // reader of row 139).
+    for (k, v) in modelHeldPanelState(contentId, model: model) { panelMap[k] = v }
     // Selection-driven overrides: when a Text / TextPath is
     // selected, the Character panel reflects its attributes rather
     // than the stored panel defaults. Mirrors the Rust dock
