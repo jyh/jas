@@ -33,6 +33,16 @@ struct LayersRowMenu {
         return LayersRowMenu(holder: holder, scope: scope)
     }
 
+    /// Row 142 (layers.yaml, Panel Selection): a right-click on a row that is
+    /// not panel-selected makes it the sole panel selection FIRST, so the menu
+    /// acts on it; a right-click inside the selection keeps the selection.
+    /// The shell calls this on the secondary press, before the menu is built.
+    static func selectForSecondaryPress(_ path: ElementPath, model: Model) {
+        if !layersPanelSelection(model: model).contains(path) {
+            setLayersPanelSelection(model: model, [path])
+        }
+    }
+
     /// The entries as a shell draws them (``WidgetEvent/contextMenuEntries``).
     var entries: [WidgetEvent.ContextMenuEntry] {
         WidgetEvent.contextMenuEntries(holder, scope: scope)

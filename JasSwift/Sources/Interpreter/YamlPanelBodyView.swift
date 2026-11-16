@@ -3973,6 +3973,9 @@ struct TreeViewContent: View {
         nonmutating set { model.layersIsolationStack = newValue }
     }
     @FocusState private var treeFocused: Bool
+    /// The row under the pointer, so the event monitor can select it on a
+    /// secondary press (row 142). Cleared when the pointer leaves that row.
+    @State private var hoveredRow: ElementPath? = nil
     // Tracks current modifier keys from an NSEvent monitor (macOS).
     @State private var modifierFlags: NSEvent.ModifierFlags = []
 
@@ -4134,8 +4137,16 @@ struct TreeViewContent: View {
             // rename or pops one isolation level exactly as this arm did, and
             // Cmd-A selects the visible rows within the isolation, where this
             // arm took every element path.
-            NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown, .keyDown]) { evt in
+            NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown, .rightMouseDown, .keyDown]) { evt in
                 modifierFlags = evt.modifierFlags
+                // Row 142: a secondary press (right-click, or Control-click)
+                // on a row selects it per layers.yaml BEFORE AppKit builds the
+                // row's context menu, so the menu acts on it.
+                let secondary = evt.type == .rightMouseDown
+                    || (evt.type == .leftMouseDown && evt.modifierFlags.contains(.control))
+                if secondary, let row = hoveredRow {
+                    LayersRowMenu.selectForSecondaryPress(row, model: model)
+                }
                 if evt.type == .keyDown && treeFocused {
                     if evt.keyCode == 51 || evt.keyCode == 117 {
                         // 51 = Delete (backspace), 117 = Forward Delete
@@ -4407,6 +4418,9 @@ struct TreeViewContent: View {
         .contentShape(Rectangle())
         .onTapGesture {
             handleRowTap(path: path)
+        }
+        .onHover { inside in
+            if inside { hoveredRow = path } else if hoveredRow == path { hoveredRow = nil }
         }
         .contextMenu {
             // Row 141 part 3: layers.yaml's `context_menu:`, drawn in this
