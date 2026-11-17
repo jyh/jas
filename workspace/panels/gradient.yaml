@@ -167,10 +167,10 @@ menu:
       one library at a time.
   - label: "Save Gradient Library"
     action: gradient_save_library
-    enabled_when: "false"
+    enabled_when: "panel.active_library_id != null"
     description: >
-      Phase 9 — opens a Save Gradient Library dialog. Deferred
-      pending a Save dialog and file-writing pipeline per app.
+      Open the Save Gradient Library dialog for the active library
+      (gradient_save_library). Disabled when no library is active.
   - separator
   - label: "Close Gradient"
     action: close_panel

@@ -1526,6 +1526,45 @@ actions:
           key: id
           insert: { collapsed: false }
 
+  gradient_save_library:
+    description: >
+      Open the Save Gradient Library dialog on the Gradient panel's active
+      library. The dialog receives the library's id as param.library and
+      proposes its display name as the name to save under (empty when it has
+      none). Saving is the dialog's Save button, gradient_save_library_confirm.
+    category: panel
+    effects:
+      - open_dialog:
+          id: gradient_library_save
+          params:
+            library: "panel.active_library_id"
+            name: "data.gradient_libraries[panel.active_library_id].name"
+
+  gradient_save_library_confirm:
+    description: >
+      Save the gradient library the dialog was opened on under the entered
+      name, then close the dialog. The rules are Save Brush Library's and
+      Save Swatch Library's: the name becomes an id (lower-case ASCII letters
+      and digits kept, every other run of characters one underscore, leading
+      and trailing underscores trimmed, "library" if nothing is left); when
+      the id is the source library's own id the save is in place and only
+      the name changes; when it names a different existing library the first
+      free "_2", "_3", ... suffix is taken. A new library is a copy of the
+      source with the new name and becomes the ACTIVE library, because the
+      Gradient panel shows one library at a time. Every save asks the host to
+      write the library's file (the interpreter itself writes no file): on
+      the web as a download of <id>.json, on the Mac under the user's
+      Application Support gradients folder, each the shape of the
+      workspace/gradients/ files. An empty name or a missing source library
+      saves nothing.
+    category: panel
+    params:
+      library: { type: string, description: "Id of the library being saved" }
+      name: { type: string, description: "The name to save it under" }
+    effects:
+      - gradient.save_library: { library: "param.library", name: "param.name" }
+      - close_dialog: null
+
   set_gradient_active_library:
     description: >
       Make one gradient library the Gradient panel's active library

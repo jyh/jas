@@ -237,7 +237,9 @@ def _save_library(store, kind, panel, lib, name):
     saved = copy.deepcopy(libs[lib])
     saved["name"] = name
     store.set_data_path(f"{kind}_libraries.{slug}", saved)
-    if slug != lib:
+    if slug != lib and kind == "gradient":
+        store.set_panel(panel, "active_library_id", slug)
+    elif slug != lib:
         store.list_toggle(panel, "open_libraries", slug,
                           key_field="id", insert={"collapsed": False})
         store.set_panel(panel, "selected_library", slug)
@@ -1114,8 +1116,12 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     # swatch.save_library: { library, name } -- the same law over
     # data.swatch_libraries and the Swatches panel (design §3.4), queuing a
     # `swatch_library` write. One implementation: `_save_library`.
+    # gradient.save_library: the same law, but the Gradient panel shows ONE
+    # library, so a new one becomes panel.active_library_id (design
+    # 2026-11-17 gradient-library tier, §2).
     for key, kind, panel in (("brush.save_library", "brush", "brushes"),
-                             ("swatch.save_library", "swatch", "swatches")):
+                             ("swatch.save_library", "swatch", "swatches"),
+                             ("gradient.save_library", "gradient", "gradient")):
         if key in effect:
             spec = effect[key] if isinstance(effect[key], dict) else {}
             _save_library(store, kind, panel, _eval(spec.get("library"), store, ctx),

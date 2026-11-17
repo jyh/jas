@@ -433,6 +433,9 @@ public class Model: ObservableObject {
     /// only ever receive a Model — can reach it. Not `@Published`: a plumbing
     /// reference swapped once at adoption time, exactly as `appDefaults` is.
     public var swatchLibraries = AppSwatchLibraries()
+    /// App-global editable gradient libraries (``AppGradientLibraries``),
+    /// carried and adopted exactly as ``swatchLibraries`` is.
+    public var gradientLibraries = AppGradientLibraries()
     /// The APP-level default fill / stroke — the tier BELOW ``defaultFill`` /
     /// ``defaultStroke``, which are per-document (Rust's `Model.default_fill`,
     /// seeded `nil` / black, exactly as above). Mirrors Rust's

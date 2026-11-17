@@ -423,6 +423,14 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "gradient_save_library": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "gradient_save_library_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "group": {
       "class": "journaling",
       "doc_verbs": [
@@ -1306,7 +1314,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 173,
+      "ui-state": 175,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1360,7 +1368,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 248,
+    "total_actions": 250,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

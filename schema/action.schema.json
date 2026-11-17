@@ -261,6 +261,7 @@
             "expand_compound_shape": {},
             "foreach": {},
             "geometry.export_pdf": {},
+            "gradient.save_library": {},
             "if": {},
             "increment": {},
             "layout": {},

@@ -370,6 +370,18 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // gradient.save_library — { library, name }: the same law over the
+    // app-global gradient tier (`model.gradientLibraries`, design 2026-11-17
+    // §2); a NEW library becomes the active one.
+    effects["gradient.save_library"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let (slug, saved) = savedLibrary(model.gradientLibraries.libs, args: args,
+                                               store: store, ctx: ctx) else { return nil }
+        model.gradientLibraries.libs[slug.slug] = saved
+        finishLibrarySave(store, kind: "gradient", panel: "gradient", slug: slug, saved: saved)
+        return nil
+    }
+
     // brush.select_unused — { library }: replace the panel's brush selection
     // with every slug of that library, in library order, that no element in
     // the document carries as `strokeBrush == "<library>/<slug>"` (at any
@@ -4097,7 +4109,10 @@ private func savedLibrary(_ libs: [String: Any], args: [String: Any], store: Sta
 /// queues one `{kind: <kind>_library, slug, manifest}` write for the host.
 private func finishLibrarySave(_ store: StateStore, kind: String, panel: String,
                                slug: LibrarySlug, saved: [String: Any]) {
-    if slug.isNew {
+    if slug.isNew && kind == "gradient" {
+        // The Gradient panel shows ONE library: the new one becomes active.
+        store.setPanel(panel, "active_library_id", slug.slug)
+    } else if slug.isNew {
         store.listToggle(panel, "open_libraries", slug.slug, keyField: "id", insert: ["collapsed": false])
         store.setPanel(panel, "selected_library", slug.slug)
     }

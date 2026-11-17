@@ -101,6 +101,7 @@ mod tests {
             )),
             swatch_libraries: serde_json::json!({}),
             brush_libraries: serde_json::json!({}),
+            gradient_libraries: serde_json::json!({}),
             pending_writes: Vec::new(),
             pending_menu: None,
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),

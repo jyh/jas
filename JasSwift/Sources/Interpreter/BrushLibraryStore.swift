@@ -65,17 +65,32 @@ public struct BrushLibraryStore {
     /// `<root>/swatches/<id>.json`, the shape of the bundle's
     /// `workspace/swatches/<id>.json`. The id is checked as a slug is.
     public func writeSwatches(id: String, manifest: [String: Any]) throws {
+        try writeFlat("swatches", id: id, manifest: manifest)
+    }
+
+    /// Every `swatches/<id>.json` under `root` that holds a JSON object, keyed
+    /// by id. Anything else is skipped.
+    public func loadSwatches() -> [String: Any] { loadFlat("swatches") }
+
+    /// Save Gradient Library's twins (design 2026-11-17 §2):
+    /// `<root>/gradients/<id>.json`, the shape of `workspace/gradients/<id>.json`.
+    public func writeGradients(id: String, manifest: [String: Any]) throws {
+        try writeFlat("gradients", id: id, manifest: manifest)
+    }
+
+    public func loadGradients() -> [String: Any] { loadFlat("gradients") }
+
+    /// One library per `<folder>/<id>.json` (the swatch and gradient layout).
+    private func writeFlat(_ folder: String, id: String, manifest: [String: Any]) throws {
         try Self.checkSlug(id)
-        let dir = root.appendingPathComponent("swatches")
+        let dir = root.appendingPathComponent(folder)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: dir.appendingPathComponent("\(id).json"), options: .atomic)
     }
 
-    /// Every `swatches/<id>.json` under `root` that holds a JSON object, keyed
-    /// by id. Anything else is skipped.
-    public func loadSwatches() -> [String: Any] {
-        let dir = root.appendingPathComponent("swatches")
+    private func loadFlat(_ folder: String) -> [String: Any] {
+        let dir = root.appendingPathComponent(folder)
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [:] }
         var out: [String: Any] = [:]
         for name in entries.sorted() where name.hasSuffix(".json") {
@@ -103,6 +118,7 @@ public struct BrushLibraryStore {
                 switch kind {
                 case "brush_library": try write(slug: slug, manifest: manifest)
                 case "swatch_library": try writeSwatches(id: slug, manifest: manifest)
+                case "gradient_library": try writeGradients(id: slug, manifest: manifest)
                 default: return false
                 }
                 return true

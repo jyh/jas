@@ -54,3 +54,30 @@ private func json(_ v: Any?) -> String {
         #expect(m.swatchLibraries.libs.count == 2, "\(name) \(lib)")
     }
 }
+
+// `gradient.save_library` (design 2026-11-17 §2): the same law over the
+// app-global gradient tier, but a NEW library becomes the ACTIVE one.
+@Test func gradientSaveLibraryMakesANewLibraryActiveAndQueuesItsWrite() {
+    func save(_ name: String) -> Model {
+        let model = Model()
+        model.gradientLibraries.libs = [
+            "neutrals": ["name": "Neutrals", "description": "d", "gradients": [["name": "B", "type": "linear"]]],
+            "spectrums": ["name": "Spectrums", "gradients": [[String: Any]]()],
+        ]
+        model.stateStore.initPanel("gradient", defaults: ["active_library_id": "neutrals"])
+        model.stateStore.setActivePanel("gradient")
+        let handler = buildYamlToolEffects(model: model)["gradient.save_library"]
+        #expect(handler != nil, "gradient.save_library is not in the tool table")
+        _ = handler?(["library": "param.lib", "name": "param.name"],
+                     ["param": ["lib": "neutrals", "name": name]], model.stateStore)
+        return model
+    }
+    let m = save("Warm Tones")
+    #expect((m.gradientLibraries.libs["warm_tones"] as? [String: Any])?["description"] as? String == "d")
+    #expect(m.stateStore.getPanel("gradient_panel_content", "active_library_id") as? String == "warm_tones")
+    #expect(m.stateStore.getPanel("gradient_panel_content", "open_libraries") == nil, "no open list")
+    #expect(m.stateStore.pendingWrites.map { $0["kind"] as? String } == ["gradient_library"])
+    #expect(save("Neutrals!").stateStore.getPanel("gradient_panel_content", "active_library_id") as? String == "neutrals")
+    #expect(save("Spectrums").gradientLibraries.libs["spectrums_2"] != nil)
+    #expect(save("").stateStore.pendingWrites.isEmpty)
+}

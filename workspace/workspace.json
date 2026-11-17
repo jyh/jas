@@ -1543,6 +1543,46 @@
         }
       ]
     },
+    "gradient_save_library": {
+      "description": "Open the Save Gradient Library dialog on the Gradient panel's active library. The dialog receives the library's id as param.library and proposes its display name as the name to save under (empty when it has none). Saving is the dialog's Save button, gradient_save_library_confirm.\n",
+      "category": "panel",
+      "effects": [
+        {
+          "open_dialog": {
+            "id": "gradient_library_save",
+            "params": {
+              "library": "panel.active_library_id",
+              "name": "data.gradient_libraries[panel.active_library_id].name"
+            }
+          }
+        }
+      ]
+    },
+    "gradient_save_library_confirm": {
+      "description": "Save the gradient library the dialog was opened on under the entered name, then close the dialog. The rules are Save Brush Library's and Save Swatch Library's: the name becomes an id (lower-case ASCII letters and digits kept, every other run of characters one underscore, leading and trailing underscores trimmed, \"library\" if nothing is left); when the id is the source library's own id the save is in place and only the name changes; when it names a different existing library the first free \"_2\", \"_3\", ... suffix is taken. A new library is a copy of the source with the new name and becomes the ACTIVE library, because the Gradient panel shows one library at a time. Every save asks the host to write the library's file (the interpreter itself writes no file): on the web as a download of <id>.json, on the Mac under the user's Application Support gradients folder, each the shape of the workspace/gradients/ files. An empty name or a missing source library saves nothing.\n",
+      "category": "panel",
+      "params": {
+        "library": {
+          "type": "string",
+          "description": "Id of the library being saved"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name to save it under"
+        }
+      },
+      "effects": [
+        {
+          "gradient.save_library": {
+            "library": "param.library",
+            "name": "param.name"
+          }
+        },
+        {
+          "close_dialog": null
+        }
+      ]
+    },
     "set_gradient_active_library": {
       "description": "Make one gradient library the Gradient panel's active library (panel.active_library_id), the one whose tiles the preset strip shows. The library is named by its id (param.library); nothing checks that a library with that id exists, as the dropdown's own write does not.\n",
       "category": "panel",
@@ -16535,8 +16575,8 @@
         {
           "label": "Save Gradient Library",
           "action": "gradient_save_library",
-          "enabled_when": "false",
-          "description": "Phase 9 \u2014 opens a Save Gradient Library dialog. Deferred pending a Save dialog and file-writing pipeline per app.\n"
+          "enabled_when": "panel.active_library_id != null",
+          "description": "Open the Save Gradient Library dialog for the active library (gradient_save_library). Disabled when no library is active.\n"
         },
         "separator",
         {
@@ -32463,6 +32503,81 @@
                     }
                   }
                 ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "gradient_library_save": {
+      "summary": "Save Gradient Library",
+      "description": "Modal dialog for saving a gradient library under a name. It is opened by the Gradient panel menu's Save Gradient Library (gradient_save_library) on the panel's active library, whose id arrives as param.library. The dialog presents a single text input for the library name, which starts as the library's own display name (param.name; empty when it has none). Cancel closes the dialog and saves nothing. Save (gradient_save_library_confirm) saves the library under the entered name: in place when the name's id is the library's own id, otherwise as a new library, which becomes the active library; either way the host is asked to write the library's file. Save is disabled while the name field is empty.\n",
+      "modal": true,
+      "params": {
+        "library": {
+          "type": "string",
+          "description": "Id of the library being saved"
+        },
+        "name": {
+          "type": "string",
+          "nullable": true,
+          "description": "The library's display name, proposed as the name to save under"
+        }
+      },
+      "state": {
+        "name": {
+          "type": "string",
+          "default": "",
+          "description": "User-entered library name"
+        }
+      },
+      "init": {
+        "name": "if param.name == null then '' else param.name"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Library name:"
+          },
+          {
+            "id": "gradient_lib_name_input",
+            "type": "text_input",
+            "placeholder": "My Gradients",
+            "bind": {
+              "value": "dialog.name"
+            }
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "Save",
+                "action": "gradient_save_library_confirm",
+                "variant": "primary",
+                "params": {
+                  "library": "param.library",
+                  "name": "dialog.name"
+                },
+                "bind": {
+                  "disabled": "dialog.name == \"\""
+                }
               }
             ]
           }

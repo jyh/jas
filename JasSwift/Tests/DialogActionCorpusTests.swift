@@ -299,6 +299,8 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
     // is read from there.
     var dataRoot = store.getDataPath("") as? [String: Any] ?? [:]
     dataRoot["swatch_libraries"] = m.swatchLibraries.libs
+    // The gradient libraries are app-global too (``AppGradientLibraries``).
+    dataRoot["gradient_libraries"] = m.gradientLibraries.libs
     for (path, value) in tc["expected_data"] as? [String: Any] ?? [:] {
         var cur: Any? = dataRoot
         for seg in path.split(separator: ".").map(String.init) {

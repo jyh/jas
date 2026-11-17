@@ -1,0 +1,46 @@
+gradient_library_save:
+  summary: "Save Gradient Library"
+  description: >
+    Modal dialog for saving a gradient library under a name. It is opened by
+    the Gradient panel menu's Save Gradient Library (gradient_save_library)
+    on the panel's active library, whose id arrives as param.library. The
+    dialog presents a single text input for the library name, which starts
+    as the library's own display name (param.name; empty when it has none).
+    Cancel closes the dialog and saves nothing. Save
+    (gradient_save_library_confirm) saves the library under the entered
+    name: in place when the name's id is the library's own id, otherwise as
+    a new library, which becomes the active library; either way the host is
+    asked to write the library's file. Save is disabled while the name field
+    is empty.
+  modal: true
+  params:
+    library: { type: string, description: "Id of the library being saved" }
+    name: { type: string, nullable: true, description: "The library's display name, proposed as the name to save under" }
+  state:
+    name: { type: string, default: "", description: "User-entered library name" }
+  init:
+    name: "if param.name == null then '' else param.name"
+  content:
+    type: container
+    layout: column
+    style: { gap: 12, padding: 16 }
+    children:
+      - { type: text, content: "Library name:" }
+      - id: gradient_lib_name_input
+        type: text_input
+        placeholder: "My Gradients"
+        bind:
+          value: "dialog.name"
+      - type: row
+        style: { justify: end, gap: 8 }
+        children:
+          - { type: button, label: "Cancel", action: dismiss_dialog }
+          - type: button
+            label: "Save"
+            action: gradient_save_library_confirm
+            variant: primary
+            params:
+              library: "param.library"
+              name: "dialog.name"
+            bind:
+              disabled: 'dialog.name == ""'
