@@ -509,11 +509,8 @@ pub fn panel_menu_ctx(
     ctx.insert("data".into(), serde_json::json!({
         "brush_libraries": st.brush_libraries.clone(),
         "swatch_libraries": st.swatch_libraries.clone(),
-        // Read-only: no port edits a gradient library yet (Open Gradient
-        // Library, §3.4, reads the bundle's).
-        "gradient_libraries": crate::interpreter::workspace::Workspace::load()
-            .and_then(|ws| ws.data().get("gradient_libraries").cloned())
-            .unwrap_or_else(|| serde_json::json!({})),
+        // The app tier (`AppState::gradient_libraries`, design 2026-11-17 §1).
+        "gradient_libraries": st.gradient_libraries.clone(),
     }));
     // `selection_has_mask` and its siblings sit at TOP level, as the body's
     // eval map places them, so `enabled_when: "!selection_has_mask"` reads the
@@ -783,6 +780,27 @@ mod tests {
         let rows = submenu_rows("gradient_panel_content", spec, &st);
         assert_eq!(rows[0]["checked"], serde_json::json!(false), "one active at a time");
         assert_eq!(rows[2]["checked"], serde_json::json!(true));
+    }
+
+    /// The gradient libraries are an app TIER (design 2026-11-17 §1), not
+    /// the bundle: a library in `AppState::gradient_libraries` the bundle
+    /// lacks is a menu row, and the panel body's strip reads it.
+    #[test]
+    fn the_gradient_menu_and_body_read_the_app_tier_not_the_bundle() {
+        let spec = menu_items_from_yaml("gradient_panel_content").into_iter().find_map(|i| match i {
+            PanelMenuItem::Submenu { spec, .. } => Some(spec),
+            _ => None,
+        }).expect("the Gradient submenu");
+        let mut st = crate::workspace::app_state::AppState::new();
+        st.gradient_libraries = serde_json::json!({"mine": {"name": "Mine", "gradients": [{"name": "G", "type": "linear", "stops": []}]}});
+        st.panel_state.entry("gradient_panel_content".into()).or_default()
+            .insert("active_library_id".into(), serde_json::json!("mine"));
+        let rows = submenu_rows("gradient_panel_content", spec, &st);
+        assert_eq!(rows.as_array().unwrap().iter().map(|r| r["label"].clone()).collect::<Vec<_>>(),
+                   vec![serde_json::json!("Mine")], "{rows}");
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "gradient_panel_content").expect("body");
+        let strip = crate::interpreter::expr::eval("data.gradient_libraries[panel.active_library_id].gradients", &ctx);
+        assert_eq!(crate::interpreter::effects::value_to_json(&strip).as_array().map(|a| a.len()), Some(1));
     }
 
     #[test]

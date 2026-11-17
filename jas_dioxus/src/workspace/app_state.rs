@@ -220,6 +220,9 @@ pub(crate) struct AppState {
     /// Keyed by library slug. Mutated by the brush.* and data.*
     /// effect handlers. See `transcripts/BRUSHES.md`.
     pub(crate) brush_libraries: serde_json::Value,
+    /// Mutable gradient libraries, app-global like the swatch libraries
+    /// (design 2026-11-17 §1): seeded from the bundle, keyed by id.
+    pub(crate) gradient_libraries: serde_json::Value,
     /// Host file writes the interpreter queued (`brush.save_library`'s
     /// `{kind, slug, manifest}`), drained by `renderer::drain_pending_writes`
     /// after each dispatch: a browser download on the web.
@@ -673,6 +676,9 @@ impl AppState {
                 .unwrap_or(serde_json::json!({})),
             brush_libraries: crate::interpreter::workspace::Workspace::load()
                 .map(|ws| ws.data().get("brush_libraries").cloned().unwrap_or(serde_json::json!({})))
+                .unwrap_or(serde_json::json!({})),
+            gradient_libraries: crate::interpreter::workspace::Workspace::load()
+                .map(|ws| ws.data().get("gradient_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
             pending_writes: Vec::new(),
             pending_menu: None,

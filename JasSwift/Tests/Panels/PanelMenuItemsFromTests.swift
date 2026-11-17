@@ -169,3 +169,20 @@ private let libsSpec: [String: Any] = [
     guard case .list(let items) = strip else { Issue.record("not a list: \(strip)"); return }
     #expect(!items.isEmpty)
 }
+
+// The gradient libraries are an app TIER (design 2026-11-17 §1), not the
+// bundle: a library in `model.gradientLibraries` is a menu row and the body's.
+@Test func theGradientMenuAndBodyReadTheAppTierNotTheBundle() {
+    let model = Model()
+    model.gradientLibraries.libs = ["mine": ["name": "Mine", "gradients": [["name": "G", "type": "linear", "stops": [Any]()]]]]
+    model.stateStore.initPanel("gradient_panel_content", defaults: ["active_library_id": "mine"])
+    let rows = panelSubmenuRows(.gradient, spec: panelMenuRequest("grad_menu_open_library")?.spec ?? [:],
+                                layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.label } == ["Mine"])
+    guard let ws = WorkspaceData.load() else { return }
+    let ctx = buildPanelBodyContext(ws: ws, model: model, contentId: "gradient_panel_content",
+                                    opacityPanel: WorkspaceLayout.defaultLayout().opacityPanel)
+    guard case .list(let items) = evaluate("data.gradient_libraries[panel.active_library_id].gradients", context: ctx)
+    else { Issue.record("not a list"); return }
+    #expect(items.count == 1)
+}
