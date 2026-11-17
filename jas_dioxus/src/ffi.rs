@@ -2072,7 +2072,22 @@ unsafe fn jas_dispatch_action_inner(
         (None, Some(_)) if req.get("menu_index").is_none() && req.get("action").is_some() => None,
         (None, Some(menu)) => {
             let at = req.get("menu_index").and_then(serde_json::Value::as_u64);
+            // `"row": <j>`: row j of an `items_from` item (row 8), its action
+            // with its evaluated params.
+            let row = req.get("row").and_then(serde_json::Value::as_u64);
             match at.and_then(|i| menu.get(i as usize)) {
+                Some(node) if row.is_some() => {
+                    let j = row.unwrap_or_default();
+                    let ctx = panel_ctx(engine, &ws, panel.unwrap_or(""));
+                    match submenu_row(node, j, &ctx) {
+                        Some(r) => Some(r),
+                        None => {
+                            set_panel_event_error(engine, "UnknownMenuItem",
+                                &format!("{}[{}].row[{j}]", panel.unwrap_or(""), at.unwrap_or_default()));
+                            return JasBytes::empty();
+                        }
+                    }
+                }
                 Some(node) => Some(node.clone()),
                 None => {
                     let named = req.get("menu_index").map_or("(none)".to_string(), |v| v.to_string());
@@ -2597,7 +2612,7 @@ pub unsafe extern "C" fn jas_panel_menu(
             serde_json::Value::String(s) if s == "separator" => serde_json::json!({"index": i, "kind": "separator"}),
             serde_json::Value::Object(o) if !o.contains_key("items") => {
                 let st = by_index.get(&(i as i64));
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "index": i,
                     "kind": "item",
                     // The walk's label: its `{{expr}}` regions evaluated in the
@@ -2609,7 +2624,14 @@ pub unsafe extern "C" fn jas_panel_menu(
                     "action": o.get("action").cloned().unwrap_or(serde_json::Value::Null),
                     "enabled": st.map_or(serde_json::Value::Bool(true), |r| r["enabled"].clone()),
                     "checked": st.map_or(serde_json::Value::Null, |r| r["checked"].clone()),
-                })
+                });
+                // An `items_from` item (row 8) carries its rows, evaluated now
+                // in the panel's engine scope; a shell sends one back as
+                // `{"panel", "menu_index", "row"}`.
+                if let Some(spec) = o.get("items_from") {
+                    row["rows"] = submenu_plan_rows(spec, &ctx);
+                }
+                row
             }
             _ => serde_json::json!({"index": i, "kind": "unknown"}),
         })
@@ -2618,6 +2640,26 @@ pub unsafe extern "C" fn jas_panel_menu(
     let out = JasBytes::from_string(serde_json::Value::Array(rows).to_string());
     ffi_instr::record_out(Crossing::PanelMenu, out.len);
     out
+}
+
+/// An `items_from` item's rows as a shell draws them:
+/// `[{"index", "label", "action", "enabled", "checked"}]`, from the shared
+/// `menu_state::items_from_entries` (which also yields each row's params; a
+/// click re-evaluates them, see [`submenu_row`]).
+fn submenu_plan_rows(spec: &serde_json::Value, ctx: &serde_json::Value) -> serde_json::Value {
+    let rows = crate::interpreter::menu_state::items_from_entries(spec, ctx);
+    serde_json::Value::Array(rows.as_array().into_iter().flatten().enumerate().map(|(j, r)| serde_json::json!({
+        "index": j, "label": r["label"], "action": r["action"],
+        "enabled": r["enabled"], "checked": r["checked"],
+    })).collect())
+}
+
+/// Row `j` of an `items_from` menu node, evaluated in `ctx` NOW (the click's
+/// scope, as the menu's static rows are): `{action, params, ...}`, or `None`
+/// when the node has no `items_from` or no row `j`.
+fn submenu_row(node: &serde_json::Value, j: u64, ctx: &serde_json::Value) -> Option<serde_json::Value> {
+    let rows = crate::interpreter::menu_state::items_from_entries(node.get("items_from")?, ctx);
+    rows.as_array()?.get(j as usize).cloned()
 }
 
 /// The menubar item whose `id` is `id`, at any depth (a menu's `items`, a
@@ -9853,6 +9895,45 @@ mod tests {
         let (reply, err) = dispatch(e, &format!(r#"{{"panel":"artboards_panel_content","menu_index":{at}}}"#));
         assert_eq!(reply, "");
         assert_eq!(err, refusal("PlatformEffect", &format!("Logged:{logged}")));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// An `items_from` item's rows, for a shell to draw (row 8): the plan row
+    /// of Brushes ▸ Open Brush Library carries `"rows"`, each
+    /// `{"index", "label", "action", "enabled", "checked"}` evaluated in the
+    /// panel's engine scope, and a row goes back as
+    /// `{"panel", "menu_index", "row"}`. A plain item carries no `rows`.
+    #[test]
+    fn an_items_from_menu_item_plans_its_rows_and_dispatches_one_by_index() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let plan_row = |e| {
+            let (rows, err) = panel_menu(e, "brushes_panel_content");
+            assert_eq!(err, "", "the plan: {err}");
+            rows.into_iter().find(|r| r["label"] == "Open Brush Library").expect("the item is planned")
+        };
+        let item = plan_row(e);
+        assert_eq!(item["rows"], serde_json::json!([{"index": 0, "label": "Default Brushes",
+            "action": "toggle_brush_library_open", "enabled": true, "checked": true}]), "{item}");
+        let (rows, _) = panel_menu(e, "brushes_panel_content");
+        let plain = rows.iter().find(|r| r["action"] == "save_brush_library").expect("Save Brush Library");
+        assert!(plain.get("rows").is_none(), "a plain item has no rows: {plain}");
+
+        let at = item["index"].as_u64().unwrap();
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":0}}"#));
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(plan_row(e)["rows"][0]["checked"], serde_json::json!(false), "the row closed its library");
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":0}}"#));
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(plan_row(e)["rows"][0]["checked"], serde_json::json!(true), "and reopened it");
+
+        // A row past the end, and a row on an item with no rows, name nothing.
+        let (_r, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":1}}"#));
+        assert_eq!(err, refusal("UnknownMenuItem", &format!("brushes_panel_content[{at}].row[1]")));
+        let plain_at = plain["index"].as_u64().unwrap();
+        let (_r, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{plain_at},"row":0}}"#));
+        assert_eq!(err, refusal("UnknownMenuItem", &format!("brushes_panel_content[{plain_at}].row[0]")));
         unsafe { jas_engine_free(e) };
     }
 
