@@ -1526,6 +1526,19 @@ actions:
           key: id
           insert: { collapsed: false }
 
+  set_gradient_active_library:
+    description: >
+      Make one gradient library the Gradient panel's active library
+      (panel.active_library_id), the one whose tiles the preset strip
+      shows. The library is named by its id (param.library); nothing
+      checks that a library with that id exists, as the dropdown's own
+      write does not.
+    category: panel
+    params:
+      library: { type: string }
+    effects:
+      - set_panel_state: { panel: gradient, key: active_library_id, value: "param.library" }
+
   save_swatch_library:
     description: >
       Open the Save Swatch Library dialog on the Swatches panel's selected

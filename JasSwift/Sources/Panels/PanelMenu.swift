@@ -377,6 +377,9 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     // not in the store, so `keys(data.swatch_libraries)` (Open Swatch Library,
     // design §3.4) reads them from there, as the panel body does.
     if let model = model { data["swatch_libraries"] = model.swatchLibraries.libs }
+    // Read-only: no port edits a gradient library yet (Open Gradient
+    // Library, §3.4, reads the bundle's).
+    if data["gradient_libraries"] == nil, let g = ws?.data["gradient_libraries"] { data["gradient_libraries"] = g }
     ctx["data"] = data
     ctx["preferences"] = Preferences.current() ?? [:]
     if let ws = ws {

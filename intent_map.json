@@ -993,6 +993,10 @@
         "doc.demote_to_solid"
       ]
     },
+    "set_gradient_active_library": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "set_layers_search": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1302,7 +1306,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 172,
+      "ui-state": 173,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1356,7 +1360,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 247,
+    "total_actions": 248,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

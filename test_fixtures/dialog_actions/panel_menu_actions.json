@@ -1405,5 +1405,28 @@
         ]
       }
     }
+  },
+  {
+    "name": "set_gradient_active_library_switches_the_preset_strip",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4, gradient: the Open Gradient Library row runs set_gradient_active_library, which makes that library the one the preset strip shows (panel.active_library_id; neutrals by default).",
+    "panel_state": {
+      "gradient_panel_content": {
+        "active_library_id": "neutrals"
+      }
+    },
+    "actions": [
+      {
+        "action": "set_gradient_active_library",
+        "params": {
+          "library": "spectrums"
+        }
+      }
+    ],
+    "expected_panel": {
+      "gradient_panel_content": {
+        "active_library_id": "spectrums"
+      }
+    }
   }
 ]
