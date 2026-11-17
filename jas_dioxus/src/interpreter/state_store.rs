@@ -80,6 +80,15 @@ pub struct StateStore {
     /// the artboards panel-selection on canvas click. See
     /// ARTBOARD_TOOL.md §Selection coupling.
     pending_panel_state_writes: Vec<(String, String, serde_json::Value)>,
+    /// File writes an effect asked for, in order, for the HOST to drain
+    /// (`brush.save_library`, the brush-library design B.2): the interpreter
+    /// does no file I/O. Each is `{kind, slug, manifest}`. Mirrors the
+    /// reference's `StateStore.pending_writes` and Swift's `pendingWrites`.
+    pub pending_writes: Vec<serde_json::Value>,
+    /// The menu an effect asked the HOST to pop up (`open_menu`), by its
+    /// declared menu item id; the latest request wins. Mirrors the
+    /// reference's `StateStore.pending_menu` and Swift's `pendingMenu`.
+    pub pending_menu: Option<String>,
     /// The writes a hosted effects batch reports to its host, in write
     /// order, or `None` when no batch is recording (FB wave 2b, A11 and
     /// W2b-5). Only a hosted batch opens it, so a store that is never run
@@ -131,6 +140,8 @@ impl StateStore {
             dialog_result_to: None,
             data: serde_json::Value::Object(serde_json::Map::new()),
             pending_panel_state_writes: Vec::new(),
+            pending_writes: Vec::new(),
+            pending_menu: None,
             writes: None,
         }
     }
@@ -638,6 +649,16 @@ impl StateStore {
     /// `StateStore.list_toggle`, which removes with Python's `list.remove`
     /// (the first occurrence only, never every one).
     pub fn list_toggle(&mut self, panel_id: &str, key: &str, value: serde_json::Value) {
+        self.list_toggle_keyed(panel_id, key, value, None, None);
+    }
+
+    /// [`Self::list_toggle`] with the keyed form (the brush-library design,
+    /// A.1): with `key_field`, membership is `item[key_field] == value` over a
+    /// list of objects and the item added is `{key_field: value}` beside the
+    /// YAML-literal `insert` fields. See [`toggle_member`].
+    pub fn list_toggle_keyed(&mut self, panel_id: &str, key: &str, value: serde_json::Value,
+                             key_field: Option<&str>,
+                             insert: Option<&serde_json::Map<String, serde_json::Value>>) {
         let scope = match self.panels.get_mut(&panel_content_id(panel_id)) {
             Some(s) => s,
             None => return,
@@ -646,10 +667,7 @@ impl StateStore {
             Some(serde_json::Value::Array(a)) => a.clone(),
             _ => vec![],
         };
-        match arr.iter().position(|item| item == &value) {
-            Some(i) => { arr.remove(i); }
-            None => arr.push(value),
-        }
+        toggle_member(&mut arr, value, key_field, insert);
         scope.insert(key.to_string(), serde_json::Value::Array(arr));
         self.journal_panel_write(panel_id, key);
     }
@@ -743,6 +761,36 @@ impl StateStore {
         }
 
         serde_json::Value::Object(ctx)
+    }
+}
+
+/// The set-membership law `list_toggle` writes, shared by the store's route
+/// and the web renderer's (one law, two callers). Without `key_field`, the
+/// FIRST item equal to `value` is removed, else `value` is appended (the
+/// reference's `list.remove` / `append`). With `key_field` (the keyed form,
+/// brush-library design A.1), the first OBJECT item whose `key_field` equals
+/// `value` is removed, else `{key_field: value}` is appended beside the
+/// YAML-literal `insert` fields, the key winning over a same-named field. A
+/// non-object item never matches the keyed form. Mirrors the reference's
+/// `StateStore.list_toggle` and Swift's keyed arm.
+pub fn toggle_member(list: &mut Vec<serde_json::Value>, value: serde_json::Value,
+                     key_field: Option<&str>,
+                     insert: Option<&serde_json::Map<String, serde_json::Value>>) {
+    match key_field {
+        Some(k) => {
+            match list.iter().position(|it| it.as_object().and_then(|o| o.get(k)) == Some(&value)) {
+                Some(i) => { list.remove(i); }
+                None => {
+                    let mut item = insert.cloned().unwrap_or_default();
+                    item.insert(k.to_string(), value);
+                    list.push(serde_json::Value::Object(item));
+                }
+            }
+        }
+        None => match list.iter().position(|it| it == &value) {
+            Some(i) => { list.remove(i); }
+            None => list.push(value),
+        },
     }
 }
 

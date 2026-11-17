@@ -2741,10 +2741,9 @@ fn run_yaml_effect(
         ) {
             let current = crate::panels::panel_menu::panel_menu_ctx(&pid, st)["panel"][key].clone();
             let mut list = current.as_array().cloned().unwrap_or_default();
-            match list.iter().position(|v| v == &value) {
-                Some(i) => { list.remove(i); }
-                None => list.push(value),
-            }
+            super::state_store::toggle_member(&mut list, value,
+                                              lt.get("key").and_then(|v| v.as_str()),
+                                              lt.get("insert").and_then(|v| v.as_object()));
             let mut sps = serde_json::Map::new();
             sps.insert("panel".into(), serde_json::Value::String(pid));
             sps.insert("key".into(), serde_json::Value::String(key.to_string()));
@@ -14778,6 +14777,40 @@ mod tests {
         assert!(all(&st), "All ran: in force again");
         // A toggle row is not an action: the rule does not answer it.
         assert!(!super::layers_filter_item_in_force(&el, "path", &ctx, &st));
+    }
+
+    /// The web route's `list_toggle` takes the keyed form too (the
+    /// brush-library design, A.1): a library already open is CLOSED even
+    /// though its `collapsed` differs from `insert`, and an absent one opens
+    /// expanded. Driven through `run_yaml_effects` with the Brushes panel as
+    /// the menu's panel, the route the panel menu takes; read back through
+    /// `panel_menu_ctx`, what the menu's next expression reads.
+    #[test]
+    fn the_web_route_toggles_a_keyed_library_in_both_directions() {
+        let mut st = AppState::new();
+        st.menu_panel = Some("brushes_panel_content".to_string());
+        let open = |st: &AppState| crate::panels::panel_menu::panel_menu_ctx("brushes_panel_content", st)
+            ["panel"]["open_libraries"].clone();
+        let before = open(&st);
+        let first = before.as_array().and_then(|a| a.first()).and_then(|o| o["id"].as_str())
+            .expect("the Brushes panel opens with a library").to_string();
+        let toggle = |lib: &str| serde_json::json!({"list_toggle": {"target": "panel.open_libraries",
+            "value": format!("\"{lib}\""), "key": "id", "insert": {"collapsed": false}}});
+        // Collapse the open one first, so `collapsed` differs from `insert`.
+        let mut collapsed = before.clone();
+        collapsed[0]["collapsed"] = serde_json::json!(true);
+        let mut sps = serde_json::Map::new();
+        sps.insert("panel".into(), serde_json::json!("brushes_panel_content"));
+        sps.insert("key".into(), serde_json::json!("open_libraries"));
+        sps.insert("value".into(), collapsed);
+        apply_set_panel_state_with_ctx(&sps, &mut st, None);
+        run_yaml_effects(&[toggle(&first)], &serde_json::json!({}), &mut st);
+        assert!(!open(&st).as_array().unwrap().iter().any(|o| o["id"] == first.as_str()),
+                "a collapsed open library closes: {}", open(&st));
+        run_yaml_effects(&[toggle(&first)], &serde_json::json!({}), &mut st);
+        assert!(open(&st).as_array().unwrap().iter()
+                    .any(|o| o["id"] == first.as_str() && o["collapsed"] == false),
+                "and reopens expanded: {}", open(&st));
     }
 
     // ── Brush-library edits run in the web app (BRUSH_LIBRARY_UNDO.md) ──
