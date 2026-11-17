@@ -6714,7 +6714,8 @@
               "visibility": "invisible",
               "locked": true,
               "is_container": true,
-              "element_selected": false
+              "element_selected": false,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -6728,7 +6729,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": true,
-              "element_selected": false
+              "element_selected": false,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -6743,7 +6745,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": true,
-              "element_selected": true
+              "element_selected": true,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -6759,7 +6762,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": false,
-              "element_selected": true
+              "element_selected": true,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -6774,7 +6778,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": false,
-              "element_selected": false
+              "element_selected": false,
+              "ancestor_layer_color": ""
             }
           ]
         }

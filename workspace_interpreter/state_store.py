@@ -204,17 +204,21 @@ def _element_tree(document: dict | None, selected: list) -> list[dict]:
     first, as both ports' trees walk it (Rust `tree_flatten_layers`, Swift
     `TreeViewContent.flatten`). A row is selected when its path is at or under
     a selected path. Collapse, panel selection, renaming, filters and isolation
-    are the widget's own binds (`layers.yaml` `lp_tree`), not rows' fields."""
+    are the widget's own binds (`layers.yaml` `lp_tree`), not rows' fields.
+    `ancestor_layer_color` (row 53(b)) is the colour of the nearest LAYER at or
+    above the row, a layer row's own; '' when that layer has none, never a
+    synthesised one."""
     rows: list[dict] = []
     sel = [tuple(p) for p in selected]
 
-    def walk(children, prefix, depth):
+    def walk(children, prefix, depth, layer_color):
         for i in reversed(range(len(children))):
             elem = children[i]
             if not isinstance(elem, dict):
                 continue
             path = prefix + (i,)
             kids = elem.get("children")
+            color = (elem.get("color") or "") if elem.get("type") == "layer" else layer_color
             rows.append({
                 "path": list(path), "depth": depth, "id": elem.get("id"),
                 "name": elem.get("name") or "", "type": elem.get("type"),
@@ -223,11 +227,12 @@ def _element_tree(document: dict | None, selected: list) -> list[dict]:
                 "locked": bool(elem.get("locked", False)),
                 "is_container": elem.get("type") in ("layer", "group"),
                 "element_selected": any(path[:len(p)] == p for p in sel),
+                "ancestor_layer_color": color,
             })
             if isinstance(kids, list):
-                walk(kids, path, depth + 1)
+                walk(kids, path, depth + 1, color)
 
-    walk((document or {}).get("layers") or [], (), 0)
+    walk((document or {}).get("layers") or [], (), 0, "")
     return rows
 
 
@@ -1429,6 +1434,13 @@ class StateStore:
         if elem is None or not isinstance(elem, dict):
             return False
         keys = dotted_field.split(".")
+        # A layer's own colour (row 53(b)) is stored normalised (#rrggbb
+        # lowercase); a non-colour writes nothing, as in both ports.
+        if dotted_field == "color" and elem.get("type", elem.get("kind")) in ("layer", "Layer"):
+            from geometry.element import normalize_layer_color
+            value = normalize_layer_color(value)
+            if value is None:
+                return False
         # A bridged element keeps its common props at its top level.
         if "type" in elem and "kind" not in elem and keys[0] == "common" \
                 and len(keys) == 2 and keys[1] in _BRIDGED_COMMON:

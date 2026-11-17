@@ -246,6 +246,13 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                     return ["\(name): the tab pick was refused (bind \(expr), value \(ev["value"] ?? "nil"))"]
                 }
                 DialogWidgetActions.write(String(expr.dropFirst("dialog.".count)), tab, store: store)
+            case "change" where WidgetEvent.inputKinds.contains(node["type"] as? String ?? ""):
+                // A select's pick (Layer Options' colour preset, row 53(b)) is
+                // a COMMIT event in the contract (`WidgetEvent.commitEvents`),
+                // so it goes through the commit route the view takes; the
+                // engine runner sends the same `change` through its own route.
+                let r = route.commit(node, text: ev["value"] as? String)
+                if r.outcome == "refused" { return ["\(name): the change was refused (\(r.reason ?? "-"))"] }
             default:
                 return ["\(name): unknown dialog event \(ev["event"] ?? "nil")"]
             }
@@ -357,6 +364,7 @@ private let dialogActionFixtures = [
     "dialog_actions/panel_menu_actions.json",
     "dialog_actions/model_verbs.json",
     "dialog_actions/symbol_actions.json",
+    "dialog_actions/layer_options.json",
 ]
 
 @Test func dialogActionCorpusRunsOnTheStoreRoute() throws {

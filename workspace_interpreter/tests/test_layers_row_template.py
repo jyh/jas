@@ -150,7 +150,7 @@ def test_the_select_square_binds_its_fill_and_border():
     at = lambda expr, **node: evaluate(expr, {**ctx, "node": node}).value
     assert at(fill, element_selected=True, ancestor_layer_color="#4a90d9") == "#4a90d9"
     assert at(fill, element_selected=False, ancestor_layer_color="#4a90d9") == "transparent"
-    # No port builds `ancestor_layer_color` yet (STATUS-jas row 53), so a
+    # A row whose nearest layer has no colour carries "" (row 53(b)), so a
     # selected row with no layer colour fills with the theme's selection
     # colour rather than with nothing (flask, 10-30, on the box).
     sel = {**ctx, "theme": {"colors": {"border": "#6a6a6a", "selection": "#2a5d9f"}}}

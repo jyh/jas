@@ -9,7 +9,8 @@
     "The documents are written by the reference codec; the expected rows are authored.",
     "visible_cases (item 38 step 1b): the ROWS TO DRAW, resolved in the core from element_tree and the widget's binds: binds.collapsed (paths), binds.panel_selection (paths), binds.renaming (a path or null). A row under a collapsed CONTAINER is hidden; collapsed is true only on a container; panel_selected and renaming are exact path matches. Expected rows are case 0's authored rows plus the three marks.",
     "rows_at_cases (row 72(a), the Layers breadcrumb): tree_rows_at(element_tree, paths) is the row whose path equals each path, IN THE ORDER OF paths; a path with no row is skipped. The document is cases[0]'s; the expected rows are cases[0]'s authored rows, looked up by path.",
-    "reveal_cases (row 78): tree_reveal(collapsed, selection) is `collapsed` minus every STRICT ancestor of a selected path, the rest kept in stored order and stored form; the selection's own paths are never expanded. Every selected path is revealed, not only the first (layers.yaml's 'the first selected element' names the SCROLL target)."
+    "reveal_cases (row 78): tree_reveal(collapsed, selection) is `collapsed` minus every STRICT ancestor of a selected path, the rest kept in stored order and stored form; the selection's own paths are never expanded. Every selected path is revealed, not only the first (layers.yaml's 'the first selected element' names the SCROLL target).",
+    "ancestor_layer_color (STATUS-jas row 53(b) PR B): the colour of the nearest LAYER at or above the row, the layer row's own for a layer; '' when that layer has none (the row template then falls back to the selection colour). Never synthesised."
   ],
   "cases": [
     {
@@ -100,7 +101,8 @@
           "visibility": "invisible",
           "locked": true,
           "is_container": true,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         },
         {
           "path": [
@@ -114,7 +116,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         },
         {
           "path": [
@@ -129,7 +132,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": true
+          "element_selected": true,
+          "ancestor_layer_color": ""
         },
         {
           "path": [
@@ -145,7 +149,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": false,
-          "element_selected": true
+          "element_selected": true,
+          "ancestor_layer_color": ""
         },
         {
           "path": [
@@ -160,7 +165,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": false,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         }
       ]
     },
@@ -172,6 +178,219 @@
         "selection": []
       },
       "expected": []
+    },
+    {
+      "name": "a_layer_colour_reaches_every_row_under_it_and_no_further",
+      "_doc": "STATUS-jas row 53(b) PR B. ancestor_layer_color is the colour of the nearest LAYER at or above the row (a layer row reads its own). 'Blue' carries #4a90d9, so its own row, its group, the group's rect and its top-level rect all carry it; 'Plain' has no colour, so its rows carry '' (the row template's fallback to the selection colour), never a synthesised one.",
+      "document": {
+        "layers": [
+          {
+            "children": [
+              {
+                "fill": {
+                  "color": {
+                    "a": 1.0,
+                    "b": 0.0,
+                    "g": 0.0,
+                    "r": 1.0,
+                    "space": "rgb"
+                  },
+                  "opacity": 1.0
+                },
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 0.0,
+                "y": 0.0
+              }
+            ],
+            "locked": false,
+            "name": "Plain",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "fill": {
+                      "color": {
+                        "a": 1.0,
+                        "b": 0.0,
+                        "g": 0.0,
+                        "r": 1.0,
+                        "space": "rgb"
+                      },
+                      "opacity": 1.0
+                    },
+                    "height": 10.0,
+                    "locked": false,
+                    "name": null,
+                    "opacity": 1.0,
+                    "rx": 0.0,
+                    "ry": 0.0,
+                    "stroke": null,
+                    "transform": null,
+                    "type": "rect",
+                    "visibility": "preview",
+                    "width": 10.0,
+                    "x": 20.0,
+                    "y": 0.0
+                  }
+                ],
+                "locked": false,
+                "name": "G",
+                "opacity": 1.0,
+                "transform": null,
+                "type": "group",
+                "visibility": "preview"
+              },
+              {
+                "fill": {
+                  "color": {
+                    "a": 1.0,
+                    "b": 0.0,
+                    "g": 0.0,
+                    "r": 1.0,
+                    "space": "rgb"
+                  },
+                  "opacity": 1.0
+                },
+                "height": 10.0,
+                "locked": false,
+                "name": null,
+                "opacity": 1.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "stroke": null,
+                "transform": null,
+                "type": "rect",
+                "visibility": "preview",
+                "width": 10.0,
+                "x": 40.0,
+                "y": 0.0
+              }
+            ],
+            "color": "#4a90d9",
+            "locked": false,
+            "name": "Blue",
+            "opacity": 1.0,
+            "transform": null,
+            "type": "layer",
+            "visibility": "preview"
+          }
+        ],
+        "selected_layer": 0,
+        "selection": []
+      },
+      "expected": [
+        {
+          "path": [
+            1
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Blue",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "ancestor_layer_color": "#4a90d9"
+        },
+        {
+          "path": [
+            1,
+            1
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false,
+          "ancestor_layer_color": "#4a90d9"
+        },
+        {
+          "path": [
+            1,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "G",
+          "type": "group",
+          "type_label": "Group",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "ancestor_layer_color": "#4a90d9"
+        },
+        {
+          "path": [
+            1,
+            0,
+            0
+          ],
+          "depth": 2,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false,
+          "ancestor_layer_color": "#4a90d9"
+        },
+        {
+          "path": [
+            0
+          ],
+          "depth": 0,
+          "id": null,
+          "name": "Plain",
+          "type": "layer",
+          "type_label": "Layer",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": true,
+          "element_selected": false,
+          "ancestor_layer_color": ""
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "depth": 1,
+          "id": null,
+          "name": "",
+          "type": "rect",
+          "type_label": "Rectangle",
+          "visibility": "preview",
+          "locked": false,
+          "is_container": false,
+          "element_selected": false,
+          "ancestor_layer_color": ""
+        }
+      ]
     }
   ],
   "visible_cases": [
@@ -274,6 +493,7 @@
           "locked": true,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -291,6 +511,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -309,6 +530,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": true,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": true,
           "renaming": false
@@ -328,6 +550,7 @@
           "locked": false,
           "is_container": false,
           "element_selected": true,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -346,6 +569,7 @@
           "locked": false,
           "is_container": false,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -462,6 +686,7 @@
           "locked": true,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": true,
           "renaming": false
@@ -479,6 +704,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -497,6 +723,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": true,
+          "ancestor_layer_color": "",
           "collapsed": true,
           "panel_selected": true,
           "renaming": false
@@ -515,6 +742,7 @@
           "locked": false,
           "is_container": false,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": true
@@ -629,6 +857,7 @@
           "locked": true,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -646,6 +875,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": true,
           "panel_selected": false,
           "renaming": false
@@ -759,6 +989,7 @@
           "locked": true,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -776,6 +1007,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -794,6 +1026,7 @@
           "locked": false,
           "is_container": true,
           "element_selected": true,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -813,6 +1046,7 @@
           "locked": false,
           "is_container": false,
           "element_selected": true,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -831,6 +1065,7 @@
           "locked": false,
           "is_container": false,
           "element_selected": false,
+          "ancestor_layer_color": "",
           "collapsed": false,
           "panel_selected": false,
           "renaming": false
@@ -863,7 +1098,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         },
         {
           "path": [
@@ -878,7 +1114,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": true
+          "element_selected": true,
+          "ancestor_layer_color": ""
         }
       ]
     },
@@ -907,7 +1144,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": true
+          "element_selected": true,
+          "ancestor_layer_color": ""
         },
         {
           "path": [
@@ -921,7 +1159,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         }
       ]
     },
@@ -957,7 +1196,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": true,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         }
       ]
     },
@@ -983,7 +1223,8 @@
           "visibility": "preview",
           "locked": false,
           "is_container": false,
-          "element_selected": false
+          "element_selected": false,
+          "ancestor_layer_color": ""
         }
       ]
     }
