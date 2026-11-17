@@ -16026,10 +16026,11 @@ mod tests {
     fn real_stub_actions_report_as_not_done() {
         // A log-only body: the purest successful no-op. (`new_symbol` was the
         // example until 2026-10-26, when it became `doc.new_symbol`, and
-        // `layers_nav_down` until 2026-10-28, when it ran its YAML; any
-        // `log`-only action serves, and this one moves when it leaves too.)
-        assert_eq!(report_of_real_action("save_brush_library"),
-                   vec![Unhandled::Logged("save_brush_library".into())]);
+        // `layers_nav_down` until 2026-10-28, when it ran its YAML, and
+        // `save_brush_library` until 2026-11-17, when it opened its dialog;
+        // any `log`-only action serves, and this one moves when it leaves too.)
+        assert_eq!(report_of_real_action("rearrange_artboards"),
+                   vec![Unhandled::Logged("rearrange_artboards (deferred)".into())]);
         // A log BESIDE a handled effect is still a stub for the real work.
         // (`save` on an untitled document dispatches `save_as`, a log too.)
         assert_eq!(report_of_real_action("save_and_close"),

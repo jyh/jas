@@ -9823,17 +9823,43 @@ mod tests {
     }
 
     /// **D6/D7.** A log-only action is a stub for work a platform supplies, and
-    /// it is refused as one. (Its example was `sym_new` until W2b-17 hosted the
-    /// Symbols verbs; `open_brush_libraries_menu` is still a stub.)
+    /// it is refused as one, by the shared batch runner both doors use. Its
+    /// example was `sym_new` until W2b-17 hosted the Symbols verbs, then the
+    /// Brushes library button until STATUS-jas row 8 wired it to `open_menu`.
+    /// No ENABLED widget dispatches a log-only action since (Rearrange's is
+    /// `disabled: true` and reads `Disabled`), so the stub is driven through
+    /// the panel-menu door: Artboards ▸ Convert to Artboards, its index read
+    /// from the bundle.
     #[test]
-    fn panel_behavior_refuses_a_log_only_action_by_name() {
+    fn a_log_only_panel_action_is_refused_by_name() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().expect("workspace");
+        let menu = ws.panel_menu("artboards_panel_content");
+        let at = menu.iter().position(|m| m.get("action").and_then(|a| a.as_str()) == Some("convert_to_artboards"))
+            .expect("the Artboards menu carries Convert to Artboards");
+        let logged = ws.actions().get("convert_to_artboards").and_then(|a| a["effects"][0]["log"].as_str())
+            .expect("convert_to_artboards is still a log-only stub; pick another")
+            .to_string();
+        let e = engine_with(misaligned(&[0]));
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"artboards_panel_content","menu_index":{at}}}"#));
+        assert_eq!(reply, "");
+        assert_eq!(err, refusal("PlatformEffect", &format!("Logged:{logged}")));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The Brushes toolbar's library button runs `open_menu` (row 8): a HOST
+    /// request, so the engine does not refuse it as a stub; it answers
+    /// `Unchanged`, because the reply carries no menu request yet and the
+    /// Windows shell pops nothing up (a declared gap, the next row-8 node).
+    #[test]
+    fn the_brush_libraries_button_is_no_longer_a_log_stub() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0]));
         let (reply, err) = behave(e, "brushes_panel_content",
                                   r#"{"widget":"bp_libraries_menu_btn","event":"click"}"#);
-        assert_eq!(reply, "");
-        assert_eq!(err, refusal("PlatformEffect", "Logged:open_brush_libraries_menu"));
+        assert_eq!(err, refusal("Unchanged", "bp_libraries_menu_btn"), "not refused as a stub: {reply}");
         unsafe { jas_engine_free(e) };
     }
 

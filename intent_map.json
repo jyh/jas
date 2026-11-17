@@ -861,6 +861,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "save_brush_library_confirm": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "save_swatch_library": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1132,6 +1136,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "toggle_brush_library_open": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "toggle_brush_library_persistent": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1290,7 +1298,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 169,
+      "ui-state": 171,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1344,7 +1352,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 244,
+    "total_actions": 246,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",
