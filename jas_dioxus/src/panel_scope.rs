@@ -585,14 +585,17 @@ pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, 
     scope
 }
 
-/// W2b-15. Seed the store's `data` with the workspace bundle's brush and swatch
-/// libraries, the values the web's `AppState` starts from. They live in the
-/// STORE, not in a view, because the library effects write them there
-/// (`set_data_path`), so an edit and the next plan read the same copy.
+/// W2b-15. Seed the store's `data` with the workspace bundle's brush, swatch
+/// and gradient libraries, the values the web's `AppState` starts from. They
+/// live in the STORE, not in a view, because the library effects write them
+/// there (`set_data_path`), so an edit and the next plan read the same copy.
+/// The gradient libraries are read-only so far, and are here so Open Gradient
+/// Library's `keys(data.gradient_libraries)` plans its rows (row 8, §3.4;
+/// until 2026-11-17 the engine planned it with none).
 pub fn seed_library_data(store: &mut StateStore) {
     let Some(ws) = crate::interpreter::workspace::Workspace::load() else { return };
     let mut data = Map::new();
-    for key in ["brush_libraries", "swatch_libraries"] {
+    for key in ["brush_libraries", "swatch_libraries", "gradient_libraries"] {
         data.insert(key.into(), ws.data().get(key).cloned().unwrap_or_else(|| serde_json::json!({})));
     }
     store.set_data(Value::Object(data));
