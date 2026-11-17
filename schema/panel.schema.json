@@ -151,6 +151,57 @@
               "dynamic": {
                 "type": "boolean"
               },
+              "id": {
+                "type": "string",
+                "description": "A menu-unique name for the item, so an effect (open_menu) can name it."
+              },
+              "items_from": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "item"
+                ],
+                "description": "A dynamic submenu's rows, evaluated each time the menu opens: one row per element of source, bound to the name in as (default item).",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+                  },
+                  "as": {
+                    "type": "string"
+                  },
+                  "item": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "label",
+                      "action"
+                    ],
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "A {{ }} template over the bound element."
+                      },
+                      "action": {
+                        "type": "string"
+                      },
+                      "params": {
+                        "type": "object",
+                        "description": "Each value an expression over the bound element."
+                      },
+                      "enabled_when": {
+                        "type": "string",
+                        "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+                      },
+                      "checked_when": {
+                        "type": "string",
+                        "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+                      }
+                    }
+                  }
+                }
+              },
               "disabled": {
                 "type": "boolean"
               }

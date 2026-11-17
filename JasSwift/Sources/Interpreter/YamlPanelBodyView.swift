@@ -101,8 +101,23 @@ func resolveIconButtonSize(
     return flyoutDefault ?? 20
 }
 
+/// Where a click hands a menu its action asked the HOST for (`open_menu`,
+/// ``StateStore/pendingMenu``, STATUS-jas row 8). The dock installs it with
+/// its layout and model; it is nil outside a dock, where nothing pops up.
+private struct MenuRequestKey: EnvironmentKey {
+    static let defaultValue: ((String) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var onMenuRequest: ((String) -> Void)? {
+        get { self[MenuRequestKey.self] }
+        set { self[MenuRequestKey.self] = newValue }
+    }
+}
+
 /// Renders a YAML element tree as a SwiftUI view.
 struct YamlElementView: View {
+    @Environment(\.onMenuRequest) private var onMenuRequest
     let element: [String: Any]
     let context: [String: Any]
     var model: Model?
@@ -1167,6 +1182,12 @@ struct YamlElementView: View {
         if let kind = element["type"] as? String, WidgetEvent.clickKinds.contains(kind),
            let route = widgetEvents {
             route.click(element, modifiers: currentEventModifiers())
+            // A menu the click asked the host for: taken once, here, and
+            // handed to the dock, which pops it up at the click.
+            if let id = model.stateStore.pendingMenu {
+                model.stateStore.pendingMenu = nil
+                onMenuRequest?(id)
+            }
             return
         }
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }

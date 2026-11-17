@@ -208,7 +208,9 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # `set_panel_state` of the Layers panel's `collapsed_paths` through
 # `tree_reveal`). No port dispatches it yet; both still reveal in the tree's
 # draw until the trigger lands (row 78 step 2).
-MIN_LOG_ONLY = 9
+# 7 on 2026-11-17: `save_brush_library` opens its dialog and
+# `open_brush_libraries_menu` runs `open_menu` (STATUS-jas row 8's wiring).
+MIN_LOG_ONLY = 7
 # Of those, the ones that DECLARE `native: <reason>` (host acts: an OS dialog,
 # the dock), each verified native in both ports. EXACT, as MIN_LOG_ONLY is.
 # 4 on 2026-10-26: open_file, save_as, revert, toggle_panel (item 8 class H;
@@ -560,12 +562,14 @@ def self_test() -> int:
         # `set_artboard_fill_preset` until 2026-10-25 (each became effects in
         # actions.yaml), `scroll_to_selected` until 2026-10-27 (declared
         # bypassed: both ports run it as render behaviour) and
-        # `layers_nav_left` until 2026-10-28 (it runs its YAML now). Verified
-        # 2026-10-28: `save_brush_library` is in neither port (0 files in
-        # jas_dioxus/src and JasSwift/Sources, with `convert_to_artboards`
-        # found in jas_dioxus/src as the control), and neither port's Brushes
-        # code saves a library.
-        "save_brush_library": "dead_both",
+        # `layers_nav_left` until 2026-10-28 (it runs its YAML now) and
+        # `save_brush_library` until 2026-11-17 (it opens its dialog, row 8).
+        # Verified 2026-11-17: `rearrange_artboards` is in 0 files of
+        # JasSwift/Sources, and jas_dioxus/src names it only in
+        # artboards_panel.rs, which hands it to the YAML pipeline (its log),
+        # and in a test that pins the log; `open_file` is found native in both
+        # as the control.
+        "rearrange_artboards": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any

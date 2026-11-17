@@ -30,6 +30,10 @@ struct RenderCtx {
     dialog_ctx: super::dialog_view::DialogCtx,
     timer_ctx: super::timer::TimerCtx,
     panel_kind: Option<PanelKind>,
+    /// The panel-menu overlay's signal, so a click whose action asked the
+    /// host for a menu (`open_menu`, `AppState::pending_menu`) can open it.
+    /// `None` where no overlay is provided (a dialog's own tree).
+    panel_menu: Option<crate::panels::panel_menu_state::PanelMenuState>,
 }
 
 /// Render a YAML element spec into a Dioxus Element.
@@ -49,6 +53,7 @@ pub fn render_element(
         dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
         timer_ctx: use_context::<super::timer::TimerCtx>(),
         panel_kind: None,
+        panel_menu: try_use_context::<crate::panels::panel_menu_state::PanelMenuState>(),
     };
     render_el(el, ctx, &rctx)
 }
@@ -522,6 +527,36 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
 /// Until 2026-09-26 every action evaluated in the app scope alone, so a
 /// panel's own keys (`panel.selected_library` for Brushes) read as null.
 pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, serde_json::Value>, panel_scope: Option<&serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+    let deferred = dispatch_action_in_body(action, params, panel_scope, st);
+    // The host half of Save Brush Library on the web: every queued library
+    // write leaves as a browser download, once, after the action that queued
+    // it (the brush-library design, B.3). Off wasm the queue stays on
+    // `AppState` for the caller to read.
+    #[cfg(target_arch = "wasm32")]
+    drain_pending_writes(st, crate::workspace::clipboard::download_file);
+    deferred
+}
+
+/// Hand every queued host write (`AppState::pending_writes`, filled by
+/// `brush.save_library`) to `sink` as `(file name, pretty JSON)`, oldest
+/// first, and empty the queue. A brush library goes out as `<slug>.json`,
+/// its manifest; installing it is placing that file at
+/// `workspace/brushes/<slug>/library.json`. A write of any other kind is
+/// dropped, as no host here knows where it goes.
+pub(crate) fn drain_pending_writes(
+    st: &mut crate::workspace::app_state::AppState,
+    mut sink: impl FnMut(&str, &str),
+) {
+    for w in std::mem::take(&mut st.pending_writes) {
+        let slug = w.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+        if w.get("kind").and_then(|v| v.as_str()) == Some("brush_library") && !slug.is_empty() {
+            let body = serde_json::to_string_pretty(&w["manifest"]).unwrap_or_default();
+            sink(&format!("{slug}.json"), &body);
+        }
+    }
+}
+
+fn dispatch_action_in_body(action: &str, params: &serde_json::Map<String, serde_json::Value>, panel_scope: Option<&serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Recorder seam hook (Arc 1 S2, dormant unless armed): records
     // depth-0 dispatches on the action seam / segments an open gesture
     // case. RAII so every early return below unwinds the depth.
@@ -2838,8 +2873,11 @@ fn run_yaml_effect(
     }
 
     // Brush-library edits (BRUSH_LIBRARY_UNDO.md) run in the shared runner.
-    const BRUSH_LIBRARY_KEYS: [&str; 4] = [
+    // `open_menu` records a HOST request (`pending_menu`), carried out of the
+    // shared runner the same way.
+    const BRUSH_LIBRARY_KEYS: [&str; 6] = [
         "brush.delete_selected", "brush.duplicate_selected", "brush.sort_by_name", "brush.select_unused",
+        "brush.save_library", "open_menu",
     ];
     if eff.as_object().is_some_and(|m| m.keys().any(|k| BRUSH_LIBRARY_KEYS.contains(&k.as_str()))) {
         run_in_brushes_store(eff, eval_ctx, st);
@@ -2912,6 +2950,12 @@ fn run_in_brushes_store(
     let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
     super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
     st.brush_libraries = store.get_data_path("brush_libraries");
+    // The host queues the run filled: a save's file write, and a menu the
+    // button asked the host to pop up. Appended / latest-wins, as the store's.
+    st.pending_writes.append(&mut store.pending_writes);
+    if let Some(menu) = store.pending_menu.take() {
+        st.pending_menu = Some(menu);
+    }
     if let Some(out) = store.panel_scope(BRUSHES) {
         let entry = st.panel_state.entry(BRUSHES.to_string()).or_default();
         for (k, v) in out {
@@ -3228,11 +3272,13 @@ fn build_mouse_event_handler(
     let mut revision = rctx.revision;
     let ctx_snapshot = ctx.clone();
     let mut dialog_signal = rctx.dialog_ctx.0;
+    let panel_menu = rctx.panel_menu;
 
     Some(EventHandler::new(move |evt: Event<MouseData>| {
         let app = app.clone();
         let actions = resolved_actions.clone();
         let mut ctx_snap = ctx_snapshot.clone();
+        let at = evt.data().page_coordinates();
         // Expose click-time modifier state to yaml condition
         // expressions as `event.alt` / `event.shift` / `event.meta` /
         // `event.ctrl`. The Boolean panel uses `event.alt` to route
@@ -3242,10 +3288,20 @@ fn build_mouse_event_handler(
         merge_event_modifiers(&mut ctx_snap, mods.alt(), mods.shift(), mods.meta(), mods.ctrl());
         spawn(async move {
             let mut deferred_dialog_effects = Vec::new();
+            let menu_request;
             {
                 let mut st = app.borrow_mut();
                 deferred_dialog_effects.extend(run_click_behaviors(&actions, &ctx_snap, &mut st));
+                // A menu the click asked the host for (`open_menu`): taken
+                // here, once, and popped up at the click as that submenu alone.
+                menu_request = st.pending_menu.take().and_then(|id|
+                    crate::panels::panel_menu::menu_request_target(&id, &st.workspace_layout));
             } // drop st borrow
+            if let (Some((kind, addr, key)), Some(mut pm)) = (menu_request, panel_menu) {
+                pm.open.set(Some(crate::panels::panel_menu_state::PanelMenuOpen {
+                    kind, addr, x: at.x, y: at.y, only: Some(key),
+                }));
+            }
 
             // Apply deferred dialog effects (outside AppState borrow)
             apply_deferred_dialog_effects(&deferred_dialog_effects, &app, &mut dialog_signal);
@@ -14903,6 +14959,65 @@ mod tests {
         assert_eq!(actions.len(), 1, "one click behavior");
         super::run_click_behaviors(&actions, &ctx, &mut st);
         assert_eq!(brush_names(&st), vec!["a", "c"]);
+    }
+
+    // ── Save / Open Brush Library on the web route (STATUS-jas row 8) ──
+    // The engine and Swift routes are pinned by the dialog-action corpus;
+    // these drive the web runner, which hands library edits to the shared
+    // runner by key and must carry its host queues back out.
+
+    #[test]
+    fn save_brush_library_runs_in_the_web_app_and_queues_one_write() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b"]);
+        let eff = serde_json::json!({"brush.save_library": {"library": "\"lib\"", "name": "\"My Set\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.brush_libraries["my_set"]["name"], serde_json::json!("My Set"), "a new library");
+        assert_eq!(st.brush_libraries["lib"]["name"], serde_json::json!("Lib"), "the source untouched");
+        assert_eq!(brushes_panel_key(&st, "selected_library"), serde_json::json!("my_set"));
+        assert_eq!(st.pending_writes.len(), 1, "one host write: {:?}", st.pending_writes);
+        assert_eq!(st.pending_writes[0]["slug"], serde_json::json!("my_set"));
+        assert_eq!(st.pending_writes[0]["manifest"]["name"], serde_json::json!("My Set"));
+        // A second save QUEUES beside the first: the carry appends, it does not replace.
+        let eff = serde_json::json!({"brush.save_library": {"library": "\"lib\"", "name": "\"Lib\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.pending_writes.iter().map(|w| w["slug"].clone()).collect::<Vec<_>>(),
+                   vec![serde_json::json!("my_set"), serde_json::json!("lib")]);
+    }
+
+    #[test]
+    fn drain_pending_writes_hands_each_write_to_the_sink_once_as_slug_json() {
+        let mut st = AppState::new();
+        st.pending_writes = vec![
+            serde_json::json!({"kind": "brush_library", "slug": "my_set", "manifest": {"name": "My Set"}}),
+            serde_json::json!({"kind": "brush_library", "slug": "lib", "manifest": {"name": "Lib"}}),
+        ];
+        let mut got: Vec<(String, serde_json::Value)> = Vec::new();
+        super::drain_pending_writes(&mut st, |file, body| {
+            got.push((file.to_string(), serde_json::from_str(body).expect("the body is JSON")));
+        });
+        assert_eq!(got, vec![
+            ("my_set.json".to_string(), serde_json::json!({"name": "My Set"})),
+            ("lib.json".to_string(), serde_json::json!({"name": "Lib"})),
+        ]);
+        assert!(st.pending_writes.is_empty(), "drained");
+        super::drain_pending_writes(&mut st, |f, _| panic!("a drained queue wrote {f}"));
+    }
+
+    #[test]
+    fn open_menu_runs_in_the_web_app_and_records_the_request() {
+        let mut st = AppState::new();
+        assert_eq!(st.pending_menu, None);
+        let eff = serde_json::json!({"open_menu": {"id": "bp_menu_open_library"}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.pending_menu.as_deref(), Some("bp_menu_open_library"));
+    }
+
+    #[test]
+    fn the_brush_libraries_button_asks_for_the_open_library_submenu() {
+        let mut st = AppState::new();
+        super::dispatch_action_in("open_brush_libraries_menu", &serde_json::Map::new(), None, &mut st);
+        assert_eq!(st.pending_menu.as_deref(), Some("bp_menu_open_library"));
     }
 
     #[test]

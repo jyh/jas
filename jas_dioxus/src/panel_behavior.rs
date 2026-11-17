@@ -995,6 +995,7 @@ fn run_batch(
     // active panel, and a write to a panel's own scope (the Color mode) is
     // still a change.
     let panels_before = store.panel_scopes().clone();
+    let menu_before = store.pending_menu.clone();
     let model_state_before = model_state(model);
     let generation = model.generation();
     let report = run_effects_hosted(batch, &ctx, store, Some(&mut *model), Some(actions),
@@ -1005,6 +1006,9 @@ fn run_batch(
         doc_changed: model.generation() != generation,
         state_changed: store.eval_context() != state_before
             || *store.panel_scopes() != panels_before
+            // A menu the batch asked the shell for (`open_menu`) is an
+            // outcome the reply names (`"menu"`), not a no-op.
+            || store.pending_menu != menu_before
             || model_state(model) != model_state_before,
     })
 }

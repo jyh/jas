@@ -20,6 +20,13 @@ pub enum PanelMenuItem {
         command: &'static str,
         group: &'static str,
     },
+    /// A submenu whose rows are declared by `items_from` and evaluated each
+    /// time the menu opens ([`submenu_rows`]); `spec` is the YAML
+    /// `items_from` map. Swift's `PanelMenuItem.submenu` is its twin.
+    Submenu {
+        label: &'static str,
+        spec: &'static serde_json::Value,
+    },
     /// Horizontal separator line.
     Separator,
 }
@@ -34,7 +41,7 @@ impl PanelMenuItem {
             PanelMenuItem::Action { command, .. }
             | PanelMenuItem::Toggle { command, .. }
             | PanelMenuItem::Radio { command, .. } => Some(command),
-            PanelMenuItem::Separator => None,
+            PanelMenuItem::Submenu { .. } | PanelMenuItem::Separator => None,
         }
     }
 
@@ -43,7 +50,8 @@ impl PanelMenuItem {
         match self {
             PanelMenuItem::Action { label, .. }
             | PanelMenuItem::Toggle { label, .. }
-            | PanelMenuItem::Radio { label, .. } => Some(label),
+            | PanelMenuItem::Radio { label, .. }
+            | PanelMenuItem::Submenu { label, .. } => Some(label),
             PanelMenuItem::Separator => None,
         }
     }
@@ -106,6 +114,12 @@ fn build_menu_items(content_id: &str) -> Vec<PanelMenuItem> {
             }
             let obj = e.as_object()?;
             let label = leak(obj.get("label")?.as_str()?);
+            // An entry that declares `items_from` is a submenu whose rows are
+            // built when the menu opens (the brush-library design, A.2).
+            if let Some(spec) = obj.get("items_from").filter(|v| v.is_object()) {
+                let spec: &'static serde_json::Value = Box::leak(Box::new(spec.clone()));
+                return Some(PanelMenuItem::Submenu { label, spec });
+            }
             let action = obj.get("action").and_then(|a| a.as_str());
             // A menu entry is a radio-group member when its `action` recurs
             // across the menu (the YAML expresses grouping by action sameness,
@@ -237,6 +251,79 @@ pub fn dispatch_yaml_menu(
     let outer = state.menu_panel.replace(content_id.to_string());
     let deferred = crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
     state.menu_panel = outer;
+    deferred
+}
+
+/// The rows of a panel's `items_from` submenu, evaluated now in the panel
+/// menu's own context ([`panel_menu_ctx`]), so a menu opened again reads the
+/// app as it is then: `[{label, action, params, enabled, checked}]`
+/// (`menu_state::items_from_entries`).
+pub fn submenu_rows(
+    content_id: &str,
+    spec: &serde_json::Value,
+    st: &crate::workspace::app_state::AppState,
+) -> serde_json::Value {
+    crate::interpreter::menu_state::items_from_entries(spec, &panel_menu_ctx(content_id, st))
+}
+
+/// The panel, its address and the submenu label for a menu item an
+/// `open_menu` effect named by its declared `id` (`AppState::pending_menu`).
+/// `None` when no panel menu declares an `items_from` item with that id, or
+/// when that panel is not in the layout (there is nowhere to anchor it). Every
+/// panel kind is searched, the toggle-only ones (Brushes, Gradient, Concepts)
+/// included, which `PanelKind::ALL` leaves out.
+pub fn menu_request_target(
+    id: &str,
+    layout: &crate::workspace::workspace::WorkspaceLayout,
+) -> Option<(crate::workspace::workspace::PanelKind, crate::workspace::workspace::PanelAddr, &'static str)> {
+    use crate::workspace::workspace::PanelKind;
+    if id.is_empty() {
+        return None;
+    }
+    let ws = crate::interpreter::workspace::Workspace::load()?;
+    let kinds = PanelKind::ALL.iter().copied()
+        .chain([PanelKind::Brushes, PanelKind::Gradient, PanelKind::Concepts]);
+    for kind in kinds {
+        let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+        let declares = ws.panel_menu(content_id).iter().find_map(|e| {
+            let o = e.as_object()?;
+            (o.get("id").and_then(|v| v.as_str()) == Some(id) && o.contains_key("items_from"))
+                .then(|| o.get("label").and_then(|v| v.as_str()).map(str::to_string))
+                .flatten()
+        });
+        if let Some(label) = declares {
+            let addr = crate::workspace::layout_apply::find_panel(layout, kind)?;
+            // The menu view keys a submenu by its built item's label.
+            let key = menu_items_from_yaml(content_id).into_iter().find_map(|i| match i {
+                PanelMenuItem::Submenu { label: l, .. } if l == label => Some(l),
+                _ => None,
+            })?;
+            return Some((kind, addr, key));
+        }
+    }
+    None
+}
+
+/// Run one chosen `items_from` row: its YAML action with its params, which
+/// [`submenu_rows`] has already evaluated (so nothing is folded into a command
+/// and split back off), in the panel's scope with the panel as the menu
+/// panel, as [`dispatch_yaml_menu`] runs a static row. A row with no action
+/// runs nothing.
+pub fn dispatch_menu_row(
+    content_id: &str,
+    row: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
+    let action = row.get("action").and_then(|a| a.as_str()).unwrap_or("");
+    if action.is_empty() {
+        return Vec::new();
+    }
+    let params = row.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+    let scope = panel_menu_ctx(content_id, st)
+        .get("panel").cloned().unwrap_or(serde_json::Value::Null);
+    let outer = st.menu_panel.replace(content_id.to_string());
+    let deferred = crate::interpreter::renderer::dispatch_action_in(action, &params, Some(&scope), st);
+    st.menu_panel = outer;
     deferred
 }
 
@@ -415,6 +502,14 @@ pub fn panel_menu_ctx(
     ctx.insert("preferences".into(), preferences);
     ctx.insert("state".into(), J::Object(state));
     ctx.insert("active_document".into(), active_document);
+    // The data namespace, read from the app's own libraries (the store the
+    // library effects write), so an `items_from` source such as
+    // `keys(data.brush_libraries)` lists what is there now, a saved library
+    // included. Swift's `panelMenuContext` carries the same key.
+    ctx.insert("data".into(), serde_json::json!({
+        "brush_libraries": st.brush_libraries.clone(),
+        "swatch_libraries": st.swatch_libraries.clone(),
+    }));
     // `selection_has_mask` and its siblings sit at TOP level, as the body's
     // eval map places them, so `enabled_when: "!selection_has_mask"` reads the
     // same key from both surfaces.
@@ -598,6 +693,91 @@ fn live_panel_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── The Open Brush Library submenu on the web (STATUS-jas row 8) ──
+    // brushes.yaml declares it with `items_from`; the view asks for its rows
+    // when the menu opens and dispatches a chosen row with that row's params.
+    // Swift's twins are `panelSubmenuRows` / `panelDispatchRow`.
+
+    fn brushes_submenu() -> (&'static str, &'static serde_json::Value) {
+        menu_items_from_yaml("brushes_panel_content").into_iter().find_map(|i| match i {
+            PanelMenuItem::Submenu { label, spec } => Some((label, spec)),
+            _ => None,
+        }).expect("the Brushes menu builds an items_from submenu")
+    }
+
+    /// `open_menu` names a menu ITEM by its declared `id`; the web host pops
+    /// up that item's submenu, which needs the panel that declares it, that
+    /// panel's address in the layout, and the label the menu view keys the
+    /// submenu by.
+    #[test]
+    fn a_menu_request_resolves_to_its_panel_address_and_submenu() {
+        use crate::workspace::workspace::PanelKind;
+        let mut st = crate::workspace::app_state::AppState::new();
+        assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout), None,
+                   "Brushes is not in the default layout, so it has no address");
+        crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout,
+            &crate::workspace::layout_apply::op_toggle_panel(PanelKind::Brushes));
+        let brushes = crate::workspace::layout_apply::find_panel(&st.workspace_layout, PanelKind::Brushes)
+            .expect("Window > Brushes docks it");
+        assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout),
+                   Some((PanelKind::Brushes, brushes, "Open Brush Library")));
+        for id in ["", "no_such_item", "Open Brush Library"] {
+            assert_eq!(menu_request_target(id, &st.workspace_layout), None, "{id:?} names no item");
+        }
+        // Closed again: no address, so nothing opens.
+        crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(brushes));
+        assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout), None);
+    }
+
+    #[test]
+    fn an_items_from_entry_builds_a_submenu_carrying_its_spec() {
+        let (label, spec) = brushes_submenu();
+        assert_eq!(label, "Open Brush Library");
+        assert_eq!(spec["source"], serde_json::json!("keys(data.brush_libraries)"));
+        let item = PanelMenuItem::Submenu { label, spec };
+        assert_eq!(item.label(), Some("Open Brush Library"));
+        assert_eq!(item.command(), None, "a submenu dispatches its rows, not itself");
+        assert!(!item.is_separator());
+    }
+
+    #[test]
+    fn the_brush_library_rows_list_every_library_checked_when_open() {
+        let (_, spec) = brushes_submenu();
+        let mut st = crate::workspace::app_state::AppState::new();
+        st.brush_libraries = serde_json::json!({
+            "zeta": {"name": "Zeta Set", "brushes": []},
+            "alpha": {"brushes": []},
+        });
+        st.panel_state.entry("brushes_panel_content".into()).or_default()
+            .insert("open_libraries".into(), serde_json::json!([{"id": "zeta", "collapsed": true}]));
+        let rows = submenu_rows("brushes_panel_content", spec, &st);
+        assert_eq!(rows, serde_json::json!([
+            {"label": "alpha", "action": "toggle_brush_library_open",
+             "params": {"library": "alpha"}, "enabled": true, "checked": false},
+            {"label": "Zeta Set", "action": "toggle_brush_library_open",
+             "params": {"library": "zeta"}, "enabled": true, "checked": true},
+        ]), "slug order; a missing name shows the slug; checked = open, whatever its collapse");
+    }
+
+    #[test]
+    fn choosing_a_brush_library_row_toggles_it_in_the_panel() {
+        let (_, spec) = brushes_submenu();
+        let mut st = crate::workspace::app_state::AppState::new();
+        let open = |st: &crate::workspace::app_state::AppState|
+            panel_menu_ctx("brushes_panel_content", st)["panel"]["open_libraries"].clone();
+        assert_eq!(open(&st), serde_json::json!([{"id": "default_brushes", "collapsed": false}]), "the declared default");
+        let row = submenu_rows("brushes_panel_content", spec, &st)[0].clone();
+        assert_eq!(row["checked"], serde_json::json!(true));
+        dispatch_menu_row("brushes_panel_content", &row, &mut st);
+        assert_eq!(open(&st), serde_json::json!([]), "closed");
+        let row = submenu_rows("brushes_panel_content", spec, &st)[0].clone();
+        assert_eq!(row["checked"], serde_json::json!(false), "the rows are evaluated again at the next open");
+        dispatch_menu_row("brushes_panel_content", &row, &mut st);
+        assert_eq!(open(&st), serde_json::json!([{"id": "default_brushes", "collapsed": false}]), "re-opened expanded");
+        assert_eq!(st.menu_panel, None, "the menu panel is restored");
+    }
 
     /// Actions name a panel by its short kind (`panel: brushes`); every panel
     /// map in the bundle is keyed by the content id. The two spellings have to

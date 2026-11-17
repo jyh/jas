@@ -42,8 +42,85 @@ pub fn PanelMenuOverlay() -> Element {
     // `panel_is_checked` build per call.
     let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
     let menu_ctx = super::panel_menu::panel_menu_ctx(content_id, &st);
+        // Flip submenu to the left when the parent menu is near
+        // the right edge of the viewport — otherwise left:100%
+        // pushes the flyout off-screen. menu_width is 180 (above);
+        // assume the submenu can be up to ~200 wide.
+        #[cfg(target_arch = "wasm32")]
+        let viewport_w: f64 = web_sys::window()
+            .and_then(|w| w.inner_width().ok())
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1280.0);
+        #[cfg(not(target_arch = "wasm32"))]
+        let viewport_w: f64 = 1280.0;
+        let flip_left = x + menu_width + 200.0 > viewport_w;
+        // Each side states BOTH offsets: a property the new style drops is
+        // RESTORED by dioxus's style update (rows 121-122).
+        let submenu_pos = if flip_left {
+            "position:absolute; left:auto; right:100%; top:0;"
+        } else {
+            "position:absolute; right:auto; left:100%; top:0;"
+        };
 
-    let item_nodes: Vec<Result<VNode, RenderError>> = items.into_iter().map(|item| {
+    // One `items_from` row: a check where its `checked_when` holds; a click
+    // runs the row's own action with its own params
+    // (`panel_menu::dispatch_menu_row`) and closes the menu. Used by a
+    // submenu's flyout and by a menu opened as that submenu alone
+    // (`PanelMenuOpen::only`, an `open_menu` request).
+    let render_row = {
+        let act = act.clone();
+        move |row: serde_json::Value| -> Element {
+            let act = act.clone();
+            let enabled = row.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let checked = row.get("checked").and_then(|v| v.as_bool()).unwrap_or(false);
+            let prefix = if checked { "\u{2713} " } else { "    " };
+            let text = row.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let display = format!("{prefix}{text}");
+            let (color, cursor, opacity) = if enabled {
+                (THEME_TEXT, "pointer", "1")
+            } else {
+                (THEME_TEXT_HINT, "default", "0.5")
+            };
+            rsx! {
+                div {
+                    class: "jas-menu-item",
+                    style: "padding:4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                    onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                    onclick: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        if !enabled {
+                            return;
+                        }
+                        let row = row.clone();
+                        (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            super::panel_menu::dispatch_menu_row(content_id, &row, st);
+                        }));
+                        submenu_open_for.set(None);
+                        panel_menu.open.set(None);
+                    },
+                    "{display}"
+                }
+            }
+        }
+    };
+
+    // An `open_menu` request shows the named submenu's rows ALONE, at the
+    // click; an empty source shows one disabled "(none)" row rather than an
+    // empty box.
+    let only_nodes: Option<Vec<Element>> = open.only.map(|key| {
+        let rows = items.iter().find_map(|i| match i {
+            PanelMenuItem::Submenu { label, spec } if *label == key => Some(*spec),
+            _ => None,
+        }).map(|spec| super::panel_menu::submenu_rows(content_id, spec, &st))
+            .and_then(|r| r.as_array().cloned()).unwrap_or_default();
+        if rows.is_empty() {
+            vec![rsx! { div { style: "padding:4px 16px; font-size:13px; color:{THEME_TEXT_HINT}; opacity:0.5;", "(none)" } }]
+        } else {
+            rows.into_iter().map(&render_row).collect()
+        }
+    });
+
+    let item_nodes: Vec<Result<VNode, RenderError>> = if let Some(nodes) = only_nodes { nodes } else { items.into_iter().map(|item| {
         match item {
             PanelMenuItem::Action { label, command, shortcut } if command == "open_swatch_library" => {
                 // Submenu host: hovering shows a flyout listing every
@@ -66,25 +143,6 @@ pub fn PanelMenuOverlay() -> Element {
                         })
                         .collect())
                     .unwrap_or_default();
-                // Flip submenu to the left when the parent menu is near
-                // the right edge of the viewport — otherwise left:100%
-                // pushes the flyout off-screen. menu_width is 180 (above);
-                // assume the submenu can be up to ~200 wide.
-                #[cfg(target_arch = "wasm32")]
-                let viewport_w: f64 = web_sys::window()
-                    .and_then(|w| w.inner_width().ok())
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1280.0);
-                #[cfg(not(target_arch = "wasm32"))]
-                let viewport_w: f64 = 1280.0;
-                let flip_left = x + menu_width + 200.0 > viewport_w;
-                // Each side states BOTH offsets: a property the new style drops is
-                // RESTORED by dioxus's style update (rows 121-122).
-                let submenu_pos = if flip_left {
-                    "position:absolute; left:auto; right:100%; top:0;"
-                } else {
-                    "position:absolute; right:auto; left:100%; top:0;"
-                };
                 // Already-open ids from panel.open_libraries
                 let open_ids: std::collections::HashSet<String> = st.swatches_panel.open_libraries
                     .as_array()
@@ -247,6 +305,42 @@ pub fn PanelMenuOverlay() -> Element {
                     }
                 }
             }
+            PanelMenuItem::Submenu { label, spec } => {
+                // An `items_from` submenu (brushes.yaml's Open Brush
+                // Library): hovering shows a flyout whose rows are evaluated
+                // NOW, in the menu's context; a row shows a check where its
+                // `checked_when` holds and runs its own action with its own
+                // params (`panel_menu::dispatch_menu_row`).
+                let key = label;
+                let display_label = format!("{label} \u{25B6}"); // ▶
+                let rows = super::panel_menu::submenu_rows(content_id, spec, &st);
+                let is_open = submenu_open_for() == Some(key);
+                let row_nodes: Vec<Element> = rows.as_array().cloned().unwrap_or_default()
+                    .into_iter().map(&render_row).collect();
+                let empty = row_nodes.is_empty();
+                rsx! {
+                    div {
+                        style: "position:relative;",
+                        onmouseenter: move |_| { submenu_open_for.set(Some(key)); },
+                        onmouseleave: move |_| { submenu_open_for.set(None); },
+                        div {
+                            class: "jas-menu-item",
+                            style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                            span { "{display_label}" }
+                        }
+                        if is_open && !empty {
+                            div {
+                                style: "{submenu_pos} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
+                                onmouseenter: move |_| { submenu_open_for.set(Some(key)); },
+                                onmouseleave: move |_| { submenu_open_for.set(None); },
+                                onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                                for node in row_nodes { {node} }
+                            }
+                        }
+                    }
+                }
+            }
             PanelMenuItem::Separator => {
                 rsx! {
                     div {
@@ -255,7 +349,7 @@ pub fn PanelMenuOverlay() -> Element {
                 }
             }
         }
-    }).collect();
+    }).collect() };
 
     drop(st);
 

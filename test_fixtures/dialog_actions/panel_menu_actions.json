@@ -1045,5 +1045,206 @@
         "isolation_stack": []
       }
     }
+  },
+  {
+    "name": "save_brush_library_opens_with_the_library_name",
+    "setup_svg": "corner_path.svg",
+    "note": "STATUS-jas row 8 (brush-library design B.1). brushes.yaml menu Save Brush Library opens brush_library_save with the selected library slug as param.library and its display name as the proposed name.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "save_brush_library"
+          }
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "brush_library_save",
+      "state": {
+        "name": "Default Brushes"
+      }
+    }
+  },
+  {
+    "name": "save_brush_library_ok_saves_a_copy_under_a_new_slug",
+    "setup_svg": "corner_path.svg",
+    "note": "Design B.2: \"My Set\" slugs to my_set, a slug no library has, so the save is a NEW library: a copy of default_brushes named My Set, opened expanded after the open ones, and selected. The source is untouched.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "save_brush_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "brush_lib_name_input"
+          },
+          "event": "commit",
+          "value": "My Set"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "save_brush_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "brush_libraries.my_set.name": "My Set",
+      "brush_libraries.default_brushes.name": "Default Brushes",
+      "brush_libraries.my_set.brushes.0.slug": "basic"
+    },
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_library": "my_set",
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          },
+          {
+            "id": "my_set",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "save_brush_library_under_the_source_slug_saves_in_place",
+    "setup_svg": "corner_path.svg",
+    "note": "Design B.2 collision rule: \"default brushes!\" slugs to default_brushes, the SOURCE library own slug, so the save is in place: the name changes, no library is added, the open list and the selection stay. (No new library is witnessed by the open list: every new save opens its library.)",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "save_brush_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "brush_lib_name_input"
+          },
+          "event": "commit",
+          "value": "default brushes!"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "save_brush_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "brush_libraries.default_brushes.name": "default brushes!"
+    },
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "toggle_brush_library_open_closes_an_open_library_whatever_its_collapse",
+    "setup_svg": "corner_path.svg",
+    "note": "Design A.1: the Open Brush Library submenu row runs toggle_brush_library_open, a keyed list_toggle on id. The open entry is COLLAPSED, so a whole-value toggle would not find it (the stale-field direction, W2b-7); the keyed one removes it.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": true
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_brush_library_open",
+        "params": {
+          "library": "default_brushes"
+        }
+      }
+    ],
+    "expected_panel": {
+      "brushes_panel_content": {
+        "open_libraries": []
+      }
+    }
+  },
+  {
+    "name": "toggle_brush_library_open_opens_a_closed_library_expanded",
+    "setup_svg": "corner_path.svg",
+    "note": "Design A.1, the other direction: a library not in the open list is appended as {id, collapsed: false}.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": []
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_brush_library_open",
+        "params": {
+          "library": "default_brushes"
+        }
+      }
+    ],
+    "expected_panel": {
+      "brushes_panel_content": {
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ]
+      }
+    }
   }
 ]

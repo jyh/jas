@@ -36,7 +36,8 @@ private let libsSpec: [String: Any] = [
 }
 
 @Test func aSubmenuEntryWithoutItemsFromStaysADisabledAction() {
-    // Today's brushes.yaml row: `type: submenu`, `dynamic: true`, no action.
+    // brushes.yaml's row before row 8's wiring (2026-11-17): `type: submenu`,
+    // `dynamic: true`, no action and no `items_from`.
     let items = menuItems(fromRaw: [["label": "Open Brush Library", "type": "submenu", "dynamic": true]])
     guard case .action(let label, let command, _) = items[0] else {
         Issue.record("got \(items[0])"); return
@@ -95,4 +96,33 @@ private let libsSpec: [String: Any] = [
     let before = model.stateStore.getPanel("brushes_panel_content", "view_mode") as? String
     panelDispatchRow(.brushes, action: "", params: ["view_mode": "list"], addr: addr, layout: &layout, model: model)
     #expect(model.stateStore.getPanel("brushes_panel_content", "view_mode") as? String == before)
+}
+
+// `open_menu` names a menu ITEM by its declared `id` (STATUS-jas row 8): the
+// Brushes toolbar's library button asks for `bp_menu_open_library`, and the
+// dock pops up that item's rows. The resolution is the pure half; Rust's twin
+// is `panel_menu::menu_request_target`.
+@Test func aMenuRequestResolvesToThePanelAndSubmenuThatDeclareIt() {
+    guard let hit = panelMenuRequest("bp_menu_open_library") else {
+        Issue.record("brushes.yaml declares bp_menu_open_library with items_from"); return
+    }
+    #expect(hit.kind == .brushes)
+    #expect(hit.label == "Open Brush Library")
+    #expect(hit.spec["source"] as? String == "keys(data.brush_libraries)")
+    for id in ["", "no_such_item", "Open Brush Library"] {
+        #expect(panelMenuRequest(id) == nil, "\(id) names no item")
+    }
+}
+
+@Test func theBrushLibrariesButtonQueuesTheOpenLibraryRequest() {
+    let model = Model()
+    #expect(model.stateStore.pendingMenu == nil)
+    runYamlActionByName("open_brush_libraries_menu", params: [:], model: model)
+    #expect(model.stateStore.pendingMenu == "bp_menu_open_library")
+    let rows = panelSubmenuRows(.brushes, spec: panelMenuRequest("bp_menu_open_library")?.spec ?? [:],
+                                layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.action } .contains("toggle_brush_library_open"),
+            "the request's rows are the declared library rows: \(rows.map { $0.label ?? "-" })")
+    #expect(rows.first(where: { $0.params["library"] as? String == "default_brushes" })?.checked == true,
+            "default_brushes is open by default")
 }

@@ -1274,7 +1274,8 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
 /// "remove_tab": <index> | null, "close_window": <bool>,
 /// "save_all_then_close": <bool>, "clipboard_write": <text> | null,
-/// "export_pdf": <file name> | null, "layout": <layout> | null}` ([`act_reply`];
+/// "export_pdf": <file name> | null, "layout": <layout> | null,
+/// "menu": <menu item id> | null}` ([`act_reply`];
 /// `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
 /// is the Print button's).
 /// `close_window` names a window close the shell must do (the engine owns no
@@ -1730,7 +1731,12 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
 /// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
-/// null, "export_pdf": <file name> | null, "layout": <layout> | null}`. `layout` is
+/// null, "export_pdf": <file name> | null, "layout": <layout> | null,
+/// "menu": <menu item id> | null}`. `menu` names a declared panel-menu item whose
+/// submenu the shell must pop up at the act (an `open_menu` effect: the Brushes
+/// toolbar's library button names `bp_menu_open_library`, STATUS-jas row 8);
+/// the shell reads that item's rows from [`jas_panel_menu`]. It is TAKEN from
+/// the store by the reply that names it, so a request is named once. `layout` is
 /// the engine's layout after a `layout:` effect moved it (Window > Toolbar), as
 /// [`jas_layout_state`] answers it, for the shell to apply. `export_pdf` names a PDF save the
 /// shell must do (Print > Print; the engine owns no file system): the file name
@@ -1741,7 +1747,9 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool,
                                    named: Named) -> serde_json::Value {
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
+    let menu = engine.store.borrow_mut().pending_menu.take();
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
+                       "menu": menu,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
                        "save_all_then_close": named.save_all_then_close,
                        "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf,
@@ -2064,7 +2072,22 @@ unsafe fn jas_dispatch_action_inner(
         (None, Some(_)) if req.get("menu_index").is_none() && req.get("action").is_some() => None,
         (None, Some(menu)) => {
             let at = req.get("menu_index").and_then(serde_json::Value::as_u64);
+            // `"row": <j>`: row j of an `items_from` item (row 8), its action
+            // with its evaluated params.
+            let row = req.get("row").and_then(serde_json::Value::as_u64);
             match at.and_then(|i| menu.get(i as usize)) {
+                Some(node) if row.is_some() => {
+                    let j = row.unwrap_or_default();
+                    let ctx = panel_ctx(engine, &ws, panel.unwrap_or(""));
+                    match submenu_row(node, j, &ctx) {
+                        Some(r) => Some(r),
+                        None => {
+                            set_panel_event_error(engine, "UnknownMenuItem",
+                                &format!("{}[{}].row[{j}]", panel.unwrap_or(""), at.unwrap_or_default()));
+                            return JasBytes::empty();
+                        }
+                    }
+                }
                 Some(node) => Some(node.clone()),
                 None => {
                     let named = req.get("menu_index").map_or("(none)".to_string(), |v| v.to_string());
@@ -2589,7 +2612,7 @@ pub unsafe extern "C" fn jas_panel_menu(
             serde_json::Value::String(s) if s == "separator" => serde_json::json!({"index": i, "kind": "separator"}),
             serde_json::Value::Object(o) if !o.contains_key("items") => {
                 let st = by_index.get(&(i as i64));
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "index": i,
                     "kind": "item",
                     // The walk's label: its `{{expr}}` regions evaluated in the
@@ -2601,7 +2624,14 @@ pub unsafe extern "C" fn jas_panel_menu(
                     "action": o.get("action").cloned().unwrap_or(serde_json::Value::Null),
                     "enabled": st.map_or(serde_json::Value::Bool(true), |r| r["enabled"].clone()),
                     "checked": st.map_or(serde_json::Value::Null, |r| r["checked"].clone()),
-                })
+                });
+                // An `items_from` item (row 8) carries its rows, evaluated now
+                // in the panel's engine scope; a shell sends one back as
+                // `{"panel", "menu_index", "row"}`.
+                if let Some(spec) = o.get("items_from") {
+                    row["rows"] = submenu_plan_rows(spec, &ctx);
+                }
+                row
             }
             _ => serde_json::json!({"index": i, "kind": "unknown"}),
         })
@@ -2610,6 +2640,26 @@ pub unsafe extern "C" fn jas_panel_menu(
     let out = JasBytes::from_string(serde_json::Value::Array(rows).to_string());
     ffi_instr::record_out(Crossing::PanelMenu, out.len);
     out
+}
+
+/// An `items_from` item's rows as a shell draws them:
+/// `[{"index", "label", "action", "enabled", "checked"}]`, from the shared
+/// `menu_state::items_from_entries` (which also yields each row's params; a
+/// click re-evaluates them, see [`submenu_row`]).
+fn submenu_plan_rows(spec: &serde_json::Value, ctx: &serde_json::Value) -> serde_json::Value {
+    let rows = crate::interpreter::menu_state::items_from_entries(spec, ctx);
+    serde_json::Value::Array(rows.as_array().into_iter().flatten().enumerate().map(|(j, r)| serde_json::json!({
+        "index": j, "label": r["label"], "action": r["action"],
+        "enabled": r["enabled"], "checked": r["checked"],
+    })).collect())
+}
+
+/// Row `j` of an `items_from` menu node, evaluated in `ctx` NOW (the click's
+/// scope, as the menu's static rows are): `{action, params, ...}`, or `None`
+/// when the node has no `items_from` or no row `j`.
+fn submenu_row(node: &serde_json::Value, j: u64, ctx: &serde_json::Value) -> Option<serde_json::Value> {
+    let rows = crate::interpreter::menu_state::items_from_entries(node.get("items_from")?, ctx);
+    rows.as_array()?.get(j as usize).cloned()
 }
 
 /// The menubar item whose `id` is `id`, at any depth (a menu's `items`, a
@@ -8618,7 +8668,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "menu", "remove_tab", "save_all_then_close"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -8642,7 +8692,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -8698,13 +8748,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
@@ -9823,17 +9873,91 @@ mod tests {
     }
 
     /// **D6/D7.** A log-only action is a stub for work a platform supplies, and
-    /// it is refused as one. (Its example was `sym_new` until W2b-17 hosted the
-    /// Symbols verbs; `open_brush_libraries_menu` is still a stub.)
+    /// it is refused as one, by the shared batch runner both doors use. Its
+    /// example was `sym_new` until W2b-17 hosted the Symbols verbs, then the
+    /// Brushes library button until STATUS-jas row 8 wired it to `open_menu`.
+    /// No ENABLED widget dispatches a log-only action since (Rearrange's is
+    /// `disabled: true` and reads `Disabled`), so the stub is driven through
+    /// the panel-menu door: Artboards ▸ Convert to Artboards, its index read
+    /// from the bundle.
     #[test]
-    fn panel_behavior_refuses_a_log_only_action_by_name() {
+    fn a_log_only_panel_action_is_refused_by_name() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().expect("workspace");
+        let menu = ws.panel_menu("artboards_panel_content");
+        let at = menu.iter().position(|m| m.get("action").and_then(|a| a.as_str()) == Some("convert_to_artboards"))
+            .expect("the Artboards menu carries Convert to Artboards");
+        let logged = ws.actions().get("convert_to_artboards").and_then(|a| a["effects"][0]["log"].as_str())
+            .expect("convert_to_artboards is still a log-only stub; pick another")
+            .to_string();
+        let e = engine_with(misaligned(&[0]));
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"artboards_panel_content","menu_index":{at}}}"#));
+        assert_eq!(reply, "");
+        assert_eq!(err, refusal("PlatformEffect", &format!("Logged:{logged}")));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// An `items_from` item's rows, for a shell to draw (row 8): the plan row
+    /// of Brushes ▸ Open Brush Library carries `"rows"`, each
+    /// `{"index", "label", "action", "enabled", "checked"}` evaluated in the
+    /// panel's engine scope, and a row goes back as
+    /// `{"panel", "menu_index", "row"}`. A plain item carries no `rows`.
+    #[test]
+    fn an_items_from_menu_item_plans_its_rows_and_dispatches_one_by_index() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let plan_row = |e| {
+            let (rows, err) = panel_menu(e, "brushes_panel_content");
+            assert_eq!(err, "", "the plan: {err}");
+            rows.into_iter().find(|r| r["label"] == "Open Brush Library").expect("the item is planned")
+        };
+        let item = plan_row(e);
+        assert_eq!(item["rows"], serde_json::json!([{"index": 0, "label": "Default Brushes",
+            "action": "toggle_brush_library_open", "enabled": true, "checked": true}]), "{item}");
+        let (rows, _) = panel_menu(e, "brushes_panel_content");
+        let plain = rows.iter().find(|r| r["action"] == "save_brush_library").expect("Save Brush Library");
+        assert!(plain.get("rows").is_none(), "a plain item has no rows: {plain}");
+
+        let at = item["index"].as_u64().unwrap();
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":0}}"#));
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(plan_row(e)["rows"][0]["checked"], serde_json::json!(false), "the row closed its library");
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":0}}"#));
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(plan_row(e)["rows"][0]["checked"], serde_json::json!(true), "and reopened it");
+
+        // A row past the end, and a row on an item with no rows, name nothing.
+        let (_r, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":1}}"#));
+        assert_eq!(err, refusal("UnknownMenuItem", &format!("brushes_panel_content[{at}].row[1]")));
+        let plain_at = plain["index"].as_u64().unwrap();
+        let (_r, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{plain_at},"row":0}}"#));
+        assert_eq!(err, refusal("UnknownMenuItem", &format!("brushes_panel_content[{plain_at}].row[0]")));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The Brushes toolbar's library button runs `open_menu` (row 8): a HOST
+    /// request. The engine owns no menus, so the act reply NAMES it,
+    /// `"menu": <item id>`, for the shell to pop up the declared item's rows
+    /// (its `jas_panel_menu` plan); every other reply carries `"menu": null`.
+    /// The request is taken by the reply that names it, so it is named once.
+    #[test]
+    fn the_brush_libraries_button_names_its_menu_in_the_reply() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0]));
         let (reply, err) = behave(e, "brushes_panel_content",
                                   r#"{"widget":"bp_libraries_menu_btn","event":"click"}"#);
-        assert_eq!(reply, "");
-        assert_eq!(err, refusal("PlatformEffect", "Logged:open_brush_libraries_menu"));
+        assert_eq!(err, "", "a menu request is not Unchanged");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["menu"], serde_json::json!("bp_menu_open_library"), "{reply}");
+        assert_eq!(v["doc_changed"], serde_json::json!(false));
+        // The next act names no menu: the request was taken by the reply above.
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_brush_library_open","params":{"library":"default_brushes"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["menu"], serde_json::Value::Null, "{reply}");
         unsafe { jas_engine_free(e) };
     }
 
