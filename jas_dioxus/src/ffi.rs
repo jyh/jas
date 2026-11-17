@@ -9943,6 +9943,24 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Open Gradient Library (§3.4) plans its rows on the engine too: the
+    /// store's `data` carries the bundle's gradient libraries, as it carries
+    /// the brush and swatch ones. One row per library, `neutrals` checked.
+    #[test]
+    fn the_gradient_library_item_plans_one_row_per_bundled_library() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let (rows, err) = panel_menu(e, "gradient_panel_content");
+        assert_eq!(err, "", "{err}");
+        let item = rows.into_iter().find(|r| r["label"] == "Open Gradient Library").expect("planned");
+        let labels: Vec<_> = item["rows"].as_array().unwrap_or_else(|| panic!("no rows: {item}"))
+            .iter().map(|r| (r["label"].clone(), r["checked"].clone())).collect();
+        assert_eq!(labels.len(), 3, "{item}");
+        assert_eq!(labels[0].1, serde_json::json!(true), "neutrals is the default: {item}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The Brushes toolbar's library button runs `open_menu` (row 8): a HOST
     /// request. The engine owns no menus, so the act reply NAMES it,
     /// `"menu": <item id>`, for the shell to pop up the declared item's rows
