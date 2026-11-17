@@ -2,8 +2,9 @@
 //!
 //! Menu items mirror the `menu:` block in
 //! `workspace/panels/swatches.yaml`. The dynamic submenu
-//! ("Open Swatch Library", open_swatch_library) is a placeholder that
-//! logs and no-ops until the library-load plumbing lands. New Swatch,
+//! ("Open Swatch Library") declares `items_from`: the generic menu view
+//! draws its rows and runs `toggle_swatch_library_open` (design
+//! 2026-10-28 §3.4; until then a native flyout here). New Swatch,
 //! Swatch Options and Save Swatch Library run their YAML, which opens a
 //! dialog.
 //!
@@ -25,10 +26,9 @@ use super::panel_menu::PanelMenuItem;
 /// so the builder folds each `params.size` into the command
 /// (`set_swatch_thumbnail_size:small`, …) — `dispatch` splits that suffix
 /// back off; the CHECK MARK is swatches.yaml's own `checked_when:`,
-/// evaluated generically by `panels::panel_is_checked`. The "Open Swatch Library" dynamic submenu
-/// carries an explicit `action: open_swatch_library` in the YAML, which
-/// the menu view (`panel_menu_view.rs`) special-cases by that command to
-/// render the per-library flyout.
+/// evaluated generically by `panels::panel_is_checked`. The "Open Swatch
+/// Library" submenu is a `PanelMenuItem::Submenu` (its `items_from`), which
+/// dispatches its own rows and never reaches `dispatch`.
 pub fn menu_items() -> Vec<PanelMenuItem> {
     super::panel_menu::menu_items_from_yaml("swatches_panel_content")
 }
@@ -58,36 +58,12 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) -> Vec<serde_j
             let params = serde_json::Map::new();
             return crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
-        // Submenu dispatches encode the chosen library id as a
-        // suffix: "open_swatch_library:<lib_id>". Toggle-add into
-        // panel.open_libraries; selecting an already-open library
-        // is a no-op (per SWP-162 — either is acceptable).
-        cmd if cmd.starts_with("open_swatch_library:") => {
-            let lib_id = cmd["open_swatch_library:".len()..].to_string();
-            let already_open = state.swatches_panel.open_libraries
-                .as_array()
-                .map(|a| a.iter().any(|e| {
-                    e.get("id").and_then(|i| i.as_str()) == Some(lib_id.as_str())
-                }))
-                .unwrap_or(false);
-            if !already_open {
-                if let Some(arr) = state.swatches_panel.open_libraries.as_array_mut() {
-                    arr.push(serde_json::json!({ "id": lib_id, "collapsed": false }));
-                }
-            }
-        }
         // New Swatch and Swatch Options open the Swatch Options dialog from
         // their YAML; the action evaluates with this panel's scope (Swatch
         // Options reads the panel's selected swatch), and its deferred
         // `open_dialog` goes back to the menu view, which opens it.
         "new_swatch" | "open_swatch_options" | "save_swatch_library" => {
             return super::panel_menu::dispatch_yaml_menu("swatches_panel_content", cmd, addr, state);
-        }
-        // A placeholder — see module doc. Logging helps surface unwired
-        // commands during manual testing.
-        "open_swatch_library" => {
-            web_sys::console::log_1(
-                &format!("[swatches] command '{cmd}' is not yet wired").into());
         }
         _ => {}
     }

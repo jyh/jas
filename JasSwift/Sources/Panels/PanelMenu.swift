@@ -371,8 +371,13 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     // `items_from` source such as `keys(data.brush_libraries)` lists what is
     // there when the menu opens (the 2026-10-28 brush-library design, A.2).
     // Without a model it falls back to the bundle's libraries.
-    ctx["data"] = (model?.stateStore.getDataPath("") as? [String: Any])
+    var data = (model?.stateStore.getDataPath("") as? [String: Any])
         ?? ["brush_libraries": ws?.brushLibraries() ?? [:]] as [String: Any]
+    // The swatch libraries are app-global on the Mac (`model.swatchLibraries`),
+    // not in the store, so `keys(data.swatch_libraries)` (Open Swatch Library,
+    // design §3.4) reads them from there, as the panel body does.
+    if let model = model { data["swatch_libraries"] = model.swatchLibraries.libs }
+    ctx["data"] = data
     ctx["preferences"] = Preferences.current() ?? [:]
     if let ws = ws {
         ctx["state"] = buildLiveStateMap(ws: ws, model: model)

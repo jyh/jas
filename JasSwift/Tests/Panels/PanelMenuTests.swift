@@ -69,13 +69,13 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     #expect(commands(items).contains("close_panel"))
 }
 
-@Test func builderSwatchesSubmenuBecomesOpenLibraryAction() {
-    // The dynamic "Open Swatch Library" submenu entry has an explicit
-    // `action: open_swatch_library` in the YAML so the menu view's
-    // submenu host fires.
+@Test func builderSwatchesSubmenuIsAnItemsFromSubmenu() {
+    // "Open Swatch Library" declares `items_from` (design 2026-10-28 §3.4);
+    // until then it carried `action: open_swatch_library`, a placeholder here.
     let items = menuItemsFromYaml("swatches_panel_content")
-    let hasHost = items.contains { if case .action(_, "open_swatch_library", _) = $0 { return true }; return false }
-    #expect(hasHost, "swatches menu should expose open_swatch_library host")
+    let isSubmenu = items.contains { if case .submenu("Open Swatch Library", _) = $0 { return true }; return false }
+    #expect(isSubmenu, "swatches menu should build the items_from submenu")
+    #expect(!commands(items).contains("open_swatch_library"), "the placeholder's command is gone")
     // Thumbnail-size rows are a radio group with folded params.
     var radios: [String] = []
     for item in items { if case .radio(_, let cmd, _) = item { radios.append(cmd) } }

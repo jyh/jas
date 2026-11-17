@@ -247,7 +247,7 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
 // ── Generic behavior dispatch ──────────────────────────────────
 
 /// Apply dialog state when a confirm action is dispatched (the native
-/// confirms the YAML does not yet express: save_swatch_library_confirm).
+/// confirms the YAML does not yet express: the paragraph dialogs' OKs).
 fn apply_dialog_confirm(
     action: &str,
     dialog: &serde_json::Map<String, serde_json::Value>,
@@ -257,35 +257,10 @@ fn apply_dialog_confirm(
         // swatch_options_confirm: the YAML's `swatch.store` (run by
         // `run_in_swatches_store`) does the write, on every route. Until
         // 2026-10-25 this arm did it natively and the YAML only logged.
-        "save_swatch_library_confirm" => {
-            // Save dialog 'name' field. Serialize the active swatch
-            // library (selected_library) to JSON and trigger a
-            // browser file download. The Flask-target test plan
-            // expects a server-side write to workspace/swatches/;
-            // in the Dioxus browser app this is a download.
-            let name = dialog.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if name.is_empty() {
-                return;
-            }
-            let lib_id = st.swatches_panel.selected_library.clone();
-            if let Some(lib) = st.swatch_libraries.get(&lib_id).cloned() {
-                let mut out = lib;
-                // Overwrite the saved library's name to match the
-                // dialog input rather than the source file's name.
-                if let Some(obj) = out.as_object_mut() {
-                    obj.insert("name".into(), serde_json::Value::String(name.to_string()));
-                }
-                let json = serde_json::to_string_pretty(&out).unwrap_or_default();
-                let filename = format!("{name}.json");
-                // showSaveFilePicker requires user activation, but the
-                // Save button's dispatch goes through Dioxus's spawn,
-                // which detaches from the click and loses the
-                // activation. Fall back to a normal browser download —
-                // matches how SVG Save and PDF Export persist files in
-                // the same app.
-                crate::workspace::clipboard::download_file(&filename, &json);
-            }
-        }
+        // save_swatch_library_confirm: the YAML's `swatch.save_library`
+        // (run by `run_in_swatches_store`) saves, and the dispatch drains the
+        // queued write as a download. Until 2026-11-17 this arm saved
+        // natively (a download of `<name>.json` only).
         // Phase 8: Justification dialog OK. Commit the 11 dialog
         // fields as jas:* attributes onto every paragraph wrapper
         // tspan in the selection, through `paragraph_host`, the law
@@ -538,10 +513,11 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
 }
 
 /// Hand every queued host write (`AppState::pending_writes`, filled by
-/// `brush.save_library`) to `sink` as `(file name, pretty JSON)`, oldest
-/// first, and empty the queue. A brush library goes out as `<slug>.json`,
-/// its manifest; installing it is placing that file at
-/// `workspace/brushes/<slug>/library.json`. A write of any other kind is
+/// `brush.save_library`, `swatch.save_library`) to `sink` as `(file name,
+/// pretty JSON)`, oldest first, and empty the queue. A brush library goes out
+/// as `<slug>.json`, its manifest; installing it is placing that file at
+/// `workspace/brushes/<slug>/library.json`. A swatch library goes out as
+/// `<id>.json`, the shape of `workspace/swatches/<id>.json`. A write of any other kind is
 /// dropped, as no host here knows where it goes.
 pub(crate) fn drain_pending_writes(
     st: &mut crate::workspace::app_state::AppState,
@@ -549,7 +525,8 @@ pub(crate) fn drain_pending_writes(
 ) {
     for w in std::mem::take(&mut st.pending_writes) {
         let slug = w.get("slug").and_then(|v| v.as_str()).unwrap_or("");
-        if w.get("kind").and_then(|v| v.as_str()) == Some("brush_library") && !slug.is_empty() {
+        let kind = w.get("kind").and_then(|v| v.as_str());
+        if matches!(kind, Some("brush_library" | "swatch_library")) && !slug.is_empty() {
             let body = serde_json::to_string_pretty(&w["manifest"]).unwrap_or_default();
             sink(&format!("{slug}.json"), &body);
         }
@@ -1505,6 +1482,13 @@ fn apply_typed_panel_slot(
         ("swatches_panel_content", "thumbnail_size") => {
             if let Some(s) = resolved.as_str() {
                 st.swatches_panel.thumbnail_size = s.to_string();
+            }
+            true
+        }
+        // The open libraries the panel body draws (`toggle_swatch_library_open`).
+        ("swatches_panel_content", "open_libraries") => {
+            if resolved.is_array() {
+                st.swatches_panel.open_libraries = resolved.clone();
             }
             true
         }
@@ -2981,6 +2965,7 @@ fn run_in_swatches_store(
     let scope: std::collections::HashMap<String, serde_json::Value> = [
         ("selected_library".to_string(), serde_json::json!(st.swatches_panel.selected_library)),
         ("selected_swatches".to_string(), serde_json::json!(st.swatches_panel.selected_swatches)),
+        ("open_libraries".to_string(), st.swatches_panel.open_libraries.clone()),
     ].into();
     store.init_panel(SWATCHES, scope);
     store.set_active_panel(Some(SWATCHES));
@@ -2990,6 +2975,16 @@ fn run_in_swatches_store(
     if let Some(sel) = store.get_panel(SWATCHES, "selected_swatches").as_array() {
         st.swatches_panel.selected_swatches = sel.iter().filter_map(|v| v.as_i64()).collect();
     }
+    // `swatch.save_library` opens and selects a new library and queues its
+    // file write (design §3.4), carried out as the brush runner's are.
+    if let Some(lib) = store.get_panel(SWATCHES, "selected_library").as_str() {
+        st.swatches_panel.selected_library = lib.to_string();
+    }
+    let open = store.get_panel(SWATCHES, "open_libraries");
+    if open.is_array() {
+        st.swatches_panel.open_libraries = open.clone();
+    }
+    st.pending_writes.append(&mut store.pending_writes);
 }
 
 // ── Artboards panel-state setter (ARTBOARDS.md) ─────────────────────────
@@ -14983,6 +14978,50 @@ mod tests {
         super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
         assert_eq!(st.pending_writes.iter().map(|w| w["slug"].clone()).collect::<Vec<_>>(),
                    vec![serde_json::json!("my_set"), serde_json::json!("lib")]);
+    }
+
+    /// The web's own route for both Save menu rows: the deferred `open_dialog`
+    /// carries the selected library and its NAME, which the action reads from
+    /// `data.<kind>_libraries` (the engine and Swift routes are pinned by the
+    /// dialog-action corpus).
+    #[test]
+    fn the_save_library_rows_open_their_dialog_with_the_library_name_on_the_web() {
+        for (content, action, lib, name) in [
+            ("swatches_panel_content", "save_swatch_library", "web_colors", "Web Colors"),
+            ("brushes_panel_content", "save_brush_library", "default_brushes", "Default Brushes"),
+        ] {
+            let mut st = AppState::new();
+            st.panel_state.entry("brushes_panel_content".into()).or_default()
+                .insert("selected_library".into(), serde_json::json!("default_brushes"));
+            let addr = crate::workspace::workspace::PanelAddr {
+                group: crate::workspace::workspace::GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+                panel_idx: 0,
+            };
+            let deferred = crate::panels::panel_menu::dispatch_yaml_menu(content, action, addr, &mut st);
+            let od = deferred.iter().find_map(|e| e.get("open_dialog")).unwrap_or_else(|| panic!("{action}: {deferred:?}"));
+            assert_eq!(od["params"]["library"], serde_json::json!(lib), "{action}: {od}");
+            assert_eq!(od["params"]["name"], serde_json::json!(name), "{action}: {od}");
+        }
+    }
+
+    #[test]
+    fn save_swatch_library_runs_in_the_web_app_opens_selects_and_queues() {
+        let mut st = AppState::new();
+        let before = st.swatch_libraries["web_colors"].clone();
+        let eff = serde_json::json!({"swatch.save_library": {"library": "\"web_colors\"", "name": "\"Sunset Palette\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.swatch_libraries["sunset_palette"]["name"], serde_json::json!("Sunset Palette"));
+        assert_eq!(st.swatch_libraries["web_colors"], before, "the source untouched");
+        assert_eq!(st.swatches_panel.selected_library, "sunset_palette");
+        assert_eq!(st.swatches_panel.open_libraries, serde_json::json!(
+            [{"id": "web_colors", "collapsed": false}, {"id": "sunset_palette", "collapsed": false}]));
+        assert_eq!(st.pending_writes.iter().map(|w| (w["kind"].clone(), w["slug"].clone())).collect::<Vec<_>>(),
+                   vec![(serde_json::json!("swatch_library"), serde_json::json!("sunset_palette"))]);
+        let mut got = Vec::new();
+        super::drain_pending_writes(&mut st, |f, body| got.push((f.to_string(),
+            serde_json::from_str::<serde_json::Value>(body).unwrap()["name"].clone())));
+        assert_eq!(got, vec![("sunset_palette.json".to_string(), serde_json::json!("Sunset Palette"))],
+                   "a swatch library leaves as <id>.json, the workspace/swatches/ shape");
     }
 
     #[test]

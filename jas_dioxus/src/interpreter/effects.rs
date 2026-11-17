@@ -1580,46 +1580,57 @@ fn run_brush_effect(
                 }
             }
         }
-        "brush.save_library" => {
+        "brush.save_library" | "swatch.save_library" => {
             // Spec: { library, name }, both EXPRESSIONS (the brush-library
-            // design, B.2). The slug is `brush_library_slug(name)`; the
-            // source's own slug saves IN PLACE, another existing slug takes
-            // the first free `_2`, `_3`, ...; the library written is a deep
-            // copy of the source with `name` set; a NEW one opens expanded and
-            // becomes the selected library (the brush selection kept, slugs
-            // being copied unchanged); one `{kind, slug, manifest}` request
-            // goes on `pending_writes` for the host. An empty name or a
-            // missing source is a no-op. Mirrors the reference's arm.
+            // design, B.2; Swatches by §3.4). The slug is
+            // `brush_library_slug(name)`; the source's own slug saves IN
+            // PLACE, another existing slug takes the first free `_2`, `_3`,
+            // ...; the library written is a deep copy of the source with
+            // `name` set; a NEW one opens expanded and becomes the selected
+            // library (its selection kept); one `{kind, slug, manifest}`
+            // request goes on `pending_writes` for the host. An empty name or
+            // a missing source is a no-op. Mirrors the reference's
+            // `_save_library`.
             if let serde_json::Value::Object(args) = spec {
+                let (kind, panel) = if name == "brush.save_library" { ("brush", "brushes") } else { ("swatch", "swatches") };
                 let lib_id = eval_string(args.get("library"), store, ctx);
                 let lib_name = eval_string(args.get("name"), store, ctx);
-                let libs = store.get_data_path("brush_libraries");
-                let source = libs.get(&lib_id).filter(|v| v.is_object()).cloned();
-                if let (false, false, Some(mut copy)) = (lib_id.is_empty(), lib_name.is_empty(), source) {
-                    let base = brush_library_slug(&lib_name);
-                    let mut slug = base.clone();
-                    if slug != lib_id && libs.get(&slug).is_some() {
-                        let mut n = 2;
-                        while libs.get(format!("{base}_{n}")).is_some() { n += 1; }
-                        slug = format!("{base}_{n}");
-                    }
-                    copy["name"] = serde_json::Value::String(lib_name);
-                    store.set_data_path(&format!("brush_libraries.{slug}"), copy.clone());
-                    if slug != lib_id {
-                        let mut insert = serde_json::Map::new();
-                        insert.insert("collapsed".to_string(), serde_json::Value::Bool(false));
-                        store.list_toggle_keyed("brushes", "open_libraries",
-                                                serde_json::Value::String(slug.clone()), Some("id"), Some(&insert));
-                        store.set_panel("brushes", "selected_library", serde_json::Value::String(slug.clone()));
-                    }
-                    store.pending_writes.push(serde_json::json!(
-                        {"kind": "brush_library", "slug": slug, "manifest": copy}));
+                save_library(store, kind, panel, &lib_id, lib_name);
+                if kind == "brush" {
                     sync_canvas_brushes(store);
                 }
             }
         }
         _ => report.unhandled.push(Unhandled::UnknownEffect(name.to_string())),
     }
+}
+
+/// Save library `lib_id` of `data.<kind>_libraries` under `lib_name`: the
+/// `brush.save_library` / `swatch.save_library` law (the arm above).
+fn save_library(store: &mut StateStore, kind: &str, panel: &str, lib_id: &str, lib_name: String) {
+    let libs = store.get_data_path(&format!("{kind}_libraries"));
+    let Some(mut copy) = libs.get(lib_id).filter(|v| v.is_object()).cloned() else { return };
+    if lib_id.is_empty() || lib_name.is_empty() {
+        return;
+    }
+    let base = brush_library_slug(&lib_name);
+    let mut slug = base.clone();
+    if slug != lib_id && libs.get(&slug).is_some() {
+        let mut n = 2;
+        while libs.get(format!("{base}_{n}")).is_some() { n += 1; }
+        slug = format!("{base}_{n}");
+    }
+    copy["name"] = serde_json::Value::String(lib_name);
+    store.set_data_path(&format!("{kind}_libraries.{slug}"), copy.clone());
+    if slug != lib_id {
+        let mut insert = serde_json::Map::new();
+        insert.insert("collapsed".to_string(), serde_json::Value::Bool(false));
+        store.list_toggle_keyed(panel, "open_libraries",
+                                serde_json::Value::String(slug.clone()), Some("id"), Some(&insert));
+        store.set_panel(panel, "selected_library", serde_json::Value::String(slug.clone()));
+    }
+    store.pending_writes.push(serde_json::json!(
+        {"kind": format!("{kind}_library"), "slug": slug, "manifest": copy}));
 }
 
 /// The eight print-config field effects and the `op_apply` verb each one
@@ -15657,6 +15668,57 @@ mod tests {
                    .as_deref(), Some("second"), "a later request replaces an earlier one");
         assert_eq!(open_menu_after(vec![json!({"open_menu": {"id": "first"}}), json!({"open_menu": {"id": ""}})])
                    .as_deref(), Some("first"), "an empty request leaves an earlier one");
+    }
+
+    // ── swatch.save_library (design §3.4): the brush law over the swatches ──
+    // Mirrors workspace_interpreter/tests/test_swatch_save_library.py.
+
+    fn swatch_saved(name: &str, library: &str) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"swatch_libraries": {
+            "web_colors": {"name": "Web Colors", "swatches": [{"name": "Red", "color": "#ff0000"}]},
+            "my_swatches": {"name": "My Swatches", "swatches": []},
+        }}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("selected_library".to_string(), serde_json::json!(library));
+        defaults.insert("selected_swatches".to_string(), serde_json::json!([0]));
+        defaults.insert("open_libraries".to_string(), serde_json::json!([{"id": "web_colors", "collapsed": true}]));
+        store.init_panel("swatches", defaults);
+        store.set_active_panel(Some("swatches"));
+        let report = run_effects(
+            &[serde_json::json!({"swatch.save_library": {"library": "param.lib", "name": "param.name"}})],
+            &serde_json::json!({"param": {"lib": library, "name": name}}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store
+    }
+
+    #[test]
+    fn swatch_save_library_saves_a_new_library_opened_selected_and_queued() {
+        let store = swatch_saved("Sunset Palette", "web_colors");
+        assert_eq!(store.get_data_path("swatch_libraries.sunset_palette"),
+                   serde_json::json!({"name": "Sunset Palette", "swatches": [{"name": "Red", "color": "#ff0000"}]}));
+        assert_eq!(store.get_data_path("swatch_libraries.web_colors.name"), serde_json::json!("Web Colors"));
+        assert_eq!(store.get_panel("swatches", "open_libraries"), &serde_json::json!(
+            [{"id": "web_colors", "collapsed": true}, {"id": "sunset_palette", "collapsed": false}]));
+        assert_eq!(store.get_panel("swatches", "selected_library"), &serde_json::json!("sunset_palette"));
+        assert_eq!(store.get_panel("swatches", "selected_swatches"), &serde_json::json!([0]));
+        assert_eq!(store.pending_writes, vec![serde_json::json!({"kind": "swatch_library", "slug": "sunset_palette",
+            "manifest": {"name": "Sunset Palette", "swatches": [{"name": "Red", "color": "#ff0000"}]}})]);
+    }
+
+    #[test]
+    fn swatch_save_library_in_place_suffix_and_no_ops() {
+        let store = swatch_saved("Web  Colors!", "web_colors");
+        assert_eq!(store.get_data_path("swatch_libraries.web_colors.name"), serde_json::json!("Web  Colors!"));
+        assert_eq!(store.get_data_path("swatch_libraries").as_object().unwrap().len(), 2, "in place");
+        assert_eq!(store.get_panel("swatches", "selected_library"), &serde_json::json!("web_colors"));
+        let store = swatch_saved("My Swatches", "web_colors");
+        assert!(store.get_data_path("swatch_libraries.my_swatches_2").is_object(), "the first free suffix");
+        for (name, lib) in [("", "web_colors"), ("X", "nowhere"), ("X", "")] {
+            let store = swatch_saved(name, lib);
+            assert!(store.pending_writes.is_empty(), "{name:?} {lib:?}");
+            assert_eq!(store.get_data_path("swatch_libraries").as_object().unwrap().len(), 2, "{name:?} {lib:?}");
+        }
     }
 
     // ── brush.save_library (the brush-library design, B.2) ──

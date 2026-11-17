@@ -126,3 +126,20 @@ private let libsSpec: [String: Any] = [
     #expect(rows.first(where: { $0.params["library"] as? String == "default_brushes" })?.checked == true,
             "default_brushes is open by default")
 }
+
+// Swatches onto the same primitives (design 2026-10-28 §3.4): the Open Swatch
+// Library rows read `data.swatch_libraries`, which on the Mac is app-global
+// (`model.swatchLibraries`), not in the store.
+@Test func theSwatchLibraryRowsListTheAppLibrariesCheckedWhenOpen() {
+    let model = Model()
+    guard let hit = panelMenuRequest("sp_menu_open_library") else {
+        Issue.record("swatches.yaml declares sp_menu_open_library with items_from"); return
+    }
+    #expect(hit.kind == .swatches)
+    let rows = panelSubmenuRows(.swatches, spec: hit.spec, layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.params["library"] as? String } == model.swatchLibraries.libs.keys.sorted().map { Optional($0) },
+            "one row per app library, in id order: \(rows.map { $0.label ?? "-" })")
+    #expect(rows.first(where: { $0.params["library"] as? String == "web_colors" })?.checked == true,
+            "web_colors is open by default")
+    #expect(rows.first?.action == "toggle_swatch_library_open")
+}

@@ -1246,5 +1246,164 @@
         ]
       }
     }
+  },
+  {
+    "name": "toggle_swatch_library_open_closes_an_open_library_whatever_its_collapse",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4: Swatches onto the brush primitives. The Open Swatch Library row runs toggle_swatch_library_open, a keyed list_toggle on id; the open entry is collapsed, so only a keyed toggle finds it. Toggle rather than add-only: SWP-162 allows either, and Brushes toggles.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": true
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_swatch_library_open",
+        "params": {
+          "library": "web_colors"
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "open_libraries": []
+      }
+    }
+  },
+  {
+    "name": "toggle_swatch_library_open_opens_a_closed_library_expanded",
+    "setup_svg": "rect_basic.svg",
+    "note": "The other direction: a library not in the open list is appended as {id, collapsed: false}.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": []
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_swatch_library_open",
+        "params": {
+          "library": "web_colors"
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "save_swatch_library_opens_with_the_library_name",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4: Save Swatch Library opens swatch_library_save with the selected library id and its name proposed, as Save Brush Library does.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "save_swatch_library"
+          }
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "swatch_library_save",
+      "state": {
+        "name": "Web Colors"
+      }
+    }
+  },
+  {
+    "name": "save_swatch_library_ok_saves_a_copy_under_a_new_id",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatch.save_library: \"Sunset Palette\" is a new id, so a copy of web_colors named Sunset Palette is added, opened expanded after the open ones, and selected; web_colors is untouched. Until row 8 the web saved natively (a download only) and the Mac logged.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "save_swatch_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "swatch_lib_name_input"
+          },
+          "event": "commit",
+          "value": "Sunset Palette"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "save_swatch_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "swatch_libraries.sunset_palette.name": "Sunset Palette",
+      "swatch_libraries.web_colors.name": "Web Colors",
+      "swatch_libraries.sunset_palette.swatches.0.color": "#000000"
+    },
+    "expected_panel": {
+      "swatches_panel_content": {
+        "selected_library": "sunset_palette",
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          },
+          {
+            "id": "sunset_palette",
+            "collapsed": false
+          }
+        ]
+      }
+    }
   }
 ]

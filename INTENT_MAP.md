@@ -7,7 +7,7 @@
 ## Scope -- read this first
 
 **This map covers the ACTION seam (`dispatch_action`) ONLY**: the
-246 actions in the workspace bundle's `actions` map, plus the
+247 actions in the workspace bundle's `actions` map, plus the
 bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
@@ -42,11 +42,11 @@ verb list is in `intent_map.json` under
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 171 |
+| `ui-state` | 172 |
 | `view` | 6 |
-| **total** | **247** |
+| **total** | **248** |
 
-(The bundle's `actions` map has 246 entries; `native-intercept` entries
+(The bundle's `actions` map has 247 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
 ## Journaling actions (60)
@@ -151,7 +151,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (171)
+## UI-state actions (172)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -197,7 +197,7 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_open`, `toggle_brush_library_persistent`,
 `toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_twirl`,
 `toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`, `toggle_link_arrowhead_scale`,
-`toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`
+`toggle_pane`, `toggle_panel`, `toggle_swatch_library_open`, `toggle_use_preview_bounds`
 
 ## Verb -> journaling evidence table
 

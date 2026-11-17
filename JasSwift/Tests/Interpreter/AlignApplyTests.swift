@@ -163,6 +163,8 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         "swatch.select_unused", "swatch.add_used_colors",
         // Swatch Options' OK (2026-10-25), until then a web-only native arm.
         "swatch.store",
+        // Save Swatch Library's confirm (2026-11-17, row 8 §3.4).
+        "swatch.save_library",
     ]
     // THIS ASSERTION IS THE REGISTRY GATE IN EMBRYO, and it is worth saying so.
     // It compares the built map against a HAND-MAINTAINED literal, which catches
