@@ -265,10 +265,139 @@ pub fn appearance_entries(appearances: &[(String, String)], active: Option<&str>
         .collect())
 }
 
+/// A dynamic submenu's rows from its declared `items_from` (the generic form
+/// of the two functions above; the brush-library design, A.2). `source` is
+/// evaluated against `ctx`; for each element, bound to `as` (default `item`)
+/// in a COPY of `ctx`, the row is `{label, action, params, enabled, checked}`:
+/// `label` a `{{}}` template, every string `params` value an expression (any
+/// other value verbatim), `enabled` true without `enabled_when`, `checked`
+/// null without `checked_when`, `action` verbatim. A source that is not a list
+/// gives no rows. Mirrors the reference's `items_from_entries` and Swift's
+/// `itemsFromEntries`.
+pub fn items_from_entries(spec: &Value, ctx: &Value) -> Value {
+    let source = spec.get("source").and_then(|v| v.as_str()).unwrap_or("null");
+    let elements = match eval(source, ctx) {
+        super::expr_types::Value::List(items) => items,
+        _ => return json!([]),
+    };
+    let name = spec.get("as").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("item");
+    let empty = serde_json::Map::new();
+    let item = spec.get("item").and_then(|v| v.as_object()).unwrap_or(&empty);
+    let mut rows = Vec::new();
+    for element in elements {
+        let mut bound = ctx.as_object().cloned().unwrap_or_default();
+        bound.insert(name.to_string(), element);
+        let bound = Value::Object(bound);
+        let label = item.get("label").and_then(|v| v.as_str())
+            .map_or(Value::Null, |l| Value::String(eval_text(l, &bound)));
+        let params: serde_json::Map<String, Value> = item.get("params").and_then(|v| v.as_object())
+            .map(|p| p.iter().map(|(k, v)| {
+                let resolved = match v.as_str() {
+                    Some(expr) => super::effects::value_to_json(&eval(expr, &bound)),
+                    None => v.clone(),
+                };
+                (k.clone(), resolved)
+            }).collect())
+            .unwrap_or_default();
+        let enabled = match item.get("enabled_when").and_then(|v| v.as_str()) {
+            Some(ew) if !ew.is_empty() => eval_bool(ew, &bound),
+            _ => true,
+        };
+        let checked = match item.get("checked_when").and_then(|v| v.as_str()) {
+            Some(cw) if !cw.is_empty() => Value::Bool(eval_bool(cw, &bound)),
+            _ => Value::Null,
+        };
+        rows.push(json!({
+            "label": label,
+            "action": item.get("action").and_then(|v| v.as_str()).unwrap_or(""),
+            "params": params,
+            "enabled": enabled,
+            "checked": checked,
+        }));
+    }
+    Value::Array(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ── items_from (the brush-library design, A.2) ──
+    // Row for row with the reference's test_menu_items_from.py and Swift's
+    // MenuItemsFromTests.
+
+    fn items_from_spec() -> Value {
+        json!({
+            "source": "keys(data.brush_libraries)",
+            "as": "lib",
+            "item": {
+                "label": "{{data.brush_libraries[lib].name}}",
+                "action": "toggle_brush_library_open",
+                "params": {"library": "lib"},
+                "checked_when": "any(panel.open_libraries, fun o -> o.id == lib)",
+            },
+        })
+    }
+
+    fn items_from_ctx() -> Value {
+        json!({
+            "data": {"brush_libraries": {
+                "zeta": {"name": "Zeta Brushes"},
+                "default_brushes": {"name": "Default Brushes"},
+            }},
+            "panel": {"open_libraries": [{"id": "default_brushes", "collapsed": false}]},
+        })
+    }
+
+    #[test]
+    fn items_from_gives_one_row_per_source_element_in_source_order() {
+        let rows = items_from_entries(&items_from_spec(), &items_from_ctx());
+        assert_eq!(rows, json!([
+            {"label": "Default Brushes", "action": "toggle_brush_library_open",
+             "params": {"library": "default_brushes"}, "enabled": true, "checked": true},
+            {"label": "Zeta Brushes", "action": "toggle_brush_library_open",
+             "params": {"library": "zeta"}, "enabled": true, "checked": false},
+        ]));
+        // The control: the two rows' `checked` differ, so a predicate
+        // evaluated once (not per element) cannot pass the arm above.
+        assert_ne!(rows[0]["checked"], rows[1]["checked"]);
+    }
+
+    #[test]
+    fn items_from_evaluates_enabled_when_per_element() {
+        let mut spec = items_from_spec();
+        spec["item"]["enabled_when"] = json!("lib != \"zeta\"");
+        let rows = items_from_entries(&spec, &items_from_ctx());
+        assert_eq!([rows[0]["enabled"].clone(), rows[1]["enabled"].clone()], [json!(true), json!(false)]);
+    }
+
+    #[test]
+    fn items_from_without_checked_when_checks_nothing() {
+        let mut spec = items_from_spec();
+        spec["item"].as_object_mut().unwrap().remove("checked_when");
+        let rows = items_from_entries(&spec, &items_from_ctx());
+        assert_eq!([rows[0]["checked"].clone(), rows[1]["checked"].clone()], [Value::Null, Value::Null]);
+    }
+
+    #[test]
+    fn items_from_params_are_expressions() {
+        let mut spec = items_from_spec();
+        spec["item"]["params"] = json!({"library": "lib + \"/x\"", "n": "1 + 1"});
+        assert_eq!(items_from_entries(&spec, &items_from_ctx())[0]["params"],
+                   json!({"library": "default_brushes/x", "n": 2}), "an integral number is an integer, as the reference gives");
+    }
+
+    #[test]
+    fn items_from_a_non_list_or_empty_source_gives_no_rows() {
+        for src in ["data.brush_libraries", "null", "3"] {
+            let mut spec = items_from_spec();
+            spec["source"] = json!(src);
+            assert_eq!(items_from_entries(&spec, &items_from_ctx()), json!([]), "{src}");
+        }
+        assert_eq!(items_from_entries(&items_from_spec(),
+                                      &json!({"data": {"brush_libraries": {}}, "panel": {}})), json!([]));
+    }
 
     /// ⭐ THE ARM THE REAL BUNDLE CANNOT DRIVE, AND THAT IS EXACTLY WHY IT IS
     /// HERE. `workspace/menubar.yaml` contains 11 bare strings and all 11 are
