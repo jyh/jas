@@ -294,6 +294,7 @@
             "swatch.add_used_colors": {},
             "swatch.delete_selected": {},
             "swatch.duplicate_selected": {},
+            "swatch.save_library": {},
             "swatch.select_unused": {},
             "swatch.sort_by_name": {},
             "swatch.store": {},

@@ -1528,17 +1528,42 @@ actions:
 
   save_swatch_library:
     description: >
-      Open the Save Swatch Library dialog prompting the user for a library name and saving the active library to workspace/swatches/.
+      Open the Save Swatch Library dialog on the Swatches panel's selected
+      library. The dialog receives the library's id as param.library and
+      proposes the library's display name as the name to save under (empty
+      when the library has no name). Saving is the dialog's Save button,
+      save_swatch_library_confirm.
     category: swatches
     effects:
-      - open_dialog: { id: 'swatch_library_save' }
+      - open_dialog:
+          id: swatch_library_save
+          params:
+            library: "panel.selected_library"
+            name: "data.swatch_libraries[panel.selected_library].name"
 
   save_swatch_library_confirm:
     description: >
-      Confirm saving the swatch library under the entered name. Closes the dialog on success.
+      Save the swatch library the dialog was opened on under the entered
+      name, then close the dialog. The rules are Save Brush Library's: the
+      name becomes an id (lower-case ASCII letters and digits kept, every
+      other run of characters one underscore, leading and trailing
+      underscores trimmed, "library" if nothing is left); when the id is the
+      source library's own id the save is in place and only the name
+      changes; when it names a different existing library the first free
+      "_2", "_3", ... suffix is taken. A new library is a copy of the source
+      with the new name; it is opened expanded at the end of the
+      open-library list and becomes the selected library, with the swatch
+      selection kept. Every save asks the host to write the library's file
+      (the interpreter itself writes no file): on the web, as a download of
+      <id>.json, the shape of the workspace/swatches/ files. An empty name
+      or a missing source library saves nothing.
     category: swatches
+    params:
+      library: { type: string, description: "Id of the library being saved" }
+      name: { type: string, description: "The name to save it under" }
     effects:
-      - log: "save_swatch_library_confirm"
+      - swatch.save_library: { library: "param.library", name: "param.name" }
+      - close_dialog: null
       - close_dialog: None
 
   # ── Stroke ───────────────────────────────────────────────
