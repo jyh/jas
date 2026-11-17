@@ -35,7 +35,16 @@ public final class AppSwatchLibraries {
     /// `workspace.json` declares — matching Rust, which seeds
     /// `AppState::swatch_libraries` from the same source.
     public init(seed: [String: Any]? = nil) {
-        self.libs = seed ?? (WorkspaceData.load()?.swatchLibraries() ?? [:])
+        self.libs = seed ?? Self.shippedSeed()
+    }
+
+    /// The bundle's swatch libraries, with the user's saved ones (Save Swatch
+    /// Library, design §3.4) shadowing them by id when the app installed a
+    /// live store, never under test. ``AppBrushLibraries/shippedSeed()`` is
+    /// the brush twin.
+    public static func shippedSeed() -> [String: Any] {
+        let libs = WorkspaceData.load()?.swatchLibraries() ?? [:]
+        return BrushLibraryStore.live.map { BrushLibraryStore.merged(bundle: libs, user: $0.loadSwatches()) } ?? libs
     }
 
     /// The mutable swatch array of one library, or nil when the id is unknown
