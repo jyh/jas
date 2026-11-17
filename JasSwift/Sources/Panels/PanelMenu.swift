@@ -209,6 +209,27 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     }
 }
 
+/// The panel, submenu label and `items_from` spec of the menu item an
+/// `open_menu` effect named by its declared `id` (``StateStore/pendingMenu``),
+/// or nil when no panel menu declares an `items_from` item with that id. Every
+/// panel kind is searched, the toggle-only ones (Brushes, Gradient, Concepts)
+/// included, which ``PanelKind/all`` leaves out. Rust's twin is
+/// `panel_menu::menu_request_target`, which also needs the panel's address.
+public func panelMenuRequest(_ id: String) -> (kind: PanelKind, label: String, spec: [String: Any])? {
+    guard !id.isEmpty, let ws = WorkspaceData.load() else { return nil }
+    for kind in PanelKind.all + [.brushes, .gradient, .concepts] {
+        // `panelMenuRaw`, not `panelMenu`: the latter casts the whole array to
+        // objects and so reads `[]` for any menu with a separator.
+        for entry in ws.panelMenuRaw(panelKindToContentId(kind)) {
+            guard let obj = entry as? [String: Any], obj["id"] as? String == id,
+                  let spec = obj["items_from"] as? [String: Any],
+                  let label = obj["label"] as? String else { continue }
+            return (kind, label, spec)
+        }
+    }
+    return nil
+}
+
 /// The rows of a panel's `items_from` submenu, evaluated now in the panel
 /// menu's own context (``panelMenuContext``), so a menu opened again reads
 /// the store as it is then.
@@ -224,6 +245,13 @@ public func panelSubmenuRows(_ kind: PanelKind, spec: [String: Any],
 /// runs nothing.
 public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String: Any],
                              addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
+    panelDispatchRow(kind, action: action, params: params, model: model)
+}
+
+/// ``panelDispatchRow(_:action:params:addr:layout:model:)`` for a caller that
+/// holds no panel address: a row popped up by an `open_menu` request. The row
+/// runs in its panel's store scope, which needs neither.
+public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String: Any], model: Model?) {
     guard !action.isEmpty, let model = model else { return }
     let pid = panelKindToContentId(kind)
     if !model.stateStore.hasPanel(pid) {

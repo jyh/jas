@@ -374,7 +374,8 @@ public struct PanelGroupView: View {
                                 panelId: contentId,
                                 theme: theme,
                                 contextProvider: { buildPanelCtx(ws: ws, contentId: contentId) },
-                                yamlDialogState: yamlDialogState
+                                yamlDialogState: yamlDialogState,
+                                menuLayout: workspaceLayout
                             )
                         } else {
                             let ctx = buildPanelCtx(ws: ws, contentId: contentId)
@@ -758,6 +759,8 @@ private struct PanelBodyObserver: View {
     /// ContentView. Mirrors the menu-path bridge in
     /// ``PanelGroupView/hamburgerButton``.
     var yamlDialogState: Binding<YamlDialogState?>? = nil
+    /// The layout a popped-up menu's rows read (``popUpMenuRequest``).
+    var menuLayout: WorkspaceLayout? = nil
 
     var body: some View {
         // Read panelStateVersion so SwiftUI re-evaluates this view
@@ -776,11 +779,48 @@ private struct PanelBodyObserver: View {
                 binding.wrappedValue = newState
             }
         }
+        let layout = menuLayout ?? WorkspaceLayout.defaultLayout()
         return YamlPanelBodyView(
             contentSpec: contentSpec, context: ctx,
             model: model, panelId: panelId, theme: theme,
             onStoreDialogOpened: onStoreDialogOpened
         )
+        .environment(\.onMenuRequest) { id in
+            popUpMenuRequest(id, layout: layout, model: capturedModel)
+        }
+    }
+}
+
+/// The AppKit adapter for an `open_menu` request (STATUS-jas row 8): the named
+/// item's `items_from` rows (``panelMenuRequest``, ``panelSubmenuRows``) as a
+/// menu at the current event, each row running its action with its params
+/// (``panelDispatchRow(_:action:params:model:)``). An empty source pops one
+/// disabled "(none)" item; an id no panel menu declares pops nothing.
+private func popUpMenuRequest(_ id: String, layout: WorkspaceLayout, model: Model) {
+    guard let hit = panelMenuRequest(id) else { return }
+    let rows = panelSubmenuRows(hit.kind, spec: hit.spec, layout: layout, model: model)
+    let menu = NSMenu(title: hit.label)
+    menu.autoenablesItems = false
+    for row in rows {
+        let item = NSMenuItem(title: row.label ?? "",
+                              action: #selector(MenuActionTarget.fire(_:)), keyEquivalent: "")
+        let (kind, action, params) = (hit.kind, row.action, row.params)
+        let target = MenuActionTarget(callback: {
+            panelDispatchRow(kind, action: action, params: params, model: model)
+        })
+        item.target = target
+        item.representedObject = target  // retain
+        item.state = (row.checked ?? false) ? .on : .off
+        item.isEnabled = row.enabled
+        menu.addItem(item)
+    }
+    if rows.isEmpty {
+        let none = NSMenuItem(title: "(none)", action: nil, keyEquivalent: "")
+        none.isEnabled = false
+        menu.addItem(none)
+    }
+    if let event = NSApp.currentEvent {
+        NSMenu.popUpContextMenu(menu, with: event, for: NSApp.keyWindow?.contentView ?? NSView())
     }
 }
 
