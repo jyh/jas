@@ -1246,5 +1246,65 @@
         ]
       }
     }
+  },
+  {
+    "name": "toggle_swatch_library_open_closes_an_open_library_whatever_its_collapse",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4: Swatches onto the brush primitives. The Open Swatch Library row runs toggle_swatch_library_open, a keyed list_toggle on id; the open entry is collapsed, so only a keyed toggle finds it. Toggle rather than add-only: SWP-162 allows either, and Brushes toggles.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": true
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_swatch_library_open",
+        "params": {
+          "library": "web_colors"
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "open_libraries": []
+      }
+    }
+  },
+  {
+    "name": "toggle_swatch_library_open_opens_a_closed_library_expanded",
+    "setup_svg": "rect_basic.svg",
+    "note": "The other direction: a library not in the open list is appended as {id, collapsed: false}.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": []
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_swatch_library_open",
+        "params": {
+          "library": "web_colors"
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    }
   }
 ]

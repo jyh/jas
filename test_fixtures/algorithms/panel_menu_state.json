@@ -777,7 +777,7 @@
           0,
           15
         ],
-        "action": "open_swatch_library",
+        "action": "",
         "label": "Open Swatch Library",
         "enabled": true,
         "checked": null
@@ -2264,7 +2264,7 @@
           0,
           15
         ],
-        "action": "open_swatch_library",
+        "action": "",
         "label": "Open Swatch Library",
         "enabled": true,
         "checked": null

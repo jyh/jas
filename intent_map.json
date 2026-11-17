@@ -1190,6 +1190,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "toggle_swatch_library_open": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "toggle_use_preview_bounds": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1298,7 +1302,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 171,
+      "ui-state": 172,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1352,7 +1356,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 246,
+    "total_actions": 247,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

@@ -1521,6 +1521,28 @@
         }
       ]
     },
+    "toggle_swatch_library_open": {
+      "description": "Open or close one swatch library in the Swatches panel. The library is named by its id (param.library). If an entry with that id is in panel.open_libraries it is removed, whatever its collapsed state; otherwise the entry {id: <id>, collapsed: false} is appended, so a library opens expanded below the ones already open. Closing the library that holds the swatch selection leaves the selection as it is.\n",
+      "category": "swatches",
+      "params": {
+        "library": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "list_toggle": {
+            "target": "panel.open_libraries",
+            "panel": "swatches",
+            "value": "param.library",
+            "key": "id",
+            "insert": {
+              "collapsed": false
+            }
+          }
+        }
+      ]
+    },
     "save_swatch_library": {
       "description": "Open the Save Swatch Library dialog prompting the user for a library name and saving the active library to workspace/swatches/.\n",
       "category": "swatches",
@@ -21527,10 +21549,22 @@
         "separator",
         {
           "label": "Open Swatch Library",
+          "id": "sp_menu_open_library",
           "type": "submenu",
           "dynamic": true,
-          "action": "open_swatch_library",
-          "description": "Submenu listing all available swatch libraries discovered from workspace/swatches/*.json files. Selecting a library adds it to the panel's open_libraries list, displaying it as a new collapsible section in the swatch tiles area. Libraries that are already open are shown with a checkmark. Each library appears as a disclosure section with a triangle toggle and the library name.\n"
+          "items_from": {
+            "source": "keys(data.swatch_libraries)",
+            "as": "lib",
+            "item": {
+              "label": "{{if data.swatch_libraries[lib].name == null then lib else data.swatch_libraries[lib].name}}",
+              "action": "toggle_swatch_library_open",
+              "params": {
+                "library": "lib"
+              },
+              "checked_when": "any(panel.open_libraries, fun o -> o.id == lib)"
+            }
+          },
+          "description": "Submenu with one row per swatch library the app knows (the workspace/swatches/*.json files), rebuilt each time the menu opens, in id order (Unicode code point), each labelled with the library's name (its id when it has none). A row is checked when its library is open in the panel. Choosing a row opens or closes that library (toggle_swatch_library_open): an open library is a collapsible section in the swatch tiles area, with a triangle toggle and the library name.\n"
         },
         {
           "label": "Save Swatch Library",

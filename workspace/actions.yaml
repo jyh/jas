@@ -1506,6 +1506,26 @@ actions:
           color_mode: "param.color_mode"
       - close_dialog: null
 
+  toggle_swatch_library_open:
+    description: >
+      Open or close one swatch library in the Swatches panel. The library
+      is named by its id (param.library). If an entry with that id is in
+      panel.open_libraries it is removed, whatever its collapsed state;
+      otherwise the entry {id: <id>, collapsed: false} is appended, so a
+      library opens expanded below the ones already open. Closing the
+      library that holds the swatch selection leaves the selection as it
+      is.
+    category: swatches
+    params:
+      library: { type: string }
+    effects:
+      - list_toggle:
+          target: panel.open_libraries
+          panel: swatches
+          value: param.library
+          key: id
+          insert: { collapsed: false }
+
   save_swatch_library:
     description: >
       Open the Save Swatch Library dialog prompting the user for a library name and saving the active library to workspace/swatches/.

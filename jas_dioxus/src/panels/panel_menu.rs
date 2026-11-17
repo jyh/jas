@@ -532,6 +532,7 @@ pub fn typed_panel_slot_keys() -> Vec<(&'static str, &'static str)> {
     vec![
         ("color_panel_content", "mode"),
         ("swatches_panel_content", "thumbnail_size"),
+        ("swatches_panel_content", "open_libraries"),
         ("symbols_panel_content", "selected_symbol"),
         ("concepts_panel_content", "selected_concept"),
         ("layers_panel_content", "type_filter"),
@@ -561,6 +562,9 @@ fn live_panel_state(
         ],
         "swatches_panel_content" => vec![
             ("thumbnail_size", s(&st.swatches_panel.thumbnail_size)),
+            // Open Swatch Library's `checked_when` reads it, and its rows'
+            // keyed `list_toggle` writes it (design 2026-10-28 §3.4).
+            ("open_libraries", st.swatches_panel.open_libraries.clone()),
             // `panel.selected_swatches.length > 0` gates Duplicate / Delete
             // Swatch — the rule `swatches_panel::is_enabled` restated natively
             // until the generic path read this slot.
@@ -731,6 +735,28 @@ mod tests {
         assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout), None);
     }
 
+    /// Open Swatch Library's rows read the app's swatch libraries, and a row
+    /// toggles the Swatches panel's open list, which this app keeps in a TYPED
+    /// slot (`AppState::swatches_panel.open_libraries`, what the body draws).
+    #[test]
+    fn choosing_a_swatch_library_row_toggles_the_typed_open_list() {
+        let spec = menu_items_from_yaml("swatches_panel_content").into_iter().find_map(|i| match i {
+            PanelMenuItem::Submenu { spec, .. } => Some(spec),
+            _ => None,
+        }).expect("the Swatches submenu");
+        let mut st = crate::workspace::app_state::AppState::new();
+        assert_eq!(st.swatches_panel.open_libraries, serde_json::json!([{"id": "web_colors", "collapsed": false}]));
+        let rows = submenu_rows("swatches_panel_content", spec, &st);
+        assert_eq!(rows[0]["params"], serde_json::json!({"library": "web_colors"}));
+        assert_eq!(rows[0]["checked"], serde_json::json!(true), "{rows}");
+        dispatch_menu_row("swatches_panel_content", &rows[0], &mut st);
+        assert_eq!(st.swatches_panel.open_libraries, serde_json::json!([]), "the body's slot closed it");
+        let rows = submenu_rows("swatches_panel_content", spec, &st);
+        assert_eq!(rows[0]["checked"], serde_json::json!(false));
+        dispatch_menu_row("swatches_panel_content", &rows[0], &mut st);
+        assert_eq!(st.swatches_panel.open_libraries, serde_json::json!([{"id": "web_colors", "collapsed": false}]));
+    }
+
     #[test]
     fn an_items_from_entry_builds_a_submenu_carrying_its_spec() {
         let (label, spec) = brushes_submenu();
@@ -869,14 +895,16 @@ mod tests {
     }
 
     #[test]
-    fn swatches_submenu_becomes_open_library_action() {
-        // The dynamic "Open Swatch Library" submenu entry has an explicit
-        // `action: open_swatch_library` in the YAML so the menu view's
-        // submenu host (keyed on that command) still fires.
+    fn swatches_submenu_is_an_items_from_submenu() {
+        // "Open Swatch Library" declares `items_from` (design 2026-10-28
+        // §3.4); until then it carried `action: open_swatch_library`, which the
+        // menu view special-cased natively. No row carries that command now.
         let items = menu_items_from_yaml("swatches_panel_content");
         assert!(items.iter().any(|i| matches!(
-            i, PanelMenuItem::Action { command: "open_swatch_library", .. })),
-            "swatches menu should expose open_swatch_library host; got {items:?}");
+            i, PanelMenuItem::Submenu { label: "Open Swatch Library", .. })),
+            "swatches menu should build the items_from submenu; got {items:?}");
+        assert!(!items.iter().any(|i| i.command() == Some("open_swatch_library")),
+            "the native host's command is gone: {items:?}");
         // Thumbnail-size rows are a radio group with folded params.
         let radios: Vec<&str> = items.iter().filter_map(|i| match i {
             PanelMenuItem::Radio { command, .. } => Some(*command),

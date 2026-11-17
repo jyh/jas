@@ -1508,6 +1508,13 @@ fn apply_typed_panel_slot(
             }
             true
         }
+        // The open libraries the panel body draws (`toggle_swatch_library_open`).
+        ("swatches_panel_content", "open_libraries") => {
+            if resolved.is_array() {
+                st.swatches_panel.open_libraries = resolved.clone();
+            }
+            true
+        }
         ("symbols_panel_content", "selected_symbol") => {
             st.symbols_selected = resolved.as_str().map(|s| s.to_string());
             true

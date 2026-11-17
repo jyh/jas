@@ -17,10 +17,9 @@ public enum SwatchesPanel {
     /// The three thumbnail-size rows share `action:
     /// set_swatch_thumbnail_size`, so the builder folds each `params.size`
     /// into the command (`set_swatch_thumbnail_size:small`, …) — `dispatch`
-    /// splits that suffix back off. The "Open Swatch Library" dynamic submenu carries an explicit `action:
-    /// open_swatch_library` in the YAML; the menu view renders it as a
-    /// plain item whose dispatch is the placeholder below until the
-    /// library-load plumbing lands.
+    /// splits that suffix back off. The "Open Swatch Library" submenu
+    /// declares `items_from` (design 2026-10-28 §3.4): the menu builds it as
+    /// `.submenu` and runs its rows (`panelDispatchRow`), never `dispatch`.
     public static func menuItems() -> [PanelMenuItem] {
         menuItemsFromYaml("swatches_panel_content")
     }
@@ -43,11 +42,6 @@ public enum SwatchesPanel {
             // pass mode=edit and let the dialog read the selection from
             // panel state.
             runYamlActionByName("open_swatch_options", params: ["mode": "edit"], model: model)
-        case "open_swatch_library":
-            // Dynamic library submenu host — placeholder until the
-            // library-load plumbing lands (mirrors the Rust reference's
-            // open_swatch_library no-op).
-            break
         default:
             runYamlActionByName(cmd, params: [:], model: model)
         }
