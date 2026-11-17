@@ -195,19 +195,32 @@ menu:
       persistent_libraries preference. Persistent libraries
       auto-open on app launch.
   - label: "Open Brush Library"
+    id: bp_menu_open_library
     type: submenu
     dynamic: true
+    items_from:
+      source: "keys(data.brush_libraries)"
+      as: lib
+      item:
+        label: "{{if data.brush_libraries[lib].name == null then lib else data.brush_libraries[lib].name}}"
+        action: toggle_brush_library_open
+        params: { library: "lib" }
+        checked_when: "any(panel.open_libraries, fun o -> o.id == lib)"
     description: >
-      Submenu listing all brush libraries discovered under
-      workspace/brushes/<slug>/library.json. Selecting a library
-      opens or closes it (toggle via checkmark).
+      Submenu with one row per brush library the app knows: the
+      libraries shipped under workspace/brushes/<slug>/library.json and
+      any the user has saved. Rows are rebuilt each time the menu opens,
+      in slug order (Unicode code point), each labelled with the
+      library's name (its slug when it has none). A row is checked when
+      its library is open in the panel; choosing a row opens or closes
+      that library (toggle_brush_library_open). The panel toolbar's
+      Brush Libraries Menu button pops up this same submenu.
   - label: "Save Brush Library"
     action: save_brush_library
     enabled_when: "panel.selected_library != null"
     description: >
-      Open the Save Brush Library dialog. The selected library's
-      manifest and artwork files are written to
-      workspace/brushes/<new_slug>/.
+      Open the Save Brush Library dialog for the selected library
+      (save_brush_library). Disabled when no library is selected.
   - separator
   - label: "Close Brushes"
     action: close_panel

@@ -6589,20 +6589,75 @@
       ]
     },
     "save_brush_library": {
-      "description": "Open the Save Brush Library dialog, prompting for a name. The selected library's manifest and artwork files are written to workspace/brushes/<new_slug>/.\n",
+      "description": "Open the Save Brush Library dialog on the Brushes panel's selected library. The dialog receives the library's slug as param.library and proposes the library's display name as the name to save under (empty when the library has no name). Saving is the dialog's Save button, save_brush_library_confirm.\n",
       "category": "brushes",
       "effects": [
         {
-          "log": "save_brush_library"
+          "open_dialog": {
+            "id": "brush_library_save",
+            "params": {
+              "library": "panel.selected_library",
+              "name": "data.brush_libraries[panel.selected_library].name"
+            }
+          }
+        }
+      ]
+    },
+    "save_brush_library_confirm": {
+      "description": "Save the library the dialog was opened on under the entered name, then close the dialog. The name becomes a slug: lower-case ASCII letters and digits are kept, every other run of characters becomes one underscore, and leading and trailing underscores are trimmed (an empty result is \"library\"). When the slug is the source library's own slug the save is in place and only the name changes. When it names a different existing library the first free \"_2\", \"_3\", ... suffix is taken. A new library is a copy of the source with the new name; it is opened expanded at the end of the open-library list and becomes the selected library, with the brush selection kept. Every save asks the host to write the library's library.json (the interpreter itself writes no file): on the Mac, under the user's Application Support brushes folder; on the web, as a download. An empty name or a missing source library saves nothing.\n",
+      "category": "brushes",
+      "params": {
+        "library": {
+          "type": "string",
+          "description": "Slug of the library being saved"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name to save it under"
+        }
+      },
+      "effects": [
+        {
+          "brush.save_library": {
+            "library": "param.library",
+            "name": "param.name"
+          }
+        },
+        {
+          "close_dialog": null
         }
       ]
     },
     "open_brush_libraries_menu": {
-      "description": "Show the dynamic Open Brush Library submenu listing all libraries discovered under workspace/brushes/. Selecting an unopened library appends to panel.open_libraries; selecting an already-open library closes it.\n",
+      "description": "Pop up the Brushes panel menu's Open Brush Library submenu (bp_menu_open_library) at the clicked button. Its rows are the menu item's declared items_from, so the toolbar button and the panel menu list the same libraries; choosing one runs toggle_brush_library_open. Popping the menu up is the host's (the interpreter records the request and draws nothing).\n",
       "category": "brushes",
       "effects": [
         {
-          "log": "open_brush_libraries_menu"
+          "open_menu": {
+            "id": "bp_menu_open_library"
+          }
+        }
+      ]
+    },
+    "toggle_brush_library_open": {
+      "description": "Open or close one brush library in the Brushes panel. The library is named by its slug (param.library). If an entry with that id is in panel.open_libraries it is removed, whatever its collapsed state; otherwise the entry {id: <slug>, collapsed: false} is appended, so a library opens expanded below the ones already open. Closing the library that holds the brush selection leaves the selection as it is.\n",
+      "category": "brushes",
+      "params": {
+        "library": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "list_toggle": {
+            "target": "panel.open_libraries",
+            "panel": "brushes",
+            "value": "param.library",
+            "key": "id",
+            "insert": {
+              "collapsed": false
+            }
+          }
         }
       ]
     },
@@ -13082,15 +13137,28 @@
         },
         {
           "label": "Open Brush Library",
+          "id": "bp_menu_open_library",
           "type": "submenu",
           "dynamic": true,
-          "description": "Submenu listing all brush libraries discovered under workspace/brushes/<slug>/library.json. Selecting a library opens or closes it (toggle via checkmark).\n"
+          "items_from": {
+            "source": "keys(data.brush_libraries)",
+            "as": "lib",
+            "item": {
+              "label": "{{if data.brush_libraries[lib].name == null then lib else data.brush_libraries[lib].name}}",
+              "action": "toggle_brush_library_open",
+              "params": {
+                "library": "lib"
+              },
+              "checked_when": "any(panel.open_libraries, fun o -> o.id == lib)"
+            }
+          },
+          "description": "Submenu with one row per brush library the app knows: the libraries shipped under workspace/brushes/<slug>/library.json and any the user has saved. Rows are rebuilt each time the menu opens, in slug order (Unicode code point), each labelled with the library's name (its slug when it has none). A row is checked when its library is open in the panel; choosing a row opens or closes that library (toggle_brush_library_open). The panel toolbar's Brush Libraries Menu button pops up this same submenu.\n"
         },
         {
           "label": "Save Brush Library",
           "action": "save_brush_library",
           "enabled_when": "panel.selected_library != null",
-          "description": "Open the Save Brush Library dialog. The selected library's manifest and artwork files are written to workspace/brushes/<new_slug>/.\n"
+          "description": "Open the Save Brush Library dialog for the selected library (save_brush_library). Disabled when no library is selected.\n"
         },
         "separator",
         {
@@ -29523,6 +29591,81 @@
                   "divide_remove_unpainted": "dialog.divide_remove_unpainted",
                   "apply_simplify_after_op": "dialog.apply_simplify_after_op",
                   "simplify_precision": "dialog.simplify_precision"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "brush_library_save": {
+      "summary": "Save Brush Library",
+      "description": "Modal dialog for saving a brush library under a name. It is opened by the Brushes panel menu's Save Brush Library (save_brush_library) on the panel's selected library, whose slug arrives as param.library. The dialog presents a single text input for the library name, which starts as the library's own display name (param.name; empty when the library has none). Cancel closes the dialog and saves nothing. Save (save_brush_library_confirm) saves the library under the entered name: in place when the name's slug is the library's own slug, otherwise as a new library, which is opened in the panel and selected; either way the host is asked to write the library's library.json. Save is disabled while the name field is empty.\n",
+      "modal": true,
+      "params": {
+        "library": {
+          "type": "string",
+          "description": "Slug of the library being saved"
+        },
+        "name": {
+          "type": "string",
+          "nullable": true,
+          "description": "The library's display name, proposed as the name to save under"
+        }
+      },
+      "state": {
+        "name": {
+          "type": "string",
+          "default": "",
+          "description": "User-entered library name"
+        }
+      },
+      "init": {
+        "name": "if param.name == null then '' else param.name"
+      },
+      "content": {
+        "type": "container",
+        "layout": "column",
+        "style": {
+          "gap": 12,
+          "padding": 16
+        },
+        "children": [
+          {
+            "type": "text",
+            "content": "Library name:"
+          },
+          {
+            "id": "brush_lib_name_input",
+            "type": "text_input",
+            "placeholder": "My Brushes",
+            "bind": {
+              "value": "dialog.name"
+            }
+          },
+          {
+            "type": "row",
+            "style": {
+              "justify": "end",
+              "gap": 8
+            },
+            "children": [
+              {
+                "type": "button",
+                "label": "Cancel",
+                "action": "dismiss_dialog"
+              },
+              {
+                "type": "button",
+                "label": "Save",
+                "action": "save_brush_library_confirm",
+                "variant": "primary",
+                "params": {
+                  "library": "param.library",
+                  "name": "dialog.name"
+                },
+                "bind": {
+                  "disabled": "dialog.name == \"\""
                 }
               }
             ]
