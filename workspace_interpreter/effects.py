@@ -219,6 +219,31 @@ def _brush_library_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", ascii_lower).strip("_") or "library"
 
 
+
+def _save_library(store, kind, panel, lib, name):
+    """Save library `lib` of `<kind>_libraries` under `name` (the
+    `brush.save_library` / `swatch.save_library` law, above)."""
+    import copy
+    libs = store.get_data_path(f"{kind}_libraries")
+    if (not isinstance(lib, str) or not isinstance(name, str) or not name
+            or not isinstance(libs, dict) or not isinstance(libs.get(lib), dict)):
+        return
+    slug = _brush_library_slug(name)
+    if slug != lib and slug in libs:
+        n = 2
+        while f"{slug}_{n}" in libs:
+            n += 1
+        slug = f"{slug}_{n}"
+    saved = copy.deepcopy(libs[lib])
+    saved["name"] = name
+    store.set_data_path(f"{kind}_libraries.{slug}", saved)
+    if slug != lib:
+        store.list_toggle(panel, "open_libraries", slug,
+                          key_field="id", insert={"collapsed": False})
+        store.set_panel(panel, "selected_library", slug)
+    store.pending_writes.append(
+        {"kind": f"{kind}_library", "slug": slug, "manifest": copy.deepcopy(saved)})
+
 def _doc_op_args(spec: dict, eval_ctx: dict) -> dict:
     """A `doc.op` spec as the op layer reads it: `op` verbatim, every other
     string field evaluated as an expression in the action's scope, other
@@ -1086,31 +1111,16 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
     # copied unchanged). One `{kind, slug, manifest}` request goes on the
     # store's `pending_writes` for the host. An empty name or a missing source
     # is a no-op.
-    if "brush.save_library" in effect:
-        import copy
-        spec = effect["brush.save_library"] if isinstance(effect["brush.save_library"], dict) else {}
-        lib = _eval(spec.get("library"), store, ctx)
-        name = _eval(spec.get("name"), store, ctx)
-        libs = store.get_data_path("brush_libraries")
-        if (not isinstance(lib, str) or not isinstance(name, str) or not name
-                or not isinstance(libs, dict) or not isinstance(libs.get(lib), dict)):
+    # swatch.save_library: { library, name } -- the same law over
+    # data.swatch_libraries and the Swatches panel (design §3.4), queuing a
+    # `swatch_library` write. One implementation: `_save_library`.
+    for key, kind, panel in (("brush.save_library", "brush", "brushes"),
+                             ("swatch.save_library", "swatch", "swatches")):
+        if key in effect:
+            spec = effect[key] if isinstance(effect[key], dict) else {}
+            _save_library(store, kind, panel, _eval(spec.get("library"), store, ctx),
+                          _eval(spec.get("name"), store, ctx))
             return None
-        slug = _brush_library_slug(name)
-        if slug != lib and slug in libs:
-            n = 2
-            while f"{slug}_{n}" in libs:
-                n += 1
-            slug = f"{slug}_{n}"
-        saved = copy.deepcopy(libs[lib])
-        saved["name"] = name
-        store.set_data_path(f"brush_libraries.{slug}", saved)
-        if slug != lib:
-            store.list_toggle("brushes", "open_libraries", slug,
-                              key_field="id", insert={"collapsed": False})
-            store.set_panel("brushes", "selected_library", slug)
-        store.pending_writes.append(
-            {"kind": "brush_library", "slug": slug, "manifest": copy.deepcopy(saved)})
-        return None
 
     # swatch.duplicate_selected / swatch.delete_selected: { library, indices }
     # and swatch.sort_by_name / swatch.select_unused / swatch.add_used_colors:
