@@ -1407,6 +1407,7 @@ pub(crate) fn build_dock_groups(
                                             addr,
                                             x: coords.x,
                                             y: coords.y,
+                                            only: None,
                                         }));
                                         menu_bar_open.set(None);
                                     },

@@ -30,6 +30,10 @@ struct RenderCtx {
     dialog_ctx: super::dialog_view::DialogCtx,
     timer_ctx: super::timer::TimerCtx,
     panel_kind: Option<PanelKind>,
+    /// The panel-menu overlay's signal, so a click whose action asked the
+    /// host for a menu (`open_menu`, `AppState::pending_menu`) can open it.
+    /// `None` where no overlay is provided (a dialog's own tree).
+    panel_menu: Option<crate::panels::panel_menu_state::PanelMenuState>,
 }
 
 /// Render a YAML element spec into a Dioxus Element.
@@ -49,6 +53,7 @@ pub fn render_element(
         dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
         timer_ctx: use_context::<super::timer::TimerCtx>(),
         panel_kind: None,
+        panel_menu: try_use_context::<crate::panels::panel_menu_state::PanelMenuState>(),
     };
     render_el(el, ctx, &rctx)
 }
@@ -3267,11 +3272,13 @@ fn build_mouse_event_handler(
     let mut revision = rctx.revision;
     let ctx_snapshot = ctx.clone();
     let mut dialog_signal = rctx.dialog_ctx.0;
+    let panel_menu = rctx.panel_menu;
 
     Some(EventHandler::new(move |evt: Event<MouseData>| {
         let app = app.clone();
         let actions = resolved_actions.clone();
         let mut ctx_snap = ctx_snapshot.clone();
+        let at = evt.data().page_coordinates();
         // Expose click-time modifier state to yaml condition
         // expressions as `event.alt` / `event.shift` / `event.meta` /
         // `event.ctrl`. The Boolean panel uses `event.alt` to route
@@ -3281,10 +3288,20 @@ fn build_mouse_event_handler(
         merge_event_modifiers(&mut ctx_snap, mods.alt(), mods.shift(), mods.meta(), mods.ctrl());
         spawn(async move {
             let mut deferred_dialog_effects = Vec::new();
+            let menu_request;
             {
                 let mut st = app.borrow_mut();
                 deferred_dialog_effects.extend(run_click_behaviors(&actions, &ctx_snap, &mut st));
+                // A menu the click asked the host for (`open_menu`): taken
+                // here, once, and popped up at the click as that submenu alone.
+                menu_request = st.pending_menu.take().and_then(|id|
+                    crate::panels::panel_menu::menu_request_target(&id, &st.workspace_layout));
             } // drop st borrow
+            if let (Some((kind, addr, key)), Some(mut pm)) = (menu_request, panel_menu) {
+                pm.open.set(Some(crate::panels::panel_menu_state::PanelMenuOpen {
+                    kind, addr, x: at.x, y: at.y, only: Some(key),
+                }));
+            }
 
             // Apply deferred dialog effects (outside AppState borrow)
             apply_deferred_dialog_effects(&deferred_dialog_effects, &app, &mut dialog_signal);

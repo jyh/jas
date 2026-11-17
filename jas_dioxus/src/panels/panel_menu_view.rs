@@ -62,7 +62,65 @@ pub fn PanelMenuOverlay() -> Element {
             "position:absolute; right:auto; left:100%; top:0;"
         };
 
-    let item_nodes: Vec<Result<VNode, RenderError>> = items.into_iter().map(|item| {
+    // One `items_from` row: a check where its `checked_when` holds; a click
+    // runs the row's own action with its own params
+    // (`panel_menu::dispatch_menu_row`) and closes the menu. Used by a
+    // submenu's flyout and by a menu opened as that submenu alone
+    // (`PanelMenuOpen::only`, an `open_menu` request).
+    let render_row = {
+        let act = act.clone();
+        move |row: serde_json::Value| -> Element {
+            let act = act.clone();
+            let enabled = row.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let checked = row.get("checked").and_then(|v| v.as_bool()).unwrap_or(false);
+            let prefix = if checked { "\u{2713} " } else { "    " };
+            let text = row.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let display = format!("{prefix}{text}");
+            let (color, cursor, opacity) = if enabled {
+                (THEME_TEXT, "pointer", "1")
+            } else {
+                (THEME_TEXT_HINT, "default", "0.5")
+            };
+            rsx! {
+                div {
+                    class: "jas-menu-item",
+                    style: "padding:4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                    onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                    onclick: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        if !enabled {
+                            return;
+                        }
+                        let row = row.clone();
+                        (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                            super::panel_menu::dispatch_menu_row(content_id, &row, st);
+                        }));
+                        submenu_open_for.set(None);
+                        panel_menu.open.set(None);
+                    },
+                    "{display}"
+                }
+            }
+        }
+    };
+
+    // An `open_menu` request shows the named submenu's rows ALONE, at the
+    // click; an empty source shows one disabled "(none)" row rather than an
+    // empty box.
+    let only_nodes: Option<Vec<Element>> = open.only.map(|key| {
+        let rows = items.iter().find_map(|i| match i {
+            PanelMenuItem::Submenu { label, spec } if *label == key => Some(*spec),
+            _ => None,
+        }).map(|spec| super::panel_menu::submenu_rows(content_id, spec, &st))
+            .and_then(|r| r.as_array().cloned()).unwrap_or_default();
+        if rows.is_empty() {
+            vec![rsx! { div { style: "padding:4px 16px; font-size:13px; color:{THEME_TEXT_HINT}; opacity:0.5;", "(none)" } }]
+        } else {
+            rows.into_iter().map(&render_row).collect()
+        }
+    });
+
+    let item_nodes: Vec<Result<VNode, RenderError>> = if let Some(nodes) = only_nodes { nodes } else { items.into_iter().map(|item| {
         match item {
             PanelMenuItem::Action { label, command, shortcut } if command == "open_swatch_library" => {
                 // Submenu host: hovering shows a flyout listing every
@@ -257,40 +315,8 @@ pub fn PanelMenuOverlay() -> Element {
                 let display_label = format!("{label} \u{25B6}"); // ▶
                 let rows = super::panel_menu::submenu_rows(content_id, spec, &st);
                 let is_open = submenu_open_for() == Some(key);
-                let row_nodes: Vec<Result<VNode, RenderError>> = rows.as_array().cloned().unwrap_or_default()
-                    .into_iter().map(|row| {
-                    let act = act.clone();
-                    let enabled = row.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-                    let checked = row.get("checked").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let prefix = if checked { "\u{2713} " } else { "    " };
-                    let text = row.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let display = format!("{prefix}{text}");
-                    let (color, cursor, opacity) = if enabled {
-                        (THEME_TEXT, "pointer", "1")
-                    } else {
-                        (THEME_TEXT_HINT, "default", "0.5")
-                    };
-                    rsx! {
-                        div {
-                            class: "jas-menu-item",
-                            style: "padding:4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
-                            onclick: move |evt: Event<MouseData>| {
-                                evt.stop_propagation();
-                                if !enabled {
-                                    return;
-                                }
-                                let row = row.clone();
-                                (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    super::panel_menu::dispatch_menu_row(content_id, &row, st);
-                                }));
-                                submenu_open_for.set(None);
-                                panel_menu.open.set(None);
-                            },
-                            "{display}"
-                        }
-                    }
-                }).collect();
+                let row_nodes: Vec<Element> = rows.as_array().cloned().unwrap_or_default()
+                    .into_iter().map(&render_row).collect();
                 let empty = row_nodes.is_empty();
                 rsx! {
                     div {
@@ -323,7 +349,7 @@ pub fn PanelMenuOverlay() -> Element {
                 }
             }
         }
-    }).collect();
+    }).collect() };
 
     drop(st);
 

@@ -22,6 +22,10 @@ pub struct PanelMenuOpen {
     pub x: f64,
     /// Screen Y of the hamburger button click.
     pub y: f64,
+    /// When set, the menu shows ONLY the rows of this submenu (keyed by its
+    /// label): what an `open_menu` effect asks for, so the Brushes toolbar's
+    /// library button pops up Open Brush Library's rows at the button.
+    pub only: Option<&'static str>,
 }
 
 /// Wraps the menu bar's open-menu signal so it can be accessed as a context.

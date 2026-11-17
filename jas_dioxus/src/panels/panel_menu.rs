@@ -266,6 +266,44 @@ pub fn submenu_rows(
     crate::interpreter::menu_state::items_from_entries(spec, &panel_menu_ctx(content_id, st))
 }
 
+/// The panel, its address and the submenu label for a menu item an
+/// `open_menu` effect named by its declared `id` (`AppState::pending_menu`).
+/// `None` when no panel menu declares an `items_from` item with that id, or
+/// when that panel is not in the layout (there is nowhere to anchor it). Every
+/// panel kind is searched, the toggle-only ones (Brushes, Gradient, Concepts)
+/// included, which `PanelKind::ALL` leaves out.
+pub fn menu_request_target(
+    id: &str,
+    layout: &crate::workspace::workspace::WorkspaceLayout,
+) -> Option<(crate::workspace::workspace::PanelKind, crate::workspace::workspace::PanelAddr, &'static str)> {
+    use crate::workspace::workspace::PanelKind;
+    if id.is_empty() {
+        return None;
+    }
+    let ws = crate::interpreter::workspace::Workspace::load()?;
+    let kinds = PanelKind::ALL.iter().copied()
+        .chain([PanelKind::Brushes, PanelKind::Gradient, PanelKind::Concepts]);
+    for kind in kinds {
+        let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+        let declares = ws.panel_menu(content_id).iter().find_map(|e| {
+            let o = e.as_object()?;
+            (o.get("id").and_then(|v| v.as_str()) == Some(id) && o.contains_key("items_from"))
+                .then(|| o.get("label").and_then(|v| v.as_str()).map(str::to_string))
+                .flatten()
+        });
+        if let Some(label) = declares {
+            let addr = crate::workspace::layout_apply::find_panel(layout, kind)?;
+            // The menu view keys a submenu by its built item's label.
+            let key = menu_items_from_yaml(content_id).into_iter().find_map(|i| match i {
+                PanelMenuItem::Submenu { label: l, .. } if l == label => Some(l),
+                _ => None,
+            })?;
+            return Some((kind, addr, key));
+        }
+    }
+    None
+}
+
 /// Run one chosen `items_from` row: its YAML action with its params, which
 /// [`submenu_rows`] has already evaluated (so nothing is folded into a command
 /// and split back off), in the panel's scope with the panel as the menu
@@ -666,6 +704,31 @@ mod tests {
             PanelMenuItem::Submenu { label, spec } => Some((label, spec)),
             _ => None,
         }).expect("the Brushes menu builds an items_from submenu")
+    }
+
+    /// `open_menu` names a menu ITEM by its declared `id`; the web host pops
+    /// up that item's submenu, which needs the panel that declares it, that
+    /// panel's address in the layout, and the label the menu view keys the
+    /// submenu by.
+    #[test]
+    fn a_menu_request_resolves_to_its_panel_address_and_submenu() {
+        use crate::workspace::workspace::PanelKind;
+        let mut st = crate::workspace::app_state::AppState::new();
+        assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout), None,
+                   "Brushes is not in the default layout, so it has no address");
+        crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout,
+            &crate::workspace::layout_apply::op_toggle_panel(PanelKind::Brushes));
+        let brushes = crate::workspace::layout_apply::find_panel(&st.workspace_layout, PanelKind::Brushes)
+            .expect("Window > Brushes docks it");
+        assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout),
+                   Some((PanelKind::Brushes, brushes, "Open Brush Library")));
+        for id in ["", "no_such_item", "Open Brush Library"] {
+            assert_eq!(menu_request_target(id, &st.workspace_layout), None, "{id:?} names no item");
+        }
+        // Closed again: no address, so nothing opens.
+        crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(brushes));
+        assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout), None);
     }
 
     #[test]
