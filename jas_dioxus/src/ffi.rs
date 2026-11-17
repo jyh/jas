@@ -8668,7 +8668,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "menu", "remove_tab", "save_all_then_close"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -8692,7 +8692,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -8748,13 +8748,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
