@@ -193,8 +193,11 @@ runtime_contexts:
         item_type: object
         description: >
           Top-level Layer elements as flat dicts with keys
-          {kind, name, common: {visibility, locked}, path}. Used by
-          bulk-toggle actions (toggle_all_layers_*) to iterate.
+          {kind, name, common: {visibility, locked}, path, color}.
+          Used by bulk-toggle actions (toggle_all_layers_*) to iterate.
+          color is the layer's own colour (#rrggbb) or null when it has
+          none (STATUS-jas row 53(b)); Layer Options' edit mode reads it
+          through element_at.
       top_level_layer_paths:
         type: list
         item_type: path

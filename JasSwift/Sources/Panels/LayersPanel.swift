@@ -331,6 +331,7 @@ public enum LayersPanel {
             var newVisibility = layer.visibility
             var newLocked = layer.locked
             var newName = layer.name
+            var newColor = layer.color
             for (dotted, exprV) in fields {
                 let exprStr = (exprV as? String) ?? ""
                 let v = evaluate(exprStr, context: callCtx)
@@ -348,6 +349,14 @@ public enum LayersPanel {
                     if case .bool(let b) = v { newLocked = b }
                 case "name":
                     if case .string(let s) = v { newName = s }
+                case "color":
+                    // The layer's own colour (row 53(b)); a non-colour writes nothing.
+                    // A `#rrggbb` read from context evaluates to .color, a literal to .string.
+                    switch v {
+                    case .string(let s), .color(let s):
+                        if let c = normalizeLayerColor(s) { newColor = c }
+                    default: break
+                    }
                 default: break
                 }
             }
@@ -362,6 +371,7 @@ public enum LayersPanel {
             newLayers[idx] = layer.withName(newName)
                                   .withLocked(newLocked)
                                   .withVisibility(newVisibility)
+                                  .withColor(newColor)
             // .replacing(...) preserves documentSetup / printPreferences
             // — passing them through the designated init silently drops
             // any field not enumerated, which would reset the user's

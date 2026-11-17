@@ -3523,7 +3523,8 @@
               "visibility": "invisible",
               "locked": true,
               "is_container": true,
-              "element_selected": false
+              "element_selected": false,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -3537,7 +3538,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": true,
-              "element_selected": false
+              "element_selected": false,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -3552,7 +3554,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": true,
-              "element_selected": true
+              "element_selected": true,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -3568,7 +3571,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": false,
-              "element_selected": true
+              "element_selected": true,
+              "ancestor_layer_color": ""
             },
             {
               "path": [
@@ -3583,7 +3587,8 @@
               "visibility": "preview",
               "locked": false,
               "is_container": false,
-              "element_selected": false
+              "element_selected": false,
+              "ancestor_layer_color": ""
             }
           ],
           "element_selection": [
@@ -3720,7 +3725,7 @@
         "id": "lp_tree",
         "key": "bind.source",
         "type": "list",
-        "value": "[{\"depth\":0,\"element_selected\":false,\"id\":null,\"is_container\":true,\"locked\":true,\"name\":\"Front\",\"path\":[1],\"type\":\"layer\",\"type_label\":\"Layer\",\"visibility\":\"invisible\"},{\"depth\":0,\"element_selected\":false,\"id\":null,\"is_container\":true,\"locked\":false,\"name\":\"Back\",\"path\":[0],\"type\":\"layer\",\"type_label\":\"Layer\",\"visibility\":\"preview\"},{\"depth\":1,\"element_selected\":true,\"id\":null,\"is_container\":true,\"locked\":false,\"name\":\"G\",\"path\":[0,1],\"type\":\"group\",\"type_label\":\"Group\",\"visibility\":\"preview\"},{\"depth\":2,\"element_selected\":true,\"id\":null,\"is_container\":false,\"locked\":false,\"name\":\"\",\"path\":[0,1,0],\"type\":\"ellipse\",\"type_label\":\"Circle\",\"visibility\":\"preview\"},{\"depth\":1,\"element_selected\":false,\"id\":null,\"is_container\":false,\"locked\":false,\"name\":\"\",\"path\":[0,0],\"type\":\"rect\",\"type_label\":\"Rectangle\",\"visibility\":\"preview\"}]"
+        "value": "[{\"ancestor_layer_color\":\"\",\"depth\":0,\"element_selected\":false,\"id\":null,\"is_container\":true,\"locked\":true,\"name\":\"Front\",\"path\":[1],\"type\":\"layer\",\"type_label\":\"Layer\",\"visibility\":\"invisible\"},{\"ancestor_layer_color\":\"\",\"depth\":0,\"element_selected\":false,\"id\":null,\"is_container\":true,\"locked\":false,\"name\":\"Back\",\"path\":[0],\"type\":\"layer\",\"type_label\":\"Layer\",\"visibility\":\"preview\"},{\"ancestor_layer_color\":\"\",\"depth\":1,\"element_selected\":true,\"id\":null,\"is_container\":true,\"locked\":false,\"name\":\"G\",\"path\":[0,1],\"type\":\"group\",\"type_label\":\"Group\",\"visibility\":\"preview\"},{\"ancestor_layer_color\":\"\",\"depth\":2,\"element_selected\":true,\"id\":null,\"is_container\":false,\"locked\":false,\"name\":\"\",\"path\":[0,1,0],\"type\":\"ellipse\",\"type_label\":\"Circle\",\"visibility\":\"preview\"},{\"ancestor_layer_color\":\"\",\"depth\":1,\"element_selected\":false,\"id\":null,\"is_container\":false,\"locked\":false,\"name\":\"\",\"path\":[0,0],\"type\":\"rect\",\"type_label\":\"Rectangle\",\"visibility\":\"preview\"}]"
       },
       {
         "path": [

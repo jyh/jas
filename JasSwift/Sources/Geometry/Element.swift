@@ -3827,6 +3827,11 @@ extension Layer {
     public func withVisibility(_ visibility: Visibility) -> Layer {
         var v = self; v.visibility = visibility; return v
     }
+
+    /// Clone-then-mutate the layer's own colour (STATUS-jas row 53(b)).
+    public func withColor(_ color: String?) -> Layer {
+        var v = self; v.color = color; return v
+    }
 }
 
 // MARK: - Path geometry utilities
