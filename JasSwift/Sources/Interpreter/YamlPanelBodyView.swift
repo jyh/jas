@@ -3606,6 +3606,19 @@ private let layerColors = [
     "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
 ]
 
+/// The colour a native tree row draws for `elem` (STATUS-jas row 146): a
+/// layer's STORED colour (#962) wins; a top-level layer with none takes the
+/// nine-colour index cycle (`indexAtTop`), a nested one with none inherits;
+/// anything else inherits. Only the fallback is synthesised, so a stored
+/// colour is never drawn as a different one. Internal so a test reaches it
+/// without rendering the view. Mirrors Rust's `native_layer_color`.
+func rowLayerColor(_ elem: Element, indexAtTop: Int?, inherited: String) -> String {
+    guard case .layer(let l) = elem else { return inherited }
+    if let c = l.color { return c }
+    if let i = indexAtTop { return layerColors[i % layerColors.count] }
+    return inherited
+}
+
 private func elementTypeLabel(_ elem: Element) -> String { treeTypeLabel(elem) }
 
 /// The Layers-panel row label: the artist's own name when the element has
@@ -4007,12 +4020,7 @@ struct TreeViewContent: View {
                 let path = prefix + [i]
                 let isCont = isContainerElem(elem)
                 let isColl = collapsed.contains(path)
-                let myColor: String = {
-                    if case .layer = elem, path.count == 1 {
-                        return layerColors[i % layerColors.count]
-                    }
-                    return color
-                }()
+                let myColor = rowLayerColor(elem, indexAtTop: path.count == 1 ? i : nil, inherited: color)
                 let id = path.map(String.init).joined(separator: "_")
                 out.append(FlatRow(id: id, path: path, elem: elem, depth: depth,
                                    isContainer: isCont, isCollapsed: isColl, layerColor: myColor))
