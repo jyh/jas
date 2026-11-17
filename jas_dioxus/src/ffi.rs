@@ -1275,7 +1275,7 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
 /// "remove_tab": <index> | null, "close_window": <bool>,
 /// "save_all_then_close": <bool>, "clipboard_write": <text> | null,
 /// "export_pdf": <file name> | null, "layout": <layout> | null,
-/// "menu": <menu item id> | null}` ([`act_reply`];
+/// "menu": <menu item id> | null, "writes": [<write>...]}` ([`act_reply`];
 /// `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
 /// is the Print button's).
 /// `close_window` names a window close the shell must do (the engine owns no
@@ -1732,7 +1732,12 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
 /// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
 /// null, "export_pdf": <file name> | null, "layout": <layout> | null,
-/// "menu": <menu item id> | null}`. `menu` names a declared panel-menu item whose
+/// "menu": <menu item id> | null, "writes": [{kind, slug, manifest}...]}`.
+/// `writes` are the file writes a library save queued (`brush.save_library`,
+/// `swatch.save_library`): the engine owns no file system, so the shell writes
+/// each (a `brush_library` as `brushes/<slug>/library.json`, a `swatch_library`
+/// as `swatches/<slug>.json`); they too are taken by the reply that names
+/// them. `menu` names a declared panel-menu item whose
 /// submenu the shell must pop up at the act (an `open_menu` effect: the Brushes
 /// toolbar's library button names `bp_menu_open_library`, STATUS-jas row 8);
 /// the shell reads that item's rows from [`jas_panel_menu`]. It is TAKEN from
@@ -1748,8 +1753,9 @@ fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: 
                                    named: Named) -> serde_json::Value {
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
     let menu = engine.store.borrow_mut().pending_menu.take();
+    let writes = std::mem::take(&mut engine.store.borrow_mut().pending_writes);
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
-                       "menu": menu,
+                       "menu": menu, "writes": writes,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
                        "save_all_then_close": named.save_all_then_close,
                        "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf,
@@ -8668,7 +8674,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "menu", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "menu", "remove_tab", "save_all_then_close", "writes"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -8692,7 +8698,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false,"writes":[]}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -8748,13 +8754,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false,"writes":[]}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false,"writes":[]}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
@@ -9942,6 +9948,30 @@ mod tests {
     /// `"menu": <item id>`, for the shell to pop up the declared item's rows
     /// (its `jas_panel_menu` plan); every other reply carries `"menu": null`.
     /// The request is taken by the reply that names it, so it is named once.
+    /// A library save queues a file write the engine cannot do (it owns no
+    /// file system), so the act reply NAMES it: `"writes": [{kind, slug,
+    /// manifest}...]`, taken from the store by the reply that names it; every
+    /// other reply carries `[]`. The Windows shell writes each (row 8, §3.4).
+    #[test]
+    fn a_library_save_names_its_file_write_in_the_reply_once() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let (reply, err) = dispatch(e, r#"{"action":"save_brush_library_confirm","params":{"library":"default_brushes","name":"My Set"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        let writes = v["writes"].as_array().unwrap_or_else(|| panic!("no writes key: {reply}"));
+        assert_eq!(writes.len(), 1, "{reply}");
+        assert_eq!(writes[0]["kind"], serde_json::json!("brush_library"));
+        assert_eq!(writes[0]["slug"], serde_json::json!("my_set"));
+        assert_eq!(writes[0]["manifest"]["name"], serde_json::json!("My Set"));
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_brush_library_open","params":{"library":"default_brushes"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["writes"], serde_json::json!([]), "taken by the reply that named it: {reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn the_brush_libraries_button_names_its_menu_in_the_reply() {
         use crate::panel_behavior::test_fixture::misaligned;

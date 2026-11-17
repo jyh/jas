@@ -509,6 +509,11 @@ pub fn panel_menu_ctx(
     ctx.insert("data".into(), serde_json::json!({
         "brush_libraries": st.brush_libraries.clone(),
         "swatch_libraries": st.swatch_libraries.clone(),
+        // Read-only: no port edits a gradient library yet (Open Gradient
+        // Library, §3.4, reads the bundle's).
+        "gradient_libraries": crate::interpreter::workspace::Workspace::load()
+            .and_then(|ws| ws.data().get("gradient_libraries").cloned())
+            .unwrap_or_else(|| serde_json::json!({})),
     }));
     // `selection_has_mask` and its siblings sit at TOP level, as the body's
     // eval map places them, so `enabled_when: "!selection_has_mask"` reads the
@@ -755,6 +760,29 @@ mod tests {
         assert_eq!(rows[0]["checked"], serde_json::json!(false));
         dispatch_menu_row("swatches_panel_content", &rows[0], &mut st);
         assert_eq!(st.swatches_panel.open_libraries, serde_json::json!([{"id": "web_colors", "collapsed": false}]));
+    }
+
+    /// Open Gradient Library (§3.4) is a RADIO over the bundle's gradient
+    /// libraries: one row per library in id order, checked where it is the
+    /// active one, and a row makes its library active.
+    #[test]
+    fn the_gradient_library_rows_are_a_radio_over_the_active_library() {
+        let spec = menu_items_from_yaml("gradient_panel_content").into_iter().find_map(|i| match i {
+            PanelMenuItem::Submenu { spec, .. } => Some(spec),
+            _ => None,
+        }).expect("the Gradient submenu");
+        let mut st = crate::workspace::app_state::AppState::new();
+        let rows = submenu_rows("gradient_panel_content", spec, &st);
+        let ids: Vec<_> = rows.as_array().unwrap().iter().map(|r| r["params"]["library"].clone()).collect();
+        assert_eq!(ids, vec![serde_json::json!("neutrals"), serde_json::json!("simple_radial"), serde_json::json!("spectrums")]);
+        let checked: Vec<_> = rows.as_array().unwrap().iter().map(|r| r["checked"].clone()).collect();
+        assert_eq!(checked, vec![serde_json::json!(true), serde_json::json!(false), serde_json::json!(false)], "{rows}");
+        assert_eq!(rows[2]["label"], serde_json::json!("Spectrums"));
+        dispatch_menu_row("gradient_panel_content", &rows[2], &mut st);
+        assert_eq!(panel_menu_ctx("gradient_panel_content", &st)["panel"]["active_library_id"], serde_json::json!("spectrums"));
+        let rows = submenu_rows("gradient_panel_content", spec, &st);
+        assert_eq!(rows[0]["checked"], serde_json::json!(false), "one active at a time");
+        assert_eq!(rows[2]["checked"], serde_json::json!(true));
     }
 
     #[test]

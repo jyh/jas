@@ -765,7 +765,7 @@ struct JasBytes jas_layout_edge_rects(struct JasEngine *e, const uint8_t *cell, 
  * "remove_tab": <index> | null, "close_window": <bool>,
  * "save_all_then_close": <bool>, "clipboard_write": <text> | null,
  * "export_pdf": <file name> | null, "layout": <layout> | null,
- * "menu": <menu item id> | null}` ([`act_reply`];
+ * "menu": <menu item id> | null, "writes": [<write>...]}` ([`act_reply`];
  * `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
  * is the Print button's).
  * `close_window` names a window close the shell must do (the engine owns no

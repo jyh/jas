@@ -143,3 +143,17 @@ private let libsSpec: [String: Any] = [
             "web_colors is open by default")
     #expect(rows.first?.action == "toggle_swatch_library_open")
 }
+
+// Open Gradient Library (§3.4): a radio over the bundle's gradient libraries.
+@Test func theGradientLibraryRowsAreARadioOverTheActiveLibrary() {
+    let model = Model()
+    guard let hit = panelMenuRequest("grad_menu_open_library") else {
+        Issue.record("gradient.yaml declares grad_menu_open_library with items_from"); return
+    }
+    #expect(hit.kind == .gradient)
+    let rows = panelSubmenuRows(.gradient, spec: hit.spec, layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.params["library"] as? String } == ["neutrals", "simple_radial", "spectrums"])
+    #expect(rows.map { $0.checked } == [true, false, false], "neutrals is the default")
+    panelDispatchRow(.gradient, action: rows[2].action, params: rows[2].params, model: model)
+    #expect(model.stateStore.getPanel("gradient_panel_content", "active_library_id") as? String == "spectrums")
+}

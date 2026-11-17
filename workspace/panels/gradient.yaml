@@ -144,14 +144,27 @@ menu:
     enabled_when: "false"
   - separator
   - label: "Open Gradient Library"
+    id: grad_menu_open_library
     type: submenu
     dynamic: true
+    items_from:
+      source: "keys(data.gradient_libraries)"
+      as: lib
+      item:
+        label: "{{if data.gradient_libraries[lib].name == null then lib else data.gradient_libraries[lib].name}}"
+        action: set_gradient_active_library
+        params: { library: "lib" }
+        checked_when: "panel.active_library_id == lib"
     description: >
-      Submenu listing all available gradient libraries discovered from
-      workspace/gradients/*.json files. Selecting a library switches
-      the active library in DOCUMENT_LIBRARY_DROPDOWN so its tiles
-      populate the preset strip. Mirrors the Swatches panel Open
-      Swatch Library submenu behavior.
+      Submenu with one row per gradient library the app knows (the
+      workspace/gradients/*.json files), rebuilt each time the menu
+      opens, in id order (Unicode code point), each labelled with the
+      library's name (its id when it has none). The row of the active
+      library is checked. Choosing a row makes that library the active
+      one (set_gradient_active_library), so its tiles populate the
+      preset strip and DOCUMENT_LIBRARY_DROPDOWN shows it. Unlike the
+      Swatches and Brushes submenus this is a radio: the panel shows
+      one library at a time.
   - label: "Save Gradient Library"
     action: gradient_save_library
     enabled_when: "false"
