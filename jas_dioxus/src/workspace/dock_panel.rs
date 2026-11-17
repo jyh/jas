@@ -1023,6 +1023,11 @@ pub(crate) fn panel_body_eval_ctx(
             .cloned().unwrap_or(serde_json::Value::Null),
         "brush_libraries": live_state_map.get("_brush_libraries")
             .cloned().unwrap_or(serde_json::Value::Null),
+        // The Gradient preset strip's libraries, the bundle's (read-only so
+        // far); until 2026-11-17 the strip read null here.
+        "gradient_libraries": crate::interpreter::workspace::Workspace::load()
+            .and_then(|ws| ws.data().get("gradient_libraries").cloned())
+            .unwrap_or(serde_json::Value::Null),
         "concepts": crate::interpreter::workspace::concepts_list(),
         "_doc_generation": live_state_map.get("_doc_generation")
             .cloned().unwrap_or(serde_json::Value::Null)

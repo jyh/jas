@@ -157,3 +157,15 @@ private let libsSpec: [String: Any] = [
     panelDispatchRow(.gradient, action: rows[2].action, params: rows[2].params, model: model)
     #expect(model.stateStore.getPanel("gradient_panel_content", "active_library_id") as? String == "spectrums")
 }
+
+// The Gradient panel body's preset strip reads
+// `data.gradient_libraries[panel.active_library_id].gradients`; the body
+// context published only brush and swatch libraries (row 8, §3.4).
+@Test func theGradientPanelBodyReadsTheBundlesGradientLibraries() {
+    guard let ws = WorkspaceData.load() else { Issue.record("no bundle"); return }
+    let ctx = buildPanelBodyContext(ws: ws, model: Model(), contentId: "gradient_panel_content",
+                                    opacityPanel: WorkspaceLayout.defaultLayout().opacityPanel)
+    let strip = evaluate("data.gradient_libraries[panel.active_library_id].gradients", context: ctx)
+    guard case .list(let items) = strip else { Issue.record("not a list: \(strip)"); return }
+    #expect(!items.isEmpty)
+}

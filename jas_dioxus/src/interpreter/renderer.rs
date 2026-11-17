@@ -15059,6 +15059,20 @@ mod tests {
         assert_eq!(st.pending_menu.as_deref(), Some("bp_menu_open_library"));
     }
 
+    /// The Gradient panel body's preset strip reads
+    /// `data.gradient_libraries[panel.active_library_id].gradients`; the body
+    /// context published only the brush and swatch libraries, so the strip
+    /// read null on the web (the engine's twin was #969).
+    #[test]
+    fn the_gradient_panel_body_reads_the_bundles_gradient_libraries() {
+        let st = AppState::new();
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "gradient_panel_content")
+            .expect("the body context");
+        let strip = expr::eval("data.gradient_libraries[panel.active_library_id].gradients", &ctx);
+        let n = super::super::effects::value_to_json(&strip).as_array().map(|a| a.len()).unwrap_or(0);
+        assert!(n > 0, "the default library's gradients: {:?}", ctx["data"].as_object().map(|m| m.keys().collect::<Vec<_>>()));
+    }
+
     #[test]
     fn sort_brushes_by_name_runs_in_the_web_app() {
         let mut st = AppState::new();

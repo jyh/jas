@@ -1023,7 +1023,9 @@ func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
         "state": stateMap,
         "panel": panelMap,
         "icons": icons,
-        "data": ["swatch_libraries": swatchLibs, "brush_libraries": (model?.stateStore.getDataPath("brush_libraries") as? [String: Any]) ?? ws.brushLibraries(), "concepts": ws.conceptsList()] as [String: Any],
+        // `gradient_libraries`: the Gradient preset strip's, the bundle's
+        // (read-only so far); until 2026-11-17 the strip read null here.
+        "data": ["swatch_libraries": swatchLibs, "brush_libraries": (model?.stateStore.getDataPath("brush_libraries") as? [String: Any]) ?? ws.brushLibraries(), "gradient_libraries": ws.data["gradient_libraries"] ?? [String: Any](), "concepts": ws.conceptsList()] as [String: Any],
         "active_document": buildActiveDocumentView(
             model: model,
             layersPanelSelection: layersPanelSelection
