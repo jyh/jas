@@ -88,6 +88,8 @@ mod tests {
             )),
             swatch_libraries: serde_json::json!({}),
             brush_libraries: serde_json::json!({}),
+            pending_writes: Vec::new(),
+            pending_menu: None,
             stroke_panel: StrokePanelState::default(),
             gradient_panel: crate::workspace::app_state::GradientPanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),

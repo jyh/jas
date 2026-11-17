@@ -632,6 +632,8 @@ mod tests {
             app_default_stroke: Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0)),
             swatch_libraries: serde_json::json!({}),
             brush_libraries: serde_json::json!({}),
+            pending_writes: Vec::new(),
+            pending_menu: None,
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
             gradient_panel: crate::workspace::app_state::GradientPanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),
