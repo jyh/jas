@@ -1274,7 +1274,8 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
 /// "remove_tab": <index> | null, "close_window": <bool>,
 /// "save_all_then_close": <bool>, "clipboard_write": <text> | null,
-/// "export_pdf": <file name> | null, "layout": <layout> | null}` ([`act_reply`];
+/// "export_pdf": <file name> | null, "layout": <layout> | null,
+/// "menu": <menu item id> | null}` ([`act_reply`];
 /// `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
 /// is the Print button's).
 /// `close_window` names a window close the shell must do (the engine owns no
@@ -1730,7 +1731,12 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
 /// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
-/// null, "export_pdf": <file name> | null, "layout": <layout> | null}`. `layout` is
+/// null, "export_pdf": <file name> | null, "layout": <layout> | null,
+/// "menu": <menu item id> | null}`. `menu` names a declared panel-menu item whose
+/// submenu the shell must pop up at the act (an `open_menu` effect: the Brushes
+/// toolbar's library button names `bp_menu_open_library`, STATUS-jas row 8);
+/// the shell reads that item's rows from [`jas_panel_menu`]. It is TAKEN from
+/// the store by the reply that names it, so a request is named once. `layout` is
 /// the engine's layout after a `layout:` effect moved it (Window > Toolbar), as
 /// [`jas_layout_state`] answers it, for the shell to apply. `export_pdf` names a PDF save the
 /// shell must do (Print > Print; the engine owns no file system): the file name
@@ -1741,7 +1747,9 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool,
                                    named: Named) -> serde_json::Value {
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
+    let menu = engine.store.borrow_mut().pending_menu.take();
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
+                       "menu": menu,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
                        "save_all_then_close": named.save_all_then_close,
                        "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf,
@@ -9849,17 +9857,26 @@ mod tests {
     }
 
     /// The Brushes toolbar's library button runs `open_menu` (row 8): a HOST
-    /// request, so the engine does not refuse it as a stub; it answers
-    /// `Unchanged`, because the reply carries no menu request yet and the
-    /// Windows shell pops nothing up (a declared gap, the next row-8 node).
+    /// request. The engine owns no menus, so the act reply NAMES it,
+    /// `"menu": <item id>`, for the shell to pop up the declared item's rows
+    /// (its `jas_panel_menu` plan); every other reply carries `"menu": null`.
+    /// The request is taken by the reply that names it, so it is named once.
     #[test]
-    fn the_brush_libraries_button_is_no_longer_a_log_stub() {
+    fn the_brush_libraries_button_names_its_menu_in_the_reply() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0]));
         let (reply, err) = behave(e, "brushes_panel_content",
                                   r#"{"widget":"bp_libraries_menu_btn","event":"click"}"#);
-        assert_eq!(err, refusal("Unchanged", "bp_libraries_menu_btn"), "not refused as a stub: {reply}");
+        assert_eq!(err, "", "a menu request is not Unchanged");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["menu"], serde_json::json!("bp_menu_open_library"), "{reply}");
+        assert_eq!(v["doc_changed"], serde_json::json!(false));
+        // The next act names no menu: the request was taken by the reply above.
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_brush_library_open","params":{"library":"default_brushes"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["menu"], serde_json::Value::Null, "{reply}");
         unsafe { jas_engine_free(e) };
     }
 
