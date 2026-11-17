@@ -86,15 +86,22 @@ layer_options:
       min: 0
       max: 100
       description: "Opacity percentage for dimmed raster images"
-  # color, color_preset, dim_images and dim_percentage have no init: a
-  # layer stores none of them, so open_layer_options passes no such
-  # params, and an init reading `param.color` evaluated to null and
-  # erased the declared default (found by expected_dialog, 2026-10-13).
+  # dim_images and dim_percentage have no init: a layer stores neither,
+  # so open_layer_options passes no such params, and an init reading
+  # an absent param evaluates to null and erases the declared default
+  # (found by expected_dialog, 2026-10-13). The colour IS stored on the
+  # layer (STATUS-jas row 53(b)), and open_layer_options passes it;
+  # with none passed (an open with no document) the declared default
+  # #4a90d9 is kept. color_preset is derived from it through hex()
+  # (a #rrggbb read from context is a COLOR, which never equals a
+  # string literal), 'custom' for a colour that is no preset.
   init:
     name: "param.name"
     lock: "param.lock"
     show: "param.show"
     preview: "param.preview"
+    color: "if param.color then param.color else '#4a90d9'"
+    color_preset: "if hex((if param.color then param.color else '#4a90d9')) == '4a90d9' then 'light_blue' else if hex((if param.color then param.color else '#4a90d9')) == 'd94a4a' then 'red' else if hex((if param.color then param.color else '#4a90d9')) == '4ad94a' then 'green' else if hex((if param.color then param.color else '#4a90d9')) == '4a4ad9' then 'blue' else if hex((if param.color then param.color else '#4a90d9')) == 'd9d94a' then 'yellow' else if hex((if param.color then param.color else '#4a90d9')) == 'd94ad9' then 'magenta' else if hex((if param.color then param.color else '#4a90d9')) == '4ad9d9' then 'cyan' else if hex((if param.color then param.color else '#4a90d9')) == 'b0b0b0' then 'light_gray' else if hex((if param.color then param.color else '#4a90d9')) == '2a7a2a' then 'dark_green' else 'custom'"
   content:
     type: container
     layout: column
@@ -151,7 +158,7 @@ layer_options:
                       it appears automatically when the swatch color
                       does not match any preset.
                     effects:
-                      - log: "color_preset_change"
+                      - set: { dialog.color: "if dialog.color_preset == 'light_blue' then '#4a90d9' else if dialog.color_preset == 'red' then '#d94a4a' else if dialog.color_preset == 'green' then '#4ad94a' else if dialog.color_preset == 'blue' then '#4a4ad9' else if dialog.color_preset == 'yellow' then '#d9d94a' else if dialog.color_preset == 'magenta' then '#d94ad9' else if dialog.color_preset == 'cyan' then '#4ad9d9' else if dialog.color_preset == 'light_gray' then '#b0b0b0' else if dialog.color_preset == 'dark_green' then '#2a7a2a' else dialog.color" }
           - type: col
             col: 3
             children:
@@ -284,3 +291,4 @@ layer_options:
               lock: "dialog.lock"
               show: "dialog.show"
               preview: "dialog.preview"
+              color: "dialog.color"

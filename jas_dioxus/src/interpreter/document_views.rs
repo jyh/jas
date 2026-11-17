@@ -537,12 +537,18 @@ fn tree_type_name(elem: &Element) -> &'static str {
 /// `test_fixtures/layers/element_tree.json`.
 pub fn element_tree(doc: &Document) -> Value {
     use crate::geometry::element::Visibility;
-    fn walk(children: &[&Element], prefix: &[usize], depth: usize,
+    // `layer_color`: the nearest LAYER's colour at or above the row (row
+    // 53(b)), a layer row's own; "" when that layer has none, never invented.
+    fn walk(children: &[&Element], prefix: &[usize], depth: usize, layer_color: &str,
             selected: &std::collections::HashSet<Vec<usize>>, rows: &mut Vec<Value>) {
         for (i, elem) in children.iter().enumerate().rev() {
             let mut path = prefix.to_vec();
             path.push(i);
             let c = elem.common();
+            let color: &str = match elem {
+                Element::Layer(le) => le.color.as_deref().unwrap_or(""),
+                _ => layer_color,
+            };
             let visibility = match c.visibility {
                 Visibility::Invisible => "invisible",
                 Visibility::Outline => "outline",
@@ -555,16 +561,17 @@ pub fn element_tree(doc: &Document) -> Value {
                 "visibility": visibility, "locked": c.locked,
                 "is_container": elem.is_group_or_layer(),
                 "element_selected": crate::document::controller::path_is_selected_or_under(selected, &path),
+                "ancestor_layer_color": color,
             }));
             if let Some(kids) = elem.children() {
                 let kids: Vec<&Element> = kids.iter().map(|k| &**k).collect();
-                walk(&kids, &path, depth + 1, selected, rows);
+                walk(&kids, &path, depth + 1, color, selected, rows);
             }
         }
     }
     let mut rows = Vec::new();
     let top: Vec<&Element> = doc.layers.iter().collect();
-    walk(&top, &[], 0, &doc.selected_paths(), &mut rows);
+    walk(&top, &[], 0, "", &doc.selected_paths(), &mut rows);
     Value::Array(rows)
 }
 
@@ -658,6 +665,9 @@ pub fn active_document_view(
                     "opacity": le.common.opacity,
                 },
                 "path": path_json.clone(),
+                // The layer's own colour (row 53(b)), null when it has none;
+                // Layer Options' edit mode reads it through element_at.
+                "color": le.color,
                 "children": elem.children().map(|k| k.iter().map(|c| element_node_view(c)).collect::<Vec<_>>())
                     .unwrap_or_default(),
             }));

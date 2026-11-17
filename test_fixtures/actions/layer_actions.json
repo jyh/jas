@@ -96,7 +96,8 @@
         "name": "Foreground",
         "lock": false,
         "show": true,
-        "preview": true
+        "preview": true,
+        "color": "#4a90d9"
       },
       "state": {
         "name": "Foreground",
@@ -131,15 +132,52 @@
         "name": "",
         "lock": false,
         "show": true,
-        "preview": true
+        "preview": true,
+        "color": "#4ad94a"
       },
       "state": {
         "name": "",
         "lock": false,
         "show": true,
         "preview": true,
-        "color": "#4a90d9",
-        "color_preset": "light_blue",
+        "color": "#4ad94a",
+        "color_preset": "green",
+        "dim_images": false,
+        "dim_percentage": 50
+      }
+    }
+  },
+  {
+    "name": "open_layer_options_edit_reads_a_stored_colour",
+    "setup_svg": "layer_color.svg",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "edit",
+          "layer_id": "2"
+        }
+      }
+    ],
+    "expected_json": "open_layer_options_edit_stored_colour_expected.json",
+    "expected_dialog": {
+      "id": "layer_options",
+      "params": {
+        "mode": "edit",
+        "layer_id": "2",
+        "name": "Upper",
+        "lock": false,
+        "show": true,
+        "preview": true,
+        "color": "#ff8000"
+      },
+      "state": {
+        "name": "Upper",
+        "lock": false,
+        "show": true,
+        "preview": true,
+        "color": "#ff8000",
+        "color_preset": "custom",
         "dim_images": false,
         "dim_percentage": 50
       }
