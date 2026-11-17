@@ -398,6 +398,15 @@ private func containerBlendAttrs(_ elem: Element) -> String {
     return s
 }
 
+/// A layer's own colour (STATUS-jas row 53(b)) as `jas:layer-color`, only
+/// when it has one. Other SVG editors ignore the attribute, so the colour
+/// survives a jas round trip and not a foreign save. Mirrors Rust's
+/// `layer_color_attr`.
+private func layerColorAttr(_ color: String?) -> String {
+    guard let c = color else { return "" }
+    return " jas:layer-color=\"\(c)\""
+}
+
 private func pathData(_ commands: [PathCommand]) -> String {
     commands.map { cmd in
         switch cmd {
@@ -1076,7 +1085,7 @@ private func elementSvgBody(_ elem: Element, indent: String) -> String {
     case .layer(let v):
         // inkscape:groupmode="layer" lets the parser distinguish a
         // Layer from a named Group (both carry inkscape:label).
-        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(containerBlendAttrs(elem))>"]
+        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(containerBlendAttrs(elem))\(layerColorAttr(v.color))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -2455,7 +2464,9 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
             return .layer(Layer(name: name ?? "", children: children,
                                     opacity: opacity, transform: transform,
                                     isolatedBlending: iso, knockoutGroup: ko,
-                                    id: id))
+                                    id: id,
+                                    color: normalizeLayerColor(
+                                        elem.attribute(forName: "jas:layer-color")?.stringValue)))
         }
         return .group(Group(children: children,
                                 opacity: opacity, transform: transform,
@@ -2805,8 +2816,10 @@ private func svgRootToDocument(_ root: XMLElement) -> Document {
                 //
                 // This is a cross-TYPE conversion, so an explicit list is
                 // unavoidable; it is written as `g.<field>` so
-                // `scripts/check_swift_copy_sites.py` counts it -- 11 of 11
-                // today, and a twelfth field ON LAYER turns it RED (measured).
+                // `scripts/check_swift_copy_sites.py` counts it -- 12 of 12
+                // today, and a thirteenth field ON LAYER turns it RED (measured
+                // when the twelfth, `color`, landed: STATUS-jas row 53(b); a
+                // Group carries no colour, so the promoted layer has none).
                 // A twelfth on GROUP alone does not, because the gate counts a
                 // construction against the type being CONSTRUCTED; that
                 // asymmetry is the honest limit of this particular watch.
@@ -2816,7 +2829,7 @@ private func svgRootToDocument(_ root: XMLElement) -> Document {
                                     blendMode: g.blendMode,
                                     isolatedBlending: g.isolatedBlending,
                                     knockoutGroup: g.knockoutGroup,
-                                    mask: g.mask, id: g.id))
+                                    mask: g.mask, id: g.id, color: nil))
             default:
                 // If the last layer is a nameless wrapper (created by
                 // this same loop on a previous bare element), append

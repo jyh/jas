@@ -256,6 +256,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Document {
             layers: vec![layer],
@@ -302,6 +303,7 @@ mod tests {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],

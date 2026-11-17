@@ -693,6 +693,7 @@ mod tests {
             common: CommonProps { name: Some("L0".into()), ..Default::default() },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],

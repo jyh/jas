@@ -15,7 +15,7 @@ from document.document import (
 )
 from geometry.element import (
     Element, Line, Rect, Circle, Ellipse, Polyline, Polygon,
-    Path, Text, TextPath, Group, Layer,
+    Path, Text, TextPath, Group, Layer, normalize_layer_color,
     Color, RgbColor, HsbColor, CmykColor,
     Fill, Stroke, Transform, Visibility,
     LineCap, LineJoin, Arrowhead, ArrowAlign,
@@ -560,6 +560,10 @@ def _extended_element_fields(o: _JsonObj, elem: Element):
             o.bool_("isolated_blending", True)
         if elem.knockout_group:
             o.bool_("knockout_group", True)
+    # A layer's own colour (row 53(b)), only when it has one, which keeps
+    # every shipped golden byte-identical.
+    if isinstance(elem, Layer) and elem.color is not None:
+        o.str("color", elem.color)
 
 
 def _element_json(elem: Element) -> str:
@@ -1276,6 +1280,7 @@ def _apply_extended_element_fields(elem: Element, d: dict) -> Element:
         "stroke_brush_overrides": d.get("stroke_brush_overrides"),
         "isolated_blending": bool(d.get("isolated_blending", False)),
         "knockout_group": bool(d.get("knockout_group", False)),
+        "color": normalize_layer_color(d.get("color")),
     }
     changes = {k: v for k, v in wanted.items()
                if k in have and getattr(elem, k) != v}

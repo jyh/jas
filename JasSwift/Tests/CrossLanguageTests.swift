@@ -100,6 +100,8 @@ private func assertSvgRoundtrip(_ name: String) {
         // A Line's width profile (`jas:width-points`) across the SVG
         // boundary. Mirrors the Rust registration.
         "line_width_profile",
+        // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+        "layer_color",
         // G1: paint arriving by CSS class re-exports as attributes and reads
         // back to the same document. Mirrors the Rust registration.
         "css_class_paint", "css_class_paint_inlined",
@@ -287,6 +289,12 @@ private func hrefRectFillGradient(_ defs: String, _ fill: String = "g") -> Gradi
 /// golden that the Rust and reference readers also parse. Mirrors
 /// `svg_parse_line_width_profile` in Rust.
 @Test func svgParseLineWidthProfile() { assertSvgParse("line_width_profile") }
+
+/// STATUS-jas row 53(b). Four layers: a colour, none (stays absent, never
+/// synthesised), an uppercase colour (stored lowercase), and an unparsable
+/// value (dropped, the layer kept). Mirrors Rust `svg_parse_layer_color` and
+/// the reference's `test_svg_parse_layer_color`.
+@Test func svgParseLayerColor() { assertSvgParse("layer_color") }
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
@@ -480,6 +488,8 @@ private func assertJsonRoundtrip(_ name: String) {
         // A Line's width profile (`jas:width-points`) across the SVG
         // boundary. Mirrors the Rust registration.
         "line_width_profile",
+        // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+        "layer_color",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -530,6 +540,8 @@ private func readFixtureData(_ path: String) -> Data {
         // A Line's width profile (`jas:width-points`) across the SVG
         // boundary. Mirrors the Rust registration.
         "line_width_profile",
+        // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+        "layer_color",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -7006,7 +7018,8 @@ private func survivalDoc() -> Document {
     Document(rawLayers: [Layer(name: "Layer 1",
                                children: [.path(saturatedPath()), .group(saturatedGroup()),
                                           .line(saturatedLine())],
-                               isolatedBlending: true, knockoutGroup: true)],
+                               isolatedBlending: true, knockoutGroup: true,
+                               color: "#4a90d9")],
              rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
              rawArtboardOptions: .default)
 }
@@ -7066,6 +7079,7 @@ private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(Strin
         ("fill_rule", s(a.fillRule == before.fillRule)),
         ("group.isolated_blending", s(ag.isolatedBlending == bg.isolatedBlending)),
         ("group.knockout_group", s(ag.knockoutGroup == bg.knockoutGroup)),
+        ("layer.color", s(al.color == bl.color)),
         ("layer.isolated_blending", s(al.isolatedBlending == bl.isolatedBlending)),
         ("layer.knockout_group", s(al.knockoutGroup == bl.knockoutGroup)),
         ("line.width_points", s(an.widthPoints == bn.widthPoints)),

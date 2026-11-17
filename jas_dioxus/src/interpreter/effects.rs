@@ -8272,6 +8272,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9128,6 +9129,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = crate::document::document::Document {
             layers: vec![layer],
@@ -9428,6 +9430,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9705,6 +9708,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9760,6 +9764,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9816,6 +9821,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9943,6 +9949,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -10022,6 +10029,7 @@ mod tests {
             ],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -10130,6 +10138,7 @@ mod tests {
             ],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -10200,6 +10209,7 @@ mod tests {
             ],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -10522,6 +10532,7 @@ mod tests {
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
         model.set_document_for_test(doc);
         assert_eq!(model.document().bounds(), (0.0, 0.0, 200.0, 100.0),
@@ -10575,6 +10586,7 @@ mod tests {
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
         model.set_document_for_test(doc);
         let b = model.document().bounds();
@@ -13642,6 +13654,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0, selection: vec![],
@@ -13693,6 +13706,7 @@ mod tests {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
     }
@@ -13727,6 +13741,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let (_, sel) = cp_probe(&model, 24.0, 36.0);
@@ -13763,6 +13778,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document {
             layers: vec![layer], selected_layer: 0,
@@ -13826,6 +13842,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(outer)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
     }
@@ -13885,6 +13902,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s7_probe_mode(&model, 60.0, 90.0), "idle", "not isolated: a wrapper is one element");
@@ -13905,6 +13923,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s7_probe_mode(&model, 0.0, 30.0), "idle");
@@ -13948,6 +13967,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let before = model.document().clone();
@@ -13978,6 +13998,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         s2_click(&mut model, "doc.path.insert_anchor_on_segment_near", 4.0, 4.0);
@@ -14036,6 +14057,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s3_marquee(&mut model, 80.0, 50.0, 90.0, 60.0),
@@ -14058,6 +14080,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let sel = s3_marquee(&mut model, 22.0, 34.0, 26.0, 38.0);
@@ -14079,6 +14102,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert!(s3_marquee(&mut model, -5.0, 25.0, 5.0, 35.0).is_empty());
@@ -14121,6 +14145,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(child)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document {
             layers: vec![layer], selected_layer: 0,
@@ -14184,6 +14209,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(child)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document {
             layers: vec![layer], selected_layer: 0,
@@ -14255,6 +14281,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let mut store = StateStore::new();
@@ -14298,6 +14325,7 @@ mod tests {
             children: vec![std::rc::Rc::new(child)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { transform: layer_t, ..CommonProps::default() },
+            color: None,
         });
         Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
     }
@@ -14350,6 +14378,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(path)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         path_erase_at_rect(&mut model, x, y, x, y, 2.0);

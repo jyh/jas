@@ -173,12 +173,15 @@
    "model divergence', is the claim amendment A2 already corrected, and A2 is",
    "right. A2's own follow-on sentence ('destroyed by all three codecs in both",
    "ports ... nothing measures them in any codec') is the gap this file now",
-   "closes. Nothing else in the freeze is affected."
+   "closes. Nothing else in the freeze is affected.",
+   "",
+   "ADDED 2026-11-17 (STATUS-jas row 53(b)): `layer.color`, an optional lowercase #rrggbb on the LAYER only (absent = no colour; Group has none). Carried by test-JSON as `color` (omitted when absent), by SVG as `jas:layer-color` on the layer's <g>, and by binary as a TAG_LAYER slot after the gradient pair, written only when present."
   ],
   "layer": {
    "name": "Layer 1",
    "isolated_blending": true,
-   "knockout_group": true
+   "knockout_group": true,
+   "color": "#4a90d9"
   },
   "group": {
    "name": "name_group",
@@ -245,6 +248,7 @@
   "fill_rule",
   "group.isolated_blending",
   "group.knockout_group",
+  "layer.color",
   "layer.isolated_blending",
   "layer.knockout_group",
   "line.width_points",
@@ -272,6 +276,7 @@
    "fill_rule": "PRESERVED",
    "group.isolated_blending": "PRESERVED",
    "group.knockout_group": "PRESERVED",
+   "layer.color": "PRESERVED",
    "layer.isolated_blending": "PRESERVED",
    "layer.knockout_group": "PRESERVED",
    "line.width_points": "PRESERVED",
@@ -298,6 +303,7 @@
    "fill_rule": "PRESERVED",
    "group.isolated_blending": "PRESERVED",
    "group.knockout_group": "PRESERVED",
+   "layer.color": "PRESERVED",
    "layer.isolated_blending": "PRESERVED",
    "layer.knockout_group": "PRESERVED",
    "line.width_points": "PRESERVED",
@@ -324,6 +330,7 @@
    "fill_rule": "PRESERVED",
    "group.isolated_blending": "PRESERVED",
    "group.knockout_group": "PRESERVED",
+   "layer.color": "PRESERVED",
    "layer.isolated_blending": "PRESERVED",
    "layer.knockout_group": "PRESERVED",
    "line.width_points": "PRESERVED",

@@ -1577,6 +1577,7 @@ mod tests {
                 name: Some(name.to_string()),
                 ..Default::default()
             },
+            color: None,
         })
     }
 

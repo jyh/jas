@@ -2730,6 +2730,7 @@ mod align_panel_state_tests {
                 name: Some("L".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let selection: Vec<ElementSelection> = selected.into_iter()
             .map(ElementSelection::all)
@@ -3166,6 +3167,7 @@ mod ensure_paragraph_wrapper_tests {
                 name: Some("L".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -3233,6 +3235,7 @@ mod ensure_paragraph_wrapper_tests {
                 name: Some("L".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -3302,6 +3305,7 @@ mod oplog_bracket_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -3510,6 +3514,7 @@ mod character_panel_apply_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -4477,6 +4482,7 @@ mod stroke_panel_apply_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -4831,6 +4837,7 @@ mod stroke_panel_field_scope_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -5307,6 +5314,7 @@ mod stroke_panel_field_scope_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],

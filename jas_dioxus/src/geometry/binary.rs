@@ -612,6 +612,14 @@ fn pack_element(elem: &Element) -> Value {
     }
     // The fill and stroke gradients, LAST on every tag (I1b, 2026-11-12).
     slots.extend(gradient_slots(elem));
+    // A layer's own colour (STATUS-jas row 53(b)) rides AFTER the gradient
+    // pair, and only when the layer has one: a colourless layer packs exactly
+    // the slots it did before (the wire goldens stay byte-identical), and an
+    // older reader ignores a trailing slot. Mirrors the reference
+    // `_pack_element` and JasSwift's `packElement`.
+    if let Element::Layer(LayerElem { color: Some(c), .. }) = elem {
+        slots.push(vstr(c));
+    }
     Value::Array(slots)
 }
 
@@ -659,6 +667,11 @@ fn with_gradient_slots(elem: Element, arr: &[Value], tag: i64) -> Element {
     }
     if let Some(g) = unpack_gradient_slot(arr.get(gi + 1)) {
         out = crate::geometry::element::with_stroke_gradient(&out, Some(g));
+    }
+    // The layer colour slot after the pair; anything but a `#rrggbb` string
+    // reads as no colour.
+    if let Element::Layer(le) = &mut out {
+        le.color = normalize_layer_color(arr.get(gi + 2).and_then(|v| v.as_str()));
     }
     out
 }
@@ -1115,6 +1128,7 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
                 common,
                 isolated_blending: tolerant_bool(arr.get(base + EXT_ISOLATED_BLENDING)),
                 knockout_group: tolerant_bool(arr.get(base + EXT_KNOCKOUT_GROUP)),
+                color: None,
             })
         }
         TAG_GROUP => {
@@ -1616,6 +1630,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         Document { layers: vec![layer], selected_layer: 0, ..Document::default() }
     }
@@ -1910,6 +1925,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         Document { layers: vec![layer], selected_layer: 0, ..Document::default() }
     }
@@ -1986,6 +2002,7 @@ mod tests {
         let doc = Document {
             layers: vec![Element::Layer(LayerElem {
                 children: vec![], isolated_blending: false, knockout_group: false, common: lc,
+                color: None,
             })],
             selected_layer: 0,
             ..Document::default()

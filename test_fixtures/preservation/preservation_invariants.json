@@ -592,7 +592,8 @@
       "bystander_fields_present": {
         "lyr_flags": [
           "isolated_blending",
-          "knockout_group"
+          "knockout_group",
+          "color"
         ],
         "grp_knockout": [
           "isolated_blending",

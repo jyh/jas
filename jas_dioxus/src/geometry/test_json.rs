@@ -780,6 +780,11 @@ fn extended_element_fields(o: &mut JsonObj, elem: &Element) {
     if ko {
         o.bool_val("knockout_group", true);
     }
+    // A layer's own colour (STATUS-jas row 53(b)), only when it has one,
+    // which keeps every shipped golden byte-identical.
+    if let Element::Layer(LayerElem { color: Some(c), .. }) = elem {
+        o.str_val("color", c);
+    }
 }
 
 fn element_json(elem: &Element) -> String {
@@ -1626,6 +1631,7 @@ fn apply_extended_element_fields(elem: &mut Element, v: &serde_json::Value) {
         Element::Layer(e) => {
             e.isolated_blending = v["isolated_blending"].as_bool().unwrap_or(false);
             e.knockout_group = v["knockout_group"].as_bool().unwrap_or(false);
+            e.color = normalize_layer_color(v["color"].as_str());
         }
         _ => {}
     }
@@ -1855,7 +1861,7 @@ fn parse_element_base(v: &serde_json::Value) -> Element {
                 .iter().map(|c| std::rc::Rc::new(parse_element(c))).collect();
             // common.name was already populated by parse_common from the
             // top-level "name" field — Layer no longer reads name itself.
-            Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
+            Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false, color: None })
         },
         "live" => {
             let kind = v["kind"].as_str().unwrap_or("");
@@ -2289,6 +2295,7 @@ mod tests {
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
         let json = document_to_test_json(&doc);
         assert!(json.contains("\"type\":\"ellipse\""),
@@ -2397,6 +2404,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             });
             let doc = Document {
                 layers: vec![layer], selected_layer: 0, ..Document::default()
@@ -3055,6 +3063,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, ..Document::default() };
 

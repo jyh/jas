@@ -4331,6 +4331,7 @@ mod tests {
             common: CommonProps { name: Some(name.to_string()), ..CommonProps::default() },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })
     }
 
@@ -4628,6 +4629,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         Model::new(doc, None)
@@ -4662,6 +4664,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -4886,12 +4889,14 @@ mod tests {
                 locked: lock_first,
                 ..Default::default()
             },
+            color: None,
         });
         let open = Element::Layer(LayerElem {
             children: vec![Rc::new(make_rect(20.0, 0.0, 10.0, 10.0))],
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("Open".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![locked, open],
@@ -5170,6 +5175,7 @@ mod tests {
             children: vec![Rc::new(group)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -5246,6 +5252,7 @@ mod tests {
             children: vec![Rc::new(group)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -5322,6 +5329,7 @@ mod tests {
             children: vec![Rc::new(outer)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -5446,6 +5454,7 @@ mod tests {
             children: vec![Rc::new(uniform), Rc::new(mixed)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let base = Document { layers: vec![layer], selected_layer: 0,
                               selection: Vec::new(), ..Document::default() };
@@ -5507,6 +5516,7 @@ mod tests {
             children: vec![Rc::new(g), Rc::new(mk(3.0))],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0,
                                  selection: Vec::new(), ..Document::default() };
@@ -5535,6 +5545,7 @@ mod tests {
             children: vec![Rc::new(mixed)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         })];
         d2.selection = vec![ElementSelection::all(vec![0, 0])];
         let via_group = selection_stroke_for_panel(&d2).map(|s| s.width);
@@ -5637,6 +5648,7 @@ mod tests {
             children: vec![Rc::new(g), Rc::new(mk(40.0))],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document { layers: vec![layer], selected_layer: 0,
                              selection: Vec::new(), ..Document::default() };
@@ -5732,6 +5744,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         })).collect();
         let doc = Document { layers, selected_layer: 0, selection: vec![], ..Document::default() };
         let mut model = Model::new(doc, None);
@@ -5897,6 +5910,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         Model::new(Document { layers: vec![layer], ..Document::default() }, None)
     }
@@ -6070,6 +6084,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -6126,6 +6141,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![ElementSelection::all(vec![0, 0])];
@@ -6185,6 +6201,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let mut doc = Document {
             layers: vec![layer], selected_layer: 0, selection: vec![],
@@ -6230,6 +6247,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: crate::geometry::element::CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -6352,6 +6370,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -6381,6 +6400,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         doc.selection = vec![
@@ -6401,6 +6421,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
             });
             let mut doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
             doc.selection = vec![
@@ -6489,6 +6510,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -6604,6 +6626,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -6666,6 +6689,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -6793,6 +6817,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -6979,6 +7004,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() };
         let mut model = Model::new(doc, None);
@@ -7218,6 +7244,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -7327,6 +7354,7 @@ mod tests {
                 transform: layer_transform,
                 ..Default::default()
             },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -8775,6 +8803,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let selection: Selection = if select_first {
             vec![ElementSelection::all(vec![0, 0])]
@@ -8858,6 +8887,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document { layers: vec![layer], selected_layer: 0, ..Document::default() };
         let out = crate::geometry::normalize::dedupe_element_ids(&doc);
@@ -8951,6 +8981,7 @@ mod preservation_law_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9038,6 +9069,7 @@ mod preservation_law_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9240,6 +9272,7 @@ mod preservation_law_tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps { name: Some("L0".into()), ..Default::default() },
+                color: None,
             });
             Model::new(Document {
                 layers: vec![layer], selected_layer: 0, selection,
@@ -9737,6 +9770,7 @@ mod preservation_law_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9815,6 +9849,7 @@ mod preservation_law_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L0".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9916,6 +9951,7 @@ mod preservation_law_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc_of = |l: &Element| Document { layers: vec![l.clone()], ..Document::default() };
         let before = doc_of(&layer).element_ids();
@@ -9944,6 +9980,7 @@ mod preservation_law_tests {
                 name: Some("L0".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let doc_of = |l: &Element| Document {
             layers: vec![l.clone()],
@@ -10142,6 +10179,7 @@ mod ungroup_all_preservation_tests {
             },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })
     }
 
@@ -10284,6 +10322,7 @@ mod ungroup_all_preservation_tests {
                 },
                 isolated_blending: true,
                 knockout_group: true,
+                color: None,
             })],
             ..Document::default()
         };
@@ -10328,6 +10367,7 @@ mod ungroup_all_preservation_tests {
                 },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })],
             ..Document::default()
         };

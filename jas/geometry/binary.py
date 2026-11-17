@@ -17,9 +17,11 @@ from document.document import (
     Document, ElementSelection, SortedCps,
     _SelectionAll, _SelectionPartial,
 )
+import dataclasses
+
 from geometry.element import (
     Element, Line, Rect, Circle, Ellipse, Polyline, Polygon,
-    Path, Text, TextPath, Group, Layer,
+    Path, Text, TextPath, Group, Layer, normalize_layer_color,
     Color, RgbColor, HsbColor, CmykColor,
     Fill, Stroke, Transform, Visibility,
     LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign,
@@ -415,6 +417,12 @@ def _pack_element(elem: Element) -> list:
         slots += [elem.isolated_blending, elem.knockout_group]
     slots += [_gradient_slot(getattr(elem, "fill_gradient", None)),
               _gradient_slot(getattr(elem, "stroke_gradient", None))]
+    # A layer's own colour rides AFTER the gradient pair, and only when the
+    # layer has one, so every layer without a colour packs exactly the
+    # slots it did before (the wire goldens stay byte-identical) and an
+    # older reader ignores the trailing slot. Mirrors Rust's `pack_element`.
+    if isinstance(elem, Layer) and elem.color is not None:
+        slots.append(elem.color)
     return slots
 
 
@@ -719,6 +727,10 @@ def _unpack_element(arr: list) -> Element:
     at = _TAG_BASE_ARITY.get(tag, len(arr)) + _tag_ext_len(tag)
     fill_g = _unpack_gradient_slot(_slot(arr, at))
     stroke_g = _unpack_gradient_slot(_slot(arr, at + 1))
+    if isinstance(elem, Layer):
+        color = normalize_layer_color(_slot(arr, at + 2))
+        if color is not None:
+            elem = dataclasses.replace(elem, color=color)
     if fill_g is not None:
         elem = with_fill_gradient(elem, fill_g)
     if stroke_g is not None:

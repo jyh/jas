@@ -1171,6 +1171,7 @@ mod resolvedalign {
             children: vec![Rc::new(instance.clone()), Rc::new(anchor.clone())],
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         })];
         (doc, instance, anchor)
     }

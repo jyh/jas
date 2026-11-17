@@ -137,7 +137,7 @@ WHAT THIS GATE CANNOT SEE -- stated on the GREEN path as well as the red
 ------------------------------------------------------------------------
   * It counts fields PRESENT IN FIXTURE JSON. A field the canonical writer
     never emits is invisible here no matter how badly it is dropped.
-  * THE VOCABULARY IS 16 FIELD NAMES, AND 77 ELEMENT-STRUCT SLOTS SIT OUTSIDE
+  * THE VOCABULARY IS 17 FIELD NAMES, AND 77 ELEMENT-STRUCT SLOTS SIT OUTSIDE
     IT. A field enters only by being on `CommonProps` or by being
     `Option`-typed. `PathElem::fill_rule`, `GroupElem::isolated_blending` and
     `knockout_group`, `width_points`, and the whole 22-field TextElem
@@ -214,8 +214,9 @@ THIN = 3
 # A PARSE floor, so it is hand-typed on purpose -- there is no independent
 # oracle for "how many fields CommonProps has" that is not another parse of the
 # same file, and a floor that agrees with any breakage is worse than none.
-# 9 common + 6 element-Option + selected_layer = 16 today.
-MIN_DERIVED_DEFAULTS = 16
+# 9 common + 7 element-Option + selected_layer = 17 today (16 -> 17 on
+# 2026-11-17: `LayerElem::color`, STATUS-jas row 53(b)).
+MIN_DERIVED_DEFAULTS = 17
 
 # How many `<struct>.<field>` slots on the structs an Element can actually BE
 # are OUTSIDE the vocabulary, because they are neither on CommonProps nor
