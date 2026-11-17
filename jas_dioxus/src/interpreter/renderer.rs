@@ -7612,6 +7612,22 @@ const LAYER_COLORS: [&str; 9] = [
     "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
 ];
 
+/// The colour a native tree row draws for `elem` (STATUS-jas row 146): a
+/// layer's STORED colour (#962) wins; a top-level layer with none takes the
+/// nine-colour index cycle (`index_at_top`), a nested one with none inherits;
+/// anything else inherits. Only the fallback is synthesised, so a stored
+/// colour is never drawn as a different one. Mirrors Swift's `rowLayerColor`.
+fn native_layer_color(elem: &GeoElement, index_at_top: Option<usize>, inherited: &str) -> String {
+    match elem {
+        GeoElement::Layer(le) => match (&le.color, index_at_top) {
+            (Some(c), _) => c.clone(),
+            (None, Some(i)) => LAYER_COLORS[i % LAYER_COLORS.len()].to_string(),
+            (None, None) => inherited.to_string(),
+        },
+        _ => inherited.to_string(),
+    }
+}
+
 fn tree_icon_svg(icon_name: &str) -> String {
     let ws = super::workspace::Workspace::load();
     if let Some(ws) = &ws {
@@ -7692,15 +7708,10 @@ fn tree_flatten_rc_children(
         let is_selected = crate::document::controller::path_is_selected_or_under(
             selected_paths, &path);
         let is_renaming = renaming_path.as_ref() == Some(&path);
-        let is_layer = child.is_layer();
         let is_collapsed = collapsed_paths.contains(&path);
         let is_panel_selected = panel_selection.contains(&path);
 
-        let current_layer_color = if is_layer {
-            if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
-        } else {
-            layer_color.to_string()
-        };
+        let current_layer_color = native_layer_color(child, (path.len() == 1).then_some(i), layer_color);
 
         // Effective visibility = most restrictive of ancestor + self,
         // matching Document::effective_visibility (Preview > Outline >
@@ -7781,7 +7792,7 @@ fn tree_flatten_layers(
         let is_renaming = renaming_path.as_ref() == Some(&path);
         let is_collapsed = collapsed_paths.contains(&path);
         let is_panel_selected = panel_selection.contains(&path);
-        let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
+        let layer_color = native_layer_color(elem, Some(i), "");
 
         let vis_str = match elem.visibility() {
             Visibility::Preview => "preview",
@@ -14778,6 +14789,30 @@ mod tests {
         assert!(all(&st), "All ran: in force again");
         // A toggle row is not an action: the rule does not answer it.
         assert!(!super::layers_filter_item_in_force(&el, "path", &ctx, &st));
+    }
+
+    /// STATUS-jas row 146: the web Layers tree draws a layer's STORED colour
+    /// (#962), and keeps the nine-colour index cycle only for a layer that has
+    /// none. Before, every top-level layer drew `LAYER_COLORS[i % 9]`, so a
+    /// stored colour was drawn as a different one. `#ff8000` is no preset, so
+    /// no index can produce it by accident.
+    #[test]
+    fn the_web_tree_draws_a_stored_layer_colour_and_cycles_only_without_one() {
+        use crate::geometry::element::{GroupElem, LayerElem};
+        use std::rc::Rc;
+        let rect = || Rc::new(Element::Group(GroupElem::default()));
+        let layers = vec![
+            Element::Layer(LayerElem { children: vec![rect()], color: Some("#ff8000".into()), ..Default::default() }),
+            Element::Layer(LayerElem { children: vec![rect()], ..Default::default() }),
+        ];
+        let empty = TreeHashSet::new();
+        let rows = tree_flatten_layers(&layers, &empty, &empty, &[], &None);
+        let colour = |path: &[usize]| rows.iter().find(|r| r.path == path)
+            .unwrap_or_else(|| panic!("no row {path:?}")).layer_color.clone();
+        assert_eq!(colour(&[0]), "#ff8000", "the stored colour wins");
+        assert_eq!(colour(&[0, 0]), "#ff8000", "and its contents carry it");
+        assert_eq!(colour(&[1]), LAYER_COLORS[1], "a layer with none keeps its index colour");
+        assert_eq!(colour(&[1, 0]), LAYER_COLORS[1]);
     }
 
     // ── Brush-library edits run in the web app (BRUSH_LIBRARY_UNDO.md) ──
