@@ -664,10 +664,11 @@ fn run_one<'h>(
         }
     }
 
-    // ── Brush and swatch library edits (brush.*, swatch.*) — their own
+    // ── Brush and swatch library edits (brush.*, swatch.*, and
+    // gradient.save_library) — their own
     // function, because only a few arms need the document (W2b-18).
     if let Some((name, spec)) = effect.iter()
-        .find(|(k, _)| k.starts_with("brush.") || k.starts_with("swatch."))
+        .find(|(k, _)| k.starts_with("brush.") || k.starts_with("swatch.") || k.as_str() == "gradient.save_library")
     {
         run_brush_effect(name, spec, ctx, store, model.as_deref_mut(), report);
         return;
@@ -1580,7 +1581,7 @@ fn run_brush_effect(
                 }
             }
         }
-        "brush.save_library" | "swatch.save_library" => {
+        "brush.save_library" | "swatch.save_library" | "gradient.save_library" => {
             // Spec: { library, name }, both EXPRESSIONS (the brush-library
             // design, B.2; Swatches by §3.4). The slug is
             // `brush_library_slug(name)`; the source's own slug saves IN
@@ -1592,7 +1593,13 @@ fn run_brush_effect(
             // a missing source is a no-op. Mirrors the reference's
             // `_save_library`.
             if let serde_json::Value::Object(args) = spec {
-                let (kind, panel) = if name == "brush.save_library" { ("brush", "brushes") } else { ("swatch", "swatches") };
+                // A new GRADIENT library becomes the active one (the panel shows
+                // one; design 2026-11-17 §2) rather than joining an open list.
+                let (kind, panel) = match name {
+                    "brush.save_library" => ("brush", "brushes"),
+                    "swatch.save_library" => ("swatch", "swatches"),
+                    _ => ("gradient", "gradient"),
+                };
                 let lib_id = eval_string(args.get("library"), store, ctx);
                 let lib_name = eval_string(args.get("name"), store, ctx);
                 save_library(store, kind, panel, &lib_id, lib_name);
@@ -1622,7 +1629,9 @@ fn save_library(store: &mut StateStore, kind: &str, panel: &str, lib_id: &str, l
     }
     copy["name"] = serde_json::Value::String(lib_name);
     store.set_data_path(&format!("{kind}_libraries.{slug}"), copy.clone());
-    if slug != lib_id {
+    if slug != lib_id && kind == "gradient" {
+        store.set_panel(panel, "active_library_id", serde_json::Value::String(slug.clone()));
+    } else if slug != lib_id {
         let mut insert = serde_json::Map::new();
         insert.insert("collapsed".to_string(), serde_json::Value::Bool(false));
         store.list_toggle_keyed(panel, "open_libraries",
@@ -15668,6 +15677,42 @@ mod tests {
                    .as_deref(), Some("second"), "a later request replaces an earlier one");
         assert_eq!(open_menu_after(vec![json!({"open_menu": {"id": "first"}}), json!({"open_menu": {"id": ""}})])
                    .as_deref(), Some("first"), "an empty request leaves an earlier one");
+    }
+
+    // ── gradient.save_library (design 2026-11-17 §2): a NEW library becomes
+    // the active one. Mirrors test_gradient_save_library.py.
+    fn gradient_saved(name: &str, library: &str) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"gradient_libraries": {
+            "neutrals": {"name": "Neutrals", "description": "d", "gradients": [{"name": "Black to White", "type": "linear"}]},
+            "spectrums": {"name": "Spectrums", "gradients": []},
+        }}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("active_library_id".to_string(), serde_json::json!(library));
+        store.init_panel("gradient", defaults);
+        store.set_active_panel(Some("gradient"));
+        let report = run_effects(
+            &[serde_json::json!({"gradient.save_library": {"library": "param.lib", "name": "param.name"}})],
+            &serde_json::json!({"param": {"lib": library, "name": name}}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store
+    }
+
+    #[test]
+    fn gradient_save_library_makes_a_new_library_active_and_queues_its_write() {
+        let store = gradient_saved("Warm Tones", "neutrals");
+        assert_eq!(store.get_data_path("gradient_libraries.warm_tones.name"), serde_json::json!("Warm Tones"));
+        assert_eq!(store.get_data_path("gradient_libraries.warm_tones.description"), serde_json::json!("d"));
+        assert_eq!(store.get_panel("gradient", "active_library_id"), &serde_json::json!("warm_tones"));
+        assert_eq!(store.get_panel("gradient", "open_libraries"), &serde_json::Value::Null, "no open list");
+        assert_eq!(store.pending_writes.iter().map(|w| (w["kind"].clone(), w["slug"].clone())).collect::<Vec<_>>(),
+                   vec![(serde_json::json!("gradient_library"), serde_json::json!("warm_tones"))]);
+        let store = gradient_saved("Neutrals!", "neutrals");
+        assert_eq!(store.get_panel("gradient", "active_library_id"), &serde_json::json!("neutrals"), "in place");
+        let store = gradient_saved("Spectrums", "neutrals");
+        assert_eq!(store.get_panel("gradient", "active_library_id"), &serde_json::json!("spectrums_2"));
+        let store = gradient_saved("", "neutrals");
+        assert!(store.pending_writes.is_empty());
     }
 
     // ── swatch.save_library (design §3.4): the brush law over the swatches ──
