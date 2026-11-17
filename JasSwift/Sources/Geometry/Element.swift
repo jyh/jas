@@ -3671,6 +3671,12 @@ public struct Layer: Equatable {
     public internal(set) var isolatedBlending: Bool
     /// See ``Group/knockoutGroup``.
     public internal(set) var knockoutGroup: Bool
+    /// The layer's own colour (STATUS-jas row 53(b)): a lowercase `#rrggbb`,
+    /// or nil for a layer that has none. No reader invents one; the Layers
+    /// row falls back to the selection colour. Layer Options writes it.
+    /// Group has no such field. Every codec reads through
+    /// ``normalizeLayerColor(_:)``.
+    public internal(set) var color: String?
 
     /// Convenience accessor that returns the empty string when the
     /// layer is unnamed. Most callers should use `name ?? ""` directly,
@@ -3685,7 +3691,8 @@ public struct Layer: Equatable {
                 isolatedBlending: Bool = false,
                 knockoutGroup: Bool = false,
                 mask: Mask? = nil,
-                id: String? = nil) {
+                id: String? = nil,
+                color: String? = nil) {
         self.name = Layer.normalizedName(name)
         self.id = id
         self.children = children
@@ -3696,6 +3703,7 @@ public struct Layer: Equatable {
         self.isolatedBlending = isolatedBlending
         self.knockoutGroup = knockoutGroup
         self.mask = mask
+        self.color = color
     }
 
     public var bounds: BBox {
@@ -3706,6 +3714,17 @@ public struct Layer: Equatable {
         let maxY = all.map { $0.y + $0.height }.max()!
         return (minX, minY, maxX - minX, maxY - minY)
     }
+}
+
+/// A layer colour as stored: `#rrggbb` lowercased, or nil for anything else
+/// (absent, empty, a name, a short form), so an unparsable value drops the
+/// colour and keeps the layer. Mirrors the reference `normalize_layer_color`
+/// and Rust `normalize_layer_color`.
+public func normalizeLayerColor(_ v: String?) -> String? {
+    guard let v = v, v.count == 7, v.hasPrefix("#") else { return nil }
+    let hex = v.dropFirst()
+    guard hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
+    return "#" + hex.lowercased()
 }
 
 // MARK: - Stable-identity helpers

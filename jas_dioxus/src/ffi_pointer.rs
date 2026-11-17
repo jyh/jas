@@ -699,6 +699,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         unsafe { &*e }.with_model_mut(|m| {
             *m = Model::new(
@@ -725,6 +726,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         unsafe { &*e }.with_model_mut(|m| {
             *m = Model::new(

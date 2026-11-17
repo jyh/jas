@@ -828,6 +828,7 @@ pub fn apply_wrap_in_layer(
         common,
         isolated_blending: false,
         knockout_group: false,
+        color: None,
     });
     new_doc.layers.push(new_layer);
     model.edit_document(new_doc);
@@ -935,6 +936,7 @@ fn preserving_layer_target(
                     },
                     isolated_blending: false,
                     knockout_group: false,
+                    color: None,
                 }));
                 return new_doc.layers.len() - 1;
             }
@@ -1199,6 +1201,7 @@ pub fn selection_clipboard_svg(doc: &crate::document::document::Document) -> Opt
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })],
         selected_layer: 0,
         selection: Vec::new(),
@@ -3002,6 +3005,7 @@ mod paste_layer_structure_tests {
             },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })
     }
 
@@ -3435,6 +3439,7 @@ mod paste_stacking_tests {
                 },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })],
             selected_layer: 0,
             selection: Vec::new(),
@@ -3615,6 +3620,7 @@ mod wrap_scale_tests {
             layers: vec![Element::Layer(LayerElem {
                 children: children.into_iter().map(Rc::new).collect(),
                 isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+                color: None,
             })],
             selection,
             ..Document::default()
@@ -3710,6 +3716,7 @@ mod clipboard_payload_tests {
                 children: vec![Rc::new(rect(0.0)), Rc::new(rect(50.0)), Rc::new(rect(100.0))],
                 common: CommonProps { name: Some("L".to_string()), ..CommonProps::default() },
                 isolated_blending: false, knockout_group: false,
+                color: None,
             })],
             selected_layer: 0, selection, ..Document::default()
         }

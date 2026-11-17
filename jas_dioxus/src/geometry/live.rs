@@ -2394,6 +2394,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         // No artboards, so the round-trip comparison isolates the recorded
         // element (the default artboard's minted id is unrelated noise here).
@@ -2432,6 +2433,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document { layers: vec![layer], artboards: vec![], ..Document::default() };
 

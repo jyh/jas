@@ -124,6 +124,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -178,6 +180,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -345,6 +349,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -394,6 +400,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
             // G1: a document whose paint arrives by CSS class re-exports it as
             // attributes, and that export reads back to the same document.
             "css_class_paint", "css_class_paint_inlined",
@@ -675,6 +683,15 @@ pub(crate) mod tests {
     #[test]
     fn svg_parse_line_width_profile() {
         assert_svg_parse("line_width_profile");
+    }
+
+    /// STATUS-jas row 53(b). Four layers: a colour, none (stays absent,
+    /// never synthesised), an uppercase colour (stored lowercase), and an
+    /// unparsable value (dropped, the layer kept). Mirrors the reference
+    /// `test_svg_parse_layer_color` and Swift `svgParseLayerColor`.
+    #[test]
+    fn svg_parse_layer_color() {
+        assert_svg_parse("layer_color");
     }
 
     #[test]
@@ -5383,6 +5400,7 @@ pub(crate) mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         crate::document::document::Document {
             layers: vec![layer], artboards: vec![], ..Default::default()
@@ -5422,6 +5440,7 @@ pub(crate) mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         crate::document::document::Document {
             layers: vec![layer], artboards: vec![], ..Default::default()
@@ -8312,6 +8331,7 @@ pub(crate) mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps { name: Some("L".into()), ..Default::default() },
+                color: None,
             });
             let mut model = Model::default();
             model.set_document_for_test(Document {
@@ -8877,6 +8897,7 @@ pub(crate) mod tests {
             common: lc,
             isolated_blending: true,
             knockout_group: true,
+            color: Some("#4a90d9".into()),
         })];
         d
     }
@@ -8961,6 +8982,7 @@ pub(crate) mod tests {
             ("fill_rule", s(a.fill_rule == before.fill_rule)),
             ("group.isolated_blending", s(ag.isolated_blending == bg.isolated_blending)),
             ("group.knockout_group", s(ag.knockout_group == bg.knockout_group)),
+            ("layer.color", s(al.color == bl.color)),
             ("layer.isolated_blending", s(al.isolated_blending == bl.isolated_blending)),
             ("layer.knockout_group", s(al.knockout_group == bl.knockout_group)),
             ("line.width_points", s(an.width_points == bn.width_points)),
@@ -9066,7 +9088,7 @@ pub(crate) mod tests {
         let c = CommonProps::default;
         vec![
             Element::Layer(LayerElem { children: vec![], isolated_blending: false,
-                                       knockout_group: false, common: c() }),
+                                       knockout_group: false, common: c(), color: None }),
             Element::Group(GroupElem { children: vec![], isolated_blending: false,
                                        knockout_group: false, common: c() }),
             Element::Line(LineElem { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0, stroke: None,
@@ -9131,6 +9153,7 @@ pub(crate) mod tests {
             children: kids.into_iter().map(std::rc::Rc::new).collect(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = |kids: Vec<Element>| Document {
             layers: vec![layer(kids)], selected_layer: 0, ..Document::default()
@@ -9257,6 +9280,7 @@ pub(crate) mod tests {
             common: lc,
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
 
         let svg = document_to_svg(&doc);

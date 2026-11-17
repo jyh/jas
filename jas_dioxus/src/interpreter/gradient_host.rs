@@ -668,6 +668,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let selection = selected.iter().map(|&i| ElementSelection::all(vec![0, i])).collect();
         let doc = Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() };

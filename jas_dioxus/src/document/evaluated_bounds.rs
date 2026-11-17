@@ -267,6 +267,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         })];
         doc
     }
@@ -390,6 +391,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         })];
         doc
     }
@@ -469,6 +471,7 @@ mod tests {
             children: elements.into_iter().map(Rc::new).collect(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         })];
         doc
     }

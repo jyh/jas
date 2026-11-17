@@ -2351,6 +2351,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -3079,6 +3080,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -3482,6 +3484,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -3596,6 +3599,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -3740,6 +3744,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -3817,6 +3822,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let mut model = Model::new(
             Document {
@@ -3902,6 +3908,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -3983,6 +3990,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let mut model = Model::new(
             Document {
@@ -4073,6 +4081,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -4645,6 +4654,7 @@ mod tests {
                 name: Some("L".to_string()),
                 ..Default::default()
             },
+            color: None,
         });
         Model::new(
             Document {
@@ -5102,6 +5112,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -5463,6 +5474,7 @@ mod tests {
                 children: vec![std::rc::Rc::new(group)],
                 isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
             });
             Model::new(
                 Document {
@@ -5533,6 +5545,7 @@ mod tests {
                 children: vec![std::rc::Rc::new(a), std::rc::Rc::new(b)],
                 isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
             });
             Model::new(
                 Document {
@@ -5717,6 +5730,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -5850,6 +5864,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -6245,6 +6260,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -6656,6 +6672,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {
@@ -6887,6 +6904,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         Model::new(
             Document {

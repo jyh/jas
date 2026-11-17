@@ -470,6 +470,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document { layers: vec![layer], selected_layer: 0,
                              selection: vec![ElementSelection::all(vec![0, 0])],

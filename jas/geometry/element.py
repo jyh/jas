@@ -1386,8 +1386,27 @@ class Layer(Group):
     type level so the layers panel can still tell "top-level
     container" from "nested container", and so the SVG codec can
     emit ``inkscape:groupmode="layer"`` for Layers only.
+
+    ``color`` (STATUS-jas row 53(b)) is the layer's own optional colour, a
+    lowercase ``#rrggbb``; None means the layer has none, and no reader
+    invents one (the Layers row falls back to the selection colour). Layer
+    Options writes it; Group has no such field.
     """
-    pass
+    color: str | None = None
+
+
+def normalize_layer_color(v) -> str | None:
+    """A layer colour as stored: ``#rrggbb`` lowercased, or None for
+    anything else (absent, empty, a name, a short form). Every codec reads
+    through this, so an unparsable value drops the colour and keeps the
+    layer. Mirrors Rust ``normalize_layer_color`` and Swift
+    ``normalizeLayerColor``."""
+    if not isinstance(v, str) or len(v) != 7 or v[0] != "#":
+        return None
+    hexpart = v[1:]
+    if not all(c in "0123456789abcdefABCDEF" for c in hexpart):
+        return None
+    return "#" + hexpart.lower()
 
 
 # ─── Reference resolution seam ─────────────────────────────────

@@ -40,6 +40,7 @@ pub fn binding(name: &str, spec: &serde_json::Value, eval: &dyn Fn(&str) -> Valu
                 common: CommonProps { name: Some(name), ..Default::default() },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             });
             serde_json::to_value(&layer).ok()
         }

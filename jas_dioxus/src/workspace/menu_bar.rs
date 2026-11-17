@@ -1179,6 +1179,7 @@ mod tests {
                 common: CommonProps { locked: true, ..CommonProps::default() },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })];
             let mut st_locked = AppState::new();
             if st_locked.tabs.is_empty() {

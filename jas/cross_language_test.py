@@ -185,7 +185,7 @@ def _survival_doc():
         name="Layer 1",
         children=(_survival_saturated_path(), _survival_saturated_group(),
                   _survival_saturated_line()),
-        isolated_blending=True, knockout_group=True),))
+        isolated_blending=True, knockout_group=True, color="#4a90d9"),))
 
 
 # (field, subject, attribute chain), in the ports' row order. The subject is
@@ -199,6 +199,7 @@ _SURVIVAL_ROWS = [
     ("fill_rule", "path", ("fill_rule",)),
     ("group.isolated_blending", "group", ("isolated_blending",)),
     ("group.knockout_group", "group", ("knockout_group",)),
+    ("layer.color", "layer", ("color",)),
     ("layer.isolated_blending", "layer", ("isolated_blending",)),
     ("layer.knockout_group", "layer", ("knockout_group",)),
     ("line.width_points", "line", ("width_points",)),
@@ -285,6 +286,8 @@ class CrossLanguageTest(absltest.TestCase):
             # A Line's width profile (`jas:width-points`) across the SVG
             # boundary. Mirrors the Rust registration.
             "line_width_profile",
+            # STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -326,6 +329,8 @@ class CrossLanguageTest(absltest.TestCase):
             # cross-language pin for the generated kind.
             "generated_polygon",
             "line_width_profile",
+            # STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -364,6 +369,8 @@ class CrossLanguageTest(absltest.TestCase):
             # the binary codec (concept slot 8, params-json slot 9).
             "generated_polygon",
             "line_width_profile",
+            # STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -746,6 +753,13 @@ class CrossLanguageTest(absltest.TestCase):
         # parse the same bytes, so a writer and reader that agreed on a
         # misspelling cannot pass here as they could the survival gate.
         _assert_svg_parse(self, "line_width_profile")
+
+    def test_svg_parse_layer_color(self):
+        # STATUS-jas row 53(b). Four layers: a colour, none (stays absent,
+        # never synthesised), an uppercase colour (stored lowercase), and an
+        # unparsable value (dropped, the layer kept). Mirrors Rust
+        # `svg_parse_layer_color` and Swift `svgParseLayerColor`.
+        _assert_svg_parse(self, "layer_color")
 
     def test_svg_parse_symbols_basic(self):
         # The <defs> master (id="m1") imports into doc.symbols (NOT layers);

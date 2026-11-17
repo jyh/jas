@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 96 96" width="96" height="96">
+  <g inkscape:groupmode="layer" inkscape:label="Blue" jas:layer-color="#4a90d9">
+    <rect x="0" y="0" width="96" height="96" fill="rgb(200,200,200)" stroke="none"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="None">
+    <rect x="0" y="0" width="96" height="96" fill="rgb(200,200,200)" stroke="none"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Upper" jas:layer-color="#FF8000">
+    <rect x="0" y="0" width="96" height="96" fill="rgb(200,200,200)" stroke="none"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Bad" jas:layer-color="blue">
+    <rect x="0" y="0" width="96" height="96" fill="rgb(200,200,200)" stroke="none"/>
+  </g>
+</svg>

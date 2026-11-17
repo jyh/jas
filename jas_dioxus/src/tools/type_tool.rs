@@ -920,6 +920,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some(String::new()), ..Default::default() },
+            color: None,
         };
         model.set_document_for_test(doc);
         model

@@ -254,6 +254,7 @@ impl Default for Document {
                 },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })],
             symbols: Vec::new(),
             selected_layer: 0,
@@ -760,6 +761,7 @@ mod tests {
                 name: Some(name.to_string()),
                 ..Default::default()
             },
+            color: None,
         })
     }
 
@@ -1107,6 +1109,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         Document {
             layers: vec![layer],

@@ -1016,6 +1016,11 @@ private func packElement(_ elem: Element) -> MsgValue {
     }
     // The fill and stroke gradients, LAST on every tag (I1b, 2026-11-12).
     slots += gradientSlots(elem)
+    // A layer's own colour (STATUS-jas row 53(b)) rides AFTER the gradient
+    // pair, and only when the layer has one: a colourless layer packs exactly
+    // the slots it did before (the wire goldens stay byte-identical), and an
+    // older reader ignores a trailing slot. Mirrors Rust's `pack_element`.
+    if case .layer(let l) = elem, let c = l.color { slots.append(.string(c)) }
     return .array(slots)
 }
 
@@ -1401,6 +1406,14 @@ private func withGradientSlots(_ elem: Element, _ arr: [MsgValue], _ tag: Int) -
     return out
 }
 
+/// The layer colour slot, after the gradient pair; anything but a `#rrggbb`
+/// string reads as no colour. Mirrors Rust's `with_gradient_slots` tail.
+private func layerColorSlot(_ arr: [MsgValue]) -> String? {
+    let ci = tagBaseArity(tagLayer) + tagExtLen(tagLayer) + 2
+    guard ci < arr.count, case .string(let s) = arr[ci] else { return nil }
+    return normalizeLayerColor(s)
+}
+
 private func unpackElement(_ v: MsgValue) throws -> Element {
     let arr = try asArray(v)
     let tag = try asInt(at(arr, 0))
@@ -1426,7 +1439,8 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
                             transform: xform, locked: locked, visibility: vis,
                             blendMode: mode,
                             isolatedBlending: iso, knockoutGroup: ko,
-                            mask: mask, id: id))
+                            mask: mask, id: id,
+                            color: layerColorSlot(arr)))
     case tagGroup:
         let children = try asArray(at(arr, 7)).map { try unpackElement($0) }
         let (iso, ko) = containerFlagSlots(arr, tagGroup)

@@ -41,6 +41,7 @@ pub(crate) fn model_with(rects: Vec<Element>, selected: &[usize]) -> Model {
         isolated_blending: false,
         knockout_group: false,
         common: CommonProps { name: Some("L".into()), ..Default::default() },
+        color: None,
     });
     let selection = selected.iter().map(|&i| ElementSelection::all(vec![0, i])).collect();
     let doc = Document { layers: vec![layer], selected_layer: 0, selection,

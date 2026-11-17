@@ -85,7 +85,8 @@ private func fullyPopulatedLayer(children: [Element]) -> Layer {
           isolatedBlending: true,
           knockoutGroup: true,
           mask: distinctMask(23),
-          id: "stage")
+          id: "stage",
+          color: "#4a90d9")
 }
 
 /// layer "stage" > group "cluster" > [alpha, beta]. The edits below all name
@@ -137,7 +138,7 @@ private func expectOnlyChildrenChanged<T>(_ before: T, _ after: T,
         ("Group", Mirror(reflecting: fullyPopulatedGroup(children: [])),
          Mirror(reflecting: Group(children: [])), 11),
         ("Layer", Mirror(reflecting: fullyPopulatedLayer(children: [])),
-         Mirror(reflecting: Layer(children: [])), 11),
+         Mirror(reflecting: Layer(children: [])), 12),
     ]
     for (what, rich, plain, expectedCount) in cases {
         #expect(rich.children.count == expectedCount,
@@ -175,7 +176,7 @@ private func expectOnlyChildrenChanged<T>(_ before: T, _ after: T,
 
     let compared = expectOnlyChildrenChanged(layerAt(doc), layerAt(after),
                                              "replaceElement on a grandchild")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
     guard let gb = groupAt(doc), let ga = groupAt(after) else {
         Issue.record("group vanished"); return
     }
@@ -202,7 +203,7 @@ private func expectOnlyChildrenChanged<T>(_ before: T, _ after: T,
 
     let compared = expectOnlyChildrenChanged(layerAt(doc), layerAt(after),
                                              "deleteElement of a grandchild")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
     guard let gb = groupAt(doc) else { Issue.record("group vanished"); return }
     let comparedG = expectOnlyChildrenChanged(gb, g,
                                               "deleteElement of a grandchild")
@@ -227,7 +228,7 @@ private func expectOnlyChildrenChanged<T>(_ before: T, _ after: T,
 
     let compared = expectOnlyChildrenChanged(layerAt(doc), layerAt(after),
                                              "insertElementAfter under a grandchild")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
     guard let gb = groupAt(doc) else { Issue.record("group vanished"); return }
     let comparedG = expectOnlyChildrenChanged(gb, g,
                                               "insertElementAfter under a grandchild")

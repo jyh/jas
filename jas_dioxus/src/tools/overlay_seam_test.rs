@@ -49,6 +49,7 @@ fn model_with_a_selected_rect() -> Model {
         isolated_blending: false,
         knockout_group: false,
         common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        color: None,
     });
     Model::new(
         Document {

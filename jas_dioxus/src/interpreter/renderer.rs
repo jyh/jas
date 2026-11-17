@@ -10093,6 +10093,7 @@ mod tests {
                 common: named(Some("Layer 1")),
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })
         }
 
@@ -10210,6 +10211,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         st.tabs[st.active_tab].model.set_document_for_test(Document {
             layers: vec![layer],
@@ -10266,6 +10268,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         st.tabs[st.active_tab].model.set_document_for_test(Document {
             layers: vec![layer],
@@ -10847,6 +10850,7 @@ mod tests {
                     name: Some(name),
                     id: None,
                 },
+                color: None,
             })
         }).collect();
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
@@ -11794,6 +11798,7 @@ mod tests {
         let mk_layer = |name: &str| Element::Layer(LayerElem {
             children: Vec::new(), isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some(name.into()), ..Default::default() },
+            color: None,
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(mk_layer("c1")), Rc::new(mk_layer("c2"))],
@@ -11996,14 +12001,17 @@ mod tests {
         let layer_a = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("A".into()), ..Default::default() },
+            color: None,
         });
         let child1 = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("c1".into()), ..Default::default() },
+            color: None,
         });
         let child2 = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("c2".into()), ..Default::default() },
+            color: None,
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child1), Rc::new(child2)],
@@ -12013,6 +12021,7 @@ mod tests {
         let layer_b = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("B".into()), ..Default::default() },
+            color: None,
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = vec![layer_a, group, layer_b];
@@ -15050,6 +15059,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![ElementSelection::all(vec![0, 0])],
@@ -15093,6 +15103,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![ElementSelection::all(vec![0, 0])],
@@ -15158,6 +15169,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![Rc::new(group(named("Wheels"))), Rc::new(group(CommonProps::default()))],
             isolated_blending: false, knockout_group: false, common: named("Car"),
+            color: None,
         });
         let doc = Document { layers: vec![layer], ..Document::default() };
         let got = tree_breadcrumb(&doc, &[vec![0], vec![0, 0], vec![0, 1], vec![0, 9]]);
@@ -15213,6 +15225,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![ElementSelection::all(vec![0, 0]),

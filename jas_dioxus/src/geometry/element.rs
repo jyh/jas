@@ -1421,6 +1421,26 @@ pub struct LayerElem {
     /// See [`GroupElem::knockout_group`].
     #[serde(default)]
     pub knockout_group: bool,
+    /// The layer's own colour (STATUS-jas row 53(b)): a lowercase `#rrggbb`,
+    /// or `None` for a layer that has none. No reader invents one; the
+    /// Layers row falls back to the selection colour. Layer Options writes
+    /// it. Group has no such field. Every codec reads through
+    /// [`normalize_layer_color`].
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// A layer colour as stored: `#rrggbb` lowercased, or `None` for anything
+/// else (absent, empty, a name, a short form), so an unparsable value drops
+/// the colour and keeps the layer. Mirrors the reference
+/// `normalize_layer_color` and Swift `normalizeLayerColor`.
+pub fn normalize_layer_color(v: Option<&str>) -> Option<String> {
+    let v = v?;
+    let hex = v.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", hex.to_ascii_lowercase()))
 }
 
 impl LayerElem {
@@ -3798,6 +3818,7 @@ mod tests {
                 children: vec![Rc::new(leaf.clone())],
                 isolated_blending: false, knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })),
             ("nested group", Element::Group(GroupElem {
                 children: vec![Rc::new(Element::Group(GroupElem {
@@ -3851,6 +3872,7 @@ mod tests {
             children: kids.into_iter().map(Rc::new).collect(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let cases: Vec<(&str, Element)> = vec![
             ("leaf", rect(1.0)),
@@ -5045,6 +5067,7 @@ mod tests {
                                   visibility: Visibility::Outline, mask: None,
                                   tool_origin: None,
                                   name: Some("Layer 1".into()), id: None },
+                                  color: None,
         });
         let json = serde_json::to_value(&elem).unwrap();
         let back: Element = serde_json::from_value(json).unwrap();

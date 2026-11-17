@@ -132,7 +132,7 @@ func mvPopulated() -> [(String, Element)] {
                                opacity: 0.42, transform: Transform.translate(7, 11),
                                locked: true, visibility: .outline, blendMode: .multiply,
                                isolatedBlending: true, knockoutGroup: true,
-                               mask: mvProbe(9), id: "layer-1"))),
+                               mask: mvProbe(9), id: "layer-1", color: "#4a90d9"))),
     ]
 }
 

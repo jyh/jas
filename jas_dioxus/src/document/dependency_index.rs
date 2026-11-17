@@ -636,6 +636,7 @@ mod tests {
             },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })
     }
 

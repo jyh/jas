@@ -1240,6 +1240,16 @@ namespace `jas:locked` uses. All four cells are asserted in
 `visibility`, `blendMode` and `mask` are unchanged by that wave and remain
 SVG-invisible.
 
+**A third container-only field, the LAYER's colour, landed on 2026-11-17**
+(STATUS-jas row 53(b), PR A). It is Layer-only (Group has none), optional, and
+stored as a lowercase `#rrggbb`. Absent means no colour, and no reader invents
+one. It rides all three codecs in all three implementations: test-JSON `color`
+(omitted when absent), SVG ` jas:layer-color` on the layer's `<g>`, and a binary
+TAG_LAYER slot after the gradient pair, written only when present. It is the
+`layer.color` row of `codec_field_survival.json`, and `lyr_flags` carries it as
+a `show_all` bystander in the preservation corpus. The Group → Layer promotion
+in the SVG reader gives the promoted layer no colour, because a Group carries none.
+
 **THE REFERENCE CANNOT ADJUDICATE THIS, and that is a standing fact about lock
 persistence, not a gap this stone left.** `workspace_interpreter/` has **no SVG
 codec at all** — measured: `svg` appears in four files and every occurrence is

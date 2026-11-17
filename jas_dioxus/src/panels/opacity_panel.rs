@@ -260,6 +260,7 @@ mod tests {
             },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
