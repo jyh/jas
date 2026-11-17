@@ -11,8 +11,15 @@ import Foundation
 public final class AppGradientLibraries {
     public var libs: [String: Any]
 
-    /// Seeded from the shipped bundle.
+    /// Seeded from the shipped bundle, with the user's saved libraries (Save
+    /// Gradient Library) shadowing it by id when the app installed a live
+    /// store, never under test.
     public init(seed: [String: Any]? = nil) {
-        self.libs = seed ?? ((WorkspaceData.load()?.data["gradient_libraries"] as? [String: Any]) ?? [:])
+        self.libs = seed ?? Self.shippedSeed()
+    }
+
+    public static func shippedSeed() -> [String: Any] {
+        let libs = (WorkspaceData.load()?.data["gradient_libraries"] as? [String: Any]) ?? [:]
+        return BrushLibraryStore.live.map { BrushLibraryStore.merged(bundle: libs, user: $0.loadGradients()) } ?? libs
     }
 }

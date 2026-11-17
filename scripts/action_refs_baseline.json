@@ -14,7 +14,6 @@
     "gradient_distribute_stops",
     "gradient_reset_midpoints",
     "gradient_reverse",
-    "gradient_save_library",
     "make_opacity_mask",
     "open_opacity_slider_popover",
     "release_opacity_mask",

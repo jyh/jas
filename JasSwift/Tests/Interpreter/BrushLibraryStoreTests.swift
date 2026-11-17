@@ -128,7 +128,7 @@ private func json(_ v: Any?) -> String {
     #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("brushes").path),
             "a swatch write is not a brush write")
     #expect(!sink(["kind": "swatch_library", "slug": "../x", "manifest": manifest]), "a bad id is refused and stays queued")
-    #expect(!sink(["kind": "gradient_library", "slug": "g", "manifest": manifest]), "another kind is not this sink's")
+    #expect(!sink(["kind": "pattern_library", "slug": "g", "manifest": manifest]), "another kind is not this sink's")
 }
 
 @Test func savedSwatchLibrariesLoadBackByIdAndShadowTheBundle() throws {
@@ -142,4 +142,16 @@ private func json(_ v: Any?) -> String {
     let merged = BrushLibraryStore.merged(bundle: ["web_colors": ["name": "Web Colors"], "other": ["name": "O"]], user: user)
     #expect((merged["web_colors"] as? [String: Any])?["name"] as? String == "Mine", "the user's shadows the bundle's")
     #expect(merged["other"] != nil && merged["sunset_palette"] != nil)
+}
+
+// Save Gradient Library's Mac half (design 2026-11-17 §2): `gradients/<id>.json`.
+@Test func theSinkWritesAGradientLibraryAsItsIdJsonAndItLoadsBack() throws {
+    let root = tmpRoot()
+    let store = BrushLibraryStore(root: root)
+    let manifest: [String: Any] = ["name": "Warm Tones", "gradients": [[String: Any]]()]
+    #expect(store.sink(["kind": "gradient_library", "slug": "warm_tones", "manifest": manifest]), "taken")
+    let file = root.appendingPathComponent("gradients/warm_tones.json")
+    #expect(json(try JSONSerialization.jsonObject(with: Data(contentsOf: file))) == json(manifest))
+    #expect(json(store.loadGradients()) == json(["warm_tones": manifest]))
+    #expect(!store.sink(["kind": "gradient_library", "slug": "A/b", "manifest": manifest]), "a bad id stays queued")
 }

@@ -517,7 +517,8 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
 /// pretty JSON)`, oldest first, and empty the queue. A brush library goes out
 /// as `<slug>.json`, its manifest; installing it is placing that file at
 /// `workspace/brushes/<slug>/library.json`. A swatch library goes out as
-/// `<id>.json`, the shape of `workspace/swatches/<id>.json`. A write of any other kind is
+/// `<id>.json`, the shape of `workspace/swatches/<id>.json`, and a gradient
+/// library likewise (`workspace/gradients/<id>.json`). A write of any other kind is
 /// dropped, as no host here knows where it goes.
 pub(crate) fn drain_pending_writes(
     st: &mut crate::workspace::app_state::AppState,
@@ -526,7 +527,7 @@ pub(crate) fn drain_pending_writes(
     for w in std::mem::take(&mut st.pending_writes) {
         let slug = w.get("slug").and_then(|v| v.as_str()).unwrap_or("");
         let kind = w.get("kind").and_then(|v| v.as_str());
-        if matches!(kind, Some("brush_library" | "swatch_library")) && !slug.is_empty() {
+        if matches!(kind, Some("brush_library" | "swatch_library" | "gradient_library")) && !slug.is_empty() {
             let body = serde_json::to_string_pretty(&w["manifest"]).unwrap_or_default();
             sink(&format!("{slug}.json"), &body);
         }
@@ -1825,6 +1826,7 @@ fn build_appstate_ctx(
     ctx.insert("data".to_string(), serde_json::json!({
         "swatch_libraries": st.swatch_libraries.clone(),
         "brush_libraries": st.brush_libraries.clone(),
+        "gradient_libraries": st.gradient_libraries.clone(),
     }));
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
@@ -2868,6 +2870,14 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // Save Gradient Library runs in the shared runner over the app-global
+    // gradient tier and the Gradient panel's active library (design
+    // 2026-11-17 §2).
+    if eff.get("gradient.save_library").is_some() {
+        run_in_gradients_store(eff, eval_ctx, st);
+        return deferred;
+    }
+
     // Swatch-library edits run in the shared runner, over the app-global
     // libraries and the Swatches panel's selection.
     if eff.as_object().is_some_and(|m| m.keys().any(|k| k.starts_with("swatch."))) {
@@ -2983,6 +2993,35 @@ fn run_in_swatches_store(
     let open = store.get_panel(SWATCHES, "open_libraries");
     if open.is_array() {
         st.swatches_panel.open_libraries = open.clone();
+    }
+    st.pending_writes.append(&mut store.pending_writes);
+}
+
+/// Run one effect in the shared runner on a `StateStore` that holds this app's
+/// gradient libraries (`AppState::gradient_libraries`) and the Gradient
+/// panel's generic state, then carry the libraries, the panel state and any
+/// queued file write back. `run_in_swatches_store` is the twin.
+fn run_in_gradients_store(
+    eff: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    const GRADIENT: &str = "gradient_panel_content";
+    let mut store = super::state_store::StateStore::new();
+    store.set_data_path("gradient_libraries", st.gradient_libraries.clone());
+    let mut scope: std::collections::HashMap<String, serde_json::Value> = crate::interpreter::workspace::Workspace::load()
+        .map(|ws| ws.panel_state_defaults(GRADIENT).into_iter().collect()).unwrap_or_default();
+    if let Some(stored) = st.panel_state.get(GRADIENT) {
+        for (k, v) in stored { scope.insert(k.clone(), v.clone()); }
+    }
+    store.init_panel(GRADIENT, scope);
+    store.set_active_panel(Some(GRADIENT));
+    let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
+    super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
+    st.gradient_libraries = store.get_data_path("gradient_libraries");
+    if let Some(out) = store.panel_scope(GRADIENT) {
+        let entry = st.panel_state.entry(GRADIENT.to_string()).or_default();
+        for (k, v) in out { entry.insert(k.clone(), v.clone()); }
     }
     st.pending_writes.append(&mut store.pending_writes);
 }
@@ -14989,6 +15028,7 @@ mod tests {
         for (content, action, lib, name) in [
             ("swatches_panel_content", "save_swatch_library", "web_colors", "Web Colors"),
             ("brushes_panel_content", "save_brush_library", "default_brushes", "Default Brushes"),
+            ("gradient_panel_content", "gradient_save_library", "neutrals", "Neutrals"),
         ] {
             let mut st = AppState::new();
             st.panel_state.entry("brushes_panel_content".into()).or_default()
@@ -15002,6 +15042,21 @@ mod tests {
             assert_eq!(od["params"]["library"], serde_json::json!(lib), "{action}: {od}");
             assert_eq!(od["params"]["name"], serde_json::json!(name), "{action}: {od}");
         }
+    }
+
+    #[test]
+    fn save_gradient_library_runs_in_the_web_app_and_the_new_library_becomes_active() {
+        let mut st = AppState::new();
+        let before = st.gradient_libraries["neutrals"].clone();
+        let eff = serde_json::json!({"gradient.save_library": {"library": "\"neutrals\"", "name": "\"Warm Tones\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.gradient_libraries["warm_tones"]["name"], serde_json::json!("Warm Tones"));
+        assert_eq!(st.gradient_libraries["neutrals"], before, "the source untouched");
+        assert_eq!(crate::panels::panel_menu::panel_menu_ctx("gradient_panel_content", &st)["panel"]["active_library_id"],
+                   serde_json::json!("warm_tones"));
+        let mut got = Vec::new();
+        super::drain_pending_writes(&mut st, |f, _| got.push(f.to_string()));
+        assert_eq!(got, vec!["warm_tones.json".to_string()], "a gradient library leaves as <id>.json");
     }
 
     #[test]

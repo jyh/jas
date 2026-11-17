@@ -1428,5 +1428,79 @@
         "active_library_id": "spectrums"
       }
     }
+  },
+  {
+    "name": "save_gradient_library_opens_with_the_active_library_name",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-11-17 gradient-library tier section 2: Save Gradient Library opens gradient_library_save on the ACTIVE library with its name proposed.",
+    "panel_state": {
+      "gradient_panel_content": {
+        "active_library_id": "neutrals"
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_save_library"
+          }
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "gradient_library_save",
+      "state": {
+        "name": "Neutrals"
+      }
+    }
+  },
+  {
+    "name": "save_gradient_library_ok_saves_a_copy_that_becomes_active",
+    "setup_svg": "rect_basic.svg",
+    "note": "gradient.save_library: \"Warm Tones\" is a new id, so a copy of neutrals named Warm Tones is added and becomes the active library (the panel shows one); neutrals is untouched.",
+    "panel_state": {
+      "gradient_panel_content": {
+        "active_library_id": "neutrals"
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_save_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "gradient_lib_name_input"
+          },
+          "event": "commit",
+          "value": "Warm Tones"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "gradient_save_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "gradient_libraries.warm_tones.name": "Warm Tones",
+      "gradient_libraries.neutrals.name": "Neutrals"
+    },
+    "expected_panel": {
+      "gradient_panel_content": {
+        "active_library_id": "warm_tones"
+      }
+    }
   }
 ]

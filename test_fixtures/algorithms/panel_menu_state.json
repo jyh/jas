@@ -1424,6 +1424,80 @@
     ]
   },
   {
+    "name": "gradient_with_an_active_library",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {
+          "active_library_id": "neutrals"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "label": "Reverse Gradient",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "label": "Open Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "label": "Save Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "label": "Close Gradient",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
     "name": "layers_group_selected_not_isolated",
     "function": "panel_menu_state",
     "args": {

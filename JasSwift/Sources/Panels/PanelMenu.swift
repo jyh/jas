@@ -202,10 +202,13 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .symbols: SymbolsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .brushes: BrushesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .concepts: ConceptsPanel.menuDispatch(cmd, addr: addr, layout: &layout, model: model)
-    // Gradient's rows other than Close are disabled placeholders with no
-    // action (gradient.yaml), so Close is its whole dispatch.
+    // Gradient: Close is the layout's; every other row runs its YAML action
+    // in the panel's scope (Save Gradient Library, design 2026-11-17 §2).
+    // Until then its other rows were disabled placeholders and Close was the
+    // whole dispatch. No Gradient row is a radio, so nothing is folded.
     case .gradient:
         if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)) }
+        else { panelDispatchRow(.gradient, action: cmd, params: [:], model: model) }
     }
 }
 

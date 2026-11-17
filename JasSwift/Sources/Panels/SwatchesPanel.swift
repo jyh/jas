@@ -78,7 +78,9 @@ public func runYamlActionByName(_ name: String, params: [String: Any], model: Mo
     // app-global swatch libraries (``AppSwatchLibraries``), as the reference's
     // and the engine's action contexts carry it. Swatch Options reads the
     // selected swatch from `data.swatch_libraries` when the menu opens it.
-    var data: [String: Any] = ["swatch_libraries": model.swatchLibraries.libs]
+    // The gradient tier is app-global too (``AppGradientLibraries``).
+    var data: [String: Any] = ["swatch_libraries": model.swatchLibraries.libs,
+                               "gradient_libraries": model.gradientLibraries.libs]
     if let brushes = store.getDataPath("brush_libraries") { data["brush_libraries"] = brushes }
     ctx["data"] = data
     let dialogs = ws.data["dialogs"] as? [String: Any]
