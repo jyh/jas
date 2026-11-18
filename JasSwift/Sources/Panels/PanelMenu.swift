@@ -221,8 +221,8 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
 public func panelMenuRequest(_ id: String) -> (kind: PanelKind, label: String, spec: [String: Any])? {
     guard !id.isEmpty, let ws = WorkspaceData.load() else { return nil }
     for kind in PanelKind.all + [.brushes, .gradient, .concepts] {
-        // `panelMenuRaw`, not `panelMenu`: the latter casts the whole array to
-        // objects and so reads `[]` for any menu with a separator.
+        // `panelMenuRaw`: the raw array, separators included (a cast of the
+        // whole array to objects reads `[]` for any menu with a separator).
         for entry in ws.panelMenuRaw(panelKindToContentId(kind)) {
             guard let obj = entry as? [String: Any], obj["id"] as? String == id,
                   let spec = obj["items_from"] as? [String: Any],

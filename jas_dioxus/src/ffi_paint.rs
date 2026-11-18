@@ -2347,7 +2347,12 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 104, "the fixture corpus changed size");
+        assert_eq!(total, 105, "the fixture corpus changed size");
+        // ⛔ 104 → 105 (jas, 2026-11-18, row 150): `gradient_three_stops.svg`,
+        // gradient_fill_only.svg with a third (green@25) stop on its linear
+        // fill, for the Gradient menu's Distribute case. Expected to present
+        // as its two-stop source does; NOT measured here (Windows-only lane).
+        // Both pins bumped in the same edit.
         // ⛔ 103 → 104 (jas, 2026-11-18, row 147's Gradient menu cases):
         // `gradient_fill_only.svg`, gradient_fill_and_stroke.svg with its path
         // removed, so the one rect and its linear fill gradient are the whole
@@ -2548,6 +2553,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 104, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 105, "the whole corpus presents");
     }
 }
