@@ -648,3 +648,17 @@ private func addressOf(_ kind: PanelKind, in layout: WorkspaceLayout) -> PanelAd
         Issue.record("Place Instance put no Generated element at [0,0]"); return
     }
 }
+
+// Row 148: a separator-holding menu reads through `panelMenuRaw`, the one
+// accessor; a `[[String: Any]]` cast of the whole array read `[]` for every such
+// menu, and that accessor (`WorkspaceData.panelMenu(_:)`, no callers) is gone.
+@Test func brushesMenuReadsItsRowsAndSeparatorsRaw() {
+    guard let ws = WorkspaceData.load() else { Issue.record("no workspace"); return }
+    let raw = ws.panelMenuRaw("brushes_panel_content")
+    let separators = raw.filter { ($0 as? String) == "separator" }.count
+    let rows = raw.compactMap { $0 as? [String: Any] }.count
+    #expect(separators >= 1, "the Brushes menu holds separators: \(raw.count) entries")
+    #expect(rows >= 3, "and object rows: \(rows)")
+    #expect(separators + rows == raw.count, "every entry is a row or a separator")
+    #expect(!panelMenu(.brushes).isEmpty, "the menu the view draws is not empty")
+}

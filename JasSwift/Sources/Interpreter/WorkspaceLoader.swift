@@ -120,20 +120,11 @@ class WorkspaceData {
         }
     }
 
-    /// Get the panel menu items for a content id.
-    func panelMenu(_ contentId: String) -> [[String: Any]] {
-        guard let panel = panel(contentId),
-              let menu = panel["menu"] as? [[String: Any]] else {
-            return []
-        }
-        return menu
-    }
-
     /// Get the panel menu entries for a content id, preserving every
-    /// entry type. Unlike ``panelMenu`` (which casts to
-    /// `[[String: Any]]` and so silently drops the bare `"separator"`
-    /// string entries), this returns the raw heterogeneous array so the
-    /// generic menu builder sees separators as well as object entries.
+    /// entry type: the raw heterogeneous array, so the generic menu builder
+    /// sees the bare `"separator"` strings as well as the object entries.
+    /// The one panel-menu accessor: a `[[String: Any]]` cast of the whole
+    /// array read `[]` for any menu holding a separator (row 148 deleted it).
     func panelMenuRaw(_ contentId: String) -> [Any] {
         guard let panel = panel(contentId),
               let menu = panel["menu"] as? [Any] else {
