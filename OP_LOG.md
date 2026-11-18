@@ -534,3 +534,36 @@ drawing verb, are reachable solely from tool/panel/dialog YAML and are
 outside the map. (Count note: the prose "33-verb unification" above
 reflects its writing date; the seam now carries 36 `doc.*` verbs — growth
 since, not a discrepancy. The 26 journaling-verb count matches exactly.)
+
+---
+
+## 14. Host-key transactions journal with `ops: []` (2026-11-18)
+
+**Measured on the engine, not reasoned.** A panel that edits the document through
+a *key* has no `doc.*` verb in its path. A slider's `gradient_stops`, the Gradient
+menu's Reverse Gradient, and the stroke, properties, character, paragraph and
+opacity fields are all such keys. Six hosts apply them (`panel_behavior.rs`:
+gradient, stroke, properties, character, paragraph, opacity), each in its own
+transaction, and none goes through `op_apply`.
+
+- **Undo is unaffected.** Reverse Gradient on a selected rect, then `undo`,
+  restores the document byte-for-byte. Undo is the snapshot stacks of §3, which
+  never read ops.
+- **The journal sees the transaction, not the edit.** Reverse Gradient records
+  `Transaction { name: "gradient_reverse", ops: [] }`. The `doc.*` control
+  (`lock`) records `ops: [lock_selection]`.
+- **The readers of `ops` today, and how each treats `[]`,** are listed in
+  `scripts/check_ops_readers.py`, which fails on any reader it does not name.
+  - Coalescing (both ports) declines unless there is exactly one op, so a
+    host-key edit never merges.
+  - The recorder replays ops into a fixture and flags an empty transaction as
+    `opaque_transaction_without_ops`, so a recorded host-key edit replays to
+    nothing, loudly.
+- **Ripens-when (ruled 2026-11-18):** typed ops per host through `op_apply`
+  become REQUIRED the day a reader is added for which an empty list is a wrong
+  answer: op replay, the `checkpoint_equivalence` gate of §6, or the intent
+  ledger. The gate stops that reader's author; the same sentence sits in
+  `op_log.rs`'s header.
+
+Not measured: Swift's journal for a host-key edit. Measure it before the first
+such reader is wired.

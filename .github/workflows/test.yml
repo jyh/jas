@@ -108,6 +108,7 @@ jobs:
       # A call to a function no evaluator defines is null, silently, in every
       # port (`len(...)` hid the Artboard tool's Delete branch; PR #460).
       - run: python scripts/check_expr_functions.py --self-test && python scripts/check_expr_functions.py
+      - run: python scripts/check_ops_readers.py --self-test && python scripts/check_ops_readers.py
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
@@ -1023,6 +1024,8 @@ jobs:
           python scripts/check_state_reads.py
           python scripts/check_expr_functions.py --self-test
           python scripts/check_expr_functions.py
+          python scripts/check_ops_readers.py --self-test
+          python scripts/check_ops_readers.py
           bash scripts/check_panel_goldens.sh
           python scripts/check_path_b_exclusions.py
           bash scripts/check_intent_map.sh
