@@ -1542,5 +1542,25 @@
       }
     ],
     "expected_json": "gradient_reset_midpoints_resets_the_selected_fill_gradient_expected.json"
+  },
+  {
+    "name": "gradient_distribute_stops_spaces_the_selected_fill_gradient",
+    "setup_svg": "gradient_three_stops.svg",
+    "note": "gradient.yaml menu Distribute Stops Evenly; actions.yaml gradient_distribute_stops writes gradient_distributed(panel.stops) to gradient_stops. The rect's linear fill is red@0 (midpoint 35), green@25 (midpoint 70), blue@100; distributed, green moves to 100 * 1 / 2 = 50 and every midpoint is 50 (test_fixtures/gradient_stop/menu_transform.json's law). gradient_three_stops.svg is gradient_fill_only.svg with the green stop added, so the rect is the whole selection and the row is enabled (three stops). The golden differs from the setup only in that location and those two midpoints.",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_distribute_stops"
+          }
+        }
+      }
+    ],
+    "expected_json": "gradient_distribute_stops_spaces_the_selected_fill_gradient_expected.json"
   }
 ]
