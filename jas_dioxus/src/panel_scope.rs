@@ -391,6 +391,29 @@ pub fn sync_colour_state(store: &mut StateStore, slice: &PanelState) {
     store.set_panel(COLOUR_PANEL, "mode", Value::String(slice.mode.clone()));
 }
 
+/// The store's Gradient panel scope takes the selection's gradient as SHOWN
+/// (`gradient_host::live_values`: type, angle, stops and the rest, or nothing
+/// with an empty selection), so an action run in that panel's scope reads the
+/// gradient the panel draws. The action runner reads `panel.*` from the STORE
+/// (`panel_behavior::run_batch`), while `engine_scope` lays these values over
+/// the panel only for the dock, so a menu row's `gradient_reversed(panel.stops)`
+/// read the store's black→white default over a red→blue selection (row 147).
+/// W2b-7's law again; the web syncs the same way before a gradient key
+/// (`renderer.rs` `apply_set_effects`). Not while the slider's press snapshot
+/// stands: then the store's stops ARE the preview (WIDGET_EVENTS.md §The
+/// stops kind).
+pub fn sync_gradient_state(store: &mut StateStore, model: &Model, fill_on_top: bool) {
+    let pressed = store.panel_scope(crate::interpreter::gradient_host::GRADIENT_PANEL)
+        .and_then(|own| own.get(&format!("stops{}", crate::panel_behavior::PRESS_SUFFIX)).cloned())
+        .is_some_and(|v| !v.is_null());
+    if pressed {
+        return;
+    }
+    for (k, v) in crate::interpreter::gradient_host::live_values(model.document(), fill_on_top) {
+        store.set_panel(crate::interpreter::gradient_host::GRADIENT_PANEL, &k, v);
+    }
+}
+
 /// Give the colour panel a store scope holding ONLY `mode`, the one key a
 /// workspace action writes (`set_color_panel_mode`, `set_panel_state: {panel:
 /// color, key: mode}`). `StateStore::set_panel` drops a write to a panel with
@@ -845,6 +868,42 @@ mod tests {
     /// this the engine's scope was the store's panel alone, so a selected blue
     /// radial drew `gradient.yaml`'s black→white linear default (flask §495).
     /// Nothing selected leaves the store's panel standing.
+    /// Row 147: the store's Gradient scope takes the selection's gradient
+    /// (the action runner reads `panel.stops` from the store), except while
+    /// the slider's press snapshot is held; a released press leaves `null`.
+    #[test]
+    fn sync_gradient_state_lays_the_selection_over_the_store_unless_a_press_is_held() {
+        use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
+        use crate::interpreter::state_store::StateStore;
+        let preview = json!([
+            {"color": "#ff0000", "opacity": 100.0, "location": 0.0, "midpoint_to_next": 50.0},
+            {"color": "#00ff00", "opacity": 100.0, "location": 100.0, "midpoint_to_next": 50.0},
+        ]);
+        let m = crate::document::test_fixture::model_with(
+            vec![crate::document::test_fixture::rect(0.0, 0.0, 10.0, 10.0)], &[0]);
+        let want = gradient_host::live_values(m.document(), true);
+        assert_ne!(want["stops"], preview, "the arm would be vacuous");
+        let press_key = format!("stops{}", crate::panel_behavior::PRESS_SUFFIX);
+        for (press, synced) in [(Value::Null, true), (preview.clone(), false)] {
+            let mut store = StateStore::new();
+            store.init_panel(GRADIENT_PANEL, std::collections::HashMap::from([
+                ("stops".to_string(), preview.clone()),
+                ("preview_state".to_string(), json!(false)),
+                (press_key.clone(), press.clone()),
+            ]));
+            sync_gradient_state(&mut store, &m, true);
+            let own = store.panel_scope(GRADIENT_PANEL).unwrap();
+            if synced {
+                assert_eq!(own["stops"], want["stops"], "a released press syncs");
+                // A solid rect reads as a seeded preview.
+                assert_eq!(own["preview_state"], json!(true));
+            } else {
+                assert_eq!(own["stops"], preview, "a held press keeps the store's preview");
+                assert_eq!(own["preview_state"], json!(false));
+            }
+        }
+    }
+
     #[test]
     fn the_engine_gradient_panel_reads_the_selection_and_else_the_store() {
         use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};

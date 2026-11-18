@@ -8167,6 +8167,73 @@ pub(crate) mod tests {
         assert!(refused >= 3 && written >= 5, "corpus too thin: {} refused, {} written", refused, written);
     }
 
+    // Runs test_fixtures/gradient_stop/menu_transform.json, the shared corpus
+    // for the Gradient panel menu's three stop transforms (GRADIENT.md §Panel
+    // menu), through the law and through the expression builtin the YAML
+    // calls. The reference (`gradient_law.py`) and Swift read the same file.
+    #[test]
+    fn gradient_menu_transform_corpus() {
+        use crate::interpreter::expr::eval;
+        use crate::interpreter::expr_types::Value as EV;
+        use crate::interpreter::gradient_host::{distribute_stops, reset_midpoints, reverse_stops};
+        // Numbers compare as numbers (the law writes f64; the fixture has ints).
+        fn same(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+            match (a, b) {
+                (serde_json::Value::Number(x), serde_json::Value::Number(y)) => x.as_f64() == y.as_f64(),
+                (serde_json::Value::Array(x), serde_json::Value::Array(y)) =>
+                    x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same(p, q)),
+                (serde_json::Value::Object(x), serde_json::Value::Object(y)) =>
+                    x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w))),
+                _ => a == b,
+            }
+        }
+        let raw = read_fixture("gradient_stop/menu_transform.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut ran: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let op = vec["op"].as_str().unwrap();
+            let (law, builtin): (fn(&serde_json::Value) -> Option<Vec<serde_json::Value>>, &str) = match op {
+                "reverse" => (reverse_stops, "gradient_reversed"),
+                "distribute" => (distribute_stops, "gradient_distributed"),
+                "reset_midpoints" => (reset_midpoints, "gradient_midpoints_reset"),
+                other => panic!("gradient_menu_transform '{}': unknown op {}", name, other),
+            };
+            let want = &vec["expected"];
+            let got = law(&vec["stops"]);
+            let ctx = serde_json::json!({"panel": {"stops": vec["stops"].clone()}});
+            let via_expr = eval(&format!("{}(panel.stops)", builtin), &ctx);
+            let e = ran.entry(op.to_string()).or_default();
+            if want.is_null() {
+                assert!(got.is_none(), "gradient_menu_transform '{}': the law must refuse, got {:?}", name, got);
+                assert!(matches!(via_expr, EV::Null), "gradient_menu_transform '{}': the builtin must be null, got {:?}", name, via_expr);
+                e.0 += 1;
+            } else {
+                let out = serde_json::Value::Array(got.unwrap_or_else(|| panic!("gradient_menu_transform '{}': refused", name)));
+                assert!(same(&out, want), "gradient_menu_transform '{}': law {} != {}", name, out, want);
+                match via_expr {
+                    EV::List(l) => {
+                        let l = serde_json::Value::Array(l);
+                        assert!(same(&l, want), "gradient_menu_transform '{}': builtin {} != {}", name, l, want);
+                    }
+                    other => panic!("gradient_menu_transform '{}': builtin gave {:?}", name, other),
+                }
+                e.1 += 1;
+            }
+        }
+        // Every op witnessed refusing AND writing, at least twice each.
+        assert_eq!(ran.len(), 3, "ops run: {:?}", ran);
+        for (op, (r, w)) in &ran {
+            assert!(*r >= 2 && *w >= 2, "gradient_menu_transform op {} too thin: {} refused, {} written", op, r, w);
+        }
+        // The builtin takes exactly one argument.
+        let ctx = serde_json::json!({"panel": {"stops": corpus["vectors"][0]["stops"].clone()}});
+        for b in ["gradient_reversed", "gradient_distributed", "gradient_midpoints_reset"] {
+            assert!(matches!(eval(&format!("{}()", b), &ctx), EV::Null), "{}()", b);
+            assert!(matches!(eval(&format!("{}(panel.stops, panel.stops)", b), &ctx), EV::Null), "{}(a, b)", b);
+        }
+    }
+
     // Runs test_fixtures/gradient_stop/slider.json, the shared corpus for the
     // Gradient slider's law (GRADIENT.md, "The slider law (precisely)"). The
     // reference (`gradient_law.py`) and Swift read the same file.

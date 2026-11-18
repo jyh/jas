@@ -895,6 +895,22 @@ fn eval_func(
             Value::List(keys.into_iter().map(serde_json::Value::String).collect())
         }
 
+        // gradient_reversed / gradient_distributed / gradient_midpoints_reset:
+        // stops -> stops, the Gradient panel menu's three transforms
+        // (GRADIENT.md §Panel menu; gradient_host, pinned by
+        // test_fixtures/gradient_stop/menu_transform.json). Null when refused.
+        "gradient_reversed" | "gradient_distributed" | "gradient_midpoints_reset" => {
+            if args.len() != 1 { return Value::Null; }
+            let v = eval_inner(&args[0], ctx, scope, store_cb);
+            let Value::List(arr) = v else { return Value::Null; };
+            let stops = serde_json::Value::Array(arr);
+            let out = match name {
+                "gradient_reversed" => super::gradient_host::reverse_stops(&stops),
+                "gradient_distributed" => super::gradient_host::distribute_stops(&stops),
+                _ => super::gradient_host::reset_midpoints(&stops),
+            };
+            out.map(Value::List).unwrap_or(Value::Null)
+        }
         "reverse" => {
             if args.len() != 1 { return Value::Null; }
             let v = eval_inner(&args[0], ctx, scope, store_cb);

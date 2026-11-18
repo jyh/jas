@@ -261,6 +261,19 @@ public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String:
         model.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
     }
     model.stateStore.setActivePanel(pid)
+    // The Gradient menu's transforms read `panel.stops`, which the action
+    // runner takes from the STORE, while ``gradientPanelLiveOverrides`` lays
+    // the selection's gradient over the panel only for the dock. Lay it over
+    // the store too, so Reverse Gradient reverses the gradient the panel draws
+    // (row 147; the engine's `panel_scope::sync_gradient_state`). Not while
+    // the slider's press snapshot stands: then the store's stops ARE the preview.
+    if pid == "gradient_panel_content" {
+        // A released press leaves NSNull, as the slider's own reader allows.
+        let held = model.stateStore.getPanel(pid, "stops__press")
+        if held == nil || held is NSNull {
+            for (k, v) in gradientPanelLiveOverrides(model: model) { model.stateStore.setPanel(pid, k, v) }
+        }
+    }
     runYamlActionByName(action, params: params, model: model)
 }
 

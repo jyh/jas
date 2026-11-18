@@ -1498,6 +1498,495 @@
     ]
   },
   {
+    "name": "gradient_transforms_enabled_on_a_linear_gradient_selection",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "type": "linear",
+          "preview_state": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 50.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100.0,
+              "midpoint_to_next": 50
+            }
+          ]
+        },
+        "active_document": {
+          "has_selection": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "label": "Reverse Gradient",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "label": "Open Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "label": "Save Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "label": "Close Gradient",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "gradient_transforms_distribute_disabled_at_two_stops",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "type": "linear",
+          "preview_state": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100.0,
+              "midpoint_to_next": 50
+            }
+          ]
+        },
+        "active_document": {
+          "has_selection": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "label": "Reverse Gradient",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "label": "Open Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "label": "Save Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "label": "Close Gradient",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "gradient_transforms_disabled_on_a_freeform_gradient",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "type": "freeform",
+          "preview_state": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 50.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100.0,
+              "midpoint_to_next": 50
+            }
+          ]
+        },
+        "active_document": {
+          "has_selection": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "label": "Reverse Gradient",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "label": "Open Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "label": "Save Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "label": "Close Gradient",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "gradient_transforms_disabled_on_a_seeded_preview",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "type": "linear",
+          "preview_state": true,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 50.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100.0,
+              "midpoint_to_next": 50
+            }
+          ]
+        },
+        "active_document": {
+          "has_selection": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "label": "Reverse Gradient",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "label": "Open Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "label": "Save Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "label": "Close Gradient",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "gradient_transforms_disabled_with_nothing_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "type": "linear",
+          "preview_state": false,
+          "stops": [
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 0.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 50.0,
+              "midpoint_to_next": 50
+            },
+            {
+              "color": "#000000",
+              "opacity": 100,
+              "location": 100.0,
+              "midpoint_to_next": 50
+            }
+          ]
+        },
+        "active_document": {
+          "has_selection": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "label": "Reverse Gradient",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "label": "Distribute Stops Evenly",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "label": "Reset Midpoints",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "label": "Open Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "label": "Save Gradient Library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "label": "Close Gradient",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
     "name": "layers_group_selected_not_isolated",
     "function": "panel_menu_state",
     "args": {

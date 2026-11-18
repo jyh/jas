@@ -223,3 +223,74 @@ def drag_midpoint(stops: list[dict], pair: Any, location: Any) -> list[dict] | N
     if a == b:
         return None
     return set_midpoint(stops, p, ((loc - a) / (b - a)) * 100)
+
+
+# ── The panel menu's three stop transforms ──────────────────────────────
+# GRADIENT.md §Panel menu: Reverse Gradient, Distribute Stops Evenly, Reset
+# Midpoints. Pure and dict-shaped like the rest of this file, pinned by
+# ``test_fixtures/gradient_stop/menu_transform.json`` (read by the Rust and
+# Swift ports too). Each returns a NEW list of stops carrying exactly the four
+# YAML fields, or ``None`` (refused, nothing written) when ``stops`` is not a
+# list of at least two stops that each have a string colour and a numeric
+# opacity and location. A missing or non-numeric ``midpoint_to_next`` reads as
+# 50, as the ports' stop parsers read it.
+
+
+def _stops_of(stops: Any) -> list[dict] | None:
+    if not isinstance(stops, list) or len(stops) < 2:
+        return None
+    out = []
+    for s in stops:
+        if not isinstance(s, dict) or not isinstance(s.get("color"), str):
+            return None
+        opacity, location = _number(s.get("opacity")), _number(s.get("location"))
+        if opacity is None or location is None:
+            return None
+        mid = _number(s.get("midpoint_to_next"))
+        out.append({"color": s["color"], "opacity": opacity, "location": location,
+                    "midpoint_to_next": 50.0 if mid is None else mid})
+    return out
+
+
+def _by_location(stops: list[dict]) -> list[dict]:
+    """``stops`` in location order; ties keep their stored order."""
+    return sorted(stops, key=lambda s: s["location"])
+
+
+def reverse_stops(stops: Any) -> list[dict] | None:
+    """Reverse Gradient: the stops in location order, reversed, each at
+    ``100 - location``. The midpoint between new neighbours ``j`` and ``j+1``
+    is that same pair's old midpoint measured from the other end,
+    ``100 - m``; the new last stop's ``midpoint_to_next`` is 50."""
+    s = _stops_of(stops)
+    if s is None:
+        return None
+    s = _by_location(s)
+    n = len(s)
+    out = []
+    for j in range(n):
+        old = s[n - 1 - j]
+        mid = 100.0 - s[n - 2 - j]["midpoint_to_next"] if j < n - 1 else 50.0
+        out.append(dict(old, location=100.0 - old["location"], midpoint_to_next=mid))
+    return out
+
+
+def distribute_stops(stops: Any) -> list[dict] | None:
+    """Distribute Stops Evenly: the stops in location order, stop ``i`` of
+    ``n`` at ``100 * i / (n - 1)``, every midpoint 50."""
+    s = _stops_of(stops)
+    if s is None:
+        return None
+    s = _by_location(s)
+    n = len(s)
+    return [dict(st, location=100.0 * i / (n - 1), midpoint_to_next=50.0)
+            for i, st in enumerate(s)]
+
+
+def reset_midpoints(stops: Any) -> list[dict] | None:
+    """Reset Midpoints: every ``midpoint_to_next`` is 50; the stored order and
+    the locations are unchanged."""
+    s = _stops_of(stops)
+    if s is None:
+        return None
+    return [dict(st, midpoint_to_next=50.0) for st in s]

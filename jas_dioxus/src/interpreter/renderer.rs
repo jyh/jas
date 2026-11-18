@@ -15044,6 +15044,51 @@ mod tests {
         }
     }
 
+    /// Row 147: the Gradient menu's transforms run in `panel_menu_ctx`'s panel,
+    /// which must be the selection's gradient as the body draws it
+    /// (`live_panel_state_table`), not the panel struct's black→white default.
+    /// The struct is NOT synced first, as nothing syncs it on a selection.
+    #[test]
+    fn gradient_menu_transforms_read_the_selection_in_the_web_app() {
+        use crate::geometry::element::{Color, Gradient, GradientStop, GradientType, GradientMethod, StrokeSubMode};
+        use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
+        use crate::panels::panel_menu::{dispatch_yaml_menu, is_enabled_from_yaml, panel_menu_ctx};
+        let g = Gradient {
+            gtype: GradientType::Linear, angle: 0.0, aspect_ratio: 100.0,
+            method: GradientMethod::Classic, dither: false, stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 0.0, midpoint_to_next: 30.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let addr = crate::workspace::workspace::PanelAddr {
+            group: crate::workspace::workspace::GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(g));
+        let ctx = panel_menu_ctx(GRADIENT_PANEL, &st);
+        assert_eq!(ctx["panel"]["stops"][0]["color"], serde_json::json!("#00ff00"), "{}", ctx["panel"]);
+        assert_eq!(ctx["panel"]["preview_state"], serde_json::json!(false));
+        assert!(is_enabled_from_yaml(GRADIENT_PANEL, "gradient_reverse", &ctx));
+        dispatch_yaml_menu(GRADIENT_PANEL, "gradient_reverse", addr, &mut st);
+        let fill = |st: &AppState| gradient_host::live_values(st.tab().unwrap().model.document(), true)["stops"].clone();
+        // green@0 (mid 30), blue@100 reversed: blue@0 (mid 70), green@100.
+        let got = fill(&st);
+        assert_eq!((&got[0]["color"], &got[0]["midpoint_to_next"], &got[1]["color"]),
+                   (&serde_json::json!("#0000ff"), &serde_json::json!(70.0), &serde_json::json!("#00ff00")), "{got}");
+        // A solid selection shows a seeded preview: the three rows are disabled.
+        let mut solid = AppState::new();
+        select_first_rect(&mut solid, None);
+        let ctx = panel_menu_ctx(GRADIENT_PANEL, &solid);
+        assert_eq!(ctx["panel"]["preview_state"], serde_json::json!(true), "{}", ctx["panel"]);
+        for row in ["gradient_reverse", "gradient_distribute_stops", "gradient_reset_midpoints"] {
+            assert!(!is_enabled_from_yaml(GRADIENT_PANEL, row, &ctx), "{row} on a solid selection");
+        }
+    }
+
     #[test]
     fn save_gradient_library_runs_in_the_web_app_and_the_new_library_becomes_active() {
         let mut st = AppState::new();
