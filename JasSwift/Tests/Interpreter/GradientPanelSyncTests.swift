@@ -1,5 +1,6 @@
-/// Phase 4: selection → gradient panel reads in JasSwift.
-/// Mirrors Rust `sync_gradient_panel_*` tests in renderer.rs.
+/// The Gradient panel's writeback in JasSwift. The read direction is
+/// `gradientPanelLiveOverrides` (GradientPanelLiveTests.swift); the
+/// store-writing sync it replaced had no caller and was deleted (row 151).
 
 import Foundation
 import Testing
@@ -37,42 +38,6 @@ private func modelWithRect(_ r: Element) -> Model {
     return Model(document: doc)
 }
 
-@Test func syncGradientPanelUniformWithGradient() {
-    let g = sampleGradient()
-    let model = modelWithRect(rectWithFillGradient(g))
-    let store = model.stateStore
-    store.set("fill_on_top", true)
-    syncGradientPanelFromSelection(store: store, controller: Controller(model: model))
-    #expect(store.get("gradient_type") as? String == "radial")
-    #expect((store.get("gradient_angle") as? Double) == 30)
-    #expect((store.get("gradient_aspect_ratio") as? Double) == 200)
-    #expect(store.get("gradient_method") as? String == "smooth")
-    #expect(store.get("gradient_dither") as? Bool == true)
-    #expect(store.get("gradient_preview_state") as? Bool == false)
-}
-
-@Test func syncGradientPanelSolidSeedsPreview() {
-    let model = modelWithRect(rectWithFillGradient(nil))
-    let store = model.stateStore
-    store.set("fill_on_top", true)
-    syncGradientPanelFromSelection(store: store, controller: Controller(model: model))
-    #expect(store.get("gradient_preview_state") as? Bool == true)
-    // First-stop seed = current solid color (red) per fill-type-coupling.
-    #expect(store.get("gradient_seed_first_color") as? String == "#ff0000")
-    #expect(store.get("gradient_type") as? String == "linear")
-}
-
-@Test func syncGradientPanelEmptySelectionLeavesStoreAlone() {
-    let layer = Layer(children: [Element]())
-    let doc = Document(layers: [layer], selectedLayer: 0, selection: [])
-    let model = Model(document: doc)
-    let store = model.stateStore
-    // Pre-populate so we can detect a no-op.
-    store.set("gradient_type", "radial")
-    syncGradientPanelFromSelection(store: store, controller: Controller(model: model))
-    #expect(store.get("gradient_type") as? String == "radial")
-}
-
 // MARK: - Phase 5: panel writeback
 
 @Test func applyGradientPanelWritesFillGradient() {
@@ -85,7 +50,9 @@ private func modelWithRect(_ r: Element) -> Model {
     store.set("gradient_method", "smooth")
     store.set("gradient_dither", true)
     store.set("gradient_stroke_sub_mode", "across")
-    store.set("gradient_preview_state", true)
+    // The solid rect shows a seeded preview (the live overrides, the one source
+    // the dock and the Gradient menu read since row 147).
+    #expect((gradientPanelLiveOverrides(model: model)["preview_state"] as? Bool) == true)
     applyGradientPanelToSelection(store: store, controller: Controller(model: model))
     let elem = model.document.getElement([0, 0])
     let g = elem.fillGradient
@@ -96,8 +63,8 @@ private func modelWithRect(_ r: Element) -> Model {
     #expect(g?.method == .smooth)
     #expect(g?.dither == true)
     #expect(g?.strokeSubMode == .across)
-    // preview_state cleared after first edit.
-    #expect((store.get("gradient_preview_state") as? Bool) == false)
+    // The first edit ends the preview: the rect now holds a gradient.
+    #expect((gradientPanelLiveOverrides(model: model)["preview_state"] as? Bool) == false)
 }
 
 @Test func theSlidersWholeListKeyWritesTheSelectionsStops() {
