@@ -43,6 +43,11 @@ func runEffects(
     // resolver-unaware call paths (panels that don't journal, the convenience
     // overload), where this whole bracket is inert. Mirrors Rust's `owns_txn`.
     let ownsTxn = model.map { !$0.isInTxn } ?? false
+    // A transaction a host opens and closes inside this batch
+    // (``Model/editDocument(_:)``) is named with the action too (row 155).
+    let priorBatchName = model?.batchActionName
+    if ownsTxn, let m = model, let an = actionName { m.batchActionName = an }
+    defer { if ownsTxn, let m = model { m.batchActionName = priorBatchName } }
     // Thread ctx through sibling effects: `let:` extends ctx for
     // subsequent siblings; nested lists (then/else/do) recurse with
     // their own ctx so bindings don't leak back.

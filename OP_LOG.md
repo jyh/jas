@@ -565,5 +565,16 @@ transaction, and none goes through `op_apply`.
   ledger. The gate stops that reader's author; the same sentence sits in
   `op_log.rs`'s header.
 
-Not measured: Swift's journal for a host-key edit. Measure it before the first
-such reader is wired.
+**Swift, measured 2026-11-18 (STATUS-jas row 155):** ops are `[]` as on the
+engine. But the transaction was ANONYMOUS (`name: nil`), because Swift's panel
+route (`runYamlActionByName`) ran its effects outside the journal
+owner-bracket, and `Model.editDocument` opened and closed its own
+transaction. Fixed in the same change: the route passes `model` and
+`actionName`, and a transaction `editDocument` opens inside an action's batch
+takes the action's name (`Model.batchActionName`). Both ports now journal
+`{name: gradient_reverse, ops: []}` (pinned by
+`gradientMenuReverseJournalsANamedTransaction`). Undo restores on both.
+REASONED, NOT MEASURED: the engine opens one transaction per batch
+(`panel_behavior.rs`, `begin_txn` when none is open), while Swift opens one per
+`editDocument`. A batch writing two host keys would then be one undo step on
+the engine and two on the Mac. Which actions write two is not censused.
