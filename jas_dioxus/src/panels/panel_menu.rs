@@ -494,6 +494,16 @@ pub fn panel_menu_ctx(
     for (k, v) in live_panel_state(content_id, st) {
         panel.insert(k, v);
     }
+    // The Gradient panel's fields describe the selection, as its body draws
+    // them (`live_panel_state_table`: the selection's gradient, and the slider
+    // struct's stops while a press stands). Its menu reads them too: Reverse
+    // Gradient's `gradient_reversed(panel.stops)` and the rows' `preview_state`
+    // guard (row 147). Without this the menu read the struct's default stops.
+    if content_id == crate::interpreter::gradient_host::GRADIENT_PANEL {
+        if let Some(live) = crate::workspace::dock_panel::live_panel_state_table(st).remove(content_id) {
+            panel.extend(live);
+        }
+    }
     let preferences = crate::interpreter::preferences::current();
     let state = crate::workspace::dock_panel::build_live_state_map(st);
     let active_document = crate::interpreter::renderer::build_active_document_view(st);

@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import JasLib
 
 // MARK: - Selection → Gradient panel
@@ -27,8 +28,10 @@ private func filled(_ g: Gradient?, _ c: Color = Color(r: 0, g: 0, b: 1)) -> Ele
 
 @Test func gradientPanelReadsTheSelectedGradient() {
     let o = gradientPanelLiveOverrides(model: gradientModel([filled(blueRadial)], selected: [[0, 0]]))
-    #expect(o.count == 7)
+    #expect(o.count == 8)
     #expect((o["type"] as? String) == "radial")
+    // The selection holds a gradient, so the panel shows it, not a seed.
+    #expect((o["preview_state"] as? Bool) == false)
     #expect((o["angle"] as? Double) == 0)
     #expect((o["aspect_ratio"] as? Double) == 100)
     #expect((o["method"] as? String) == "classic")
@@ -46,15 +49,57 @@ private func filled(_ g: Gradient?, _ c: Color = Color(r: 0, g: 0, b: 1)) -> Ele
                                                             selected: [[0, 0]]))
     #expect((o["type"] as? String) == "linear")
     #expect(((o["stops"] as? [[String: Any]])?.first?["color"] as? String) == "#ff0000")
+    // A seed is a preview: the Gradient menu's three transforms are disabled on
+    // it (row 147). Mirrors gradient_host.rs.
+    #expect((o["preview_state"] as? Bool) == true)
 }
 
 @Test func gradientPanelAddsNothingWithNoSelectionAndOnlyTheFirstStopsWhenMixed() {
     #expect(gradientPanelLiveOverrides(model: gradientModel([filled(blueRadial)], selected: [])).isEmpty)
     // GRADIENT.md §Multi-selection: the slider shows the first element's
-    // stops; every other field stands as the store holds it. Mirrors
-    // gradient_host.rs `live_values_are_empty_with_no_selection_and_only_the_first_stops_when_mixed`.
+    // stops; every other field stands as the store holds it, except that a
+    // mixed selection is not a seeded preview. Mirrors gradient_host.rs
+    // `live_values_are_empty_with_no_selection_and_only_the_first_stops_when_mixed`.
     let mixed = gradientModel([filled(blueRadial), filled(nil)], selected: [[0, 0], [0, 1]])
     let o = gradientPanelLiveOverrides(model: mixed)
-    #expect(Array(o.keys) == ["stops"])
+    #expect(Set(o.keys) == ["preview_state", "stops"])
+    #expect((o["preview_state"] as? Bool) == false)
     #expect((o["stops"] as? [[String: Any]])?.map { $0["color"] as? String } == blueRadial.stops.map { $0.color })
+}
+
+// MARK: - The Gradient menu reads the selection (row 147)
+//
+// A Gradient panel-menu row runs its YAML in the panel's STORE scope, so
+// ``panelDispatchRow`` lays the selection's gradient over that scope first,
+// unless the slider's press snapshot is held. A released press leaves NSNull.
+
+private func fillStops(_ m: Model) -> [String] {
+    guard case .rect(let r) = m.document.layers[0].children[0] else { return [] }
+    return r.fillGradient?.stops.map { "\($0.color)@\(Int($0.location))" } ?? []
+}
+
+@Test func gradientMenuReverseReadsTheSelectionAfterAReleasedPress() {
+    let m = gradientModel([filled(blueRadial)], selected: [[0, 0]])
+    let pid = "gradient_panel_content"
+    m.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+    m.stateStore.setPanel(pid, "stops__press", NSNull())
+    panelDispatchRow(.gradient, action: "gradient_reverse", params: [:], model: m)
+    // blue@0, white@100 reversed; the store's black→white default would give
+    // white@0, black@100.
+    #expect(fillStops(m) == ["#ffffff@0", "#0000ff@100"])
+}
+
+@Test func gradientMenuLeavesTheStoreStopsWhileAPressIsHeld() {
+    let m = gradientModel([filled(blueRadial)], selected: [[0, 0]])
+    let pid = "gradient_panel_content"
+    m.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+    let preview: [[String: Any]] = [
+        ["color": "#ff0000", "opacity": 100.0, "location": 0.0, "midpoint_to_next": 50.0],
+        ["color": "#00ff00", "opacity": 100.0, "location": 100.0, "midpoint_to_next": 50.0],
+    ]
+    m.stateStore.setPanel(pid, "stops", preview)
+    m.stateStore.setPanel(pid, "stops__press", preview)
+    panelDispatchRow(.gradient, action: "gradient_reverse", params: [:], model: m)
+    // The held preview is what the panel shows, so it is what reverses.
+    #expect(fillStops(m) == ["#00ff00@0", "#ff0000@100"])
 }

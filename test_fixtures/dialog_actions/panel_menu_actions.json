@@ -1502,5 +1502,45 @@
         "active_library_id": "warm_tones"
       }
     }
+  },
+  {
+    "name": "gradient_reverse_flips_the_selected_fill_gradient",
+    "setup_svg": "gradient_fill_only.svg",
+    "note": "gradient.yaml menu Reverse Gradient; actions.yaml gradient_reverse writes gradient_reversed(panel.stops) to gradient_stops. The rect's linear fill is red@0 (midpoint 35, opacity 60), blue@100; reversed it is blue@0 with midpoint 100 - 35 = 65, red@100 with midpoint 50 (test_fixtures/gradient_stop/menu_transform.json's law). fill_on_top; the rect is the only element (gradient_fill_only.svg is gradient_fill_and_stroke.svg without its path), so Select All is not a mixed selection. The golden differs from the setup only in those two stops.",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_reverse"
+          }
+        }
+      }
+    ],
+    "expected_json": "gradient_reverse_flips_the_selected_fill_gradient_expected.json"
+  },
+  {
+    "name": "gradient_reset_midpoints_resets_the_selected_fill_gradient",
+    "setup_svg": "gradient_fill_only.svg",
+    "note": "gradient.yaml menu Reset Midpoints; actions.yaml gradient_reset_midpoints writes gradient_midpoints_reset(panel.stops) to gradient_stops. The rect's fill midpoint 35 becomes 50; locations, colours and opacities stay, on the one rect (gradient_fill_only.svg). The golden differs from the setup only in that midpoint.",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_reset_midpoints"
+          }
+        }
+      }
+    ],
+    "expected_json": "gradient_reset_midpoints_resets_the_selected_fill_gradient_expected.json"
   }
 ]

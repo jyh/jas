@@ -2347,7 +2347,13 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 103, "the fixture corpus changed size");
+        assert_eq!(total, 104, "the fixture corpus changed size");
+        // ⛔ 103 → 104 (jas, 2026-11-18, row 147's Gradient menu cases):
+        // `gradient_fill_only.svg`, gradient_fill_and_stroke.svg with its path
+        // removed, so the one rect and its linear fill gradient are the whole
+        // selection. A strict subset of a file that presents, so expected to
+        // present; NOT measured here (this lane is Windows-only). Both pins
+        // bumped in the same edit.
         // ⛔ 100 → 101 (jas, 2026-10-28, the layers_nav_right empty-container
         // case): `two_layers_top_empty.svg`, multi_layer.svg with the circle
         // removed, so its top layer is empty: one rect, no gradient, no text.
@@ -2542,6 +2548,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 103, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 104, "the whole corpus presents");
     }
 }

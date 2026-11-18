@@ -1423,6 +1423,22 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         return .list(obj.keys.sorted { Array($0.unicodeScalars.map(\.value)).lexicographicallyPrecedes(
             $1.unicodeScalars.map(\.value)) }.map { AnyJSON($0) })
 
+    // gradient_reversed / gradient_distributed / gradient_midpoints_reset:
+    // stops -> stops, the Gradient panel menu's three transforms
+    // (GRADIENT.md §Panel menu; Effects.swift, pinned by
+    // test_fixtures/gradient_stop/menu_transform.json). Null when refused.
+    case "gradient_reversed", "gradient_distributed", "gradient_midpoints_reset":
+        guard args.count == 1 else { return .null }
+        guard case .list(let items) = evalNode(args[0], ctx) else { return .null }
+        let stops: [Any] = items.map(\.value)
+        let out: [[String: Any]]?
+        switch name {
+        case "gradient_reversed": out = gradientReverseStops(stops)
+        case "gradient_distributed": out = gradientDistributeStops(stops)
+        default: out = gradientResetMidpoints(stops)
+        }
+        return out.map { .list($0.map { AnyJSON($0) }) } ?? .null
+
     case "reverse":
         guard args.count == 1 else { return .null }
         let v = evalNode(args[0], ctx)

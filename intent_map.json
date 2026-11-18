@@ -423,6 +423,18 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "gradient_distribute_stops": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "gradient_reset_midpoints": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "gradient_reverse": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "gradient_save_library": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1314,7 +1326,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 175,
+      "ui-state": 178,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1368,7 +1380,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 250,
+    "total_actions": 253,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

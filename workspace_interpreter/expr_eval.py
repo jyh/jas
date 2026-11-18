@@ -299,6 +299,14 @@ _COLOR_DECOMPOSE = {
 }
 
 
+#: The Gradient panel menu's stop transforms: builtin name → gradient_law function.
+_GRADIENT_TRANSFORMS = {
+    "gradient_reversed": "reverse_stops",
+    "gradient_distributed": "distribute_stops",
+    "gradient_midpoints_reset": "reset_midpoints",
+}
+
+
 def _eval_func(node: FuncCall, ctx: dict) -> Value:
     name = node.name
 
@@ -625,6 +633,18 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         if not isinstance(arg.value, dict):
             return Value.list_([])
         return Value.list_(sorted(str(k) for k in arg.value))
+
+    # gradient_reversed / gradient_distributed / gradient_midpoints_reset:
+    # stops → stops — the Gradient panel menu's three transforms
+    # (GRADIENT.md §Panel menu; the law is gradient_law, pinned by
+    # test_fixtures/gradient_stop/menu_transform.json). null when refused.
+    if name in ("gradient_reversed", "gradient_distributed", "gradient_midpoints_reset"):
+        if len(node.args) != 1:
+            return Value.null()
+        from workspace_interpreter import gradient_law
+        arg = eval_node(node.args[0], ctx)
+        out = getattr(gradient_law, _GRADIENT_TRANSFORMS[name])(arg.value)
+        return Value.null() if out is None else Value.list_(out)
 
     # reverse: list → list — reverses a list (useful for foreach over
     # index-sensitive paths where deletion order matters)

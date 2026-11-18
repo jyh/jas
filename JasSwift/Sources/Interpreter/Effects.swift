@@ -1197,6 +1197,69 @@ public func gradientStopsToJSON(_ stops: [GradientStop]) -> [[String: Any]] {
 
 // MARK: - The slider law (GRADIENT.md, "The slider law (precisely)")
 //
+// The Gradient panel menu's three stop transforms (GRADIENT.md §Panel menu):
+// Reverse Gradient, Distribute Stops Evenly, Reset Midpoints. They mirror
+// `gradient_law.reverse_stops` / `distribute_stops` / `reset_midpoints` and
+// `gradient_host.rs`, pinned by `test_fixtures/gradient_stop/menu_transform.json`.
+// They work on the YAML's JSON stops so a colour string passes through
+// verbatim; the expression builtins `gradient_reversed` /
+// `gradient_distributed` / `gradient_midpoints_reset` call them.
+
+private typealias TransformRow = (color: String, opacity: Double, location: Double, mid: Double)
+
+/// The rows the transforms accept: `nil` unless `stops` is a list of at least
+/// two objects each with a string `color` and a numeric `opacity` and
+/// `location`. A missing or non-numeric `midpoint_to_next` reads as 50.
+private func transformRows(_ stops: Any?) -> [TransformRow]? {
+    guard let arr = stops as? [Any], arr.count >= 2 else { return nil }
+    var out: [TransformRow] = []
+    for item in arr {
+        guard let s = item as? [String: Any], let c = s["color"] as? String,
+              let o = sliderNumber(s["opacity"]), let l = sliderNumber(s["location"]) else { return nil }
+        out.append((c, o, l, sliderNumber(s["midpoint_to_next"]) ?? 50))
+    }
+    return out
+}
+
+private func transformStop(_ c: String, _ o: Double, _ l: Double, _ m: Double) -> [String: Any] {
+    ["color": c, "opacity": o, "location": l, "midpoint_to_next": m]
+}
+
+/// `rows` in location order; ties keep their stored order (a stable sort).
+private func byLocation(_ rows: [TransformRow]) -> [TransformRow] {
+    rows.enumerated().sorted { ($0.element.location, $0.offset) < ($1.element.location, $1.offset) }
+        .map(\.element)
+}
+
+/// Reverse Gradient: the stops in location order, reversed, each at
+/// `100 - location`. The midpoint between new neighbours `j` and `j+1` is
+/// that pair's old midpoint from the other end, `100 - m`; the new last
+/// stop's midpoint is 50.
+public func gradientReverseStops(_ stops: Any?) -> [[String: Any]]? {
+    guard let rows = transformRows(stops) else { return nil }
+    let s = byLocation(rows), n = s.count
+    return (0..<n).map { j in
+        let r = s[n - 1 - j]
+        return transformStop(r.color, r.opacity, 100 - r.location, j < n - 1 ? 100 - s[n - 2 - j].mid : 50)
+    }
+}
+
+/// Distribute Stops Evenly: the stops in location order, stop `i` of `n` at
+/// `100 * i / (n - 1)`, every midpoint 50.
+public func gradientDistributeStops(_ stops: Any?) -> [[String: Any]]? {
+    guard let rows = transformRows(stops) else { return nil }
+    let s = byLocation(rows), n = s.count
+    return s.enumerated().map { i, r in
+        transformStop(r.color, r.opacity, 100.0 * Double(i) / Double(n - 1), 50)
+    }
+}
+
+/// Reset Midpoints: every midpoint is 50; the stored order and the locations
+/// are unchanged.
+public func gradientResetMidpoints(_ stops: Any?) -> [[String: Any]]? {
+    transformRows(stops)?.map { transformStop($0.color, $0.opacity, $0.location, 50) }
+}
+
 // The GRADIENT_SLIDER's five gestures, mirroring `gradient_law.py` and
 // `gradient_host.rs`, pinned by `test_fixtures/gradient_stop/slider.json`.
 // They share `editStop`'s two rules: a sort is stable, and a midpoint resets
@@ -1475,18 +1538,25 @@ func settingGradientField(_ g: Gradient, _ key: String, _ value: Any?) -> Gradie
 public func gradientPanelLiveOverrides(model: Model) -> [String: Any] {
     let fillOnTop = (model.stateStore.get("fill_on_top") as? Bool) ?? true
     let g: Gradient
+    let preview: Bool
     switch selectionGradient(model.document, fillOnTop: fillOnTop) {
     case .empty: return [:]
     case .mixed:
-        guard let first = firstMemberGradient(model.document, fillOnTop: fillOnTop) else { return [:] }
-        return ["stops": first.stops.map { s -> [String: Any] in
+        guard let first = firstMemberGradient(model.document, fillOnTop: fillOnTop) else {
+            return ["preview_state": false]
+        }
+        return ["preview_state": false, "stops": first.stops.map { s -> [String: Any] in
             ["color": s.color, "opacity": s.opacity, "location": s.location,
              "midpoint_to_next": s.midpointToNext]
         }]
-    case .uniform(let u): g = u
-    case .solid(let c): g = seedGradient(c)
+    // `preview_state`: the panel shows a SEED when the active attribute is
+    // solid or none (gradient.yaml), which the Gradient menu's transforms are
+    // disabled on (row 147).
+    case .uniform(let u): g = u; preview = false
+    case .solid(let c): g = seedGradient(c); preview = true
     }
     return [
+        "preview_state": preview,
         "type": g.type.rawValue,
         "angle": g.angle,
         "aspect_ratio": g.aspectRatio,

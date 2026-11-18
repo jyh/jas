@@ -1,0 +1,243 @@
+{
+  "_doc": [
+    "The Gradient panel menu's three stop transforms (transcripts/GRADIENT.md, Panel menu): Reverse Gradient, Distribute Stops Evenly, Reset Midpoints.",
+    "Each vector names an op (reverse | distribute | reset_midpoints) and the stops it takes; expected is the stops list the op returns, or null (refused, nothing written).",
+    "reverse: stops in location order (stable), then reversed; each location becomes 100 - location; the midpoint between new neighbours j and j+1 is 100 minus the old midpoint of that same pair; the last stop's midpoint_to_next is 50.",
+    "distribute: stops in location order (stable); stop i of n takes location 100 * i / (n - 1) in binary64; every midpoint_to_next is 50.",
+    "reset_midpoints: every midpoint_to_next is 50; stored order and locations are unchanged.",
+    "All three refuse a value that is not a list, a list of fewer than two stops, or a stop with no numeric location.",
+    "Every expected value was computed by hand from the spec text before the law existed; each _comment shows the arithmetic.",
+    "Read by workspace_interpreter/tests/test_gradient_menu_transform.py (reference), jas_dioxus/src/cross_language_test.rs and JasSwift/Tests/Panels/GradientStopCorpusTests.swift."
+  ],
+  "vectors": [
+    {
+      "name": "reverse_two_stops",
+      "op": "reverse",
+      "_comment": "Locations 0, 100 become 100, 0, so blue leads. The one pair's midpoint was 40 from red; from blue it is 100 - 40 = 60. The new last stop (red) takes 50.",
+      "stops": [
+        {"color": "#ff0000", "opacity": 100, "location": 0, "midpoint_to_next": 40},
+        {"color": "#0000ff", "opacity": 0, "location": 100, "midpoint_to_next": 50}
+      ],
+      "expected": [
+        {"color": "#0000ff", "opacity": 0, "location": 0, "midpoint_to_next": 60},
+        {"color": "#ff0000", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reverse_three_asymmetric",
+      "op": "reverse",
+      "_comment": "A 0 (mid 30), B 25 (mid 70), C 100. Reversed: C 100 -> 0, B 25 -> 75, A 0 -> 100. Pair C-B was old B-C, mid 70 -> 30. Pair B-A was old A-B, mid 30 -> 70. A is last: 50.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 30},
+        {"color": "#808080", "opacity": 50, "location": 25, "midpoint_to_next": 70},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ],
+      "expected": [
+        {"color": "#ffffff", "opacity": 100, "location": 0, "midpoint_to_next": 30},
+        {"color": "#808080", "opacity": 50, "location": 75, "midpoint_to_next": 70},
+        {"color": "#000000", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reverse_unsorted_stored_order",
+      "op": "reverse",
+      "_comment": "The same three stops stored C, A, B. In location order they are A, B, C, so the answer is reverse_three_asymmetric's. A law that reverses STORED order would return B, A, C with locations 75, 100, 0.",
+      "stops": [
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50},
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 30},
+        {"color": "#808080", "opacity": 50, "location": 25, "midpoint_to_next": 70}
+      ],
+      "expected": [
+        {"color": "#ffffff", "opacity": 100, "location": 0, "midpoint_to_next": 30},
+        {"color": "#808080", "opacity": 50, "location": 75, "midpoint_to_next": 70},
+        {"color": "#000000", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reverse_missing_midpoint_reads_50",
+      "op": "reverse",
+      "_comment": "The first stop has no midpoint_to_next; it reads as 50 (gradient_host::stops_from_json), so the reversed pair's midpoint is 100 - 50 = 50.",
+      "stops": [
+        {"color": "#ff0000", "opacity": 100, "location": 20},
+        {"color": "#00ff00", "opacity": 100, "location": 80, "midpoint_to_next": 50}
+      ],
+      "expected": [
+        {"color": "#00ff00", "opacity": 100, "location": 20, "midpoint_to_next": 50},
+        {"color": "#ff0000", "opacity": 100, "location": 80, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reverse_tie_keeps_stored_order_then_flips",
+      "op": "reverse",
+      "_comment": "A 0 (mid 10), B 50 (mid 20), C 50 (mid 30), D 100, stored B before C. Location order is stable, so A, B, C, D; reversed D, C, B, A at 0, 50, 50, 100. Pair D-C was old C-D: 100 - 30 = 70. C-B was old B-C: 100 - 20 = 80. B-A was old A-B: 100 - 10 = 90. A is last: 50. An unstable tie gives D, B, C, A.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 10},
+        {"color": "#ff0000", "opacity": 100, "location": 50, "midpoint_to_next": 20},
+        {"color": "#00ff00", "opacity": 100, "location": 50, "midpoint_to_next": 30},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ],
+      "expected": [
+        {"color": "#ffffff", "opacity": 100, "location": 0, "midpoint_to_next": 70},
+        {"color": "#00ff00", "opacity": 100, "location": 50, "midpoint_to_next": 80},
+        {"color": "#ff0000", "opacity": 100, "location": 50, "midpoint_to_next": 90},
+        {"color": "#000000", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reverse_refuses_one_stop",
+      "op": "reverse",
+      "_comment": "Fewer than two stops: refused.",
+      "stops": [
+        {"color": "#ff0000", "opacity": 100, "location": 0, "midpoint_to_next": 50}
+      ],
+      "expected": null
+    },
+    {
+      "name": "reverse_refuses_not_a_list",
+      "op": "reverse",
+      "_comment": "A string is not a stops list: refused.",
+      "stops": "#ff0000",
+      "expected": null
+    },
+    {
+      "name": "reverse_refuses_stop_without_location",
+      "op": "reverse",
+      "_comment": "The second stop's location is missing: refused, not read as 0.",
+      "stops": [
+        {"color": "#ff0000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#0000ff", "opacity": 100, "midpoint_to_next": 50}
+      ],
+      "expected": null
+    },
+    {
+      "name": "distribute_four_stops",
+      "op": "distribute",
+      "_comment": "n = 4: 100*0/3 = 0, 100*1/3 = 33.333333333333336, 100*2/3 = 66.66666666666667 (binary64), 100*3/3 = 100. Midpoints 40 all become 50.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 40},
+        {"color": "#ff0000", "opacity": 100, "location": 10, "midpoint_to_next": 40},
+        {"color": "#00ff00", "opacity": 100, "location": 20, "midpoint_to_next": 40},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 40}
+      ],
+      "expected": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#ff0000", "opacity": 100, "location": 33.333333333333336, "midpoint_to_next": 50},
+        {"color": "#00ff00", "opacity": 100, "location": 66.66666666666667, "midpoint_to_next": 50},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "distribute_unsorted_stored_order",
+      "op": "distribute",
+      "_comment": "Stored at 100, 0, 30. In location order: 0 (black), 30 (red), 100 (white); n = 3 gives 0, 50, 100, returned in that order.",
+      "stops": [
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 40},
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 40},
+        {"color": "#ff0000", "opacity": 100, "location": 30, "midpoint_to_next": 40}
+      ],
+      "expected": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#ff0000", "opacity": 100, "location": 50, "midpoint_to_next": 50},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "distribute_two_stops",
+      "op": "distribute",
+      "_comment": "n = 2: 0 and 100. The menu row is disabled at two stops; the law still answers.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 20, "midpoint_to_next": 30},
+        {"color": "#ffffff", "opacity": 100, "location": 80, "midpoint_to_next": 50}
+      ],
+      "expected": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "distribute_tie_keeps_stored_order",
+      "op": "distribute",
+      "_comment": "Black 0, red 50, green 50, stored red before green. Stable location order is black, red, green; n = 3 gives 0, 50, 100, so red takes 50 and green 100. An unstable tie swaps them.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#ff0000", "opacity": 100, "location": 50, "midpoint_to_next": 50},
+        {"color": "#00ff00", "opacity": 100, "location": 50, "midpoint_to_next": 50}
+      ],
+      "expected": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#ff0000", "opacity": 100, "location": 50, "midpoint_to_next": 50},
+        {"color": "#00ff00", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "distribute_refuses_one_stop",
+      "op": "distribute",
+      "_comment": "Fewer than two stops: refused (n - 1 would be 0).",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 20, "midpoint_to_next": 50}
+      ],
+      "expected": null
+    },
+    {
+      "name": "distribute_refuses_empty",
+      "op": "distribute",
+      "_comment": "No stops: refused.",
+      "stops": [],
+      "expected": null
+    },
+    {
+      "name": "distribute_refuses_stop_without_opacity",
+      "op": "distribute",
+      "_comment": "The first stop has no opacity: refused, because the ports' stop parsers refuse it (a stop is colour, opacity, location).",
+      "stops": [
+        {"color": "#000000", "location": 0, "midpoint_to_next": 50},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ],
+      "expected": null
+    },
+    {
+      "name": "reset_three_stops",
+      "op": "reset_midpoints",
+      "_comment": "Midpoints 40, 70, 30 all become 50; locations 0, 25, 100 stay.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 40},
+        {"color": "#808080", "opacity": 50, "location": 25, "midpoint_to_next": 70},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 30}
+      ],
+      "expected": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+        {"color": "#808080", "opacity": 50, "location": 25, "midpoint_to_next": 50},
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reset_keeps_stored_order",
+      "op": "reset_midpoints",
+      "_comment": "Stored at 100, 0: the order is kept (no sort), only the midpoints change (40 and 70 become 50).",
+      "stops": [
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 40},
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 70}
+      ],
+      "expected": [
+        {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 50},
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50}
+      ]
+    },
+    {
+      "name": "reset_refuses_one_stop",
+      "op": "reset_midpoints",
+      "_comment": "Fewer than two stops: refused.",
+      "stops": [
+        {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 40}
+      ],
+      "expected": null
+    },
+    {
+      "name": "reset_refuses_not_a_list",
+      "op": "reset_midpoints",
+      "_comment": "A number is not a stops list: refused.",
+      "stops": 7,
+      "expected": null
+    }
+  ]
+}

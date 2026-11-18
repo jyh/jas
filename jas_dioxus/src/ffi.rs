@@ -2139,7 +2139,16 @@ unsafe fn jas_dispatch_action_inner(
     // New Swatch and the Color Picker are menubar actions that read
     // `state.fill_color`, and until 2026-10-15 this arm read the stale copy.
     let scope = match panel {
-        Some(pid) => panel_ctx(engine, &ws, pid),
+        Some(pid) => {
+            // The Gradient menu's transforms read `panel.stops`, which the
+            // runner takes from the store: give it the selection's gradient.
+            if pid == crate::interpreter::gradient_host::GRADIENT_PANEL {
+                let fill_on_top = engine.panel.borrow().effective(&engine.model.borrow()).fill_on_top;
+                crate::panel_scope::sync_gradient_state(
+                    &mut engine.store.borrow_mut(), &engine.model.borrow(), fill_on_top);
+            }
+            panel_ctx(engine, &ws, pid)
+        }
         None => {
             crate::panel_scope::sync_colour_state(
                 &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));

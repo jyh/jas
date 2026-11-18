@@ -1583,6 +1583,39 @@
         }
       ]
     },
+    "gradient_reverse": {
+      "description": "Reverse Gradient, the Gradient panel menu's first row (GRADIENT.md \u00a7Panel menu): flip the stops of the gradient the panel shows end to end. The panel's stops are taken in location order (two stops at the same location keep their stored order), reversed, and each moves to 100 minus its location, so the last colour now starts the gradient. Each midpoint keeps its place between the same two colours: the midpoint between two neighbours is that pair's old midpoint measured from the other end (100 minus it), and the new last stop's midpoint is 50. Colours and opacities are unchanged. The new stops are written to gradient_stops, the slider's whole-list write, so they reach the selection's gradient (its fill or stroke, per fill_on_top) the same way a slider gesture does. The menu row is enabled only while something is selected, the selection's active attribute holds a gradient (the panel is not showing a seeded preview), and that gradient is not freeform.\n",
+      "category": "panel",
+      "effects": [
+        {
+          "set": {
+            "gradient_stops": "gradient_reversed(panel.stops)"
+          }
+        }
+      ]
+    },
+    "gradient_distribute_stops": {
+      "description": "Distribute Stops Evenly, the Gradient panel menu's second row (GRADIENT.md \u00a7Panel menu): space the stops of the gradient the panel shows at equal intervals. The panel's stops are taken in location order (two stops at the same location keep their stored order); the first moves to 0 %, the last to 100 %, and stop i of n to 100 \u00d7 i \u00f7 (n \u2212 1) %. Every midpoint resets to 50. Colours and opacities are unchanged. The new stops are written to gradient_stops, the slider's whole-list write, so they reach the selection's gradient the same way a slider gesture does. The menu row is enabled under the same conditions as Reverse Gradient, and only with more than two stops: two stops are already at 0 % and 100 % after any distribution.\n",
+      "category": "panel",
+      "effects": [
+        {
+          "set": {
+            "gradient_stops": "gradient_distributed(panel.stops)"
+          }
+        }
+      ]
+    },
+    "gradient_reset_midpoints": {
+      "description": "Reset Midpoints, the Gradient panel menu's third row (GRADIENT.md \u00a7Panel menu): return every midpoint of the gradient the panel shows to 50 %, halfway between its two stops. Stop locations, colours, opacities and their stored order are unchanged. The new stops are written to gradient_stops, the slider's whole-list write, so they reach the selection's gradient the same way a slider gesture does. The menu row is enabled under the same conditions as Reverse Gradient.\n",
+      "category": "panel",
+      "effects": [
+        {
+          "set": {
+            "gradient_stops": "gradient_midpoints_reset(panel.stops)"
+          }
+        }
+      ]
+    },
     "set_gradient_active_library": {
       "description": "Make one gradient library the Gradient panel's active library (panel.active_library_id), the one whose tiles the preset strip shows. The library is named by its id (param.library); nothing checks that a library with that id exists, as the dropdown's own write does not.\n",
       "category": "panel",
@@ -16539,18 +16572,20 @@
         {
           "label": "Reverse Gradient",
           "action": "gradient_reverse",
-          "enabled_when": "false",
-          "description": "Phase 5 \u2014 flips stops end-to-end. Disabled until the action pipeline is wired.\n"
+          "enabled_when": "active_document.has_selection and not panel.preview_state and panel.type != 'freeform'",
+          "description": "Flips the stops end to end (actions.yaml gradient_reverse). Enabled while something is selected, its active attribute holds a gradient (not a seeded preview) and the gradient is not freeform.\n"
         },
         {
           "label": "Distribute Stops Evenly",
           "action": "gradient_distribute_stops",
-          "enabled_when": "false"
+          "enabled_when": "active_document.has_selection and not panel.preview_state and panel.type != 'freeform' and panel.stops.length > 2",
+          "description": "Spaces the stops evenly from 0 % to 100 % and resets the midpoints (actions.yaml gradient_distribute_stops). Enabled as Reverse Gradient is, and only with more than two stops.\n"
         },
         {
           "label": "Reset Midpoints",
           "action": "gradient_reset_midpoints",
-          "enabled_when": "false"
+          "enabled_when": "active_document.has_selection and not panel.preview_state and panel.type != 'freeform'",
+          "description": "Returns every midpoint to 50 % (actions.yaml gradient_reset_midpoints). Enabled as Reverse Gradient is.\n"
         },
         "separator",
         {

@@ -256,13 +256,18 @@ pub fn live_values(doc: &Document, fill_on_top: bool) -> serde_json::Map<String,
     let g = match selection_gradient(doc, fill_on_top) {
         SelectionGradient::Empty => return m,
         SelectionGradient::Mixed => {
+            m.insert("preview_state".into(), json!(false));
             if let Some(first) = first_member_gradient(doc, fill_on_top) {
                 m.insert("stops".into(), stops_to_json(&first.stops));
             }
             return m;
         }
-        SelectionGradient::Uniform(g) => g,
-        SelectionGradient::Solid(c) => seed_gradient(c),
+        // `preview_state`: the panel shows a SEED when the active attribute is
+        // solid or none (gradient.yaml; the web's
+        // `sync_gradient_panel_from_selection`), which the Gradient menu's
+        // transforms are disabled on (row 147).
+        SelectionGradient::Uniform(g) => { m.insert("preview_state".into(), json!(false)); g }
+        SelectionGradient::Solid(c) => { m.insert("preview_state".into(), json!(true)); seed_gradient(c) }
     };
     fn name(v: impl serde::Serialize) -> Value { serde_json::to_value(v).unwrap_or(Value::Null) }
     m.insert("type".into(), name(g.gtype));
@@ -641,6 +646,71 @@ pub fn stops_step(gesture: &str, params: &Value, current: &Value, stop: i64, mid
     }
 }
 
+// ── The panel menu's three stop transforms ──────────────────────────────
+// GRADIENT.md §Panel menu: Reverse Gradient, Distribute Stops Evenly, Reset
+// Midpoints. They mirror `gradient_law.reverse_stops` / `distribute_stops` /
+// `reset_midpoints` and are pinned by
+// `test_fixtures/gradient_stop/menu_transform.json`. They work on the YAML's
+// JSON stops, not on `GradientStop`, so a colour string passes through
+// verbatim, as it does in the reference; the expression builtins
+// `gradient_reversed` / `gradient_distributed` / `gradient_midpoints_reset`
+// call them, and the menu's YAML hands the result to `gradient_stops`.
+
+/// A stops list the transforms accept, as (colour, opacity, location,
+/// midpoint) rows: `None` unless `stops` is a list of at least two objects
+/// each with a string `color` and a numeric `opacity` and `location`. A
+/// missing or non-numeric `midpoint_to_next` reads as 50.
+fn transform_rows(stops: &Value) -> Option<Vec<(String, f64, f64, f64)>> {
+    let arr = stops.as_array()?;
+    if arr.len() < 2 { return None; }
+    arr.iter().map(|s| Some((
+        s.get("color")?.as_str()?.to_string(),
+        s.get("opacity")?.as_f64()?,
+        s.get("location")?.as_f64()?,
+        s.get("midpoint_to_next").and_then(Value::as_f64).unwrap_or(50.0),
+    ))).collect()
+}
+
+fn transform_stop(color: &str, opacity: f64, location: f64, mid: f64) -> Value {
+    json!({"color": color, "opacity": opacity, "location": location, "midpoint_to_next": mid})
+}
+
+/// `rows` in location order; ties keep their stored order.
+fn by_location(mut rows: Vec<(String, f64, f64, f64)>) -> Vec<(String, f64, f64, f64)> {
+    rows.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+    rows
+}
+
+/// Reverse Gradient: the stops in location order, reversed, each at
+/// `100 - location`. The midpoint between new neighbours `j` and `j+1` is
+/// that pair's old midpoint from the other end, `100 - m`; the new last
+/// stop's midpoint is 50.
+pub fn reverse_stops(stops: &Value) -> Option<Vec<Value>> {
+    let s = by_location(transform_rows(stops)?);
+    let n = s.len();
+    Some((0..n).map(|j| {
+        let (c, o, l, _) = &s[n - 1 - j];
+        let mid = if j < n - 1 { 100.0 - s[n - 2 - j].3 } else { 50.0 };
+        transform_stop(c, *o, 100.0 - l, mid)
+    }).collect())
+}
+
+/// Distribute Stops Evenly: the stops in location order, stop `i` of `n` at
+/// `100 * i / (n - 1)`, every midpoint 50.
+pub fn distribute_stops(stops: &Value) -> Option<Vec<Value>> {
+    let s = by_location(transform_rows(stops)?);
+    let n = s.len();
+    Some(s.iter().enumerate()
+        .map(|(i, (c, o, _, _))| transform_stop(c, *o, 100.0 * i as f64 / (n - 1) as f64, 50.0))
+        .collect())
+}
+
+/// Reset Midpoints: every midpoint is 50; the stored order and the locations
+/// are unchanged.
+pub fn reset_midpoints(stops: &Value) -> Option<Vec<Value>> {
+    Some(transform_rows(stops)?.iter().map(|(c, o, l, _)| transform_stop(c, *o, *l, 50.0)).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -949,6 +1019,8 @@ mod tests {
         assert_eq!(v["method"], json!("classic"));
         assert_eq!(v["dither"], json!(false));
         assert_eq!(v["stroke_sub_mode"], json!("within"));
+        // The selection holds a gradient, so the panel shows it, not a seed.
+        assert_eq!(v["preview_state"], json!(false));
         assert_eq!(v["stops"], json!([
             {"color": "#0000ff", "opacity": 100.0, "location": 0.0, "midpoint_to_next": 50.0},
             {"color": "#ffffff", "opacity": 100.0, "location": 100.0, "midpoint_to_next": 50.0},
@@ -967,6 +1039,11 @@ mod tests {
         let solid = model_with(vec![rect(Some(RED))], &[0]);
         let v = live_values(solid.document(), true);
         assert_eq!(v["stops"][0]["color"], json!("#ff0000"), "{v:?}");
+        // A seed is a preview (gradient.yaml `preview_state`, the web's
+        // `sync_gradient_panel_from_selection`): the Gradient menu's three
+        // transforms are disabled on it (row 147).
+        assert_eq!(v["preview_state"], json!(true), "{v:?}");
+        assert_eq!(stroke["preview_state"], json!(true), "the stroke seed too: {stroke:?}");
     }
 
     /// Nothing selected, or a mixed selection, contributes NOTHING, so the
@@ -979,9 +1056,11 @@ mod tests {
         select(&mut m, &[0, 1]);
         assert!(matches!(selection_gradient(m.document(), true), SelectionGradient::Mixed));
         // GRADIENT.md §Multi-selection: the slider shows the first element's
-        // stops; every other field stands as the store holds it.
+        // stops; every other field stands as the store holds it, except that a
+        // mixed selection is not a seeded preview (the web sets it false too).
         let v = live_values(m.document(), true);
-        assert_eq!(v.keys().collect::<Vec<_>>(), vec!["stops"]);
+        assert_eq!(v.keys().collect::<Vec<_>>(), vec!["preview_state", "stops"]);
+        assert_eq!(v["preview_state"], json!(false));
         assert_eq!(stops_from_json(&v["stops"]), Some(fill_gradient(&m, 0).unwrap().stops.clone()));
     }
 
@@ -995,7 +1074,8 @@ mod tests {
         let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
         assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0)));
         let v = live_values(m.document(), true);
-        assert_eq!(v.len(), 7, "{v:?}");
+        // The six gradient fields, the stops and `preview_state` (row 147).
+        assert_eq!(v.len(), 8, "{v:?}");
         for k in v.keys() {
             assert!(declared.contains_key(k), "{k} is not a declared Gradient panel field");
         }
