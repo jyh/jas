@@ -103,3 +103,34 @@ private func fillStops(_ m: Model) -> [String] {
     // The held preview is what the panel shows, so it is what reverses.
     #expect(fillStops(m) == ["#00ff00@0", "#ff0000@100"])
 }
+
+// Row 155: a panel-menu row's transaction carries its action's name, as the
+// engine's (`{name: gradient_reverse, ops: []}`). Swift's panel route ran its
+// effects outside the journal owner-bracket, so the transaction was anonymous.
+@Test func gradientMenuReverseJournalsANamedTransaction() {
+    let m = gradientModel([filled(blueRadial)], selected: [[0, 0]])
+    let pid = "gradient_panel_content"
+    m.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+    let j0 = m.journal.count
+    panelDispatchRow(.gradient, action: "gradient_reverse", params: [:], model: m)
+    let new = Array(m.journal.dropFirst(j0))
+    #expect(new.count == 1, "one transaction: \(new.map { $0.name ?? "nil" })")
+    #expect(new.first?.name == "gradient_reverse")
+    #expect(new.first?.ops.isEmpty == true, "a host-key edit journals no ops (OP_LOG.md §14)")
+    m.undo()
+    #expect(fillStops(m) == ["#0000ff@0", "#ffffff@100"], "one undo restores the gradient")
+}
+
+// ...and the name does not outlive its batch: an edit made afterwards, outside
+// any action, journals anonymously as before.
+@Test func theBatchNameDoesNotOutliveItsAction() {
+    let m = gradientModel([filled(blueRadial)], selected: [[0, 0]])
+    let pid = "gradient_panel_content"
+    m.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+    panelDispatchRow(.gradient, action: "gradient_reverse", params: [:], model: m)
+    #expect(m.batchActionName == nil)
+    let j0 = m.journal.count
+    m.editDocument(m.document.replaceElement([0, 0], with: filled(nil)))
+    #expect(m.journal.count == j0 + 1)
+    #expect(m.journal.last?.name == nil, "a standalone edit stays anonymous: \(m.journal.last?.name ?? "nil")")
+}

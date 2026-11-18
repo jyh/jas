@@ -85,9 +85,14 @@ public func runYamlActionByName(_ name: String, params: [String: Any], model: Mo
     ctx["data"] = data
     let dialogs = ws.data["dialogs"] as? [String: Any]
     let platformEffects = alignPlatformEffects(model: model)
+    // `model` and `actionName` give this batch the journal owner-bracket
+    // (Effects.swift, OP_LOG.md §9): a transaction the effects open is named
+    // with the action and committed as one undo step. Without them a panel-menu
+    // row's host-key edit journaled anonymously (row 155; the engine names it).
     runEffects(effects, ctx: ctx, store: store,
                actions: actions, dialogs: dialogs,
-               platformEffects: platformEffects)
+               platformEffects: platformEffects,
+               model: model, actionName: name)
     model.panelStateVersion &+= 1
 }
 
