@@ -1236,6 +1236,7 @@ bind:
 | `color` | color | The displayed color (for `color_swatch` elements) |
 | `icon` | string | The icon name (for `icon_button` elements; switches icon dynamically) |
 | `z_index` | number | The stacking order of the element |
+| `selected_in` | list | A tile's selection outline (`color_swatch`, the brush-tile `container`): a 2px accent outline when the tile is selected. The tile's identity is its click behaviour's first `select.target`. It is selected when that identity is a member of this list. When that `select` names a `scope` with a `scope_value`, the tile is selected only when `panel.<scope>` also equals its `scope_value`: `select` resets the list whenever its scope changes, so the same index in another library is a different tile. Pinned by `test_fixtures/algorithms/tile_selected_in.json`. |
 
 Any style property may also appear in `bind` to make it reactive.
 
