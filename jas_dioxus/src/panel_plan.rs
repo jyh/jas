@@ -849,28 +849,15 @@ pub fn panel_list(panels: &Value) -> Value {
 /// that is not an index into its group, or a docked panel the bundle does not
 /// hold.
 pub fn dock_layout(data: &Value, name: &str) -> Option<Value> {
-    let groups = data.get("default_layouts")?.get(name)?.get("dock")?
-        .get("dock_main")?.get("groups")?.as_array()?;
-    let panels = data.get("panels")?;
-    let mut out = vec![];
-    for g in groups {
-        let mut ids = vec![];
-        for short in g.get("panels")?.as_array()? {
-            let id = format!("{}_panel_content", short.as_str()?);
-            panels.get(&id)?;
-            ids.push(Value::String(id));
-        }
-        // Refused, never repaired: an empty group, or an `active` that is not an
-        // index into the group. A shell is then never handed a value to clamp.
-        if ids.is_empty() { return None; }
-        let active = match g.get("active") {
-            None => 0,
-            Some(v) => v.as_i64().filter(|a| (0..ids.len() as i64).contains(a))?,
-        };
-        out.push(json!({"panels": ids, "active": active}));
-    }
-    // A dock with no groups is no dock: a shell would draw an empty column.
-    if out.is_empty() { return None; }
+    // The refusals (an empty group, an `active` outside its group, an undeclared
+    // panel, no groups) are the shared reader's, so the web's default dock and a
+    // shell's are read by ONE law (row 160). A shell is never handed a value to
+    // clamp, and a dock with no groups is no dock.
+    let groups = crate::workspace::layout_apply::spec_dock_groups(data, name)?;
+    let out: Vec<Value> = groups.into_iter().map(|(ids, active)| json!({
+        "panels": ids.into_iter().map(|s| format!("{s}_panel_content")).collect::<Vec<_>>(),
+        "active": active,
+    })).collect();
     Some(json!({"groups": out}))
 }
 

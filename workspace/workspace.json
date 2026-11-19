@@ -7139,7 +7139,8 @@
             {
               "panels": [
                 "artboards",
-                "layers"
+                "layers",
+                "symbols"
               ],
               "active": 0
             }

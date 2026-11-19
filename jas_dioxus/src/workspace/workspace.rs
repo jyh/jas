@@ -342,6 +342,26 @@ impl WorkspaceLayout {
         Self::named(DEFAULT_LAYOUT_NAME)
     }
 
+    /// The `Default` layout's dock groups, READ FROM THE SPEC
+    /// (`default_layouts.yaml`, compiled into the bundle), never a hand copy
+    /// (row 160: this used to list `[color, swatches] … [artboards, layers,
+    /// symbols]` while the spec, and the Windows shell reading it, said
+    /// `[color, swatches, brushes] … [artboards, layers]`). The bundle is a
+    /// compile-time constant and `the_default_dock_is_the_specs_default_layout`
+    /// pins that it reads, so a defective one is a loud panic here, never a
+    /// silently different dock.
+    fn spec_default_groups() -> Vec<PanelGroup> {
+        let ws = crate::interpreter::workspace::Workspace::load()
+            .expect("the compiled workspace bundle parses");
+        let groups = super::layout_apply::spec_dock_groups(ws.data(), DEFAULT_LAYOUT_NAME)
+            .expect("default_layouts.yaml declares a readable Default dock");
+        groups.into_iter().map(|(ids, active)| {
+            let mut g = PanelGroup::new(ids.iter().map(|s| super::layout_apply::parse_panel_kind(s)).collect());
+            g.active = active;
+            g
+        }).collect()
+    }
+
     /// Create the default layout with a custom name.
     pub fn named(name: &str) -> Self {
         Self {
@@ -349,17 +369,7 @@ impl WorkspaceLayout {
             name: name.to_string(),
             anchored: vec![(
                 DockEdge::Right,
-                Dock::new(
-                    DockId(0),
-                    vec![
-                        PanelGroup::new(vec![PanelKind::Color, PanelKind::Swatches]),
-                        PanelGroup::new(vec![PanelKind::Align, PanelKind::Boolean]),
-                        PanelGroup::new(vec![PanelKind::Character, PanelKind::Paragraph]),
-                        PanelGroup::new(vec![PanelKind::Stroke, PanelKind::Properties]),
-                        PanelGroup::new(vec![PanelKind::Artboards, PanelKind::Layers, PanelKind::Symbols]),
-                    ],
-                    DEFAULT_DOCK_WIDTH,
-                ),
+                Dock::new(DockId(0), Self::spec_default_groups(), DEFAULT_DOCK_WIDTH),
             )],
             floating: vec![],
             hidden_panels: vec![],
@@ -1358,6 +1368,30 @@ mod tests {
         layout.anchored_dock(DockEdge::Right).unwrap().id
     }
 
+    /// Row 160: the default dock IS `default_layouts.yaml`'s `Default`, read
+    /// from the compiled bundle, never a hand copy. The expectation is derived
+    /// from the bundle's bytes here, so a YAML edit moves it and no constant in
+    /// this file can agree with a stale dock. (The web and Swift both carried
+    /// `[color, swatches] … [artboards, layers, symbols]` while the spec, and
+    /// the Windows shell reading it, said `[color, swatches, brushes] …
+    /// [artboards, layers]`.)
+    #[test]
+    fn the_default_dock_is_the_specs_default_layout() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the compiled bundle");
+        let groups = ws.data()["default_layouts"]["Default"]["dock"]["dock_main"]["groups"]
+            .as_array().expect("Default declares dock_main groups");
+        let want: Vec<(Vec<String>, usize)> = groups.iter().map(|g| (
+            g["panels"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect(),
+            g.get("active").and_then(|a| a.as_u64()).unwrap_or(0) as usize,
+        )).collect();
+        assert!(want.len() >= 2, "a real population: {want:?}");
+        let l = WorkspaceLayout::default_layout();
+        let got: Vec<(Vec<String>, usize)> = l.anchored_dock(DockEdge::Right).unwrap().groups.iter()
+            .map(|g| (g.panels.iter().map(|k| super::super::layout_apply::panel_kind_str(*k).to_string()).collect(), g.active))
+            .collect();
+        assert_eq!(got, want, "the default dock vs default_layouts.yaml Default");
+    }
+
     /// Find the group index in `dock_id` that contains `kind`, or panic.
     /// Use this instead of hardcoding indices so tests stay robust as
     /// the default layout gains or re-orders panels.
@@ -2205,16 +2239,17 @@ mod tests {
 
     #[test]
     fn show_in_last_group_lands_in_dock_main_last_group() {
-        // Brushes is toggle-only and NOT in the default layout, so summoning
-        // it exercises the fresh-show path. Per the toggle_panel contract it
+        // Gradient is toggle-only and NOT in the default layout (Brushes is,
+        // since row 160 read the dock from the spec), so summoning it
+        // exercises the fresh-show path. Per the toggle_panel contract it
         // must land in dock_main's LAST group and become that group's active
         // tab — NOT the first group.
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         let last = l.dock(id).unwrap().groups.len() - 1;
-        assert!(!l.is_panel_visible(PanelKind::Brushes));
-        l.show_panel_in_last_group(PanelKind::Brushes);
-        let (g, pi) = panel_of(&l, id, PanelKind::Brushes);
+        assert!(!l.is_panel_visible(PanelKind::Gradient));
+        l.show_panel_in_last_group(PanelKind::Gradient);
+        let (g, pi) = panel_of(&l, id, PanelKind::Gradient);
         assert_eq!(g, last, "summoned panel must land in dock_main's LAST group");
         let group = &l.dock(id).unwrap().groups[last];
         assert_eq!(group.active, pi, "summoned panel must be the active tab");
@@ -2229,7 +2264,8 @@ mod tests {
         let last = l.dock(id).unwrap().groups.len() - 1;
         l.dock_mut(id).unwrap().collapsed = true;
         l.dock_mut(id).unwrap().groups[last].collapsed = true;
-        l.show_panel_in_last_group(PanelKind::Brushes);
+        assert!(!l.is_panel_visible(PanelKind::Gradient), "a panel the default does not show");
+        l.show_panel_in_last_group(PanelKind::Gradient);
         assert!(!l.dock(id).unwrap().collapsed, "dock expanded on summon");
         assert!(!l.dock(id).unwrap().groups[last].collapsed, "target group expanded");
     }
@@ -2364,10 +2400,13 @@ mod tests {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
         assert!(l.anchored_dock(DockEdge::Bottom).is_none());
+        // The group detached is whatever the default's first group holds (the
+        // spec's, row 160), so its panels are read before the move.
+        let want = l.dock(id).unwrap().groups[0].panels.clone();
         let fid = l.detach_group(ga(id.0, 0), 50.0, 50.0).unwrap();
         l.snap_to_edge(fid, DockEdge::Bottom);
         assert!(l.anchored_dock(DockEdge::Bottom).is_some());
-        assert_eq!(l.anchored_dock(DockEdge::Bottom).unwrap().groups[0].panels, vec![PanelKind::Color, PanelKind::Swatches]);
+        assert_eq!(l.anchored_dock(DockEdge::Bottom).unwrap().groups[0].panels, want);
     }
 
     #[test]
@@ -2633,11 +2672,16 @@ mod tests {
     fn reorder_panel_forward() {
         let mut l = WorkspaceLayout::default_layout();
         let id = right_dock_id(&l);
-        // Reorder within the Color group ([Color, Swatches]).
+        // Reorder within the Color group (Color first): the first two tabs swap
+        // and the rest stay (read from the layout, the spec's since row 160).
         let g_color = group_of(&l, id, PanelKind::Color);
+        let mut want = l.dock(id).unwrap().groups[g_color].panels.clone();
+        assert_eq!(want[0], PanelKind::Color);
+        assert!(want.len() >= 2, "a reorder needs two tabs: {want:?}");
+        want.swap(0, 1);
         l.reorder_panel(ga(id.0, g_color), 0, 1);
         let g = &l.dock(id).unwrap().groups[g_color];
-        assert_eq!(g.panels, vec![PanelKind::Swatches, PanelKind::Color]);
+        assert_eq!(g.panels, want);
         assert_eq!(g.active, 1);
     }
 

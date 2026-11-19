@@ -1334,18 +1334,28 @@ mod tests {
         let (_, dock) = st.workspace_layout.anchored.first().unwrap();
         let dock_id = dock.id;
         let before = dock.groups.len();
-        // Default group 0 = [color, swatches] — a TAB STACK, so only Color
-        // is drawn. Swatches is a member that is on screen nowhere, and the
-        // toggle raises it before it can hide it.
+        // Default group 0 opens with [color, swatches, ...] — a TAB STACK, so
+        // only Color is drawn. Swatches is a member that is on screen nowhere,
+        // and the toggle raises it before it can hide it.
+        let members = dock.groups[0].panels.clone();
+        assert!(members.len() >= 2 && members[0] == PanelKind::Color && members[1] == PanelKind::Swatches,
+                "the fixture's group 0: {members:?}");
         assert!(st.workspace_layout.panel_on_screen(PanelKind::Color));
         assert!(!st.workspace_layout.panel_on_screen(PanelKind::Swatches));
         toggle_panel(&mut st, "swatches"); // raise: Swatches to the front
         assert!(st.workspace_layout.panel_on_screen(PanelKind::Swatches));
         assert!(!st.workspace_layout.panel_on_screen(PanelKind::Color));
         toggle_panel(&mut st, "swatches"); // now drawn, so this hides it
-        toggle_panel(&mut st, "color"); // sole survivor, drawn again, hides
-        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Color));
-        assert!(!st.workspace_layout.is_panel_visible(PanelKind::Swatches));
+        // The rest of the group (the spec's, row 160): each is raised if it is
+        // not drawn, then hidden, until the group is empty.
+        for k in members.iter().filter(|k| **k != PanelKind::Swatches) {
+            let id = crate::workspace::layout_apply::panel_kind_str(*k);
+            if !st.workspace_layout.panel_on_screen(*k) { toggle_panel(&mut st, id); }
+            toggle_panel(&mut st, id);
+        }
+        for k in &members {
+            assert!(!st.workspace_layout.is_panel_visible(*k), "{k:?} hidden");
+        }
         let after = st.workspace_layout.dock(dock_id).unwrap().groups.len();
         assert_eq!(after, before - 1, "emptied group auto-removed on toggle-off");
     }
