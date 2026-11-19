@@ -288,6 +288,12 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "disable_opacity_mask": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
+    },
     "discard_and_close_tab": {
       "class": "ui-state",
       "dispatches": [
@@ -535,6 +541,12 @@
         "doc.make_instance"
       ]
     },
+    "make_opacity_mask": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
+    },
     "maximize_canvas": {
       "class": "ui-state",
       "doc_verbs": []
@@ -739,6 +751,12 @@
     "release_compound_shape": {
       "class": "ui-state",
       "doc_verbs": []
+    },
+    "release_opacity_mask": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "release_transform": {
       "class": "ui-state",
@@ -1206,6 +1224,22 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "toggle_new_masks_clipping": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_new_masks_inverted": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_opacity_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_opacity_thumbnails": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "toggle_pane": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1235,6 +1269,12 @@
       ]
     },
     "ungroup_all": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
+    },
+    "unlink_opacity_mask": {
       "class": "journaling",
       "doc_verbs": [
         "doc.op"
@@ -1322,11 +1362,11 @@
     ],
     "by_class": {
       "doc-direct": 5,
-      "journaling": 60,
+      "journaling": 64,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 178,
+      "ui-state": 182,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1376,11 +1416,11 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 60,
+    "journaling_actions": 64,
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 253,
+    "total_actions": 261,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

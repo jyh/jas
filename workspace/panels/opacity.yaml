@@ -270,6 +270,10 @@ content:
           bind:
             icon: 'if selection_mask_linked then "link_linked" else "link_unlinked"'
             disabled: "!selection_has_mask"
+          behavior:
+            - event: click
+              effects:
+                - doc.op: { op: toggle_mask_linked }
 
         - id: op_mask_preview
           type: placeholder
@@ -329,6 +333,14 @@ content:
               bind:
                 disabled: "!selection_has_mask"
                 checked: "selection_mask_clip"
+              behavior:
+                - event: change
+                  description: >-
+                    This behavior owns the press: event.value is the new checked
+                    state, and every selected mask takes it (the document op
+                    set_mask_clip). An element with no mask is skipped.
+                  effects:
+                    - doc.op: { op: set_mask_clip, clip: "event.value" }
 
             - id: op_invert_mask
               type: checkbox
@@ -340,3 +352,11 @@ content:
               bind:
                 disabled: "!selection_has_mask"
                 checked: "selection_mask_invert"
+              behavior:
+                - event: change
+                  description: >-
+                    This behavior owns the press: event.value is the new checked
+                    state, and every selected mask takes it (the document op
+                    set_mask_invert). An element with no mask is skipped.
+                  effects:
+                    - doc.op: { op: set_mask_invert, invert: "event.value" }
