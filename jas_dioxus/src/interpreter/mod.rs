@@ -45,6 +45,10 @@ pub mod menu_state;
 // engine's panel door both read it. NOT gated.
 pub mod tool_options;
 
+// A tile's selection outline (`bind.selected_in`): the web's renderer and the
+// engine's panel plan both read it. NOT gated.
+pub mod tile_selection;
+
 #[cfg(feature = "web")]
 pub mod renderer;
 #[cfg(feature = "web")]

@@ -3503,6 +3503,26 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+/// A tile's selection outline (`bind.selected_in`), scoped by its `select`'s
+/// library. The same file as Rust's `algorithm_tile_selected_in_vectors`;
+/// the expected values come from the RULE (the corpus's generator).
+@Test func testAlgorithmTileSelectedIn() throws {
+    let json = readFixture("algorithms/tile_selected_in.json")
+    let doc = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let cases = doc["cases"] as! [[String: Any]]
+    let trues = cases.filter { $0["expected"] as! Bool }.count
+    #expect(trues >= 3 && cases.count - trues >= 3, "\(trues) true of \(cases.count)")
+    #expect(cases.contains { $0["name"] as! String == "swatch_same_index_in_another_library_is_not_selected" })
+    var failures: [String] = []
+    for c in cases {
+        let name = c["name"] as! String
+        let want = c["expected"] as! Bool
+        let got = widgetSelectedIn(c["element"] as! [String: Any], context: c["context"] as! [String: Any])
+        if got != want { failures.append("\(name): got \(got), want \(want)") }
+    }
+    #expect(failures.isEmpty, "\(failures.count) of \(cases.count) cases wrong:\n\(failures.joined(separator: "\n"))")
+}
+
 // MARK: - The two dynamic submenus (menu_workspace, menu_appearance)
 
 /// The entries each dynamic submenu lists, which menu_state.json cannot see.

@@ -7935,6 +7935,30 @@ pub(crate) mod tests {
         }
     }
 
+    /// A tile's selection outline (`bind.selected_in`), scoped by its
+    /// `select`'s library. Expected values come from the RULE, applied by the
+    /// corpus's generator, not from either port. Swift runs the same file.
+    #[test]
+    fn algorithm_tile_selected_in_vectors() {
+        let json_str = read_fixture("algorithms/tile_selected_in.json");
+        let doc: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        // Anti-vacuity: both answers, and the case the scope law exists for.
+        let trues = cases.iter().filter(|c| c["expected"] == true).count();
+        assert!(trues >= 3 && cases.len() - trues >= 3, "{trues} true of {}", cases.len());
+        assert!(cases.iter().any(|c| c["name"] == "swatch_same_index_in_another_library_is_not_selected"));
+        let mut failures = Vec::new();
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            let want = c["expected"].as_bool().unwrap();
+            let got = crate::interpreter::tile_selection::selected_in(&c["element"], &c["context"]);
+            if got != want {
+                failures.push(format!("{name}: got {got}, want {want}"));
+            }
+        }
+        assert!(failures.is_empty(), "{} of {} cases wrong:\n{}", failures.len(), cases.len(), failures.join("\n"));
+    }
+
     /// FLOATSPELL: the one spelling of a full-precision f64. Expected values
     /// come from the RULE (computed in Python), not from either port, so this
     /// binds Rust as tightly as it binds Swift.
