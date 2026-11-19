@@ -462,6 +462,18 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_dialog_event(IntPtr engine, byte[] eventJson, nuint eventLen);
 
     /// <summary>
+    /// jas row 149 (#992): the saved libraries under <c>root</c> (UTF-8, no
+    /// terminator; the folder holding <c>brushes/</c>, <c>swatches/</c> and
+    /// <c>gradients/</c>), merged over the bundle's by slug. Called once, after
+    /// <c>jas_engine_new</c> and before the first plan. Answers
+    /// <c>{"brush_libraries":N,"swatch_libraries":N,"gradient_libraries":N}</c>;
+    /// an absent root takes 0 of each. Empty span for a NULL engine or bad
+    /// UTF-8. Copy the span, then release it with <c>jas_free</c>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_engine_load_user_libraries(IntPtr engine, byte[] root, nuint rootLen);
+
+    /// <summary>
     /// The shell names the document it opened or saved (#406): the model's
     /// <c>filename</c>, which the canvas tab shows. ⛔ UTF-8 BYTES, NOT A
     /// STRING (BL5), as <see cref="jas_load_svg"/>. 1 named; 0 refused (null,

@@ -2463,6 +2463,12 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         JasCore.jas_set_dpi_scale(_engine, _scaleX);
+        // jas row 149: the libraries this shell saved (under `LibraryRoot`, where
+        // `ApplyLibraryWrites` puts them) join the bundle's before the first plan,
+        // as the Mac's do at launch. One row says what the engine took.
+        var root = UserLibrariesWire.RootBytes(LibraryRoot);
+        _report(UserLibrariesWire.Row(JasCore.TakeString(
+            JasCore.jas_engine_load_user_libraries(_engine, root, (nuint)root.Length))) + $" root={LibraryRoot}");
         TellViewport();
         // The window validated SB_TOOL against `jas_tool_count`; a refusal
         // here would mean the core's list moved under it, and it is named.

@@ -3065,6 +3065,49 @@ internal static class ActWire
 }
 
 /// <summary>
+/// jas row 149: the launch row for the saved libraries the engine took
+/// (<c>jas_engine_load_user_libraries</c>). Every count is read, never
+/// defaulted: a reply without one, an empty span or a non-JSON reply is a
+/// RUSTFAIL row that names what was wrong.
+/// </summary>
+internal static class UserLibrariesWire
+{
+    /// <summary>The root as the entry takes it: its UTF-8 bytes, no terminator.</summary>
+    internal static byte[] RootBytes(string root) => System.Text.Encoding.UTF8.GetBytes(root);
+
+    /// <summary>The row for the entry's <paramref name="reply"/>.</summary>
+    internal static string Row(string reply)
+    {
+        const string Refused = "RUSTFAIL USER LIBRARIES refused: ";
+        if (string.IsNullOrEmpty(reply))
+        {
+            return Refused + "the core answered nothing (a NULL engine or a root that is not UTF-8)";
+        }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            var counts = new List<long>();
+            foreach (var key in new[] { "brush_libraries", "swatch_libraries", "gradient_libraries" })
+            {
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !doc.RootElement.TryGetProperty(key, out var v)
+                    || v.ValueKind != System.Text.Json.JsonValueKind.Number
+                    || !v.TryGetInt64(out var n))
+                {
+                    return Refused + $"no {key} count in {reply}";
+                }
+                counts.Add(n);
+            }
+            return $"USER LIBRARIES brush={counts[0]} swatch={counts[1]} gradient={counts[2]}";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Refused + $"not JSON: {reply}";
+        }
+    }
+}
+
+/// <summary>
 /// A `gradient_tile` (gradient.yaml `grad_tiles_row`, the preset strip): one
 /// library gradient, `bind.gradient`, drawn as the web draws it
 /// (`renderer.rs` `gradient_css_background`): its stops as a ramp, radial for
