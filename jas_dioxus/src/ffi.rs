@@ -6784,6 +6784,35 @@ mod tests {
         e
     }
 
+    /// Row 169 slice 1: MAKE MASK IS A YAML ACT. On Windows the click reached
+    /// the door and was refused `EmptyBehavior op_make_mask` (flask, 11-19), so
+    /// no mask could exist and the whole mask column was unreachable. A click
+    /// now makes a mask on the selection (clip and invert from the panel's
+    /// new-mask preferences), the label reads "Release", the mask controls
+    /// enable, and a second click releases it.
+    #[test]
+    fn make_mask_makes_then_releases_through_the_panel_door() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let masked = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .map(|cs| cs.iter().filter(|c| c.common().mask.is_some()).count()).unwrap_or(0);
+        assert_eq!(masked(e), 0, "fixture: no mask before the click");
+        assert_eq!(leaf(e, OP, "op_make_mask")["values"]["bind.label"], "Make Mask");
+        let (reply, err) = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert!(!reply.is_empty(), "Make Mask was refused: {err}");
+        assert_eq!(masked(e), 2, "both selected rects gain a mask");
+        assert_eq!(leaf(e, OP, "op_make_mask")["values"]["bind.label"], "Release");
+        // Plan values carry a bind's result as its text.
+        assert_eq!(leaf(e, OP, "op_clip")["values"]["bind.disabled"], "false", "the mask controls enable");
+        let (reply, err) = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert!(!reply.is_empty(), "Release was refused: {err}");
+        assert_eq!(masked(e), 0, "the second click releases");
+        assert_eq!(leaf(e, OP, "op_make_mask")["values"]["bind.label"], "Make Mask");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// BRUSH OPTIONS IN LIBRARY_EDIT LOADS THE BRUSH IT EDITS, in the engine.
     /// Its inits find the brush by `filter(...brushes, fun b -> b.slug == ...)[0]`;
     /// until 2026-10-15 they read a `brushes_by_slug` index no port builds, so

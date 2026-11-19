@@ -5639,6 +5639,14 @@ pub(crate) mod tests {
         run_operation_fixture("operations/controller_ops.json");
     }
 
+    /// Row 169: the opacity-mask ops by name (`doc.op`), each the Controller
+    /// law: make (clip and invert from the op), release, and make leaving an
+    /// existing mask untouched. Swift runs the same file.
+    #[test]
+    fn mask_ops_fixture() {
+        run_operation_fixture("operations/mask_ops.json");
+    }
+
     #[test]
     fn operation_tspan_ops() {
         run_operation_fixture("operations/tspan_ops.json");

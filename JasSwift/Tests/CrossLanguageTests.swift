@@ -1029,6 +1029,11 @@ private func transformedCanonicalDocument() -> Document {
     try runOperationFixture("controller_ops.json")
 }
 
+/// Row 169: the opacity-mask ops; the same file as Rust's `mask_ops_fixture`.
+@Test func maskOpsFixture() throws {
+    try runOperationFixture("mask_ops.json")
+}
+
 /// Tspan character-attribute writes (TSPAN.md "Character attribute writes"):
 /// `set_character_attribute` over a mid-word range, the whole range, and a
 /// merge-inducing write, each byte-matching the Rust-authored golden and
