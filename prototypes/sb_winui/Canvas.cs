@@ -1823,7 +1823,7 @@ internal sealed unsafe class Canvas : IDisposable
         {
             while (true)
             {
-                Cmd first = null!;
+                Cmd? first = null;
                 bool got;
 
                 // ⛔ THE HEAD OF THE LOOP IS BOUNDED ONLY WHEN A LATCH IS ARMED,
@@ -1860,7 +1860,9 @@ internal sealed unsafe class Canvas : IDisposable
                     continue;
                 }
 
-                var batch = new List<Cmd> { first };
+                // `got` is true only when Take or TryTake handed back a command,
+                // so `first` is set here; the compiler cannot see that through `got`.
+                var batch = new List<Cmd> { first! };
                 while (_queue.TryTake(out var more))
                 {
                     batch.Add(more);
