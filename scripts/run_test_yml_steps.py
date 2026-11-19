@@ -25,8 +25,15 @@ WHAT IT DOES
 
 WHAT IT DOES NOT DO, SAID HERE SO A GREEN IS NOT READ AS CI's
 -------------------------------------------------------------
-* It skips every script that calls a bare `cargo` (named in the output). Run
-  the Rust lanes yourself, through the build wrapper your box requires.
+* By default it skips every script that calls a bare `cargo` (named in the
+  output). `--cargo` runs them too, and only with CARGO_TARGET_DIR set in the
+  environment: a box whose builds must not land in the repo's own `target/`
+  names its build directory, or the mode refuses by name (rc 2). Those scripts
+  run `cargo run`/`cargo test`, which read CARGO_TARGET_DIR themselves. The
+  ref worktree builds into the same directory, so a failure re-run rebuilds.
+  `--cargo` raises the per-invocation timeout to 1800 s unless `--timeout`
+  says otherwise. Even then it runs only scripts/ lines: CI's own `cargo test`
+  steps are not among them.
 * It runs nothing that is not a scripts/ invocation: no `cargo`, `swift`,
   `pytest`, `dotnet` or `wasm-pack` line, and no other workflow file.
 * A step that reads a log or artifact an earlier CI step writes fails on both
@@ -70,11 +77,42 @@ def script_of(cmd: str) -> str:
     return _INVOCATION.match(cmd).group(2)
 
 
+# A script that BUILDS: its subprocess argv starts with cargo. Not the bare word:
+# lane_report.py names "cargo" only to explain an absent toolchain, and this
+# file names it in its own needle, so both read as builders and were skipped
+# (this tool's own --self-test step never ran here until 2026-11-19).
+_CARGO_ARGV = "[" + '"cargo",'  # built, so this file does not spell its own needle
+
+
 def calls_cargo(script: Path) -> bool:
     try:
-        return '"cargo"' in script.read_text(encoding="utf-8", errors="replace")
+        return _CARGO_ARGV in script.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
+
+
+def partition(cmds: list[str], is_cargo, with_cargo: bool) -> tuple[list[str], list[str]]:
+    """(to run, skipped), each in first-seen order. Without `--cargo` a script
+    that calls a bare cargo is skipped; with it, nothing is."""
+    if with_cargo:
+        return list(cmds), []
+    skipped = [c for c in cmds if is_cargo(c)]
+    return [c for c in cmds if c not in skipped], skipped
+
+
+def cargo_refusal(env: dict, with_cargo: bool) -> str | None:
+    """Why `--cargo` cannot run here, or None. A run that builds must name where."""
+    if with_cargo and not env.get("CARGO_TARGET_DIR"):
+        return ("--cargo needs CARGO_TARGET_DIR set to the build directory this box uses; "
+                "without it the cargo scripts would build into jas_dioxus/target")
+    return None
+
+
+def footer(with_cargo: bool, target: str = "") -> str:
+    if with_cargo:
+        return (f"  (scripts/ steps only, bare-cargo scripts INCLUDED, built in {target}; "
+                "CI's own cargo/swift steps are not scripts/ lines: see this file's docstring)")
+    return "  (scripts/ steps only, bare-cargo scripts skipped: not CI's green; see this file's docstring)"
 
 
 def classify(rc_here, rc_ref) -> str:
@@ -97,8 +135,10 @@ def run(cmd: str, cwd: Path, env: dict, log: Path, timeout: int):
 
 def self_test() -> int:
     failures: list[str] = []
+    ran: list[str] = []
 
     def check(cond, label):
+        ran.append(label)
         if not cond:
             failures.append(label)
 
@@ -130,7 +170,25 @@ def self_test() -> int:
     check(len(live) >= 150, f"live invocations found: {len(live)} (a floor, never a target)")
     check(any("check_cbindgen_freshness" in c for c in live),
           "control: the list holds check_cbindgen_freshness (the #966 miss)")
-    arms = 5
+    builders = {script_of(c) for c in live if calls_cargo(ROOT / "scripts" / script_of(c))}
+    check("cross_language_algorithms.py" in builders and "check_native_core_tests.py" in builders,
+          f"control: the live builders include the cargo-run scripts: {sorted(builders)}")
+    check(not builders & {"run_test_yml_steps.py", "lane_report.py"},
+          f"a script naming cargo without running it is not skipped: {sorted(builders)}")
+    # --cargo: the bare-cargo scripts are included, and only behind a named target dir.
+    cmds3 = ["python scripts/a.py", "python scripts/c.py --x", "bash scripts/b.sh"]
+    is_c = lambda c: script_of(c) == "c.py"
+    check(partition(cmds3, is_c, False) == (["python scripts/a.py", "bash scripts/b.sh"], ["python scripts/c.py --x"]),
+          "default: a cargo script is skipped and named")
+    check(partition(cmds3, is_c, True) == (cmds3, []), "--cargo: every invocation runs, in order, none skipped")
+    r = cargo_refusal({}, True)
+    check(r is not None and "CARGO_TARGET_DIR" in r, f"--cargo without CARGO_TARGET_DIR is refused by name: {r!r}")
+    check(cargo_refusal({"CARGO_TARGET_DIR": ""}, True) is not None, "an EMPTY CARGO_TARGET_DIR is refused too")
+    check(cargo_refusal({"CARGO_TARGET_DIR": "/v/t"}, True) is None, "--cargo with a target dir runs")
+    check(cargo_refusal({}, False) is None, "no --cargo: nothing to refuse")
+    check("skipped" in footer(False) and "skipped" not in footer(True) and "/v/t" in footer(True, "/v/t"),
+          f"the footer names the mode: {footer(False)!r} / {footer(True, '/v/t')!r}")
+    arms = len(ran)  # counted as they run, never typed
     for f in failures:
         print(f"  FAIL: {f}")
     print(f"run_test_yml_steps --self-test: {arms} arm(s), {len(failures)} failure(s), {len(live)} live invocations")
@@ -143,7 +201,10 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="print the invocations and exit")
     ap.add_argument("--compare-ref", default="origin/main",
                     help="re-run failures on a clean worktree of this ref ('' to skip)")
-    ap.add_argument("--timeout", type=int, default=300, help="seconds per invocation")
+    ap.add_argument("--cargo", action="store_true",
+                    help="also run the scripts that call a bare cargo (needs CARGO_TARGET_DIR)")
+    ap.add_argument("--timeout", type=int, default=None,
+                    help="seconds per invocation (default 300; 1800 with --cargo)")
     ap.add_argument("--logs", type=Path, help="keep per-invocation logs here (default: a temp dir)")
     args = ap.parse_args()
     if args.self_test:
@@ -152,18 +213,23 @@ def main() -> int:
     if args.list:
         print("\n".join(cmds))
         return 0
-    skipped = [c for c in cmds if calls_cargo(ROOT / "scripts" / script_of(c))]
-    todo = [c for c in cmds if c not in skipped]
+    refusal = cargo_refusal(dict(os.environ), args.cargo)
+    if refusal:
+        print(f"run_test_yml_steps: REFUSED: {refusal}", file=sys.stderr)
+        return 2
+    timeout = args.timeout if args.timeout is not None else (1800 if args.cargo else 300)
+    todo, skipped = partition(cmds, lambda c: calls_cargo(ROOT / "scripts" / script_of(c)), args.cargo)
     logs = args.logs or Path(tempfile.mkdtemp(prefix="test-yml-steps-"))
     logs.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     ref = args.compare_ref
     env.setdefault("RANGE", f"{ref}..HEAD" if ref else "origin/main..HEAD")
     print(f"run_test_yml_steps: {len(cmds)} distinct invocations; running {len(todo)}; "
-          f"skipped {len(skipped)} that call a bare cargo: {', '.join(sorted({script_of(c) for c in skipped})) or 'none'}")
+          + (f"bare-cargo scripts INCLUDED (CARGO_TARGET_DIR={os.environ['CARGO_TARGET_DIR']})" if args.cargo else
+             f"skipped {len(skipped)} that call a bare cargo: {', '.join(sorted({script_of(c) for c in skipped})) or 'none'}"))
     failed = []
     for i, cmd in enumerate(todo):
-        rc = run(cmd, ROOT, env, logs / f"here-{i:03d}.log", args.timeout)
+        rc = run(cmd, ROOT, env, logs / f"here-{i:03d}.log", timeout)
         if rc != 0:
             failed.append((i, cmd, rc))
     wt = None
@@ -175,7 +241,7 @@ def main() -> int:
             if (ROOT / ".venv").is_dir():
                 (wt / ".venv").symlink_to(ROOT / ".venv")
         for i, cmd, rc in failed:
-            rc_ref = run(cmd, wt, env, logs / f"ref-{i:03d}.log", args.timeout) if wt else None
+            rc_ref = run(cmd, wt, env, logs / f"ref-{i:03d}.log", timeout) if wt else None
             results.append((classify(rc, rc_ref), cmd, rc, rc_ref, i))
     finally:
         if wt is not None:
@@ -186,7 +252,7 @@ def main() -> int:
         print(f"  {kind:4} rc={rc}/{rc_ref if rc_ref is not None else '-'}  {cmd}  [log here-{i:03d}.log]")
     print(f"run_test_yml_steps: ran {len(todo)}, failed here {len(failed)}, "
           f"{'on both sides ' + str(len(results) - len(mine)) + ', ' if ref else ''}YOURS {len(mine)}; logs {logs}")
-    print("  (scripts/ steps only, bare-cargo scripts skipped: not CI's green; see this file's docstring)")
+    print(footer(args.cargo, os.environ.get("CARGO_TARGET_DIR", "")))
     return 1 if mine else 0
 
 
