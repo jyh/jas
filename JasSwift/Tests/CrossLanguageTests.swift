@@ -3503,6 +3503,53 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+/// Laying a user's saved libraries over the bundle's at launch: the Mac's
+/// own loader (`BrushLibraryStore.load` / `loadSwatches` / `loadGradients`)
+/// and `merged`, over the same file as Rust's
+/// `algorithm_user_library_merge_vectors`, which the engine's Windows door
+/// (`jas_engine_load_user_libraries`) runs. Expected values come from the RULE.
+@Test func testAlgorithmUserLibraryMerge() throws {
+    let json = readFixture("algorithms/user_library_merge.json")
+    let doc = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let bundle = doc["bundle"] as! [String: Any]
+    let cases = doc["cases"] as! [[String: Any]]
+    let kinds = ["brush_libraries", "swatch_libraries", "gradient_libraries"]
+    let base = FileManager.default.temporaryDirectory
+        .appendingPathComponent("jas-user-libs-\(ProcessInfo.processInfo.processIdentifier)")
+    defer { try? FileManager.default.removeItem(at: base) }
+    var failures: [String] = []
+    var kept = 0
+    for (i, c) in cases.enumerated() {
+        let name = c["name"] as! String
+        let root = base.appendingPathComponent(String(format: "%02d", i))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for (rel, text) in c["files"] as! [String: String] {
+            let url = root.appendingPathComponent(rel)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        let store = BrushLibraryStore(root: root)
+        let user: [String: [String: Any]] = [
+            "brush_libraries": store.load(),
+            "swatch_libraries": store.loadSwatches(),
+            "gradient_libraries": store.loadGradients(),
+        ]
+        let expected = c["expected"] as! [String: Any]
+        var same = true
+        for kind in kinds {
+            let got = BrushLibraryStore.merged(bundle: bundle[kind] as! [String: Any], user: user[kind]!)
+            let want = expected[kind] as! [String: Any]
+            if !NSDictionary(dictionary: got).isEqual(to: want) {
+                failures.append("\(name) [\(kind)]: got \(got), want \(want)")
+            }
+            if !NSDictionary(dictionary: want).isEqual(to: bundle[kind] as! [String: Any]) { same = false }
+        }
+        if same { kept += 1 }
+    }
+    #expect(kept >= 3 && cases.count - kept >= 3, "\(kept) of \(cases.count) cases keep the bundle")
+    #expect(failures.isEmpty, "\(failures.count) wrong:\n\(failures.joined(separator: "\n"))")
+}
+
 /// A tile's selection outline (`bind.selected_in`), scoped by its `select`'s
 /// library. The same file as Rust's `algorithm_tile_selected_in_vectors`;
 /// the expected values come from the RULE (the corpus's generator).

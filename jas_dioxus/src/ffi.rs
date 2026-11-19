@@ -2296,6 +2296,43 @@ pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
 }
 
 
+/// **Lay the user's saved libraries over the bundle's** (row 149): `root` is
+/// the shell's saved-libraries directory, UTF-8, the folder that holds
+/// `brushes/<slug>/library.json`, `swatches/<id>.json` and
+/// `gradients/<id>.json` (the layout the shell's library writes use, and the
+/// Mac's). Each library the user saved replaces the bundle's of the same
+/// slug, and a new slug is added, as the Mac does at launch
+/// (`BrushLibraryStore.merged`). A file that is not a JSON object is skipped.
+/// Call it once, after [`jas_engine_new`] and before the first plan.
+///
+/// Answers `{"brush_libraries":N,"swatch_libraries":N,"gradient_libraries":N}`,
+/// the count of user libraries taken per kind (an absent root takes 0 of
+/// each and changes nothing). A NULL engine or bad UTF-8 is the empty span.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a live engine; `root` must be NULL or valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_engine_load_user_libraries(e: *mut JasEngine, root: *const u8, len: usize) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let Ok(root) = (unsafe { utf8(root, len) }) else { return JasBytes::empty() };
+    let user = crate::interpreter::user_libraries::load_user_libraries(std::path::Path::new(root));
+    let mut store = engine.store.borrow_mut();
+    let mut data = store.data().as_object().cloned().unwrap_or_default();
+    let mut taken = serde_json::Map::new();
+    for (kind, _) in crate::interpreter::user_libraries::USER_LIBRARY_KINDS {
+        let mine = &user[kind];
+        let n = mine.as_object().map_or(0, |m| m.len());
+        if n > 0 {
+            let bundle = data.get(kind).cloned().unwrap_or_else(|| serde_json::json!({}));
+            data.insert(kind.into(), crate::interpreter::user_libraries::merged_libraries(&bundle, mine));
+        }
+        taken.insert(kind.into(), serde_json::json!(n));
+    }
+    store.set_data(serde_json::Value::Object(data));
+    JasBytes::from_string(serde_json::Value::Object(taken).to_string())
+}
+
 /// Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
 /// the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
 /// a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
@@ -10042,6 +10079,60 @@ mod tests {
         assert_eq!(err, "", "{reply}");
         let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
         assert_eq!(v["writes"], serde_json::json!([]), "taken by the reply that named it: {reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 149: a library saved on Windows survives a relaunch. The shell hands
+    /// the engine its saved root once, after `jas_engine_new`; the engine lays
+    /// the user's libraries over the bundle's by slug (the Mac's launch merge,
+    /// `BrushLibraryStore.merged`), and the reply counts what it took.
+    #[test]
+    fn the_saved_libraries_root_lays_the_users_libraries_over_the_bundles() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let before = engine_of(e).store.borrow().data().clone();
+        let first_swatch = before["swatch_libraries"].as_object().and_then(|m| m.keys().next().cloned())
+            .expect("the bundle has a swatch library");
+        let root = std::env::temp_dir().join(format!("jas-row149-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("brushes/mine")).unwrap();
+        std::fs::write(root.join("brushes/mine/library.json"), r#"{"name": "Mine", "brushes": []}"#).unwrap();
+        std::fs::create_dir_all(root.join("swatches")).unwrap();
+        std::fs::write(root.join(format!("swatches/{first_swatch}.json")), r#"{"name": "Shadowed", "swatches": []}"#).unwrap();
+        std::fs::write(root.join("swatches/junk.json"), "[1]").unwrap();
+
+        let r = root.to_str().unwrap();
+        let reply = unsafe { jas_engine_load_user_libraries(e, r.as_ptr(), r.len()) };
+        let v: serde_json::Value = serde_json::from_str(&take(reply)).expect("a JSON reply");
+        assert_eq!(v, serde_json::json!({"brush_libraries": 1, "swatch_libraries": 1, "gradient_libraries": 0}));
+        {
+            let store = engine_of(e).store.borrow();
+            let data = store.data();
+            assert_eq!(data["brush_libraries"]["mine"]["name"], "Mine");
+            for slug in before["brush_libraries"].as_object().unwrap().keys() {
+                assert!(data["brush_libraries"].get(slug).is_some(), "the bundle's {slug} is kept");
+            }
+            assert_eq!(data["swatch_libraries"][first_swatch.as_str()]["name"], "Shadowed", "the user's wins");
+            assert!(data["swatch_libraries"].get("junk").is_none(), "a non-object file is skipped");
+            assert_eq!(data["gradient_libraries"], before["gradient_libraries"]);
+        }
+
+        // An absent root takes nothing and changes nothing.
+        let after_one = engine_of(e).store.borrow().data().clone();
+        let missing = root.join("absent");
+        let m = missing.to_str().unwrap();
+        let reply = unsafe { jas_engine_load_user_libraries(e, m.as_ptr(), m.len()) };
+        let v: serde_json::Value = serde_json::from_str(&take(reply)).unwrap();
+        assert_eq!(v, serde_json::json!({"brush_libraries": 0, "swatch_libraries": 0, "gradient_libraries": 0}));
+        assert_eq!(engine_of(e).store.borrow().data(), &after_one);
+
+        // Bad UTF-8 is refused with the empty span; a NULL engine too.
+        let bad = [0xffu8, 0xfe];
+        let reply = unsafe { jas_engine_load_user_libraries(e, bad.as_ptr(), bad.len()) };
+        assert_eq!(reply.len, 0);
+        let reply = unsafe { jas_engine_load_user_libraries(std::ptr::null_mut(), r.as_ptr(), r.len()) };
+        assert_eq!(reply.len, 0);
+        let _ = std::fs::remove_dir_all(&root);
         unsafe { jas_engine_free(e) };
     }
 
