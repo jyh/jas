@@ -33,9 +33,8 @@ tool.
   in document space. The reference-point cross moves there. No
   transform applied.
 - **Alt/Option click on canvas** (no movement). Sets the reference
-  point AND opens the Shear Options dialog. Driven by the
-  `tool_options_dialog_on_alt_click` field on the tool yaml
-  (introduced by the Scale spec).
+  point AND opens the Shear Options dialog. Written in the
+  tool's own `on_mouseup`, as Scale's is.
 - **Drag** (press → move → release). The press point anchors the
   drag and, together with the reference point, defines the
   **shear axis** — the line from reference point to press point.
@@ -217,8 +216,7 @@ The four `shear_*` keys are Shear-specific.
 ## Cross-app artifacts
 
 - `workspace/tools/shear.yaml` — tool spec (id `shear`, cursor, no
-  shortcut, gesture handlers, `tool_options_dialog: shear_options`,
-  `tool_options_dialog_on_alt_click: true`, declared as the
+  shortcut, gesture handlers, `tool_options_dialog: shear_options`, declared as the
   toolbar alternate of `scale`).
 - `workspace/dialogs/shear_options.yaml` — dialog layout, state-key
   bindings, button actions.
@@ -228,9 +226,7 @@ The four `shear_*` keys are Shear-specific.
 - `workspace/actions.yaml` — action wiring.
 - `workspace/dialogs/tool_alternates.yaml` — declares Shear as the
   alternate of Scale in the toolbar.
-- The `tool_options_dialog_on_alt_click` field and the
-  `reference_point_cross` / `bbox_ghost` overlay render types are
-  introduced by the Scale spec; Shear consumes them.
+- The `reference_point_cross` / `bbox_ghost` overlay render types are introduced by the Scale spec; Shear consumes them.
 - New effects **`doc.shear.preview_render`** and
   **`doc.shear.apply`** added to all four native apps.
 - The shared transform math in `algorithms/transform_apply` gains

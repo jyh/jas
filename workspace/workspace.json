@@ -26209,7 +26209,6 @@
       "menu_label": "Rotate Tool",
       "shortcut": "R",
       "tool_options_dialog": "rotate_options",
-      "tool_options_dialog_on_alt_click": true,
       "state": {
         "mode": {
           "default": "idle",
@@ -26603,7 +26602,6 @@
       "menu_label": "Scale Tool",
       "shortcut": "S",
       "tool_options_dialog": "scale_options",
-      "tool_options_dialog_on_alt_click": true,
       "state": {
         "mode": {
           "default": "idle",
@@ -27379,7 +27377,6 @@
       "menu_label": "Shear Tool",
       "shortcut": "Shift+S",
       "tool_options_dialog": "shear_options",
-      "tool_options_dialog_on_alt_click": true,
       "state": {
         "mode": {
           "default": "idle",

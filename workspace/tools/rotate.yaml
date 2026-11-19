@@ -14,14 +14,13 @@
 #
 # Shared with Scale and Shear: state.transform_reference_point
 # (cleared on selection change); reference_point_cross overlay;
-# tool_options_dialog_on_alt_click toolbar dispatcher.
+# and the Alt-click that opens rotate_options, written in on_mouseup below.
 
 id: rotate
 cursor: crosshair
 menu_label: "Rotate Tool"
 shortcut: "R"
 tool_options_dialog: "rotate_options"
-tool_options_dialog_on_alt_click: true
 
 state:
   mode:
