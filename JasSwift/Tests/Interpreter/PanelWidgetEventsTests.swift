@@ -568,12 +568,19 @@ private func firstMask(_ model: Model) -> (clip: Bool, invert: Bool, linked: Boo
 func makeMaskRunsItsYamlAndReadsTheLayoutsClippingPreference(clipping: Bool) {
     let model = modelWithSelectedRect()
     #expect(firstMask(model) == nil, "the control: no mask before the click")
-    opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
+    let made = opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
+    #expect(made.outcome == "committed", "the click ran: \(made)")
     #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, true],
             "Make Mask, clipping=\(clipping)")
     opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_link_indicator"))
     #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, false],
             "the link indicator unlinks")
+    opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_clip"))
+    #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, false, false],
+            "Clip flips the shown value")
+    opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_invert_mask"))
+    #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, true, false],
+            "Invert Mask flips the shown value")
     opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
     #expect(firstMask(model) == nil, "a second click releases")
 }
@@ -587,5 +594,10 @@ func makeMaskRunsItsYamlAndReadsTheLayoutsClippingPreference(clipping: Bool) {
     for widget in ["op_make_mask", "op_link_indicator"] {
         let needle = "id == " + "\"" + widget + "\""
         #expect(!src.contains(needle), "a native intercept for \(widget) remains")
+    }
+    // Clip and Invert Mask were keyed on their checkbox's bind.
+    for bind in ["selection_mask_clip", "selection_mask_invert"] {
+        let needle = "case " + "\"" + bind + "\":"
+        #expect(!src.contains(needle), "a native intercept for \(bind) remains")
     }
 }

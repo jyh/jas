@@ -4043,7 +4043,6 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         static_label.to_string()
     };
     let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.disabled. When true, the button is rendered dimmed
     // and pointer-events are disabled so the click handler is inert.
@@ -4229,7 +4228,6 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.checked + resolve the highlight color. The highlight is
     // applied by CSS via the `data-checked` attribute + `--jas-check-bg`
@@ -5998,7 +5996,6 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     };
 
     let bind_target = classify_bind(bind_expr);
-    let bind_expr_owned = bind_expr.to_string();
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
@@ -6043,39 +6040,6 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             return;
         }
         let new_val = !checked;
-        // Opacity panel selection-mask bindings: `selection_mask_clip` /
-        // `selection_mask_invert` route directly to Controller methods
-        // (the flag lives on the selected element's mask, not on the
-        // panel-local state). See OPACITY.md § States.
-        if panel_kind == Some(PanelKind::Opacity) {
-            let handled = match bind_expr_owned.as_str() {
-                "selection_mask_clip" => {
-                    let app = app.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::set_mask_clip_on_selection(&mut tab.model, new_val);
-                        }
-                    });
-                    true
-                }
-                "selection_mask_invert" => {
-                    let app = app.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::set_mask_invert_on_selection(&mut tab.model, new_val);
-                        }
-                    });
-                    true
-                }
-                _ => false,
-            };
-            if handled {
-                revision += 1;
-                return;
-            }
-        }
         match &bind_target {
             BindTarget::Dialog(field) => {
                 if let Some(mut ds) = dialog_signal() {
@@ -14938,6 +14902,14 @@ mod tests {
             .expect("the Opacity body context");
         let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
         let el = find(ws.panel("opacity_panel_content").expect("opacity"), widget).expect(widget).clone();
+        // A boolean kind's press runs with `event.value` the new checked state,
+        // as `render_toggle` builds its handler.
+        let ctx = if super::is_boolean_kind(&el) {
+            let checked = el["bind"]["checked"].as_str().expect("a checked bind");
+            super::boolean_press_ctx(&ctx, expr::eval(checked, &ctx).to_bool())
+        } else {
+            ctx
+        };
         let actions = super::resolve_click_behaviors(&el, &ctx, "click");
         assert_eq!(actions.len(), 1, "{widget}: one declared click behavior");
         super::run_click_behaviors(&actions, &ctx, st);
@@ -14959,6 +14931,10 @@ mod tests {
             assert_eq!(first_mask(&st), Some((clipping, false, true)), "Make Mask, clipping={clipping}");
             opacity_click(&mut st, "op_link_indicator");
             assert_eq!(first_mask(&st), Some((clipping, false, false)), "the link indicator unlinks");
+            opacity_click(&mut st, "op_clip");
+            assert_eq!(first_mask(&st), Some((!clipping, false, false)), "Clip flips the shown value");
+            opacity_click(&mut st, "op_invert_mask");
+            assert_eq!(first_mask(&st), Some((!clipping, true, false)), "Invert Mask flips the shown value");
             opacity_click(&mut st, "op_make_mask");
             assert_eq!(first_mask(&st), None, "a second click releases");
         }
@@ -14972,6 +14948,11 @@ mod tests {
         for widget in ["op_make_mask", "op_link_indicator"] {
             let needle = format!("id == {}{widget}{}", '"', '"');
             assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {widget} remains");
+        }
+        // Clip and Invert Mask were keyed on their checkbox's bind.
+        for bind in ["selection_mask_clip", "selection_mask_invert"] {
+            let needle = format!("{}{bind}{} =>", '"', '"');
+            assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {bind} remains");
         }
     }
 

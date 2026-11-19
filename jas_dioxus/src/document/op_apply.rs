@@ -2638,10 +2638,6 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         "release_mask" => {
             Controller::release_mask_on_selection(model);
         }
-        // The Opacity panel's Make Mask / Release button as ONE verb: release
-        // when every selected element has a mask (`selection_has_mask`,
-        // `mask_facts`), else make. A behavior `condition:` may read only the
-        // event, so the branch on document state lives here.
         // The Opacity menu's Disable / Unlink Opacity Mask (row 172): first-wins
         // toggles of every selected mask, the Controller law.
         // The Opacity panel's Clip and Invert Mask checkboxes (row 169 slice 2):
@@ -2660,6 +2656,10 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         "toggle_mask_linked" => {
             Controller::toggle_mask_linked_on_selection(model);
         }
+        // The Opacity panel's Make Mask / Release button as ONE verb: release
+        // when every selected element has a mask (`selection_has_mask`,
+        // `mask_facts`), else make. A behavior `condition:` may read only the
+        // event, so the branch on document state lives here.
         "toggle_mask" => {
             let flag = |k: &str| op.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
             if crate::interpreter::mask_facts::mask_facts(model.document()).0 {

@@ -561,8 +561,9 @@ expression that reads another root, or that does not parse.
     writable bind and no behavior is `inert` (`EmptyBehavior`).
 - **Every other bind is read, never written, by this layer.** That
   covers a `state.` path, a `foreach` item's field (`ab.name`), an
-  indexed path (`panel.stops[…].opacity`), an expression, and a name a
-  port routes to native code (Opacity's `selection_mask_clip`). A widget
+  indexed path (`panel.stops[…].opacity`), an expression, and a fact
+  derived from the document (Opacity's `selection_mask_clip`, whose
+  checkbox writes through its declared `doc.op` behavior). A widget
   with such a bind does its work through its declared behaviors, or
   through its port's native code, which this document does not rule.
 - **The write is a store write** (both halves), and a store write notifies
