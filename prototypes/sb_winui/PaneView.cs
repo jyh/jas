@@ -1103,8 +1103,10 @@ public sealed partial class MainWindow
         /// a 1-DIP border, as the web and the Mac draw it, holding the core's
         /// `thumbnail.svg` (<see cref="PanelWire.Thumbnail"/>) fitted inside, its
         /// aspect kept. No thumbnail is the blank square, counted in `empty`.
+        /// A <see cref="PreviewTile"/>, so the square reaches the UIA tree (a
+        /// `Border` has no automation peer: O97 read it ABSENT, jas 11-18).
         /// </summary>
-        private Border BuildElementPreview(PaneLeaf leaf, ref int empty)
+        private PreviewTile BuildElementPreview(PaneLeaf leaf, ref int empty)
         {
             var host = new ContentControl
             {
@@ -1121,13 +1123,14 @@ public sealed partial class MainWindow
             {
                 empty++;
             }
-            return new Border
+            var tile = new PreviewTile
             {
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
                 BorderBrush = _paneMutedBrush,
                 BorderThickness = new Thickness(1),
-                Child = host,
             };
+            tile.Children.Add(host);
+            return tile;
         }
 
         /// <summary>
@@ -2821,6 +2824,17 @@ public sealed partial class MainWindow
 /// edge and takes the same tap; the peer is the only addition.
 /// </summary>
 internal sealed partial class SwatchTile : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// An `element_preview`'s square (the Layers row's `lp_preview`): a white,
+/// bordered tile that UI Automation can SEE, as <see cref="SwatchTile"/> is.
+/// It draws as the `Border` it replaced; the peer is the only addition.
+/// </summary>
+internal sealed partial class PreviewTile : Grid
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
