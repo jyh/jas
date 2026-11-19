@@ -341,7 +341,9 @@ public sealed partial class MainWindow : Window
     /// the flyout at the group's button; the synth read runs its item instead.
     /// The flyout is built from the rows alone: a separator, a toggle item where
     /// the core gave a check state, a plain item otherwise, enabled as the core
-    /// said, and a click sends the index back.
+    /// said, and a click sends the index back. An item carrying `rows` (jas
+    /// §915, an `items_from` item) is a submenu of those rows, and a row's click
+    /// sends the item's index and the row's.
     /// </summary>
     private void OnPanelMenuRead(string key, string panelId, string via, string json)
     {
@@ -358,6 +360,13 @@ public sealed partial class MainWindow : Window
             if (row.Kind == "separator") { flyout.Items.Add(new MenuFlyoutSeparator()); continue; }
             if (row.Kind != "item") { continue; }
             var (text, _) = MenuWire.Label(row.Label);
+            if (row.Rows is { } subRows)
+            {
+                var sub = new MenuFlyoutSubItem { Text = text, IsEnabled = row.Enabled };
+                AddMenuRows(sub.Items, subRows, key, panelId, row.Index, "hand");
+                flyout.Items.Add(sub);
+                continue;
+            }
             MenuFlyoutItem item = row.Checked is bool on
                 ? new ToggleMenuFlyoutItem { Text = text, IsChecked = on }
                 : new MenuFlyoutItem { Text = text };
@@ -367,6 +376,49 @@ public sealed partial class MainWindow : Window
             flyout.Items.Add(item);
         }
         flyout.ShowAt(g.Menu);
+    }
+
+    /// <summary>jas §915: an `items_from` item's rows as flyout items (a toggle
+    /// where the core gave a check state), each click sending the item's index
+    /// and the row's.</summary>
+    private void AddMenuRows(IList<MenuFlyoutItemBase> into, IReadOnlyList<PanelMenuSubRow> rows, string key,
+                             string panelId, int index, string via)
+    {
+        foreach (var r in rows)
+        {
+            var (text, _) = MenuWire.Label(r.Label);
+            MenuFlyoutItem item = r.Checked is bool on
+                ? new ToggleMenuFlyoutItem { Text = text, IsChecked = on }
+                : new MenuFlyoutItem { Text = text };
+            item.IsEnabled = r.Enabled;
+            var j = r.Index;
+            item.Click += (_, _) => _canvas?.PanelMenu(new PanelMenuCmd { Group = key, PanelId = panelId, Index = index, Row = j, Via = via });
+            into.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// jas §915: an act asked for a panel-menu item's rows to pop up at the
+    /// control it was on (the Brushes toolbar's library button). Drawn as the
+    /// group menu's submenu is; a control no drawn view holds is refused by
+    /// name, never popped up somewhere else.
+    /// </summary>
+    private void OnPanelMenuPopup(DialogOpener at, PanelMenuRow item)
+    {
+        var views = new List<PaneView> { _toolbar, _canvasStrip };
+        views.AddRange(_dockGroups.Values.Select(g => g.View));
+        var view = views.FirstOrDefault(v => v._paneDrawnPanel == at.Panel);
+        var el = view?.ControlAt(at.Path);
+        if (el is null || el.ActualWidth <= 0 || el.ActualHeight <= 0)
+        {
+            Report($"RUSTFAIL PANEL MENU POPUP UNDRAWN panel={at.Panel} widget={at.Widget} path={at.Path ?? "(none)"} -- no drawn control to pop it up at");
+            return;
+        }
+        var key = _dockGroups.FirstOrDefault(kv => ReferenceEquals(kv.Value.View, view)).Key ?? "pane";
+        var flyout = new MenuFlyout();
+        AddMenuRows(flyout.Items, item.Rows ?? Array.Empty<PanelMenuSubRow>(), key, at.Panel, item.Index, "popup");
+        flyout.ShowAt(el);
+        Report($"PANEL MENU POPUP SHOWN group={key} panel={at.Panel} widget={at.Widget} index={item.Index} rows={flyout.Items.Count}");
     }
 
     /// <summary>Show which tab of a group is the panel its pane now holds.</summary>
@@ -1330,6 +1382,7 @@ public sealed partial class MainWindow : Window
         _canvas.PanelChanged = OnPanelChanged;
         _canvas.PaneChanged = OnPaneChanged;
         _canvas.PanelMenuRead = OnPanelMenuRead;
+        _canvas.PanelMenuPopup = OnPanelMenuPopup;
         _canvas.DockChanged = OnDockChanged;
         _canvas.LayoutChanged = OnLayoutChanged;
         _canvas.EdgeRectsChanged = OnEdgeRectsChanged;
