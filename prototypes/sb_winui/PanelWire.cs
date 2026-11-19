@@ -3063,13 +3063,19 @@ internal static class GradientTileWire
         catch (System.Text.Json.JsonException) { return null; }
     }
 
-    /// <summary>A linear ramp's start and end in the tile's unit square (y down):
-    /// angle 0 runs left to right and 90 bottom to top, as the web's CSS
-    /// `90 - angle` does.</summary>
-    internal static (double Sx, double Sy, double Ex, double Ey) Ends(double angle)
+    /// <summary>A linear ramp's start and end on a <paramref name="w"/> x
+    /// <paramref name="h"/> tile, in the tile's unit square (y down): angle 0
+    /// runs left to right and 90 bottom to top, as the web's CSS `90 - angle`
+    /// does. The line runs corner to corner as CSS's does, length
+    /// |w cos a| + |h sin a| through the centre (jas, 11-18: a radius-0.5
+    /// line was 1/sqrt 2 of the web's at 45 degrees). A tile with no extent is
+    /// the unit square's.</summary>
+    internal static (double Sx, double Sy, double Ex, double Ey) Ends(double angle, double w, double h)
     {
+        if (!(w > 0) || !(h > 0)) { w = 1; h = 1; }
         var r = angle * Math.PI / 180;
-        double dx = Math.Cos(r) / 2, dy = -Math.Sin(r) / 2;
+        var half = (Math.Abs(w * Math.Cos(r)) + Math.Abs(h * Math.Sin(r))) / 2;
+        double dx = Math.Cos(r) * half / w, dy = -Math.Sin(r) * half / h;
         static double Snap(double v) => Math.Abs(v) < 1e-9 ? 0 : v;
         return (Snap(0.5 - dx), Snap(0.5 - dy), Snap(0.5 + dx), Snap(0.5 + dy));
     }

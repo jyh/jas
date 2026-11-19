@@ -2158,11 +2158,17 @@ static class Program
                 """{"stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":140}]}""",
                 """{"type":"linear"}""", "{x", null }
                 .Select(j => GradientTileWire.Read(j) is null ? "(null)" : "read")));
-        static string Ends(double a) { var e = GradientTileWire.Ends(a); return FormattableString.Invariant($"{e.Sx:0.###},{e.Sy:0.###}>{e.Ex:0.###},{e.Ey:0.###}"); }
+        static string Ends(double a, double w = 32, double h = 24) { var e = GradientTileWire.Ends(a, w, h); return FormattableString.Invariant($"{e.Sx:0.###},{e.Sy:0.###}>{e.Ex:0.###},{e.Ey:0.###}"); }
         Eq("tile: angle 0 runs left to right", "0,0.5>1,0.5", Ends(0));
         Eq("tile: angle 90 runs bottom to top", "0.5,1>0.5,0", Ends(90));
         Eq("tile: angle 180 runs right to left", "1,0.5>0,0.5", Ends(180));
         Eq("tile: angle -90 runs top to bottom", "0.5,0>0.5,1", Ends(-90));
+        // jas's nit (11-18): CSS runs the line corner to corner, length
+        // |W cos a| + |H sin a|, so an off-axis ramp spans the whole tile.
+        Eq("tile: 45 degrees on a square runs corner to corner", "0,1>1,0", Ends(45, 24, 24));
+        { var e45 = GradientTileWire.Ends(45, 32, 24);
+          Eq("tile: 45 degrees on a 32x24 tile ends on the corners' perpendiculars", "0.0625,1.0833>0.9375,-0.0833",
+             FormattableString.Invariant($"{e45.Sx:0.0000},{e45.Sy:0.0000}>{e45.Ex:0.0000},{e45.Ey:0.0000}")); }
 
         // -- THE PANEL MENU (the owner's note 3, 2026-10-12) ----------------------
         // `jas_panel_menu` rows, read as the shell draws them. The shell evaluates
