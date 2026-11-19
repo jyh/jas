@@ -254,6 +254,15 @@ content:
             draw a persistent highlight on this preview while it is
             the active editing target (i.e., while
             ``editing_target_is_mask`` is false).
+          bind:
+            checked: "!editing_target_is_mask"
+          behavior:
+            - event: click
+              description: >-
+                Edit the element's content: the editing target leaves the
+                mask. View state on the document model, never journaled.
+              effects:
+                - doc.set_editing_target: { mask: "false" }
 
         - id: op_link_indicator
           type: icon_button
@@ -291,6 +300,29 @@ content:
             a no-op otherwise. The native renderers draw a
             persistent highlight on this preview while mask-editing
             is active (``editing_target_is_mask`` is true).
+
+            Shift-click toggles mask.disabled on every selected mask
+            (the document op toggle_mask_disabled). Alt-click toggles
+            mask isolation: the canvas renders only the first selected
+            element's mask subtree until a second Alt-click. A plain
+            click enters mask-editing. Neither the editing target nor
+            isolation is journaled.
+          bind:
+            checked: "editing_target_is_mask"
+            disabled: "!selection_has_mask"
+          behavior:
+            - event: click
+              condition: "event.shift"
+              effects:
+                - doc.op: { op: toggle_mask_disabled }
+            - event: click
+              condition: "event.alt and not event.shift"
+              effects:
+                - doc.toggle_mask_isolation: {}
+            - event: click
+              condition: "not event.shift and not event.alt"
+              effects:
+                - doc.set_editing_target: { mask: "true" }
 
         - type: container
           id: op_buttons_col
