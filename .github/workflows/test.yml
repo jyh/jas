@@ -450,6 +450,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # l2_baselines_at_risk's tab arm reads workspace/layout.yaml's canvas_tab_bar
+      # (STATUS-flask section 920); without PyYAML it lists every tab baseline, saying why.
+      - run: pip install PyYAML
       # docs/TESTING.md section 2: a frozen baseline changes only with the spec item it renders,
       # or with a `Baseline-Refreeze: <item>: <reason>` trailer. The rule is about a WHOLE PR,
       # so the range is the PR's own delta against main; on main itself that degenerates, and
