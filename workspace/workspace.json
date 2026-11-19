@@ -19078,7 +19078,23 @@
                 "type": "placeholder",
                 "col": 3,
                 "summary": "Opacity preview",
-                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\nClicking this preview sets the editing target to the element's main content (exits mask-editing mode) per OPACITY.md \u00a7Preview interactions. The native renderers draw a persistent highlight on this preview while it is the active editing target (i.e., while ``editing_target_is_mask`` is false).\n"
+                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\nClicking this preview sets the editing target to the element's main content (exits mask-editing mode) per OPACITY.md \u00a7Preview interactions. The native renderers draw a persistent highlight on this preview while it is the active editing target (i.e., while ``editing_target_is_mask`` is false).\n",
+                "bind": {
+                  "checked": "!editing_target_is_mask"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "description": "Edit the element's content: the editing target leaves the mask. View state on the document model, never journaled.",
+                    "effects": [
+                      {
+                        "doc.set_editing_target": {
+                          "mask": "false"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "op_link_indicator",
@@ -19108,7 +19124,44 @@
                 "type": "placeholder",
                 "col": 3,
                 "summary": "Mask preview",
-                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\nClicking this preview enters mask-editing mode per OPACITY.md \u00a7Preview interactions: the editing target switches to the first selected element's mask subtree, and subsequent tool drawing adds to ``element.mask.subtree`` instead of the active layer. Requires ``selection_has_mask``; a no-op otherwise. The native renderers draw a persistent highlight on this preview while mask-editing is active (``editing_target_is_mask`` is true).\n"
+                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\nClicking this preview enters mask-editing mode per OPACITY.md \u00a7Preview interactions: the editing target switches to the first selected element's mask subtree, and subsequent tool drawing adds to ``element.mask.subtree`` instead of the active layer. Requires ``selection_has_mask``; a no-op otherwise. The native renderers draw a persistent highlight on this preview while mask-editing is active (``editing_target_is_mask`` is true).\nShift-click toggles mask.disabled on every selected mask (the document op toggle_mask_disabled). Alt-click toggles mask isolation: the canvas renders only the first selected element's mask subtree until a second Alt-click. A plain click enters mask-editing. Neither the editing target nor isolation is journaled.\n",
+                "bind": {
+                  "checked": "editing_target_is_mask",
+                  "disabled": "!selection_has_mask"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "condition": "event.shift",
+                    "effects": [
+                      {
+                        "doc.op": {
+                          "op": "toggle_mask_disabled"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt and not event.shift",
+                    "effects": [
+                      {
+                        "doc.toggle_mask_isolation": {}
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "not event.shift and not event.alt",
+                    "effects": [
+                      {
+                        "doc.set_editing_target": {
+                          "mask": "true"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "type": "container",

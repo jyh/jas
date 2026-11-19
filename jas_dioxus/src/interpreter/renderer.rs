@@ -9548,99 +9548,23 @@ fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         .or_else(|| el.get("type"))
         .and_then(|s| s.as_str())
         .unwrap_or("?");
-    let panel_kind = rctx.panel_kind;
-
-    // Opacity panel previews (OPACITY.md §Preview interactions):
-    // op_preview and op_mask_preview handle click to switch the
-    // editing target (content vs mask subtree) and render a
-    // persistent highlight on the active target.
-    let is_opacity_preview =
-        panel_kind == Some(PanelKind::Opacity)
-        && (id == "op_preview" || id == "op_mask_preview");
-    if is_opacity_preview {
-        let editing_mask = expr::eval("editing_target_is_mask", ctx).to_bool();
-        let has_mask = expr::eval("selection_has_mask", ctx).to_bool();
-        let is_mask_preview = id == "op_mask_preview";
-        // Highlight the preview that matches the current editing
-        // target: op_preview when not in mask-editing, op_mask_preview
-        // when in mask-editing.
-        let highlight = editing_mask == is_mask_preview;
-        let border = if highlight { "2px solid #4a90d9" } else { "2px solid transparent" };
-        // Clicking MASK_PREVIEW requires the selection to have a
-        // mask; otherwise the click is a no-op (mirrors the
-        // "Requires element.mask to be present" clause in the spec).
-        let click_enabled = !is_mask_preview || has_mask;
-        let app = rctx.app.clone();
-        let mut revision = rctx.revision;
-        let target_is_mask = is_mask_preview;
-        // MASK_PREVIEW supports modifier-clicks per OPACITY.md
-        // §Preview interactions:
-        //   * plain click → enter mask-editing mode (routed above)
-        //   * Alt/Option-click → toggle mask isolation (render only
-        //     the mask subtree on the canvas)
-        //   * Shift-click → toggle mask.disabled
-        let on_click = EventHandler::new(move |evt: Event<MouseData>| {
-            if !click_enabled {
-                return;
-            }
-            let mods = evt.data().modifiers();
-            let alt = mods.alt();
-            let shift = mods.shift();
-            let app = app.clone();
-            spawn(async move {
-                use crate::workspace::app_state::EditingTarget;
-                let mut st = app.borrow_mut();
-                if target_is_mask && shift {
-                    // Shift-click: toggle mask.disabled on every
-                    // selected mask via the existing Controller.
-                    if let Some(tab) = st.tab_mut() {
-                        crate::document::controller::Controller::toggle_mask_disabled_on_selection(&mut tab.model);
-                    }
-                } else if target_is_mask && alt {
-                    // Alt-click: toggle mask isolation on the first
-                    // selected element's mask. Enters isolation if
-                    // off; exits otherwise.
-                    if let Some(tab) = st.tab_mut() {
-                        let first_path = tab.model.document().selection.first()
-                            .map(|es| es.path.clone());
-                        tab.model.mask_isolation_path = match (&tab.model.mask_isolation_path, first_path) {
-                            (Some(_), _) => None,
-                            (None, Some(p)) => Some(p),
-                            (None, None) => None,
-                        };
-                    }
-                } else {
-                    // Plain click: flip editing target between
-                    // content and the first selected element's mask
-                    // subtree.
-                    if let Some(tab) = st.tab_mut() {
-                        tab.model.editing_target = if target_is_mask {
-                            tab.model.document().selection.first()
-                                .map(|es| EditingTarget::Mask(es.path.clone()))
-                                .unwrap_or(EditingTarget::Content)
-                        } else {
-                            EditingTarget::Content
-                        };
-                    }
-                }
-                revision += 1;
-            });
-        });
-        let cursor = if click_enabled { "pointer" } else { "default" };
-        return rsx! {
-            div {
-                id: "{id}",
-                style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;outline:{border};outline-offset:-2px;cursor:{cursor};",
-                title: "{summary}",
-                onclick: move |evt| on_click.call(evt),
-                "[{summary}]"
-            }
-        };
-    }
-
+    // A placeholder may carry `bind.checked` (drawn as a persistent highlight:
+    // the Opacity previews mark the active editing target), `bind.disabled`,
+    // and declared click behaviors. All three are generic; until row 169
+    // slice 3 the previews' were a web special case keyed on their ids.
+    let bind = |k: &str| el.get("bind").and_then(|b| b.get(k)).and_then(|v| v.as_str())
+        .map(|e| expr::eval(e, ctx).to_bool()).unwrap_or(false);
+    let (checked, disabled) = (bind("checked"), bind("disabled"));
+    let border = if checked { "2px solid #4a90d9" } else { "2px solid transparent" };
+    let on_click = if disabled { None } else { build_click_handler(el, ctx, rctx) };
+    let cursor = if on_click.is_some() { "pointer" } else { "default" };
+    let dim = if disabled { "opacity:0.5;" } else { "opacity:1;" };
     rsx! {
         div {
-            style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;",
+            id: "{id}",
+            style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;outline:{border};outline-offset:-2px;cursor:{cursor};{dim}",
+            title: "{summary}",
+            onclick: move |evt| if let Some(h) = &on_click { h.call(evt) },
             "[{summary}]"
         }
     }
@@ -14572,6 +14496,7 @@ mod tests {
                 | "button"                // render_button
                 | "toggle" | "checkbox"   // render_toggle
                 | "tree_view"             // render_tree_view (native)
+                | "placeholder"           // render_placeholder (row 169 slice 3)
         )
     }
 
@@ -14915,6 +14840,27 @@ mod tests {
         super::run_click_behaviors(&actions, &ctx, st);
     }
 
+    /// One click with modifiers, merged into the context as the web's mouse
+    /// handler merges them (`merge_event_modifiers`).
+    fn opacity_click_with(st: &mut AppState, widget: &str, shift: bool, alt: bool) {
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match node {
+                serde_json::Value::Object(m) if m.get("id").and_then(|v| v.as_str()) == Some(id) => Some(node),
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let mut ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(st, "opacity_panel_content")
+            .expect("the Opacity body context");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let el = find(ws.panel("opacity_panel_content").expect("opacity"), widget).expect(widget).clone();
+        let actions = super::resolve_click_behaviors(&el, &ctx, "click");
+        assert!(!actions.is_empty(), "{widget}: a declared click behavior");
+        super::merge_event_modifiers(&mut ctx, alt, shift, false, false);
+        super::run_click_behaviors(&actions, &ctx, st);
+    }
+
     fn first_mask(st: &AppState) -> Option<(bool, bool, bool)> {
         let doc = st.tabs[st.active_tab].model.document();
         let path = doc.selection.first().expect("a selection").path.clone();
@@ -14940,6 +14886,30 @@ mod tests {
         }
     }
 
+    /// The previews on the web (row 169 slice 3): a plain click on the mask
+    /// preview edits the mask, the content preview edits the content, and
+    /// Shift on the mask preview toggles `mask.disabled`, each from its YAML
+    /// through the web's click loop with the click's modifiers merged in.
+    #[test]
+    fn the_previews_on_the_web_run_their_yaml() {
+        use crate::document::model::EditingTarget;
+        let mut st = opacity_web_state(true);
+        opacity_click(&mut st, "op_make_mask");
+        let path = st.tabs[st.active_tab].model.document().selection[0].path.clone();
+        let target = |st: &AppState| st.tabs[st.active_tab].model.editing_target.clone();
+        opacity_click_with(&mut st, "op_mask_preview", false, false);
+        assert_eq!(target(&st), EditingTarget::Mask(path.clone()), "a plain click edits the mask");
+        opacity_click_with(&mut st, "op_preview", false, false);
+        assert_eq!(target(&st), EditingTarget::Content, "the content preview edits the content");
+        let disabled = |st: &AppState| { let doc = st.tabs[st.active_tab].model.document();
+            doc.get_element(&path).and_then(|e| e.common().mask.as_ref().map(|m| m.disabled)) };
+        opacity_click_with(&mut st, "op_mask_preview", true, false);
+        assert_eq!(disabled(&st), Some(true), "Shift toggles mask.disabled");
+        assert_eq!(target(&st), EditingTarget::Content, "and leaves the target");
+        opacity_click_with(&mut st, "op_mask_preview", false, true);
+        assert_eq!(st.tabs[st.active_tab].model.mask_isolation_path, Some(path.clone()), "Alt isolates");
+    }
+
     /// The intercepts that bypassed the YAML are gone from the renderer. The
     /// needles are built at run time so this test's own text cannot match.
     #[test]
@@ -14949,6 +14919,9 @@ mod tests {
             let needle = format!("id == {}{widget}{}", '"', '"');
             assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {widget} remains");
         }
+        // The two previews were keyed on their ids in render_placeholder.
+        let needle = format!("(id == {q}op_preview{q} || id == {q}op_mask_preview{q})", q = '"');
+        assert_eq!(src.matches(&needle).count(), 0, "a native intercept for the previews remains");
         // Clip and Invert Mask were keyed on their checkbox's bind.
         for bind in ["selection_mask_clip", "selection_mask_invert"] {
             let needle = format!("{}{bind}{} =>", '"', '"');

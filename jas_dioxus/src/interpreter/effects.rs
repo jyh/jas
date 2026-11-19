@@ -1730,6 +1730,31 @@ fn run_doc_effect(
             // committed transform.
             model.clear_preview_snapshot();
         }
+        // The Opacity panel's two previews (row 169 slice 3). VIEW STATE on the
+        // Model, never a document op: neither journals, so undo and replay
+        // never step through them. `mask: true` edits the first selected
+        // element's mask; false, or no selection, edits the content.
+        "doc.set_editing_target" => {
+            use crate::document::model::EditingTarget;
+            let mask = spec.get("mask").and_then(|v| v.as_str())
+                .map(|e| eval_expr(e, store, ctx).to_bool())
+                .or_else(|| spec.get("mask").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            let first = model.document().selection.first().map(|es| es.path.clone());
+            model.editing_target = match (mask, first) {
+                (true, Some(path)) => EditingTarget::Mask(path),
+                _ => EditingTarget::Content,
+            };
+        }
+        // Alt on the mask preview: isolate the first selected element's mask,
+        // or leave isolation when it is on.
+        "doc.toggle_mask_isolation" => {
+            let first = model.document().selection.first().map(|es| es.path.clone());
+            model.mask_isolation_path = match &model.mask_isolation_path {
+                Some(_) => None,
+                None => first,
+            };
+        }
         "doc.clear_selection" => {
             Controller::clear_selection(model);
         }
