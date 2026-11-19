@@ -1471,6 +1471,20 @@ fn apply_typed_panel_slot(
     resolved: &serde_json::Value,
 ) -> bool {
     match (content_id, key) {
+        // The Opacity menu's four panel-local toggles (row 174): the panel body
+        // and the menu's checks read `AppState.opacity_panel`.
+        ("opacity_panel_content",
+         "thumbnails_hidden" | "options_shown" | "new_masks_clipping" | "new_masks_inverted") => {
+            set_opacity_field(&mut st.opacity_panel, key, resolved);
+            true
+        }
+        // The Character menu's toggles (row 174): the same write the panel's
+        // own toggles make, which applies the field to the selection.
+        ("character_panel_content",
+         "snap_to_glyph_visible" | "all_caps" | "small_caps" | "superscript" | "subscript") => {
+            commit_panel_field(st, Some(PanelKind::Character), key, resolved);
+            true
+        }
         ("color_panel_content", "mode") => {
             if let Some(mode) = resolved
                 .as_str()

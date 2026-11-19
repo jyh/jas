@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn every_typed_write_target_round_trips_through_the_menu_context() {
         let claimed = panel_menu::typed_panel_slot_keys();
-        assert_eq!(claimed.len(), 8, "the typed-slot census changed; add a probe below");
+        assert_eq!(claimed.len(), 17, "the typed-slot census changed; add a probe below");
         for (content_id, key) in claimed {
             // A value the key's own enum / type accepts and that is NOT the
             // declared default, so a write that silently does nothing reds.
@@ -581,6 +581,13 @@ mod tests {
                     ("[[1, 0]]", serde_json::json!([[1, 0]])),
                 ("layers_panel_content", "renaming_element") =>
                     ("[1, 0]", serde_json::json!([1, 0])),
+                // The Opacity and Character menus' toggles (row 174): their
+                // actions.yaml entries write these, and the web renders them
+                // from typed AppState fields.
+                ("opacity_panel_content", "new_masks_clipping") => ("false", serde_json::json!(false)),
+                ("opacity_panel_content", k) => { let _ = k; ("true", serde_json::json!(true)) }
+                ("character_panel_content", "snap_to_glyph_visible") => ("false", serde_json::json!(false)),
+                ("character_panel_content", k) => { let _ = k; ("true", serde_json::json!(true)) }
                 other => panic!("no probe for {other:?}"),
             };
             let layout = WorkspaceLayout::default_layout();
