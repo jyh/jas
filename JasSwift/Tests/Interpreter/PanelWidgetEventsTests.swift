@@ -564,25 +564,26 @@ private func firstMask(_ model: Model) -> (clip: Bool, invert: Bool, linked: Boo
     return (m.clip, m.invert, m.linked)
 }
 
-@Test(arguments: [true, false])
-func makeMaskRunsItsYamlAndReadsTheLayoutsClippingPreference(clipping: Bool) {
-    let model = modelWithSelectedRect()
-    #expect(firstMask(model) == nil, "the control: no mask before the click")
-    let made = opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
-    #expect(made.outcome == "committed", "the click ran: \(made)")
-    #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, true],
-            "Make Mask, clipping=\(clipping)")
-    opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_link_indicator"))
-    #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, false],
-            "the link indicator unlinks")
-    opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_clip"))
-    #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, false, false],
-            "Clip flips the shown value")
-    opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_invert_mask"))
-    #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, true, false],
-            "Invert Mask flips the shown value")
-    opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
-    #expect(firstMask(model) == nil, "a second click releases")
+@Test func makeMaskRunsItsYamlAndReadsTheLayoutsClippingPreference() {
+    for clipping in [true, false] {
+        let model = modelWithSelectedRect()
+        #expect(firstMask(model) == nil, "the control: no mask before the click")
+        let made = opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
+        #expect(made.outcome == "committed", "the click ran: \(made)")
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, true],
+                "Make Mask, clipping=\(clipping)")
+        opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_link_indicator"))
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, false],
+                "the link indicator unlinks")
+        opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_clip"))
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, false, false],
+                "Clip flips the shown value")
+        opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_invert_mask"))
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, true, false],
+                "Invert Mask flips the shown value")
+        opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
+        #expect(firstMask(model) == nil, "a second click releases")
+    }
 }
 
 @Test func theMacPanelBodyHasNoNativeOpacityMaskIntercept() throws {
