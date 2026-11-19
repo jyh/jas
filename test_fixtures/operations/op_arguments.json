@@ -147,6 +147,14 @@
       ]
     },
     "lock_selection": {},
+    "make_mask": {
+      "clip": [
+        "boolean"
+      ],
+      "invert": [
+        "boolean"
+      ]
+    },
     "make_symbol": {
       "master_id": [
         "string"
@@ -226,6 +234,7 @@
         "string"
       ]
     },
+    "release_mask": {},
     "rotate_transform": {
       "angle": [
         "number"
@@ -477,6 +486,14 @@
         "array"
       ]
     },
+    "toggle_mask": {
+      "clip": [
+        "boolean"
+      ],
+      "invert": [
+        "boolean"
+      ]
+    },
     "unlock_all": {},
     "unpack_group_at": {
       "path": [
@@ -567,6 +584,10 @@
       "parent_path": "witnessed"
     },
     "lock_selection": {},
+    "make_mask": {
+      "clip": "witnessed",
+      "invert": "witnessed"
+    },
     "make_symbol": {
       "master_id": "witnessed",
       "path": "witnessed",
@@ -605,6 +626,7 @@
       "path": "witnessed",
       "ref_id": "witnessed"
     },
+    "release_mask": {},
     "rotate_transform": {
       "angle": "witnessed",
       "rx": "witnessed",
@@ -718,6 +740,10 @@
     },
     "toggle_element_lock": {
       "path": "witnessed"
+    },
+    "toggle_mask": {
+      "clip": "witnessed",
+      "invert": "witnessed"
     },
     "unlock_all": {},
     "unpack_group_at": {
