@@ -2122,6 +2122,13 @@ public func opApply(
         controller.lockSelection()
     case "unlock_all":
         controller.unlockAll()
+    // Row 169: the opacity-mask verbs by name (`doc.op`), each the Controller
+    // law the Opacity panel's Make Mask / Release run; `clip` and `invert`
+    // default false. Rust `op_apply` the same.
+    case "make_mask":
+        controller.makeMaskOnSelection(clip: op["clip"] as? Bool ?? false, invert: op["invert"] as? Bool ?? false)
+    case "release_mask":
+        controller.releaseMaskOnSelection()
     case "hide_selection":
         controller.hideSelection()
     case "show_all":

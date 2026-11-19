@@ -2627,6 +2627,17 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         "unlock_all" => {
             Controller::unlock_all(model);
         }
+        // Row 169: the opacity-mask verbs by name (`doc.op`), each the
+        // Controller law the Opacity panel's Make Mask / Release run. `clip`
+        // and `invert` are the op's, defaulting false; an element that already
+        // has a mask keeps it (`make_mask_on_selection`).
+        "make_mask" => {
+            let flag = |k: &str| op.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            Controller::make_mask_on_selection(model, flag("clip"), flag("invert"));
+        }
+        "release_mask" => {
+            Controller::release_mask_on_selection(model);
+        }
         "hide_selection" => {
             Controller::hide_selection(model);
         }

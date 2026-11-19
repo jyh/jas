@@ -302,9 +302,26 @@ content:
                 Creates an opacity mask on the selected element(s), or
                 releases an existing mask. The label flips between
                 "Make Mask" and "Release" based on selection_has_mask
-                per OPACITY.md § States.
+                per OPACITY.md § States. A click with no mask on the
+                selection makes one on every selected element that has
+                none (an empty group as its subtree, linked, enabled),
+                its clip and invert taken from the panel's "New Opacity
+                Masks Are Clipping" and "... Are Inverted" preferences;
+                an element that already has a mask keeps it. A click when
+                the selection has a mask releases every selected mask.
+                Both are the document ops make_mask and release_mask, so
+                every app runs them the same way.
               bind:
                 label: 'if selection_has_mask then "Release" else "Make Mask"'
+              behavior:
+                - event: click
+                  condition: "not selection_has_mask"
+                  effects:
+                    - doc.op: { op: make_mask, clip: "panel.new_masks_clipping", invert: "panel.new_masks_inverted" }
+                - event: click
+                  condition: "selection_has_mask"
+                  effects:
+                    - doc.op: { op: release_mask }
 
             - id: op_clip
               type: checkbox
