@@ -309,19 +309,15 @@ content:
                 Masks Are Clipping" and "... Are Inverted" preferences;
                 an element that already has a mask keeps it. A click when
                 the selection has a mask releases every selected mask.
-                Both are the document ops make_mask and release_mask, so
-                every app runs them the same way.
+                Both are the one document op toggle_mask (release when
+                every selected element has a mask, else make), so every
+                app runs them the same way.
               bind:
                 label: 'if selection_has_mask then "Release" else "Make Mask"'
               behavior:
                 - event: click
-                  condition: "not selection_has_mask"
                   effects:
-                    - doc.op: { op: make_mask, clip: "panel.new_masks_clipping", invert: "panel.new_masks_inverted" }
-                - event: click
-                  condition: "selection_has_mask"
-                  effects:
-                    - doc.op: { op: release_mask }
+                    - doc.op: { op: toggle_mask, clip: "panel.new_masks_clipping", invert: "panel.new_masks_inverted" }
 
             - id: op_clip
               type: checkbox
