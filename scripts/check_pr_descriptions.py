@@ -944,6 +944,9 @@ def _subject_arms() -> list[str]:
         # ARM 4 does, so this source carries no path of its own.
         d_path = bl("body-path.md", "see " + "bri" + "efs" + "/2026-11-12-x/y.md here\n")
         d_clean = bl("body-clean.md", "A clean description of a change.\n")
+        # desk AHA (2026-11-18): the shape a sibling seat planted on 11-17, which --msg-file passes by design;
+        # a PR body is checked with --body-file.
+        d_aha = bl("body-aha.md", "see " + "se" + "at " + "bri" + "efs" + "/2026-11-16-x-BANK-1.md for the run\n")
 
         if history_verdict(set(), d) != (sorted([k1, k4]), [], [], 5):
             failures.append("history over an empty baseline must report both planted subjects as NEW")
@@ -979,6 +982,7 @@ def _subject_arms() -> list[str]:
             ("body-file, a rootless private path (the #923 shape)", body_file_mode, (d_path,), 1),
             ("body-file, a clean draft", body_file_mode, (d_clean,), 0),
             ("body-file, unreadable", body_file_mode, (b_none,), 1),
+            ("body-file, a seat word and a rootless private dir (the desk AHA plant)", body_file_mode, (d_aha,), 1),
             ("ref, a lane word joined into a branch name", ref_mode, (ref,), 1),
             ("ref, a family word", ref_mode, ("refs/heads/tidy-" + k0,), 1),
             ("ref, clean", ref_mode, ("refs/heads/jas/tidy-branch",), 0),
