@@ -969,7 +969,39 @@ internal static class PanelWire
     /// beneath its children, so a child's own control wins the press.
     /// </summary>
     internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events,
-                                  string? Background = null, string? Border = null);
+                                  string? Background = null, string? Border = null, bool? Selected = null);
+
+    /// <summary>
+    /// jas §927 item 1: a plan entry's `selected`, the engine's resolution of
+    /// the node's `bind.selected_in` membership (by the web's own law, so the
+    /// shell tests no list). True or false as sent; null when the entry has no
+    /// `selected` (the node declares no `selected_in`, or an older core) or
+    /// carries anything but a bool.
+    /// </summary>
+    internal static bool? ReadSelected(System.Text.Json.JsonElement entry) =>
+        entry.ValueKind == System.Text.Json.JsonValueKind.Object && entry.TryGetProperty("selected", out var s)
+            ? s.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                _ => null,
+            }
+            : null;
+
+    /// <summary>
+    /// jas §927 item 1: a selected tile's outline, the web's
+    /// `outline:2px solid #007aff` (the swatch tile's `SwatchBorder::Selected`
+    /// and the brush tile's alike). Null for an unselected tile or one with no
+    /// `selected`: it keeps its own edge.
+    /// </summary>
+    internal static (double Width, byte R, byte G, byte B)? TileOutline(bool? selected) =>
+        selected == true ? (2, 0x00, 0x7A, 0xFF) : null;
+
+    /// <summary>
+    /// jas §927 item 1: a tile's UIA `ItemStatus`, `selected` exactly when the
+    /// plan says so, as an option button's is.
+    /// </summary>
+    internal static string TileStatus(bool? selected) => selected == true ? "selected" : "";
 
     /// <summary>
     /// jas §630: a surface's paint, from its `bind.background`: a `#rrggbb`
@@ -1178,7 +1210,8 @@ internal static class PanelWire
                             ? bg.GetString() : null,
                         e.TryGetProperty("values", out var vb) && vb.ValueKind == System.Text.Json.JsonValueKind.Object
                             && vb.TryGetProperty("bind.border", out var bd) && bd.ValueKind == System.Text.Json.JsonValueKind.String
-                            ? bd.GetString() : null));
+                            ? bd.GetString() : null,
+                        ReadSelected(e)));
                 }
             }
             return boxes;

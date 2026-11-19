@@ -1556,7 +1556,9 @@ actions:
       the web as a download of <id>.json, on the Mac under the user's
       Application Support gradients folder, each the shape of the
       workspace/gradients/ files. An empty name or a missing source library
-      saves nothing.
+      saves nothing. A desktop host (the Mac, Windows) reads its saved libraries back at
+      the next launch: each replaces the bundle's library of the same id, and a
+      new id is added (test_fixtures/algorithms/user_library_merge.json).
     category: panel
     params:
       library: { type: string, description: "Id of the library being saved" }
@@ -1660,7 +1662,9 @@ actions:
       selection kept. Every save asks the host to write the library's file
       (the interpreter itself writes no file): on the web, as a download of
       <id>.json, the shape of the workspace/swatches/ files. An empty name
-      or a missing source library saves nothing.
+      or a missing source library saves nothing. A desktop host (the Mac, Windows) reads its saved libraries back at
+      the next launch: each replaces the bundle's library of the same id, and a
+      new id is added (test_fixtures/algorithms/user_library_merge.json).
     category: swatches
     params:
       library: { type: string, description: "Id of the library being saved" }
@@ -4794,7 +4798,9 @@ actions:
       kept. Every save asks the host to write the library's library.json
       (the interpreter itself writes no file): on the Mac, under the
       user's Application Support brushes folder; on the web, as a
-      download. An empty name or a missing source library saves nothing.
+      download. An empty name or a missing source library saves nothing. A desktop host (the Mac, Windows) reads its saved libraries back at
+      the next launch: each replaces the bundle's library of the same id, and a
+      new id is added (test_fixtures/algorithms/user_library_merge.json).
     category: brushes
     params:
       library: { type: string, description: "Slug of the library being saved" }

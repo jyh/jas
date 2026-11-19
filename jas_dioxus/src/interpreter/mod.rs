@@ -49,6 +49,10 @@ pub mod tool_options;
 // engine's panel plan both read it. NOT gated.
 pub mod tile_selection;
 
+// A user's saved libraries over the bundle's (row 149): the engine's door and
+// the corpus runner read it. NOT gated.
+pub mod user_libraries;
+
 #[cfg(feature = "web")]
 pub mod renderer;
 #[cfg(feature = "web")]
