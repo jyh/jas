@@ -586,6 +586,29 @@ private func firstMask(_ model: Model) -> (clip: Bool, invert: Bool, linked: Boo
     }
 }
 
+@Test func theOpacityPreviewsRunTheirYamlOnTheMac() {
+    // Row 169 slice 3: the previews' acts from their YAML, the Mac's route for
+    // a placeholder's click (`behavior`), with the click's modifiers.
+    let model = modelWithSelectedRect()
+    opacityRoute(model, clipping: true).click(shipped(opacity, "op_make_mask"))
+    let path = model.document.selection[0].path
+    let click = { (w: String, shift: Bool, alt: Bool) in
+        _ = opacityRoute(model, clipping: true).behavior(
+            shipped(opacity, w), event: "click", modifiers: ["shift": shift, "alt": alt])
+    }
+    click("op_mask_preview", false, false)
+    #expect(model.editingTarget == .mask(path), "a plain click edits the mask")
+    click("op_preview", false, false)
+    #expect(model.editingTarget == .content, "the content preview edits the content")
+    click("op_mask_preview", true, false)
+    #expect(model.document.getElement(path).mask?.disabled == true, "Shift toggles mask.disabled")
+    #expect(model.editingTarget == .content, "and leaves the target")
+    click("op_mask_preview", false, true)
+    #expect(model.maskIsolationPath == path, "Alt isolates the mask")
+    click("op_mask_preview", false, true)
+    #expect(model.maskIsolationPath == nil, "Alt again exits isolation")
+}
+
 @Test func theMacPanelBodyHasNoNativeOpacityMaskIntercept() throws {
     let tests = (#filePath as NSString).deletingLastPathComponent
     let path = ((tests as NSString).appendingPathComponent("../../Sources/Interpreter/YamlPanelBodyView.swift") as NSString)
@@ -596,6 +619,9 @@ private func firstMask(_ model: Model) -> (clip: Bool, invert: Bool, linked: Boo
         let needle = "id == " + "\"" + widget + "\""
         #expect(!src.contains(needle), "a native intercept for \(widget) remains")
     }
+    // The two previews were keyed on their ids in renderPlaceholder.
+    #expect(!src.contains("id == " + "\"op_preview\" || id == " + "\"op_mask_preview\""),
+            "a native intercept for the previews remains")
     // Clip and Invert Mask were keyed on their checkbox's bind.
     for bind in ["selection_mask_clip", "selection_mask_invert"] {
         let needle = "case " + "\"" + bind + "\":"
