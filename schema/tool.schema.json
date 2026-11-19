@@ -50,10 +50,6 @@
       "uniqueItems": true,
       "description": "Named keys this tool's on_keydown takes BEFORE the app's shortcuts, because its handler owns their fall-through. The Artboard tool claims Delete and Backspace: with artboards selected in the Artboards panel it deletes them, else it dispatches delete_selection itself (ARTBOARD_TOOL.md §Delete behavior). A YAML tool reports every key handled, so a port cannot tell which keys it means without this list. Absent means none."
     },
-    "tool_options_dialog_on_alt_click": {
-      "type": "boolean",
-      "description": "When true, an Alt-click on canvas opens the dialog referenced by tool_options_dialog. Used by the transform-tool family (Scale, Rotate, Shear) — the same click also writes state.transform_reference_point. Per SCALE_TOOL.md §Tool Options dialog."
-    },
     "state": {
       "type": "object",
       "description": "Tool-local state slots. Namespaced as $tool.<id>.* in expressions.",

@@ -35,8 +35,9 @@ tool — clicking on a non-selected element does not select it.
   transform applied.
 - **Alt/Option click on canvas** (mousedown + mouseup with no
   movement). Sets the reference point AND opens the Scale Options
-  dialog. Driven by the new `tool_options_dialog_on_alt_click`
-  field on the tool yaml.
+  dialog. Written in the tool's own `on_mouseup` (a click with
+  `alt_held` runs `open_dialog: scale_options`); no dispatcher reads
+  a flag for it.
 - **Drag** (press → move → release). The press point anchors the
   drag — it does NOT relocate the reference point. Per-frame scale
   factors are computed as
@@ -308,19 +309,17 @@ shows the last entered values.
 ## Cross-app artifacts
 
 - `workspace/tools/scale.yaml` — tool spec (id `scale`, cursor,
-  shortcut `S`, gesture handlers, `tool_options_dialog: scale_options`,
-  `tool_options_dialog_on_alt_click: true`).
+  shortcut `S`, gesture handlers, `tool_options_dialog: scale_options`).
 - `workspace/dialogs/scale_options.yaml` — dialog layout, state-key
   bindings, button actions.
 - `workspace/state.yaml` — declares the eight state keys above.
 - `workspace/actions.yaml` — action wiring for OK / Cancel / Copy /
   Reset.
-- A new **`tool_options_dialog_on_alt_click`** boolean field on
-  tool yaml, parallel to the existing `tool_options_dialog`. The
-  YAML tool runtime's canvas-click dispatcher checks this field on
-  Alt-click; when truthy, it writes `state.transform_reference_point`
-  to the click coordinate and dispatches `open_dialog` with the
-  configured dialog id.
+- The Alt-click dialog is NOT a tool-yaml field. It was first specified
+  as a `tool_options_dialog_on_alt_click` boolean read by the canvas-click
+  dispatcher, but no port ever read it: every port runs the gesture from
+  the tool's `on_mouseup` (`if: tool.scale.alt_held` → `open_dialog`). The
+  field was struck on 2026-11-19 (STATUS-jas row 171).
 - New overlay render types **`reference_point_cross`** and
   **`bbox_ghost`** added to the overlay runtime in all four
   native apps (Rust, Swift, OCaml, Python).
