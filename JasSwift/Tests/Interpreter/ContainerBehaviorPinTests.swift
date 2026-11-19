@@ -50,7 +50,8 @@ private func wiresPointerClick(_ widgetType: String) -> Bool {
          "text",                      // renderText
          "button",                    // renderButton
          "toggle", "checkbox",        // renderToggle
-         "tree_view":                 // renderTreeView (native)
+         "tree_view",                 // renderTreeView (native)
+         "placeholder":               // renderPlaceholder (row 169 slice 3)
         return true
     default:
         return false

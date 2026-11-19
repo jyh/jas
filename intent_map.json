@@ -1327,7 +1327,7 @@
   },
   "generated_from": "workspace/workspace.json",
   "generator": "scripts/gen_intent_map.py",
-  "scope_note": "ACTION seam (dispatch_action) ONLY. 45 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
+  "scope_note": "ACTION seam (dispatch_action) ONLY. 47 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
   "summary": {
     "action_seam_doc_verbs": [
       "doc.apply_concept_operation",
@@ -1429,8 +1429,10 @@
       "doc.preview.capture",
       "doc.select_in_rect",
       "doc.select_polygon_from_buffer",
+      "doc.set_editing_target",
       "doc.set_selection",
       "doc.snapshot.restore",
+      "doc.toggle_mask_isolation",
       "doc.toggle_selection",
       "doc.zoom.fit_marquee",
       "doc.zoom.scrubby",
