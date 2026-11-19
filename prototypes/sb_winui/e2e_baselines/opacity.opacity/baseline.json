@@ -4,7 +4,7 @@
     "frame_hash":  "cc43a16fa3afd3bc060d6848f6a0ef6c8870f56552b100fd99a3b144a91dba9d",
     "plan_panel":  "opacity_panel_content",
     "plan_sha":  "008ff4bc3ae06245",
-    "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
-    "tab_sha":  "bf94097025b37fd6",
+    "tab":  "[0,0]=on:\"rect_with_stroke.svg *\"",
+    "tab_sha":  "16a48189949a774f",
     "selection_count":  1
 }
