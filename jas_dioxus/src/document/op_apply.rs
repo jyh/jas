@@ -2644,6 +2644,16 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         // event, so the branch on document state lives here.
         // The Opacity menu's Disable / Unlink Opacity Mask (row 172): first-wins
         // toggles of every selected mask, the Controller law.
+        // The Opacity panel's Clip and Invert Mask checkboxes (row 169 slice 2):
+        // set the field on every selected mask; an element with none is skipped.
+        "set_mask_clip" => {
+            let clip = op.get("clip").and_then(|v| v.as_bool()).unwrap_or(false);
+            Controller::set_mask_clip_on_selection(model, clip);
+        }
+        "set_mask_invert" => {
+            let invert = op.get("invert").and_then(|v| v.as_bool()).unwrap_or(false);
+            Controller::set_mask_invert_on_selection(model, invert);
+        }
         "toggle_mask_disabled" => {
             Controller::toggle_mask_disabled_on_selection(model);
         }

@@ -2132,6 +2132,11 @@ public func opApply(
     // Make Mask / Release as ONE verb: release when every selected element has
     // a mask (`selectionHasMask`), else make. Rust `op_apply` the same.
     // The Opacity menu's Disable / Unlink Opacity Mask (row 172). Rust the same.
+    // The Opacity panel's Clip and Invert Mask checkboxes (row 169 slice 2).
+    case "set_mask_clip":
+        controller.setMaskClipOnSelection(op["clip"] as? Bool ?? false)
+    case "set_mask_invert":
+        controller.setMaskInvertOnSelection(op["invert"] as? Bool ?? false)
     case "toggle_mask_disabled":
         controller.toggleMaskDisabledOnSelection()
     case "toggle_mask_linked":

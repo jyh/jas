@@ -6813,6 +6813,35 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 169 slice 2: CLIP, INVERT MASK AND THE LINK INDICATOR ACT. After #996
+    /// they were enabled on the box and changed nothing (flask §937): no YAML
+    /// behavior. A checkbox's `change` carries the new checked state as
+    /// `event.value` (gradient's Dither, the precedent); the link indicator's
+    /// click toggles. Each writes every selected mask.
+    #[test]
+    fn the_mask_controls_change_the_selected_masks() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let masks = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .map(|cs| cs.iter().filter_map(|c| c.common().mask.as_ref().map(|m| (m.clip, m.invert, m.linked))).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert_eq!(masks(e), vec![(true, false, true); 2], "fixture: two masks at the declared defaults");
+        for (ev, want) in [
+            (r#"{"widget":"op_clip","event":"change","value":false}"#, (false, false, true)),
+            (r#"{"widget":"op_invert_mask","event":"change","value":true}"#, (false, true, true)),
+            (r#"{"widget":"op_link_indicator","event":"click"}"#, (false, true, false)),
+            (r#"{"widget":"op_clip","event":"change","value":true}"#, (true, true, false)),
+        ] {
+            let (reply, err) = behave(e, OP, ev);
+            assert!(!reply.is_empty(), "{ev} was refused: {err}");
+            assert_eq!(masks(e), vec![want; 2], "after {ev}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 172: EVERY LIVE OPACITY MENU ITEM RUNS IN THE ENGINE. Until 11-19 all
     /// ten read `UnknownAction` through the panel door (probed), because they
     /// named commands only the web's and the Mac's native dispatch knew. Sent

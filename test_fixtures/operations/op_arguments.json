@@ -421,6 +421,16 @@
         "number"
       ]
     },
+    "set_mask_clip": {
+      "clip": [
+        "boolean"
+      ]
+    },
+    "set_mask_invert": {
+      "invert": [
+        "boolean"
+      ]
+    },
     "set_output_field": {
       "field": [
         "string"
@@ -712,6 +722,12 @@
     "set_marks_and_bleed_field": {
       "field": "witnessed",
       "value": "witnessed"
+    },
+    "set_mask_clip": {
+      "clip": "witnessed"
+    },
+    "set_mask_invert": {
+      "invert": "witnessed"
     },
     "set_output_field": {
       "field": "witnessed",
