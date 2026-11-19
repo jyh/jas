@@ -4062,37 +4062,6 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         "opacity:1;pointer-events:auto;"
     };
 
-    // Opacity panel: op_make_mask dispatches Controller::make or release
-    // based on the current selection_has_mask predicate. Direct route
-    // rather than yaml-actions because the target lives on the
-    // selection's mask field, not on a panel-state key.
-    if panel_kind == Some(PanelKind::Opacity) && id == "op_make_mask" {
-        let selection_has_mask = expr::eval("selection_has_mask", ctx).to_bool();
-        let app = rctx.app.clone();
-        let mut revision = rctx.revision;
-        let handler = EventHandler::new(move |_evt: Event<MouseData>| {
-            let app = app.clone();
-            spawn(async move {
-                {
-                    let mut st = app.borrow_mut();
-                    if selection_has_mask {
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
-                        }
-                    } else {
-                        let clip = st.opacity_panel.new_masks_clipping;
-                        let invert = st.opacity_panel.new_masks_inverted;
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::make_mask_on_selection(&mut tab.model, clip, invert);
-                        }
-                    }
-                }
-                revision += 1;
-            });
-        });
-        return rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } };
-    }
-
     // Try behavior array first, then shorthand action property
     let on_click = build_click_handler(el, ctx, rctx).or_else(|| {
         let action = el.get("action").and_then(|a| a.as_str())?.to_string();
@@ -4402,28 +4371,7 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     // Toolbar buttons omit `label` entirely and stay icon-only.
     let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("").to_string();
 
-    // Opacity panel: op_link_indicator click toggles mask.linked on
-    // every selected mask via Controller. Same pattern as
-    // op_make_mask in render_button. OPACITY.md §Document model.
-    let opacity_link_click: Option<EventHandler<Event<MouseData>>> =
-        if panel_kind == Some(PanelKind::Opacity) && id == "op_link_indicator" {
-            let app = rctx.app.clone();
-            let mut revision = rctx.revision;
-            Some(EventHandler::new(move |_evt: Event<MouseData>| {
-                let app = app.clone();
-                spawn(async move {
-                    let mut st = app.borrow_mut();
-                    if let Some(tab) = st.tab_mut() {
-                        crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
-                    }
-                    revision += 1;
-                });
-            }))
-        } else {
-            None
-        };
-
-    let on_click = opacity_link_click.or_else(|| build_click_handler(el, ctx, rctx));
+    let on_click = build_click_handler(el, ctx, rctx);
     let on_mousedown = build_mousedown_handler(el, ctx, rctx);
     let on_mouseup = build_mouseup_handler(el, ctx, rctx);
 
