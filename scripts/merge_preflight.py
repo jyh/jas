@@ -735,13 +735,48 @@ def gh_merge(pr: int, repo: str, head: str) -> str:
     return _gh("pr", "view", str(pr), "-R", repo, "--json", "state", "--jq", ".state").strip()
 
 
-def level2_notice(pr: int, repo: str = REPO) -> list[str]:
+def forge_reader(repo: str, ref: str):
+    """A reader for `path` at `ref` ON THE FORGE: None when the file is absent
+    there (a 404); any other failure RAISES, so an unread side is never taken
+    for an absent file."""
+    def read(path: str) -> str | None:
+        try:
+            return _gh("api", "-H", "Accept: application/vnd.github.raw", f"repos/{repo}/contents/{path}?ref={ref}")
+        except RuntimeError as e:
+            if "Not Found" in str(e) or "HTTP 404" in str(e):
+                return None
+            raise
+    return read
+
+
+def level2_notice(pr: int, repo: str = REPO, head_sha: str | None = None) -> list[str]:
     """The LEVEL-2 NOTICE lines for the files the PR changes (read from the
-    forge), or one line saying why none could be computed."""
+    forge), or one line saying why none could be computed. The tab arm
+    (l2_baselines_at_risk's docstring) compares the canvas tab bar at the PR's
+    merge base and its head, both read from the forge: the local tree is
+    neither side."""
     try:
         import l2_baselines_at_risk as l2
         files = _gh("api", "--paginate", f"repos/{repo}/pulls/{pr}/files", "--jq", ".[].filename").split()
-        return l2.report(l2.at_risk(files, l2._read, l2.load_baselines()))
+        why: dict[str, str] = {}
+        read_base = read_head = None
+        degenerate = None
+        if head_sha and l2.LAYOUT in files:
+            mb = _gh("api", f"repos/{repo}/compare/{BASE}...{head_sha}", "--jq", ".merge_base_commit.sha").strip()
+            read_head = forge_reader(repo, head_sha)
+            # A head already in the base (a merged PR) has ITSELF as merge base,
+            # so base and head read the same bytes and the tab bar would read
+            # "unchanged" whatever the PR did (driven on #916, 11-18). No
+            # before/after exists, so it is listed and says why.
+            if mb == head_sha:
+                degenerate = f"UNREADABLE: the merge base IS the head {head_sha[:8]} (already in {BASE})"
+            else:
+                read_base = forge_reader(repo, mb)
+        risk = l2.at_risk(files, read_head or l2._read, l2.load_baselines(), tab_items=l2.load_tab_items(),
+                          read_base=read_base, why=why)
+        if degenerate and l2.TAB_KEY in risk:
+            why[l2.TAB_KEY] = degenerate
+        return l2.report(risk, why)
     except Exception as e:  # advice must not hide the verdict above it
         return [f"LEVEL-2 NOTICE UNAVAILABLE: {type(e).__name__}: {e}"]
 
@@ -775,7 +810,7 @@ def main() -> int:
     # Advisory, never a refusal: the WinUI baselines a panel-YAML change may
     # un-certify (l2_baselines_at_risk.py; STATUS-flask § 449). Level 2 is
     # the box's, so the merger names them to flask in the release.
-    for line in level2_notice(args.pr, args.repo):
+    for line in level2_notice(args.pr, args.repo, state.head_sha):
         print(f"  {line}")
     if verdict.ok:
         print("merge_preflight: OK -- every condition holds; the green tree IS the merged tree")
