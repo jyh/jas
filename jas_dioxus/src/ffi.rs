@@ -6894,12 +6894,11 @@ mod tests {
         };
         let case = |e| engine_of(e).with_model(|m| {
             let doc = m.document();
-            let es = doc.selection.first().expect("a selection");
-            match doc.get_element(&es.path) {
+            doc.selection.iter().find_map(|es| match doc.get_element(&es.path) {
                 Some(Element::Text(t)) =>
-                    (t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone()),
-                other => panic!("the fixture's first selection is not text: {other:?}"),
-            }
+                    Some((t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone())),
+                _ => None,
+            }).expect("the fixture selects a text element")
         });
         let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
         assert_eq!(case(e), s("", "", ""), "the control: no case or shift");

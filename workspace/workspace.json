@@ -1813,6 +1813,71 @@
         }
       ]
     },
+    "toggle_snap_to_glyph_visible": {
+      "description": "Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.\n",
+      "category": "panel",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "snap_to_glyph_visible",
+            "value": "not panel.snap_to_glyph_visible"
+          }
+        }
+      ]
+    },
+    "toggle_all_caps": {
+      "description": "Toggle All Caps on the selected text (the Character panel menu's All Caps, the same field as the panel's All Caps toggle). Turning it on clears Small Caps; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "all_caps",
+            "value": "not panel.all_caps"
+          }
+        }
+      ]
+    },
+    "toggle_small_caps": {
+      "description": "Toggle Small Caps on the selected text (the Character panel menu's Small Caps, the same field as the panel's Small Caps toggle). Turning it on clears All Caps; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "small_caps",
+            "value": "not panel.small_caps"
+          }
+        }
+      ]
+    },
+    "toggle_superscript": {
+      "description": "Toggle Superscript on the selected text (the Character panel menu's Superscript, the same field as the panel's Superscript toggle). Turning it on clears Subscript; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "superscript",
+            "value": "not panel.superscript"
+          }
+        }
+      ]
+    },
+    "toggle_subscript": {
+      "description": "Toggle Subscript on the selected text (the Character panel menu's Subscript, the same field as the panel's Subscript toggle). Turning it on clears Superscript; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "subscript",
+            "value": "not panel.subscript"
+          }
+        }
+      ]
+    },
     "make_opacity_mask": {
       "description": "Make an opacity mask on every selected element that has none (the panel menu's Make Opacity Mask): an empty group as its subtree, linked and enabled, its clip and invert taken from the panel's new-mask preferences. An element that already has a mask keeps it. The document op make_mask.\n",
       "category": "appearance",
