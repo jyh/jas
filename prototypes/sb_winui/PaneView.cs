@@ -591,6 +591,16 @@ public sealed partial class MainWindow
                         el = BuildGradientSlider(leaf);
                         break;
 
+                    // jas 917: a preset-strip tile (gradient.yaml `grad_tiles_row`),
+                    // one library gradient. A tile has NO id (the foreach repeats
+                    // it), so its plan path addresses it, as a library swatch's
+                    // does; ApplyLeafValues draws `bind.gradient` on every draw.
+                    case "gradient_tile":
+                        gradients++;
+                        if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { unaddressable++; }
+                        el = BuildGradientTile(leaf);
+                        break;
+
                     // A `length_input` is this control too: the person types TEXT
                     // and the core parses it by the widget's kind. What differs is
                     // the DISPLAY, and the core now sends that ready-made.
@@ -1117,6 +1127,58 @@ public sealed partial class MainWindow
                 BorderBrush = _paneMutedBrush,
                 BorderThickness = new Thickness(1),
                 Child = host,
+            };
+        }
+
+        /// <summary>
+        /// jas 917: a `gradient_tile`, a bordered tile filled on every draw from
+        /// `bind.gradient` (<see cref="GradientTileBrush"/>). A tap sends the
+        /// leaf's `click` by its plan path; the engine runs the tile's `set`s. A
+        /// tile with neither an id nor a path is counted unaddressable and sends
+        /// nothing.
+        /// </summary>
+        private SwatchTile BuildGradientTile(PaneLeaf leaf)
+        {
+            var tile = new SwatchTile { BorderBrush = _paneMutedBrush, BorderThickness = new Thickness(1) };
+            var id = leaf.Id;
+            var path = leaf.Path;
+            if (PanelWire.Addressable(id, path)) { tile.Tapped += (_, _) => OnPaneClick(id, path); }
+            return tile;
+        }
+
+        /// <summary>
+        /// jas 917: a tile's ramp. Linear at the gradient's angle
+        /// (<see cref="GradientTileWire.Ends"/>) or radial, each stop at its
+        /// location with its opacity as alpha, as the web's CSS background draws
+        /// it. A gradient the tile cannot read is the muted fill, never a guess.
+        /// </summary>
+        private Microsoft.UI.Xaml.Media.Brush GradientTileBrush(string? json)
+        {
+            if (GradientTileWire.Read(json) is not { } g) { return _paneMutedBrush; }
+            var stops = new Microsoft.UI.Xaml.Media.GradientStopCollection();
+            foreach (var st in g.Stops)
+            {
+                var c = PanelWire.SwatchColor(st.Color);
+                stops.Add(new Microsoft.UI.Xaml.Media.GradientStop
+                {
+                    Color = c is { } k
+                        ? Microsoft.UI.ColorHelper.FromArgb((byte)Math.Round(255 * st.Opacity / 100), k.R, k.G, k.B)
+                        : Microsoft.UI.Colors.Gray,
+                    Offset = st.Location / 100,
+                });
+            }
+            if (g.Type == "radial")
+            {
+                var radial = new Microsoft.UI.Xaml.Media.RadialGradientBrush();
+                foreach (var st in stops) { radial.GradientStops.Add(st); }
+                return radial;
+            }
+            var (sx, sy, ex, ey) = GradientTileWire.Ends(g.Angle);
+            return new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(sx, sy),
+                EndPoint = new Windows.Foundation.Point(ex, ey),
+                GradientStops = stops,
             };
         }
 
@@ -1821,6 +1883,10 @@ public sealed partial class MainWindow
 
                 case GradientSliderSurface slider when leaf.Type == "gradient_slider":
                     DrawGradientSlider(slider, leaf);
+                    break;
+
+                case SwatchTile tile when leaf.Type == "gradient_tile":
+                    tile.Background = GradientTileBrush(leaf.Value("bind.gradient"));
                     break;
 
                 case TextBlock tb when leaf.Type == "text":

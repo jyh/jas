@@ -2941,6 +2941,50 @@ internal static class ActWire
 }
 
 /// <summary>
+/// A `gradient_tile` (gradient.yaml `grad_tiles_row`, the preset strip): one
+/// library gradient, `bind.gradient`, drawn as the web draws it
+/// (`renderer.rs` `gradient_css_background`): its stops as a ramp, radial for
+/// a `radial` gradient and linear at its `angle` otherwise. Pure, so
+/// `sb_winui_tests` drives it; a click is the leaf's, sent by plan path.
+/// </summary>
+internal static class GradientTileWire
+{
+    /// <summary>A tile's gradient: `type` (`linear` when absent), `angle` in
+    /// degrees (0 when absent) and its stops.</summary>
+    internal readonly record struct Tile(string Type, double Angle, IReadOnlyList<GradientSliderWire.Stop> Stops);
+
+    /// <summary>`bind.gradient` as a tile, or null (the muted tile) when it is
+    /// not a JSON object whose `stops` read as at least two stops by
+    /// <see cref="GradientSliderWire.Stops"/>, the slider's own reading.</summary>
+    internal static Tile? Read(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var g = doc.RootElement;
+            if (g.ValueKind != System.Text.Json.JsonValueKind.Object || !g.TryGetProperty("stops", out var st)) { return null; }
+            if (GradientSliderWire.Stops(st.GetRawText()) is not { Count: >= 2 } stops) { return null; }
+            var type = g.TryGetProperty("type", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String ? t.GetString()! : "linear";
+            var angle = g.TryGetProperty("angle", out var a) && a.TryGetDouble(out var ad) ? ad : 0;
+            return new Tile(type, angle, stops);
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>A linear ramp's start and end in the tile's unit square (y down):
+    /// angle 0 runs left to right and 90 bottom to top, as the web's CSS
+    /// `90 - angle` does.</summary>
+    internal static (double Sx, double Sy, double Ex, double Ey) Ends(double angle)
+    {
+        var r = angle * Math.PI / 180;
+        double dx = Math.Cos(r) / 2, dy = -Math.Sin(r) / 2;
+        static double Snap(double v) => Math.Abs(v) < 1e-9 ? 0 : v;
+        return (Snap(0.5 - dx), Snap(0.5 - dy), Snap(0.5 + dx), Snap(0.5 + dy));
+    }
+}
+
+/// <summary>
 /// The `gradient_slider`'s picture (gradient.yaml `grad_slider`), as the web
 /// draws it (`renderer.rs` `render_gradient_slider`): a bar previewing the
 /// stops, a circle per stop at its `location`, and a diamond per pair at its
