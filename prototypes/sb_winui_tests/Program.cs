@@ -448,6 +448,34 @@ static class Program
         Eq("finding 6: a style other than solid is refused by name", "(null)", SB("1px dashed #555555"));
         Eq("finding 6: an unresolved template is refused", "(null)", SB("1px solid {{theme.colors.border}}"));
         Eq("finding 6: a zero width draws nothing and is refused", "(null)", SB("0px solid #555555"));
+        // jas §927 item 1: a tile's selection is the plan row's resolved
+        // `selected` (the engine tests `bind.selected_in` membership; the shell
+        // tests nothing). A swatch tile is a leaf, a brush tile a surface
+        // (UIA reads it as a Group, so it carries its own ItemStatus).
+        const string TilePlan = """
+            {"chrome": [],
+             "containers": [
+               {"path": [1, 0, 2], "rect": {"x": 0, "y": 0, "w": 40, "h": 40}, "type": "container", "id": "", "events": ["click"], "values": {"bind.selected_in": "[]"}, "selected": true},
+               {"path": [1, 0, 3], "rect": {"x": 42, "y": 0, "w": 40, "h": 40}, "type": "container", "id": "", "events": ["click"], "values": {"bind.selected_in": "[]"}, "selected": false},
+               {"path": [1, 1], "rect": {"x": 0, "y": 50, "w": 40, "h": 40}, "type": "container", "id": "", "events": ["click"], "values": {}}],
+             "leaves": []}
+            """;
+        var thits = PanelWire.HitBoxes(TilePlan);
+        Eq("§927: a surface carries its row's selected (true, false, absent)",
+            "True|False|(null)", thits is { Count: 3 } ? string.Join("|", thits.Select(h => h.Selected?.ToString() ?? "(null)")) : "(none)");
+        static string TO(bool? sel) => PanelWire.TileOutline(sel) is { } o
+            ? FormattableString.Invariant($"{o.Width}/{o.R:X2}{o.G:X2}{o.B:X2}") : "(null)";
+        Eq("§927: a selected tile's outline is the web's 2px #007aff", "2/007AFF", TO(true));
+        Eq("§927: an unselected tile keeps its own edge", "(null)", TO(false));
+        Eq("§927: a row with no selected_in keeps its own edge", "(null)", TO(null));
+        Eq("§927: UIA ItemStatus of a selected tile", "selected", PanelWire.TileStatus(true));
+        Eq("§927: UIA ItemStatus of an unselected tile", "", PanelWire.TileStatus(false));
+        Eq("§927: UIA ItemStatus of a row with no selected_in", "", PanelWire.TileStatus(null));
+        Check("§927: a selected-tile row reads from the plan entry",
+            PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": true}""").RootElement) == true
+            && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": false}""").RootElement) == false
+            && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": "true"}""").RootElement) is null
+            && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{}""").RootElement) is null, "");
         Eq("finding 6: no border is no border", "(null)", SB(null));
 
         var token = PanelWire.RowValue("a b\tc");

@@ -118,7 +118,7 @@ public sealed partial class MainWindow
             Dictionary<string, string> Values, Dictionary<string, string> Static,
             Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items,
             SliderTrack? Track = null, IReadOnlyList<string>? Events = null,
-            PanelWire.LeafParts? Parts = null)
+            PanelWire.LeafParts? Parts = null, bool? Selected = null)
         {
             internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
             internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -191,7 +191,10 @@ public sealed partial class MainWindow
                     // Row 56 (#796): a labelled icon_button's icon and label rects;
                     // null for every other leaf, and from an older core.
                     PanelWire.ReadParts(e.TryGetProperty("parts", out var pts) ? pts.GetRawText() : null,
-                                        rect.GetProperty("x").GetInt64(), rect.GetProperty("y").GetInt64())));
+                                        rect.GetProperty("x").GetInt64(), rect.GetProperty("y").GetInt64()),
+                    // jas §927 item 1: a tile's `bind.selected_in` membership, as
+                    // the engine resolved it; null on any other leaf.
+                    PanelWire.ReadSelected(e)));
             }
             var icons = new Dictionary<string, (string Viewbox, string Svg)>();
             foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -1882,6 +1885,7 @@ public sealed partial class MainWindow
             {
                 case SwatchTile swatch when leaf.Type == "color_swatch":
                     swatch.Background = SwatchBrush(leaf.Value("bind.color"));
+                    ApplyTileOutline(swatch, leaf.Selected);
                     break;
 
                 case GradientSliderSurface slider when leaf.Type == "gradient_slider":
@@ -2147,12 +2151,44 @@ public sealed partial class MainWindow
                 : new(Microsoft.UI.Colors.Transparent);
 
         /// <summary>
+        /// jas §927 item 1: a swatch tile's selection, from the plan row's
+        /// `selected`: the web's 2px accent outline (`PanelWire.TileOutline`)
+        /// when selected, else the tile's own 1px muted edge, and UIA
+        /// `ItemStatus` `selected` exactly when selected.
+        /// </summary>
+        private void ApplyTileOutline(SwatchTile tile, bool? selected)
+        {
+            if (PanelWire.TileOutline(selected) is { } o)
+            {
+                tile.BorderThickness = new Thickness(o.Width);
+                tile.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, o.R, o.G, o.B));
+            }
+            else
+            {
+                tile.BorderThickness = new Thickness(1);
+                tile.BorderBrush = _paneMutedBrush;
+            }
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(tile, PanelWire.TileStatus(selected));
+        }
+
+        /// <summary>
         /// Finding 6: a surface's `bind.border` (the Layers select square's), drawn
         /// as the Border's own stroke. A spelling <see cref="PanelWire.SurfaceBorder"/>
         /// refuses draws no border and, at build, is named in a row.
         /// </summary>
         private void ApplySurfaceBorder(Border surface, PanelWire.HitBox hit, bool report)
         {
+            // jas §927 item 1: a brush tile is a surface (UIA reads it as a Group),
+            // so it carries its own ItemStatus, as a swatch tile does.
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(surface, PanelWire.TileStatus(hit.Selected));
+            if (PanelWire.TileOutline(hit.Selected) is { } sel)
+            {
+                surface.BorderThickness = new Thickness(sel.Width);
+                surface.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, sel.R, sel.G, sel.B));
+                return;
+            }
             if (PanelWire.SurfaceBorder(hit.Border) is { } b)
             {
                 surface.BorderThickness = new Thickness(b.Width);
