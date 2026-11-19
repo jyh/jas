@@ -2188,6 +2188,49 @@ static class Program
         Eq("panel menu knob: a negative or non-number index is refused", "refused,refused", PK("dock1:-1") + "," + PK("dock1:x"));
         Eq("panel menu knob: unset is refused (the caller reads it as not asked)", "refused", PK(null));
 
+        // -- ROW 8 (jas §915/§916): AN items_from ITEM'S ROWS, THE POPUP, THE WRITES --
+        // A plan row may carry `rows` (a dynamic submenu) and `id`; no `rows` key
+        // is a plain item, and `rows: []` is an EMPTY submenu, not a plain item.
+        var libJson = "[{\"index\":0,\"kind\":\"item\",\"id\":\"bp_menu_open_library\",\"label\":\"Open Brush Library\",\"action\":null,\"enabled\":true,\"checked\":null,"
+                    + "\"rows\":[{\"index\":0,\"label\":\"Default Brushes\",\"action\":\"toggle_brush_library_open\",\"enabled\":true,\"checked\":true},"
+                    + "{\"index\":1,\"label\":\"Other\",\"action\":\"toggle_brush_library_open\",\"enabled\":false,\"checked\":null}]},"
+                    + "{\"index\":1,\"kind\":\"item\",\"id\":null,\"label\":\"Save Brush Library\",\"action\":\"save_brush_library\",\"enabled\":true,\"checked\":null},"
+                    + "{\"index\":2,\"kind\":\"item\",\"label\":\"Open Gradient Library\",\"action\":null,\"enabled\":true,\"checked\":null,\"rows\":[]}]";
+        var lib = PanelMenuWire.Parse(libJson);
+        Eq("row 8: an items_from item's rows are read, in order", "Default Brushes,Other", string.Join(",", lib[0].Rows?.Select(r => r.Label) ?? new[] { "(null)" }));
+        Eq("row 8: a submenu row carries its own index, enabled and check state", "0:True:True,1:False:(null)",
+            string.Join(",", lib[0].Rows?.Select(r => $"{r.Index}:{r.Enabled}:{r.Checked?.ToString() ?? "(null)"}") ?? new[] { "(null)" }));
+        Check("row 8: no rows key is a plain item (null, not empty)", lib[1].Rows is null, $"{lib[1].Rows?.Count}");
+        Check("row 8: rows [] is an EMPTY submenu (not null)", lib[2].Rows is { Count: 0 }, $"{lib[2].Rows?.Count.ToString() ?? "null"}");
+        Eq("row 8: the plan row's id is read; null or absent reads empty", "bp_menu_open_library||", $"{lib[0].Id}|{lib[1].Id}|{lib[2].Id}");
+        Eq("row 8: the row an act reply's menu names is found by id", "0", PanelMenuWire.ById(lib, "bp_menu_open_library")?.Index.ToString() ?? "(null)");
+        Eq("row 8: an id no row carries finds nothing (never row 0)", "(null),(null)",
+            (PanelMenuWire.ById(lib, "bp_menu_nope")?.Index.ToString() ?? "(null)") + "," + (PanelMenuWire.ById(lib, "")?.Index.ToString() ?? "(null)"));
+        Eq("row 8: a plain menu click is {panel, menu_index}", "{\"panel\":\"brushes_panel_content\",\"menu_index\":1}", PanelMenuWire.RunJson("brushes_panel_content", 1, -1));
+        Eq("row 8: a submenu row click adds row", "{\"panel\":\"brushes_panel_content\",\"menu_index\":0,\"row\":1}", PanelMenuWire.RunJson("brushes_panel_content", 0, 1));
+        Eq("row 8: an act reply's menu is read", "bp_menu_open_library",
+            ActWire.Menu("""{"changed":[],"doc_changed":false,"menu":"bp_menu_open_library","writes":[]}""") ?? "(null)");
+        Eq("row 8: menu null, absent, a non-string or unreadable is no popup", "(null)|(null)|(null)|(null)",
+            (ActWire.Menu("""{"menu":null}""") ?? "(null)") + "|" + (ActWire.Menu("""{"changed":[]}""") ?? "(null)") + "|"
+            + (ActWire.Menu("""{"menu":3}""") ?? "(null)") + "|" + (ActWire.Menu("{x") ?? "(null)"));
+        var writesReply = """{"changed":[],"writes":[{"kind":"brush_library","slug":"my_set","manifest":{"name":"My Set","brushes":[]}},"""
+                        + """{"kind":"swatch_library","slug":"warm2","manifest":{"name":"Warm"}},{"kind":"gradient_library","slug":"g","manifest":{"name":"G"}},"""
+                        + """{"kind":"brush_library","slug":"../evil","manifest":{}},{"kind":"brush_library","slug":"Caps","manifest":{}},"""
+                        + """{"kind":"brush_library","slug":"","manifest":{}},{"kind":"font_library","slug":"x","manifest":{}},"""
+                        + """{"kind":"swatch_library","slug":"nomanifest"}]}""";
+        var writes = ActWire.Writes(writesReply);
+        Eq("row 8: every write is read, in order", "8", writes.Count.ToString());
+        Eq("row 8: a write's path is the kind's, under the root",
+            "brushes/my_set/library.json|swatches/warm2.json|gradients/g.json",
+            string.Join("|", writes.Take(3).Select(w => LibraryWrite.RelativePath(w.Kind, w.Slug) ?? "(refused)")));
+        Eq("row 8: a slug outside [a-z0-9_]+ and an unknown kind are refused",
+            "(refused)|(refused)|(refused)|(refused)",
+            string.Join("|", writes.Skip(3).Take(4).Select(w => LibraryWrite.RelativePath(w.Kind, w.Slug) ?? "(refused)")));
+        Check("row 8: the manifest is the whole library JSON, verbatim", writes[0].Manifest is { } m0 && m0.Contains("\"name\":\"My Set\"") && m0.Contains("\"brushes\":[]"), writes[0].Manifest ?? "(null)");
+        Check("row 8: a write with no manifest carries none (the caller refuses it)", writes[7].Manifest is null, writes[7].Manifest ?? "(null)");
+        Eq("row 8: no writes key, [] or unreadable is no write", "0,0,0",
+            $"{ActWire.Writes("""{"changed":[]}""").Count},{ActWire.Writes("""{"writes":[]}""").Count},{ActWire.Writes("{x").Count}");
+
         // The reply's changed rows against the plan read after the click. #360's
         // plan PRUNES a hidden node's rows and lists the node in `hidden`, so a
         // changed row under a hidden path is not drawn and cannot disagree: it is

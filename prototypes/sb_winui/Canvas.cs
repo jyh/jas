@@ -378,6 +378,8 @@ internal sealed class PanelMenuCmd : Cmd
     internal string Group = "";
     internal string PanelId = "";
     internal int Index = -1;
+    /// <summary>jas §915: an `items_from` item's row, sent as `"row"`; -1 for a plain item.</summary>
+    internal int Row = -1;
     internal string Via = "hand";
 }
 
@@ -1168,6 +1170,8 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyExportPdf(reply, $"item=quit action=quit {head}");
         ApplyLayoutReply(reply, $"item=quit action=quit {head}");
         ApplySaveAllThenClose(reply, $"item=quit action=quit {head}");
+        ApplyLibraryWrites(reply, $"item=quit action=quit {head}");
+        ApplyMenuPopup(reply, $"item=quit action=quit {head}", null);
     }
 
     /// <summary>
@@ -1242,6 +1246,8 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyExportPdf(reply, head);
         ApplyLayoutReply(reply, head);
         ApplySaveAllThenClose(reply, head);
+        ApplyLibraryWrites(reply, head);
+        ApplyMenuPopup(reply, head, null);
         if (k.Panel is not null)
         {
             // A panel key can move panel state with no document change (the
@@ -1341,6 +1347,84 @@ internal sealed unsafe class Canvas : IDisposable
         _report($"PDF EXPORT named {head} name={PanelWire.RowValue(name)} bytes={bytes.Length} {Tids()}");
         PostToUi(() => ExportPdfReady?.Invoke(name, bytes));
     }
+
+    /// <summary>
+    /// jas §916: the library files an act reply names in `writes` (the engine
+    /// owns no file system), each written under <see cref="LibraryRoot"/> at
+    /// <see cref="LibraryWrite.RelativePath"/>. Every write is a row: `LIBRARY
+    /// WRITE wrote` with its path and bytes, or `RUSTFAIL LIBRARY WRITE
+    /// REFUSED` naming why (a kind or slug the path refuses, no manifest, an
+    /// I/O error); a refused write is never written somewhere else.
+    /// </summary>
+    private void ApplyLibraryWrites(string reply, string head)
+    {
+        foreach (var w in ActWire.Writes(reply))
+        {
+            var what = $"kind={PanelWire.RowValue(w.Kind)} slug={PanelWire.RowValue(w.Slug)}";
+            if (LibraryWrite.RelativePath(w.Kind, w.Slug) is not { } rel)
+            {
+                _report($"RUSTFAIL LIBRARY WRITE REFUSED {head} {what} -- the kind or slug names no library path {Tids()}");
+                continue;
+            }
+            if (w.Manifest is null)
+            {
+                _report($"RUSTFAIL LIBRARY WRITE REFUSED {head} {what} -- the write carries no manifest {Tids()}");
+                continue;
+            }
+            var path = System.IO.Path.Combine(LibraryRoot, rel.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            try
+            {
+                var bytes = new System.Text.UTF8Encoding(false).GetBytes(w.Manifest);
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+                var tmp = path + ".tmp";
+                System.IO.File.WriteAllBytes(tmp, bytes);
+                System.IO.File.Move(tmp, path, overwrite: true);
+                _report($"LIBRARY WRITE wrote {head} {what} path={PanelWire.RowValue(path)} bytes={bytes.Length} {Tids()}");
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                _report($"RUSTFAIL LIBRARY WRITE REFUSED {head} {what} path={PanelWire.RowValue(path)} -- {ex.GetType().Name} {Tids()}");
+            }
+        }
+    }
+
+    /// <summary>jas §916: the app's data root, `%LOCALAPPDATA%\Jas` (the Mac's is
+    /// `Application Support/Jas`); library writes go under it.</summary>
+    internal static string LibraryRoot =>
+        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Jas");
+
+    /// <summary>
+    /// jas §915: an act reply that names a `menu` asks the shell to pop up that
+    /// panel-menu item's rows at the act's control. The rows are read from
+    /// `jas_panel_menu` of the act's panel and found by the plan row's `id`; the
+    /// window draws them at <paramref name="at"/>. Named, never silent: `PANEL
+    /// MENU POPUP` with the row count, or `RUSTFAIL PANEL MENU POPUP REFUSED`
+    /// when no control anchors it or no plan row carries that id.
+    /// </summary>
+    private void ApplyMenuPopup(string reply, string head, DialogOpener? at)
+    {
+        if (ActWire.Menu(reply) is not { } menu) { return; }
+        var what = $"menu={PanelWire.RowValue(menu)}";
+        if (at is null)
+        {
+            _report($"RUSTFAIL PANEL MENU POPUP REFUSED {head} {what} -- this act has no panel control to pop it up at {Tids()}");
+            return;
+        }
+        var pid = System.Text.Encoding.UTF8.GetBytes(at.Panel);
+        var rowsJson = JasCore.TakeString(JasCore.jas_panel_menu(_engine, pid, (nuint)pid.Length));
+        if (PanelMenuWire.ById(PanelMenuWire.Parse(rowsJson), menu) is not { Rows: { } rows } item)
+        {
+            _report($"RUSTFAIL PANEL MENU POPUP REFUSED {head} {what} panel={at.Panel} -- no plan row of the panel's menu carries that id with rows {Tids()}");
+            return;
+        }
+        var on = rows.Where(r => r.Checked == true).Select(r => r.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        _report($"PANEL MENU POPUP {head} {what} panel={at.Panel} index={item.Index} rows={rows.Count} checked=[{string.Join(",", on)}] {Tids()}");
+        PostToUi(() => PanelMenuPopup?.Invoke(at, item));
+    }
+
+    /// <summary>jas §915: raised on the UI thread with the act's control and the
+    /// plan row whose rows to pop up there.</summary>
+    internal Action<DialogOpener, PanelMenuRow>? PanelMenuPopup { get; set; }
 
     /// <summary>jas §637: a PDF the engine named is ready to save (its suggested name, its bytes). Raised on the UI thread.</summary>
     internal Action<string, byte[]>? ExportPdfReady { get; set; }
@@ -1662,6 +1746,8 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyExportPdf(reply, head);
         ApplyLayoutReply(reply, head);
         ApplySaveAllThenClose(reply, head);
+        ApplyLibraryWrites(reply, head);
+        ApplyMenuPopup(reply, head, null);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
         ApplyDialogRefresh("event");
@@ -5421,9 +5507,10 @@ internal sealed unsafe class Canvas : IDisposable
             PostToUi(() => PanelMenuRead?.Invoke(g, p, v, rowsJson));
             return false;
         }
-        var runHead = $"{head} index={cmd.Index} via={cmd.Via}";
-        var json = System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(
-            new Dictionary<string, object> { ["panel"] = cmd.PanelId, ["menu_index"] = cmd.Index }));
+        var runHead = cmd.Row >= 0
+            ? $"{head} index={cmd.Index} row={cmd.Row} via={cmd.Via}"
+            : $"{head} index={cmd.Index} via={cmd.Via}";
+        var json = System.Text.Encoding.UTF8.GetBytes(PanelMenuWire.RunJson(cmd.PanelId, cmd.Index, cmd.Row));
         var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
         var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
         if (reply.Length == 0)
@@ -5447,6 +5534,8 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyExportPdf(reply, runHead);
             ApplyLayoutReply(reply, runHead);
             ApplySaveAllThenClose(reply, runHead);
+            ApplyLibraryWrites(reply, runHead);
+            ApplyMenuPopup(reply, runHead, null);
         }
         catch (Exception ex)
         {
@@ -5509,6 +5598,8 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyExportPdf(reply, head);
             ApplyLayoutReply(reply, head);
             ApplySaveAllThenClose(reply, head);
+            ApplyLibraryWrites(reply, head);
+            ApplyMenuPopup(reply, head, null);
         }
         catch (Exception ex)
         {
@@ -5740,6 +5831,8 @@ internal sealed unsafe class Canvas : IDisposable
             ApplyExportPdf(reply, head);
             ApplyLayoutReply(reply, head);
             ApplySaveAllThenClose(reply, head);
+            ApplyLibraryWrites(reply, head);
+            ApplyMenuPopup(reply, head, new DialogOpener(click.PanelId, click.Widget, click.Path));
             ApplyTimers(reply, click, head);
             // A non-empty answer to a tick: the engine ran the timer's effects
             // (the flyout opened), so this press's click is dropped.
