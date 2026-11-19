@@ -943,6 +943,28 @@ uint8_t jas_dialog_dismiss(struct JasEngine *e);
 struct JasBytes jas_document_pdf(struct JasEngine *e);
 
 /**
+ * **Lay the user's saved libraries over the bundle's** (row 149): `root` is
+ * the shell's saved-libraries directory, UTF-8, the folder that holds
+ * `brushes/<slug>/library.json`, `swatches/<id>.json` and
+ * `gradients/<id>.json` (the layout the shell's library writes use, and the
+ * Mac's). Each library the user saved replaces the bundle's of the same
+ * slug, and a new slug is added, as the Mac does at launch
+ * (`BrushLibraryStore.merged`). A file that is not a JSON object is skipped.
+ * Call it once, after [`jas_engine_new`] and before the first plan.
+ *
+ * Answers `{"brush_libraries":N,"swatch_libraries":N,"gradient_libraries":N}`,
+ * the count of user libraries taken per kind (an absent root takes 0 of
+ * each and changes nothing). A NULL engine or bad UTF-8 is the empty span.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a live engine; `root` must be NULL or valid for `len` bytes.
+ */
+struct JasBytes jas_engine_load_user_libraries(struct JasEngine *e,
+                                               const uint8_t *root,
+                                               uintptr_t len);
+
+/**
  * Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
  * the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
  * a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON

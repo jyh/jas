@@ -7959,6 +7959,43 @@ pub(crate) mod tests {
         assert!(failures.is_empty(), "{} of {} cases wrong:\n{}", failures.len(), cases.len(), failures.join("\n"));
     }
 
+    /// Laying a user's saved libraries over the bundle's (the Mac's launch
+    /// merge; the engine's for the Windows shell). Each case's files go into
+    /// an empty directory and the engine's loader reads it. Expected values
+    /// come from the RULE (the corpus's generator). Swift runs the same file.
+    #[test]
+    fn algorithm_user_library_merge_vectors() {
+        use crate::interpreter::user_libraries::{load_user_libraries, merged_libraries, USER_LIBRARY_KINDS};
+        let doc: serde_json::Value =
+            serde_json::from_str(&read_fixture("algorithms/user_library_merge.json")).unwrap();
+        let bundle = &doc["bundle"];
+        let cases = doc["cases"].as_array().unwrap();
+        let unchanged = |c: &serde_json::Value| USER_LIBRARY_KINDS.iter().all(|(k, _)| c["expected"][*k] == bundle[*k]);
+        let kept = cases.iter().filter(|c| unchanged(c)).count();
+        assert!(kept >= 3 && cases.len() - kept >= 3, "{kept} of {} cases keep the bundle", cases.len());
+        let base = std::env::temp_dir().join(format!("jas-user-libs-{}", std::process::id()));
+        let mut failures = Vec::new();
+        for (i, c) in cases.iter().enumerate() {
+            let name = c["name"].as_str().unwrap();
+            let root = base.join(format!("{i:02}"));
+            std::fs::create_dir_all(&root).unwrap();
+            for (rel, text) in c["files"].as_object().unwrap() {
+                let path = root.join(rel);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, text.as_str().unwrap()).unwrap();
+            }
+            let user = load_user_libraries(&root);
+            for (kind, _) in USER_LIBRARY_KINDS {
+                let got = merged_libraries(&bundle[kind], &user[kind]);
+                if got != c["expected"][kind] {
+                    failures.push(format!("{name} [{kind}]: got {got}, want {}", c["expected"][kind]));
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(failures.is_empty(), "{} wrong:\n{}", failures.len(), failures.join("\n"));
+    }
+
     /// FLOATSPELL: the one spelling of a full-precision f64. Expected values
     /// come from the RULE (computed in Python), not from either port, so this
     /// binds Rust as tightly as it binds Swift.
