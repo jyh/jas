@@ -1111,35 +1111,6 @@ struct YamlElementView: View {
         // release of a press whose hold timer fired (the flyout opened) is
         // not a click.
         if PressHoldGate.shared.consumesClick(PressHoldGate.holdTimerIds(element)) { return }
-        // Opacity panel: op_make_mask dispatches Controller make or
-        // release based on selection_has_mask. The button has no
-        // ``action`` in yaml — routing is resolved here against the
-        // panel id and the element id. Mirrors the Rust special-case
-        // in ``render_button``.
-        if panelId == "opacity_panel_content",
-           let id = element["id"] as? String, id == "op_make_mask",
-           let m = model {
-            let hasMask = evaluate("selection_has_mask", context: context).toBool()
-            let ctrl = Controller(model: m)
-            if hasMask {
-                ctrl.releaseMaskOnSelection()
-            } else {
-                let clip = (context["_opacity_new_masks_clipping"] as? Bool) ?? true
-                let invert = (context["_opacity_new_masks_inverted"] as? Bool) ?? false
-                ctrl.makeMaskOnSelection(clip: clip, invert: invert)
-            }
-            return
-        }
-        // Opacity panel: op_link_indicator toggles mask.linked on
-        // every selected mask via Controller. OPACITY.md §Document
-        // model. Mirrors the Rust special-case in
-        // ``render_icon_button``.
-        if panelId == "opacity_panel_content",
-           let id = element["id"] as? String, id == "op_link_indicator",
-           let m = model {
-            Controller(model: m).toggleMaskLinkedOnSelection()
-            return
-        }
         // WIDGET_EVENTS.md, "Clicking a button": a declared `click` behavior
         // IS the click, so the node's `action` runs only when none is declared.
         if WidgetEvent.clickRunsNodeAction(element),
@@ -3082,30 +3053,7 @@ struct YamlElementView: View {
             }
             return false
         }()
-        // Opacity panel selection-mask bindings route write-backs to
-        // the document controller (the flag lives on the selected
-        // element's mask, not on a panel-state key). See OPACITY.md §
-        // States. Mirrors the Rust ``render_toggle`` special-case.
-        let maskRoute: String? = {
-            guard panelId == "opacity_panel_content" else { return nil }
-            switch stateExpr?.trimmingCharacters(in: .whitespaces) {
-            case "selection_mask_clip": return "clip"
-            case "selection_mask_invert": return "invert"
-            default: return nil
-            }
-        }()
-        let capturedModel = model
-
         let onToggle: (Bool) -> Void = { newVal in
-            if let route = maskRoute, let m = capturedModel {
-                let ctrl = Controller(model: m)
-                if route == "clip" {
-                    ctrl.setMaskClipOnSelection(newVal)
-                } else {
-                    ctrl.setMaskInvertOnSelection(newVal)
-                }
-                return
-            }
             // WIDGET_EVENTS.md: a declared `click` / `change` behavior IS the
             // press (Magic Wand's flips, Stroke's Dashed); otherwise the
             // negated value is written. The value negated is the one this

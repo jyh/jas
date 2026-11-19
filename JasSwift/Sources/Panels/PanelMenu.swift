@@ -563,15 +563,21 @@ private func layoutHeldPanelState(_ contentId: String,
         }
         return ["mode": mode]
     case "opacity_panel_content":
-        return [
-            "thumbnails_hidden": layout.opacityPanel.thumbnailsHidden,
-            "options_shown": layout.opacityPanel.optionsShown,
-            "new_masks_clipping": layout.opacityPanel.newMasksClipping,
-            "new_masks_inverted": layout.opacityPanel.newMasksInverted,
-        ]
+        return opacityHeldPanelState(layout.opacityPanel)
     default:
         return [:]
     }
+}
+
+/// The Opacity panel's `panel.*` values this app keeps on
+/// ``OpacityPanelState``: one map for the menu's context and the body's.
+func opacityHeldPanelState(_ op: OpacityPanelState) -> [String: Any] {
+    [
+        "thumbnails_hidden": op.thumbnailsHidden,
+        "options_shown": op.optionsShown,
+        "new_masks_clipping": op.newMasksClipping,
+        "new_masks_inverted": op.newMasksInverted,
+    ]
 }
 
 /// Query whether a menu command is enabled for a panel kind.

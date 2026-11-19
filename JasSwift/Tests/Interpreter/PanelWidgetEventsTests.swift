@@ -539,3 +539,66 @@ private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [
     #expect(gradientSliderKey(.upArrow) == nil)
     #expect(gradientSliderKey(KeyEquivalent("q")) == nil)
 }
+
+// MARK: - Opacity: the mask column runs its YAML (row 169 slice 1b)
+//
+// Make Mask and the link indicator had NATIVE intercepts in
+// `YamlPanelBodyView.handleWidgetClick` that ran the Controller and never read
+// the `doc.op` behaviors the YAML declares. Without them the click takes this
+// route, with the scope the dock builds (`buildPanelBodyContext`), and Make
+// Mask reads `panel.new_masks_clipping`, which the Mac keeps on the layout's
+// `OpacityPanelState`, not in the store.
+
+private let opacity = "opacity_panel_content"
+
+private func opacityRoute(_ model: Model, clipping: Bool) -> PanelWidgetEvents {
+    let ws = WorkspaceData.load()!
+    let ctx = buildPanelBodyContext(ws: ws, model: model, contentId: opacity,
+                                    opacityPanel: OpacityPanelState(newMasksClipping: clipping))
+    return PanelWidgetEvents(model: model, panelId: opacity, scope: ctx)
+}
+
+private func firstMask(_ model: Model) -> (clip: Bool, invert: Bool, linked: Bool)? {
+    guard let path = model.document.selection.first?.path,
+          let m = model.document.getElement(path).mask else { return nil }
+    return (m.clip, m.invert, m.linked)
+}
+
+@Test func makeMaskRunsItsYamlAndReadsTheLayoutsClippingPreference() {
+    for clipping in [true, false] {
+        let model = modelWithSelectedRect()
+        #expect(firstMask(model) == nil, "the control: no mask before the click")
+        let made = opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
+        #expect(made.outcome == "committed", "the click ran: \(made)")
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, true],
+                "Make Mask, clipping=\(clipping)")
+        opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_link_indicator"))
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [clipping, false, false],
+                "the link indicator unlinks")
+        opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_clip"))
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, false, false],
+                "Clip flips the shown value")
+        opacityRoute(model, clipping: clipping).press(shipped(opacity, "op_invert_mask"))
+        #expect(firstMask(model).map { [$0.clip, $0.invert, $0.linked] } == [!clipping, true, false],
+                "Invert Mask flips the shown value")
+        opacityRoute(model, clipping: clipping).click(shipped(opacity, "op_make_mask"))
+        #expect(firstMask(model) == nil, "a second click releases")
+    }
+}
+
+@Test func theMacPanelBodyHasNoNativeOpacityMaskIntercept() throws {
+    let tests = (#filePath as NSString).deletingLastPathComponent
+    let path = ((tests as NSString).appendingPathComponent("../../Sources/Interpreter/YamlPanelBodyView.swift") as NSString)
+        .standardizingPath
+    let src = try String(contentsOfFile: path, encoding: .utf8)
+    #expect(src.count > 10_000, "the control: the view's source was read")
+    for widget in ["op_make_mask", "op_link_indicator"] {
+        let needle = "id == " + "\"" + widget + "\""
+        #expect(!src.contains(needle), "a native intercept for \(widget) remains")
+    }
+    // Clip and Invert Mask were keyed on their checkbox's bind.
+    for bind in ["selection_mask_clip", "selection_mask_invert"] {
+        let needle = "case " + "\"" + bind + "\":"
+        #expect(!src.contains(needle), "a native intercept for \(bind) remains")
+    }
+}

@@ -3288,6 +3288,17 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
                                           key: (k?.isEmpty ?? true) ? nil : k)
             return nil
         },
+        // A panel body's `doc.op` (row 169 slice 1b): the Opacity mask column
+        // declares its acts as document ops, and this table, which every
+        // panel body's route builds, had no `doc.op`, so on the Mac those
+        // clicks changed nothing behind native intercepts. The same law as
+        // the Layers table's handler: the caller's scope over the store's.
+        "doc.op": { value, callCtx, _ in
+            guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
+            opApply(model, Controller(model: model),
+                    docOpArgs(spec, context: model.stateStore.evalContext(extra: callCtx)))
+            return nil
+        },
         "snapshot": { _, _, _ in
             // OP_LOG.md Increment 1: NO-OP on this map. These panel actions
             // (align / boolean / swatch) are dispatched through `runEffects`

@@ -1148,6 +1148,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "toggle_all_caps": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "toggle_all_layers_lock": {
       "class": "doc-direct",
       "doc_verbs": [
@@ -1245,6 +1249,22 @@
       "doc_verbs": []
     },
     "toggle_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_small_caps": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_snap_to_glyph_visible": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_subscript": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_superscript": {
       "class": "ui-state",
       "doc_verbs": []
     },
@@ -1366,7 +1386,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 182,
+      "ui-state": 187,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1420,7 +1440,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 261,
+    "total_actions": 266,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

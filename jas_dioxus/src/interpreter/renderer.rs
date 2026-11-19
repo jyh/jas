@@ -4043,7 +4043,6 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         static_label.to_string()
     };
     let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.disabled. When true, the button is rendered dimmed
     // and pointer-events are disabled so the click handler is inert.
@@ -4061,37 +4060,6 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     } else {
         "opacity:1;pointer-events:auto;"
     };
-
-    // Opacity panel: op_make_mask dispatches Controller::make or release
-    // based on the current selection_has_mask predicate. Direct route
-    // rather than yaml-actions because the target lives on the
-    // selection's mask field, not on a panel-state key.
-    if panel_kind == Some(PanelKind::Opacity) && id == "op_make_mask" {
-        let selection_has_mask = expr::eval("selection_has_mask", ctx).to_bool();
-        let app = rctx.app.clone();
-        let mut revision = rctx.revision;
-        let handler = EventHandler::new(move |_evt: Event<MouseData>| {
-            let app = app.clone();
-            spawn(async move {
-                {
-                    let mut st = app.borrow_mut();
-                    if selection_has_mask {
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
-                        }
-                    } else {
-                        let clip = st.opacity_panel.new_masks_clipping;
-                        let invert = st.opacity_panel.new_masks_inverted;
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::make_mask_on_selection(&mut tab.model, clip, invert);
-                        }
-                    }
-                }
-                revision += 1;
-            });
-        });
-        return rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } };
-    }
 
     // Try behavior array first, then shorthand action property
     let on_click = build_click_handler(el, ctx, rctx).or_else(|| {
@@ -4260,7 +4228,6 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.checked + resolve the highlight color. The highlight is
     // applied by CSS via the `data-checked` attribute + `--jas-check-bg`
@@ -4402,28 +4369,7 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     // Toolbar buttons omit `label` entirely and stay icon-only.
     let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("").to_string();
 
-    // Opacity panel: op_link_indicator click toggles mask.linked on
-    // every selected mask via Controller. Same pattern as
-    // op_make_mask in render_button. OPACITY.md §Document model.
-    let opacity_link_click: Option<EventHandler<Event<MouseData>>> =
-        if panel_kind == Some(PanelKind::Opacity) && id == "op_link_indicator" {
-            let app = rctx.app.clone();
-            let mut revision = rctx.revision;
-            Some(EventHandler::new(move |_evt: Event<MouseData>| {
-                let app = app.clone();
-                spawn(async move {
-                    let mut st = app.borrow_mut();
-                    if let Some(tab) = st.tab_mut() {
-                        crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
-                    }
-                    revision += 1;
-                });
-            }))
-        } else {
-            None
-        };
-
-    let on_click = opacity_link_click.or_else(|| build_click_handler(el, ctx, rctx));
+    let on_click = build_click_handler(el, ctx, rctx);
     let on_mousedown = build_mousedown_handler(el, ctx, rctx);
     let on_mouseup = build_mouseup_handler(el, ctx, rctx);
 
@@ -6050,7 +5996,6 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     };
 
     let bind_target = classify_bind(bind_expr);
-    let bind_expr_owned = bind_expr.to_string();
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
@@ -6095,39 +6040,6 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             return;
         }
         let new_val = !checked;
-        // Opacity panel selection-mask bindings: `selection_mask_clip` /
-        // `selection_mask_invert` route directly to Controller methods
-        // (the flag lives on the selected element's mask, not on the
-        // panel-local state). See OPACITY.md § States.
-        if panel_kind == Some(PanelKind::Opacity) {
-            let handled = match bind_expr_owned.as_str() {
-                "selection_mask_clip" => {
-                    let app = app.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::set_mask_clip_on_selection(&mut tab.model, new_val);
-                        }
-                    });
-                    true
-                }
-                "selection_mask_invert" => {
-                    let app = app.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::set_mask_invert_on_selection(&mut tab.model, new_val);
-                        }
-                    });
-                    true
-                }
-                _ => false,
-            };
-            if handled {
-                revision += 1;
-                return;
-            }
-        }
         match &bind_target {
             BindTarget::Dialog(field) => {
                 if let Some(mut ds) = dialog_signal() {
@@ -14956,6 +14868,92 @@ mod tests {
         assert_eq!(actions.len(), 1, "one click behavior");
         super::run_click_behaviors(&actions, &ctx, &mut st);
         assert_eq!(brush_names(&st), vec!["a", "c"]);
+    }
+
+    // ── The Opacity mask column runs its YAML on the web (row 169 slice 1b) ──
+    //
+    // Make Mask and the link indicator had NATIVE web intercepts that ran the
+    // Controller directly and never read the `doc.op` behaviors the YAML
+    // declares (the ones Windows and the engine run). These drive the
+    // declared behaviors through the web's own click loop, with the panel
+    // body's real context, and pin that the intercepts are gone.
+
+    fn opacity_web_state(clipping: bool) -> AppState {
+        let svg = include_str!("../../../test_fixtures/svg/rect_with_stroke.svg");
+        let mut st = AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        crate::document::controller::Controller::select_all(&mut st.tabs[st.active_tab].model);
+        st.opacity_panel.new_masks_clipping = clipping;
+        st
+    }
+
+    fn opacity_click(st: &mut AppState, widget: &str) {
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match node {
+                serde_json::Value::Object(m) if m.get("id").and_then(|v| v.as_str()) == Some(id) => Some(node),
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(st, "opacity_panel_content")
+            .expect("the Opacity body context");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let el = find(ws.panel("opacity_panel_content").expect("opacity"), widget).expect(widget).clone();
+        // A boolean kind's press runs with `event.value` the new checked state,
+        // as `render_toggle` builds its handler.
+        let ctx = if super::is_boolean_kind(&el) {
+            let checked = el["bind"]["checked"].as_str().expect("a checked bind");
+            super::boolean_press_ctx(&ctx, expr::eval(checked, &ctx).to_bool())
+        } else {
+            ctx
+        };
+        let actions = super::resolve_click_behaviors(&el, &ctx, "click");
+        assert_eq!(actions.len(), 1, "{widget}: one declared click behavior");
+        super::run_click_behaviors(&actions, &ctx, st);
+    }
+
+    fn first_mask(st: &AppState) -> Option<(bool, bool, bool)> {
+        let doc = st.tabs[st.active_tab].model.document();
+        let path = doc.selection.first().expect("a selection").path.clone();
+        doc.get_element(&path).expect("the element").common().mask.as_ref()
+            .map(|m| (m.clip, m.invert, m.linked))
+    }
+
+    #[test]
+    fn make_mask_on_the_web_runs_its_yaml_and_reads_the_clipping_preference() {
+        for clipping in [true, false] {
+            let mut st = opacity_web_state(clipping);
+            assert_eq!(first_mask(&st), None, "the control: no mask before the click");
+            opacity_click(&mut st, "op_make_mask");
+            assert_eq!(first_mask(&st), Some((clipping, false, true)), "Make Mask, clipping={clipping}");
+            opacity_click(&mut st, "op_link_indicator");
+            assert_eq!(first_mask(&st), Some((clipping, false, false)), "the link indicator unlinks");
+            opacity_click(&mut st, "op_clip");
+            assert_eq!(first_mask(&st), Some((!clipping, false, false)), "Clip flips the shown value");
+            opacity_click(&mut st, "op_invert_mask");
+            assert_eq!(first_mask(&st), Some((!clipping, true, false)), "Invert Mask flips the shown value");
+            opacity_click(&mut st, "op_make_mask");
+            assert_eq!(first_mask(&st), None, "a second click releases");
+        }
+    }
+
+    /// The intercepts that bypassed the YAML are gone from the renderer. The
+    /// needles are built at run time so this test's own text cannot match.
+    #[test]
+    fn the_web_renderer_has_no_native_opacity_mask_intercept() {
+        let src = include_str!("renderer.rs");
+        for widget in ["op_make_mask", "op_link_indicator"] {
+            let needle = format!("id == {}{widget}{}", '"', '"');
+            assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {widget} remains");
+        }
+        // Clip and Invert Mask were keyed on their checkbox's bind.
+        for bind in ["selection_mask_clip", "selection_mask_invert"] {
+            let needle = format!("{}{bind}{} =>", '"', '"');
+            assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {bind} remains");
+        }
     }
 
     // ── Save / Open Brush Library on the web route (STATUS-jas row 8) ──

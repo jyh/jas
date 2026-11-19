@@ -6877,6 +6877,50 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 173: EVERY LIVE CHARACTER MENU ITEM RUNS IN THE ENGINE. Until 11-19
+    /// the five toggles read `UnknownAction` through the panel door: they named
+    /// commands only the web's and the Mac's native dispatch knew, while
+    /// `action_refs_baseline.json` called them "no-op in every app". Sent by
+    /// index, as the Windows shell sends them (character.yaml `menu:`; the
+    /// separators count). Read off the ELEMENT, never through the host.
+    #[test]
+    fn every_live_character_menu_item_runs_in_the_engine() {
+        use crate::geometry::element::Element;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let item = |e, at: u32| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{CHARACTER}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        };
+        let case = |e| engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter().find_map(|es| match doc.get_element(&es.path) {
+                Some(Element::Text(t)) =>
+                    Some((t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone())),
+                _ => None,
+            }).expect("the fixture selects a text element")
+        });
+        let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        assert_eq!(case(e), s("", "", ""), "the control: no case or shift");
+        item(e, 2);
+        assert_eq!(case(e), s("uppercase", "", ""), "All Caps");
+        item(e, 3);
+        assert_eq!(case(e), s("", "small-caps", ""), "Small Caps clears All Caps");
+        item(e, 4);
+        assert_eq!(case(e), s("", "small-caps", "super"), "Superscript");
+        item(e, 5);
+        assert_eq!(case(e), s("", "small-caps", "sub"), "Subscript clears Superscript");
+        item(e, 5);
+        assert_eq!(case(e), s("", "small-caps", ""), "Subscript again turns it off");
+        item(e, 3);
+        assert_eq!(case(e), s("", "", ""), "Small Caps again turns it off");
+        let snap = |e| engine_of(e).store.borrow().get_panel(CHARACTER, "snap_to_glyph_visible").clone();
+        let before = snap(e);
+        item(e, 0);
+        assert_ne!(snap(e), before, "Show Snap to Glyph Options did not flip");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 169: Make Mask reads the panel's NEW-MASK PREFERENCES as they stand.
     /// The menu items "New Opacity Masks Are Clipping / Inverted" toggle them;
     /// a mask made after each toggle carries the toggled value, never the

@@ -155,6 +155,7 @@ struct PanelWidgetEvents {
             // `panel.` targets and `set_panel_state` write the active panel.
             store.setActivePanel(pid)
             Self.seedTwoWayGlobals(panel: panel, panelId: pid, store: store)
+            Self.seedLayoutHeldPanelState(scope: scope, panelId: pid, store: store)
         }
         let dialogBefore = store.getDialogId()
         let host = WidgetEvent.Host(scope: scope, writeBind: writeBind, dispatch: dispatch)
@@ -220,6 +221,24 @@ struct PanelWidgetEvents {
                   let field = store.getPanel(panelId, key), !(field is NSNull)
             else { continue }
             store.set(global, field)
+        }
+    }
+}
+
+extension PanelWidgetEvents {
+    /// The `panel.*` keys this app holds on the LAYOUT (Opacity's New Opacity
+    /// Masks preferences, ``opacityHeldPanelState``), taken from the scope the
+    /// view rendered into the store before an event. A behavior reads
+    /// `panel.*` from the store (``WidgetEvent/scopeLocals`` leaves `panel` to
+    /// it), and the Mac's menu writes the layout, so without this Make Mask's
+    /// `doc.op` read the bundle's default whatever the menu showed (row 169
+    /// slice 1b). The engine's store holds these keys itself.
+    static func seedLayoutHeldPanelState(scope: [String: Any], panelId: String,
+                                         store: StateStore) {
+        guard panelId == "opacity_panel_content",
+              let shown = scope["panel"] as? [String: Any] else { return }
+        for key in opacityHeldPanelState(OpacityPanelState()).keys.sorted() {
+            if let v = shown[key] { store.setPanel(panelId, key, v) }
         }
     }
 }
