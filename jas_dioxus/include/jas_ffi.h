@@ -1058,8 +1058,9 @@ uint8_t jas_document_set_filename(struct JasEngine *e, const uint8_t *name, uint
  * the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
  * the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
  * or `separator` (any other node is `unknown`, never guessed at). An item
- * also carries `label`, `action`, `enabled` and `checked` (a bool for a
- * checkable item, null otherwise).
+ * also carries `id` (the node's `id`, or null), `label`, `action`, `enabled`
+ * and `checked` (a bool for a checkable item, null otherwise). An act reply's
+ * `menu` names an item by its `id`.
  *
  * ⭐ THE STATE IS THE SHARED WALK'S, NOT THIS FUNCTION'S. `enabled` and
  * `checked` are [`menu_state`]'s rows for the menu, evaluated in the panel's
