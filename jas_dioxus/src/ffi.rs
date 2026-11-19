@@ -3985,6 +3985,46 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **A selected tile says so in its plan row** (jas §927 item 1). The plan
+    /// carried `bind.selected_in` as the LIST, which the shell cannot test
+    /// membership in (it evaluates nothing), so Windows drew no selection
+    /// outline. The row's `selected` is the web's own law
+    /// (`tile_selection::selected_in`, #990, shared): a tap on tile k marks k and
+    /// leaves its neighbour plain, and a
+    /// ctrl-tap on a second tile marks both. Swatches and Brushes alike.
+    #[test]
+    fn a_tapped_tile_reads_selected_in_its_plan_row_and_its_neighbour_does_not() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        for panel in ["swatches_panel_content", "brushes_panel_content"] {
+            let e = jas_engine_new();
+            let tiles = |e| -> Vec<serde_json::Value> {
+                let plan: serde_json::Value = serde_json::from_str(&plan_of(e, panel, 228, 600)).unwrap();
+                ["chrome", "containers", "leaves"].iter()
+                    .filter_map(|k| plan[*k].as_array()).flatten()
+                    .filter(|r| r["values"].get("bind.selected_in").is_some())
+                    .cloned().collect()
+            };
+            let before = tiles(e);
+            assert!(before.len() > 4, "{panel}: fixture: too few tiles: {}", before.len());
+            assert!(before.iter().all(|t| t["selected"] == false), "{panel}: a tile reads selected before any tap: {before:?}");
+            let tap = |e, t: &serde_json::Value, ctrl: bool| {
+                let ev = format!(r#"{{"widget":"","path":{},"event":"click","ctrl":{ctrl}}}"#, t["path"]);
+                let (reply, err) = behave(e, panel, &ev);
+                assert!(!reply.is_empty(), "{panel}: the tap was refused: {err}");
+            };
+            let (k, n, m) = (1usize, 2usize, 3usize);
+            tap(e, &before[k], false);
+            let after = tiles(e);
+            assert_eq!(after[k]["selected"], true, "{panel}: the tapped tile: {}", after[k]);
+            assert_eq!(after[n]["selected"], false, "{panel}: its neighbour: {}", after[n]);
+            tap(e, &before[m], true);
+            let after = tiles(e);
+            let marked: Vec<usize> = (0..after.len()).filter(|&i| after[i]["selected"] == true).collect();
+            assert_eq!(marked, vec![k, m], "{panel}: after a ctrl-tap on {m}");
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
     /// **A library swatch is tapped by its plan path** (STATUS-flask §114: 216
     /// of 228 tiles drew and sent nothing, because the library template has no
     /// id). The door ran the tile's `select` and refused it `UnknownEffect`;

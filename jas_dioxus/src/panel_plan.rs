@@ -43,8 +43,11 @@
 //!          "display": {"<bind key>": "<the core-formatted display string>", ...},
 //!          "options": null | [{"kind": "option", "value", "label", "selected"[, "glyph"]}
 //!                             | {"kind": "separator"}, ...],
-//!          "parts": {"icon": {x,y,w,h}[, "label": {x,y,w,h}]}}  only on a labelled
+//!          "parts": {"icon": {x,y,w,h}[, "label": {x,y,w,h}]},  only on a labelled
 //!                             `icon_button` (see [`parts_of`])
+//!          "selected": <bool>}  only on a node that declares `bind.selected_in`:
+//!                             its membership, by the web's law
+//!                             (`interpreter::tile_selection`)
 //! ```
 //!
 //! `options` is the node's declared list with its dividers told apart from its
@@ -595,6 +598,12 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
     });
     if let Some(parts) = parts {
         e["parts"] = parts;
+    }
+    // A tile's selection, resolved here because the shell cannot test the
+    // list `bind.selected_in` carries (jas §927 item 1): the web's own law,
+    // library scope and all (#990).
+    if item.node.get("bind").and_then(|b| b.get("selected_in")).is_some() {
+        e["selected"] = Value::Bool(crate::interpreter::tile_selection::selected_in(&item.node, &item.ctx));
     }
     e
 }
