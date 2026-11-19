@@ -453,6 +453,12 @@ jobs:
       # l2_baselines_at_risk's tab arm reads workspace/layout.yaml's canvas_tab_bar
       # (STATUS-flask section 920); without PyYAML it lists every tab baseline, saying why.
       - run: pip install PyYAML
+      # The local runner of this file's scripts/ steps parses every run: block; its
+      # self-test holds the parser to the live workflow (a floor, and the step a
+      # `- run:` grep missed, check_cbindgen_freshness).
+      - name: The local step runner parses every run block
+        if: ${{ !cancelled() }}
+        run: python scripts/run_test_yml_steps.py --self-test
       # docs/TESTING.md section 2: a frozen baseline changes only with the spec item it renders,
       # or with a `Baseline-Refreeze: <item>: <reason>` trailer. The rule is about a WHOLE PR,
       # so the range is the PR's own delta against main; on main itself that degenerates, and

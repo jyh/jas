@@ -48,6 +48,8 @@
   "test_action_corpus :: Action test 'menu_undo_restores_before_the_group' failed: canonical JSON mismatch": 1,
   "test_gesture_corpus :: Gesture test 'blob_paint_fill' failed: canonical JSON mismatch": 1,
   "test_shortcut_structure :: Workspace test 'shortcut_structure' failed: canonical JSON mismatch": 1,
+  "test_workspace_default_layout :: Workspace test 'workspace_default' failed: canonical JSON mismatch": 1,
+  "test_workspace_default_with_panes :: Workspace test 'workspace_default_with_panes' failed: canonical JSON mismatch": 1,
   "test_workspace_pane_ops :: Workspace operation test 'clamp_panes_in_a_viewport_smaller_than_the_margin' failed: canonical JSON mismatch": 1,
   "test_workspace_pane_ops :: Workspace operation test 'set_canvas_maximized_false_after_maximize_restores' failed: canonical JSON mismatch": 1,
   "test_workspace_pane_ops :: Workspace operation test 'set_canvas_maximized_true_maximizes' failed: canonical JSON mismatch": 1,

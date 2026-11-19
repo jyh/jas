@@ -173,11 +173,21 @@ mod tests {
     /// the seeding question can be revisited.
     #[test]
     fn the_seed_is_the_yaml_not_the_hard_coded_default() {
+        // Since row 160 `WorkspaceLayout::named` reads the SHIPPED bundle's
+        // Default too, so the shipped Default can no longer tell the seed from
+        // the default: the arm seeds a bundle whose groups differ from it.
+        let given = bundle(dock(json!([{"panels": ["align", "color"]}])));
+        let seeded = from_default_layout(&given, "L").unwrap();
+        let named = WorkspaceLayout::named("L");
+        assert_eq!(seeded.anchored[0].1.groups.iter().map(|g| g.panels.clone()).collect::<Vec<_>>(),
+                   vec![vec![PanelKind::Align, PanelKind::Color]], "the seed is the bundle it was given");
+        assert_ne!(seeded.anchored[0].1.groups[0].panels, named.anchored[0].1.groups[0].panels,
+                   "and not the default's groups");
+        // The shipped bundle's Default, seeded, IS the default dock now.
         let ws = crate::interpreter::workspace::Workspace::load().unwrap();
-        let seeded = from_default_layout(ws.data(), "Default").unwrap();
-        let named = WorkspaceLayout::named("Default");
-        assert_ne!(seeded.anchored[0].1.groups[0].panels, named.anchored[0].1.groups[0].panels);
-        assert!(seeded.anchored[0].1.groups[0].panels.contains(&PanelKind::Brushes));
+        let shipped = from_default_layout(ws.data(), "Default").unwrap();
+        assert_eq!(shipped.anchored[0].1.groups[0].panels, WorkspaceLayout::named("Default").anchored[0].1.groups[0].panels);
+        assert!(shipped.anchored[0].1.groups[0].panels.contains(&PanelKind::Brushes));
     }
 
     #[test]

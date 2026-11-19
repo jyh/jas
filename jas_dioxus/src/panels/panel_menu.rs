@@ -730,8 +730,13 @@ mod tests {
     fn a_menu_request_resolves_to_its_panel_address_and_submenu() {
         use crate::workspace::workspace::PanelKind;
         let mut st = crate::workspace::app_state::AppState::new();
+        // The default dock holds Brushes (the spec's, row 160), so it is closed
+        // first: the law is that a panel NOT in the layout has no address.
+        let docked = crate::workspace::layout_apply::find_panel(&st.workspace_layout, PanelKind::Brushes)
+            .expect("the default dock holds Brushes");
+        st.workspace_layout.close_panel(docked);
         assert_eq!(menu_request_target("bp_menu_open_library", &st.workspace_layout), None,
-                   "Brushes is not in the default layout, so it has no address");
+                   "Brushes is not in the layout, so it has no address");
         crate::workspace::layout_apply::layout_apply(&mut st.workspace_layout,
             &crate::workspace::layout_apply::op_toggle_panel(PanelKind::Brushes));
         let brushes = crate::workspace::layout_apply::find_panel(&st.workspace_layout, PanelKind::Brushes)

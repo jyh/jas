@@ -8172,7 +8172,9 @@ mod tests {
         };
         assert_eq!(ids(&groups[0]), ["color_panel_content", "swatches_panel_content", "brushes_panel_content"]);
         assert_eq!(ids(&groups[1]), ["align_panel_content", "boolean_panel_content"]);
-        assert_eq!(ids(&groups[4]), ["artboards_panel_content", "layers_panel_content"]);
+        // Symbols joined the last group in the spec (row 160, catching up with
+        // Symbols P3b): a Windows-visible change, typed here on purpose.
+        assert_eq!(ids(&groups[4]), ["artboards_panel_content", "layers_panel_content", "symbols_panel_content"]);
         assert!(groups.iter().all(|g| g["active"] == 0), "every group opens on its first panel");
     }
 
