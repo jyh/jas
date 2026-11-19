@@ -2833,67 +2833,34 @@ struct YamlElementView: View {
         let summary = element["summary"] as? String
             ?? element["type"] as? String
             ?? "?"
-        // Opacity panel previews (OPACITY.md §Preview interactions):
-        // op_preview / op_mask_preview handle click to switch the
-        // editing target and render a persistent highlight on the
-        // active target. Mirrors the Rust special-case in
-        // ``render_placeholder``.
-        let id = element["id"] as? String
-        if panelId == "opacity_panel_content",
-           let id, id == "op_preview" || id == "op_mask_preview" {
-            let editingMask = evaluate("editing_target_is_mask", context: context).toBool()
-            let hasMask = evaluate("selection_has_mask", context: context).toBool()
-            let isMaskPreview = id == "op_mask_preview"
-            // Highlight the preview that matches the current editing
-            // target: op_preview when content-mode, op_mask_preview
-            // when mask-mode.
-            let highlight = editingMask == isMaskPreview
-            // MASK_PREVIEW click requires the selection to have a
-            // mask; otherwise the click is a no-op.
-            let clickEnabled = !isMaskPreview || hasMask
-            SwiftUI.Text("[\(summary)]")
-                .foregroundColor(.gray)
-                .frame(minHeight: 30)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(highlight
-                                ? SwiftUI.Color(red: 74 / 255, green: 144 / 255, blue: 217 / 255)
-                                : SwiftUI.Color.clear,
-                                lineWidth: 2)
-                )
-                .contentShape(SwiftUI.Rectangle())
-                .onTapGesture {
-                    guard clickEnabled, let m = model else { return }
-                    // MASK_PREVIEW supports modifier-clicks per
-                    // OPACITY.md §Preview interactions. Query the
-                    // current NSEvent modifier flags at tap time.
-                    let flags = NSEvent.modifierFlags
-                    let shift = flags.contains(.shift)
-                    let alt = flags.contains(.option)
-                    if isMaskPreview && shift {
-                        // Shift-click: toggle mask.disabled on every
-                        // selected mask via Controller.
-                        Controller(model: m).toggleMaskDisabledOnSelection()
-                    } else if isMaskPreview && alt {
-                        // Alt-click: toggle mask isolation on the
-                        // first selected element's mask.
-                        if m.maskIsolationPath != nil {
-                            m.maskIsolationPath = nil
-                        } else {
-                            m.maskIsolationPath = m.document.selection.first?.path
-                        }
-                    } else {
-                        // Plain click: flip editing target.
-                        m.editingTarget = isMaskPreview
-                            ? .mask(m.document.selection.first?.path ?? [])
-                            : .content
-                    }
-                }
-        } else {
-            SwiftUI.Text("[\(summary)]")
-                .foregroundColor(.gray)
-                .frame(minHeight: 30)
+        // A placeholder may carry `bind.checked` (drawn as a persistent
+        // highlight: the Opacity previews mark the active editing target),
+        // `bind.disabled`, and declared click behaviors, all generic. Until
+        // row 169 slice 3 the previews' were a special case keyed on their ids.
+        let bind = element["bind"] as? [String: Any]
+        let flag = { (k: String) -> Bool in
+            (bind?[k] as? String).map { evaluate($0, context: context).toBool() } ?? false
         }
+        let checked = flag("checked")
+        let disabled = flag("disabled")
+        let clicks = (element["behavior"] as? [[String: Any]])?
+            .contains { ($0["event"] as? String ?? "click") == "click" } ?? false
+        SwiftUI.Text("[\(summary)]")
+            .foregroundColor(.gray)
+            .frame(minHeight: 30)
+            .opacity(disabled ? 0.5 : 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(checked
+                            ? SwiftUI.Color(red: 74 / 255, green: 144 / 255, blue: 217 / 255)
+                            : SwiftUI.Color.clear,
+                            lineWidth: 2)
+            )
+            .contentShape(SwiftUI.Rectangle())
+            .onTapGesture {
+                guard clicks, !disabled else { return }
+                widgetEvents?.behavior(element, event: "click", modifiers: currentEventModifiers())
+            }
     }
 
     // MARK: - Select
