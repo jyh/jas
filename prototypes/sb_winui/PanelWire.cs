@@ -3072,6 +3072,14 @@ internal static class ActWire
 /// </summary>
 internal static class UserLibrariesWire
 {
+    /// <summary>
+    /// jas §932 item 1: the data root. <c>SB_LIBRARY_ROOT</c> when set and not
+    /// blank (a proving run's fresh, empty root), else
+    /// <c>&lt;LocalApplicationData&gt;\Jas</c>, the Mac's <c>Application Support/Jas</c>.
+    /// </summary>
+    internal static string RootFor(string? knob, string localAppData) =>
+        string.IsNullOrWhiteSpace(knob) ? System.IO.Path.Combine(localAppData, "Jas") : knob;
+
     /// <summary>The root as the entry takes it: its UTF-8 bytes, no terminator.</summary>
     internal static byte[] RootBytes(string root) => System.Text.Encoding.UTF8.GetBytes(root);
 

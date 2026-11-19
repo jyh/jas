@@ -463,6 +463,15 @@ static class Program
         Eq("row 149: a reply that is not JSON is refused by name",
             "RUSTFAIL USER LIBRARIES refused: not JSON: nope",
             UserLibrariesWire.Row("nope"));
+        // jas §932 item 1: SB_LIBRARY_ROOT moves the data root for the launch
+        // read AND the writes (a proving run's fresh, empty root); unset or
+        // blank keeps `%LOCALAPPDATA%\Jas`.
+        Eq("§932: the knob, when set, is the root",
+            @"C:\T\sb-libroot-ab", UserLibrariesWire.RootFor(@"C:\T\sb-libroot-ab", @"C:\Users\u\AppData\Local"));
+        Eq("§932: unset keeps the app's data root",
+            @"C:\Users\u\AppData\Local\Jas", UserLibrariesWire.RootFor(null, @"C:\Users\u\AppData\Local"));
+        Eq("§932: a blank knob is unset, never a root of nothing",
+            @"C:\Users\u\AppData\Local\Jas", UserLibrariesWire.RootFor("  ", @"C:\Users\u\AppData\Local"));
         Eq("row 149: the root's bytes are its UTF-8, no terminator",
             "4A,61,73,C3,A9", string.Join(",", UserLibrariesWire.RootBytes("Jasé").Select(b => b.ToString("X2"))));
         // jas §927 item 1: a tile's selection is the plan row's resolved

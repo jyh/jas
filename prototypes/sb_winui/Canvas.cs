@@ -1389,9 +1389,12 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>jas §916: the app's data root, `%LOCALAPPDATA%\Jas` (the Mac's is
-    /// `Application Support/Jas`); library writes go under it.</summary>
-    internal static string LibraryRoot =>
-        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Jas");
+    /// `Application Support/Jas`); library writes go under it and the launch reads
+    /// it back (row 149). `SB_LIBRARY_ROOT` moves it (jas §932: a proving run's
+    /// fresh, empty root), see `UserLibrariesWire.RootFor`.</summary>
+    internal static string LibraryRoot => UserLibrariesWire.RootFor(
+        Environment.GetEnvironmentVariable("SB_LIBRARY_ROOT"),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 
     /// <summary>
     /// jas §915: an act reply that names a `menu` asks the shell to pop up that
