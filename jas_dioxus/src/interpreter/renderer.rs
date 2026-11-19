@@ -14958,6 +14958,75 @@ mod tests {
         assert_eq!(brush_names(&st), vec!["a", "c"]);
     }
 
+    // ── The Opacity mask column runs its YAML on the web (row 169 slice 1b) ──
+    //
+    // Make Mask and the link indicator had NATIVE web intercepts that ran the
+    // Controller directly and never read the `doc.op` behaviors the YAML
+    // declares (the ones Windows and the engine run). These drive the
+    // declared behaviors through the web's own click loop, with the panel
+    // body's real context, and pin that the intercepts are gone.
+
+    fn opacity_web_state(clipping: bool) -> AppState {
+        let svg = include_str!("../../../test_fixtures/svg/rect_with_stroke.svg");
+        let mut st = AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        crate::document::controller::Controller::select_all(&mut st.tabs[st.active_tab].model);
+        st.opacity_panel.new_masks_clipping = clipping;
+        st
+    }
+
+    fn opacity_click(st: &mut AppState, widget: &str) {
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match node {
+                serde_json::Value::Object(m) if m.get("id").and_then(|v| v.as_str()) == Some(id) => Some(node),
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(st, "opacity_panel_content")
+            .expect("the Opacity body context");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let el = find(ws.panel("opacity_panel_content").expect("opacity"), widget).expect(widget).clone();
+        let actions = super::resolve_click_behaviors(&el, &ctx, "click");
+        assert_eq!(actions.len(), 1, "{widget}: one declared click behavior");
+        super::run_click_behaviors(&actions, &ctx, st);
+    }
+
+    fn first_mask(st: &AppState) -> Option<(bool, bool, bool)> {
+        let doc = st.tabs[st.active_tab].model.document();
+        let path = doc.selection.first().expect("a selection").path.clone();
+        doc.get_element(&path).expect("the element").common().mask.as_ref()
+            .map(|m| (m.clip, m.invert, m.linked))
+    }
+
+    #[test]
+    fn make_mask_on_the_web_runs_its_yaml_and_reads_the_clipping_preference() {
+        for clipping in [true, false] {
+            let mut st = opacity_web_state(clipping);
+            assert_eq!(first_mask(&st), None, "the control: no mask before the click");
+            opacity_click(&mut st, "op_make_mask");
+            assert_eq!(first_mask(&st), Some((clipping, false, true)), "Make Mask, clipping={clipping}");
+            opacity_click(&mut st, "op_link_indicator");
+            assert_eq!(first_mask(&st), Some((clipping, false, false)), "the link indicator unlinks");
+            opacity_click(&mut st, "op_make_mask");
+            assert_eq!(first_mask(&st), None, "a second click releases");
+        }
+    }
+
+    /// The intercepts that bypassed the YAML are gone from the renderer. The
+    /// needles are built at run time so this test's own text cannot match.
+    #[test]
+    fn the_web_renderer_has_no_native_opacity_mask_intercept() {
+        let src = include_str!("renderer.rs");
+        for widget in ["op_make_mask", "op_link_indicator"] {
+            let needle = format!("id == {}{widget}{}", '"', '"');
+            assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {widget} remains");
+        }
+    }
+
     // ── Save / Open Brush Library on the web route (STATUS-jas row 8) ──
     // The engine and Swift routes are pinned by the dialog-action corpus;
     // these drive the web runner, which hands library edits to the shared
