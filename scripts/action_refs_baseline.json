@@ -1,9 +1,10 @@
 {
   "_comment": [
     "Action names referenced from the bundle (panel flyout menus) that have no",
-    "actions: entry yet, and are NOT native intercepts — they are forward-declared",
-    "menu items for panels not yet fully implemented (gradient / opacity / swatches /",
-    "character). They currently no-op in every app. This is a MONOTONICALLY-DECREASING",
+    "actions: entry yet. A name here is UNKNOWN to the engine, so the item is dead",
+    "on Windows; it may still run natively on the web or the Mac (13 names did,",
+    "until rows 172 and 173 defined them). Probe a name in every port before calling",
+    "it a no-op. This is a MONOTONICALLY-DECREASING",
     "debt list: check_action_refs.py fails if a NEW unresolved ref appears (that is",
     "the real guard, e.g. it would have caught export_to_pdf), and also fails if a",
     "listed action becomes resolved but is left here (implement it -> remove it here).",
@@ -11,12 +12,7 @@
   ],
   "unresolved_actions": [
     "open_opacity_slider_popover",
-    "toggle_all_caps",
     "toggle_page_isolated_blending",
-    "toggle_page_knockout_group",
-    "toggle_small_caps",
-    "toggle_snap_to_glyph_visible",
-    "toggle_subscript",
-    "toggle_superscript"
+    "toggle_page_knockout_group"
   ]
 }
