@@ -28,7 +28,10 @@ description: >
   uses the generic select effect with mode=auto: plain click,
   Shift+click for ranges, Cmd/Ctrl+click to toggle. Selection is
   per-library; the selected_brushes panel state tracks slugs (not
-  indices) within selected_library.
+  indices) within selected_library. A selected tile draws a 2px
+  accent outline (its selected_in binding), in the selected library
+  only: a brush with the same slug in another open library is not
+  outlined.
 
   Double-click a tile to open the Brush Options dialog in
   library_edit mode for the master brush.

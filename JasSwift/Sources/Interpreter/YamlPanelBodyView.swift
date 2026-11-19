@@ -3361,13 +3361,16 @@ func widgetHasPointerBehavior(_ element: [String: Any]) -> Bool {
     }
 }
 
-/// Evaluate a tile widget's `bind.selected_in` membership: true when the
-/// element's per-item identity (read from its click behavior's first
-/// `select.target`, so authors don't repeat it) is a member of the bound list
-/// expression. Shared by tile-shaped widgets (`color_swatch` and the
-/// Brushes-panel brush-tile `container`) so the accent-outline selection cue
-/// is drawn identically wherever a `selected_in` bind appears. Mirrors
-/// jas_dioxus renderer.rs `eval_selected_in`.
+/// Evaluate a tile widget's `bind.selected_in` membership. Its identity is
+/// its click behaviour's first `select.target`, so authors do not repeat it.
+/// The tile is selected when that identity is a member of the bound list,
+/// AND, when that `select` names a `scope` (a panel key) with a
+/// `scope_value`, when `panel.<scope>` equals the tile's `scope_value`: the
+/// `select` effect resets the list whenever the scope changes, so the same
+/// index in another library is a different swatch. Shared by tile-shaped
+/// widgets (`color_swatch` and the Brushes-panel brush-tile `container`).
+/// Mirrors jas_dioxus `interpreter::tile_selection::selected_in`; both are
+/// pinned by `test_fixtures/algorithms/tile_selected_in.json`.
 func widgetSelectedIn(_ element: [String: Any], context: [String: Any]) -> Bool {
     guard let bind = element["bind"] as? [String: Any],
           let listExpr = bind["selected_in"] as? String
@@ -3376,23 +3379,24 @@ func widgetSelectedIn(_ element: [String: Any], context: [String: Any]) -> Bool 
     guard case .list(let items) = listVal else { return false }
 
     guard let behaviors = element["behavior"] as? [[String: Any]] else { return false }
-    var idExpr: String? = nil
+    var select: [String: Any]? = nil
     outer: for b in behaviors {
         guard let effects = b["effects"] as? [[String: Any]] else { continue }
         for e in effects {
-            if let sel = e["select"] as? [String: Any],
-               let target = sel["target"] as? String {
-                idExpr = target
+            if let sel = e["select"] as? [String: Any], sel["target"] is String {
+                select = sel
                 break outer
             }
         }
     }
-    guard let expr = idExpr else { return false }
-    let idVal = evaluate(expr, context: context)
-    let idAny: Any? = idVal.toAny()
-    return items.contains { item in
-        widgetSelectedInIdEquals(item.value, idAny)
-    }
+    guard let sel = select, let expr = sel["target"] as? String else { return false }
+    let idAny: Any? = evaluate(expr, context: context).toAny()
+    guard items.contains(where: { widgetSelectedInIdEquals($0.value, idAny) }) else { return false }
+    guard let scope = sel["scope"] as? String, !scope.isEmpty else { return true }
+    let current: Any? = evaluate("panel.\(scope)", context: context).toAny()
+    if current == nil || current is NSNull { return false }
+    let mine: Any? = evaluate(sel["scope_value"] as? String ?? "", context: context).toAny()
+    return widgetSelectedInIdEquals(current, mine)
 }
 
 /// Loose typed equality used by `selected_in` lookup. Compares numeric /

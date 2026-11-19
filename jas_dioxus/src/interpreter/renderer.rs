@@ -6720,47 +6720,10 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     }
 }
 
-/// Evaluate a tile widget's `bind.selected_in` membership: true when the
-/// element's per-item identity (read from its click behavior's first
-/// `select.target`, so authors don't repeat it) is a member of the bound
-/// list expression. Shared by tile-shaped widgets (`color_swatch` and the
-/// brush-tile `container`) so the accent-outline selection cue is drawn
-/// identically wherever a `selected_in` bind appears.
+/// A tile's `bind.selected_in` outline. The law lives in the un-gated
+/// [`super::tile_selection`], which the engine's panel plan shares.
 fn eval_selected_in(el: &serde_json::Value, ctx: &serde_json::Value) -> bool {
-    el.get("bind")
-        .and_then(|b| b.get("selected_in"))
-        .and_then(|v| v.as_str())
-        .map(|list_expr| {
-            let list_val = expr::eval(list_expr, ctx);
-            let id_expr = el
-                .get("behavior")
-                .and_then(|b| b.as_array())
-                .and_then(|behaviors| {
-                    behaviors.iter().find_map(|b| {
-                        let effects = b.get("effects").and_then(|v| v.as_array())?;
-                        effects.iter().find_map(|e| {
-                            e.get("select")
-                                .and_then(|s| s.get("target"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                        })
-                    })
-                });
-            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
-            list_contains_value(&list_val, id_val.as_ref())
-        })
-        .unwrap_or(false)
-}
-
-/// Test whether `id` is a member of the list `list`. Used by the
-/// `selected_in` bind on `color_swatch` and other tile widgets.
-fn list_contains_value(list: &Value, id: Option<&Value>) -> bool {
-    let Some(id) = id else { return false; };
-    let id_json = super::effects::value_to_json(id);
-    match list {
-        Value::List(items) => items.iter().any(|item| item == &id_json),
-        _ => false,
-    }
+    super::tile_selection::selected_in(el, ctx)
 }
 
 /// Evaluate a bind expression and parse its result back to a JSON value.

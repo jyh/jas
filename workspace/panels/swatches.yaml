@@ -427,8 +427,10 @@ content:
         selection, Shift+click to extend a range, Cmd/Ctrl+click to toggle.
         The selected_swatches panel state tracks the selection as a list of
         indices within the selected_library. Visual selection feedback is
-        provided by the data-bind-selected-in binding, which adds a
-        jas-selected CSS class (2px accent-colored outline).
+        provided by the tile's selected_in binding: a 2px accent-colored
+        outline on each selected tile of the selected library only. The
+        same index in another open library is a different swatch, so it is
+        not outlined.
 
         Double-click a swatch to open the Swatch Options dialog in edit mode,
         passing the swatch's name, color, color_mode, library id, and index
