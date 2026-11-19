@@ -2572,8 +2572,9 @@ pub unsafe extern "C" fn jas_document_set_filename(e: *mut JasEngine, name: *con
 /// the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
 /// the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
 /// or `separator` (any other node is `unknown`, never guessed at). An item
-/// also carries `label`, `action`, `enabled` and `checked` (a bool for a
-/// checkable item, null otherwise).
+/// also carries `id` (the node's `id`, or null), `label`, `action`, `enabled`
+/// and `checked` (a bool for a checkable item, null otherwise). An act reply's
+/// `menu` names an item by its `id`.
 ///
 /// ⭐ THE STATE IS THE SHARED WALK'S, NOT THIS FUNCTION'S. `enabled` and
 /// `checked` are [`menu_state`]'s rows for the menu, evaluated in the panel's
@@ -2636,6 +2637,9 @@ pub unsafe extern "C" fn jas_panel_menu(
                     "label": st.map_or_else(
                         || o.get("label").cloned().unwrap_or(serde_json::Value::Null),
                         |r| r["label"].clone()),
+                    // The node's `id`, or null: an act reply's `menu` names an
+                    // item by it (row 8), and the shell finds the row here.
+                    "id": o.get("id").cloned().unwrap_or(serde_json::Value::Null),
                     "action": o.get("action").cloned().unwrap_or(serde_json::Value::Null),
                     "enabled": st.map_or(serde_json::Value::Bool(true), |r| r["enabled"].clone()),
                     "checked": st.map_or(serde_json::Value::Null, |r| r["checked"].clone()),
@@ -10010,6 +10014,15 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
         assert_eq!(v["menu"], serde_json::json!("bp_menu_open_library"), "{reply}");
         assert_eq!(v["doc_changed"], serde_json::json!(false));
+        // The named id is a plan row's `id`, so a shell finds the rows to pop up
+        // without knowing any panel's ids (flask, row 8 shell half).
+        let (rows, err) = panel_menu(e, "brushes_panel_content");
+        assert_eq!(err, "", "the plan: {err}");
+        let named = rows.iter().find(|r| r["id"] == v["menu"]).unwrap_or_else(|| panic!("no plan row has id {}", v["menu"]));
+        assert_eq!(named["label"], serde_json::json!("Open Brush Library"), "{named}");
+        assert!(named["rows"].is_array(), "the named row carries its rows: {named}");
+        assert!(rows.iter().filter(|r| r["kind"] == "item").all(|r| r.get("id").is_some()),
+                "every item row carries `id` (null when the node has none)");
         // The next act names no menu: the request was taken by the reply above.
         let (reply, err) = dispatch(e, r#"{"action":"toggle_brush_library_open","params":{"library":"default_brushes"}}"#);
         assert_eq!(err, "", "{reply}");
