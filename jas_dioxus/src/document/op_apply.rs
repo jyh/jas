@@ -2642,6 +2642,14 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         // when every selected element has a mask (`selection_has_mask`,
         // `mask_facts`), else make. A behavior `condition:` may read only the
         // event, so the branch on document state lives here.
+        // The Opacity menu's Disable / Unlink Opacity Mask (row 172): first-wins
+        // toggles of every selected mask, the Controller law.
+        "toggle_mask_disabled" => {
+            Controller::toggle_mask_disabled_on_selection(model);
+        }
+        "toggle_mask_linked" => {
+            Controller::toggle_mask_linked_on_selection(model);
+        }
         "toggle_mask" => {
             let flag = |k: &str| op.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
             if crate::interpreter::mask_facts::mask_facts(model.document()).0 {

@@ -84,6 +84,8 @@
     "snapshot": "history",
     "toggle_element_lock": "edit",
     "toggle_mask": "edit",
+    "toggle_mask_disabled": "edit",
+    "toggle_mask_linked": "edit",
     "undo": "history",
     "ungroup_all": "edit",
     "ungroup_selection": "edit",

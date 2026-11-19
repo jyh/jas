@@ -6813,6 +6813,68 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 172: EVERY LIVE OPACITY MENU ITEM RUNS IN THE ENGINE. Until 11-19 all
+    /// ten read `UnknownAction` through the panel door (probed), because they
+    /// named commands only the web's and the Mac's native dispatch knew. Sent
+    /// by index, as the Windows shell sends them (opacity.yaml `menu:`). The two
+    /// page-blending items (11, 12) are pending a renderer and are not here.
+    #[test]
+    fn every_live_opacity_menu_item_runs_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let item = |e, at: u32| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{OP}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        };
+        let panel = |e, k: &str| engine_of(e).store.borrow().get_panel(OP, k).clone();
+        let mask = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .and_then(|cs| cs.first().and_then(|c| c.common().mask.as_ref().map(|m| (m.disabled, m.linked))));
+        for (at, key) in [(0, "thumbnails_hidden"), (1, "options_shown")] {
+            let before = panel(e, key);
+            item(e, at);
+            assert_ne!(panel(e, key), before, "menu item {at} did not flip {key}");
+        }
+        assert_eq!(mask(e), None, "fixture: no mask yet");
+        item(e, 3);
+        assert_eq!(mask(e), Some((false, true)), "Make Opacity Mask: enabled and linked");
+        item(e, 5);
+        assert_eq!(mask(e), Some((true, true)), "Disable Opacity Mask");
+        item(e, 6);
+        assert_eq!(mask(e), Some((true, false)), "Unlink Opacity Mask");
+        item(e, 4);
+        assert_eq!(mask(e), None, "Release Opacity Mask");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 169: Make Mask reads the panel's NEW-MASK PREFERENCES as they stand.
+    /// The menu items "New Opacity Masks Are Clipping / Inverted" toggle them;
+    /// a mask made after each toggle carries the toggled value, never the
+    /// declared default (clip true, invert false).
+    #[test]
+    fn make_mask_reads_the_new_mask_preferences_the_menu_toggled() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let first_mask = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .and_then(|cs| cs.first().and_then(|c| c.common().mask.as_ref().map(|m| (m.clip, m.invert))));
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert_eq!(first_mask(e), Some((true, false)), "the declared defaults");
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert_eq!(first_mask(e), None, "released");
+        // The menu items as the Windows shell sends them: by index (opacity.yaml
+        // `menu:`: 8 Clipping, 9 Inverted).
+        for at in [8, 9] {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{OP}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        }
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert_eq!(first_mask(e), Some((false, true)), "a mask made after both toggles");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// BRUSH OPTIONS IN LIBRARY_EDIT LOADS THE BRUSH IT EDITS, in the engine.
     /// Its inits find the brush by `filter(...brushes, fun b -> b.slug == ...)[0]`;
     /// until 2026-10-15 they read a `brushes_by_slug` index no port builds, so

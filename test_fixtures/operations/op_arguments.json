@@ -494,6 +494,8 @@
         "boolean"
       ]
     },
+    "toggle_mask_disabled": {},
+    "toggle_mask_linked": {},
     "unlock_all": {},
     "unpack_group_at": {
       "path": [
@@ -745,6 +747,8 @@
       "clip": "witnessed",
       "invert": "witnessed"
     },
+    "toggle_mask_disabled": {},
+    "toggle_mask_linked": {},
     "unlock_all": {},
     "unpack_group_at": {
       "path": "witnessed"

@@ -2131,6 +2131,11 @@ public func opApply(
         controller.releaseMaskOnSelection()
     // Make Mask / Release as ONE verb: release when every selected element has
     // a mask (`selectionHasMask`), else make. Rust `op_apply` the same.
+    // The Opacity menu's Disable / Unlink Opacity Mask (row 172). Rust the same.
+    case "toggle_mask_disabled":
+        controller.toggleMaskDisabledOnSelection()
+    case "toggle_mask_linked":
+        controller.toggleMaskLinkedOnSelection()
     case "toggle_mask":
         if selectionHasMask(model.document) {
             controller.releaseMaskOnSelection()
