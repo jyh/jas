@@ -6877,6 +6877,53 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 169 slice 3: THE TWO OPACITY PREVIEWS ACT IN THE ENGINE. They were
+    /// `placeholder` leaves with no `behavior:`; their acts and highlight lived
+    /// only in the web's and the Mac's native code, so Windows could not run or
+    /// draw them. A plain click on the mask preview edits the mask, on the
+    /// content preview edits the content; Shift toggles `mask.disabled`; Alt
+    /// toggles mask isolation. `bind.checked` is the highlight, read off the plan.
+    #[test]
+    fn the_opacity_previews_act_in_the_engine() {
+        use crate::document::model::EditingTarget;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let checked = |e, w: &str| leaf(e, OP, w)["values"]["bind.checked"].clone();
+        let target = |e| engine_of(e).model.borrow().editing_target.clone();
+        let isolation = |e| engine_of(e).model.borrow().mask_isolation_path.clone();
+        let disabled = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .and_then(|cs| cs.first().and_then(|c| c.common().mask.as_ref().map(|m| m.disabled)));
+        let click = |e, w: &str, mods: &str| {
+            let (reply, err) = behave(e, OP, &format!(r#"{{"widget":"{w}","event":"click"{mods}}}"#));
+            assert!(!reply.is_empty(), "{w}{mods} was refused: {err}");
+        };
+
+        assert_eq!(leaf(e, OP, "op_mask_preview")["values"]["bind.disabled"], "true",
+                   "no mask yet: the mask preview is disabled");
+        assert_eq!((checked(e, "op_preview"), checked(e, "op_mask_preview")), ("true".into(), "false".into()),
+                   "the content preview is the highlighted target");
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let first = engine_of(e).model.borrow().document().selection[0].path.clone();
+
+        click(e, "op_mask_preview", "");
+        assert_eq!(target(e), EditingTarget::Mask(first.clone()), "a plain click edits the mask");
+        assert_eq!((checked(e, "op_preview"), checked(e, "op_mask_preview")), ("false".into(), "true".into()));
+        click(e, "op_preview", "");
+        assert_eq!(target(e), EditingTarget::Content, "the content preview edits the content");
+
+        click(e, "op_mask_preview", r#","shift":true"#);
+        assert_eq!(disabled(e), Some(true), "Shift toggles mask.disabled");
+        assert_eq!(target(e), EditingTarget::Content, "and leaves the target");
+        click(e, "op_mask_preview", r#","alt":true"#);
+        assert_eq!(isolation(e), Some(first.clone()), "Alt isolates the mask");
+        assert_eq!(target(e), EditingTarget::Content, "and leaves the target");
+        click(e, "op_mask_preview", r#","alt":true"#);
+        assert_eq!(isolation(e), None, "Alt again exits isolation");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 173: EVERY LIVE CHARACTER MENU ITEM RUNS IN THE ENGINE. Until 11-19
     /// the five toggles read `UnknownAction` through the panel door: they named
     /// commands only the web's and the Mac's native dispatch knew, while
