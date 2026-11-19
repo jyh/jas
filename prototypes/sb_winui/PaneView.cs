@@ -1152,7 +1152,7 @@ public sealed partial class MainWindow
         /// location with its opacity as alpha, as the web's CSS background draws
         /// it. A gradient the tile cannot read is the muted fill, never a guess.
         /// </summary>
-        private Microsoft.UI.Xaml.Media.Brush GradientTileBrush(string? json)
+        private Microsoft.UI.Xaml.Media.Brush GradientTileBrush(string? json, double w, double h)
         {
             if (GradientTileWire.Read(json) is not { } g) { return _paneMutedBrush; }
             var stops = new Microsoft.UI.Xaml.Media.GradientStopCollection();
@@ -1173,7 +1173,7 @@ public sealed partial class MainWindow
                 foreach (var st in stops) { radial.GradientStops.Add(st); }
                 return radial;
             }
-            var (sx, sy, ex, ey) = GradientTileWire.Ends(g.Angle);
+            var (sx, sy, ex, ey) = GradientTileWire.Ends(g.Angle, w, h);
             return new Microsoft.UI.Xaml.Media.LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(sx, sy),
@@ -1886,7 +1886,7 @@ public sealed partial class MainWindow
                     break;
 
                 case SwatchTile tile when leaf.Type == "gradient_tile":
-                    tile.Background = GradientTileBrush(leaf.Value("bind.gradient"));
+                    tile.Background = GradientTileBrush(leaf.Value("bind.gradient"), leaf.W, leaf.H);
                     break;
 
                 case TextBlock tb when leaf.Type == "text":
