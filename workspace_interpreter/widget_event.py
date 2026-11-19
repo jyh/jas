@@ -441,20 +441,25 @@ def _declared(widget: dict, events: tuple[str, ...]) -> list[dict]:
 
 def _run_behaviors(behaviors: list[dict], value, store, run_kwargs: dict,
                    scope: dict | None = None, event: dict | None = None) -> int:
-    """Run ``behaviors`` in order; the count excludes a false ``condition``.
+    """Run ``behaviors`` in order; the count excludes a false ``condition``
+    and a body-less entry (no ``action``, no non-empty ``effects``:
+    WIDGET_EVENTS.md, "A behavior with no body"), which runs nothing.
     ``scope`` adds names beside ``event`` (a pick's ``item``). ``event``
     replaces the default ``{"value": value}`` (a click's modifiers)."""
     ran = 0
     for b in behaviors:
+        effects = b.get("effects")
+        action = b.get("action")
+        has_effects = isinstance(effects, list) and len(effects) > 0
+        if not has_effects and not isinstance(action, str):
+            continue
         ctx = {**(scope or {}), "event": event if event is not None else {"value": value}}
         condition = b.get("condition")
         if isinstance(condition, str) and not evaluate(
                 condition, store.eval_context(ctx)).to_bool():
             continue
-        effects = b.get("effects")
-        if isinstance(effects, list):
+        if has_effects:
             run_effects(effects, ctx, store, **run_kwargs)
-        action = b.get("action")
         if isinstance(action, str):
             dispatch = {"action": action, "params": b.get("params") or {}}
             run_effects([{"dispatch": dispatch}], ctx, store, **run_kwargs)

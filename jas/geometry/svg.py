@@ -16,7 +16,7 @@ from geometry.element import (
     APPROX_CHAR_WIDTH_FACTOR,
     ArcTo, Circle, ClosePath, Color, RgbColor, CompoundOperation,
     CompoundShape, CurveTo, Element,
-    Ellipse, Fill, Group, Layer, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
+    Ellipse, Fill, Group, Layer, normalize_layer_color, Line, LineCap, LineJoin, LineTo, MoveTo, Path,
     PathCommand, Polygon, Polyline, QuadTo, Rect, RecordedElem, ReferenceElem,
     GeneratedElem,
     SmoothCurveTo,
@@ -149,6 +149,14 @@ def _container_blend_attrs(isolated_blending: bool, knockout_group: bool) -> str
     if knockout_group:
         out += ' jas:knockout-group="true"'
     return out
+
+
+def _layer_color_attr(color: str | None) -> str:
+    """A layer's own colour (STATUS-jas row 53(b)) as ``jas:layer-color``,
+    only when it has one. Other SVG editors ignore the attribute, so the
+    colour survives a jas round trip and not a foreign save. Mirrors the
+    Rust ``layer_color_attr``."""
+    return f' jas:layer-color="{color}"' if color is not None else ""
 
 
 # An attribute value is double-quoted, so a JSON value's quotes must be escaped.
@@ -489,7 +497,7 @@ def _element_svg(elem: Element, indent: str) -> str:
         case Layer(children=children, name=name, opacity=opacity,
                    transform=transform, id=eid):
             label = f' inkscape:label="{escape(name)}"' if name else ""
-            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}{_id_lock_attrs(eid, elem.locked)}{_container_blend_attrs(elem.isolated_blending, elem.knockout_group)}>']
+            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}{_id_lock_attrs(eid, elem.locked)}{_container_blend_attrs(elem.isolated_blending, elem.knockout_group)}{_layer_color_attr(elem.color)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -1511,7 +1519,8 @@ def _parse_element(node: ET.Element) -> Element | None:
         if group_mode == "layer":
             return Layer(children=tuple(children), name=label or "",
                          opacity=opacity, transform=transform, id=eid,
-                         locked=locked, isolated_blending=iso, knockout_group=ko)
+                         locked=locked, isolated_blending=iso, knockout_group=ko,
+                         color=normalize_layer_color(_jas_get(node, "layer-color")))
         return Group(children=tuple(children),
                      opacity=opacity, transform=transform,
                      name=name, id=eid,

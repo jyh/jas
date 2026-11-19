@@ -1236,6 +1236,7 @@ bind:
 | `color` | color | The displayed color (for `color_swatch` elements) |
 | `icon` | string | The icon name (for `icon_button` elements; switches icon dynamically) |
 | `z_index` | number | The stacking order of the element |
+| `selected_in` | list | A tile's selection outline (`color_swatch`, the brush-tile `container`): a 2px accent outline when the tile is selected. The tile's identity is its click behaviour's first `select.target`. It is selected when that identity is a member of this list. When that `select` names a `scope` with a `scope_value`, the tile is selected only when `panel.<scope>` also equals its `scope_value`: `select` resets the list whenever its scope changes, so the same index in another library is a different tile. Pinned by `test_fixtures/algorithms/tile_selected_in.json`. |
 
 Any style property may also appear in `bind` to make it reactive.
 
@@ -1867,6 +1868,9 @@ any port pins them. A wrong argument count or type returns the fallback shown.
 | `anchor_buffer_length(name)` | `number` | The number of anchors in the named anchor buffer (the Pen's path so far); `0` on the same terms. |
 | `anchor_buffer_close_hit(name, x, y, r)` | `bool` | Whether the named anchor buffer holds at least two anchors and `(x, y)` lies within distance `r` of its FIRST anchor (the Pen's click-near-start to close), measured with `hypot`; `false` otherwise, or unless the name is a string and the rest numbers. |
 | `brush_type_of(slug)` | `string` | The `type` of the brush a `"<library id>/<brush slug>"` slug names in the context's `brush_libraries` (the Blob Brush dialog's Calligraphic gate); the slug splits at its first `/`. `null` when the slug has no `/`, the library or brush is absent, or the brush has no string `type`. (Swift answers `null` for the whole library when any entry in its `brushes` is not a map; the reference and Rust skip that entry.) |
+| `gradient_reversed(stops)` | `list` | The Gradient panel menu's Reverse Gradient (GRADIENT.md §Panel menu): `stops` (`{color, opacity, location, midpoint_to_next}`) in location order (ties keep their stored order), reversed, each at `100 − location`; the midpoint between new neighbours is `100 −` that pair's old midpoint, and the new last stop's is 50. `null` unless `stops` is a list of at least two stops each with a string `color` and numeric `opacity` and `location` (a missing midpoint reads as 50). Pinned by `test_fixtures/gradient_stop/menu_transform.json`. |
+| `gradient_distributed(stops)` | `list` | Distribute Stops Evenly: `stops` in location order (ties keep their stored order), stop `i` of `n` at `100 × i ÷ (n − 1)`, every midpoint 50. `null` on the same inputs as `gradient_reversed`. |
+| `gradient_midpoints_reset(stops)` | `list` | Reset Midpoints: every midpoint 50; stored order and locations unchanged. `null` on the same inputs as `gradient_reversed`. |
 
 #### Comparison Operators
 

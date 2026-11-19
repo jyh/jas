@@ -92,3 +92,66 @@ private func stop(_ d: Any) -> GradientStop {
         #expect(t.refused >= 1 && t.written >= 3, "corpus too thin for \(op): \(t.refused) refused, \(t.written) written")
     }
 }
+
+// The Gradient panel menu's three stop transforms (Swift arm). Runs
+// test_fixtures/gradient_stop/menu_transform.json, which the reference
+// (gradient_law.py) and Rust (cross_language_test.rs) read too, through the
+// law and through the expression builtin the menu's YAML calls.
+
+/// Numbers compare as numbers (the law writes Doubles; the fixture has ints).
+private func sameJSON(_ a: Any?, _ b: Any?) -> Bool {
+    switch (a, b) {
+    case (nil, nil): return true
+    case let (x as String, y as String): return x == y
+    case let (x as NSNumber, y as NSNumber): return x.doubleValue == y.doubleValue
+    case let (x as [Any], y as [Any]):
+        return x.count == y.count && zip(x, y).allSatisfy { sameJSON($0, $1) }
+    case let (x as [String: Any], y as [String: Any]):
+        return x.count == y.count && x.allSatisfy { k, v in y[k].map { sameJSON(v, $0) } ?? false }
+    default: return false
+    }
+}
+
+@Test func gradientMenuTransformCorpus() {
+    let ops: [String: (law: (Any?) -> [[String: Any]]?, builtin: String)] = [
+        "reverse": (gradientReverseStops, "gradient_reversed"),
+        "distribute": (gradientDistributeStops, "gradient_distributed"),
+        "reset_midpoints": (gradientResetMidpoints, "gradient_midpoints_reset"),
+    ]
+    var ran: [String: (refused: Int, written: Int)] = [:]
+    let vectors = gradientStopCorpus("gradient_stop/menu_transform.json")
+    for vec in vectors {
+        let name = vec["name"] as! String
+        let op = vec["op"] as! String
+        guard let (law, builtin) = ops[op] else {
+            Issue.record("gradient_menu_transform '\(name)': unknown op \(op)"); continue
+        }
+        let got = law(vec["stops"])
+        let viaExpr = evaluate("\(builtin)(panel.stops)", context: ["panel": ["stops": vec["stops"]!]])
+        var counts = ran[op] ?? (0, 0)
+        if let expected = vec["expected"] as? [Any] {
+            #expect(got.map { sameJSON($0, expected) } ?? false,
+                    "gradient_menu_transform '\(name)': law \(String(describing: got))")
+            if case .list(let items) = viaExpr {
+                #expect(sameJSON(items.map(\.value), expected), "gradient_menu_transform '\(name)': builtin")
+            } else {
+                Issue.record("gradient_menu_transform '\(name)': builtin gave \(viaExpr)")
+            }
+            counts.written += 1
+        } else {
+            #expect(got == nil, "gradient_menu_transform '\(name)': the law must refuse")
+            #expect(viaExpr == .null, "gradient_menu_transform '\(name)': the builtin must be null")
+            counts.refused += 1
+        }
+        ran[op] = counts
+    }
+    #expect(ran.count == 3, "ops run: \(ran.keys.sorted())")
+    for (op, c) in ran {
+        #expect(c.refused >= 2 && c.written >= 2, "op \(op) too thin: \(c.refused) refused, \(c.written) written")
+    }
+    let ctx: [String: Any] = ["panel": ["stops": vectors[0]["stops"]!]]
+    for (_, b) in ops.values {
+        #expect(evaluate("\(b)()", context: ctx) == .null, "\(b)()")
+        #expect(evaluate("\(b)(panel.stops, panel.stops)", context: ctx) == .null, "\(b)(a, b)")
+    }
+}

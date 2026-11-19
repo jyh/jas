@@ -20,7 +20,9 @@
     "one on a bystander. The canonical test JSON is the door that can.",
     "",
     "THE SHAPE, and what each id is for:",
-    "  lyr_flags     -- the enclosing LAYER, both flags true. A container",
+    "  lyr_flags     -- the enclosing LAYER, both flags true, and (since",
+    "                   2026-11-17, STATUS-jas row 53(b)) a layer colour, the",
+    "                   third container-only field. A container",
     "                   bystander that every whole-document walk rebuilds.",
     "  grp_knockout  -- a GROUP bystander, both flags true. The vector's edit",
     "                   never speaks to it, but `show_all` walks THROUGH it, so",
@@ -49,6 +51,7 @@
       "visibility": "preview",
       "isolated_blending": true,
       "knockout_group": true,
+      "color": "#4a90d9",
       "children": [
         {
           "type": "group",

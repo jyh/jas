@@ -124,6 +124,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -178,6 +180,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -345,6 +349,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -394,6 +400,8 @@ pub(crate) mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // STATUS-jas row 53(b): a layer's optional colour (`jas:layer-color`).
+            "layer_color",
             // G1: a document whose paint arrives by CSS class re-exports it as
             // attributes, and that export reads back to the same document.
             "css_class_paint", "css_class_paint_inlined",
@@ -675,6 +683,15 @@ pub(crate) mod tests {
     #[test]
     fn svg_parse_line_width_profile() {
         assert_svg_parse("line_width_profile");
+    }
+
+    /// STATUS-jas row 53(b). Four layers: a colour, none (stays absent,
+    /// never synthesised), an uppercase colour (stored lowercase), and an
+    /// unparsable value (dropped, the layer kept). Mirrors the reference
+    /// `test_svg_parse_layer_color` and Swift `svgParseLayerColor`.
+    #[test]
+    fn svg_parse_layer_color() {
+        assert_svg_parse("layer_color");
     }
 
     #[test]
@@ -5383,6 +5400,7 @@ pub(crate) mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         crate::document::document::Document {
             layers: vec![layer], artboards: vec![], ..Default::default()
@@ -5422,6 +5440,7 @@ pub(crate) mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         crate::document::document::Document {
             layers: vec![layer], artboards: vec![], ..Default::default()
@@ -7916,6 +7935,67 @@ pub(crate) mod tests {
         }
     }
 
+    /// A tile's selection outline (`bind.selected_in`), scoped by its
+    /// `select`'s library. Expected values come from the RULE, applied by the
+    /// corpus's generator, not from either port. Swift runs the same file.
+    #[test]
+    fn algorithm_tile_selected_in_vectors() {
+        let json_str = read_fixture("algorithms/tile_selected_in.json");
+        let doc: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        // Anti-vacuity: both answers, and the case the scope law exists for.
+        let trues = cases.iter().filter(|c| c["expected"] == true).count();
+        assert!(trues >= 3 && cases.len() - trues >= 3, "{trues} true of {}", cases.len());
+        assert!(cases.iter().any(|c| c["name"] == "swatch_same_index_in_another_library_is_not_selected"));
+        let mut failures = Vec::new();
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            let want = c["expected"].as_bool().unwrap();
+            let got = crate::interpreter::tile_selection::selected_in(&c["element"], &c["context"]);
+            if got != want {
+                failures.push(format!("{name}: got {got}, want {want}"));
+            }
+        }
+        assert!(failures.is_empty(), "{} of {} cases wrong:\n{}", failures.len(), cases.len(), failures.join("\n"));
+    }
+
+    /// Laying a user's saved libraries over the bundle's (the Mac's launch
+    /// merge; the engine's for the Windows shell). Each case's files go into
+    /// an empty directory and the engine's loader reads it. Expected values
+    /// come from the RULE (the corpus's generator). Swift runs the same file.
+    #[test]
+    fn algorithm_user_library_merge_vectors() {
+        use crate::interpreter::user_libraries::{load_user_libraries, merged_libraries, USER_LIBRARY_KINDS};
+        let doc: serde_json::Value =
+            serde_json::from_str(&read_fixture("algorithms/user_library_merge.json")).unwrap();
+        let bundle = &doc["bundle"];
+        let cases = doc["cases"].as_array().unwrap();
+        let unchanged = |c: &serde_json::Value| USER_LIBRARY_KINDS.iter().all(|(k, _)| c["expected"][*k] == bundle[*k]);
+        let kept = cases.iter().filter(|c| unchanged(c)).count();
+        assert!(kept >= 3 && cases.len() - kept >= 3, "{kept} of {} cases keep the bundle", cases.len());
+        let base = std::env::temp_dir().join(format!("jas-user-libs-{}", std::process::id()));
+        let mut failures = Vec::new();
+        for (i, c) in cases.iter().enumerate() {
+            let name = c["name"].as_str().unwrap();
+            let root = base.join(format!("{i:02}"));
+            std::fs::create_dir_all(&root).unwrap();
+            for (rel, text) in c["files"].as_object().unwrap() {
+                let path = root.join(rel);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, text.as_str().unwrap()).unwrap();
+            }
+            let user = load_user_libraries(&root);
+            for (kind, _) in USER_LIBRARY_KINDS {
+                let got = merged_libraries(&bundle[kind], &user[kind]);
+                if got != c["expected"][kind] {
+                    failures.push(format!("{name} [{kind}]: got {got}, want {}", c["expected"][kind]));
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(failures.is_empty(), "{} wrong:\n{}", failures.len(), failures.join("\n"));
+    }
+
     /// FLOATSPELL: the one spelling of a full-precision f64. Expected values
     /// come from the RULE (computed in Python), not from either port, so this
     /// binds Rust as tightly as it binds Swift.
@@ -8148,6 +8228,73 @@ pub(crate) mod tests {
         assert!(refused >= 3 && written >= 5, "corpus too thin: {} refused, {} written", refused, written);
     }
 
+    // Runs test_fixtures/gradient_stop/menu_transform.json, the shared corpus
+    // for the Gradient panel menu's three stop transforms (GRADIENT.md §Panel
+    // menu), through the law and through the expression builtin the YAML
+    // calls. The reference (`gradient_law.py`) and Swift read the same file.
+    #[test]
+    fn gradient_menu_transform_corpus() {
+        use crate::interpreter::expr::eval;
+        use crate::interpreter::expr_types::Value as EV;
+        use crate::interpreter::gradient_host::{distribute_stops, reset_midpoints, reverse_stops};
+        // Numbers compare as numbers (the law writes f64; the fixture has ints).
+        fn same(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+            match (a, b) {
+                (serde_json::Value::Number(x), serde_json::Value::Number(y)) => x.as_f64() == y.as_f64(),
+                (serde_json::Value::Array(x), serde_json::Value::Array(y)) =>
+                    x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same(p, q)),
+                (serde_json::Value::Object(x), serde_json::Value::Object(y)) =>
+                    x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w))),
+                _ => a == b,
+            }
+        }
+        let raw = read_fixture("gradient_stop/menu_transform.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut ran: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let op = vec["op"].as_str().unwrap();
+            let (law, builtin): (fn(&serde_json::Value) -> Option<Vec<serde_json::Value>>, &str) = match op {
+                "reverse" => (reverse_stops, "gradient_reversed"),
+                "distribute" => (distribute_stops, "gradient_distributed"),
+                "reset_midpoints" => (reset_midpoints, "gradient_midpoints_reset"),
+                other => panic!("gradient_menu_transform '{}': unknown op {}", name, other),
+            };
+            let want = &vec["expected"];
+            let got = law(&vec["stops"]);
+            let ctx = serde_json::json!({"panel": {"stops": vec["stops"].clone()}});
+            let via_expr = eval(&format!("{}(panel.stops)", builtin), &ctx);
+            let e = ran.entry(op.to_string()).or_default();
+            if want.is_null() {
+                assert!(got.is_none(), "gradient_menu_transform '{}': the law must refuse, got {:?}", name, got);
+                assert!(matches!(via_expr, EV::Null), "gradient_menu_transform '{}': the builtin must be null, got {:?}", name, via_expr);
+                e.0 += 1;
+            } else {
+                let out = serde_json::Value::Array(got.unwrap_or_else(|| panic!("gradient_menu_transform '{}': refused", name)));
+                assert!(same(&out, want), "gradient_menu_transform '{}': law {} != {}", name, out, want);
+                match via_expr {
+                    EV::List(l) => {
+                        let l = serde_json::Value::Array(l);
+                        assert!(same(&l, want), "gradient_menu_transform '{}': builtin {} != {}", name, l, want);
+                    }
+                    other => panic!("gradient_menu_transform '{}': builtin gave {:?}", name, other),
+                }
+                e.1 += 1;
+            }
+        }
+        // Every op witnessed refusing AND writing, at least twice each.
+        assert_eq!(ran.len(), 3, "ops run: {:?}", ran);
+        for (op, (r, w)) in &ran {
+            assert!(*r >= 2 && *w >= 2, "gradient_menu_transform op {} too thin: {} refused, {} written", op, r, w);
+        }
+        // The builtin takes exactly one argument.
+        let ctx = serde_json::json!({"panel": {"stops": corpus["vectors"][0]["stops"].clone()}});
+        for b in ["gradient_reversed", "gradient_distributed", "gradient_midpoints_reset"] {
+            assert!(matches!(eval(&format!("{}()", b), &ctx), EV::Null), "{}()", b);
+            assert!(matches!(eval(&format!("{}(panel.stops, panel.stops)", b), &ctx), EV::Null), "{}(a, b)", b);
+        }
+    }
+
     // Runs test_fixtures/gradient_stop/slider.json, the shared corpus for the
     // Gradient slider's law (GRADIENT.md, "The slider law (precisely)"). The
     // reference (`gradient_law.py`) and Swift read the same file.
@@ -8312,6 +8459,7 @@ pub(crate) mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps { name: Some("L".into()), ..Default::default() },
+                color: None,
             });
             let mut model = Model::default();
             model.set_document_for_test(Document {
@@ -8877,6 +9025,7 @@ pub(crate) mod tests {
             common: lc,
             isolated_blending: true,
             knockout_group: true,
+            color: Some("#4a90d9".into()),
         })];
         d
     }
@@ -8961,6 +9110,7 @@ pub(crate) mod tests {
             ("fill_rule", s(a.fill_rule == before.fill_rule)),
             ("group.isolated_blending", s(ag.isolated_blending == bg.isolated_blending)),
             ("group.knockout_group", s(ag.knockout_group == bg.knockout_group)),
+            ("layer.color", s(al.color == bl.color)),
             ("layer.isolated_blending", s(al.isolated_blending == bl.isolated_blending)),
             ("layer.knockout_group", s(al.knockout_group == bl.knockout_group)),
             ("line.width_points", s(an.width_points == bn.width_points)),
@@ -9066,7 +9216,7 @@ pub(crate) mod tests {
         let c = CommonProps::default;
         vec![
             Element::Layer(LayerElem { children: vec![], isolated_blending: false,
-                                       knockout_group: false, common: c() }),
+                                       knockout_group: false, common: c(), color: None }),
             Element::Group(GroupElem { children: vec![], isolated_blending: false,
                                        knockout_group: false, common: c() }),
             Element::Line(LineElem { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0, stroke: None,
@@ -9131,6 +9281,7 @@ pub(crate) mod tests {
             children: kids.into_iter().map(std::rc::Rc::new).collect(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = |kids: Vec<Element>| Document {
             layers: vec![layer(kids)], selected_layer: 0, ..Document::default()
@@ -9257,6 +9408,7 @@ pub(crate) mod tests {
             common: lc,
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
 
         let svg = document_to_svg(&doc);

@@ -121,6 +121,24 @@ def _eval_literal(node: Literal, ctx: dict = None) -> Value:
 # ── Path resolution ──────────────────────────────────────────
 
 
+def _path_member(indices: tuple, member: str) -> Value:
+    """A PATH's computed property (Phase 3 §6.2): ``depth``, ``parent``,
+    ``id`` and ``indices``; null for any other name. One copy for both
+    readers: a dot access on a computed value, and a dotted name whose head
+    is a PATH (a lambda parameter, STATUS-jas row 143)."""
+    if member == "depth":
+        return Value.number(len(indices))
+    if member == "parent":
+        if len(indices) == 0:
+            return Value.null()
+        return Value.path(indices[:-1])
+    if member == "id":
+        return Value.string(".".join(str(i) for i in indices))
+    if member == "indices":
+        return Value.list_(list(indices))
+    return Value.null()
+
+
 def _eval_path(segments: list[str], ctx: dict) -> Value:
     if not segments:
         return Value.null()
@@ -130,7 +148,10 @@ def _eval_path(segments: list[str], ctx: dict) -> Value:
     if obj is None:
         return Value.null()
 
-    for seg in segments[1:]:
+    for i, seg in enumerate(segments[1:]):
+        if isinstance(obj, Value) and obj.type == ValueType.PATH:
+            # A typed PATH (a lambda parameter): its member, then nothing more.
+            return _path_member(obj.value, seg) if i == len(segments) - 2 else Value.null()
         if isinstance(obj, dict):
             if seg in obj:
                 obj = obj[seg]
@@ -166,18 +187,7 @@ def _eval_dot_access(node: DotAccess, ctx: dict) -> Value:
 
     # Path computed properties (Phase 3 §6.2)
     if obj_val.type == ValueType.PATH:
-        indices = obj_val.value  # tuple[int, ...]
-        if node.member == "depth":
-            return Value.number(len(indices))
-        if node.member == "parent":
-            if len(indices) == 0:
-                return Value.null()
-            return Value.path(indices[:-1])
-        if node.member == "id":
-            return Value.string(".".join(str(i) for i in indices))
-        if node.member == "indices":
-            return Value.list_(list(indices))
-        return Value.null()
+        return _path_member(obj_val.value, node.member)
 
     # List methods
     if obj_val.type == ValueType.LIST and node.member == "length":
@@ -268,7 +278,10 @@ def _apply_closure(closure: Value, args: list[Value], caller_ctx: dict) -> Value
         if k in caller_ctx:
             call_ctx[k] = caller_ctx[k]
     for p, a in zip(params, args):
-        call_ctx[p] = a.value if a.type != ValueType.CLOSURE else a
+        # A CLOSURE and a PATH stay typed. A PATH's bare value is a tuple, which
+        # reads back as the string "(0,)", so `.depth` and `as_path` of a lambda
+        # parameter were null (STATUS-jas row 143).
+        call_ctx[p] = a if a.type in (ValueType.CLOSURE, ValueType.PATH) else a.value
     return eval_node(body, call_ctx)
 
 
@@ -283,6 +296,14 @@ _COLOR_DECOMPOSE = {
     "cmyk_m": lambda r, g, b: color_util.rgb_to_cmyk(r, g, b)[1],
     "cmyk_y": lambda r, g, b: color_util.rgb_to_cmyk(r, g, b)[2],
     "cmyk_k": lambda r, g, b: color_util.rgb_to_cmyk(r, g, b)[3],
+}
+
+
+#: The Gradient panel menu's stop transforms: builtin name → gradient_law function.
+_GRADIENT_TRANSFORMS = {
+    "gradient_reversed": "reverse_stops",
+    "gradient_distributed": "distribute_stops",
+    "gradient_midpoints_reset": "reset_midpoints",
 }
 
 
@@ -612,6 +633,18 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         if not isinstance(arg.value, dict):
             return Value.list_([])
         return Value.list_(sorted(str(k) for k in arg.value))
+
+    # gradient_reversed / gradient_distributed / gradient_midpoints_reset:
+    # stops → stops — the Gradient panel menu's three transforms
+    # (GRADIENT.md §Panel menu; the law is gradient_law, pinned by
+    # test_fixtures/gradient_stop/menu_transform.json). null when refused.
+    if name in ("gradient_reversed", "gradient_distributed", "gradient_midpoints_reset"):
+        if len(node.args) != 1:
+            return Value.null()
+        from workspace_interpreter import gradient_law
+        arg = eval_node(node.args[0], ctx)
+        out = getattr(gradient_law, _GRADIENT_TRANSFORMS[name])(arg.value)
+        return Value.null() if out is None else Value.list_(out)
 
     # reverse: list → list — reverses a list (useful for foreach over
     # index-sensitive paths where deletion order matters)

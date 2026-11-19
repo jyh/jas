@@ -4,7 +4,7 @@
     "frame_hash":  "2ef07b937ed4e2d36e9b18660c534d44b5ee6c54463acbee7ea40b91ddfb2ae8",
     "plan_panel":  "boolean_panel_content",
     "plan_sha":  "214de6189eec9238",
-    "tab":  "[0,0]=on:\"overlapping_rects.svg\"",
-    "tab_sha":  "3741ae7325175207",
+    "tab":  "[0,0]=on:\"overlapping_rects.svg *\"",
+    "tab_sha":  "0558f949d17b4ee3",
     "selection_count":  1
 }

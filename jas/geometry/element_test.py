@@ -1204,5 +1204,24 @@ class BrushPromotionTest(absltest.TestCase):
             self.assertIs(with_stroke_brush(elem, "charcoal"), elem)
 
 
+
+class LayerColorTest(absltest.TestCase):
+    """STATUS-jas row 53(b): the one normalizer every codec reads a layer
+    colour through. Mirrors Rust `normalize_layer_color` and Swift
+    `normalizeLayerColor`; the shared vector `layer_color.svg` pins the
+    same four shapes across all three."""
+
+    def test_a_layer_has_no_colour_by_default(self):
+        from geometry.element import Layer
+        self.assertIsNone(Layer().color)
+
+    def test_normalize_layer_color(self):
+        from geometry.element import normalize_layer_color as n
+        self.assertEqual(n("#4a90d9"), "#4a90d9")
+        self.assertEqual(n("#FF8000"), "#ff8000")
+        for bad in (None, "", "blue", "#fff", "#4a90d9ff", "4a90d9#",
+                    "#4a90dg", "#\u0664a90d9"[:7], 7):
+            self.assertIsNone(n(bad), repr(bad))
+
 if __name__ == "__main__":
     absltest.main()

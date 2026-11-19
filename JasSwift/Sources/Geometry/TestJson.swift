@@ -369,6 +369,9 @@ private func extendedElementFields(_ o: JsonObj, _ elem: Element) {
     let flags = containerBlendFlags(elem)
     if flags.isolatedBlending { o.bool("isolated_blending", true) }
     if flags.knockoutGroup { o.bool("knockout_group", true) }
+    // A layer's own colour (STATUS-jas row 53(b)), only when it has one,
+    // which keeps every shipped golden byte-identical.
+    if case .layer(let l) = elem, let c = l.color { o.str("color", c) }
 }
 
 private func linecapStr(_ lc: LineCap) -> String {
@@ -1160,6 +1163,11 @@ private func applyExtendedElementFields(_ elem: Element, _ d: [String: Any]) -> 
     e = withContainerBlendFlags(e,
                                 isolatedBlending: d["isolated_blending"] as? Bool ?? false,
                                 knockoutGroup: d["knockout_group"] as? Bool ?? false)
+    // A layer's own colour, clone-then-mutate like the flags above.
+    if case .layer(var l) = e {
+        l.color = normalizeLayerColor(d["color"] as? String)
+        e = .layer(l)
+    }
     return e
 }
 

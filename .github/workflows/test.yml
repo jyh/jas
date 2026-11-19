@@ -108,6 +108,7 @@ jobs:
       # A call to a function no evaluator defines is null, silently, in every
       # port (`len(...)` hid the Artboard tool's Delete branch; PR #460).
       - run: python scripts/check_expr_functions.py --self-test && python scripts/check_expr_functions.py
+      - run: python scripts/check_ops_readers.py --self-test && python scripts/check_ops_readers.py
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
@@ -449,6 +450,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # l2_baselines_at_risk's tab arm reads workspace/layout.yaml's canvas_tab_bar
+      # (STATUS-flask section 920); without PyYAML it lists every tab baseline, saying why.
+      - run: pip install PyYAML
+      # The local runner of this file's scripts/ steps parses every run: block; its
+      # self-test holds the parser to the live workflow (a floor, and the step a
+      # `- run:` grep missed, check_cbindgen_freshness).
+      - name: The local step runner parses every run block
+        if: ${{ !cancelled() }}
+        run: python scripts/run_test_yml_steps.py --self-test
       # docs/TESTING.md section 2: a frozen baseline changes only with the spec item it renders,
       # or with a `Baseline-Refreeze: <item>: <reason>` trailer. The rule is about a WHOLE PR,
       # so the range is the PR's own delta against main; on main itself that degenerates, and
@@ -1023,6 +1033,8 @@ jobs:
           python scripts/check_state_reads.py
           python scripts/check_expr_functions.py --self-test
           python scripts/check_expr_functions.py
+          python scripts/check_ops_readers.py --self-test
+          python scripts/check_ops_readers.py
           bash scripts/check_panel_goldens.sh
           python scripts/check_path_b_exclusions.py
           bash scripts/check_intent_map.sh

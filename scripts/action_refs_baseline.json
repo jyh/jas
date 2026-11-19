@@ -11,13 +11,8 @@
   ],
   "unresolved_actions": [
     "disable_opacity_mask",
-    "gradient_distribute_stops",
-    "gradient_reset_midpoints",
-    "gradient_reverse",
-    "gradient_save_library",
     "make_opacity_mask",
     "open_opacity_slider_popover",
-    "open_swatch_library",
     "release_opacity_mask",
     "toggle_all_caps",
     "toggle_new_masks_clipping",

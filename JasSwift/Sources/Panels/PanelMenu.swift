@@ -202,11 +202,35 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .symbols: SymbolsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .brushes: BrushesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .concepts: ConceptsPanel.menuDispatch(cmd, addr: addr, layout: &layout, model: model)
-    // Gradient's rows other than Close are disabled placeholders with no
-    // action (gradient.yaml), so Close is its whole dispatch.
+    // Gradient: Close is the layout's; every other row runs its YAML action
+    // in the panel's scope (Save Gradient Library, design 2026-11-17 §2).
+    // Until then its other rows were disabled placeholders and Close was the
+    // whole dispatch. No Gradient row is a radio, so nothing is folded.
     case .gradient:
         if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)) }
+        else { panelDispatchRow(.gradient, action: cmd, params: [:], model: model) }
     }
+}
+
+/// The panel, submenu label and `items_from` spec of the menu item an
+/// `open_menu` effect named by its declared `id` (``StateStore/pendingMenu``),
+/// or nil when no panel menu declares an `items_from` item with that id. Every
+/// panel kind is searched, the toggle-only ones (Brushes, Gradient, Concepts)
+/// included, which ``PanelKind/all`` leaves out. Rust's twin is
+/// `panel_menu::menu_request_target`, which also needs the panel's address.
+public func panelMenuRequest(_ id: String) -> (kind: PanelKind, label: String, spec: [String: Any])? {
+    guard !id.isEmpty, let ws = WorkspaceData.load() else { return nil }
+    for kind in PanelKind.all + [.brushes, .gradient, .concepts] {
+        // `panelMenuRaw`: the raw array, separators included (a cast of the
+        // whole array to objects reads `[]` for any menu with a separator).
+        for entry in ws.panelMenuRaw(panelKindToContentId(kind)) {
+            guard let obj = entry as? [String: Any], obj["id"] as? String == id,
+                  let spec = obj["items_from"] as? [String: Any],
+                  let label = obj["label"] as? String else { continue }
+            return (kind, label, spec)
+        }
+    }
+    return nil
 }
 
 /// The rows of a panel's `items_from` submenu, evaluated now in the panel
@@ -224,12 +248,32 @@ public func panelSubmenuRows(_ kind: PanelKind, spec: [String: Any],
 /// runs nothing.
 public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String: Any],
                              addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
+    panelDispatchRow(kind, action: action, params: params, model: model)
+}
+
+/// ``panelDispatchRow(_:action:params:addr:layout:model:)`` for a caller that
+/// holds no panel address: a row popped up by an `open_menu` request. The row
+/// runs in its panel's store scope, which needs neither.
+public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String: Any], model: Model?) {
     guard !action.isEmpty, let model = model else { return }
     let pid = panelKindToContentId(kind)
     if !model.stateStore.hasPanel(pid) {
         model.stateStore.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
     }
     model.stateStore.setActivePanel(pid)
+    // The Gradient menu's transforms read `panel.stops`, which the action
+    // runner takes from the STORE, while ``gradientPanelLiveOverrides`` lays
+    // the selection's gradient over the panel only for the dock. Lay it over
+    // the store too, so Reverse Gradient reverses the gradient the panel draws
+    // (row 147; the engine's `panel_scope::sync_gradient_state`). Not while
+    // the slider's press snapshot stands: then the store's stops ARE the preview.
+    if pid == "gradient_panel_content" {
+        // A released press leaves NSNull, as the slider's own reader allows.
+        let held = model.stateStore.getPanel(pid, "stops__press")
+        if held == nil || held is NSNull {
+            for (k, v) in gradientPanelLiveOverrides(model: model) { model.stateStore.setPanel(pid, k, v) }
+        }
+    }
     runYamlActionByName(action, params: params, model: model)
 }
 
@@ -343,8 +387,17 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     // `items_from` source such as `keys(data.brush_libraries)` lists what is
     // there when the menu opens (the 2026-10-28 brush-library design, A.2).
     // Without a model it falls back to the bundle's libraries.
-    ctx["data"] = (model?.stateStore.getDataPath("") as? [String: Any])
+    var data = (model?.stateStore.getDataPath("") as? [String: Any])
         ?? ["brush_libraries": ws?.brushLibraries() ?? [:]] as [String: Any]
+    // The swatch libraries are app-global on the Mac (`model.swatchLibraries`),
+    // not in the store, so `keys(data.swatch_libraries)` (Open Swatch Library,
+    // design §3.4) reads them from there, as the panel body does.
+    if let model = model { data["swatch_libraries"] = model.swatchLibraries.libs }
+    // The app tier (``AppGradientLibraries``, design 2026-11-17 §1); the
+    // bundle's without a model.
+    if let model = model { data["gradient_libraries"] = model.gradientLibraries.libs }
+    else if data["gradient_libraries"] == nil, let g = ws?.data["gradient_libraries"] { data["gradient_libraries"] = g }
+    ctx["data"] = data
     ctx["preferences"] = Preferences.current() ?? [:]
     if let ws = ws {
         ctx["state"] = buildLiveStateMap(ws: ws, model: model)
@@ -463,7 +516,7 @@ func artboardsPanelSelection(model: Model?) -> [String] {
 /// shared panel store, keyed exactly as the panel's YAML state table
 /// declares them. One panel: the layers isolation stack, which the YAML
 /// `list_push` / `list_pop` effects route to `model.layersIsolationStack`.
-private func modelHeldPanelState(_ contentId: String,
+func modelHeldPanelState(_ contentId: String,
                                  model: Model?) -> [String: Any] {
     switch contentId {
     case "layers_panel_content":
@@ -471,6 +524,21 @@ private func modelHeldPanelState(_ contentId: String,
         return ["isolation_stack": m.layersIsolationStack]
     default:
         return [:]
+    }
+}
+
+/// Write a declared `panel.*` key this app keeps on the MODEL (the writer
+/// beside ``modelHeldPanelState``, one map for both directions). Returns false
+/// for a key the model does not hold, which then belongs to the store.
+/// `paths` are index arrays.
+@discardableResult
+func setModelHeldPanelState(_ contentId: String, _ key: String, paths: [[Int]], model: Model) -> Bool {
+    switch (contentId, key) {
+    case ("layers_panel_content", "isolation_stack"):
+        model.layersIsolationStack = paths
+        return true
+    default:
+        return false
     }
 }
 

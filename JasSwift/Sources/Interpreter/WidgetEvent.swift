@@ -720,6 +720,116 @@ enum WidgetEvent {
 
     // MARK: - Behaviors
 
+    /// Design section 8 form 2 (row 139): run item `index` of `widget`'s
+    /// `context_menu:` in this event's scope (`host.scope`, a row's). The twin
+    /// of Rust's `jas_panel_behavior` event `context_menu`. A separator, an
+    /// index past the list, or an item whose `enabled_when` fails is refused by
+    /// name. The action is resolved as a template (as a menu label is) and runs
+    /// with the item's declared params, evaluated as a behaviour's.
+    static func contextMenuItem(
+        widget: [String: Any], index: Int, store: StateStore,
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        guard let items = widget["context_menu"] as? [Any] else {
+            return Result(outcome: "refused", reason: "NoContextMenu")
+        }
+        guard index >= 0, index < items.count, let item = items[index] as? [String: Any] else {
+            return Result(outcome: "refused", reason: "NoContextMenuItem")
+        }
+        let ctx = host.scope ?? store.evalContext()
+        if let cond = item["enabled_when"] as? String, !evaluate(cond, context: ctx).toBool() {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        let action = (item["action"] as? String).map { evaluateText($0, context: ctx) } ?? ""
+        guard !action.isEmpty else { return Result(outcome: "refused", reason: "EmptyBehavior") }
+        var entry: [String: Any] = ["action": action]
+        if let p = item["params"] { entry["params"] = p }
+        let ran = runBehaviors([entry], value: nil, store: store, actions: actions, dialogs: dialogs,
+                               platformEffects: platformEffects, model: model, host: host)
+        return Result(outcome: ran > 0 ? "committed" : "inert", behaviorsRun: ran)
+    }
+
+    /// One entry of a `context_menu:` as a shell draws it: a separator, or an
+    /// item with its label, whether it is enabled, and its INDEX in the yaml list
+    /// (separators included), which is the index ``contextMenuItem`` takes.
+    enum ContextMenuEntry: Equatable {
+        case separator
+        case item(label: String, enabled: Bool, index: Int)
+    }
+
+    /// The entries of `widget`'s `context_menu:` in `scope` (a row's, with its
+    /// `node`). They are read as ``contextMenuItem`` reads them: the label is
+    /// interpolated text, an item with no `enabled_when` is enabled, and a
+    /// bare `separator` is a separator. An item that is not a mapping is
+    /// skipped, and the door refuses it (`NoContextMenuItem`).
+    static func contextMenuEntries(_ widget: [String: Any], scope: [String: Any]) -> [ContextMenuEntry] {
+        var out: [ContextMenuEntry] = []
+        for (i, raw) in ((widget["context_menu"] as? [Any]) ?? []).enumerated() {
+            if raw as? String == "separator" { out.append(.separator); continue }
+            guard let item = raw as? [String: Any] else { continue }
+            let label = (item["label"] as? String).map { evaluateText($0, context: scope) } ?? ""
+            let on = (item["enabled_when"] as? String).map { evaluate($0, context: scope).toBool() } ?? true
+            out.append(.item(label: label, enabled: on, index: i))
+        }
+        return out
+    }
+
+    /// The row of `holder`'s `foreach` whose `path` is `row`, and the name it
+    /// binds (`as:`, else `item`). The source is evaluated in `scope` by the
+    /// app's evaluator, and the row's data gains `_index`, its position in the
+    /// source. It fails, naming why, unless exactly one row has that path. The
+    /// Layers row's shell and the forms runner both bind a row through this.
+    static func rowBinding(_ holder: [String: Any], scope: [String: Any], row: [Int])
+        -> Swift.Result<(name: String, data: [String: Any]), RowBindingRefusal> {
+        guard let all = rowBindings(holder, scope: scope) else {
+            return .failure(RowBindingRefusal("`\(holder["id"] as? String ?? "?")` has no foreach"))
+        }
+        let hits = all.rows.filter { $0.path == row }
+        guard hits.count == 1 else {
+            return .failure(RowBindingRefusal("row \(row) is \(hits.count) row(s) of `\(all.source)`, not one"))
+        }
+        return .success((all.name, hits[0].data))
+    }
+
+    /// Every row of `holder`'s `foreach`, in source order, each with its path
+    /// (nil when its `path` is not an index array) and its data with `_index`.
+    /// The source is evaluated ONCE, so a shell that binds every drawn row
+    /// calls this and not ``rowBinding`` per row. Nil when there is no foreach.
+    static func rowBindings(_ holder: [String: Any], scope: [String: Any])
+        -> (name: String, source: String, rows: [(path: [Int]?, data: [String: Any])])? {
+        guard let spec = holder["foreach"] as? [String: Any] else { return nil }
+        let source = spec["source"] as? String ?? ""
+        var items: [Any] = []
+        if case .list(let arr) = evaluate(source, context: scope) { items = arr.map { $0.value } }
+        let rows = items.enumerated().map { (i, item) -> (path: [Int]?, data: [String: Any]) in
+            var data = item as? [String: Any] ?? ["_value": item]
+            data["_index"] = i
+            return (rowPath((item as? [String: Any])?["path"]), data)
+        }
+        return (spec["as"] as? String ?? "item", source, rows)
+    }
+
+    struct RowBindingRefusal: Error, Equatable {
+        let why: String
+        init(_ why: String) { self.why = why }
+    }
+
+    /// A row's `path` as an index array: a list of non-negative integers, or a
+    /// `{"__path__": [...]}` marker. Booleans and fractions are not indices.
+    static func rowPath(_ v: Any?) -> [Int]? {
+        let v = (v as? [String: Any])?["__path__"] ?? v
+        guard let a = v as? [Any] else { return nil }
+        var out: [Int] = []
+        for x in a {
+            guard let n = x as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.intValue >= 0,
+                  Double(n.intValue) == n.doubleValue else { return nil }
+            out.append(n.intValue)
+        }
+        return out
+    }
+
     private static func declared(_ widget: [String: Any], events: [String]) -> [[String: Any]] {
         (widget["behavior"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
             .filter { ($0["event"] as? String).map(events.contains) ?? false }
@@ -749,6 +859,11 @@ enum WidgetEvent {
         let locals = scopeLocals(host.scope, store: store).merging(extra) { _, new in new }
         var ran = 0
         for b in behaviors {
+            // A body-less entry (no `action`, no non-empty `effects`) runs
+            // nothing and is not counted (WIDGET_EVENTS.md, "A behavior with
+            // no body"; the reference's `_run_behaviors`).
+            let hasEffects = !((b["effects"] as? [Any]) ?? []).isEmpty
+            if !hasEffects && !(b["action"] is String) { continue }
             var ctx = locals
             // A click's event is its modifiers and carries no value.
             ctx["event"] = event ?? (["value": value ?? NSNull()] as [String: Any])

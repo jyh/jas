@@ -242,6 +242,39 @@ marked PROPOSED and never gates.
 * **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
   "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
   hovering there that long.
+  * **A level-1 runner delivers it as the row's three declared events.**
+    1. `drag_start` goes to the pressed row.
+    2. `drag_move` goes to the target row, with `event.hover_ms`.
+    3. `drag_end` goes to the target row, with `event.zone`, `event.drop_parent`, `event.drop_index` and
+       `event.drop_valid`.
+  * **The runner computes the `drop_*` fields by this rule (row 137). A shell realises the same rule from the pointer.**
+    * **Resolve the drop to ELEMENTS before anything moves:** the target parent, and the target row's element by
+      identity (spec's S2-12).
+    * **`into`** (a container only; a leaf row has only `before` and `after`): `drop_parent` is the target. The
+      dragged elements become its topmost children, which are the last children in document order. So
+      `drop_index` is the parent's child count after the dragged elements are removed.
+    * **`before`** puts the dragged elements above the target in z order, and **`after`** puts them below it. The
+      tree draws topmost first. `drop_parent` is the target's parent.
+    * `drop_index` is the target element's index among its siblings, **read AFTER the dragged elements are
+      removed** (S2-14), counted among the parent's children in DOCUMENT order with 0 = the bottom child (drawn
+      last): plus 1 for `before`, unchanged for `after`. An index taken before the removal is off by
+      one for every same-parent move from below the target (`drag_leaf_after`, `drag_shifts_collapsed_sibling`).
+    * **`drop_valid`** is `move_elements`' own validity check (the S2 spec's one authority for validity), never a
+      second copy of its rules. It is false when ANY dragged element fails one of the S2 spec's five rules:
+      1. the parent is the element itself or one of its descendants;
+      2. the parent is locked, by its own flag or an ancestor's;
+      3. a layer goes anywhere but the root or a layer, or a non-layer goes to the root;
+      4. a search or type filter is active;
+      5. in isolation, the parent is outside the isolated container.
+  * **F1c (row 145): the hover expands a collapsed target, computed by the runner.** When the zone is `into`, `hover_ms`
+    is 500 or more, and the target row's path is in `collapsed_paths`, the runner removes that one path before
+    `drag_end`, as layers.yaml states: "Hovering over a collapsed container for 500ms auto-expands it". Any other
+    zone, or a shorter hover, changes nothing. The rule is spec's SPEC-coll. A shell's own hover timer is never
+    called; only a level-2 driver sees one.
+  * **Where no node declares an action for `drag_move` or `drag_end`, the step changes nothing and reads
+    `unchanged`.** That is the case at the control and on main today. The drop's document read then cannot be told
+    from a refusal. This rule tests the receiving `move_elements` and never a shell's own conversion from the
+    pointer, which only a level-2 driver sees.
 * **A key step after a panel step** (spec's S1: the tree's arrows and Ctrl+A) is delivered to the widget that holds key
   focus after that panel step, not to the canvas. Today a key after a panel step is refused by name, as above.
 * **A dropdown item by value**: a `commit` on a `dropdown` names the item by its `value`, never its label, and carries the
@@ -255,7 +288,8 @@ marked PROPOSED and never gates.
 * **`"event": "input"` with `"value"`** sets a field's text and fires its declared `input` behaviour once, with the final
   value (`lp_search_input`). It fires nothing when the field declares no `input` (`lp_name_edit`, which can still be typed
   into and then left by Escape or blur). **`"event": "blur"`** (optionally with `row`) fires the declared `blur`
-  behaviour (the rename field). A step names the event the widget DECLARES, and `commit` is never a stand-in for `input`.
+  behaviour (the rename field). Its `event.value` is the field's text: what an `input` step typed into that same field,
+  else what the field's `bind.value` shows. A step names the event the widget DECLARES, and `commit` is never a stand-in for `input`.
 * **`{"read": "panel", "panel": "<content id>"}`** compares that panel's declared `state:` keys with the script's
   `expected_panel_json`: canonical JSON, keys sorted, paths in index-array form. Each level-1 runner must be able to emit it;
   the panel selection, for one, is in no document.
@@ -269,8 +303,41 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   starting with the widget, whose `behavior:` declares that event. A Layers row's `click` is declared on the row's
   container, so a click on `lp_name` selects the row. `lp_eye` declares its own `click`, so an eye click never reaches the
   row. The runner records where a step bubbled to. A step addressed by id alone does not bubble.
-* **Still refused by name there:** `at`, `hold_ms`, a row drag, the `dialog` / `context_menu` / `panel_menu` steps,
-  `{"read": "panel_menu"}`, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Both runners deliver the panel-menu forms (row 139).**
+  * `{"read": "panel_menu", "panel": P}` reads the menu's items in declared order, separators omitted, as
+    `{action, params, enabled, checked}`. `enabled` and `checked` come from the menu's own predicates, and `checked` is
+    null for an item with no `checked_when`.
+  * `{"panel_menu": P, "action": A, "params": {...}}` picks the one item whose action is `A` and whose declared params
+    equal every param the step names. Labels are never used. Zero or two matches, or a disabled item, are refused by
+    name. The item runs as a shell's pick does.
+* **Both runners deliver the row context menu (row 139).**
+  * A row `secondary_press` opens the `context_menu:` declared on the nearest node along the widget's path, with the
+    row as its `node`. It dispatches nothing of its own.
+  * The VERY NEXT step may be `{"context_menu": "<action>", "params": {...}}`. It picks the one item whose action,
+    resolved when the menu opened, is the step's, and whose declared params equal every param the step names.
+  * The item runs through the engine's door: `jas_panel_behavior` event `context_menu` with the item index in Rust,
+    `PanelWidgetEvents.contextMenuItem` in Swift. The door runs it in the row's scope. It refuses a separator, an index
+    past the list, or an item whose `enabled_when` fails. It resolves a template action as a menu label is resolved,
+    and evaluates the params as a behaviour's.
+  * Any other step closes the menu.
+  * ⚠️ Both shells still hand-build the Layers row context menu, so this form drives the yaml's route, not theirs.
+* **Still refused by name there:** `at`, `hold_ms`, the `dialog` step, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. Both runners also
+  deliver the text and dropdown forms (rows 135 and 136):
+  * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,
+    so a field that declares no `input` fires nothing and the step is recorded `unchanged`.
+  * After an `input`, the field holds key focus. The next key goes to the field as its `keydown`, carrying the field's
+    text, and a key the field declares nothing for is refused (`UnboundFieldKey`).
+  * **F6 (row 145): a row step that leaves a field SHOWN on its row also gives that field key focus**, as every shell
+    focuses the field an inline rename shows (the double-click that opens a rename shows `lp_name_edit`). A field is
+    shown when it is a repeated `text_input` that declares `bind.visible` and that expression holds in the row's scope.
+    Its text is what its `bind.value` shows. The next key then goes to the field as above, so Escape cancels the
+    rename through the field, Enter confirms it, and an arrow is refused. A field with no `visible` bind is always
+    shown, so it takes focus only from an `input` step. Two shown fields on one row are refused by name.
+  * A per-row `commit` types the value and then sends `keydown` Enter.
+  * `blur` carries the typed text, or the field's `bind.value` when nothing was typed.
+  * A dropdown `commit` picks the item by `value`, and Alt picks it as `alt_toggle`.
+  * A row drag is refused by its own name: `a row drag is not delivered by this runner`.
 * `JAS_FORMS_DIR=<dir>` (with `JAS_FORMS_SHA=<sha>`) replays a directory of PROPOSED scripts. It writes their read-backs
   to one JSON file for a settling day to read, and it is not a gate. Swift's runner follows (Rust first).
 

@@ -764,7 +764,8 @@ struct JasBytes jas_layout_edge_rects(struct JasEngine *e, const uint8_t *cell, 
  * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
  * "remove_tab": <index> | null, "close_window": <bool>,
  * "save_all_then_close": <bool>, "clipboard_write": <text> | null,
- * "export_pdf": <file name> | null, "layout": <layout> | null}` ([`act_reply`];
+ * "export_pdf": <file name> | null, "layout": <layout> | null,
+ * "menu": <menu item id> | null, "writes": [<write>...]}` ([`act_reply`];
  * `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
  * is the Print button's).
  * `close_window` names a window close the shell must do (the engine owns no
@@ -942,6 +943,28 @@ uint8_t jas_dialog_dismiss(struct JasEngine *e);
 struct JasBytes jas_document_pdf(struct JasEngine *e);
 
 /**
+ * **Lay the user's saved libraries over the bundle's** (row 149): `root` is
+ * the shell's saved-libraries directory, UTF-8, the folder that holds
+ * `brushes/<slug>/library.json`, `swatches/<id>.json` and
+ * `gradients/<id>.json` (the layout the shell's library writes use, and the
+ * Mac's). Each library the user saved replaces the bundle's of the same
+ * slug, and a new slug is added, as the Mac does at launch
+ * (`BrushLibraryStore.merged`). A file that is not a JSON object is skipped.
+ * Call it once, after [`jas_engine_new`] and before the first plan.
+ *
+ * Answers `{"brush_libraries":N,"swatch_libraries":N,"gradient_libraries":N}`,
+ * the count of user libraries taken per kind (an absent root takes 0 of
+ * each and changes nothing). A NULL engine or bad UTF-8 is the empty span.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a live engine; `root` must be NULL or valid for `len` bytes.
+ */
+struct JasBytes jas_engine_load_user_libraries(struct JasEngine *e,
+                                               const uint8_t *root,
+                                               uintptr_t len);
+
+/**
  * Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
  * the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
  * a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
@@ -1057,8 +1080,9 @@ uint8_t jas_document_set_filename(struct JasEngine *e, const uint8_t *name, uint
  * the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
  * the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
  * or `separator` (any other node is `unknown`, never guessed at). An item
- * also carries `label`, `action`, `enabled` and `checked` (a bool for a
- * checkable item, null otherwise).
+ * also carries `id` (the node's `id`, or null), `label`, `action`, `enabled`
+ * and `checked` (a bool for a checkable item, null otherwise). An act reply's
+ * `menu` names an item by its `id`.
  *
  * ⭐ THE STATE IS THE SHARED WALK'S, NOT THIS FUNCTION'S. `enabled` and
  * `checked` are [`menu_state`]'s rows for the menu, evaluated in the panel's

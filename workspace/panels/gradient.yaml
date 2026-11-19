@@ -132,32 +132,53 @@ state:
 menu:
   - label: "Reverse Gradient"
     action: gradient_reverse
-    enabled_when: "false"
+    enabled_when: "active_document.has_selection and not panel.preview_state and panel.type != 'freeform'"
     description: >
-      Phase 5 — flips stops end-to-end. Disabled until the action
-      pipeline is wired.
+      Flips the stops end to end (actions.yaml gradient_reverse). Enabled
+      while something is selected, its active attribute holds a gradient
+      (not a seeded preview) and the gradient is not freeform.
   - label: "Distribute Stops Evenly"
     action: gradient_distribute_stops
-    enabled_when: "false"
+    enabled_when: "active_document.has_selection and not panel.preview_state and panel.type != 'freeform' and panel.stops.length > 2"
+    description: >
+      Spaces the stops evenly from 0 % to 100 % and resets the midpoints
+      (actions.yaml gradient_distribute_stops). Enabled as Reverse Gradient
+      is, and only with more than two stops.
   - label: "Reset Midpoints"
     action: gradient_reset_midpoints
-    enabled_when: "false"
+    enabled_when: "active_document.has_selection and not panel.preview_state and panel.type != 'freeform'"
+    description: >
+      Returns every midpoint to 50 % (actions.yaml gradient_reset_midpoints).
+      Enabled as Reverse Gradient is.
   - separator
   - label: "Open Gradient Library"
+    id: grad_menu_open_library
     type: submenu
     dynamic: true
+    items_from:
+      source: "keys(data.gradient_libraries)"
+      as: lib
+      item:
+        label: "{{if data.gradient_libraries[lib].name == null then lib else data.gradient_libraries[lib].name}}"
+        action: set_gradient_active_library
+        params: { library: "lib" }
+        checked_when: "panel.active_library_id == lib"
     description: >
-      Submenu listing all available gradient libraries discovered from
-      workspace/gradients/*.json files. Selecting a library switches
-      the active library in DOCUMENT_LIBRARY_DROPDOWN so its tiles
-      populate the preset strip. Mirrors the Swatches panel Open
-      Swatch Library submenu behavior.
+      Submenu with one row per gradient library the app knows (the
+      workspace/gradients/*.json files), rebuilt each time the menu
+      opens, in id order (Unicode code point), each labelled with the
+      library's name (its id when it has none). The row of the active
+      library is checked. Choosing a row makes that library the active
+      one (set_gradient_active_library), so its tiles populate the
+      preset strip and DOCUMENT_LIBRARY_DROPDOWN shows it. Unlike the
+      Swatches and Brushes submenus this is a radio: the panel shows
+      one library at a time.
   - label: "Save Gradient Library"
     action: gradient_save_library
-    enabled_when: "false"
+    enabled_when: "panel.active_library_id != null"
     description: >
-      Phase 9 — opens a Save Gradient Library dialog. Deferred
-      pending a Save dialog and file-writing pipeline per app.
+      Open the Save Gradient Library dialog for the active library
+      (gradient_save_library). Disabled when no library is active.
   - separator
   - label: "Close Gradient"
     action: close_panel

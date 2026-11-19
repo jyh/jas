@@ -43,6 +43,11 @@ func runEffects(
     // resolver-unaware call paths (panels that don't journal, the convenience
     // overload), where this whole bracket is inert. Mirrors Rust's `owns_txn`.
     let ownsTxn = model.map { !$0.isInTxn } ?? false
+    // A transaction a host opens and closes inside this batch
+    // (``Model/editDocument(_:)``) is named with the action too (row 155).
+    let priorBatchName = model?.batchActionName
+    if ownsTxn, let m = model, let an = actionName { m.batchActionName = an }
+    defer { if ownsTxn, let m = model { m.batchActionName = priorBatchName } }
     // Thread ctx through sibling effects: `let:` extends ctx for
     // subsequent siblings; nested lists (then/else/do) recurse with
     // their own ctx so bindings don't leak back.
@@ -1197,6 +1202,69 @@ public func gradientStopsToJSON(_ stops: [GradientStop]) -> [[String: Any]] {
 
 // MARK: - The slider law (GRADIENT.md, "The slider law (precisely)")
 //
+// The Gradient panel menu's three stop transforms (GRADIENT.md §Panel menu):
+// Reverse Gradient, Distribute Stops Evenly, Reset Midpoints. They mirror
+// `gradient_law.reverse_stops` / `distribute_stops` / `reset_midpoints` and
+// `gradient_host.rs`, pinned by `test_fixtures/gradient_stop/menu_transform.json`.
+// They work on the YAML's JSON stops so a colour string passes through
+// verbatim; the expression builtins `gradient_reversed` /
+// `gradient_distributed` / `gradient_midpoints_reset` call them.
+
+private typealias TransformRow = (color: String, opacity: Double, location: Double, mid: Double)
+
+/// The rows the transforms accept: `nil` unless `stops` is a list of at least
+/// two objects each with a string `color` and a numeric `opacity` and
+/// `location`. A missing or non-numeric `midpoint_to_next` reads as 50.
+private func transformRows(_ stops: Any?) -> [TransformRow]? {
+    guard let arr = stops as? [Any], arr.count >= 2 else { return nil }
+    var out: [TransformRow] = []
+    for item in arr {
+        guard let s = item as? [String: Any], let c = s["color"] as? String,
+              let o = sliderNumber(s["opacity"]), let l = sliderNumber(s["location"]) else { return nil }
+        out.append((c, o, l, sliderNumber(s["midpoint_to_next"]) ?? 50))
+    }
+    return out
+}
+
+private func transformStop(_ c: String, _ o: Double, _ l: Double, _ m: Double) -> [String: Any] {
+    ["color": c, "opacity": o, "location": l, "midpoint_to_next": m]
+}
+
+/// `rows` in location order; ties keep their stored order (a stable sort).
+private func byLocation(_ rows: [TransformRow]) -> [TransformRow] {
+    rows.enumerated().sorted { ($0.element.location, $0.offset) < ($1.element.location, $1.offset) }
+        .map(\.element)
+}
+
+/// Reverse Gradient: the stops in location order, reversed, each at
+/// `100 - location`. The midpoint between new neighbours `j` and `j+1` is
+/// that pair's old midpoint from the other end, `100 - m`; the new last
+/// stop's midpoint is 50.
+public func gradientReverseStops(_ stops: Any?) -> [[String: Any]]? {
+    guard let rows = transformRows(stops) else { return nil }
+    let s = byLocation(rows), n = s.count
+    return (0..<n).map { j in
+        let r = s[n - 1 - j]
+        return transformStop(r.color, r.opacity, 100 - r.location, j < n - 1 ? 100 - s[n - 2 - j].mid : 50)
+    }
+}
+
+/// Distribute Stops Evenly: the stops in location order, stop `i` of `n` at
+/// `100 * i / (n - 1)`, every midpoint 50.
+public func gradientDistributeStops(_ stops: Any?) -> [[String: Any]]? {
+    guard let rows = transformRows(stops) else { return nil }
+    let s = byLocation(rows), n = s.count
+    return s.enumerated().map { i, r in
+        transformStop(r.color, r.opacity, 100.0 * Double(i) / Double(n - 1), 50)
+    }
+}
+
+/// Reset Midpoints: every midpoint is 50; the stored order and the locations
+/// are unchanged.
+public func gradientResetMidpoints(_ stops: Any?) -> [[String: Any]]? {
+    transformRows(stops)?.map { transformStop($0.color, $0.opacity, $0.location, 50) }
+}
+
 // The GRADIENT_SLIDER's five gestures, mirroring `gradient_law.py` and
 // `gradient_host.rs`, pinned by `test_fixtures/gradient_stop/slider.json`.
 // They share `editStop`'s two rules: a sort is stable, and a midpoint resets
@@ -1475,18 +1543,25 @@ func settingGradientField(_ g: Gradient, _ key: String, _ value: Any?) -> Gradie
 public func gradientPanelLiveOverrides(model: Model) -> [String: Any] {
     let fillOnTop = (model.stateStore.get("fill_on_top") as? Bool) ?? true
     let g: Gradient
+    let preview: Bool
     switch selectionGradient(model.document, fillOnTop: fillOnTop) {
     case .empty: return [:]
     case .mixed:
-        guard let first = firstMemberGradient(model.document, fillOnTop: fillOnTop) else { return [:] }
-        return ["stops": first.stops.map { s -> [String: Any] in
+        guard let first = firstMemberGradient(model.document, fillOnTop: fillOnTop) else {
+            return ["preview_state": false]
+        }
+        return ["preview_state": false, "stops": first.stops.map { s -> [String: Any] in
             ["color": s.color, "opacity": s.opacity, "location": s.location,
              "midpoint_to_next": s.midpointToNext]
         }]
-    case .uniform(let u): g = u
-    case .solid(let c): g = seedGradient(c)
+    // `preview_state`: the panel shows a SEED when the active attribute is
+    // solid or none (gradient.yaml), which the Gradient menu's transforms are
+    // disabled on (row 147).
+    case .uniform(let u): g = u; preview = false
+    case .solid(let c): g = seedGradient(c); preview = true
     }
     return [
+        "preview_state": preview,
         "type": g.type.rawValue,
         "angle": g.angle,
         "aspect_ratio": g.aspectRatio,
@@ -1552,7 +1627,6 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     } else {
         controller.setSelectionStrokeGradient(g)
     }
-    store.set("gradient_preview_state", false)
 }
 
 /// A member's active-attribute gradient: its own, or the seed its solid
@@ -1610,7 +1684,6 @@ private func applyGradientPanelToMixed(store: StateStore, controller: Controller
         })
     }
     controller.model.editDocument(doc)
-    store.set("gradient_preview_state", false)
 }
 
 /// Demote the selection's active-attribute gradient back to a solid.
@@ -1622,100 +1695,6 @@ public func demoteGradientPanelSelection(store: StateStore, controller: Controll
     } else {
         controller.setSelectionStrokeGradient(nil)
     }
-}
-
-// MARK: - Gradient panel state binding (Phase 4: read direction)
-
-/// Sync gradient panel state from the selection's active attribute
-/// (fill or stroke per `state.fill_on_top`). Mirrors
-/// jas_dioxus::AppState::sync_gradient_panel_from_selection.
-///
-/// Behavior per GRADIENT.md §Multi-selection and §Fill-type coupling:
-///   - Empty selection: leave panel state alone (session defaults).
-///   - Uniform with gradient: populate panel fields from the shared
-///     gradient on the active attribute.
-///   - Mixed (different gradients across selection, or some gradient
-///     and some solid/none): leave panel fields alone; the renderer
-///     handles blank-vs-uniform display per the multi-selection table.
-///   - Uniform without gradient (solid/none on every selected
-///     element's active attribute): seed a preview gradient (first
-///     stop = current solid color, second stop = white) and set
-///     `gradient_preview_state = true`. First edit (Phase 5) will
-///     materialise this onto the elements.
-public func syncGradientPanelFromSelection(store: StateStore, controller: Controller) {
-    let doc = controller.model.document
-    if doc.selection.isEmpty { return }
-
-    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
-
-    var first: Gradient? = nil
-    var firstSet = false
-    var mixed = false
-    var firstSolidColor: Color? = nil
-    for es in doc.selection {
-        guard let elem = doc.tryGetElement(es.path) else { continue }
-        let g = fillOnTop ? elem.fillGradient : elem.strokeGradient
-        if firstSolidColor == nil && g == nil {
-            let solid = fillOnTop ? elem.fill?.color : elem.stroke?.color
-            firstSolidColor = solid
-        }
-        if !firstSet {
-            first = g
-            firstSet = true
-        } else if first != g {
-            mixed = true
-        }
-    }
-    if mixed {
-        store.set("gradient_preview_state", false)
-        return
-    }
-    if let g = first {
-        let typeStr: String
-        switch g.type {
-        case .linear: typeStr = "linear"
-        case .radial: typeStr = "radial"
-        case .freeform: typeStr = "freeform"
-        }
-        let methodStr: String
-        switch g.method {
-        case .classic: methodStr = "classic"
-        case .smooth: methodStr = "smooth"
-        case .points: methodStr = "points"
-        case .lines: methodStr = "lines"
-        }
-        let subModeStr: String
-        switch g.strokeSubMode {
-        case .within: subModeStr = "within"
-        case .along: subModeStr = "along"
-        case .across: subModeStr = "across"
-        }
-        store.set("gradient_type", typeStr)
-        store.set("gradient_angle", g.angle)
-        store.set("gradient_aspect_ratio", g.aspectRatio)
-        store.set("gradient_method", methodStr)
-        store.set("gradient_dither", g.dither)
-        store.set("gradient_stroke_sub_mode", subModeStr)
-        store.set("gradient_stops_count", Double(g.stops.count))
-        store.set("gradient_preview_state", false)
-        return
-    }
-    // Uniform without gradient — seed preview gradient.
-    let seedHex: String
-    if let c = firstSolidColor {
-        seedHex = "#" + c.toHex()
-    } else {
-        seedHex = "#000000"
-    }
-    store.set("gradient_type", "linear")
-    store.set("gradient_angle", 0.0)
-    store.set("gradient_aspect_ratio", 100.0)
-    store.set("gradient_method", "classic")
-    store.set("gradient_dither", false)
-    store.set("gradient_stroke_sub_mode", "within")
-    // Seed first stop at the solid color, second stop white.
-    store.set("gradient_seed_first_color", seedHex)
-    store.set("gradient_preview_state", true)
 }
 
 // MARK: - Character panel state binding
@@ -3466,7 +3445,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     let toolEffects = buildYamlToolEffects(model: model)
     for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
                 "brush.append", "brush.update", "brush.sort_by_name", "brush.select_unused",
-                "brush.save_library",
+                "brush.save_library", "swatch.save_library", "gradient.save_library",
                 "swatch.duplicate_selected", "swatch.delete_selected", "swatch.sort_by_name",
                 "swatch.select_unused", "swatch.add_used_colors", "swatch.store"] {
         guard let handler = toolEffects[key] else {

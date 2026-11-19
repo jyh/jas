@@ -1045,5 +1045,522 @@
         "isolation_stack": []
       }
     }
+  },
+  {
+    "name": "save_brush_library_opens_with_the_library_name",
+    "setup_svg": "corner_path.svg",
+    "note": "STATUS-jas row 8 (brush-library design B.1). brushes.yaml menu Save Brush Library opens brush_library_save with the selected library slug as param.library and its display name as the proposed name.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "save_brush_library"
+          }
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "brush_library_save",
+      "state": {
+        "name": "Default Brushes"
+      }
+    }
+  },
+  {
+    "name": "save_brush_library_ok_saves_a_copy_under_a_new_slug",
+    "setup_svg": "corner_path.svg",
+    "note": "Design B.2: \"My Set\" slugs to my_set, a slug no library has, so the save is a NEW library: a copy of default_brushes named My Set, opened expanded after the open ones, and selected. The source is untouched.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "save_brush_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "brush_lib_name_input"
+          },
+          "event": "commit",
+          "value": "My Set"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "save_brush_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "brush_libraries.my_set.name": "My Set",
+      "brush_libraries.default_brushes.name": "Default Brushes",
+      "brush_libraries.my_set.brushes.0.slug": "basic"
+    },
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_library": "my_set",
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          },
+          {
+            "id": "my_set",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "save_brush_library_under_the_source_slug_saves_in_place",
+    "setup_svg": "corner_path.svg",
+    "note": "Design B.2 collision rule: \"default brushes!\" slugs to default_brushes, the SOURCE library own slug, so the save is in place: the name changes, no library is added, the open list and the selection stay. (No new library is witnessed by the open list: every new save opens its library.)",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": []
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "brushes_panel_content",
+          "address": {
+            "action": "save_brush_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "brush_lib_name_input"
+          },
+          "event": "commit",
+          "value": "default brushes!"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "save_brush_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "brush_libraries.default_brushes.name": "default brushes!"
+    },
+    "expected_panel": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "toggle_brush_library_open_closes_an_open_library_whatever_its_collapse",
+    "setup_svg": "corner_path.svg",
+    "note": "Design A.1: the Open Brush Library submenu row runs toggle_brush_library_open, a keyed list_toggle on id. The open entry is COLLAPSED, so a whole-value toggle would not find it (the stale-field direction, W2b-7); the keyed one removes it.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": true
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_brush_library_open",
+        "params": {
+          "library": "default_brushes"
+        }
+      }
+    ],
+    "expected_panel": {
+      "brushes_panel_content": {
+        "open_libraries": []
+      }
+    }
+  },
+  {
+    "name": "toggle_brush_library_open_opens_a_closed_library_expanded",
+    "setup_svg": "corner_path.svg",
+    "note": "Design A.1, the other direction: a library not in the open list is appended as {id, collapsed: false}.",
+    "panel_state": {
+      "brushes_panel_content": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": []
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_brush_library_open",
+        "params": {
+          "library": "default_brushes"
+        }
+      }
+    ],
+    "expected_panel": {
+      "brushes_panel_content": {
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "toggle_swatch_library_open_closes_an_open_library_whatever_its_collapse",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4: Swatches onto the brush primitives. The Open Swatch Library row runs toggle_swatch_library_open, a keyed list_toggle on id; the open entry is collapsed, so only a keyed toggle finds it. Toggle rather than add-only: SWP-162 allows either, and Brushes toggles.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": true
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_swatch_library_open",
+        "params": {
+          "library": "web_colors"
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "open_libraries": []
+      }
+    }
+  },
+  {
+    "name": "toggle_swatch_library_open_opens_a_closed_library_expanded",
+    "setup_svg": "rect_basic.svg",
+    "note": "The other direction: a library not in the open list is appended as {id, collapsed: false}.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": []
+      }
+    },
+    "actions": [
+      {
+        "action": "toggle_swatch_library_open",
+        "params": {
+          "library": "web_colors"
+        }
+      }
+    ],
+    "expected_panel": {
+      "swatches_panel_content": {
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "save_swatch_library_opens_with_the_library_name",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4: Save Swatch Library opens swatch_library_save with the selected library id and its name proposed, as Save Brush Library does.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "save_swatch_library"
+          }
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "swatch_library_save",
+      "state": {
+        "name": "Web Colors"
+      }
+    }
+  },
+  {
+    "name": "save_swatch_library_ok_saves_a_copy_under_a_new_id",
+    "setup_svg": "rect_basic.svg",
+    "note": "swatch.save_library: \"Sunset Palette\" is a new id, so a copy of web_colors named Sunset Palette is added, opened expanded after the open ones, and selected; web_colors is untouched. Until row 8 the web saved natively (a download only) and the Mac logged.",
+    "panel_state": {
+      "swatches_panel_content": {
+        "selected_library": "web_colors",
+        "selected_swatches": [],
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "swatches_panel_content",
+          "address": {
+            "action": "save_swatch_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "swatch_lib_name_input"
+          },
+          "event": "commit",
+          "value": "Sunset Palette"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "save_swatch_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "swatch_libraries.sunset_palette.name": "Sunset Palette",
+      "swatch_libraries.web_colors.name": "Web Colors",
+      "swatch_libraries.sunset_palette.swatches.0.color": "#000000"
+    },
+    "expected_panel": {
+      "swatches_panel_content": {
+        "selected_library": "sunset_palette",
+        "open_libraries": [
+          {
+            "id": "web_colors",
+            "collapsed": false
+          },
+          {
+            "id": "sunset_palette",
+            "collapsed": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "set_gradient_active_library_switches_the_preset_strip",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-10-28 section 3.4, gradient: the Open Gradient Library row runs set_gradient_active_library, which makes that library the one the preset strip shows (panel.active_library_id; neutrals by default).",
+    "panel_state": {
+      "gradient_panel_content": {
+        "active_library_id": "neutrals"
+      }
+    },
+    "actions": [
+      {
+        "action": "set_gradient_active_library",
+        "params": {
+          "library": "spectrums"
+        }
+      }
+    ],
+    "expected_panel": {
+      "gradient_panel_content": {
+        "active_library_id": "spectrums"
+      }
+    }
+  },
+  {
+    "name": "save_gradient_library_opens_with_the_active_library_name",
+    "setup_svg": "rect_basic.svg",
+    "note": "Design 2026-11-17 gradient-library tier section 2: Save Gradient Library opens gradient_library_save on the ACTIVE library with its name proposed.",
+    "panel_state": {
+      "gradient_panel_content": {
+        "active_library_id": "neutrals"
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_save_library"
+          }
+        }
+      }
+    ],
+    "expected_dialog": {
+      "id": "gradient_library_save",
+      "state": {
+        "name": "Neutrals"
+      }
+    }
+  },
+  {
+    "name": "save_gradient_library_ok_saves_a_copy_that_becomes_active",
+    "setup_svg": "rect_basic.svg",
+    "note": "gradient.save_library: \"Warm Tones\" is a new id, so a copy of neutrals named Warm Tones is added and becomes the active library (the panel shows one); neutrals is untouched.",
+    "panel_state": {
+      "gradient_panel_content": {
+        "active_library_id": "neutrals"
+      }
+    },
+    "actions": [
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_save_library"
+          }
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "gradient_lib_name_input"
+          },
+          "event": "commit",
+          "value": "Warm Tones"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "gradient_save_library_confirm",
+            "label": "Save"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_data": {
+      "gradient_libraries.warm_tones.name": "Warm Tones",
+      "gradient_libraries.neutrals.name": "Neutrals"
+    },
+    "expected_panel": {
+      "gradient_panel_content": {
+        "active_library_id": "warm_tones"
+      }
+    }
+  },
+  {
+    "name": "gradient_reverse_flips_the_selected_fill_gradient",
+    "setup_svg": "gradient_fill_only.svg",
+    "note": "gradient.yaml menu Reverse Gradient; actions.yaml gradient_reverse writes gradient_reversed(panel.stops) to gradient_stops. The rect's linear fill is red@0 (midpoint 35, opacity 60), blue@100; reversed it is blue@0 with midpoint 100 - 35 = 65, red@100 with midpoint 50 (test_fixtures/gradient_stop/menu_transform.json's law). fill_on_top; the rect is the only element (gradient_fill_only.svg is gradient_fill_and_stroke.svg without its path), so Select All is not a mixed selection. The golden differs from the setup only in those two stops.",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_reverse"
+          }
+        }
+      }
+    ],
+    "expected_json": "gradient_reverse_flips_the_selected_fill_gradient_expected.json"
+  },
+  {
+    "name": "gradient_reset_midpoints_resets_the_selected_fill_gradient",
+    "setup_svg": "gradient_fill_only.svg",
+    "note": "gradient.yaml menu Reset Midpoints; actions.yaml gradient_reset_midpoints writes gradient_midpoints_reset(panel.stops) to gradient_stops. The rect's fill midpoint 35 becomes 50; locations, colours and opacities stay, on the one rect (gradient_fill_only.svg). The golden differs from the setup only in that midpoint.",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_reset_midpoints"
+          }
+        }
+      }
+    ],
+    "expected_json": "gradient_reset_midpoints_resets_the_selected_fill_gradient_expected.json"
+  },
+  {
+    "name": "gradient_distribute_stops_spaces_the_selected_fill_gradient",
+    "setup_svg": "gradient_three_stops.svg",
+    "note": "gradient.yaml menu Distribute Stops Evenly; actions.yaml gradient_distribute_stops writes gradient_distributed(panel.stops) to gradient_stops. The rect's linear fill is red@0 (midpoint 35), green@25 (midpoint 70), blue@100; distributed, green moves to 100 * 1 / 2 = 50 and every midpoint is 50 (test_fixtures/gradient_stop/menu_transform.json's law). gradient_three_stops.svg is gradient_fill_only.svg with the green stop added, so the rect is the whole selection and the row is enabled (three stops). The golden differs from the setup only in that location and those two midpoints.",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "panel_menu": {
+          "panel": "gradient_panel_content",
+          "address": {
+            "action": "gradient_distribute_stops"
+          }
+        }
+      }
+    ],
+    "expected_json": "gradient_distribute_stops_spaces_the_selected_fill_gradient_expected.json"
   }
 ]

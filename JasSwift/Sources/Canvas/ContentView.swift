@@ -197,6 +197,9 @@ public class WorkspaceState: ObservableObject {
     /// canvas below. Per-canvas would fork the libraries per tab, which
     /// jas_dioxus does not do.
     public let swatchLibraries = AppSwatchLibraries()
+    /// One editable gradient-library tier for the whole app, adopted as the
+    /// swatch tier is.
+    public let gradientLibraries = AppGradientLibraries()
     /// One editable brush-library tier for the whole app (STATUS-jas row 59),
     /// adopted into every canvas's store below, as jas_dioxus holds
     /// `AppState.brush_libraries` across tabs.
@@ -265,6 +268,9 @@ public class WorkspaceState: ObservableObject {
     private func adoptAppDefaults() {
         for entry in canvases where entry.model.swatchLibraries !== swatchLibraries {
             entry.model.swatchLibraries = swatchLibraries
+        }
+        for entry in canvases where entry.model.gradientLibraries !== gradientLibraries {
+            entry.model.gradientLibraries = gradientLibraries
         }
         for entry in canvases where entry.model.stateStore.sharedBrushLibraries !== brushLibraries {
             entry.model.stateStore.sharedBrushLibraries = brushLibraries

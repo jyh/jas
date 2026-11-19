@@ -3,8 +3,8 @@
     "surface":  "2379x1333",
     "frame_hash":  "fa4e76e83f0e7a21ef07c6400209a25749ce412c630b3d3ed048d74940b8ea22",
     "plan_panel":  "gradient_panel_content",
-    "plan_sha":  "ca2a3ceebd297c99",
-    "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
-    "tab_sha":  "bf94097025b37fd6",
+    "plan_sha":  "6bf8e447d3084b19",
+    "tab":  "[0,0]=on:\"rect_with_stroke.svg *\"",
+    "tab_sha":  "16a48189949a774f",
     "selection_count":  1
 }

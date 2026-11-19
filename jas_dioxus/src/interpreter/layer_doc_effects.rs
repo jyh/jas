@@ -40,6 +40,7 @@ pub fn binding(name: &str, spec: &serde_json::Value, eval: &dyn Fn(&str) -> Valu
                 common: CommonProps { name: Some(name), ..Default::default() },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             });
             serde_json::to_value(&layer).ok()
         }
@@ -187,7 +188,9 @@ fn normalize_path_markers(raw: &[serde_json::Value]) -> Vec<Vec<usize>> {
 }
 
 /// Write one dotted field of the TOP-LEVEL layer at `path` (`common.visibility`,
-/// `common.locked`, `common.opacity`, `name`). A locked layer is locked by
+/// `common.locked`, `common.opacity`, `name`, and the layer's own `color`,
+/// row 53(b), read through `normalize_layer_color` so a non-colour writes
+/// nothing). A locked layer is locked by
 /// inheritance at read time, never by setting the flag on its contents.
 /// Anything else, or a path that is not one top-level index, does nothing.
 fn set_field(model: &mut Model, path: &[usize], dotted: &str, value: &Value) {
@@ -214,6 +217,14 @@ fn set_field(model: &mut Model, path: &[usize], dotted: &str, value: &Value) {
         ("name", Value::Str(s)) => match elem {
             Element::Layer(le) => {
                 le.set_name(s.clone());
+                true
+            }
+            _ => false,
+        },
+        // A `#rrggbb` read from context evaluates to a Color, a literal to a Str.
+        ("color", Value::Str(s) | Value::Color(s)) => match (elem, crate::geometry::element::normalize_layer_color(Some(s))) {
+            (Element::Layer(le), Some(c)) => {
+                le.color = Some(c);
                 true
             }
             _ => false,

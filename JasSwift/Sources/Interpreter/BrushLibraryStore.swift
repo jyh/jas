@@ -29,9 +29,7 @@ public struct BrushLibraryStore {
     /// Write one library. The slug must be what `brush.save_library` makes,
     /// `[a-z0-9_]+`, so no slug can name a path outside `brushes/`.
     public func write(slug: String, manifest: [String: Any]) throws {
-        guard !slug.isEmpty, slug.unicodeScalars.allSatisfy({
-            ($0.value >= 97 && $0.value <= 122) || ($0.value >= 48 && $0.value <= 57) || $0 == "_"
-        }) else { throw BadSlug(slug: slug) }
+        try Self.checkSlug(slug)
         let dir = root.appendingPathComponent("brushes").appendingPathComponent(slug)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
@@ -55,19 +53,77 @@ public struct BrushLibraryStore {
         return out
     }
 
+    /// The save law's alphabet, `[a-z0-9_]+`, so no id can name a path outside
+    /// its folder.
+    static func checkSlug(_ slug: String) throws {
+        guard !slug.isEmpty, slug.unicodeScalars.allSatisfy({
+            ($0.value >= 97 && $0.value <= 122) || ($0.value >= 48 && $0.value <= 57) || $0 == "_"
+        }) else { throw BadSlug(slug: slug) }
+    }
+
+    /// Write one SWATCH library (Save Swatch Library, design §3.4) as
+    /// `<root>/swatches/<id>.json`, the shape of the bundle's
+    /// `workspace/swatches/<id>.json`. The id is checked as a slug is.
+    public func writeSwatches(id: String, manifest: [String: Any]) throws {
+        try writeFlat("swatches", id: id, manifest: manifest)
+    }
+
+    /// Every `swatches/<id>.json` under `root` that holds a JSON object, keyed
+    /// by id. Anything else is skipped.
+    public func loadSwatches() -> [String: Any] { loadFlat("swatches") }
+
+    /// Save Gradient Library's twins (design 2026-11-17 §2):
+    /// `<root>/gradients/<id>.json`, the shape of `workspace/gradients/<id>.json`.
+    public func writeGradients(id: String, manifest: [String: Any]) throws {
+        try writeFlat("gradients", id: id, manifest: manifest)
+    }
+
+    public func loadGradients() -> [String: Any] { loadFlat("gradients") }
+
+    /// One library per `<folder>/<id>.json` (the swatch and gradient layout).
+    private func writeFlat(_ folder: String, id: String, manifest: [String: Any]) throws {
+        try Self.checkSlug(id)
+        let dir = root.appendingPathComponent(folder)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: dir.appendingPathComponent("\(id).json"), options: .atomic)
+    }
+
+    private func loadFlat(_ folder: String) -> [String: Any] {
+        let dir = root.appendingPathComponent(folder)
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return [:] }
+        var out: [String: Any] = [:]
+        for name in entries.sorted() where name.hasSuffix(".json") {
+            if let data = try? Data(contentsOf: dir.appendingPathComponent(name)),
+               let lib = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                out[String(name.dropLast(5))] = lib
+            }
+        }
+        return out
+    }
+
     /// The bundle's libraries with the user's laid over them, slug for slug.
     public static func merged(bundle: [String: Any], user: [String: Any]) -> [String: Any] {
         bundle.merging(user) { _, mine in mine }
     }
 
-    /// A ``StateStore/pendingWriteSink``: writes a `brush_library` request and
-    /// reports success; any other kind is not this sink's and stays queued.
+    /// A ``StateStore/pendingWriteSink``: writes a `brush_library` or a
+    /// `swatch_library` request and reports success; any other kind, or a
+    /// failed write, is not taken and stays queued.
     public var sink: ([String: Any]) -> Bool {
         { w in
-            guard w["kind"] as? String == "brush_library", let slug = w["slug"] as? String,
+            guard let kind = w["kind"] as? String, let slug = w["slug"] as? String,
                   let manifest = w["manifest"] as? [String: Any] else { return false }
-            do { try write(slug: slug, manifest: manifest); return true } catch {
-                NSLog("jas: brush library write failed for \(slug): \(error)")
+            do {
+                switch kind {
+                case "brush_library": try write(slug: slug, manifest: manifest)
+                case "swatch_library": try writeSwatches(id: slug, manifest: manifest)
+                case "gradient_library": try writeGradients(id: slug, manifest: manifest)
+                default: return false
+                }
+                return true
+            } catch {
+                NSLog("jas: \(kind) write failed for \(slug): \(error)")
                 return false
             }
         }

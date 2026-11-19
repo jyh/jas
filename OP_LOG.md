@@ -534,3 +534,47 @@ drawing verb, are reachable solely from tool/panel/dialog YAML and are
 outside the map. (Count note: the prose "33-verb unification" above
 reflects its writing date; the seam now carries 36 `doc.*` verbs — growth
 since, not a discrepancy. The 26 journaling-verb count matches exactly.)
+
+---
+
+## 14. Host-key transactions journal with `ops: []` (2026-11-18)
+
+**Measured on the engine, not reasoned.** A panel that edits the document through
+a *key* has no `doc.*` verb in its path. A slider's `gradient_stops`, the Gradient
+menu's Reverse Gradient, and the stroke, properties, character, paragraph and
+opacity fields are all such keys. Six hosts apply them (`panel_behavior.rs`:
+gradient, stroke, properties, character, paragraph, opacity), each in its own
+transaction, and none goes through `op_apply`.
+
+- **Undo is unaffected.** Reverse Gradient on a selected rect, then `undo`,
+  restores the document byte-for-byte. Undo is the snapshot stacks of §3, which
+  never read ops.
+- **The journal sees the transaction, not the edit.** Reverse Gradient records
+  `Transaction { name: "gradient_reverse", ops: [] }`. The `doc.*` control
+  (`lock`) records `ops: [lock_selection]`.
+- **The readers of `ops` today, and how each treats `[]`,** are listed in
+  `scripts/check_ops_readers.py`, which fails on any reader it does not name.
+  - Coalescing (both ports) declines unless there is exactly one op, so a
+    host-key edit never merges.
+  - The recorder replays ops into a fixture and flags an empty transaction as
+    `opaque_transaction_without_ops`, so a recorded host-key edit replays to
+    nothing, loudly.
+- **Ripens-when (ruled 2026-11-18):** typed ops per host through `op_apply`
+  become REQUIRED the day a reader is added for which an empty list is a wrong
+  answer: op replay, the `checkpoint_equivalence` gate of §6, or the intent
+  ledger. The gate stops that reader's author; the same sentence sits in
+  `op_log.rs`'s header.
+
+**Swift, measured 2026-11-18 (STATUS-jas row 155):** ops are `[]` as on the
+engine. But the transaction was ANONYMOUS (`name: nil`), because Swift's panel
+route (`runYamlActionByName`) ran its effects outside the journal
+owner-bracket, and `Model.editDocument` opened and closed its own
+transaction. Fixed in the same change: the route passes `model` and
+`actionName`, and a transaction `editDocument` opens inside an action's batch
+takes the action's name (`Model.batchActionName`). Both ports now journal
+`{name: gradient_reverse, ops: []}` (pinned by
+`gradientMenuReverseJournalsANamedTransaction`). Undo restores on both.
+REASONED, NOT MEASURED: the engine opens one transaction per batch
+(`panel_behavior.rs`, `begin_txn` when none is open), while Swift opens one per
+`editDocument`. A batch writing two host keys would then be one undo step on
+the engine and two on the Mac. Which actions write two is not censused.

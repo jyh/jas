@@ -1,16 +1,27 @@
 swatch_library_save:
   summary: "Save Swatch Library"
   description: >
-    Modal dialog for saving the selected swatch library to a file. The
-    dialog presents a single text input for the library name. On confirm
-    (Save button, dispatches save_swatch_library_confirm), the selected
-    library's complete data (name, description, and all swatches with
-    their name, color, color_mode, color_type, and global fields) is
-    serialized to JSON and written to workspace/swatches/<name>.json.
-    Save is disabled when the name field is empty.
+    Modal dialog for saving a swatch library under a name. It is opened by
+    the Swatches panel menu's Save Swatch Library (save_swatch_library) on
+    the panel's selected library, whose id arrives as param.library. The
+    dialog presents a single text input for the library name, which starts
+    as the library's own display name (param.name; empty when it has
+    none). Cancel closes the dialog and saves nothing. Save
+    (save_swatch_library_confirm) saves the library under the entered
+    name: in place when the name's id is the library's own id, otherwise as
+    a new library, which is opened in the panel and selected; either way
+    the host is asked to write the library's complete data (name,
+    description, and every swatch with its name, color, color_mode,
+    color_type and global fields) as <id>.json. Save is disabled while the
+    name field is empty.
   modal: true
+  params:
+    library: { type: string, description: "Id of the library being saved" }
+    name: { type: string, nullable: true, description: "The library's display name, proposed as the name to save under" }
   state:
     name: { type: string, default: "", description: "User-entered library name" }
+  init:
+    name: "if param.name == null then '' else param.name"
   content:
     type: container
     layout: column
@@ -30,5 +41,8 @@ swatch_library_save:
             label: "Save"
             action: save_swatch_library_confirm
             variant: primary
+            params:
+              library: "param.library"
+              name: "dialog.name"
             bind:
               disabled: 'dialog.name == ""'

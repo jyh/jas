@@ -664,10 +664,11 @@ fn run_one<'h>(
         }
     }
 
-    // ── Brush and swatch library edits (brush.*, swatch.*) — their own
+    // ── Brush and swatch library edits (brush.*, swatch.*, and
+    // gradient.save_library) — their own
     // function, because only a few arms need the document (W2b-18).
     if let Some((name, spec)) = effect.iter()
-        .find(|(k, _)| k.starts_with("brush.") || k.starts_with("swatch."))
+        .find(|(k, _)| k.starts_with("brush.") || k.starts_with("swatch.") || k.as_str() == "gradient.save_library")
     {
         run_brush_effect(name, spec, ctx, store, model.as_deref_mut(), report);
         return;
@@ -985,8 +986,25 @@ fn run_one<'h>(
         return;
     }
 
-    // list_toggle: { target, value, panel? } — set membership (the Layers
-    // type filter, the Layers twirl's collapsed_paths). `panel.<key>` on the
+    // open_menu: { id } | id — ask the host to pop up the declared menu
+    // item's submenu (the brush-library design, A.3). The id is a LITERAL, as
+    // open_dialog's is; it is recorded as `pending_menu`, the latest request
+    // winning; an empty or non-string id records nothing. Mirrors the
+    // reference's arm and Swift's.
+    if let Some(om) = effect.get("open_menu") {
+        let id = match om {
+            serde_json::Value::Object(o) => o.get("id").and_then(|v| v.as_str()),
+            other => other.as_str(),
+        };
+        if let Some(id) = id.filter(|s| !s.is_empty()) {
+            store.pending_menu = Some(id.to_string());
+        }
+        return;
+    }
+
+    // list_toggle: { target, value, panel?, key?, insert? } — set membership
+    // (the Layers type filter, the Layers twirl's collapsed_paths; keyed over
+    // objects, the Brushes panel's open_libraries). `panel.<key>` on the
     // named panel when `panel` is given, as set_panel_state, else the active.
     if let Some(serde_json::Value::Object(lt)) = effect.get("list_toggle") {
         let target = lt.get("target").and_then(|v| v.as_str()).unwrap_or("");
@@ -999,7 +1017,9 @@ fn run_one<'h>(
                 None => store.active_panel_id().map(|s| s.to_string()),
             };
             if let Some(panel) = panel {
-                store.list_toggle(&panel, parts[1], value_to_json(&value));
+                store.list_toggle_keyed(&panel, parts[1], value_to_json(&value),
+                                        lt.get("key").and_then(|v| v.as_str()),
+                                        lt.get("insert").and_then(|v| v.as_object()));
             }
         }
         return;
@@ -1561,8 +1581,65 @@ fn run_brush_effect(
                 }
             }
         }
+        "brush.save_library" | "swatch.save_library" | "gradient.save_library" => {
+            // Spec: { library, name }, both EXPRESSIONS (the brush-library
+            // design, B.2; Swatches by §3.4). The slug is
+            // `brush_library_slug(name)`; the source's own slug saves IN
+            // PLACE, another existing slug takes the first free `_2`, `_3`,
+            // ...; the library written is a deep copy of the source with
+            // `name` set; a NEW one opens expanded and becomes the selected
+            // library (its selection kept); one `{kind, slug, manifest}`
+            // request goes on `pending_writes` for the host. An empty name or
+            // a missing source is a no-op. Mirrors the reference's
+            // `_save_library`.
+            if let serde_json::Value::Object(args) = spec {
+                // A new GRADIENT library becomes the active one (the panel shows
+                // one; design 2026-11-17 §2) rather than joining an open list.
+                let (kind, panel) = match name {
+                    "brush.save_library" => ("brush", "brushes"),
+                    "swatch.save_library" => ("swatch", "swatches"),
+                    _ => ("gradient", "gradient"),
+                };
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let lib_name = eval_string(args.get("name"), store, ctx);
+                save_library(store, kind, panel, &lib_id, lib_name);
+                if kind == "brush" {
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
         _ => report.unhandled.push(Unhandled::UnknownEffect(name.to_string())),
     }
+}
+
+/// Save library `lib_id` of `data.<kind>_libraries` under `lib_name`: the
+/// `brush.save_library` / `swatch.save_library` law (the arm above).
+fn save_library(store: &mut StateStore, kind: &str, panel: &str, lib_id: &str, lib_name: String) {
+    let libs = store.get_data_path(&format!("{kind}_libraries"));
+    let Some(mut copy) = libs.get(lib_id).filter(|v| v.is_object()).cloned() else { return };
+    if lib_id.is_empty() || lib_name.is_empty() {
+        return;
+    }
+    let base = brush_library_slug(&lib_name);
+    let mut slug = base.clone();
+    if slug != lib_id && libs.get(&slug).is_some() {
+        let mut n = 2;
+        while libs.get(format!("{base}_{n}")).is_some() { n += 1; }
+        slug = format!("{base}_{n}");
+    }
+    copy["name"] = serde_json::Value::String(lib_name);
+    store.set_data_path(&format!("{kind}_libraries.{slug}"), copy.clone());
+    if slug != lib_id && kind == "gradient" {
+        store.set_panel(panel, "active_library_id", serde_json::Value::String(slug.clone()));
+    } else if slug != lib_id {
+        let mut insert = serde_json::Map::new();
+        insert.insert("collapsed".to_string(), serde_json::Value::Bool(false));
+        store.list_toggle_keyed(panel, "open_libraries",
+                                serde_json::Value::String(slug.clone()), Some("id"), Some(&insert));
+        store.set_panel(panel, "selected_library", serde_json::Value::String(slug.clone()));
+    }
+    store.pending_writes.push(serde_json::json!(
+        {"kind": format!("{kind}_library"), "slug": slug, "manifest": copy}));
 }
 
 /// The eight print-config field effects and the `op_apply` verb each one
@@ -3273,6 +3350,26 @@ fn resolve_value_or_expr(
 
 /// Evaluate an arg as a string. Returns "" on null / missing /
 /// non-string result.
+/// Save Brush Library's slug (the brush-library design, B.2): lower-case
+/// ASCII letters and digits kept, every other run of characters one `_`, the
+/// ends trimmed, `library` when nothing is left. The lower-casing is ASCII
+/// ONLY (the Kelvin sign U+212A is not a `k`), as the reference pins.
+fn brush_library_slug(name: &str) -> String {
+    let mut out = String::new();
+    let mut gap = false;
+    for c in name.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            if gap && !out.is_empty() { out.push('_'); }
+            gap = false;
+            out.push(c);
+        } else {
+            gap = true;
+        }
+    }
+    if out.is_empty() { "library".to_string() } else { out }
+}
+
 fn eval_string(
     arg: Option<&serde_json::Value>,
     store: &StateStore,
@@ -8272,6 +8369,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9128,6 +9226,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = crate::document::document::Document {
             layers: vec![layer],
@@ -9428,6 +9527,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9705,6 +9805,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9760,6 +9861,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9816,6 +9918,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -9943,6 +10046,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -10022,6 +10126,7 @@ mod tests {
             ],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -10130,6 +10235,7 @@ mod tests {
             ],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -10200,6 +10306,7 @@ mod tests {
             ],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0,
@@ -10522,6 +10629,7 @@ mod tests {
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
         model.set_document_for_test(doc);
         assert_eq!(model.document().bounds(), (0.0, 0.0, 200.0, 100.0),
@@ -10575,6 +10683,7 @@ mod tests {
             common: CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         })];
         model.set_document_for_test(doc);
         let b = model.document().bounds();
@@ -13642,6 +13751,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer], selected_layer: 0, selection: vec![],
@@ -13693,6 +13803,7 @@ mod tests {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
     }
@@ -13727,6 +13838,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let (_, sel) = cp_probe(&model, 24.0, 36.0);
@@ -13763,6 +13875,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document {
             layers: vec![layer], selected_layer: 0,
@@ -13826,6 +13939,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(outer)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
     }
@@ -13885,6 +13999,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s7_probe_mode(&model, 60.0, 90.0), "idle", "not isolated: a wrapper is one element");
@@ -13905,6 +14020,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s7_probe_mode(&model, 0.0, 30.0), "idle");
@@ -13948,6 +14064,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let before = model.document().clone();
@@ -13978,6 +14095,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         s2_click(&mut model, "doc.path.insert_anchor_on_segment_near", 4.0, 4.0);
@@ -14036,6 +14154,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s3_marquee(&mut model, 80.0, 50.0, 90.0, 60.0),
@@ -14058,6 +14177,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let sel = s3_marquee(&mut model, 22.0, 34.0, 26.0, 38.0);
@@ -14079,6 +14199,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert!(s3_marquee(&mut model, -5.0, 25.0, 5.0, 35.0).is_empty());
@@ -14121,6 +14242,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(child)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document {
             layers: vec![layer], selected_layer: 0,
@@ -14184,6 +14306,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(child)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document {
             layers: vec![layer], selected_layer: 0,
@@ -14255,6 +14378,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(group)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         let mut store = StateStore::new();
@@ -14298,6 +14422,7 @@ mod tests {
             children: vec![std::rc::Rc::new(child)],
             isolated_blending: false, knockout_group: false,
             common: CommonProps { transform: layer_t, ..CommonProps::default() },
+            color: None,
         });
         Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
     }
@@ -14350,6 +14475,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![std::rc::Rc::new(path)],
             isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            color: None,
         });
         let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         path_erase_at_rect(&mut model, x, y, x, y, 2.0);
@@ -15523,6 +15649,308 @@ mod tests {
         (store.get_panel("layers", "type_filter").clone(), report.unhandled)
     }
 
+    // ── open_menu (the brush-library design, A.3) ──
+    // Row for row with the reference's test_open_menu.py and Swift's
+    // OpenMenuEffectTests.
+
+    fn open_menu_after(effects: Vec<serde_json::Value>) -> Option<String> {
+        let mut store = StateStore::new();
+        let report = run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store.pending_menu.clone()
+    }
+
+    #[test]
+    fn open_menu_records_the_request_as_pending_menu() {
+        use serde_json::json;
+        assert_eq!(StateStore::new().pending_menu, None, "a new store has none");
+        assert_eq!(open_menu_after(vec![json!({"open_menu": {"id": "bp_menu_open_library"}})]).as_deref(),
+                   Some("bp_menu_open_library"), "the mapping form");
+        assert_eq!(open_menu_after(vec![json!({"open_menu": "bp_menu_open_library"})]).as_deref(),
+                   Some("bp_menu_open_library"), "the bare form");
+        assert_eq!(open_menu_after(vec![json!({"open_menu": {"id": "param.x"}})]).as_deref(),
+                   Some("param.x"), "the id is a literal, not an expression");
+        for spec in [json!({"id": ""}), json!({}), json!({"id": 3}), json!(""), json!(null), json!(7)] {
+            assert_eq!(open_menu_after(vec![json!({"open_menu": spec.clone()})]), None, "{spec}");
+        }
+        assert_eq!(open_menu_after(vec![json!({"open_menu": {"id": "first"}}), json!({"open_menu": {"id": "second"}})])
+                   .as_deref(), Some("second"), "a later request replaces an earlier one");
+        assert_eq!(open_menu_after(vec![json!({"open_menu": {"id": "first"}}), json!({"open_menu": {"id": ""}})])
+                   .as_deref(), Some("first"), "an empty request leaves an earlier one");
+    }
+
+    // ── gradient.save_library (design 2026-11-17 §2): a NEW library becomes
+    // the active one. Mirrors test_gradient_save_library.py.
+    fn gradient_saved(name: &str, library: &str) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"gradient_libraries": {
+            "neutrals": {"name": "Neutrals", "description": "d", "gradients": [{"name": "Black to White", "type": "linear"}]},
+            "spectrums": {"name": "Spectrums", "gradients": []},
+        }}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("active_library_id".to_string(), serde_json::json!(library));
+        store.init_panel("gradient", defaults);
+        store.set_active_panel(Some("gradient"));
+        let report = run_effects(
+            &[serde_json::json!({"gradient.save_library": {"library": "param.lib", "name": "param.name"}})],
+            &serde_json::json!({"param": {"lib": library, "name": name}}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store
+    }
+
+    #[test]
+    fn gradient_save_library_makes_a_new_library_active_and_queues_its_write() {
+        let store = gradient_saved("Warm Tones", "neutrals");
+        assert_eq!(store.get_data_path("gradient_libraries.warm_tones.name"), serde_json::json!("Warm Tones"));
+        assert_eq!(store.get_data_path("gradient_libraries.warm_tones.description"), serde_json::json!("d"));
+        assert_eq!(store.get_panel("gradient", "active_library_id"), &serde_json::json!("warm_tones"));
+        assert_eq!(store.get_panel("gradient", "open_libraries"), &serde_json::Value::Null, "no open list");
+        assert_eq!(store.pending_writes.iter().map(|w| (w["kind"].clone(), w["slug"].clone())).collect::<Vec<_>>(),
+                   vec![(serde_json::json!("gradient_library"), serde_json::json!("warm_tones"))]);
+        let store = gradient_saved("Neutrals!", "neutrals");
+        assert_eq!(store.get_panel("gradient", "active_library_id"), &serde_json::json!("neutrals"), "in place");
+        let store = gradient_saved("Spectrums", "neutrals");
+        assert_eq!(store.get_panel("gradient", "active_library_id"), &serde_json::json!("spectrums_2"));
+        let store = gradient_saved("", "neutrals");
+        assert!(store.pending_writes.is_empty());
+    }
+
+    // ── swatch.save_library (design §3.4): the brush law over the swatches ──
+    // Mirrors workspace_interpreter/tests/test_swatch_save_library.py.
+
+    fn swatch_saved(name: &str, library: &str) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"swatch_libraries": {
+            "web_colors": {"name": "Web Colors", "swatches": [{"name": "Red", "color": "#ff0000"}]},
+            "my_swatches": {"name": "My Swatches", "swatches": []},
+        }}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("selected_library".to_string(), serde_json::json!(library));
+        defaults.insert("selected_swatches".to_string(), serde_json::json!([0]));
+        defaults.insert("open_libraries".to_string(), serde_json::json!([{"id": "web_colors", "collapsed": true}]));
+        store.init_panel("swatches", defaults);
+        store.set_active_panel(Some("swatches"));
+        let report = run_effects(
+            &[serde_json::json!({"swatch.save_library": {"library": "param.lib", "name": "param.name"}})],
+            &serde_json::json!({"param": {"lib": library, "name": name}}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store
+    }
+
+    #[test]
+    fn swatch_save_library_saves_a_new_library_opened_selected_and_queued() {
+        let store = swatch_saved("Sunset Palette", "web_colors");
+        assert_eq!(store.get_data_path("swatch_libraries.sunset_palette"),
+                   serde_json::json!({"name": "Sunset Palette", "swatches": [{"name": "Red", "color": "#ff0000"}]}));
+        assert_eq!(store.get_data_path("swatch_libraries.web_colors.name"), serde_json::json!("Web Colors"));
+        assert_eq!(store.get_panel("swatches", "open_libraries"), &serde_json::json!(
+            [{"id": "web_colors", "collapsed": true}, {"id": "sunset_palette", "collapsed": false}]));
+        assert_eq!(store.get_panel("swatches", "selected_library"), &serde_json::json!("sunset_palette"));
+        assert_eq!(store.get_panel("swatches", "selected_swatches"), &serde_json::json!([0]));
+        assert_eq!(store.pending_writes, vec![serde_json::json!({"kind": "swatch_library", "slug": "sunset_palette",
+            "manifest": {"name": "Sunset Palette", "swatches": [{"name": "Red", "color": "#ff0000"}]}})]);
+    }
+
+    #[test]
+    fn swatch_save_library_in_place_suffix_and_no_ops() {
+        let store = swatch_saved("Web  Colors!", "web_colors");
+        assert_eq!(store.get_data_path("swatch_libraries.web_colors.name"), serde_json::json!("Web  Colors!"));
+        assert_eq!(store.get_data_path("swatch_libraries").as_object().unwrap().len(), 2, "in place");
+        assert_eq!(store.get_panel("swatches", "selected_library"), &serde_json::json!("web_colors"));
+        let store = swatch_saved("My Swatches", "web_colors");
+        assert!(store.get_data_path("swatch_libraries.my_swatches_2").is_object(), "the first free suffix");
+        for (name, lib) in [("", "web_colors"), ("X", "nowhere"), ("X", "")] {
+            let store = swatch_saved(name, lib);
+            assert!(store.pending_writes.is_empty(), "{name:?} {lib:?}");
+            assert_eq!(store.get_data_path("swatch_libraries").as_object().unwrap().len(), 2, "{name:?} {lib:?}");
+        }
+    }
+
+    // ── brush.save_library (the brush-library design, B.2) ──
+    // Mirrors workspace_interpreter/tests/test_brush_save_library.py arm for
+    // arm; each arm has its own store.
+
+    fn save_libs() -> serde_json::Value {
+        serde_json::json!({
+            "default_brushes": {"name": "Default Brushes", "brushes": [{"slug": "basic", "name": "Basic"}]},
+            "my_brushes": {"name": "My Brushes", "brushes": []},
+            "my_brushes_2": {"name": "My Brushes 2", "brushes": []},
+        })
+    }
+
+    fn save_library(name: serde_json::Value, library: serde_json::Value, libs: serde_json::Value) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"brush_libraries": libs}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("selected_library".to_string(), library.clone());
+        defaults.insert("selected_brushes".to_string(), serde_json::json!(["basic"]));
+        defaults.insert("open_libraries".to_string(), serde_json::json!([{"id": "default_brushes", "collapsed": true}]));
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        let report = run_effects(
+            &[serde_json::json!({"brush.save_library": {"library": "param.lib", "name": "param.name"}})],
+            &serde_json::json!({"param": {"lib": library, "name": name}}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store
+    }
+
+    fn saved(name: &str) -> StateStore {
+        save_library(serde_json::json!(name), serde_json::json!("default_brushes"), save_libs())
+    }
+
+    const SLUG_ROWS: [(&str, &str); 5] = [
+        ("Calligraphy Set", "calligraphy_set"),
+        ("  Ink -- & Wash!  ", "ink_wash"),
+        ("\u{dc}ber 7", "ber_7"),
+        ("--- !!! ---", "library"),
+        // ASCII-only lower-casing: the Kelvin sign is NOT a "k" here, though
+        // a Unicode-wide lower-case would make it one.
+        ("\u{212a}elvin", "elvin"),
+    ];
+
+    #[test]
+    fn save_library_derives_the_slug_from_the_name() {
+        for (name, slug) in SLUG_ROWS {
+            let store = saved(name);
+            assert_eq!(store.get_data_path(&format!("brush_libraries.{slug}.name")), serde_json::json!(name),
+                       "{name:?} -> {slug}");
+        }
+        let distinct: std::collections::HashSet<_> = SLUG_ROWS.iter().map(|(_, s)| *s).collect();
+        assert_eq!(distinct.len(), SLUG_ROWS.len(), "the slug rows are pairwise distinct");
+    }
+
+    #[test]
+    fn save_library_writes_a_deep_copy_with_the_new_name() {
+        let mut store = saved("Calligraphy Set");
+        assert_eq!(store.get_data_path("brush_libraries.calligraphy_set"),
+                   serde_json::json!({"name": "Calligraphy Set", "brushes": [{"slug": "basic", "name": "Basic"}]}));
+        store.set_data_path("brush_libraries.calligraphy_set.brushes.0.name", serde_json::json!("changed"));
+        assert_eq!(store.get_data_path("brush_libraries.calligraphy_set.brushes")[0]["name"],
+                   serde_json::json!("changed"), "the write landed on the copy");
+        assert_eq!(store.get_data_path("brush_libraries.default_brushes.brushes")[0]["name"],
+                   serde_json::json!("Basic"), "and not on the source");
+        assert_eq!(store.get_data_path("brush_libraries.default_brushes.name"), serde_json::json!("Default Brushes"));
+    }
+
+    #[test]
+    fn save_library_opens_a_new_library_expanded_and_selects_it() {
+        let store = saved("Calligraphy Set");
+        assert_eq!(store.get_panel("brushes", "open_libraries"), &serde_json::json!(
+            [{"id": "default_brushes", "collapsed": true}, {"id": "calligraphy_set", "collapsed": false}]));
+        assert_eq!(store.get_panel("brushes", "selected_library"), &serde_json::json!("calligraphy_set"));
+        assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!(["basic"]));
+    }
+
+    #[test]
+    fn save_library_under_the_sources_own_slug_saves_in_place() {
+        let store = saved("Default Brushes!");
+        let keys: Vec<String> = store.get_data_path("brush_libraries").as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys.len(), 3, "{keys:?}");
+        assert_eq!(store.get_data_path("brush_libraries.default_brushes.name"), serde_json::json!("Default Brushes!"));
+        assert_eq!(store.get_panel("brushes", "open_libraries"),
+                   &serde_json::json!([{"id": "default_brushes", "collapsed": true}]));
+        assert_eq!(store.get_panel("brushes", "selected_library"), &serde_json::json!("default_brushes"));
+    }
+
+    #[test]
+    fn save_library_takes_the_first_free_suffix_from_2() {
+        let store = saved("My Brushes");
+        assert!(store.get_data_path("brush_libraries.my_brushes_3").is_object(), "_2 is taken, so _3");
+        assert_eq!(store.get_data_path("brush_libraries.my_brushes"), save_libs()["my_brushes"]);
+        let mut libs = save_libs();
+        libs.as_object_mut().unwrap().remove("my_brushes_2");
+        let store = save_library(serde_json::json!("My Brushes"), serde_json::json!("default_brushes"), libs);
+        assert!(store.get_data_path("brush_libraries.my_brushes_2").is_object(), "the suffix starts at 2");
+    }
+
+    #[test]
+    fn save_library_queues_one_write_for_the_host() {
+        let mut store = saved("Calligraphy Set");
+        assert_eq!(store.pending_writes, vec![serde_json::json!({
+            "kind": "brush_library", "slug": "calligraphy_set",
+            "manifest": {"name": "Calligraphy Set", "brushes": [{"slug": "basic", "name": "Basic"}]}})]);
+        // The queued manifest is not the live library.
+        store.set_data_path("brush_libraries.calligraphy_set.name", serde_json::json!("edited later"));
+        assert_eq!(store.pending_writes[0]["manifest"]["name"], serde_json::json!("Calligraphy Set"));
+        let store = saved("Default Brushes");
+        assert_eq!(store.pending_writes.iter().map(|w| w["slug"].clone()).collect::<Vec<_>>(),
+                   vec![serde_json::json!("default_brushes")], "an in-place save queues the source's slug");
+        assert!(StateStore::new().pending_writes.is_empty(), "a fresh store has none");
+    }
+
+    #[test]
+    fn save_library_with_an_empty_name_or_a_missing_source_is_a_no_op() {
+        use serde_json::json;
+        for (name, library) in [(json!(""), json!("default_brushes")), (json!(null), json!("default_brushes")),
+                                (json!("X"), json!("nowhere")), (json!("X"), json!(null))] {
+            let store = save_library(name.clone(), library.clone(), save_libs());
+            assert_eq!(store.get_data_path("brush_libraries"), save_libs(), "{name} {library}");
+            assert!(store.pending_writes.is_empty(), "{name} {library}");
+            assert_eq!(store.get_panel("brushes", "open_libraries"),
+                       &json!([{"id": "default_brushes", "collapsed": true}]), "{name} {library}");
+        }
+    }
+
+    /// `list_toggle: { target, value, key, insert }` (the brush-library
+    /// design, A.1): membership over a list of keyed OBJECTS (the Brushes
+    /// panel's `open_libraries`, `{id, collapsed}`). Mirrors the reference's
+    /// `TestListToggleKeyed` arm for arm; each arm has its own store.
+    fn keyed_toggle(initial: serde_json::Value, value: &str, insert: Option<serde_json::Value>)
+        -> serde_json::Value {
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("open_libraries".to_string(), initial);
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        let mut spec = serde_json::json!({"target": "panel.open_libraries", "value": value, "key": "id"});
+        if let Some(ins) = insert { spec["insert"] = ins; }
+        let report = run_effects(&[serde_json::json!({"list_toggle": spec})],
+                                 &serde_json::json!({}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        store.get_panel("brushes", "open_libraries").clone()
+    }
+
+    #[test]
+    fn keyed_list_toggle_matches_the_reference_arm_for_arm() {
+        use serde_json::json;
+        // An absent key appends the keyed item with `insert` beside it.
+        assert_eq!(keyed_toggle(json!([{"id": "a", "collapsed": true}]), "\"b\"", Some(json!({"collapsed": false}))),
+                   json!([{"id": "a", "collapsed": true}, {"id": "b", "collapsed": false}]));
+        // A present key is removed whatever its other fields (the stale-field
+        // direction: a whole-value compare would APPEND a second "a").
+        assert_eq!(keyed_toggle(json!([{"id": "a", "collapsed": true}, {"id": "b", "collapsed": false}]),
+                                "\"a\"", Some(json!({"collapsed": false}))),
+                   json!([{"id": "b", "collapsed": false}]));
+        // Only the first keyed match is removed.
+        assert_eq!(keyed_toggle(json!([{"id": "a"}, {"id": "b"}, {"id": "a", "x": 1}]), "\"a\"", None),
+                   json!([{"id": "b"}, {"id": "a", "x": 1}]));
+        // Without insert the item is the key alone.
+        assert_eq!(keyed_toggle(json!([]), "\"a\"", None), json!([{"id": "a"}]));
+        // The key wins over the same field in insert.
+        assert_eq!(keyed_toggle(json!([]), "\"a\"", Some(json!({"id": "zzz", "collapsed": false}))),
+                   json!([{"id": "a", "collapsed": false}]));
+        // A non-object item never matches.
+        assert_eq!(keyed_toggle(json!(["a", {"id": "a"}]), "\"a\"", None), json!(["a"]));
+        // insert is a literal, not an expression.
+        assert_eq!(keyed_toggle(json!([]), "\"a\"", Some(json!({"label": "param.x"}))),
+                   json!([{"id": "a", "label": "param.x"}]));
+    }
+
+    /// The control: the same list and value WITHOUT `key` compares whole
+    /// values and appends, the defect the keyed form exists to fix.
+    #[test]
+    fn unkeyed_list_toggle_still_compares_whole_values() {
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("open_libraries".to_string(), serde_json::json!([{"id": "a", "collapsed": true}]));
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        run_effects(&[serde_json::json!({"list_toggle": {"target": "panel.open_libraries", "value": "\"a\""}})],
+                    &serde_json::json!({}), &mut store, None, None, None, None);
+        assert_eq!(store.get_panel("brushes", "open_libraries"),
+                   &serde_json::json!([{"id": "a", "collapsed": true}, "a"]));
+    }
+
     #[test]
     fn list_toggle_matches_the_reference_row_for_row() {
         use serde_json::json;
@@ -15705,10 +16133,11 @@ mod tests {
     fn real_stub_actions_report_as_not_done() {
         // A log-only body: the purest successful no-op. (`new_symbol` was the
         // example until 2026-10-26, when it became `doc.new_symbol`, and
-        // `layers_nav_down` until 2026-10-28, when it ran its YAML; any
-        // `log`-only action serves, and this one moves when it leaves too.)
-        assert_eq!(report_of_real_action("save_brush_library"),
-                   vec![Unhandled::Logged("save_brush_library".into())]);
+        // `layers_nav_down` until 2026-10-28, when it ran its YAML, and
+        // `save_brush_library` until 2026-11-17, when it opened its dialog;
+        // any `log`-only action serves, and this one moves when it leaves too.)
+        assert_eq!(report_of_real_action("rearrange_artboards"),
+                   vec![Unhandled::Logged("rearrange_artboards (deferred)".into())]);
         // A log BESIDE a handled effect is still a stub for the real work.
         // (`save` on an untitled document dispatches `save_as`, a log too.)
         assert_eq!(report_of_real_action("save_and_close"),

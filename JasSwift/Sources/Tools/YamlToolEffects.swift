@@ -349,26 +349,36 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     // `store.pendingWrites` for the host. An empty name or a missing source
     // is a no-op.
     effects["brush.save_library"] = { spec, ctx, store in
-        guard let args = spec as? [String: Any] else { return nil }
-        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
-        let name = evalStringValue(args["name"], store: store, ctx: ctx)
-        guard !libId.isEmpty, !name.isEmpty,
+        guard let args = spec as? [String: Any],
               let libs = store.getDataPath("brush_libraries") as? [String: Any],
-              var saved = libs[libId] as? [String: Any] else { return nil }
-        var slug = brushLibrarySlug(name)
-        if slug != libId, libs[slug] != nil {
-            var n = 2
-            while libs["\(slug)_\(n)"] != nil { n += 1 }
-            slug = "\(slug)_\(n)"
-        }
-        saved["name"] = name
-        store.setDataPath("brush_libraries.\(slug)", saved)
-        if slug != libId {
-            store.listToggle("brushes", "open_libraries", slug, keyField: "id", insert: ["collapsed": false])
-            store.setPanel("brushes", "selected_library", slug)
-        }
-        store.appendPendingWrite(["kind": "brush_library", "slug": slug, "manifest": saved])
+              let (slug, saved) = savedLibrary(libs, args: args, store: store, ctx: ctx) else { return nil }
+        store.setDataPath("brush_libraries.\(slug.slug)", saved)
+        finishLibrarySave(store, kind: "brush", panel: "brushes", slug: slug, saved: saved)
         syncCanvasBrushes(store: store)
+        return nil
+    }
+
+    // swatch.save_library — { library, name }: the same law over the swatch
+    // libraries (design §3.4), which are app-global here
+    // (`model.swatchLibraries`), queuing a `swatch_library` write.
+    effects["swatch.save_library"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let (slug, saved) = savedLibrary(model.swatchLibraries.libs, args: args,
+                                               store: store, ctx: ctx) else { return nil }
+        model.swatchLibraries.libs[slug.slug] = saved
+        finishLibrarySave(store, kind: "swatch", panel: "swatches", slug: slug, saved: saved)
+        return nil
+    }
+
+    // gradient.save_library — { library, name }: the same law over the
+    // app-global gradient tier (`model.gradientLibraries`, design 2026-11-17
+    // §2); a NEW library becomes the active one.
+    effects["gradient.save_library"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any],
+              let (slug, saved) = savedLibrary(model.gradientLibraries.libs, args: args,
+                                               store: store, ctx: ctx) else { return nil }
+        model.gradientLibraries.libs[slug.slug] = saved
+        finishLibrarySave(store, kind: "gradient", panel: "gradient", slug: slug, saved: saved)
         return nil
     }
 
@@ -4072,6 +4082,43 @@ private func brushUpdateInLibrary(store: StateStore, libId: String, slug: String
 
 /// Push the current data.brush_libraries through to the canvas
 /// renderer's brush registry so the next paint sees the updates.
+/// The slug a library save writes under and whether it is a NEW library
+/// (not the source's own slug).
+private struct LibrarySlug { let slug: String; let isNew: Bool }
+
+/// `brush.save_library` / `swatch.save_library`'s shared law over `libs`: the
+/// slug from the name, in place on the source's own slug, else the first free
+/// `_2`, `_3`, ...; the copy with `name` set. Nil (a no-op) for an empty name
+/// or a missing source.
+private func savedLibrary(_ libs: [String: Any], args: [String: Any], store: StateStore,
+                          ctx: [String: Any]) -> (LibrarySlug, [String: Any])? {
+    let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+    let name = evalStringValue(args["name"], store: store, ctx: ctx)
+    guard !libId.isEmpty, !name.isEmpty, var saved = libs[libId] as? [String: Any] else { return nil }
+    var slug = brushLibrarySlug(name)
+    if slug != libId, libs[slug] != nil {
+        var n = 2
+        while libs["\(slug)_\(n)"] != nil { n += 1 }
+        slug = "\(slug)_\(n)"
+    }
+    saved["name"] = name
+    return (LibrarySlug(slug: slug, isNew: slug != libId), saved)
+}
+
+/// A NEW library opens expanded and becomes the selected library; every save
+/// queues one `{kind: <kind>_library, slug, manifest}` write for the host.
+private func finishLibrarySave(_ store: StateStore, kind: String, panel: String,
+                               slug: LibrarySlug, saved: [String: Any]) {
+    if slug.isNew && kind == "gradient" {
+        // The Gradient panel shows ONE library: the new one becomes active.
+        store.setPanel(panel, "active_library_id", slug.slug)
+    } else if slug.isNew {
+        store.listToggle(panel, "open_libraries", slug.slug, keyField: "id", insert: ["collapsed": false])
+        store.setPanel(panel, "selected_library", slug.slug)
+    }
+    store.appendPendingWrite(["kind": "\(kind)_library", "slug": slug.slug, "manifest": saved])
+}
+
 /// Save Brush Library's slug (`brush.save_library`): ASCII-only lower-casing
 /// (never `lowercased()`, which is Unicode-wide: the Kelvin sign becomes "k"),
 /// ASCII letters and digits kept, every other run one `_`, ends trimmed,

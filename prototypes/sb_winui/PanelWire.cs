@@ -969,7 +969,39 @@ internal static class PanelWire
     /// beneath its children, so a child's own control wins the press.
     /// </summary>
     internal sealed record HitBox(string Path, string Id, double X, double Y, double W, double H, IReadOnlyList<string> Events,
-                                  string? Background = null, string? Border = null);
+                                  string? Background = null, string? Border = null, bool? Selected = null);
+
+    /// <summary>
+    /// jas §927 item 1: a plan entry's `selected`, the engine's resolution of
+    /// the node's `bind.selected_in` membership (by the web's own law, so the
+    /// shell tests no list). True or false as sent; null when the entry has no
+    /// `selected` (the node declares no `selected_in`, or an older core) or
+    /// carries anything but a bool.
+    /// </summary>
+    internal static bool? ReadSelected(System.Text.Json.JsonElement entry) =>
+        entry.ValueKind == System.Text.Json.JsonValueKind.Object && entry.TryGetProperty("selected", out var s)
+            ? s.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
+                _ => null,
+            }
+            : null;
+
+    /// <summary>
+    /// jas §927 item 1: a selected tile's outline, the web's
+    /// `outline:2px solid #007aff` (the swatch tile's `SwatchBorder::Selected`
+    /// and the brush tile's alike). Null for an unselected tile or one with no
+    /// `selected`: it keeps its own edge.
+    /// </summary>
+    internal static (double Width, byte R, byte G, byte B)? TileOutline(bool? selected) =>
+        selected == true ? (2, 0x00, 0x7A, 0xFF) : null;
+
+    /// <summary>
+    /// jas §927 item 1: a tile's UIA `ItemStatus`, `selected` exactly when the
+    /// plan says so, as an option button's is.
+    /// </summary>
+    internal static string TileStatus(bool? selected) => selected == true ? "selected" : "";
 
     /// <summary>
     /// jas §630: a surface's paint, from its `bind.background`: a `#rrggbb`
@@ -1178,7 +1210,8 @@ internal static class PanelWire
                             ? bg.GetString() : null,
                         e.TryGetProperty("values", out var vb) && vb.ValueKind == System.Text.Json.JsonValueKind.Object
                             && vb.TryGetProperty("bind.border", out var bd) && bd.ValueKind == System.Text.Json.JsonValueKind.String
-                            ? bd.GetString() : null));
+                            ? bd.GetString() : null,
+                        ReadSelected(e)));
                 }
             }
             return boxes;
@@ -1649,9 +1682,19 @@ internal static class ToolKnob
 
 /// <summary>
 /// One row of `jas_panel_menu`: a node of a panel's `menu:`, as the core
-/// evaluated it. `Checked` is null for a row that is not checkable.
+/// evaluated it. `Checked` is null for a row that is not checkable. `Id` is
+/// the node's `id` ("" when it has none). `Rows` (jas §915, row 8) is an
+/// `items_from` item's submenu: null for a plain item (no `rows` key), and
+/// an EMPTY list for a submenu with no rows, which is still a submenu.
 /// </summary>
-internal sealed record PanelMenuRow(int Index, string Kind, string Label, string Action, bool Enabled, bool? Checked);
+internal sealed record PanelMenuRow(int Index, string Kind, string Label, string Action, bool Enabled, bool? Checked,
+                                    string Id = "", IReadOnlyList<PanelMenuSubRow>? Rows = null);
+
+/// <summary>
+/// One row of an `items_from` item's submenu (jas §915), as the core evaluated
+/// it. A click sends it back by `Index` as `{"panel", "menu_index", "row"}`.
+/// </summary>
+internal sealed record PanelMenuSubRow(int Index, string Label, string Action, bool Enabled, bool? Checked);
 
 /// <summary>
 /// The panel menu (the owner's note 3, 2026-10-12), read off the core's rows
@@ -1672,18 +1715,45 @@ internal static class PanelMenuWire
             if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return rows;
             foreach (var r in doc.RootElement.EnumerateArray())
             {
-                static string Str(System.Text.Json.JsonElement e, string k) =>
-                    e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
-                bool? chk = r.TryGetProperty("checked", out var c) && (c.ValueKind == System.Text.Json.JsonValueKind.True || c.ValueKind == System.Text.Json.JsonValueKind.False)
-                    ? c.GetBoolean() : null;
-                var en = !r.TryGetProperty("enabled", out var en0) || en0.ValueKind != System.Text.Json.JsonValueKind.False;
-                rows.Add(new PanelMenuRow(
-                    r.TryGetProperty("index", out var i) && i.TryGetInt32(out var iv) ? iv : rows.Count,
-                    Str(r, "kind"), Str(r, "label"), Str(r, "action"), en, chk));
+                List<PanelMenuSubRow>? sub = null;
+                if (r.TryGetProperty("rows", out var rs) && rs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    sub = new List<PanelMenuSubRow>();
+                    foreach (var x in rs.EnumerateArray())
+                    {
+                        sub.Add(new PanelMenuSubRow(Index(x, sub.Count), Str(x, "label"), Str(x, "action"), Enabled(x), Checked(x)));
+                    }
+                }
+                rows.Add(new PanelMenuRow(Index(r, rows.Count), Str(r, "kind"), Str(r, "label"), Str(r, "action"),
+                                          Enabled(r), Checked(r), Str(r, "id"), sub));
             }
         }
         catch (System.Text.Json.JsonException) { rows.Clear(); }
         return rows;
+
+        static string Str(System.Text.Json.JsonElement e, string k) =>
+            e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+        static int Index(System.Text.Json.JsonElement e, int fallback) =>
+            e.TryGetProperty("index", out var i) && i.TryGetInt32(out var iv) ? iv : fallback;
+        static bool Enabled(System.Text.Json.JsonElement e) =>
+            !e.TryGetProperty("enabled", out var v) || v.ValueKind != System.Text.Json.JsonValueKind.False;
+        static bool? Checked(System.Text.Json.JsonElement e) =>
+            e.TryGetProperty("checked", out var c) && (c.ValueKind == System.Text.Json.JsonValueKind.True || c.ValueKind == System.Text.Json.JsonValueKind.False)
+                ? c.GetBoolean() : null;
+    }
+
+    /// <summary>The plan row whose `id` is <paramref name="id"/> (an act reply's
+    /// `menu`, jas §915), or null; an empty id finds nothing.</summary>
+    internal static PanelMenuRow? ById(IEnumerable<PanelMenuRow> rows, string id) =>
+        id.Length == 0 ? null : rows.FirstOrDefault(r => string.Equals(r.Id, id, StringComparison.Ordinal));
+
+    /// <summary>The dispatch for a menu click: `{"panel", "menu_index"}`, plus
+    /// `"row"` for a submenu row (jas §915) when <paramref name="row"/> is 0 or more.</summary>
+    internal static string RunJson(string panelId, int index, int row)
+    {
+        var d = new Dictionary<string, object> { ["panel"] = panelId, ["menu_index"] = index };
+        if (row >= 0) { d["row"] = row; }
+        return System.Text.Json.JsonSerializer.Serialize(d);
     }
 
     /// <summary>`SB_PANEL_MENU_SYNTH=&lt;group key&gt;:&lt;index&gt;`, or null for
@@ -2792,6 +2862,60 @@ internal static class ActWire
     }
 
     /// <summary>
+    /// jas §915: the panel-menu item an act reply names in `menu`, whose rows
+    /// the shell pops up at the act's control; null for null, absent, a
+    /// non-string or an unreadable reply.
+    /// </summary>
+    internal static string? Menu(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("menu", out var t)
+                   && t.ValueKind == System.Text.Json.JsonValueKind.String
+                ? t.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// jas §916: the file writes an act reply names in `writes`, in order, each
+    /// `{kind, slug, manifest}`. `Manifest` is the library JSON verbatim, or
+    /// null when the write carries none. No key, `[]` or unreadable is none.
+    /// </summary>
+    internal static List<LibraryWrite> Writes(string reply)
+    {
+        var list = new List<LibraryWrite>();
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("writes", out var ws)
+                || ws.ValueKind != System.Text.Json.JsonValueKind.Array) { return list; }
+            foreach (var w in ws.EnumerateArray())
+            {
+                var manifest = w.ValueKind == System.Text.Json.JsonValueKind.Object && w.TryGetProperty("manifest", out var m)
+                               && m.ValueKind == System.Text.Json.JsonValueKind.Object ? m.GetRawText() : null;
+                list.Add(new LibraryWrite(Str(w, "kind"), Str(w, "slug"), manifest));
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            list.Clear();
+        }
+        return list;
+
+        static string Str(System.Text.Json.JsonElement e, string k) =>
+            e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(k, out var v)
+            && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+    }
+
+    /// <summary>
     /// jas §637: whether bytes from `jas_document_pdf` are a PDF (they open
     /// `%PDF-`). Anything else is never written to disk as one.
     /// </summary>
@@ -2937,6 +3061,56 @@ internal static class ActWire
         {
             return null;
         }
+    }
+}
+
+/// <summary>
+/// A `gradient_tile` (gradient.yaml `grad_tiles_row`, the preset strip): one
+/// library gradient, `bind.gradient`, drawn as the web draws it
+/// (`renderer.rs` `gradient_css_background`): its stops as a ramp, radial for
+/// a `radial` gradient and linear at its `angle` otherwise. Pure, so
+/// `sb_winui_tests` drives it; a click is the leaf's, sent by plan path.
+/// </summary>
+internal static class GradientTileWire
+{
+    /// <summary>A tile's gradient: `type` (`linear` when absent), `angle` in
+    /// degrees (0 when absent) and its stops.</summary>
+    internal readonly record struct Tile(string Type, double Angle, IReadOnlyList<GradientSliderWire.Stop> Stops);
+
+    /// <summary>`bind.gradient` as a tile, or null (the muted tile) when it is
+    /// not a JSON object whose `stops` read as at least two stops by
+    /// <see cref="GradientSliderWire.Stops"/>, the slider's own reading.</summary>
+    internal static Tile? Read(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var g = doc.RootElement;
+            if (g.ValueKind != System.Text.Json.JsonValueKind.Object || !g.TryGetProperty("stops", out var st)) { return null; }
+            if (GradientSliderWire.Stops(st.GetRawText()) is not { Count: >= 2 } stops) { return null; }
+            var type = g.TryGetProperty("type", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String ? t.GetString()! : "linear";
+            var angle = g.TryGetProperty("angle", out var a) && a.TryGetDouble(out var ad) ? ad : 0;
+            return new Tile(type, angle, stops);
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>A linear ramp's start and end on a <paramref name="w"/> x
+    /// <paramref name="h"/> tile, in the tile's unit square (y down): angle 0
+    /// runs left to right and 90 bottom to top, as the web's CSS `90 - angle`
+    /// does. The line runs corner to corner as CSS's does, length
+    /// |w cos a| + |h sin a| through the centre (jas, 11-18: a radius-0.5
+    /// line was 1/sqrt 2 of the web's at 45 degrees). A tile with no extent is
+    /// the unit square's.</summary>
+    internal static (double Sx, double Sy, double Ex, double Ey) Ends(double angle, double w, double h)
+    {
+        if (!(w > 0) || !(h > 0)) { w = 1; h = 1; }
+        var r = angle * Math.PI / 180;
+        var half = (Math.Abs(w * Math.Cos(r)) + Math.Abs(h * Math.Sin(r))) / 2;
+        double dx = Math.Cos(r) * half / w, dy = -Math.Sin(r) * half / h;
+        static double Snap(double v) => Math.Abs(v) < 1e-9 ? 0 : v;
+        return (Snap(0.5 - dx), Snap(0.5 - dy), Snap(0.5 + dx), Snap(0.5 + dy));
     }
 }
 
@@ -3114,4 +3288,31 @@ internal static class PanelKeys
     /// and Ctrl+A arrived. Every other key bubbles as before.
     /// </summary>
     internal static bool BeforeScroller(uint code) => code is 0xF700 or 0xF701 or 0xF702 or 0xF703 or 0xF729 or 0xF72B;
+}
+
+/// <summary>
+/// jas §916: one library file an act reply names (the engine owns no file
+/// system). <see cref="RelativePath"/> says where it goes under the app's
+/// data root, or refuses it.
+/// </summary>
+internal sealed record LibraryWrite(string Kind, string Slug, string? Manifest)
+{
+    /// <summary>
+    /// The write's path under the data root, `/`-separated: a `brush_library`
+    /// at `brushes/&lt;slug&gt;/library.json`, a `swatch_library` at
+    /// `swatches/&lt;slug&gt;.json`, a `gradient_library` at
+    /// `gradients/&lt;slug&gt;.json`. Null (refused) for any other kind, or a
+    /// slug outside `[a-z0-9_]+`, so no slug can name a path outside its folder.
+    /// </summary>
+    internal static string? RelativePath(string kind, string slug)
+    {
+        if (slug.Length == 0 || !slug.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_')) { return null; }
+        return kind switch
+        {
+            "brush_library" => $"brushes/{slug}/library.json",
+            "swatch_library" => $"swatches/{slug}.json",
+            "gradient_library" => $"gradients/{slug}.json",
+            _ => null,
+        };
+    }
 }

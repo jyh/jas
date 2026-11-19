@@ -1301,3 +1301,23 @@ private func testLayout() -> WorkspaceLayout {
     layoutApply(&l, opTogglePane(.toolbar))
     #expect(l.panes()!.isPaneVisible(.toolbar), "a second toggle shows it again")
 }
+
+/// Row 160: the default dock IS `default_layouts.yaml`'s `Default`, read from
+/// the compiled bundle, never a hand copy. The expectation is derived from the
+/// bundle's bytes here (the twin of Rust's
+/// `the_default_dock_is_the_specs_default_layout`), so a YAML edit moves it.
+@Test func theDefaultDockIsTheSpecsDefaultLayout() throws {
+    let ws = try #require(WorkspaceData.load(), "the compiled bundle")
+    let layouts = try #require(ws.data["default_layouts"] as? [String: Any])
+    let dflt = try #require(layouts["Default"] as? [String: Any])
+    let dock = try #require(dflt["dock"] as? [String: Any])
+    let main = try #require(dock["dock_main"] as? [String: Any])
+    let groups = try #require(main["groups"] as? [[String: Any]])
+    let want: [[String]] = groups.map { ($0["panels"] as? [String]) ?? [] }
+    let wantActive: [Int] = groups.map { ($0["active"] as? Int) ?? 0 }
+    #expect(want.count >= 2, "a real population: \(want)")
+    let l = WorkspaceLayout.defaultLayout()
+    let got = l.anchoredDock(.right)!.groups
+    #expect(got.map { $0.panels.map(layoutPanelKindStr) } == want, "the default dock vs default_layouts.yaml Default")
+    #expect(got.map { $0.active } == wantActive)
+}

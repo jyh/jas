@@ -118,7 +118,7 @@ public sealed partial class MainWindow
             Dictionary<string, string> Values, Dictionary<string, string> Static,
             Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items,
             SliderTrack? Track = null, IReadOnlyList<string>? Events = null,
-            PanelWire.LeafParts? Parts = null)
+            PanelWire.LeafParts? Parts = null, bool? Selected = null)
         {
             internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
             internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -191,7 +191,10 @@ public sealed partial class MainWindow
                     // Row 56 (#796): a labelled icon_button's icon and label rects;
                     // null for every other leaf, and from an older core.
                     PanelWire.ReadParts(e.TryGetProperty("parts", out var pts) ? pts.GetRawText() : null,
-                                        rect.GetProperty("x").GetInt64(), rect.GetProperty("y").GetInt64())));
+                                        rect.GetProperty("x").GetInt64(), rect.GetProperty("y").GetInt64()),
+                    // jas §927 item 1: a tile's `bind.selected_in` membership, as
+                    // the engine resolved it; null on any other leaf.
+                    PanelWire.ReadSelected(e)));
             }
             var icons = new Dictionary<string, (string Viewbox, string Svg)>();
             foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -589,6 +592,16 @@ public sealed partial class MainWindow
                     case "gradient_slider":
                         gradients++;
                         el = BuildGradientSlider(leaf);
+                        break;
+
+                    // jas 917: a preset-strip tile (gradient.yaml `grad_tiles_row`),
+                    // one library gradient. A tile has NO id (the foreach repeats
+                    // it), so its plan path addresses it, as a library swatch's
+                    // does; ApplyLeafValues draws `bind.gradient` on every draw.
+                    case "gradient_tile":
+                        gradients++;
+                        if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { unaddressable++; }
+                        el = BuildGradientTile(leaf);
                         break;
 
                     // A `length_input` is this control too: the person types TEXT
@@ -1093,8 +1106,10 @@ public sealed partial class MainWindow
         /// a 1-DIP border, as the web and the Mac draw it, holding the core's
         /// `thumbnail.svg` (<see cref="PanelWire.Thumbnail"/>) fitted inside, its
         /// aspect kept. No thumbnail is the blank square, counted in `empty`.
+        /// A <see cref="PreviewTile"/>, so the square reaches the UIA tree (a
+        /// `Border` has no automation peer: O97 read it ABSENT, jas 11-18).
         /// </summary>
-        private Border BuildElementPreview(PaneLeaf leaf, ref int empty)
+        private PreviewTile BuildElementPreview(PaneLeaf leaf, ref int empty)
         {
             var host = new ContentControl
             {
@@ -1111,12 +1126,65 @@ public sealed partial class MainWindow
             {
                 empty++;
             }
-            return new Border
+            var tile = new PreviewTile
             {
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
                 BorderBrush = _paneMutedBrush,
                 BorderThickness = new Thickness(1),
-                Child = host,
+            };
+            tile.Children.Add(host);
+            return tile;
+        }
+
+        /// <summary>
+        /// jas 917: a `gradient_tile`, a bordered tile filled on every draw from
+        /// `bind.gradient` (<see cref="GradientTileBrush"/>). A tap sends the
+        /// leaf's `click` by its plan path; the engine runs the tile's `set`s. A
+        /// tile with neither an id nor a path is counted unaddressable and sends
+        /// nothing.
+        /// </summary>
+        private SwatchTile BuildGradientTile(PaneLeaf leaf)
+        {
+            var tile = new SwatchTile { BorderBrush = _paneMutedBrush, BorderThickness = new Thickness(1) };
+            var id = leaf.Id;
+            var path = leaf.Path;
+            if (PanelWire.Addressable(id, path)) { tile.Tapped += (_, _) => OnPaneClick(id, path); }
+            return tile;
+        }
+
+        /// <summary>
+        /// jas 917: a tile's ramp. Linear at the gradient's angle
+        /// (<see cref="GradientTileWire.Ends"/>) or radial, each stop at its
+        /// location with its opacity as alpha, as the web's CSS background draws
+        /// it. A gradient the tile cannot read is the muted fill, never a guess.
+        /// </summary>
+        private Microsoft.UI.Xaml.Media.Brush GradientTileBrush(string? json, double w, double h)
+        {
+            if (GradientTileWire.Read(json) is not { } g) { return _paneMutedBrush; }
+            var stops = new Microsoft.UI.Xaml.Media.GradientStopCollection();
+            foreach (var st in g.Stops)
+            {
+                var c = PanelWire.SwatchColor(st.Color);
+                stops.Add(new Microsoft.UI.Xaml.Media.GradientStop
+                {
+                    Color = c is { } k
+                        ? Microsoft.UI.ColorHelper.FromArgb((byte)Math.Round(255 * st.Opacity / 100), k.R, k.G, k.B)
+                        : Microsoft.UI.Colors.Gray,
+                    Offset = st.Location / 100,
+                });
+            }
+            if (g.Type == "radial")
+            {
+                var radial = new Microsoft.UI.Xaml.Media.RadialGradientBrush();
+                foreach (var st in stops) { radial.GradientStops.Add(st); }
+                return radial;
+            }
+            var (sx, sy, ex, ey) = GradientTileWire.Ends(g.Angle, w, h);
+            return new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(sx, sy),
+                EndPoint = new Windows.Foundation.Point(ex, ey),
+                GradientStops = stops,
             };
         }
 
@@ -1817,10 +1885,15 @@ public sealed partial class MainWindow
             {
                 case SwatchTile swatch when leaf.Type == "color_swatch":
                     swatch.Background = SwatchBrush(leaf.Value("bind.color"));
+                    ApplyTileOutline(swatch, leaf.Selected);
                     break;
 
                 case GradientSliderSurface slider when leaf.Type == "gradient_slider":
                     DrawGradientSlider(slider, leaf);
+                    break;
+
+                case SwatchTile tile when leaf.Type == "gradient_tile":
+                    tile.Background = GradientTileBrush(leaf.Value("bind.gradient"), leaf.W, leaf.H);
                     break;
 
                 case TextBlock tb when leaf.Type == "text":
@@ -2078,12 +2151,44 @@ public sealed partial class MainWindow
                 : new(Microsoft.UI.Colors.Transparent);
 
         /// <summary>
+        /// jas §927 item 1: a swatch tile's selection, from the plan row's
+        /// `selected`: the web's 2px accent outline (`PanelWire.TileOutline`)
+        /// when selected, else the tile's own 1px muted edge, and UIA
+        /// `ItemStatus` `selected` exactly when selected.
+        /// </summary>
+        private void ApplyTileOutline(SwatchTile tile, bool? selected)
+        {
+            if (PanelWire.TileOutline(selected) is { } o)
+            {
+                tile.BorderThickness = new Thickness(o.Width);
+                tile.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, o.R, o.G, o.B));
+            }
+            else
+            {
+                tile.BorderThickness = new Thickness(1);
+                tile.BorderBrush = _paneMutedBrush;
+            }
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(tile, PanelWire.TileStatus(selected));
+        }
+
+        /// <summary>
         /// Finding 6: a surface's `bind.border` (the Layers select square's), drawn
         /// as the Border's own stroke. A spelling <see cref="PanelWire.SurfaceBorder"/>
         /// refuses draws no border and, at build, is named in a row.
         /// </summary>
         private void ApplySurfaceBorder(Border surface, PanelWire.HitBox hit, bool report)
         {
+            // jas §927 item 1: a brush tile is a surface (UIA reads it as a Group),
+            // so it carries its own ItemStatus, as a swatch tile does.
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(surface, PanelWire.TileStatus(hit.Selected));
+            if (PanelWire.TileOutline(hit.Selected) is { } sel)
+            {
+                surface.BorderThickness = new Thickness(sel.Width);
+                surface.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, sel.R, sel.G, sel.B));
+                return;
+            }
             if (PanelWire.SurfaceBorder(hit.Border) is { } b)
             {
                 surface.BorderThickness = new Thickness(b.Width);
@@ -2755,6 +2860,17 @@ public sealed partial class MainWindow
 /// edge and takes the same tap; the peer is the only addition.
 /// </summary>
 internal sealed partial class SwatchTile : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// An `element_preview`'s square (the Layers row's `lp_preview`): a white,
+/// bordered tile that UI Automation can SEE, as <see cref="SwatchTile"/> is.
+/// It draws as the `Border` it replaced; the peer is the only addition.
+/// </summary>
+internal sealed partial class PreviewTile : Grid
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);

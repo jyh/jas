@@ -1364,6 +1364,7 @@ mod tests {
                 visibility: Visibility::Invisible,
                 ..Default::default()
             },
+            color: None,
         }));
         let bytes = document_to_pdf(&doc);
         let s = String::from_utf8_lossy(&bytes);

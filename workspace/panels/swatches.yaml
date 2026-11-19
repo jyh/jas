@@ -158,21 +158,26 @@ menu:
       when no swatches are selected.
   - separator
   - label: "Open Swatch Library"
+    id: sp_menu_open_library
     type: submenu
     dynamic: true
-    # The native menu view special-cases this command to render the
-    # dynamic library flyout (one row per workspace/swatches/*.json).
-    # An explicit action lets the generic menu builder emit the same
-    # Action the renderer keys on, instead of the native code
-    # hardcoding the entry.
-    action: open_swatch_library
+    items_from:
+      source: "keys(data.swatch_libraries)"
+      as: lib
+      item:
+        label: "{{if data.swatch_libraries[lib].name == null then lib else data.swatch_libraries[lib].name}}"
+        action: toggle_swatch_library_open
+        params: { library: "lib" }
+        checked_when: "any(panel.open_libraries, fun o -> o.id == lib)"
     description: >
-      Submenu listing all available swatch libraries discovered from
-      workspace/swatches/*.json files. Selecting a library adds it to
-      the panel's open_libraries list, displaying it as a new
-      collapsible section in the swatch tiles area. Libraries that are
-      already open are shown with a checkmark. Each library appears as
-      a disclosure section with a triangle toggle and the library name.
+      Submenu with one row per swatch library the app knows (the
+      workspace/swatches/*.json files), rebuilt each time the menu
+      opens, in id order (Unicode code point), each labelled with the
+      library's name (its id when it has none). A row is checked when
+      its library is open in the panel. Choosing a row opens or closes
+      that library (toggle_swatch_library_open): an open library is a
+      collapsible section in the swatch tiles area, with a triangle
+      toggle and the library name.
   - label: "Save Swatch Library"
     action: save_swatch_library
     description: >
@@ -422,8 +427,10 @@ content:
         selection, Shift+click to extend a range, Cmd/Ctrl+click to toggle.
         The selected_swatches panel state tracks the selection as a list of
         indices within the selected_library. Visual selection feedback is
-        provided by the data-bind-selected-in binding, which adds a
-        jas-selected CSS class (2px accent-colored outline).
+        provided by the tile's selected_in binding: a 2px accent-colored
+        outline on each selected tile of the selected library only. The
+        same index in another open library is a different swatch, so it is
+        not outlined.
 
         Double-click a swatch to open the Swatch Options dialog in edit mode,
         passing the swatch's name, color, color_mode, library id, and index

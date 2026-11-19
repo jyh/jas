@@ -686,6 +686,7 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // Mutable brush libraries for rendering — the Brushes panel binds its
     // per-library disclosure label/tiles to data.brush_libraries[lib.id].
     m.insert("_brush_libraries".into(), st.brush_libraries.clone());
+    m.insert("_gradient_libraries".into(), st.gradient_libraries.clone());
 
     // Document generation counter — changes on every document mutation,
     // ensuring the layers panel re-renders when selection, visibility,
@@ -1023,6 +1024,10 @@ pub(crate) fn panel_body_eval_ctx(
             .cloned().unwrap_or(serde_json::Value::Null),
         "brush_libraries": live_state_map.get("_brush_libraries")
             .cloned().unwrap_or(serde_json::Value::Null),
+        // The Gradient preset strip's libraries: the app tier
+        // (`AppState::gradient_libraries`, design 2026-11-17 §1).
+        "gradient_libraries": live_state_map.get("_gradient_libraries")
+            .cloned().unwrap_or(serde_json::Value::Null),
         "concepts": crate::interpreter::workspace::concepts_list(),
         "_doc_generation": live_state_map.get("_doc_generation")
             .cloned().unwrap_or(serde_json::Value::Null)
@@ -1128,17 +1133,10 @@ pub(crate) fn build_dock_groups(
         let act_drop = act.clone();
         let group_collapsed = group.collapsed;
 
-        // Tab insertion indicator: which index has the drop caret?
-        let tab_drop_idx: Option<usize> = if cur_drag.is_some() {
-            match cur_drop {
-                Some(DropTarget::TabBar { group: g, index }) if g == (GroupAddr { dock_id: did, group_idx: gi }) => Some(index),
-                _ => None,
-            }
-        } else {
-            None
-        };
-        let panel_count = group.panels.len();
-
+        // The tab drop caret is the overlay's (`DockDropOverlay`, row 124): the
+        // tree reads the drag signals with `peek()` and does not re-render mid-drag,
+        // so an in-bar caret here never drew, and if anything did re-render the tree
+        // it would shift the tabs under the pointer (row 134).
         // Tab bar buttons — each tab is individually draggable
         let tab_nodes: Vec<Result<VNode, RenderError>> = group.panels.iter().enumerate().flat_map(|(pi, &kind)| {
             let act_click = act_tabs.clone();
@@ -1153,20 +1151,12 @@ pub(crate) fn build_dock_groups(
             });
             let outline = "";
 
-            // Insertion indicator before this tab
-            let show_caret = tab_drop_idx == Some(pi);
             let mut nodes: Vec<Result<VNode, RenderError>> = Vec::new();
-            if show_caret {
-                nodes.push(rsx! {
-                    div {
-                        key: "tab-caret-{gi}-{pi}",
-                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
-                    }
-                });
-            }
             // The tab's DOM id derives from the panel's YAML content id,
             // as the Mac tab's accessibility identifier does (test_hook.rs).
             let tab_id = crate::workspace::test_hook::tab_dom_id(panel_kind_to_content_id(kind));
+            #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+            let tab_id_drop = tab_id.clone(); // the dragover's rect lookup (row 131)
             nodes.push(rsx! {
                 div {
                     key: "dock-tab-{gi}-{pi}",
@@ -1192,10 +1182,23 @@ pub(crate) fn build_dock_groups(
                         evt.stop_propagation();
                         let coords = evt.data().page_coordinates();
                         last_drag_pos.set((coords.x, coords.y));
-                        // Left half → insert before this tab; right half → insert after
-                        let x = evt.data().element_coordinates().x;
-                        let mid = 30.0; // approximate tab half-width
-                        let idx = if x < mid { pi } else { pi + 1 };
+                        // Left half → insert before this tab; right half → insert after,
+                        // split at the tab's own midpoint (row 131). The offset is read
+                        // against the TAB's rect, not the event target's, which can be a
+                        // child (the close button).
+                        #[cfg(target_arch = "wasm32")]
+                        let (x, width) = {
+                            let c = evt.data().client_coordinates();
+                            web_sys::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.get_element_by_id(&tab_id_drop))
+                                .map(|el| { let r = el.get_bounding_client_rect(); (c.x - r.left(), r.width()) })
+                                .unwrap_or((evt.data().element_coordinates().x, 60.0))
+                        };
+                        // No DOM off the web, where no drag event arrives; the old 30 px half.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let (x, width) = (evt.data().element_coordinates().x, 60.0);
+                        let idx = tab_drop_slot(pi, x, width);
                         drop_target_sig.set(Some(DropTarget::TabBar {
                             group: GroupAddr { dock_id: did, group_idx: gi },
                             index: idx,
@@ -1237,15 +1240,6 @@ pub(crate) fn build_dock_groups(
                     }
                 }
             });
-            // After-last caret (only on the final tab)
-            if pi == panel_count - 1 && tab_drop_idx == Some(panel_count) {
-                nodes.push(rsx! {
-                    div {
-                        key: "tab-caret-{gi}-end",
-                        style: "width:3px; align-self:stretch; background-color:{THEME_ACCENT}; border-radius:1px; flex-shrink:0; transition:width 0.1s ease;",
-                    }
-                });
-            }
             nodes
         }).collect();
 
@@ -1267,6 +1261,8 @@ pub(crate) fn build_dock_groups(
         let tab_bar_border = if tab_bar_drop { format!("2px solid {THEME_ACCENT}") } else { format!("1px solid {THEME_BORDER}") };
 
         let group_dom_id = crate::workspace::test_hook::dock_group_dom_id(did.0, gi);
+        #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+        let group_dom_id_drop = group_dom_id.clone(); // the dragover's rect lookup (row 132)
 
         rsx! {
             div {
@@ -1277,13 +1273,22 @@ pub(crate) fn build_dock_groups(
                     evt.prevent_default();
                     let coords = evt.data().page_coordinates();
                     last_drag_pos.set((coords.x, coords.y));
-                    let y = evt.data().element_coordinates().y;
-                    let mid = 30.0;
-                    if y < mid {
-                        drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi }));
-                    } else {
-                        drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: gi + 1 }));
-                    }
+                    // The side is read against the GROUP's own rect (row 132), not
+                    // the event target's: the target is whichever body widget is
+                    // under the pointer.
+                    #[cfg(target_arch = "wasm32")]
+                    let (y, height) = {
+                        let c = evt.data().client_coordinates();
+                        web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.get_element_by_id(&group_dom_id_drop))
+                            .map(|el| { let r = el.get_bounding_client_rect(); (c.y - r.top(), r.height()) })
+                            .unwrap_or((evt.data().element_coordinates().y, 60.0))
+                    };
+                    // No DOM off the web, where no drag event arrives; the old 30 px split.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let (y, height) = (evt.data().element_coordinates().y, 60.0);
+                    drop_target_sig.set(Some(DropTarget::GroupSlot { dock_id: did, group_idx: group_body_slot(gi, y, height) }));
                 },
                 ondrop: move |evt: Event<DragData>| {
                     evt.prevent_default();
@@ -1295,7 +1300,9 @@ pub(crate) fn build_dock_groups(
                             match (src, tgt) {
                                 (DragPayload::Group(from), DropTarget::GroupSlot { dock_id: to_dock, group_idx: to_idx }) => {
                                     if from.dock_id == to_dock {
-                                        st.workspace_layout.move_group_within_dock(to_dock, from.group_idx, to_idx);
+                                        // The slot is converted to the post-removal index,
+                                        // so the group lands at the bar (row 133).
+                                        st.workspace_layout.move_group_within_dock(to_dock, from.group_idx, group_slot_drop_index(from, to_dock, to_idx));
                                     } else {
                                         st.workspace_layout.move_group_to_dock(from, to_dock, to_idx);
                                     }
@@ -1405,6 +1412,7 @@ pub(crate) fn build_dock_groups(
                                             addr,
                                             x: coords.x,
                                             y: coords.y,
+                                            only: None,
                                         }));
                                         menu_bar_open.set(None);
                                     },
@@ -1608,6 +1616,36 @@ pub(crate) fn slot_bar(rect_of: impl Fn(usize) -> Option<FeedbackRect>, group_id
 /// `None` past the last tab. An index at an existing tab draws a 3px caret on
 /// that tab's LEFT edge; the index past the end draws it on the last tab's
 /// RIGHT edge; a group with no tabs draws nothing.
+/// The `to` for a whole group dragged from `from` and dropped at dock `slot`
+/// of `to_dock` (a gap between groups, counted with the dragged group still in
+/// place). Within its own dock the move takes an index AFTER the group is
+/// removed, so a slot past it drops by one; into another dock the slot is the
+/// index. WORKSPACE.md "Moving a Panel to Another Group"; row 133.
+pub(crate) fn group_slot_drop_index(from: GroupAddr, to_dock: DockId, slot: usize) -> usize {
+    if from.dock_id == to_dock {
+        crate::workspace::layout_apply::reorder_to_for_drop_slot(from.group_idx, slot)
+    } else {
+        slot
+    }
+}
+
+/// The dock slot for a new group made by a drop on group `group_idx`'s body
+/// at `y` px below the GROUP's top edge, the group being `height` px tall:
+/// above the group in its upper half, below it from the midpoint on
+/// (WORKSPACE.md "Moving a Panel to Another Group"; row 132). The twin of
+/// Swift's `dockGroupDropTarget` body case.
+pub(crate) fn group_body_slot(group_idx: usize, y: f64, height: f64) -> usize {
+    if y < height / 2.0 { group_idx } else { group_idx + 1 }
+}
+
+/// The insertion slot for a drop at `x` px from the left edge of tab
+/// `tab_index`, `width` px wide: the left half inserts before the tab, and
+/// from its midpoint on, after it (WORKSPACE.md "Moving a Panel to Another
+/// Group"; row 131). The twin of Swift's `dockTabDropSlot`.
+pub(crate) fn tab_drop_slot(tab_index: usize, x: f64, width: f64) -> usize {
+    if x < width / 2.0 { tab_index } else { tab_index + 1 }
+}
+
 pub(crate) fn tab_caret(rect_of: impl Fn(usize) -> Option<FeedbackRect>, index: usize) -> Option<FeedbackRect> {
     if let Some((x, y, _, h)) = rect_of(index) {
         return Some((x, y, 3.0, h));
@@ -1732,6 +1770,67 @@ mod dock_drop_overlay_tests {
         assert_eq!(tab_caret(tabs, 2), Some((226.0, 20.0, 3.0, 25.0)));
         assert_eq!(tab_caret(|_| None, 0), None);
         assert_eq!(tab_caret(tabs, 4), None);
+    }
+
+    /// Row 131: the half is the tab's own midpoint, not a fixed 30 px. Measured
+    /// on the web before the fix (probe `half131.py`): a 73.5 px Swatches tab
+    /// took a drop at +33 px, LEFT of its midpoint 36.75, as "after" it. The
+    /// twin of Swift's `dockTabDropSlot` arms (`theMidpointBelongsToTheRightHalf`).
+    #[test]
+    fn a_tab_drop_slot_splits_the_tab_at_its_own_midpoint() {
+        use super::tab_drop_slot;
+        assert_eq!(tab_drop_slot(1, 33.0, 73.5), 1, "left of a wide tab's midpoint: before it");
+        assert_eq!(tab_drop_slot(1, 36.75, 73.5), 2, "the midpoint belongs to the right half");
+        assert_eq!(tab_drop_slot(1, 36.7, 73.5), 1);
+        assert_eq!(tab_drop_slot(0, 2.0, 73.5), 0);
+        assert_eq!(tab_drop_slot(0, 70.0, 73.5), 1);
+        assert_eq!(tab_drop_slot(2, 25.0, 40.0), 3, "past a narrow tab's midpoint: after it");
+        assert_eq!(tab_drop_slot(2, 15.0, 40.0), 2, "before a narrow tab's midpoint: before it");
+    }
+
+    /// Row 132: a tab dropped on a group's body makes a new group above the
+    /// group in the upper half of the GROUP's own height, below it from the
+    /// midpoint on. Measured on the web before the fix (probe `body132.py`,
+    /// a 225 px group): drops at +138 and +166, in the LOWER half, went ABOVE,
+    /// because the side came from the hovered child widget's local y (10 px into
+    /// the hex row and the colour bar). After the fix both go below. (A drop at
+    /// the exact middle sits on the boundary and separates nothing.) Twin of Swift's
+    /// `dockGroupDropTarget` body arms, case for case.
+    #[test]
+    fn a_group_body_slot_splits_the_group_at_its_own_midpoint() {
+        use super::group_body_slot;
+        assert_eq!(group_body_slot(3, 28.0, 224.0), 3, "just under the tab bar: above");
+        assert_eq!(group_body_slot(3, 111.9, 224.0), 3);
+        assert_eq!(group_body_slot(3, 112.0, 224.0), 4, "the midpoint belongs to the lower half");
+        assert_eq!(group_body_slot(3, 214.0, 224.0), 4, "near the bottom: below");
+    }
+
+    /// Row 133: a whole group dropped at a dock slot lands at the bar. Measured
+    /// on the web before the fix (probe `group133.py`): group 0 onto group 2's
+    /// lower half (slot 3) landed below group 3, one past the bar; the backward
+    /// control was right. Twins of Swift's row 133 arms, case for case.
+    #[test]
+    fn a_group_dropped_at_a_slot_lands_at_the_bar() {
+        use super::group_slot_drop_index;
+        use crate::workspace::workspace::{DockId, GroupAddr, WorkspaceLayout};
+        let order = |l: &WorkspaceLayout| l.anchored[0].1.groups.iter().map(|g| g.panels.clone()).collect::<Vec<_>>();
+        let moved = |from: usize, slot: usize| {
+            let mut l = WorkspaceLayout::default_layout();
+            let did = l.anchored[0].1.id;
+            let f = GroupAddr { dock_id: did, group_idx: from };
+            l.move_group_within_dock(did, from, group_slot_drop_index(f, did, slot));
+            order(&l)
+        };
+        let g = order(&WorkspaceLayout::default_layout());
+        assert_eq!(moved(0, 3)[..4], [g[1].clone(), g[2].clone(), g[0].clone(), g[3].clone()], "forward, lower half of group 2");
+        assert_eq!(moved(3, 0)[..4], [g[3].clone(), g[0].clone(), g[1].clone(), g[2].clone()], "backward, upper half of group 0");
+        assert_eq!(moved(0, 2)[..4], [g[1].clone(), g[0].clone(), g[2].clone(), g[3].clone()], "forward, upper half of group 2");
+        assert_eq!(moved(3, 1)[..4], [g[0].clone(), g[3].clone(), g[1].clone(), g[2].clone()], "backward, lower half of group 0");
+        assert_eq!(moved(1, 1), g, "its own upper half");
+        assert_eq!(moved(1, 2), g, "its own lower half");
+        // Into another dock the slot is the index unchanged.
+        let other = DockId(99);
+        assert_eq!(group_slot_drop_index(GroupAddr { dock_id: DockId(1), group_idx: 0 }, other, 3), 3);
     }
 
     #[test]

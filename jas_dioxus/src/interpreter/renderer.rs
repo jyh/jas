@@ -30,6 +30,10 @@ struct RenderCtx {
     dialog_ctx: super::dialog_view::DialogCtx,
     timer_ctx: super::timer::TimerCtx,
     panel_kind: Option<PanelKind>,
+    /// The panel-menu overlay's signal, so a click whose action asked the
+    /// host for a menu (`open_menu`, `AppState::pending_menu`) can open it.
+    /// `None` where no overlay is provided (a dialog's own tree).
+    panel_menu: Option<crate::panels::panel_menu_state::PanelMenuState>,
 }
 
 /// Render a YAML element spec into a Dioxus Element.
@@ -49,6 +53,7 @@ pub fn render_element(
         dialog_ctx: use_context::<super::dialog_view::DialogCtx>(),
         timer_ctx: use_context::<super::timer::TimerCtx>(),
         panel_kind: None,
+        panel_menu: try_use_context::<crate::panels::panel_menu_state::PanelMenuState>(),
     };
     render_el(el, ctx, &rctx)
 }
@@ -242,7 +247,7 @@ fn eval_to_json(source: &str, ctx: &serde_json::Value) -> serde_json::Value {
 // ── Generic behavior dispatch ──────────────────────────────────
 
 /// Apply dialog state when a confirm action is dispatched (the native
-/// confirms the YAML does not yet express: save_swatch_library_confirm).
+/// confirms the YAML does not yet express: the paragraph dialogs' OKs).
 fn apply_dialog_confirm(
     action: &str,
     dialog: &serde_json::Map<String, serde_json::Value>,
@@ -252,35 +257,10 @@ fn apply_dialog_confirm(
         // swatch_options_confirm: the YAML's `swatch.store` (run by
         // `run_in_swatches_store`) does the write, on every route. Until
         // 2026-10-25 this arm did it natively and the YAML only logged.
-        "save_swatch_library_confirm" => {
-            // Save dialog 'name' field. Serialize the active swatch
-            // library (selected_library) to JSON and trigger a
-            // browser file download. The Flask-target test plan
-            // expects a server-side write to workspace/swatches/;
-            // in the Dioxus browser app this is a download.
-            let name = dialog.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if name.is_empty() {
-                return;
-            }
-            let lib_id = st.swatches_panel.selected_library.clone();
-            if let Some(lib) = st.swatch_libraries.get(&lib_id).cloned() {
-                let mut out = lib;
-                // Overwrite the saved library's name to match the
-                // dialog input rather than the source file's name.
-                if let Some(obj) = out.as_object_mut() {
-                    obj.insert("name".into(), serde_json::Value::String(name.to_string()));
-                }
-                let json = serde_json::to_string_pretty(&out).unwrap_or_default();
-                let filename = format!("{name}.json");
-                // showSaveFilePicker requires user activation, but the
-                // Save button's dispatch goes through Dioxus's spawn,
-                // which detaches from the click and loses the
-                // activation. Fall back to a normal browser download —
-                // matches how SVG Save and PDF Export persist files in
-                // the same app.
-                crate::workspace::clipboard::download_file(&filename, &json);
-            }
-        }
+        // save_swatch_library_confirm: the YAML's `swatch.save_library`
+        // (run by `run_in_swatches_store`) saves, and the dispatch drains the
+        // queued write as a download. Until 2026-11-17 this arm saved
+        // natively (a download of `<name>.json` only).
         // Phase 8: Justification dialog OK. Commit the 11 dialog
         // fields as jas:* attributes onto every paragraph wrapper
         // tspan in the selection, through `paragraph_host`, the law
@@ -522,6 +502,39 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
 /// Until 2026-09-26 every action evaluated in the app scope alone, so a
 /// panel's own keys (`panel.selected_library` for Brushes) read as null.
 pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, serde_json::Value>, panel_scope: Option<&serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+    let deferred = dispatch_action_in_body(action, params, panel_scope, st);
+    // The host half of Save Brush Library on the web: every queued library
+    // write leaves as a browser download, once, after the action that queued
+    // it (the brush-library design, B.3). Off wasm the queue stays on
+    // `AppState` for the caller to read.
+    #[cfg(target_arch = "wasm32")]
+    drain_pending_writes(st, crate::workspace::clipboard::download_file);
+    deferred
+}
+
+/// Hand every queued host write (`AppState::pending_writes`, filled by
+/// `brush.save_library`, `swatch.save_library`) to `sink` as `(file name,
+/// pretty JSON)`, oldest first, and empty the queue. A brush library goes out
+/// as `<slug>.json`, its manifest; installing it is placing that file at
+/// `workspace/brushes/<slug>/library.json`. A swatch library goes out as
+/// `<id>.json`, the shape of `workspace/swatches/<id>.json`, and a gradient
+/// library likewise (`workspace/gradients/<id>.json`). A write of any other kind is
+/// dropped, as no host here knows where it goes.
+pub(crate) fn drain_pending_writes(
+    st: &mut crate::workspace::app_state::AppState,
+    mut sink: impl FnMut(&str, &str),
+) {
+    for w in std::mem::take(&mut st.pending_writes) {
+        let slug = w.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = w.get("kind").and_then(|v| v.as_str());
+        if matches!(kind, Some("brush_library" | "swatch_library" | "gradient_library")) && !slug.is_empty() {
+            let body = serde_json::to_string_pretty(&w["manifest"]).unwrap_or_default();
+            sink(&format!("{slug}.json"), &body);
+        }
+    }
+}
+
+fn dispatch_action_in_body(action: &str, params: &serde_json::Map<String, serde_json::Value>, panel_scope: Option<&serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Recorder seam hook (Arc 1 S2, dormant unless armed): records
     // depth-0 dispatches on the action seam / segments an open gesture
     // case. RAII so every early return below unwinds the depth.
@@ -1473,6 +1486,13 @@ fn apply_typed_panel_slot(
             }
             true
         }
+        // The open libraries the panel body draws (`toggle_swatch_library_open`).
+        ("swatches_panel_content", "open_libraries") => {
+            if resolved.is_array() {
+                st.swatches_panel.open_libraries = resolved.clone();
+            }
+            true
+        }
         ("symbols_panel_content", "selected_symbol") => {
             st.symbols_selected = resolved.as_str().map(|s| s.to_string());
             true
@@ -1806,6 +1826,7 @@ fn build_appstate_ctx(
     ctx.insert("data".to_string(), serde_json::json!({
         "swatch_libraries": st.swatch_libraries.clone(),
         "brush_libraries": st.brush_libraries.clone(),
+        "gradient_libraries": st.gradient_libraries.clone(),
     }));
     if !params.is_empty() {
         ctx.insert("param".to_string(), serde_json::Value::Object(params.clone()));
@@ -2741,10 +2762,9 @@ fn run_yaml_effect(
         ) {
             let current = crate::panels::panel_menu::panel_menu_ctx(&pid, st)["panel"][key].clone();
             let mut list = current.as_array().cloned().unwrap_or_default();
-            match list.iter().position(|v| v == &value) {
-                Some(i) => { list.remove(i); }
-                None => list.push(value),
-            }
+            super::state_store::toggle_member(&mut list, value,
+                                              lt.get("key").and_then(|v| v.as_str()),
+                                              lt.get("insert").and_then(|v| v.as_object()));
             let mut sps = serde_json::Map::new();
             sps.insert("panel".into(), serde_json::Value::String(pid));
             sps.insert("key".into(), serde_json::Value::String(key.to_string()));
@@ -2839,11 +2859,22 @@ fn run_yaml_effect(
     }
 
     // Brush-library edits (BRUSH_LIBRARY_UNDO.md) run in the shared runner.
-    const BRUSH_LIBRARY_KEYS: [&str; 4] = [
+    // `open_menu` records a HOST request (`pending_menu`), carried out of the
+    // shared runner the same way.
+    const BRUSH_LIBRARY_KEYS: [&str; 6] = [
         "brush.delete_selected", "brush.duplicate_selected", "brush.sort_by_name", "brush.select_unused",
+        "brush.save_library", "open_menu",
     ];
     if eff.as_object().is_some_and(|m| m.keys().any(|k| BRUSH_LIBRARY_KEYS.contains(&k.as_str()))) {
         run_in_brushes_store(eff, eval_ctx, st);
+        return deferred;
+    }
+
+    // Save Gradient Library runs in the shared runner over the app-global
+    // gradient tier and the Gradient panel's active library (design
+    // 2026-11-17 §2).
+    if eff.get("gradient.save_library").is_some() {
+        run_in_gradients_store(eff, eval_ctx, st);
         return deferred;
     }
 
@@ -2913,6 +2944,12 @@ fn run_in_brushes_store(
     let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
     super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
     st.brush_libraries = store.get_data_path("brush_libraries");
+    // The host queues the run filled: a save's file write, and a menu the
+    // button asked the host to pop up. Appended / latest-wins, as the store's.
+    st.pending_writes.append(&mut store.pending_writes);
+    if let Some(menu) = store.pending_menu.take() {
+        st.pending_menu = Some(menu);
+    }
     if let Some(out) = store.panel_scope(BRUSHES) {
         let entry = st.panel_state.entry(BRUSHES.to_string()).or_default();
         for (k, v) in out {
@@ -2938,6 +2975,7 @@ fn run_in_swatches_store(
     let scope: std::collections::HashMap<String, serde_json::Value> = [
         ("selected_library".to_string(), serde_json::json!(st.swatches_panel.selected_library)),
         ("selected_swatches".to_string(), serde_json::json!(st.swatches_panel.selected_swatches)),
+        ("open_libraries".to_string(), st.swatches_panel.open_libraries.clone()),
     ].into();
     store.init_panel(SWATCHES, scope);
     store.set_active_panel(Some(SWATCHES));
@@ -2947,6 +2985,45 @@ fn run_in_swatches_store(
     if let Some(sel) = store.get_panel(SWATCHES, "selected_swatches").as_array() {
         st.swatches_panel.selected_swatches = sel.iter().filter_map(|v| v.as_i64()).collect();
     }
+    // `swatch.save_library` opens and selects a new library and queues its
+    // file write (design §3.4), carried out as the brush runner's are.
+    if let Some(lib) = store.get_panel(SWATCHES, "selected_library").as_str() {
+        st.swatches_panel.selected_library = lib.to_string();
+    }
+    let open = store.get_panel(SWATCHES, "open_libraries");
+    if open.is_array() {
+        st.swatches_panel.open_libraries = open.clone();
+    }
+    st.pending_writes.append(&mut store.pending_writes);
+}
+
+/// Run one effect in the shared runner on a `StateStore` that holds this app's
+/// gradient libraries (`AppState::gradient_libraries`) and the Gradient
+/// panel's generic state, then carry the libraries, the panel state and any
+/// queued file write back. `run_in_swatches_store` is the twin.
+fn run_in_gradients_store(
+    eff: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    const GRADIENT: &str = "gradient_panel_content";
+    let mut store = super::state_store::StateStore::new();
+    store.set_data_path("gradient_libraries", st.gradient_libraries.clone());
+    let mut scope: std::collections::HashMap<String, serde_json::Value> = crate::interpreter::workspace::Workspace::load()
+        .map(|ws| ws.panel_state_defaults(GRADIENT).into_iter().collect()).unwrap_or_default();
+    if let Some(stored) = st.panel_state.get(GRADIENT) {
+        for (k, v) in stored { scope.insert(k.clone(), v.clone()); }
+    }
+    store.init_panel(GRADIENT, scope);
+    store.set_active_panel(Some(GRADIENT));
+    let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
+    super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
+    st.gradient_libraries = store.get_data_path("gradient_libraries");
+    if let Some(out) = store.panel_scope(GRADIENT) {
+        let entry = st.panel_state.entry(GRADIENT.to_string()).or_default();
+        for (k, v) in out { entry.insert(k.clone(), v.clone()); }
+    }
+    st.pending_writes.append(&mut store.pending_writes);
 }
 
 // ── Artboards panel-state setter (ARTBOARDS.md) ─────────────────────────
@@ -3229,11 +3306,13 @@ fn build_mouse_event_handler(
     let mut revision = rctx.revision;
     let ctx_snapshot = ctx.clone();
     let mut dialog_signal = rctx.dialog_ctx.0;
+    let panel_menu = rctx.panel_menu;
 
     Some(EventHandler::new(move |evt: Event<MouseData>| {
         let app = app.clone();
         let actions = resolved_actions.clone();
         let mut ctx_snap = ctx_snapshot.clone();
+        let at = evt.data().page_coordinates();
         // Expose click-time modifier state to yaml condition
         // expressions as `event.alt` / `event.shift` / `event.meta` /
         // `event.ctrl`. The Boolean panel uses `event.alt` to route
@@ -3243,10 +3322,20 @@ fn build_mouse_event_handler(
         merge_event_modifiers(&mut ctx_snap, mods.alt(), mods.shift(), mods.meta(), mods.ctrl());
         spawn(async move {
             let mut deferred_dialog_effects = Vec::new();
+            let menu_request;
             {
                 let mut st = app.borrow_mut();
                 deferred_dialog_effects.extend(run_click_behaviors(&actions, &ctx_snap, &mut st));
+                // A menu the click asked the host for (`open_menu`): taken
+                // here, once, and popped up at the click as that submenu alone.
+                menu_request = st.pending_menu.take().and_then(|id|
+                    crate::panels::panel_menu::menu_request_target(&id, &st.workspace_layout));
             } // drop st borrow
+            if let (Some((kind, addr, key)), Some(mut pm)) = (menu_request, panel_menu) {
+                pm.open.set(Some(crate::panels::panel_menu_state::PanelMenuOpen {
+                    kind, addr, x: at.x, y: at.y, only: Some(key),
+                }));
+            }
 
             // Apply deferred dialog effects (outside AppState borrow)
             apply_deferred_dialog_effects(&deferred_dialog_effects, &app, &mut dialog_signal);
@@ -6631,47 +6720,10 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     }
 }
 
-/// Evaluate a tile widget's `bind.selected_in` membership: true when the
-/// element's per-item identity (read from its click behavior's first
-/// `select.target`, so authors don't repeat it) is a member of the bound
-/// list expression. Shared by tile-shaped widgets (`color_swatch` and the
-/// brush-tile `container`) so the accent-outline selection cue is drawn
-/// identically wherever a `selected_in` bind appears.
+/// A tile's `bind.selected_in` outline. The law lives in the un-gated
+/// [`super::tile_selection`], which the engine's panel plan shares.
 fn eval_selected_in(el: &serde_json::Value, ctx: &serde_json::Value) -> bool {
-    el.get("bind")
-        .and_then(|b| b.get("selected_in"))
-        .and_then(|v| v.as_str())
-        .map(|list_expr| {
-            let list_val = expr::eval(list_expr, ctx);
-            let id_expr = el
-                .get("behavior")
-                .and_then(|b| b.as_array())
-                .and_then(|behaviors| {
-                    behaviors.iter().find_map(|b| {
-                        let effects = b.get("effects").and_then(|v| v.as_array())?;
-                        effects.iter().find_map(|e| {
-                            e.get("select")
-                                .and_then(|s| s.get("target"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                        })
-                    })
-                });
-            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
-            list_contains_value(&list_val, id_val.as_ref())
-        })
-        .unwrap_or(false)
-}
-
-/// Test whether `id` is a member of the list `list`. Used by the
-/// `selected_in` bind on `color_swatch` and other tile widgets.
-fn list_contains_value(list: &Value, id: Option<&Value>) -> bool {
-    let Some(id) = id else { return false; };
-    let id_json = super::effects::value_to_json(id);
-    match list {
-        Value::List(items) => items.iter().any(|item| item == &id_json),
-        _ => false,
-    }
+    super::tile_selection::selected_in(el, ctx)
 }
 
 /// Evaluate a bind expression and parse its result back to a JSON value.
@@ -7612,6 +7664,22 @@ const LAYER_COLORS: [&str; 9] = [
     "#d94ad9", "#4ad9d9", "#b0b0b0", "#2a7a2a",
 ];
 
+/// The colour a native tree row draws for `elem` (STATUS-jas row 146): a
+/// layer's STORED colour (#962) wins; a top-level layer with none takes the
+/// nine-colour index cycle (`index_at_top`), a nested one with none inherits;
+/// anything else inherits. Only the fallback is synthesised, so a stored
+/// colour is never drawn as a different one. Mirrors Swift's `rowLayerColor`.
+fn native_layer_color(elem: &GeoElement, index_at_top: Option<usize>, inherited: &str) -> String {
+    match elem {
+        GeoElement::Layer(le) => match (&le.color, index_at_top) {
+            (Some(c), _) => c.clone(),
+            (None, Some(i)) => LAYER_COLORS[i % LAYER_COLORS.len()].to_string(),
+            (None, None) => inherited.to_string(),
+        },
+        _ => inherited.to_string(),
+    }
+}
+
 fn tree_icon_svg(icon_name: &str) -> String {
     let ws = super::workspace::Workspace::load();
     if let Some(ws) = &ws {
@@ -7692,15 +7760,10 @@ fn tree_flatten_rc_children(
         let is_selected = crate::document::controller::path_is_selected_or_under(
             selected_paths, &path);
         let is_renaming = renaming_path.as_ref() == Some(&path);
-        let is_layer = child.is_layer();
         let is_collapsed = collapsed_paths.contains(&path);
         let is_panel_selected = panel_selection.contains(&path);
 
-        let current_layer_color = if is_layer {
-            if path.len() == 1 { LAYER_COLORS[i % LAYER_COLORS.len()].to_string() } else { layer_color.to_string() }
-        } else {
-            layer_color.to_string()
-        };
+        let current_layer_color = native_layer_color(child, (path.len() == 1).then_some(i), layer_color);
 
         // Effective visibility = most restrictive of ancestor + self,
         // matching Document::effective_visibility (Preview > Outline >
@@ -7781,7 +7844,7 @@ fn tree_flatten_layers(
         let is_renaming = renaming_path.as_ref() == Some(&path);
         let is_collapsed = collapsed_paths.contains(&path);
         let is_panel_selected = panel_selection.contains(&path);
-        let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
+        let layer_color = native_layer_color(elem, Some(i), "");
 
         let vis_str = match elem.visibility() {
             Visibility::Preview => "preview",
@@ -9074,16 +9137,9 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         "position:fixed;left:{}px;top:{}px;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                         cx, cy
                     );
-                    let is_container = {
-                        let st = app.borrow();
-                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
-                            .map(|e| e.is_group_or_layer()).unwrap_or(false)
-                    };
-                    let is_layer = {
-                        let st = app.borrow();
-                        st.tab().and_then(|t| t.model.document().get_element(&cpath))
-                            .map(|e| e.is_layer()).unwrap_or(false)
-                    };
+                    // Row 141 part 3 (web half): the entries are layers.yaml's
+                    // `context_menu:` in the right-clicked row's scope.
+                    let (entries, row_scope) = layers_row_menu(el, ctx, &cpath).unwrap_or_default();
                     let item_style = "padding:4px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;";
                     let item_style_disabled = "padding:4px 12px;font-size:11px;color:var(--jas-text-dim,#777);";
 
@@ -9092,21 +9148,20 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let close_app2 = app.clone();
                     let mut close_rev2 = revision;
 
-                    let cpath_for_action = cpath.clone();
                     let mut ctx_dialog_signal = rctx.dialog_ctx.0;
-                    let do_action = |action: &'static str| {
+                    let do_action = |action: String, params: serde_json::Map<String, serde_json::Value>| {
                         let a = app.clone();
                         let mut r = revision;
-                        let path_str = cpath_for_action.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+                        let scope = row_scope.clone();
                         move |_: Event<MouseData>| {
                             let a2 = a.clone();
-                            let ps = path_str.clone();
+                            let action = action.clone();
+                            let params = params.clone();
+                            let scope = scope.clone();
                             spawn(async move {
                                 let deferred = {
                                     let mut st = a2.borrow_mut();
-                                    let mut params = serde_json::Map::new();
-                                    params.insert("layer_id".into(), serde_json::Value::String(ps));
-                                    let d = dispatch_action(action, &params, &mut st);
+                                    let d = dispatch_action_in(&action, &params, Some(&scope), &mut st);
                                     st.layers_context_menu = None;
                                     d
                                 };
@@ -9130,6 +9185,19 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         }
                     };
 
+                    let menu_items: Vec<Element> = entries.into_iter().enumerate().map(|(i, entry)| match entry {
+                        RowMenuEntry::Separator => rsx! {
+                            div { key: "{i}", style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
+                        },
+                        RowMenuEntry::Item { label, enabled: true, action, params } => {
+                            let on_pick = do_action(action, params);
+                            rsx! { div { key: "{i}", style: "{item_style}", onclick: on_pick, "{label}" } }
+                        }
+                        RowMenuEntry::Item { label, enabled: false, .. } => rsx! {
+                            div { key: "{i}", style: "{item_style_disabled}", "{label}" }
+                        },
+                    }).collect();
+
                     rsx! {
                         // Backdrop to close menu on click
                         div {
@@ -9152,44 +9220,54 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         }
                         div {
                             style: "{menu_style}",
-                            div {
-                                style: if is_layer { item_style } else { item_style_disabled },
-                                onclick: do_action("open_layer_options"),
-                                "Options for Layer..."
-                            }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("duplicate_layer_selection"),
-                                "Duplicate"
-                            }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("delete_layer_selection"),
-                                "Delete Selection"
-                            }
-                            div { style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
-                            div {
-                                style: if is_container { item_style } else { item_style_disabled },
-                                onclick: do_action("enter_isolation_mode"),
-                                "Enter Isolation Mode"
-                            }
-                            div { style: "height:1px;background-color:var(--jas-border,#555);margin:2px 0;" }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("flatten_artwork"),
-                                "Flatten Artwork"
-                            }
-                            div {
-                                style: "{item_style}",
-                                onclick: do_action("collect_in_new_layer"),
-                                "Collect in New Layer"
-                            }
+                            {menu_items.into_iter()}
                         }
                     }
                 }
             }
         }
     }
+}
+
+/// One entry of the Layers row's yaml `context_menu:` as the web draws it
+/// (STATUS-jas row 141 part 3, web half; the twin of Swift's `LayersRowMenu`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RowMenuEntry {
+    Separator,
+    Item { label: String, enabled: bool, action: String, params: serde_json::Map<String, serde_json::Value> },
+}
+
+/// The `context_menu:` of `holder` (`lp_tree`) for row `path`, read in that
+/// row's scope: `node` is bound by the holder's own foreach, the expansion the
+/// tree draws. Labels and actions are interpolated, `enabled_when` is evaluated
+/// (an item without one is enabled), and params are resolved as a behaviour's
+/// are (`resolve_behavior_params`). Returns the entries and the row's scope, or
+/// `None` when the holder declares no menu or the row is not one of its rows.
+pub(crate) fn layers_row_menu(holder: &serde_json::Value, ctx: &serde_json::Value, path: &[usize])
+    -> Option<(Vec<RowMenuEntry>, serde_json::Value)> {
+    let items = holder.get("context_menu")?.as_array()?;
+    let var = holder.get("foreach").and_then(|f| f.get("as")).and_then(|v| v.as_str()).unwrap_or("item");
+    let want: Vec<serde_json::Value> = path.iter().map(|&i| serde_json::json!(i)).collect();
+    let scope = crate::interpreter::foreach::row_scopes(holder, ctx)?.into_iter().find(|r| {
+        let p = &r[var]["path"];
+        let p = p.get("__path__").unwrap_or(p);
+        p.as_array().is_some_and(|a| a.as_slice() == want.as_slice())
+    })?;
+    let empty = serde_json::Map::new();
+    let entries = items.iter().filter_map(|raw| {
+        if raw.as_str() == Some("separator") {
+            return Some(RowMenuEntry::Separator);
+        }
+        let item = raw.as_object()?;
+        let text = |k: &str| item.get(k).and_then(|v| v.as_str())
+            .map(|t| crate::interpreter::expr::eval_text(t, &scope)).unwrap_or_default();
+        let enabled = item.get("enabled_when").and_then(|v| v.as_str())
+            .map_or(true, |c| crate::interpreter::expr::eval(c, &scope).to_bool());
+        let decl = item.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
+        Some(RowMenuEntry::Item { label: text("label"), enabled, action: text("action"),
+                                  params: resolve_behavior_params(decl, &scope) })
+    }).collect();
+    Some((entries, scope))
 }
 
 /// Render a brush_preview widget: a small preview of the brush tip / stroke,
@@ -10078,6 +10156,7 @@ mod tests {
                 common: named(Some("Layer 1")),
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })
         }
 
@@ -10195,6 +10274,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         st.tabs[st.active_tab].model.set_document_for_test(Document {
             layers: vec![layer],
@@ -10251,6 +10331,7 @@ mod tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         st.tabs[st.active_tab].model.set_document_for_test(Document {
             layers: vec![layer],
@@ -10832,6 +10913,7 @@ mod tests {
                     name: Some(name),
                     id: None,
                 },
+                color: None,
             })
         }).collect();
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
@@ -11779,6 +11861,7 @@ mod tests {
         let mk_layer = |name: &str| Element::Layer(LayerElem {
             children: Vec::new(), isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some(name.into()), ..Default::default() },
+            color: None,
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(mk_layer("c1")), Rc::new(mk_layer("c2"))],
@@ -11981,14 +12064,17 @@ mod tests {
         let layer_a = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("A".into()), ..Default::default() },
+            color: None,
         });
         let child1 = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("c1".into()), ..Default::default() },
+            color: None,
         });
         let child2 = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("c2".into()), ..Default::default() },
+            color: None,
         });
         let group = Element::Group(GroupElem {
             children: vec![Rc::new(child1), Rc::new(child2)],
@@ -11998,6 +12084,7 @@ mod tests {
         let layer_b = Element::Layer(LayerElem { children: Vec::new(),
             isolated_blending: false, knockout_group: false,
             common: CommonProps { name: Some("B".into()), ..Default::default() },
+            color: None,
         });
         let mut new_doc = st.tabs[st.active_tab].model.document().clone();
         new_doc.layers = vec![layer_a, group, layer_b];
@@ -14756,6 +14843,64 @@ mod tests {
         assert!(!super::layers_filter_item_in_force(&el, "path", &ctx, &st));
     }
 
+    /// STATUS-jas row 146: the web Layers tree draws a layer's STORED colour
+    /// (#962), and keeps the nine-colour index cycle only for a layer that has
+    /// none. Before, every top-level layer drew `LAYER_COLORS[i % 9]`, so a
+    /// stored colour was drawn as a different one. `#ff8000` is no preset, so
+    /// no index can produce it by accident.
+    #[test]
+    fn the_web_tree_draws_a_stored_layer_colour_and_cycles_only_without_one() {
+        use crate::geometry::element::{GroupElem, LayerElem};
+        use std::rc::Rc;
+        let rect = || Rc::new(Element::Group(GroupElem::default()));
+        let layers = vec![
+            Element::Layer(LayerElem { children: vec![rect()], color: Some("#ff8000".into()), ..Default::default() }),
+            Element::Layer(LayerElem { children: vec![rect()], ..Default::default() }),
+        ];
+        let empty = TreeHashSet::new();
+        let rows = tree_flatten_layers(&layers, &empty, &empty, &[], &None);
+        let colour = |path: &[usize]| rows.iter().find(|r| r.path == path)
+            .unwrap_or_else(|| panic!("no row {path:?}")).layer_color.clone();
+        assert_eq!(colour(&[0]), "#ff8000", "the stored colour wins");
+        assert_eq!(colour(&[0, 0]), "#ff8000", "and its contents carry it");
+        assert_eq!(colour(&[1]), LAYER_COLORS[1], "a layer with none keeps its index colour");
+        assert_eq!(colour(&[1, 0]), LAYER_COLORS[1]);
+    }
+
+    /// The web route's `list_toggle` takes the keyed form too (the
+    /// brush-library design, A.1): a library already open is CLOSED even
+    /// though its `collapsed` differs from `insert`, and an absent one opens
+    /// expanded. Driven through `run_yaml_effects` with the Brushes panel as
+    /// the menu's panel, the route the panel menu takes; read back through
+    /// `panel_menu_ctx`, what the menu's next expression reads.
+    #[test]
+    fn the_web_route_toggles_a_keyed_library_in_both_directions() {
+        let mut st = AppState::new();
+        st.menu_panel = Some("brushes_panel_content".to_string());
+        let open = |st: &AppState| crate::panels::panel_menu::panel_menu_ctx("brushes_panel_content", st)
+            ["panel"]["open_libraries"].clone();
+        let before = open(&st);
+        let first = before.as_array().and_then(|a| a.first()).and_then(|o| o["id"].as_str())
+            .expect("the Brushes panel opens with a library").to_string();
+        let toggle = |lib: &str| serde_json::json!({"list_toggle": {"target": "panel.open_libraries",
+            "value": format!("\"{lib}\""), "key": "id", "insert": {"collapsed": false}}});
+        // Collapse the open one first, so `collapsed` differs from `insert`.
+        let mut collapsed = before.clone();
+        collapsed[0]["collapsed"] = serde_json::json!(true);
+        let mut sps = serde_json::Map::new();
+        sps.insert("panel".into(), serde_json::json!("brushes_panel_content"));
+        sps.insert("key".into(), serde_json::json!("open_libraries"));
+        sps.insert("value".into(), collapsed);
+        apply_set_panel_state_with_ctx(&sps, &mut st, None);
+        run_yaml_effects(&[toggle(&first)], &serde_json::json!({}), &mut st);
+        assert!(!open(&st).as_array().unwrap().iter().any(|o| o["id"] == first.as_str()),
+                "a collapsed open library closes: {}", open(&st));
+        run_yaml_effects(&[toggle(&first)], &serde_json::json!({}), &mut st);
+        assert!(open(&st).as_array().unwrap().iter()
+                    .any(|o| o["id"] == first.as_str() && o["collapsed"] == false),
+                "and reopens expanded: {}", open(&st));
+    }
+
     // ── Brush-library edits run in the web app (BRUSH_LIBRARY_UNDO.md) ──
     //
     // The web runner handed only `doc.*` keys to the shared runner, so every
@@ -14811,6 +14956,184 @@ mod tests {
         assert_eq!(actions.len(), 1, "one click behavior");
         super::run_click_behaviors(&actions, &ctx, &mut st);
         assert_eq!(brush_names(&st), vec!["a", "c"]);
+    }
+
+    // ── Save / Open Brush Library on the web route (STATUS-jas row 8) ──
+    // The engine and Swift routes are pinned by the dialog-action corpus;
+    // these drive the web runner, which hands library edits to the shared
+    // runner by key and must carry its host queues back out.
+
+    #[test]
+    fn save_brush_library_runs_in_the_web_app_and_queues_one_write() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b"]);
+        let eff = serde_json::json!({"brush.save_library": {"library": "\"lib\"", "name": "\"My Set\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.brush_libraries["my_set"]["name"], serde_json::json!("My Set"), "a new library");
+        assert_eq!(st.brush_libraries["lib"]["name"], serde_json::json!("Lib"), "the source untouched");
+        assert_eq!(brushes_panel_key(&st, "selected_library"), serde_json::json!("my_set"));
+        assert_eq!(st.pending_writes.len(), 1, "one host write: {:?}", st.pending_writes);
+        assert_eq!(st.pending_writes[0]["slug"], serde_json::json!("my_set"));
+        assert_eq!(st.pending_writes[0]["manifest"]["name"], serde_json::json!("My Set"));
+        // A second save QUEUES beside the first: the carry appends, it does not replace.
+        let eff = serde_json::json!({"brush.save_library": {"library": "\"lib\"", "name": "\"Lib\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.pending_writes.iter().map(|w| w["slug"].clone()).collect::<Vec<_>>(),
+                   vec![serde_json::json!("my_set"), serde_json::json!("lib")]);
+    }
+
+    /// The web's own route for both Save menu rows: the deferred `open_dialog`
+    /// carries the selected library and its NAME, which the action reads from
+    /// `data.<kind>_libraries` (the engine and Swift routes are pinned by the
+    /// dialog-action corpus).
+    #[test]
+    fn the_save_library_rows_open_their_dialog_with_the_library_name_on_the_web() {
+        for (content, action, lib, name) in [
+            ("swatches_panel_content", "save_swatch_library", "web_colors", "Web Colors"),
+            ("brushes_panel_content", "save_brush_library", "default_brushes", "Default Brushes"),
+            ("gradient_panel_content", "gradient_save_library", "neutrals", "Neutrals"),
+        ] {
+            let mut st = AppState::new();
+            st.panel_state.entry("brushes_panel_content".into()).or_default()
+                .insert("selected_library".into(), serde_json::json!("default_brushes"));
+            let addr = crate::workspace::workspace::PanelAddr {
+                group: crate::workspace::workspace::GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+                panel_idx: 0,
+            };
+            let deferred = crate::panels::panel_menu::dispatch_yaml_menu(content, action, addr, &mut st);
+            let od = deferred.iter().find_map(|e| e.get("open_dialog")).unwrap_or_else(|| panic!("{action}: {deferred:?}"));
+            assert_eq!(od["params"]["library"], serde_json::json!(lib), "{action}: {od}");
+            assert_eq!(od["params"]["name"], serde_json::json!(name), "{action}: {od}");
+        }
+    }
+
+    /// Row 147: the Gradient menu's transforms run in `panel_menu_ctx`'s panel,
+    /// which must be the selection's gradient as the body draws it
+    /// (`live_panel_state_table`), not the panel struct's black→white default.
+    /// The struct is NOT synced first, as nothing syncs it on a selection.
+    #[test]
+    fn gradient_menu_transforms_read_the_selection_in_the_web_app() {
+        use crate::geometry::element::{Color, Gradient, GradientStop, GradientType, GradientMethod, StrokeSubMode};
+        use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
+        use crate::panels::panel_menu::{dispatch_yaml_menu, is_enabled_from_yaml, panel_menu_ctx};
+        let g = Gradient {
+            gtype: GradientType::Linear, angle: 0.0, aspect_ratio: 100.0,
+            method: GradientMethod::Classic, dither: false, stroke_sub_mode: StrokeSubMode::Within,
+            stops: vec![
+                GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 0.0, midpoint_to_next: 30.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: Vec::new(),
+        };
+        let addr = crate::workspace::workspace::PanelAddr {
+            group: crate::workspace::workspace::GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(g));
+        let ctx = panel_menu_ctx(GRADIENT_PANEL, &st);
+        assert_eq!(ctx["panel"]["stops"][0]["color"], serde_json::json!("#00ff00"), "{}", ctx["panel"]);
+        assert_eq!(ctx["panel"]["preview_state"], serde_json::json!(false));
+        assert!(is_enabled_from_yaml(GRADIENT_PANEL, "gradient_reverse", &ctx));
+        dispatch_yaml_menu(GRADIENT_PANEL, "gradient_reverse", addr, &mut st);
+        let fill = |st: &AppState| gradient_host::live_values(st.tab().unwrap().model.document(), true)["stops"].clone();
+        // green@0 (mid 30), blue@100 reversed: blue@0 (mid 70), green@100.
+        let got = fill(&st);
+        assert_eq!((&got[0]["color"], &got[0]["midpoint_to_next"], &got[1]["color"]),
+                   (&serde_json::json!("#0000ff"), &serde_json::json!(70.0), &serde_json::json!("#00ff00")), "{got}");
+        // A solid selection shows a seeded preview: the three rows are disabled.
+        let mut solid = AppState::new();
+        select_first_rect(&mut solid, None);
+        let ctx = panel_menu_ctx(GRADIENT_PANEL, &solid);
+        assert_eq!(ctx["panel"]["preview_state"], serde_json::json!(true), "{}", ctx["panel"]);
+        for row in ["gradient_reverse", "gradient_distribute_stops", "gradient_reset_midpoints"] {
+            assert!(!is_enabled_from_yaml(GRADIENT_PANEL, row, &ctx), "{row} on a solid selection");
+        }
+    }
+
+    #[test]
+    fn save_gradient_library_runs_in_the_web_app_and_the_new_library_becomes_active() {
+        let mut st = AppState::new();
+        let before = st.gradient_libraries["neutrals"].clone();
+        let eff = serde_json::json!({"gradient.save_library": {"library": "\"neutrals\"", "name": "\"Warm Tones\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.gradient_libraries["warm_tones"]["name"], serde_json::json!("Warm Tones"));
+        assert_eq!(st.gradient_libraries["neutrals"], before, "the source untouched");
+        assert_eq!(crate::panels::panel_menu::panel_menu_ctx("gradient_panel_content", &st)["panel"]["active_library_id"],
+                   serde_json::json!("warm_tones"));
+        let mut got = Vec::new();
+        super::drain_pending_writes(&mut st, |f, _| got.push(f.to_string()));
+        assert_eq!(got, vec!["warm_tones.json".to_string()], "a gradient library leaves as <id>.json");
+    }
+
+    #[test]
+    fn save_swatch_library_runs_in_the_web_app_opens_selects_and_queues() {
+        let mut st = AppState::new();
+        let before = st.swatch_libraries["web_colors"].clone();
+        let eff = serde_json::json!({"swatch.save_library": {"library": "\"web_colors\"", "name": "\"Sunset Palette\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.swatch_libraries["sunset_palette"]["name"], serde_json::json!("Sunset Palette"));
+        assert_eq!(st.swatch_libraries["web_colors"], before, "the source untouched");
+        assert_eq!(st.swatches_panel.selected_library, "sunset_palette");
+        assert_eq!(st.swatches_panel.open_libraries, serde_json::json!(
+            [{"id": "web_colors", "collapsed": false}, {"id": "sunset_palette", "collapsed": false}]));
+        assert_eq!(st.pending_writes.iter().map(|w| (w["kind"].clone(), w["slug"].clone())).collect::<Vec<_>>(),
+                   vec![(serde_json::json!("swatch_library"), serde_json::json!("sunset_palette"))]);
+        let mut got = Vec::new();
+        super::drain_pending_writes(&mut st, |f, body| got.push((f.to_string(),
+            serde_json::from_str::<serde_json::Value>(body).unwrap()["name"].clone())));
+        assert_eq!(got, vec![("sunset_palette.json".to_string(), serde_json::json!("Sunset Palette"))],
+                   "a swatch library leaves as <id>.json, the workspace/swatches/ shape");
+    }
+
+    #[test]
+    fn drain_pending_writes_hands_each_write_to_the_sink_once_as_slug_json() {
+        let mut st = AppState::new();
+        st.pending_writes = vec![
+            serde_json::json!({"kind": "brush_library", "slug": "my_set", "manifest": {"name": "My Set"}}),
+            serde_json::json!({"kind": "brush_library", "slug": "lib", "manifest": {"name": "Lib"}}),
+        ];
+        let mut got: Vec<(String, serde_json::Value)> = Vec::new();
+        super::drain_pending_writes(&mut st, |file, body| {
+            got.push((file.to_string(), serde_json::from_str(body).expect("the body is JSON")));
+        });
+        assert_eq!(got, vec![
+            ("my_set.json".to_string(), serde_json::json!({"name": "My Set"})),
+            ("lib.json".to_string(), serde_json::json!({"name": "Lib"})),
+        ]);
+        assert!(st.pending_writes.is_empty(), "drained");
+        super::drain_pending_writes(&mut st, |f, _| panic!("a drained queue wrote {f}"));
+    }
+
+    #[test]
+    fn open_menu_runs_in_the_web_app_and_records_the_request() {
+        let mut st = AppState::new();
+        assert_eq!(st.pending_menu, None);
+        let eff = serde_json::json!({"open_menu": {"id": "bp_menu_open_library"}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(st.pending_menu.as_deref(), Some("bp_menu_open_library"));
+    }
+
+    #[test]
+    fn the_brush_libraries_button_asks_for_the_open_library_submenu() {
+        let mut st = AppState::new();
+        super::dispatch_action_in("open_brush_libraries_menu", &serde_json::Map::new(), None, &mut st);
+        assert_eq!(st.pending_menu.as_deref(), Some("bp_menu_open_library"));
+    }
+
+    /// The Gradient panel body's preset strip reads
+    /// `data.gradient_libraries[panel.active_library_id].gradients`; the body
+    /// context published only the brush and swatch libraries, so the strip
+    /// read null on the web (the engine's twin was #969).
+    #[test]
+    fn the_gradient_panel_body_reads_the_bundles_gradient_libraries() {
+        let st = AppState::new();
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "gradient_panel_content")
+            .expect("the body context");
+        let strip = expr::eval("data.gradient_libraries[panel.active_library_id].gradients", &ctx);
+        let n = super::super::effects::value_to_json(&strip).as_array().map(|a| a.len()).unwrap_or(0);
+        assert!(n > 0, "the default library's gradients: {:?}", ctx["data"].as_object().map(|m| m.keys().collect::<Vec<_>>()));
     }
 
     #[test]
@@ -15035,6 +15358,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![ElementSelection::all(vec![0, 0])],
@@ -15078,6 +15402,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![ElementSelection::all(vec![0, 0])],
@@ -15143,6 +15468,7 @@ mod tests {
         let layer = Element::Layer(LayerElem {
             children: vec![Rc::new(group(named("Wheels"))), Rc::new(group(CommonProps::default()))],
             isolated_blending: false, knockout_group: false, common: named("Car"),
+            color: None,
         });
         let doc = Document { layers: vec![layer], ..Document::default() };
         let got = tree_breadcrumb(&doc, &[vec![0], vec![0, 0], vec![0, 1], vec![0, 9]]);
@@ -15198,6 +15524,7 @@ mod tests {
                 isolated_blending: false,
                 knockout_group: false,
                 common: CommonProps::default(),
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![ElementSelection::all(vec![0, 0]),
@@ -15946,5 +16273,92 @@ mod layers_tree_key_tests {
         let ctrl_a = KeyChord::new("a", true, false, false, false);
         assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
         assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
+    }
+}
+
+
+#[cfg(test)]
+mod layers_row_menu_tests {
+    use super::{layers_row_menu, RowMenuEntry};
+
+    /// `lp_tree` as the workspace declares it, and a scope with the shared
+    /// element_tree fixture's first case as `active_document.element_tree`
+    /// (rows [1] Front, [0] Back, [0,1] G, [0,1,0] a leaf) and the panel's
+    /// declared defaults.
+    fn holder_and_ctx(isolated: bool) -> (serde_json::Value, serde_json::Value) {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        fn find(n: &serde_json::Value) -> Option<serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some("lp_tree") {
+                return Some(n.clone());
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(find),
+                serde_json::Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let holder = find(&ws.panel("layers_panel_content").expect("layers panel")["content"]).expect("lp_tree");
+        let raw = include_str!(concat!("../../../test_fixtures/", "layers/element_tree.json"));
+        let fixture: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let rows = fixture["cases"][0]["expected"].clone();
+        let mut panel: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults("layers_panel_content").into_iter().collect();
+        if isolated {
+            panel.insert("isolation_stack".into(), serde_json::json!([[0]]));
+        }
+        let ctx = serde_json::json!({"panel": panel, "active_document": {"element_tree": rows}});
+        (holder, ctx)
+    }
+
+    fn item<'a>(es: &'a [RowMenuEntry], label: &str) -> Option<&'a RowMenuEntry> {
+        es.iter().find(|e| matches!(e, RowMenuEntry::Item { label: l, .. } if l == label))
+    }
+
+    fn labels(es: &[RowMenuEntry]) -> Vec<String> {
+        es.iter().map(|e| match e {
+            RowMenuEntry::Separator => "-".to_string(),
+            RowMenuEntry::Item { label, .. } => label.clone(),
+        }).collect()
+    }
+
+    #[test]
+    fn the_row_menu_is_the_yamls_menu_in_the_rows_scope() {
+        let (holder, ctx) = holder_and_ctx(false);
+        let (es, _) = layers_row_menu(&holder, &ctx, &[0]).expect("row [0] has a menu");
+        assert_eq!(labels(&es), ["Options for Layer...", "Duplicate", "Delete Selection", "-",
+                                 "Enter Isolation Mode", "-", "Flatten Artwork", "Collect in New Layer"]);
+        // The row is bound as `node`: a layer row enables the layer-only item
+        // (an unbound node disables it everywhere), a group row does not.
+        assert!(matches!(item(&es, "Options for Layer..."), Some(RowMenuEntry::Item { enabled: true, .. })), "{es:?}");
+        let (group, _) = layers_row_menu(&holder, &ctx, &[0, 1]).expect("row [0,1] has a menu");
+        assert!(matches!(item(&group, "Options for Layer..."), Some(RowMenuEntry::Item { enabled: false, .. })), "{group:?}");
+        // The params are resolved in the row's scope: the isolation item names THIS row.
+        match item(&group, "Enter Isolation Mode") {
+            Some(RowMenuEntry::Item { action, params, .. }) => {
+                assert_eq!(action, "enter_isolation_mode");
+                assert!(params.get("container_id").and_then(|v| v.as_str()).is_some_and(|c| c.contains('0') && c.contains('1')),
+                        "the row's own path: {params:?}");
+            }
+            other => panic!("no isolation item: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_isolation_item_follows_the_isolation_stack() {
+        let (holder, ctx) = holder_and_ctx(true);
+        let (es, _) = layers_row_menu(&holder, &ctx, &[0, 1]).expect("row [0,1] has a menu");
+        match item(&es, "Exit Isolation Mode") {
+            Some(RowMenuEntry::Item { action, enabled, .. }) => {
+                assert_eq!(action, "exit_isolation_mode");
+                assert!(*enabled);
+            }
+            other => panic!("no Exit item while isolated: {other:?} in {es:?}"),
+        }
+    }
+
+    #[test]
+    fn a_row_that_is_not_in_the_tree_has_no_menu() {
+        let (holder, ctx) = holder_and_ctx(false);
+        assert!(layers_row_menu(&holder, &ctx, &[7]).is_none());
     }
 }

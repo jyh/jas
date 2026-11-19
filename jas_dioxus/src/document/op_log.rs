@@ -6,13 +6,23 @@
 //! replaces snapshot-boundary grouping; a `PrimitiveOp` is one entry in its
 //! ordered op list, a superset of today's `apply_op` fixture op (§5).
 //!
-//! Sub-step 2.1 wires the journal as a **cursor** (drives `is_modified` and the
-//! transaction count); the `ops` list and the causal metadata
-//! (`actor`/`parent`/`lamport`/`label`, OP_LOG.md §8) are recorded but mostly
-//! reserved here — they are populated and read in the later sub-steps (op
-//! capture in the `op_apply` path, the `checkpoint_equivalence` gate, the
-//! fixture reshape, and cross-language pinning). Hence the module-wide
-//! dead-code allow: most fields are deliberately not-yet-read in 2.1.
+//! Sub-step 2.1 wired the journal as a **cursor** (drives `is_modified` and the
+//! transaction count); the causal metadata (`actor`/`parent`/`lamport`/`label`,
+//! OP_LOG.md §8) is recorded and mostly not yet read, hence the module-wide
+//! dead-code allow. The `ops` list IS read today, by transaction coalescing
+//! (`Model`, both ports) and the recorder (`recorder/core.rs`): the full list
+//! of readers, each with how it treats an empty list, is
+//! `scripts/check_ops_readers.py` (corrected 2026-11-18, STATUS-jas row 154;
+//! until then this header said `ops` was reserved).
+//!
+//! ⛔ **HOST-KEY TRANSACTIONS JOURNAL WITH `ops: []`.** Six panel hosts write the
+//! document from a key with no `doc.*` verb (gradient, stroke, properties,
+//! character, paragraph, opacity; `panel_behavior.rs`), so their transactions
+//! carry a name and no ops. Undo is unaffected (snapshot stacks). **Typed ops
+//! per host through `op_apply` become REQUIRED, not optional, the day a reader
+//! of `ops` is added for which an empty list is a wrong answer** (op replay,
+//! `checkpoint_equivalence`, the intent ledger). `check_ops_readers.py` fails on
+//! any new reader, so that decision is made when the reader is written.
 #![allow(dead_code)]
 
 /// A primitive op: one entry in a transaction's ordered op list. A superset of

@@ -72,7 +72,7 @@ private func fullyPopulatedGroup(children: [Element]) -> Group {
 
 /// A Layer whose EVERY field other than `children` is set away from its
 /// default. Deliberately NOT `locked`/`invisible`-only: the whole point is that
-/// every one of the eleven fields is observable.
+/// every one of the twelve fields is observable.
 private func fullyPopulatedLayer(children: [Element]) -> Layer {
     Layer(name: "Stage",
           children: children,
@@ -84,7 +84,8 @@ private func fullyPopulatedLayer(children: [Element]) -> Layer {
           isolatedBlending: true,
           knockoutGroup: true,
           mask: distinctMask(23),
-          id: "stage")
+          id: "stage",
+          color: "#4a90d9")
 }
 
 /// A Document whose every field other than `layers` is away from its default,
@@ -141,7 +142,7 @@ private func expectOnlyChanged<T>(_ before: T, _ after: T,
         ("Group", Mirror(reflecting: fullyPopulatedGroup(children: [])),
          Mirror(reflecting: Group(children: [])), 11, ["children"]),
         ("Layer", Mirror(reflecting: fullyPopulatedLayer(children: [])),
-         Mirror(reflecting: Layer(children: [])), 11, ["children"]),
+         Mirror(reflecting: Layer(children: [])), 12, ["children"]),
         ("Document", Mirror(reflecting: fullyPopulatedDocument(children: [])),
          Mirror(reflecting: Document(layers: [])), 8, ["layers"]),
     ]
@@ -184,7 +185,7 @@ private func expectOnlyChanged<T>(_ before: T, _ after: T,
     let compared = expectOnlyChanged(stageLayer(doc), stageLayer(after),
                                      except: ["children"],
                                      "addElement into a layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 // MARK: - addElement (mask-editing mode)
@@ -251,7 +252,7 @@ private func expectOnlyChanged<T>(_ before: T, _ after: T,
     let compared = expectOnlyChanged(stageLayer(doc), stageLayer(after),
                                      except: ["children"],
                                      "groupSelection inside a layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 @Test func ungroupSelectionPreservesEveryFieldOfTheEnclosingLayer() {
@@ -276,7 +277,7 @@ private func expectOnlyChanged<T>(_ before: T, _ after: T,
     let compared = expectOnlyChanged(stageLayer(doc), stageLayer(after),
                                      except: ["children"],
                                      "ungroupSelection inside a layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 // MARK: - the compound-shape lifecycle
@@ -308,7 +309,7 @@ private func overlappingRects() -> [Element] {
     let compared = expectOnlyChanged(stageLayer(doc), stageLayer(after),
                                      except: ["children"],
                                      "makeCompoundShape inside a layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 private func documentWithCompound() -> Document {
@@ -336,7 +337,7 @@ private func documentWithCompound() -> Document {
     let compared = expectOnlyChanged(stageLayer(doc), stageLayer(after),
                                      except: ["children"],
                                      "releaseCompoundShape inside a layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 @Test func expandCompoundShapePreservesEveryFieldOfTheEnclosingLayer() {
@@ -356,7 +357,7 @@ private func documentWithCompound() -> Document {
     let compared = expectOnlyChanged(stageLayer(doc), stageLayer(after),
                                      except: ["children"],
                                      "expandCompoundShape inside a layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 // MARK: - Mask: the one container-holder in this file still rebuilt by hand
@@ -453,7 +454,7 @@ private func documentWithCompound() -> Document {
 
     let compared = expectOnlyChanged(lb, la, except: ["children", "locked"],
                                      "unlockAll over a nested layer")
-    #expect(compared.count == 9, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 @Test func showAllPreservesEveryFieldOfANestedLayer() {
@@ -484,7 +485,7 @@ private func documentWithCompound() -> Document {
 
     let compared = expectOnlyChanged(lb, la, except: ["children"],
                                      "showAll over a nested layer")
-    #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
+    #expect(compared.count == 11, "compared \(compared.count) Layer fields: \(compared)")
 }
 
 // MARK: - addLayer: the Document is a bystander container too

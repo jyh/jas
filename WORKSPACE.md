@@ -219,8 +219,24 @@ no-op here; reordering inside a group is `reorder_panel`.
 
 A shell that knows where in the tab bar a panel was dropped passes that
 position as `to_index`, so the panel lands where the drop indicator was drawn.
-The web computes it from the hovered tab (the left half inserts before it,
-the right half after). A shell that computes no position omits it.
+Each shell computes it from the hovered tab: the left half inserts before it,
+and from the tab's own midpoint on, the right half inserts after it. The half is
+measured on that tab's width, never on a fixed approximation. A shell that
+computes no position omits it.
+
+A panel dropped on another group's body, below its tab bar, does not join
+that group: it becomes a new group of its own in the same dock, next to the
+group it was dropped on. In the upper half of that group's height it goes
+above the group; from the midpoint on, below it. The half is measured on the
+group's own height, never on whatever widget in the body is under the pointer.
+
+A whole group dragged by its grip and dropped on another group's body is
+placed the same way: above that group in the upper half of its height, below
+it from the midpoint on, where the drop indicator is drawn. Within one dock the
+move's position is the group's index after it is taken out, so the shell
+converts as it does for a tab: a position after the group's own index is
+reduced by one, and both gaps beside the group leave it where it is. A group
+dropped on another group's tab bar takes that group's index.
 
 A drop within the panel's own group is a `reorder_panel`. Its `to` is the
 panel's index after it is taken out of the group, but the drop position counts

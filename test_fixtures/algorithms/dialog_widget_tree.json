@@ -2572,6 +2572,104 @@
     ]
   },
   {
+    "name": "brush_library_save",
+    "function": "widget_tree",
+    "args": {
+      "dialog": "brush_library_save",
+      "ctx": {}
+    },
+    "expected": [
+      {
+        "path": [],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "gap",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          0
+        ],
+        "type": "text",
+        "id": "",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          1
+        ],
+        "type": "text_input",
+        "id": "brush_lib_name_input",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          2
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "gap",
+          "justify"
+        ]
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "type": "button",
+        "id": "",
+        "kind": "button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "type": "button",
+        "id": "",
+        "kind": "button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "disabled"
+        ],
+        "style": []
+      }
+    ]
+  },
+  {
     "name": "brush_options",
     "function": "widget_tree",
     "args": {
@@ -6320,6 +6418,104 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [],
+        "style": []
+      }
+    ]
+  },
+  {
+    "name": "gradient_library_save",
+    "function": "widget_tree",
+    "args": {
+      "dialog": "gradient_library_save",
+      "ctx": {}
+    },
+    "expected": [
+      {
+        "path": [],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "gap",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          0
+        ],
+        "type": "text",
+        "id": "",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          1
+        ],
+        "type": "text_input",
+        "id": "gradient_lib_name_input",
+        "kind": "text_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          2
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "gap",
+          "justify"
+        ]
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "type": "button",
+        "id": "",
+        "kind": "button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "type": "button",
+        "id": "",
+        "kind": "button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "disabled"
+        ],
         "style": []
       }
     ]

@@ -256,6 +256,7 @@ fn run_element_evaluated_bounds(vectors: &[Value]) -> Vec<Value> {
                 },
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })];
             let result = match element_evaluated_bbox(&doc, &[0, 0]) {
                 Some((x, y, w, h)) => json!([x, y, w, h]),
@@ -493,6 +494,7 @@ fn run_paste_translate(vectors: &[Value]) -> Vec<Value> {
                     common: CommonProps { name: Some("L0".into()), ..Default::default() },
                     isolated_blending: false,
                     knockout_group: false,
+                    color: None,
                 })],
                 // Explicitly EMPTY: `Document::default()` seeds a Letter
                 // artboard whose id is random, which would make the golden

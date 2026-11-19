@@ -230,6 +230,21 @@ public enum LayersPanel {
     /// when no row binds the chord, so the caller lets the key pass. Mirrors Rust
     /// `layers_tree_key`.
     @discardableResult
+    /// The tree's keyboard Delete/Backspace (STATUS-jas row 141): the
+    /// last-layer rule, then `delete_layer_selection` through the PANEL
+    /// dispatch, where the one orphan gate lives (part 2b). An orphaning
+    /// delete opens the yaml confirm and runs nothing.
+    static func keyboardDelete(model: Model, onDialogOpened: (() -> Void)?) {
+        let paths = layersPanelSelection(model: model)
+        guard !paths.isEmpty else { return }
+        if paths.filter({ $0.count == 1 }).count >= model.document.layers.count { return }
+        guard let ws = WorkspaceData.load() else { return }
+        let ctx = buildPanelBodyContext(ws: ws, model: model, contentId: "layers_panel_content",
+                                        opacityPanel: OpacityPanelState())
+        dispatchPanelAction("delete_layer_selection", params: [:], actions: ws.actions(), ctx: ctx,
+                            store: model.stateStore, model: model, onDialogOpened: onDialogOpened)
+    }
+
     public static func treeKey(_ chord: KeyChord, model: Model,
                                onCloseDialog: (() -> Void)? = nil) -> Bool {
         guard let ws = WorkspaceData.load(),
@@ -316,6 +331,7 @@ public enum LayersPanel {
             var newVisibility = layer.visibility
             var newLocked = layer.locked
             var newName = layer.name
+            var newColor = layer.color
             for (dotted, exprV) in fields {
                 let exprStr = (exprV as? String) ?? ""
                 let v = evaluate(exprStr, context: callCtx)
@@ -333,6 +349,14 @@ public enum LayersPanel {
                     if case .bool(let b) = v { newLocked = b }
                 case "name":
                     if case .string(let s) = v { newName = s }
+                case "color":
+                    // The layer's own colour (row 53(b)); a non-colour writes nothing.
+                    // A `#rrggbb` read from context evaluates to .color, a literal to .string.
+                    switch v {
+                    case .string(let s), .color(let s):
+                        if let c = normalizeLayerColor(s) { newColor = c }
+                    default: break
+                    }
                 default: break
                 }
             }
@@ -347,6 +371,7 @@ public enum LayersPanel {
             newLayers[idx] = layer.withName(newName)
                                   .withLocked(newLocked)
                                   .withVisibility(newVisibility)
+                                  .withColor(newColor)
             // .replacing(...) preserves documentSetup / printPreferences
             // — passing them through the designated init silently drops
             // any field not enumerated, which would reset the user's
@@ -725,7 +750,12 @@ public enum LayersPanel {
 
         let docOpHandler: PlatformEffect = { value, callCtx, _ in
             guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
-            opApply(model, controller, docOpArgs(spec, context: callCtx))
+            // The store's namespaces under the caller's (STATUS-jas row 144): the
+            // engine's panel door leaves `panel` to the store (`scopeLocals`), so
+            // read the call context alone, `panel.*` was null. Taken when the
+            // effect runs, so a write earlier in the same batch is seen.
+            opApply(model, controller,
+                    docOpArgs(spec, context: model.stateStore.evalContext(extra: callCtx)))
             return nil
         }
 

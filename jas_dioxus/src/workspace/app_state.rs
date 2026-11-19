@@ -220,6 +220,16 @@ pub(crate) struct AppState {
     /// Keyed by library slug. Mutated by the brush.* and data.*
     /// effect handlers. See `transcripts/BRUSHES.md`.
     pub(crate) brush_libraries: serde_json::Value,
+    /// Mutable gradient libraries, app-global like the swatch libraries
+    /// (design 2026-11-17 §1): seeded from the bundle, keyed by id.
+    pub(crate) gradient_libraries: serde_json::Value,
+    /// Host file writes the interpreter queued (`brush.save_library`'s
+    /// `{kind, slug, manifest}`), drained by `renderer::drain_pending_writes`
+    /// after each dispatch: a browser download on the web.
+    pub(crate) pending_writes: Vec<serde_json::Value>,
+    /// The declared menu item an `open_menu` effect asked the host to pop up
+    /// (the Brushes toolbar's library button), taken by the panel menu view.
+    pub(crate) pending_menu: Option<String>,
     /// Stroke panel state — mirrored to/from global state for selection sync.
     pub(crate) stroke_panel: StrokePanelState,
     /// Gradient panel state — mirrored to/from the active fill or stroke
@@ -667,6 +677,11 @@ impl AppState {
             brush_libraries: crate::interpreter::workspace::Workspace::load()
                 .map(|ws| ws.data().get("brush_libraries").cloned().unwrap_or(serde_json::json!({})))
                 .unwrap_or(serde_json::json!({})),
+            gradient_libraries: crate::interpreter::workspace::Workspace::load()
+                .map(|ws| ws.data().get("gradient_libraries").cloned().unwrap_or(serde_json::json!({})))
+                .unwrap_or(serde_json::json!({})),
+            pending_writes: Vec::new(),
+            pending_menu: None,
             stroke_panel: StrokePanelState::default(),
             gradient_panel: GradientPanelState::default(),
             character_panel: CharacterPanelState::default(),
@@ -2730,6 +2745,7 @@ mod align_panel_state_tests {
                 name: Some("L".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let selection: Vec<ElementSelection> = selected.into_iter()
             .map(ElementSelection::all)
@@ -3166,6 +3182,7 @@ mod ensure_paragraph_wrapper_tests {
                 name: Some("L".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -3233,6 +3250,7 @@ mod ensure_paragraph_wrapper_tests {
                 name: Some("L".into()),
                 ..Default::default()
             },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -3302,6 +3320,7 @@ mod oplog_bracket_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -3510,6 +3529,7 @@ mod character_panel_apply_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -4477,6 +4497,7 @@ mod stroke_panel_apply_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -4831,6 +4852,7 @@ mod stroke_panel_field_scope_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps { name: Some("L".into()), ..Default::default() },
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],
@@ -5307,6 +5329,7 @@ mod stroke_panel_field_scope_tests {
             isolated_blending: false,
             knockout_group: false,
             common: CommonProps::default(),
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],

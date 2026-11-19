@@ -142,6 +142,20 @@
           ],
           "renaming_element": null,
           "isolation_stack": []
+        },
+        "active_document": {
+          "top_level_layer_paths": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ]
         }
       },
       "expected": {
@@ -167,6 +181,144 @@
           ],
           "renaming_element": null,
           "isolation_stack": []
+        },
+        "active_document": {
+          "top_level_layer_paths": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "action": "delete_layer_selection",
+        "params": {}
+      }
+    },
+    {
+      "name": "delete_is_refused_when_it_would_remove_every_layer",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Delete"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        },
+        "active_document": {
+          "top_level_layer_paths": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "backspace_is_refused_when_it_would_remove_every_layer",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Backspace"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                1
+              ]
+            },
+            {
+              "__path__": [
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        },
+        "active_document": {
+          "top_level_layer_paths": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ]
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "delete_runs_when_one_layer_and_a_child_of_the_other_are_selected",
+      "panel": "layers_panel_content",
+      "chord": {
+        "key": "Delete"
+      },
+      "ctx": {
+        "panel": {
+          "layers_panel_selection": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1,
+                0
+              ]
+            }
+          ],
+          "renaming_element": null,
+          "isolation_stack": []
+        },
+        "active_document": {
+          "top_level_layer_paths": [
+            {
+              "__path__": [
+                0
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ]
         }
       },
       "expected": {

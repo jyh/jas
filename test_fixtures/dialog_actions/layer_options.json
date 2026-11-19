@@ -1,0 +1,163 @@
+[
+  {
+    "name": "layer_options_create_ok_takes_the_next_preset_colour",
+    "setup_svg": "multi_layer.svg",
+    "note": "STATUS-jas row 53(b). Create mode proposes the next colour in the nine-preset cycle, mod(top_level_layers.length, 9): two layers, so index 2, green #4ad94a. OK writes it on the new layer, which nothing is selected above, so it is appended.",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "create",
+          "layer_id": null
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "lo_name_input"
+          },
+          "event": "commit",
+          "value": "Notes"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "layer_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_json": "layer_options_create_ok_takes_the_next_preset_colour_expected.json"
+  },
+  {
+    "name": "layer_options_create_preset_change_writes_that_preset",
+    "setup_svg": "multi_layer.svg",
+    "note": "Choosing a preset sets dialog.color to that preset's hex (the dialog's nine-row table): magenta is #d94ad9.",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "create",
+          "layer_id": null
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "lo_name_input"
+          },
+          "event": "commit",
+          "value": "Notes"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "lo_color_preset"
+          },
+          "event": "change",
+          "value": "magenta"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "layer_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_json": "layer_options_create_preset_change_writes_that_preset_expected.json"
+  },
+  {
+    "name": "layer_options_edit_preset_change_colours_a_colourless_layer",
+    "setup_svg": "multi_layer.svg",
+    "note": "Edit mode on Foreground (no colour), preset red: OK writes #d94a4a onto that layer and nothing else.",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "edit",
+          "layer_id": "1"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "id": "lo_color_preset"
+          },
+          "event": "change",
+          "value": "red"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "layer_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_json": "layer_options_edit_preset_change_colours_a_colourless_layer_expected.json"
+  },
+  {
+    "name": "layer_options_edit_ok_keeps_a_stored_colour",
+    "setup_svg": "layer_color.svg",
+    "note": "Edit mode on 'Upper', whose stored colour #ff8000 is no preset (the dropdown reads custom): OK with no change writes the same colour back, so the document is unchanged.",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "edit",
+          "layer_id": "2"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "layer_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_document": "unchanged"
+  },
+  {
+    "name": "layer_options_edit_ok_on_a_colourless_layer_writes_the_default",
+    "setup_svg": "multi_layer.svg",
+    "note": "A layer with no colour opens showing the dialog's declared default, #4a90d9 (light_blue), and an explicit OK writes it. Readers never invent a colour; this is a write the user confirmed.",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "edit",
+          "layer_id": "0"
+        }
+      },
+      {
+        "dialog_event": {
+          "address": {
+            "action": "layer_options_confirm",
+            "label": "OK"
+          },
+          "event": "click"
+        }
+      }
+    ],
+    "expected_dialog": null,
+    "expected_json": "layer_options_edit_ok_on_a_colourless_layer_writes_the_default_expected.json"
+  }
+]

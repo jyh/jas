@@ -12,19 +12,37 @@ func renderedTextWidth(_ s: String, family: String, weight: String, style: Strin
     var traits: NSFontDescriptor.SymbolicTraits = []
     if weight == "bold" { traits.insert(.bold) }
     if style == "italic" { traits.insert(.italic) }
-    let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
-    let font: NSFont
-    if !traits.isEmpty {
+    let font: NSFont = withFontLookup {
+        let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
+        if traits.isEmpty { return baseFont }
         let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
-        font = NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
-    } else {
-        font = baseFont
+        return NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
     }
     return Double(NSAttributedString(string: s, attributes: [.font: font]).size().width)
     #else
     return Double(s.count) * size * approxCharWidthFactor
     #endif
 }
+
+#if canImport(AppKit)
+/// One font lookup at a time in this process (STATUS-jas row 140).
+///
+/// Measured 2026-11-16: a parallel `swift test` of the forms tests hung 3 runs
+/// of 3. Each time, 14 threads sat in `renderedTextWidth` → `NSFont(name:size:)`
+/// → CoreText → a SYNCHRONOUS XPC to the system font service
+/// (`XTypeXPCClient XTCopyFontWithName` / `XTCopyFontProviders`), and none got a
+/// reply. A fresh process got fonts in milliseconds meanwhile, so the service
+/// was healthy and the wedge was this process's concurrent lookups. Every
+/// `NSFont` construction in the app goes through this lock. The measuring that
+/// follows a lookup does not, because no hung stack was in it.
+private let fontLookupLock = NSLock()
+
+func withFontLookup<T>(_ body: () -> T) -> T {
+    fontLookupLock.lock()
+    defer { fontLookupLock.unlock() }
+    return body()
+}
+#endif
 
 /// Line segments per Bezier curve when flattening paths.
 public let elementFlattenSteps = 20
@@ -3653,6 +3671,12 @@ public struct Layer: Equatable {
     public internal(set) var isolatedBlending: Bool
     /// See ``Group/knockoutGroup``.
     public internal(set) var knockoutGroup: Bool
+    /// The layer's own colour (STATUS-jas row 53(b)): a lowercase `#rrggbb`,
+    /// or nil for a layer that has none. No reader invents one; the Layers
+    /// row falls back to the selection colour. Layer Options writes it.
+    /// Group has no such field. Every codec reads through
+    /// ``normalizeLayerColor(_:)``.
+    public internal(set) var color: String?
 
     /// Convenience accessor that returns the empty string when the
     /// layer is unnamed. Most callers should use `name ?? ""` directly,
@@ -3667,7 +3691,8 @@ public struct Layer: Equatable {
                 isolatedBlending: Bool = false,
                 knockoutGroup: Bool = false,
                 mask: Mask? = nil,
-                id: String? = nil) {
+                id: String? = nil,
+                color: String? = nil) {
         self.name = Layer.normalizedName(name)
         self.id = id
         self.children = children
@@ -3678,6 +3703,7 @@ public struct Layer: Equatable {
         self.isolatedBlending = isolatedBlending
         self.knockoutGroup = knockoutGroup
         self.mask = mask
+        self.color = color
     }
 
     public var bounds: BBox {
@@ -3688,6 +3714,17 @@ public struct Layer: Equatable {
         let maxY = all.map { $0.y + $0.height }.max()!
         return (minX, minY, maxX - minX, maxY - minY)
     }
+}
+
+/// A layer colour as stored: `#rrggbb` lowercased, or nil for anything else
+/// (absent, empty, a name, a short form), so an unparsable value drops the
+/// colour and keeps the layer. Mirrors the reference `normalize_layer_color`
+/// and Rust `normalize_layer_color`.
+public func normalizeLayerColor(_ v: String?) -> String? {
+    guard let v = v, v.count == 7, v.hasPrefix("#") else { return nil }
+    let hex = v.dropFirst()
+    guard hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
+    return "#" + hex.lowercased()
 }
 
 // MARK: - Stable-identity helpers
@@ -3789,6 +3826,11 @@ extension Layer {
 
     public func withVisibility(_ visibility: Visibility) -> Layer {
         var v = self; v.visibility = visibility; return v
+    }
+
+    /// Clone-then-mutate the layer's own colour (STATUS-jas row 53(b)).
+    public func withColor(_ color: String?) -> Layer {
+        var v = self; v.color = color; return v
     }
 }
 

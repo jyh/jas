@@ -1506,19 +1506,172 @@ actions:
           color_mode: "param.color_mode"
       - close_dialog: null
 
+  toggle_swatch_library_open:
+    description: >
+      Open or close one swatch library in the Swatches panel. The library
+      is named by its id (param.library). If an entry with that id is in
+      panel.open_libraries it is removed, whatever its collapsed state;
+      otherwise the entry {id: <id>, collapsed: false} is appended, so a
+      library opens expanded below the ones already open. Closing the
+      library that holds the swatch selection leaves the selection as it
+      is.
+    category: swatches
+    params:
+      library: { type: string }
+    effects:
+      - list_toggle:
+          target: panel.open_libraries
+          panel: swatches
+          value: param.library
+          key: id
+          insert: { collapsed: false }
+
+  gradient_save_library:
+    description: >
+      Open the Save Gradient Library dialog on the Gradient panel's active
+      library. The dialog receives the library's id as param.library and
+      proposes its display name as the name to save under (empty when it has
+      none). Saving is the dialog's Save button, gradient_save_library_confirm.
+    category: panel
+    effects:
+      - open_dialog:
+          id: gradient_library_save
+          params:
+            library: "panel.active_library_id"
+            name: "data.gradient_libraries[panel.active_library_id].name"
+
+  gradient_save_library_confirm:
+    description: >
+      Save the gradient library the dialog was opened on under the entered
+      name, then close the dialog. The rules are Save Brush Library's and
+      Save Swatch Library's: the name becomes an id (lower-case ASCII letters
+      and digits kept, every other run of characters one underscore, leading
+      and trailing underscores trimmed, "library" if nothing is left); when
+      the id is the source library's own id the save is in place and only
+      the name changes; when it names a different existing library the first
+      free "_2", "_3", ... suffix is taken. A new library is a copy of the
+      source with the new name and becomes the ACTIVE library, because the
+      Gradient panel shows one library at a time. Every save asks the host to
+      write the library's file (the interpreter itself writes no file): on
+      the web as a download of <id>.json, on the Mac under the user's
+      Application Support gradients folder, each the shape of the
+      workspace/gradients/ files. An empty name or a missing source library
+      saves nothing. A desktop host (the Mac, Windows) reads its saved libraries back at
+      the next launch: each replaces the bundle's library of the same id, and a
+      new id is added (test_fixtures/algorithms/user_library_merge.json).
+    category: panel
+    params:
+      library: { type: string, description: "Id of the library being saved" }
+      name: { type: string, description: "The name to save it under" }
+    effects:
+      - gradient.save_library: { library: "param.library", name: "param.name" }
+      - close_dialog: null
+
+  gradient_reverse:
+    description: >
+      Reverse Gradient, the Gradient panel menu's first row (GRADIENT.md
+      §Panel menu): flip the stops of the gradient the panel shows end to
+      end. The panel's stops are taken in location order (two stops at the
+      same location keep their stored order), reversed, and each moves to
+      100 minus its location, so the last colour now starts the gradient.
+      Each midpoint keeps its place between the same two colours: the
+      midpoint between two neighbours is that pair's old midpoint measured
+      from the other end (100 minus it), and the new last stop's midpoint
+      is 50. Colours and opacities are unchanged. The new stops are written
+      to gradient_stops, the slider's whole-list write, so they reach the
+      selection's gradient (its fill or stroke, per fill_on_top) the same
+      way a slider gesture does. The menu row is enabled only while
+      something is selected, the selection's active attribute holds a
+      gradient (the panel is not showing a seeded preview), and that
+      gradient is not freeform.
+    category: panel
+    effects:
+      - set: { gradient_stops: "gradient_reversed(panel.stops)" }
+
+  gradient_distribute_stops:
+    description: >
+      Distribute Stops Evenly, the Gradient panel menu's second row
+      (GRADIENT.md §Panel menu): space the stops of the gradient the panel
+      shows at equal intervals. The panel's stops are taken in location
+      order (two stops at the same location keep their stored order); the
+      first moves to 0 %, the last to 100 %, and stop i of n to
+      100 × i ÷ (n − 1) %. Every midpoint resets to 50. Colours and
+      opacities are unchanged. The new stops are written to gradient_stops,
+      the slider's whole-list write, so they reach the selection's gradient
+      the same way a slider gesture does. The menu row is enabled under the
+      same conditions as Reverse Gradient, and only with more than two
+      stops: two stops are already at 0 % and 100 % after any distribution.
+    category: panel
+    effects:
+      - set: { gradient_stops: "gradient_distributed(panel.stops)" }
+
+  gradient_reset_midpoints:
+    description: >
+      Reset Midpoints, the Gradient panel menu's third row (GRADIENT.md
+      §Panel menu): return every midpoint of the gradient the panel shows to
+      50 %, halfway between its two stops. Stop locations, colours,
+      opacities and their stored order are unchanged. The new stops are
+      written to gradient_stops, the slider's whole-list write, so they
+      reach the selection's gradient the same way a slider gesture does.
+      The menu row is enabled under the same conditions as Reverse
+      Gradient.
+    category: panel
+    effects:
+      - set: { gradient_stops: "gradient_midpoints_reset(panel.stops)" }
+
+  set_gradient_active_library:
+    description: >
+      Make one gradient library the Gradient panel's active library
+      (panel.active_library_id), the one whose tiles the preset strip
+      shows. The library is named by its id (param.library); nothing
+      checks that a library with that id exists, as the dropdown's own
+      write does not.
+    category: panel
+    params:
+      library: { type: string }
+    effects:
+      - set_panel_state: { panel: gradient, key: active_library_id, value: "param.library" }
+
   save_swatch_library:
     description: >
-      Open the Save Swatch Library dialog prompting the user for a library name and saving the active library to workspace/swatches/.
+      Open the Save Swatch Library dialog on the Swatches panel's selected
+      library. The dialog receives the library's id as param.library and
+      proposes the library's display name as the name to save under (empty
+      when the library has no name). Saving is the dialog's Save button,
+      save_swatch_library_confirm.
     category: swatches
     effects:
-      - open_dialog: { id: 'swatch_library_save' }
+      - open_dialog:
+          id: swatch_library_save
+          params:
+            library: "panel.selected_library"
+            name: "data.swatch_libraries[panel.selected_library].name"
 
   save_swatch_library_confirm:
     description: >
-      Confirm saving the swatch library under the entered name. Closes the dialog on success.
+      Save the swatch library the dialog was opened on under the entered
+      name, then close the dialog. The rules are Save Brush Library's: the
+      name becomes an id (lower-case ASCII letters and digits kept, every
+      other run of characters one underscore, leading and trailing
+      underscores trimmed, "library" if nothing is left); when the id is the
+      source library's own id the save is in place and only the name
+      changes; when it names a different existing library the first free
+      "_2", "_3", ... suffix is taken. A new library is a copy of the source
+      with the new name; it is opened expanded at the end of the
+      open-library list and becomes the selected library, with the swatch
+      selection kept. Every save asks the host to write the library's file
+      (the interpreter itself writes no file): on the web, as a download of
+      <id>.json, the shape of the workspace/swatches/ files. An empty name
+      or a missing source library saves nothing. A desktop host (the Mac, Windows) reads its saved libraries back at
+      the next launch: each replaces the bundle's library of the same id, and a
+      new id is added (test_fixtures/algorithms/user_library_merge.json).
     category: swatches
+    params:
+      library: { type: string, description: "Id of the library being saved" }
+      name: { type: string, description: "The name to save it under" }
     effects:
-      - log: "save_swatch_library_confirm"
+      - swatch.save_library: { library: "param.library", name: "param.name" }
+      - close_dialog: null
       - close_dialog: None
 
   # ── Stroke ───────────────────────────────────────────────
@@ -2434,7 +2587,14 @@ actions:
       resolved via element_at(path_from_id(layer_id)) and passed as
       dialog params so the dialog's init: block populates the inputs.
       In create mode, layer_id is null and the dialog's defaults take
-      effect (name "Layer N", color preset, visible+preview+unlocked).
+      effect (name "Layer N", visible+preview+unlocked).
+      The colour (STATUS-jas row 53(b)) is passed as the color param.
+      In edit mode it is the layer's own stored colour, or the dialog's
+      declared default #4a90d9 (Light Blue) when the layer has none, so
+      the swatch always shows a colour. In create mode it is the next
+      colour in the nine-preset cycle: the preset at index (number of
+      top-level layers) mod 9, in the order Light Blue, Red, Green,
+      Blue, Yellow, Magenta, Cyan, Light Gray, Dark Green.
     category: layers
     tier: 3
     params:
@@ -2455,6 +2615,10 @@ actions:
             lock: "if layer_elem != null then layer_elem.common.locked else false"
             show: "layer_elem == null or layer_elem.common.visibility != 'invisible'"
             preview: "layer_elem == null or layer_elem.common.visibility == 'preview'"
+            color: >
+              if layer_elem != null
+                then (if layer_elem.color then layer_elem.color else '#4a90d9')
+                else ['#4a90d9', '#d94a4a', '#4ad94a', '#4a4ad9', '#d9d94a', '#d94ad9', '#4ad9d9', '#b0b0b0', '#2a7a2a'][mod(active_document.top_level_layers.length, 9)]
 
   layer_options_confirm:
     description: >
@@ -2466,12 +2630,16 @@ actions:
       at that path in place. Visibility is derived from the show and
       preview booleans: show=false maps to invisible; show=true with
       preview=true maps to preview; show=true with preview=false maps
-      to outline. One undo snapshot covers the operation. Closes the
-      dialog on success.
+      to outline. When a color is passed (a #rrggbb string), it is
+      written as the layer's own colour, on the new layer in create
+      mode and on the edited layer in edit mode (STATUS-jas row 53(b));
+      when none is passed the layer's colour is left as it was. One
+      undo snapshot covers the operation. Closes the dialog on success.
     category: layers
     tier: 3
     params:
       layer_id: { type: string, nullable: true }
+      color: { type: color, nullable: true }
       name: { type: string }
       lock: { type: bool }
       show: { type: bool }
@@ -2492,6 +2660,13 @@ actions:
                   name: "param.name"
                   common.locked: "param.lock"
                   common.visibility: target_visibility
+            - if:
+                condition: "param.color"
+                then:
+                  - doc.set:
+                      path: "path_from_id(param.layer_id)"
+                      fields:
+                        color: "param.color"
           else:
             - let:
                 insert_index: "active_document.new_layer_insert_index"
@@ -2507,6 +2682,13 @@ actions:
                 fields:
                   common.locked: "param.lock"
                   common.visibility: target_visibility
+            - if:
+                condition: "param.color"
+                then:
+                  - doc.set:
+                      path: "path(insert_index)"
+                      fields:
+                        color: "param.color"
       - close_dialog
 
   # Scrolling
@@ -4588,22 +4770,76 @@ actions:
 
   save_brush_library:
     description: >
-      Open the Save Brush Library dialog, prompting for a name.
-      The selected library's manifest and artwork files are
-      written to workspace/brushes/<new_slug>/.
+      Open the Save Brush Library dialog on the Brushes panel's selected
+      library. The dialog receives the library's slug as param.library and
+      proposes the library's display name as the name to save under
+      (empty when the library has no name). Saving is the dialog's Save
+      button, save_brush_library_confirm.
     category: brushes
     effects:
-      - log: "save_brush_library"
+      - open_dialog:
+          id: brush_library_save
+          params:
+            library: "panel.selected_library"
+            name: "data.brush_libraries[panel.selected_library].name"
+
+  save_brush_library_confirm:
+    description: >
+      Save the library the dialog was opened on under the entered name,
+      then close the dialog. The name becomes a slug: lower-case ASCII
+      letters and digits are kept, every other run of characters becomes
+      one underscore, and leading and trailing underscores are trimmed
+      (an empty result is "library"). When the slug is the source
+      library's own slug the save is in place and only the name changes.
+      When it names a different existing library the first free "_2",
+      "_3", ... suffix is taken. A new library is a copy of the source with
+      the new name; it is opened expanded at the end of the open-library
+      list and becomes the selected library, with the brush selection
+      kept. Every save asks the host to write the library's library.json
+      (the interpreter itself writes no file): on the Mac, under the
+      user's Application Support brushes folder; on the web, as a
+      download. An empty name or a missing source library saves nothing. A desktop host (the Mac, Windows) reads its saved libraries back at
+      the next launch: each replaces the bundle's library of the same id, and a
+      new id is added (test_fixtures/algorithms/user_library_merge.json).
+    category: brushes
+    params:
+      library: { type: string, description: "Slug of the library being saved" }
+      name: { type: string, description: "The name to save it under" }
+    effects:
+      - brush.save_library: { library: "param.library", name: "param.name" }
+      - close_dialog: null
 
   open_brush_libraries_menu:
     description: >
-      Show the dynamic Open Brush Library submenu listing all
-      libraries discovered under workspace/brushes/. Selecting an
-      unopened library appends to panel.open_libraries; selecting
-      an already-open library closes it.
+      Pop up the Brushes panel menu's Open Brush Library submenu
+      (bp_menu_open_library) at the clicked button. Its rows are the
+      menu item's declared items_from, so the toolbar button and the
+      panel menu list the same libraries; choosing one runs
+      toggle_brush_library_open. Popping the menu up is the host's
+      (the interpreter records the request and draws nothing).
     category: brushes
     effects:
-      - log: "open_brush_libraries_menu"
+      - open_menu: { id: bp_menu_open_library }
+
+  toggle_brush_library_open:
+    description: >
+      Open or close one brush library in the Brushes panel. The library is
+      named by its slug (param.library). If an entry with that id is in
+      panel.open_libraries it is removed, whatever its collapsed state;
+      otherwise the entry {id: <slug>, collapsed: false} is appended, so a
+      library opens expanded below the ones already open. Closing the
+      library that holds the brush selection leaves the selection as it
+      is.
+    category: brushes
+    params:
+      library: { type: string }
+    effects:
+      - list_toggle:
+          target: panel.open_libraries
+          panel: brushes
+          value: param.library
+          key: id
+          insert: { collapsed: false }
 
   apply_brush_to_selection:
     description: >

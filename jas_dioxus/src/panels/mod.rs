@@ -550,7 +550,7 @@ mod tests {
     /// Where this app WRITES a declared panel key and where it READS one back
     /// have to be the same place.
     ///
-    /// `panel_menu::typed_panel_slot_keys` names the seven (panel, key) pairs a
+    /// `panel_menu::typed_panel_slot_keys` names the eight (panel, key) pairs a
     /// panel-named `set_panel_state` is routed into a typed `AppState` slot for
     /// instead of into the generic per-panel table; `panel_menu_ctx` builds the
     /// scope a panel menu evaluates against. This drives each pair END TO END —
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn every_typed_write_target_round_trips_through_the_menu_context() {
         let claimed = panel_menu::typed_panel_slot_keys();
-        assert_eq!(claimed.len(), 7, "the typed-slot census changed; add a probe below");
+        assert_eq!(claimed.len(), 8, "the typed-slot census changed; add a probe below");
         for (content_id, key) in claimed {
             // A value the key's own enum / type accepts and that is NOT the
             // declared default, so a write that silently does nothing reds.
@@ -568,6 +568,9 @@ mod tests {
                 ("color_panel_content", "mode") => ("\"cmyk\"", serde_json::json!("cmyk")),
                 ("swatches_panel_content", "thumbnail_size") =>
                     ("\"large\"", serde_json::json!("large")),
+                // The keyed toggle writes a whole list (row 8, §3.4).
+                ("swatches_panel_content", "open_libraries") =>
+                    ("[]", serde_json::json!([])),
                 ("symbols_panel_content", "selected_symbol") =>
                     ("\"star\"", serde_json::json!("star")),
                 ("concepts_panel_content", "selected_concept") =>
@@ -632,6 +635,9 @@ mod tests {
             app_default_stroke: Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0)),
             swatch_libraries: serde_json::json!({}),
             brush_libraries: serde_json::json!({}),
+            gradient_libraries: serde_json::json!({}),
+            pending_writes: Vec::new(),
+            pending_menu: None,
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
             gradient_panel: crate::workspace::app_state::GradientPanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),
@@ -693,6 +699,7 @@ mod tests {
             common: CommonProps { name: Some("L0".into()), ..Default::default() },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],

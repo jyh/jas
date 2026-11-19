@@ -78,6 +78,32 @@ struct PanelWidgetEvents {
         }
     }
 
+    /// Deliver `input`, `keydown` or `blur` to a text field
+    /// (``WidgetEvent/textEntry``) in this route's scope: a Layers row's
+    /// rename field, reached by a script's `row` step, has the row's `node`
+    /// in ``scope``.
+    @discardableResult
+    func textEntry(_ widget: [String: Any], event: String, text: String?, key: String? = nil,
+                   modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
+        run { host, panel, ws in
+            WidgetEvent.textEntry(widget: widget, event: event, store: model.stateStore,
+                                  panel: panel, text: text, key: key, modifiers: modifiers,
+                                  actions: ws?.actions(), dialogs: ws?.dialogs(),
+                                  platformEffects: platformEffects, model: model, host: host)
+        }
+    }
+
+    /// Run item `index` of `widget`'s `context_menu:` in this route's scope
+    /// (``WidgetEvent/contextMenuItem``): a Layers row's, with its `node`.
+    @discardableResult
+    func contextMenuItem(_ widget: [String: Any], index: Int) -> WidgetEvent.Result {
+        run { host, _, ws in
+            WidgetEvent.contextMenuItem(widget: widget, index: index, store: model.stateStore,
+                                        actions: ws?.actions(), dialogs: ws?.dialogs(),
+                                        platformEffects: platformEffects, model: model, host: host)
+        }
+    }
+
     @discardableResult
     func click(_ widget: [String: Any], modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
         run { host, panel, ws in
@@ -403,6 +429,25 @@ func dispatchPanelAction(
         // dispatcher that holds the `doc.*` handlers.
         LayersPanel.dispatchYamlAction(name, model: model)
         return
+    case "delete_layer_selection":
+        // The reference-aware gate (delete_layer_orphan_confirm.yaml), in the
+        // DISPATCH, as the web keeps it (`renderer.rs`), so every route that
+        // reaches the action meets it (STATUS-jas row 141 part 2b). The
+        // deletion paths are the PANEL selection. Orphans: open the confirm with
+        // their count and run nothing; its OK runs the distinct
+        // `delete_layer_orphan_confirm_ok`, so this does not re-fire. None:
+        // fall through to the action.
+        let orphans = DependencyIndex.orphanedReferences(
+            model.document, layersPanelSelection(model: model)).count
+        if orphans > 0 {
+            let ws = WorkspaceData.load()
+            runEffects([["open_dialog": ["id": "delete_layer_orphan_confirm",
+                                         "params": ["count": orphans]] as [String: Any]]],
+                       ctx: ctx, store: store, actions: actions,
+                       dialogs: ws?.data["dialogs"] as? [String: Any])
+            onDialogOpened?()
+            return
+        }
     default:
         break
     }

@@ -476,6 +476,17 @@ fn container_blend_attrs(isolated_blending: bool, knockout_group: bool) -> Strin
     s
 }
 
+/// A layer's own colour (STATUS-jas row 53(b)) as `jas:layer-color`, only
+/// when it has one. Other SVG editors ignore the attribute, so the colour
+/// survives a jas round trip and not a foreign save. Mirrors the reference
+/// `_layer_color_attr` and JasSwift's `layerColorAttr`.
+fn layer_color_attr(color: &Option<String>) -> String {
+    match color {
+        Some(c) => format!(" jas:layer-color=\"{}\"", c),
+        None => String::new(),
+    }
+}
+
 fn id_lock_attrs(id: &Option<String>, locked: bool) -> String {
     let id_part = match id {
         None => String::new(),
@@ -1252,10 +1263,11 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
             // inkscape:groupmode="layer" lets the parser distinguish
             // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
-                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}{}>",
+                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}{}{}>",
                 indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 container_blend_attrs(e.isolated_blending, e.knockout_group),
+                layer_color_attr(&e.color),
             )];
             let child_indent = format!("{}  ", indent);
             for child in &e.children {
@@ -2914,6 +2926,8 @@ fn parse_element_body(node: &XmlNode) -> Option<Element> {
             if group_mode.as_deref() == Some("layer") {
                 Some(Element::Layer(LayerElem {
                     children, common, isolated_blending: iso, knockout_group: ko,
+                    color: normalize_layer_color(
+                        node.attrs.get("jas:layer-color").map(|s| s.as_str())),
                 }))
             } else {
                 Some(Element::Group(GroupElem {
@@ -3244,6 +3258,8 @@ pub fn try_svg_to_document(svg: &str) -> Option<Document> {
                     common: g.common.clone(),
                     isolated_blending: g.isolated_blending,
                     knockout_group: g.knockout_group,
+                    // A Group carries no colour; a promoted layer has none.
+                    color: None,
                 }));
             }
             _ => {
@@ -3256,6 +3272,7 @@ pub fn try_svg_to_document(svg: &str) -> Option<Document> {
                         common: CommonProps::default(),
                         isolated_blending: false,
                         knockout_group: false,
+                        color: None,
                     }));
                 } else if let Some(Element::Layer(le)) = layers.last_mut() {
                     le.children.push(Rc::new(elem));
@@ -4066,6 +4083,7 @@ mod tests {
                     name: Some("Layer".to_string()),
                     ..Default::default()
                 },
+                color: None,
             })],
             selected_layer: 0,
             selection: vec![],

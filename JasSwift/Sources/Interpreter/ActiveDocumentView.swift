@@ -87,10 +87,14 @@ func elementNodeView(_ elem: Element) -> [String: Any] {
 public func elementTree(_ doc: Document) -> [[String: Any]] {
     var rows: [[String: Any]] = []
     let selected = doc.selectedPaths
-    func walk(_ children: [Element], _ prefix: [Int], _ depth: Int) {
+    // `layerColor`: the nearest LAYER's colour at or above the row (row
+    // 53(b)), a layer row's own; "" when that layer has none, never invented.
+    func walk(_ children: [Element], _ prefix: [Int], _ depth: Int, _ layerColor: String) {
         for i in children.indices.reversed() {
             let elem = children[i]
             let path = prefix + [i]
+            var color = layerColor
+            if case .layer(let l) = elem { color = l.color ?? "" }
             let vis: String = {
                 switch elem.visibility {
                 case .invisible: return "invisible"
@@ -106,11 +110,12 @@ public func elementTree(_ doc: Document) -> [[String: Any]] {
                 "name": elem.name ?? "", "type": treeTypeName(elem), "type_label": treeTypeLabel(elem),
                 "visibility": vis, "locked": elem.isLocked, "is_container": kids != nil,
                 "element_selected": pathIsSelectedOrUnder(selected, path),
+                "ancestor_layer_color": color,
             ])
-            if let kids { walk(kids, path, depth + 1) }
+            if let kids { walk(kids, path, depth + 1, color) }
         }
     }
-    walk(doc.layers.map { Element.layer($0) }, [], 0)
+    walk(doc.layers.map { Element.layer($0) }, [], 0, "")
     return rows
 }
 
@@ -218,6 +223,9 @@ public func buildActiveDocumentView(
                 "locked": layer.locked,
             ],
             "path": pathJson,
+            // The layer's own colour (row 53(b)), null when it has none;
+            // Layer Options' edit mode reads it through element_at.
+            "color": layer.color as Any? ?? NSNull(),
             "children": layer.children.map(elementNodeView),
         ])
         topLevelLayerPaths.append(pathJson)

@@ -2347,7 +2347,18 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 102, "the fixture corpus changed size");
+        assert_eq!(total, 105, "the fixture corpus changed size");
+        // ⛔ 104 → 105 (jas, 2026-11-18, row 150): `gradient_three_stops.svg`,
+        // gradient_fill_only.svg with a third (green@25) stop on its linear
+        // fill, for the Gradient menu's Distribute case. Expected to present
+        // as its two-stop source does; NOT measured here (Windows-only lane).
+        // Both pins bumped in the same edit.
+        // ⛔ 103 → 104 (jas, 2026-11-18, row 147's Gradient menu cases):
+        // `gradient_fill_only.svg`, gradient_fill_and_stroke.svg with its path
+        // removed, so the one rect and its linear fill gradient are the whole
+        // selection. A strict subset of a file that presents, so expected to
+        // present; NOT measured here (this lane is Windows-only). Both pins
+        // bumped in the same edit.
         // ⛔ 100 → 101 (jas, 2026-10-28, the layers_nav_right empty-container
         // case): `two_layers_top_empty.svg`, multi_layer.svg with the circle
         // removed, so its top layer is empty: one rect, no gradient, no text.
@@ -2525,6 +2536,12 @@ mod tests {
         // gradient, no text, no transform. Expected to present; that it does
         // is read, not measured here (no cargo on the authoring box, O54).
         // Both pins bumped in the same edit.
+        // ⛔ 102 → 103 (jas, 2026-11-17, STATUS-jas row 53(b)):
+        // `layer_color.svg`, four layers each holding one solid-fill rect, three
+        // of them carrying `jas:layer-color` (one valid, one uppercase, one
+        // unparsable): no stroke, no gradient, no text, no transform. Measured
+        // to present by this test's own run on the authoring box. Both pins
+        // bumped in the same edit.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2536,6 +2553,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 102, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 105, "the whole corpus presents");
     }
 }

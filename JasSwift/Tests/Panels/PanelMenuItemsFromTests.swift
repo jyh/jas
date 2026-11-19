@@ -36,7 +36,8 @@ private let libsSpec: [String: Any] = [
 }
 
 @Test func aSubmenuEntryWithoutItemsFromStaysADisabledAction() {
-    // Today's brushes.yaml row: `type: submenu`, `dynamic: true`, no action.
+    // brushes.yaml's row before row 8's wiring (2026-11-17): `type: submenu`,
+    // `dynamic: true`, no action and no `items_from`.
     let items = menuItems(fromRaw: [["label": "Open Brush Library", "type": "submenu", "dynamic": true]])
     guard case .action(let label, let command, _) = items[0] else {
         Issue.record("got \(items[0])"); return
@@ -95,4 +96,93 @@ private let libsSpec: [String: Any] = [
     let before = model.stateStore.getPanel("brushes_panel_content", "view_mode") as? String
     panelDispatchRow(.brushes, action: "", params: ["view_mode": "list"], addr: addr, layout: &layout, model: model)
     #expect(model.stateStore.getPanel("brushes_panel_content", "view_mode") as? String == before)
+}
+
+// `open_menu` names a menu ITEM by its declared `id` (STATUS-jas row 8): the
+// Brushes toolbar's library button asks for `bp_menu_open_library`, and the
+// dock pops up that item's rows. The resolution is the pure half; Rust's twin
+// is `panel_menu::menu_request_target`.
+@Test func aMenuRequestResolvesToThePanelAndSubmenuThatDeclareIt() {
+    guard let hit = panelMenuRequest("bp_menu_open_library") else {
+        Issue.record("brushes.yaml declares bp_menu_open_library with items_from"); return
+    }
+    #expect(hit.kind == .brushes)
+    #expect(hit.label == "Open Brush Library")
+    #expect(hit.spec["source"] as? String == "keys(data.brush_libraries)")
+    for id in ["", "no_such_item", "Open Brush Library"] {
+        #expect(panelMenuRequest(id) == nil, "\(id) names no item")
+    }
+}
+
+@Test func theBrushLibrariesButtonQueuesTheOpenLibraryRequest() {
+    let model = Model()
+    #expect(model.stateStore.pendingMenu == nil)
+    runYamlActionByName("open_brush_libraries_menu", params: [:], model: model)
+    #expect(model.stateStore.pendingMenu == "bp_menu_open_library")
+    let rows = panelSubmenuRows(.brushes, spec: panelMenuRequest("bp_menu_open_library")?.spec ?? [:],
+                                layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.action } .contains("toggle_brush_library_open"),
+            "the request's rows are the declared library rows: \(rows.map { $0.label ?? "-" })")
+    #expect(rows.first(where: { $0.params["library"] as? String == "default_brushes" })?.checked == true,
+            "default_brushes is open by default")
+}
+
+// Swatches onto the same primitives (design 2026-10-28 §3.4): the Open Swatch
+// Library rows read `data.swatch_libraries`, which on the Mac is app-global
+// (`model.swatchLibraries`), not in the store.
+@Test func theSwatchLibraryRowsListTheAppLibrariesCheckedWhenOpen() {
+    let model = Model()
+    guard let hit = panelMenuRequest("sp_menu_open_library") else {
+        Issue.record("swatches.yaml declares sp_menu_open_library with items_from"); return
+    }
+    #expect(hit.kind == .swatches)
+    let rows = panelSubmenuRows(.swatches, spec: hit.spec, layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.params["library"] as? String } == model.swatchLibraries.libs.keys.sorted().map { Optional($0) },
+            "one row per app library, in id order: \(rows.map { $0.label ?? "-" })")
+    #expect(rows.first(where: { $0.params["library"] as? String == "web_colors" })?.checked == true,
+            "web_colors is open by default")
+    #expect(rows.first?.action == "toggle_swatch_library_open")
+}
+
+// Open Gradient Library (§3.4): a radio over the bundle's gradient libraries.
+@Test func theGradientLibraryRowsAreARadioOverTheActiveLibrary() {
+    let model = Model()
+    guard let hit = panelMenuRequest("grad_menu_open_library") else {
+        Issue.record("gradient.yaml declares grad_menu_open_library with items_from"); return
+    }
+    #expect(hit.kind == .gradient)
+    let rows = panelSubmenuRows(.gradient, spec: hit.spec, layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.params["library"] as? String } == ["neutrals", "simple_radial", "spectrums"])
+    #expect(rows.map { $0.checked } == [true, false, false], "neutrals is the default")
+    panelDispatchRow(.gradient, action: rows[2].action, params: rows[2].params, model: model)
+    #expect(model.stateStore.getPanel("gradient_panel_content", "active_library_id") as? String == "spectrums")
+}
+
+// The Gradient panel body's preset strip reads
+// `data.gradient_libraries[panel.active_library_id].gradients`; the body
+// context published only brush and swatch libraries (row 8, §3.4).
+@Test func theGradientPanelBodyReadsTheBundlesGradientLibraries() {
+    guard let ws = WorkspaceData.load() else { Issue.record("no bundle"); return }
+    let ctx = buildPanelBodyContext(ws: ws, model: Model(), contentId: "gradient_panel_content",
+                                    opacityPanel: WorkspaceLayout.defaultLayout().opacityPanel)
+    let strip = evaluate("data.gradient_libraries[panel.active_library_id].gradients", context: ctx)
+    guard case .list(let items) = strip else { Issue.record("not a list: \(strip)"); return }
+    #expect(!items.isEmpty)
+}
+
+// The gradient libraries are an app TIER (design 2026-11-17 §1), not the
+// bundle: a library in `model.gradientLibraries` is a menu row and the body's.
+@Test func theGradientMenuAndBodyReadTheAppTierNotTheBundle() {
+    let model = Model()
+    model.gradientLibraries.libs = ["mine": ["name": "Mine", "gradients": [["name": "G", "type": "linear", "stops": [Any]()]]]]
+    model.stateStore.initPanel("gradient_panel_content", defaults: ["active_library_id": "mine"])
+    let rows = panelSubmenuRows(.gradient, spec: panelMenuRequest("grad_menu_open_library")?.spec ?? [:],
+                                layout: WorkspaceLayout.defaultLayout(), model: model)
+    #expect(rows.map { $0.label } == ["Mine"])
+    guard let ws = WorkspaceData.load() else { return }
+    let ctx = buildPanelBodyContext(ws: ws, model: model, contentId: "gradient_panel_content",
+                                    opacityPanel: WorkspaceLayout.defaultLayout().opacityPanel)
+    guard case .list(let items) = evaluate("data.gradient_libraries[panel.active_library_id].gradients", context: ctx)
+    else { Issue.record("not a list"); return }
+    #expect(items.count == 1)
 }

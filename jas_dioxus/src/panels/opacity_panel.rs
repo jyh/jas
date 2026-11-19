@@ -101,6 +101,9 @@ mod tests {
             )),
             swatch_libraries: serde_json::json!({}),
             brush_libraries: serde_json::json!({}),
+            gradient_libraries: serde_json::json!({}),
+            pending_writes: Vec::new(),
+            pending_menu: None,
             stroke_panel: crate::workspace::app_state::StrokePanelState::default(),
             gradient_panel: crate::workspace::app_state::GradientPanelState::default(),
             character_panel: crate::workspace::app_state::CharacterPanelState::default(),
@@ -260,6 +263,7 @@ mod tests {
             },
             isolated_blending: false,
             knockout_group: false,
+            color: None,
         });
         let doc = Document {
             layers: vec![layer],

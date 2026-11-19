@@ -907,6 +907,7 @@ mod save_as_tests {
                 common: CommonProps::default(),
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })],
             ..Document::default()
         };
@@ -1035,6 +1036,7 @@ mod revert_tests {
                 common: CommonProps::default(),
                 isolated_blending: false,
                 knockout_group: false,
+                color: None,
             })],
             ..Document::default()
         };

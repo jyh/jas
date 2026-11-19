@@ -790,8 +790,9 @@ content:
               width: 12
               height: 12
             bind:
-              # No port builds `ancestor_layer_color` yet (STATUS-jas row 53), so a
-              # selected row falls back to the theme's selection colour.
+              # `ancestor_layer_color` is the nearest layer's own colour (row
+              # 53(b)); it is "" when that layer has none, and a selected row
+              # then falls back to the theme's selection colour.
               background: "if node.element_selected then (if node.ancestor_layer_color then node.ancestor_layer_color else theme.colors.selection) else 'transparent'"
               border: "'1px solid ' + theme.colors.border"
             behavior:
@@ -811,6 +812,10 @@ content:
           action: duplicate_layer_selection
         - label: "Delete Selection"
           action: delete_layer_selection
+          # "A document always has at least one layer" (Empty State, above):
+          # refused when the panel selection holds every top-level layer. The
+          # keyboard rows below carry the same condition (STATUS-jas row 141).
+          enabled_when: "filter(panel.layers_panel_selection, fun p -> p.depth == 1).length < active_document.top_level_layer_paths.length"
         - separator
         - label: "{{if panel.isolation_stack.length > 0 then 'Exit Isolation Mode' else 'Enter Isolation Mode'}}"
           action: "{{if panel.isolation_stack.length > 0 then 'exit_isolation_mode' else 'enter_isolation_mode'}}"
@@ -825,8 +830,8 @@ content:
           enabled_when: "active_document.layers_panel_selection_count > 0 and panel.isolation_stack.length == 0"
 
       keyboard:
-        - { key: "Delete",     action: delete_layer_selection }
-        - { key: "Backspace",  action: delete_layer_selection }
+        - { key: "Delete",     action: delete_layer_selection, enabled_when: "filter(panel.layers_panel_selection, fun p -> p.depth == 1).length < active_document.top_level_layer_paths.length" }
+        - { key: "Backspace",  action: delete_layer_selection, enabled_when: "filter(panel.layers_panel_selection, fun p -> p.depth == 1).length < active_document.top_level_layer_paths.length" }
         - { key: "F2",         action: rename_element, params: { path: "panel.layers_panel_selection[0]" } }
         - { key: "Enter",      action: rename_element, params: { path: "panel.layers_panel_selection[0]" }, enabled_when: "panel.layers_panel_selection.length == 1" }
         - { key: "Ctrl+A",     action: layers_select_all }

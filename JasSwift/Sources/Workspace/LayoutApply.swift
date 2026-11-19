@@ -54,6 +54,45 @@ func layoutParsePanelKind(_ s: String) -> PanelKind {
     }
 }
 
+/// The dock groups of layout `name` in the bundle's `default_layouts`, as
+/// `(short panel ids, active index)` in the layout's order: THE ONE STRICT
+/// READER of a layout's groups (row 160), the twin of Rust's
+/// `layout_apply::spec_dock_groups`, and what `WorkspaceLayout.named` reads.
+/// `nil`, never a repair: no such layout, a group with no panels, a panel id
+/// the bundle does not declare (`<id>_panel_content`) or no `PanelKind` names,
+/// an `active` that is not an index into its group, or no groups at all.
+func specDockGroups(_ data: [String: Any], _ name: String) -> [(panels: [String], active: Int)]? {
+    guard let layouts = data["default_layouts"] as? [String: Any],
+          let layout = layouts[name] as? [String: Any],
+          let dock = layout["dock"] as? [String: Any],
+          let main = dock["dock_main"] as? [String: Any],
+          let groups = main["groups"] as? [Any],
+          let panels = data["panels"] as? [String: Any] else { return nil }
+    var out: [(panels: [String], active: Int)] = []
+    for g in groups {
+        guard let g = g as? [String: Any], let shorts = g["panels"] as? [Any] else { return nil }
+        var ids: [String] = []
+        for s in shorts {
+            guard let short = s as? String, panels["\(short)_panel_content"] != nil else { return nil }
+            // layoutParsePanelKind falls back to .layers, so the round trip is
+            // what refuses an id no PanelKind names.
+            guard layoutPanelKindStr(layoutParsePanelKind(short)) == short else { return nil }
+            ids.append(short)
+        }
+        if ids.isEmpty { return nil }
+        var active = 0
+        if let a = g["active"] {
+            // JSONSerialization hands a JSON integer back as an NSNumber; a
+            // Bool is an NSNumber too, so it is refused by its own type.
+            guard let n = a as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+                  n.doubleValue == Double(n.intValue), (0..<ids.count).contains(n.intValue) else { return nil }
+            active = n.intValue
+        }
+        out.append((ids, active))
+    }
+    return out.isEmpty ? nil : out
+}
+
 /// Serialize a `PanelKind` to its canonical lowercase op string (the inverse of
 /// `layoutParsePanelKind`). Production `show_panel` sites use this to build the
 /// op dictionary, so the round-trip is lossless across all 16 kinds.

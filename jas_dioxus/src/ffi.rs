@@ -1274,7 +1274,8 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
 /// "remove_tab": <index> | null, "close_window": <bool>,
 /// "save_all_then_close": <bool>, "clipboard_write": <text> | null,
-/// "export_pdf": <file name> | null, "layout": <layout> | null}` ([`act_reply`];
+/// "export_pdf": <file name> | null, "layout": <layout> | null,
+/// "menu": <menu item id> | null, "writes": [<write>...]}` ([`act_reply`];
 /// `clipboard_write` and `layout` are [`jas_dispatch_action`]'s, and `export_pdf`
 /// is the Print button's).
 /// `close_window` names a window close the shell must do (the engine owns no
@@ -1730,7 +1731,17 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
 /// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
-/// null, "export_pdf": <file name> | null, "layout": <layout> | null}`. `layout` is
+/// null, "export_pdf": <file name> | null, "layout": <layout> | null,
+/// "menu": <menu item id> | null, "writes": [{kind, slug, manifest}...]}`.
+/// `writes` are the file writes a library save queued (`brush.save_library`,
+/// `swatch.save_library`): the engine owns no file system, so the shell writes
+/// each (a `brush_library` as `brushes/<slug>/library.json`, a `swatch_library`
+/// as `swatches/<slug>.json`); they too are taken by the reply that names
+/// them. `menu` names a declared panel-menu item whose
+/// submenu the shell must pop up at the act (an `open_menu` effect: the Brushes
+/// toolbar's library button names `bp_menu_open_library`, STATUS-jas row 8);
+/// the shell reads that item's rows from [`jas_panel_menu`]. It is TAKEN from
+/// the store by the reply that names it, so a request is named once. `layout` is
 /// the engine's layout after a `layout:` effect moved it (Window > Toolbar), as
 /// [`jas_layout_state`] answers it, for the shell to apply. `export_pdf` names a PDF save the
 /// shell must do (Print > Print; the engine owns no file system): the file name
@@ -1741,7 +1752,10 @@ fn paste_into_session(engine: &JasEngine, clipboard: Option<&serde_json::Value>)
 fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool,
                                    named: Named) -> serde_json::Value {
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
+    let menu = engine.store.borrow_mut().pending_menu.take();
+    let writes = std::mem::take(&mut engine.store.borrow_mut().pending_writes);
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
+                       "menu": menu, "writes": writes,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
                        "save_all_then_close": named.save_all_then_close,
                        "clipboard_write": named.clipboard_write, "export_pdf": named.export_pdf,
@@ -2064,7 +2078,22 @@ unsafe fn jas_dispatch_action_inner(
         (None, Some(_)) if req.get("menu_index").is_none() && req.get("action").is_some() => None,
         (None, Some(menu)) => {
             let at = req.get("menu_index").and_then(serde_json::Value::as_u64);
+            // `"row": <j>`: row j of an `items_from` item (row 8), its action
+            // with its evaluated params.
+            let row = req.get("row").and_then(serde_json::Value::as_u64);
             match at.and_then(|i| menu.get(i as usize)) {
+                Some(node) if row.is_some() => {
+                    let j = row.unwrap_or_default();
+                    let ctx = panel_ctx(engine, &ws, panel.unwrap_or(""));
+                    match submenu_row(node, j, &ctx) {
+                        Some(r) => Some(r),
+                        None => {
+                            set_panel_event_error(engine, "UnknownMenuItem",
+                                &format!("{}[{}].row[{j}]", panel.unwrap_or(""), at.unwrap_or_default()));
+                            return JasBytes::empty();
+                        }
+                    }
+                }
                 Some(node) => Some(node.clone()),
                 None => {
                     let named = req.get("menu_index").map_or("(none)".to_string(), |v| v.to_string());
@@ -2110,7 +2139,16 @@ unsafe fn jas_dispatch_action_inner(
     // New Swatch and the Color Picker are menubar actions that read
     // `state.fill_color`, and until 2026-10-15 this arm read the stale copy.
     let scope = match panel {
-        Some(pid) => panel_ctx(engine, &ws, pid),
+        Some(pid) => {
+            // The Gradient menu's transforms read `panel.stops`, which the
+            // runner takes from the store: give it the selection's gradient.
+            if pid == crate::interpreter::gradient_host::GRADIENT_PANEL {
+                let fill_on_top = engine.panel.borrow().effective(&engine.model.borrow()).fill_on_top;
+                crate::panel_scope::sync_gradient_state(
+                    &mut engine.store.borrow_mut(), &engine.model.borrow(), fill_on_top);
+            }
+            panel_ctx(engine, &ws, pid)
+        }
         None => {
             crate::panel_scope::sync_colour_state(
                 &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));
@@ -2257,6 +2295,43 @@ pub unsafe extern "C" fn jas_document_pdf(e: *mut JasEngine) -> JasBytes {
     JasBytes::from_vec(crate::geometry::pdf::document_to_pdf(engine.model.borrow().document()))
 }
 
+
+/// **Lay the user's saved libraries over the bundle's** (row 149): `root` is
+/// the shell's saved-libraries directory, UTF-8, the folder that holds
+/// `brushes/<slug>/library.json`, `swatches/<id>.json` and
+/// `gradients/<id>.json` (the layout the shell's library writes use, and the
+/// Mac's). Each library the user saved replaces the bundle's of the same
+/// slug, and a new slug is added, as the Mac does at launch
+/// (`BrushLibraryStore.merged`). A file that is not a JSON object is skipped.
+/// Call it once, after [`jas_engine_new`] and before the first plan.
+///
+/// Answers `{"brush_libraries":N,"swatch_libraries":N,"gradient_libraries":N}`,
+/// the count of user libraries taken per kind (an absent root takes 0 of
+/// each and changes nothing). A NULL engine or bad UTF-8 is the empty span.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a live engine; `root` must be NULL or valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_engine_load_user_libraries(e: *mut JasEngine, root: *const u8, len: usize) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let Ok(root) = (unsafe { utf8(root, len) }) else { return JasBytes::empty() };
+    let user = crate::interpreter::user_libraries::load_user_libraries(std::path::Path::new(root));
+    let mut store = engine.store.borrow_mut();
+    let mut data = store.data().as_object().cloned().unwrap_or_default();
+    let mut taken = serde_json::Map::new();
+    for (kind, _) in crate::interpreter::user_libraries::USER_LIBRARY_KINDS {
+        let mine = &user[kind];
+        let n = mine.as_object().map_or(0, |m| m.len());
+        if n > 0 {
+            let bundle = data.get(kind).cloned().unwrap_or_else(|| serde_json::json!({}));
+            data.insert(kind.into(), crate::interpreter::user_libraries::merged_libraries(&bundle, mine));
+        }
+        taken.insert(kind.into(), serde_json::json!(n));
+    }
+    store.set_data(serde_json::Value::Object(data));
+    JasBytes::from_string(serde_json::Value::Object(taken).to_string())
+}
 
 /// Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
 /// the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
@@ -2534,8 +2609,9 @@ pub unsafe extern "C" fn jas_document_set_filename(e: *mut JasEngine, name: *con
 /// the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
 /// the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
 /// or `separator` (any other node is `unknown`, never guessed at). An item
-/// also carries `label`, `action`, `enabled` and `checked` (a bool for a
-/// checkable item, null otherwise).
+/// also carries `id` (the node's `id`, or null), `label`, `action`, `enabled`
+/// and `checked` (a bool for a checkable item, null otherwise). An act reply's
+/// `menu` names an item by its `id`.
 ///
 /// ⭐ THE STATE IS THE SHARED WALK'S, NOT THIS FUNCTION'S. `enabled` and
 /// `checked` are [`menu_state`]'s rows for the menu, evaluated in the panel's
@@ -2589,7 +2665,7 @@ pub unsafe extern "C" fn jas_panel_menu(
             serde_json::Value::String(s) if s == "separator" => serde_json::json!({"index": i, "kind": "separator"}),
             serde_json::Value::Object(o) if !o.contains_key("items") => {
                 let st = by_index.get(&(i as i64));
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "index": i,
                     "kind": "item",
                     // The walk's label: its `{{expr}}` regions evaluated in the
@@ -2598,10 +2674,20 @@ pub unsafe extern "C" fn jas_panel_menu(
                     "label": st.map_or_else(
                         || o.get("label").cloned().unwrap_or(serde_json::Value::Null),
                         |r| r["label"].clone()),
+                    // The node's `id`, or null: an act reply's `menu` names an
+                    // item by it (row 8), and the shell finds the row here.
+                    "id": o.get("id").cloned().unwrap_or(serde_json::Value::Null),
                     "action": o.get("action").cloned().unwrap_or(serde_json::Value::Null),
                     "enabled": st.map_or(serde_json::Value::Bool(true), |r| r["enabled"].clone()),
                     "checked": st.map_or(serde_json::Value::Null, |r| r["checked"].clone()),
-                })
+                });
+                // An `items_from` item (row 8) carries its rows, evaluated now
+                // in the panel's engine scope; a shell sends one back as
+                // `{"panel", "menu_index", "row"}`.
+                if let Some(spec) = o.get("items_from") {
+                    row["rows"] = submenu_plan_rows(spec, &ctx);
+                }
+                row
             }
             _ => serde_json::json!({"index": i, "kind": "unknown"}),
         })
@@ -2610,6 +2696,26 @@ pub unsafe extern "C" fn jas_panel_menu(
     let out = JasBytes::from_string(serde_json::Value::Array(rows).to_string());
     ffi_instr::record_out(Crossing::PanelMenu, out.len);
     out
+}
+
+/// An `items_from` item's rows as a shell draws them:
+/// `[{"index", "label", "action", "enabled", "checked"}]`, from the shared
+/// `menu_state::items_from_entries` (which also yields each row's params; a
+/// click re-evaluates them, see [`submenu_row`]).
+fn submenu_plan_rows(spec: &serde_json::Value, ctx: &serde_json::Value) -> serde_json::Value {
+    let rows = crate::interpreter::menu_state::items_from_entries(spec, ctx);
+    serde_json::Value::Array(rows.as_array().into_iter().flatten().enumerate().map(|(j, r)| serde_json::json!({
+        "index": j, "label": r["label"], "action": r["action"],
+        "enabled": r["enabled"], "checked": r["checked"],
+    })).collect())
+}
+
+/// Row `j` of an `items_from` menu node, evaluated in `ctx` NOW (the click's
+/// scope, as the menu's static rows are): `{action, params, ...}`, or `None`
+/// when the node has no `items_from` or no row `j`.
+fn submenu_row(node: &serde_json::Value, j: u64, ctx: &serde_json::Value) -> Option<serde_json::Value> {
+    let rows = crate::interpreter::menu_state::items_from_entries(node.get("items_from")?, ctx);
+    rows.as_array()?.get(j as usize).cloned()
 }
 
 /// The menubar item whose `id` is `id`, at any depth (a menu's `items`, a
@@ -3877,6 +3983,46 @@ mod tests {
         println!("ITEMS-AFTER {}", serde_json::Value::Array(after.clone()));
         assert_eq!(engine_of(e).store.borrow().get_panel(P, "type_filter"), &serde_json::json!([pick]));
         unsafe { jas_engine_free(e) };
+    }
+
+    /// **A selected tile says so in its plan row** (jas §927 item 1). The plan
+    /// carried `bind.selected_in` as the LIST, which the shell cannot test
+    /// membership in (it evaluates nothing), so Windows drew no selection
+    /// outline. The row's `selected` is the web's own law
+    /// (`tile_selection::selected_in`, #990, shared): a tap on tile k marks k and
+    /// leaves its neighbour plain, and a
+    /// ctrl-tap on a second tile marks both. Swatches and Brushes alike.
+    #[test]
+    fn a_tapped_tile_reads_selected_in_its_plan_row_and_its_neighbour_does_not() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        for panel in ["swatches_panel_content", "brushes_panel_content"] {
+            let e = jas_engine_new();
+            let tiles = |e| -> Vec<serde_json::Value> {
+                let plan: serde_json::Value = serde_json::from_str(&plan_of(e, panel, 228, 600)).unwrap();
+                ["chrome", "containers", "leaves"].iter()
+                    .filter_map(|k| plan[*k].as_array()).flatten()
+                    .filter(|r| r["values"].get("bind.selected_in").is_some())
+                    .cloned().collect()
+            };
+            let before = tiles(e);
+            assert!(before.len() > 4, "{panel}: fixture: too few tiles: {}", before.len());
+            assert!(before.iter().all(|t| t["selected"] == false), "{panel}: a tile reads selected before any tap: {before:?}");
+            let tap = |e, t: &serde_json::Value, ctrl: bool| {
+                let ev = format!(r#"{{"widget":"","path":{},"event":"click","ctrl":{ctrl}}}"#, t["path"]);
+                let (reply, err) = behave(e, panel, &ev);
+                assert!(!reply.is_empty(), "{panel}: the tap was refused: {err}");
+            };
+            let (k, n, m) = (1usize, 2usize, 3usize);
+            tap(e, &before[k], false);
+            let after = tiles(e);
+            assert_eq!(after[k]["selected"], true, "{panel}: the tapped tile: {}", after[k]);
+            assert_eq!(after[n]["selected"], false, "{panel}: its neighbour: {}", after[n]);
+            tap(e, &before[m], true);
+            let after = tiles(e);
+            let marked: Vec<usize> = (0..after.len()).filter(|&i| after[i]["selected"] == true).collect();
+            assert_eq!(marked, vec![k, m], "{panel}: after a ctrl-tap on {m}");
+            unsafe { jas_engine_free(e) };
+        }
     }
 
     /// **A library swatch is tapped by its plan path** (STATUS-flask §114: 216
@@ -5358,6 +5504,7 @@ mod tests {
         "dialog_actions/panel_menu_actions.json",
         "dialog_actions/model_verbs.json",
         "dialog_actions/symbol_actions.json",
+        "dialog_actions/layer_options.json",
     ];
 
     /// THE ACTION CORPUS, INSIDE AN OPEN DIALOG (design
@@ -8102,7 +8249,9 @@ mod tests {
         };
         assert_eq!(ids(&groups[0]), ["color_panel_content", "swatches_panel_content", "brushes_panel_content"]);
         assert_eq!(ids(&groups[1]), ["align_panel_content", "boolean_panel_content"]);
-        assert_eq!(ids(&groups[4]), ["artboards_panel_content", "layers_panel_content"]);
+        // Symbols joined the last group in the spec (row 160, catching up with
+        // Symbols P3b): a Windows-visible change, typed here on purpose.
+        assert_eq!(ids(&groups[4]), ["artboards_panel_content", "layers_panel_content", "symbols_panel_content"]);
         assert!(groups.iter().all(|g| g["active"] == 0), "every group opens on its first panel");
     }
 
@@ -8617,7 +8766,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "export_pdf", "layout", "menu", "remove_tab", "save_all_then_close", "writes"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -8641,7 +8790,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false,"writes":[]}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -8697,13 +8846,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false,"writes":[]}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"export_pdf":null,"layout":null,"menu":null,"remove_tab":null,"save_all_then_close":false,"writes":[]}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
@@ -9822,17 +9971,196 @@ mod tests {
     }
 
     /// **D6/D7.** A log-only action is a stub for work a platform supplies, and
-    /// it is refused as one. (Its example was `sym_new` until W2b-17 hosted the
-    /// Symbols verbs; `open_brush_libraries_menu` is still a stub.)
+    /// it is refused as one, by the shared batch runner both doors use. Its
+    /// example was `sym_new` until W2b-17 hosted the Symbols verbs, then the
+    /// Brushes library button until STATUS-jas row 8 wired it to `open_menu`.
+    /// No ENABLED widget dispatches a log-only action since (Rearrange's is
+    /// `disabled: true` and reads `Disabled`), so the stub is driven through
+    /// the panel-menu door: Artboards ▸ Convert to Artboards, its index read
+    /// from the bundle.
     #[test]
-    fn panel_behavior_refuses_a_log_only_action_by_name() {
+    fn a_log_only_panel_action_is_refused_by_name() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().expect("workspace");
+        let menu = ws.panel_menu("artboards_panel_content");
+        let at = menu.iter().position(|m| m.get("action").and_then(|a| a.as_str()) == Some("convert_to_artboards"))
+            .expect("the Artboards menu carries Convert to Artboards");
+        let logged = ws.actions().get("convert_to_artboards").and_then(|a| a["effects"][0]["log"].as_str())
+            .expect("convert_to_artboards is still a log-only stub; pick another")
+            .to_string();
+        let e = engine_with(misaligned(&[0]));
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"artboards_panel_content","menu_index":{at}}}"#));
+        assert_eq!(reply, "");
+        assert_eq!(err, refusal("PlatformEffect", &format!("Logged:{logged}")));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// An `items_from` item's rows, for a shell to draw (row 8): the plan row
+    /// of Brushes ▸ Open Brush Library carries `"rows"`, each
+    /// `{"index", "label", "action", "enabled", "checked"}` evaluated in the
+    /// panel's engine scope, and a row goes back as
+    /// `{"panel", "menu_index", "row"}`. A plain item carries no `rows`.
+    #[test]
+    fn an_items_from_menu_item_plans_its_rows_and_dispatches_one_by_index() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let plan_row = |e| {
+            let (rows, err) = panel_menu(e, "brushes_panel_content");
+            assert_eq!(err, "", "the plan: {err}");
+            rows.into_iter().find(|r| r["label"] == "Open Brush Library").expect("the item is planned")
+        };
+        let item = plan_row(e);
+        assert_eq!(item["rows"], serde_json::json!([{"index": 0, "label": "Default Brushes",
+            "action": "toggle_brush_library_open", "enabled": true, "checked": true}]), "{item}");
+        let (rows, _) = panel_menu(e, "brushes_panel_content");
+        let plain = rows.iter().find(|r| r["action"] == "save_brush_library").expect("Save Brush Library");
+        assert!(plain.get("rows").is_none(), "a plain item has no rows: {plain}");
+
+        let at = item["index"].as_u64().unwrap();
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":0}}"#));
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(plan_row(e)["rows"][0]["checked"], serde_json::json!(false), "the row closed its library");
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":0}}"#));
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(plan_row(e)["rows"][0]["checked"], serde_json::json!(true), "and reopened it");
+
+        // A row past the end, and a row on an item with no rows, name nothing.
+        let (_r, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{at},"row":1}}"#));
+        assert_eq!(err, refusal("UnknownMenuItem", &format!("brushes_panel_content[{at}].row[1]")));
+        let plain_at = plain["index"].as_u64().unwrap();
+        let (_r, err) = dispatch(e, &format!(r#"{{"panel":"brushes_panel_content","menu_index":{plain_at},"row":0}}"#));
+        assert_eq!(err, refusal("UnknownMenuItem", &format!("brushes_panel_content[{plain_at}].row[0]")));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Open Gradient Library (§3.4) plans its rows on the engine too: the
+    /// store's `data` carries the bundle's gradient libraries, as it carries
+    /// the brush and swatch ones. One row per library, `neutrals` checked.
+    #[test]
+    fn the_gradient_library_item_plans_one_row_per_bundled_library() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let (rows, err) = panel_menu(e, "gradient_panel_content");
+        assert_eq!(err, "", "{err}");
+        let item = rows.into_iter().find(|r| r["label"] == "Open Gradient Library").expect("planned");
+        let labels: Vec<_> = item["rows"].as_array().unwrap_or_else(|| panic!("no rows: {item}"))
+            .iter().map(|r| (r["label"].clone(), r["checked"].clone())).collect();
+        assert_eq!(labels.len(), 3, "{item}");
+        assert_eq!(labels[0].1, serde_json::json!(true), "neutrals is the default: {item}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The Brushes toolbar's library button runs `open_menu` (row 8): a HOST
+    /// request. The engine owns no menus, so the act reply NAMES it,
+    /// `"menu": <item id>`, for the shell to pop up the declared item's rows
+    /// (its `jas_panel_menu` plan); every other reply carries `"menu": null`.
+    /// The request is taken by the reply that names it, so it is named once.
+    /// A library save queues a file write the engine cannot do (it owns no
+    /// file system), so the act reply NAMES it: `"writes": [{kind, slug,
+    /// manifest}...]`, taken from the store by the reply that names it; every
+    /// other reply carries `[]`. The Windows shell writes each (row 8, §3.4).
+    #[test]
+    fn a_library_save_names_its_file_write_in_the_reply_once() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let (reply, err) = dispatch(e, r#"{"action":"save_brush_library_confirm","params":{"library":"default_brushes","name":"My Set"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        let writes = v["writes"].as_array().unwrap_or_else(|| panic!("no writes key: {reply}"));
+        assert_eq!(writes.len(), 1, "{reply}");
+        assert_eq!(writes[0]["kind"], serde_json::json!("brush_library"));
+        assert_eq!(writes[0]["slug"], serde_json::json!("my_set"));
+        assert_eq!(writes[0]["manifest"]["name"], serde_json::json!("My Set"));
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_brush_library_open","params":{"library":"default_brushes"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["writes"], serde_json::json!([]), "taken by the reply that named it: {reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 149: a library saved on Windows survives a relaunch. The shell hands
+    /// the engine its saved root once, after `jas_engine_new`; the engine lays
+    /// the user's libraries over the bundle's by slug (the Mac's launch merge,
+    /// `BrushLibraryStore.merged`), and the reply counts what it took.
+    #[test]
+    fn the_saved_libraries_root_lays_the_users_libraries_over_the_bundles() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let before = engine_of(e).store.borrow().data().clone();
+        let first_swatch = before["swatch_libraries"].as_object().and_then(|m| m.keys().next().cloned())
+            .expect("the bundle has a swatch library");
+        let root = std::env::temp_dir().join(format!("jas-row149-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("brushes/mine")).unwrap();
+        std::fs::write(root.join("brushes/mine/library.json"), r#"{"name": "Mine", "brushes": []}"#).unwrap();
+        std::fs::create_dir_all(root.join("swatches")).unwrap();
+        std::fs::write(root.join(format!("swatches/{first_swatch}.json")), r#"{"name": "Shadowed", "swatches": []}"#).unwrap();
+        std::fs::write(root.join("swatches/junk.json"), "[1]").unwrap();
+
+        let r = root.to_str().unwrap();
+        let reply = unsafe { jas_engine_load_user_libraries(e, r.as_ptr(), r.len()) };
+        let v: serde_json::Value = serde_json::from_str(&take(reply)).expect("a JSON reply");
+        assert_eq!(v, serde_json::json!({"brush_libraries": 1, "swatch_libraries": 1, "gradient_libraries": 0}));
+        {
+            let store = engine_of(e).store.borrow();
+            let data = store.data();
+            assert_eq!(data["brush_libraries"]["mine"]["name"], "Mine");
+            for slug in before["brush_libraries"].as_object().unwrap().keys() {
+                assert!(data["brush_libraries"].get(slug).is_some(), "the bundle's {slug} is kept");
+            }
+            assert_eq!(data["swatch_libraries"][first_swatch.as_str()]["name"], "Shadowed", "the user's wins");
+            assert!(data["swatch_libraries"].get("junk").is_none(), "a non-object file is skipped");
+            assert_eq!(data["gradient_libraries"], before["gradient_libraries"]);
+        }
+
+        // An absent root takes nothing and changes nothing.
+        let after_one = engine_of(e).store.borrow().data().clone();
+        let missing = root.join("absent");
+        let m = missing.to_str().unwrap();
+        let reply = unsafe { jas_engine_load_user_libraries(e, m.as_ptr(), m.len()) };
+        let v: serde_json::Value = serde_json::from_str(&take(reply)).unwrap();
+        assert_eq!(v, serde_json::json!({"brush_libraries": 0, "swatch_libraries": 0, "gradient_libraries": 0}));
+        assert_eq!(engine_of(e).store.borrow().data(), &after_one);
+
+        // Bad UTF-8 is refused with the empty span; a NULL engine too.
+        let bad = [0xffu8, 0xfe];
+        let reply = unsafe { jas_engine_load_user_libraries(e, bad.as_ptr(), bad.len()) };
+        assert_eq!(reply.len, 0);
+        let reply = unsafe { jas_engine_load_user_libraries(std::ptr::null_mut(), r.as_ptr(), r.len()) };
+        assert_eq!(reply.len, 0);
+        let _ = std::fs::remove_dir_all(&root);
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn the_brush_libraries_button_names_its_menu_in_the_reply() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0]));
         let (reply, err) = behave(e, "brushes_panel_content",
                                   r#"{"widget":"bp_libraries_menu_btn","event":"click"}"#);
-        assert_eq!(reply, "");
-        assert_eq!(err, refusal("PlatformEffect", "Logged:open_brush_libraries_menu"));
+        assert_eq!(err, "", "a menu request is not Unchanged");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["menu"], serde_json::json!("bp_menu_open_library"), "{reply}");
+        assert_eq!(v["doc_changed"], serde_json::json!(false));
+        // The named id is a plan row's `id`, so a shell finds the rows to pop up
+        // without knowing any panel's ids (flask, row 8 shell half).
+        let (rows, err) = panel_menu(e, "brushes_panel_content");
+        assert_eq!(err, "", "the plan: {err}");
+        let named = rows.iter().find(|r| r["id"] == v["menu"]).unwrap_or_else(|| panic!("no plan row has id {}", v["menu"]));
+        assert_eq!(named["label"], serde_json::json!("Open Brush Library"), "{named}");
+        assert!(named["rows"].is_array(), "the named row carries its rows: {named}");
+        assert!(rows.iter().filter(|r| r["kind"] == "item").all(|r| r.get("id").is_some()),
+                "every item row carries `id` (null when the node has none)");
+        // The next act names no menu: the request was taken by the reply above.
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_brush_library_open","params":{"library":"default_brushes"}}"#);
+        assert_eq!(err, "", "{reply}");
+        let v: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(v["menu"], serde_json::Value::Null, "{reply}");
         unsafe { jas_engine_free(e) };
     }
 

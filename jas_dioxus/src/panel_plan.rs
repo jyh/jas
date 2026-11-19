@@ -43,8 +43,11 @@
 //!          "display": {"<bind key>": "<the core-formatted display string>", ...},
 //!          "options": null | [{"kind": "option", "value", "label", "selected"[, "glyph"]}
 //!                             | {"kind": "separator"}, ...],
-//!          "parts": {"icon": {x,y,w,h}[, "label": {x,y,w,h}]}}  only on a labelled
+//!          "parts": {"icon": {x,y,w,h}[, "label": {x,y,w,h}]},  only on a labelled
 //!                             `icon_button` (see [`parts_of`])
+//!          "selected": <bool>}  only on a node that declares `bind.selected_in`:
+//!                             its membership, by the web's law
+//!                             (`interpreter::tile_selection`)
 //! ```
 //!
 //! `options` is the node's declared list with its dividers told apart from its
@@ -596,6 +599,12 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
     if let Some(parts) = parts {
         e["parts"] = parts;
     }
+    // A tile's selection, resolved here because the shell cannot test the
+    // list `bind.selected_in` carries (jas §927 item 1): the web's own law,
+    // library scope and all (#990).
+    if item.node.get("bind").and_then(|b| b.get("selected_in")).is_some() {
+        e["selected"] = Value::Bool(crate::interpreter::tile_selection::selected_in(&item.node, &item.ctx));
+    }
     e
 }
 
@@ -849,28 +858,15 @@ pub fn panel_list(panels: &Value) -> Value {
 /// that is not an index into its group, or a docked panel the bundle does not
 /// hold.
 pub fn dock_layout(data: &Value, name: &str) -> Option<Value> {
-    let groups = data.get("default_layouts")?.get(name)?.get("dock")?
-        .get("dock_main")?.get("groups")?.as_array()?;
-    let panels = data.get("panels")?;
-    let mut out = vec![];
-    for g in groups {
-        let mut ids = vec![];
-        for short in g.get("panels")?.as_array()? {
-            let id = format!("{}_panel_content", short.as_str()?);
-            panels.get(&id)?;
-            ids.push(Value::String(id));
-        }
-        // Refused, never repaired: an empty group, or an `active` that is not an
-        // index into the group. A shell is then never handed a value to clamp.
-        if ids.is_empty() { return None; }
-        let active = match g.get("active") {
-            None => 0,
-            Some(v) => v.as_i64().filter(|a| (0..ids.len() as i64).contains(a))?,
-        };
-        out.push(json!({"panels": ids, "active": active}));
-    }
-    // A dock with no groups is no dock: a shell would draw an empty column.
-    if out.is_empty() { return None; }
+    // The refusals (an empty group, an `active` outside its group, an undeclared
+    // panel, no groups) are the shared reader's, so the web's default dock and a
+    // shell's are read by ONE law (row 160). A shell is never handed a value to
+    // clamp, and a dock with no groups is no dock.
+    let groups = crate::workspace::layout_apply::spec_dock_groups(data, name)?;
+    let out: Vec<Value> = groups.into_iter().map(|(ids, active)| json!({
+        "panels": ids.into_iter().map(|s| format!("{s}_panel_content")).collect::<Vec<_>>(),
+        "active": active,
+    })).collect();
     Some(json!({"groups": out}))
 }
 

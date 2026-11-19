@@ -69,13 +69,13 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     #expect(commands(items).contains("close_panel"))
 }
 
-@Test func builderSwatchesSubmenuBecomesOpenLibraryAction() {
-    // The dynamic "Open Swatch Library" submenu entry has an explicit
-    // `action: open_swatch_library` in the YAML so the menu view's
-    // submenu host fires.
+@Test func builderSwatchesSubmenuIsAnItemsFromSubmenu() {
+    // "Open Swatch Library" declares `items_from` (design 2026-10-28 §3.4);
+    // until then it carried `action: open_swatch_library`, a placeholder here.
     let items = menuItemsFromYaml("swatches_panel_content")
-    let hasHost = items.contains { if case .action(_, "open_swatch_library", _) = $0 { return true }; return false }
-    #expect(hasHost, "swatches menu should expose open_swatch_library host")
+    let isSubmenu = items.contains { if case .submenu("Open Swatch Library", _) = $0 { return true }; return false }
+    #expect(isSubmenu, "swatches menu should build the items_from submenu")
+    #expect(!commands(items).contains("open_swatch_library"), "the placeholder's command is gone")
     // Thumbnail-size rows are a radio group with folded params.
     var radios: [String] = []
     for item in items { if case .radio(_, let cmd, _) = item { radios.append(cmd) } }
@@ -647,4 +647,18 @@ private func addressOf(_ kind: PanelKind, in layout: WorkspaceLayout) -> PanelAd
     guard case .live(.generated) = model.document.tryGetElement([0, 0]) else {
         Issue.record("Place Instance put no Generated element at [0,0]"); return
     }
+}
+
+// Row 148: a separator-holding menu reads through `panelMenuRaw`, the one
+// accessor; a `[[String: Any]]` cast of the whole array read `[]` for every such
+// menu, and that accessor (`WorkspaceData.panelMenu(_:)`, no callers) is gone.
+@Test func brushesMenuReadsItsRowsAndSeparatorsRaw() {
+    guard let ws = WorkspaceData.load() else { Issue.record("no workspace"); return }
+    let raw = ws.panelMenuRaw("brushes_panel_content")
+    let separators = raw.filter { ($0 as? String) == "separator" }.count
+    let rows = raw.compactMap { $0 as? [String: Any] }.count
+    #expect(separators >= 1, "the Brushes menu holds separators: \(raw.count) entries")
+    #expect(rows >= 3, "and object rows: \(rows)")
+    #expect(separators + rows == raw.count, "every entry is a row or a separator")
+    #expect(!panelMenu(.brushes).isEmpty, "the menu the view draws is not empty")
 }

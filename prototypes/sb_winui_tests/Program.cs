@@ -448,6 +448,34 @@ static class Program
         Eq("finding 6: a style other than solid is refused by name", "(null)", SB("1px dashed #555555"));
         Eq("finding 6: an unresolved template is refused", "(null)", SB("1px solid {{theme.colors.border}}"));
         Eq("finding 6: a zero width draws nothing and is refused", "(null)", SB("0px solid #555555"));
+        // jas §927 item 1: a tile's selection is the plan row's resolved
+        // `selected` (the engine tests `bind.selected_in` membership; the shell
+        // tests nothing). A swatch tile is a leaf, a brush tile a surface
+        // (UIA reads it as a Group, so it carries its own ItemStatus).
+        const string TilePlan = """
+            {"chrome": [],
+             "containers": [
+               {"path": [1, 0, 2], "rect": {"x": 0, "y": 0, "w": 40, "h": 40}, "type": "container", "id": "", "events": ["click"], "values": {"bind.selected_in": "[]"}, "selected": true},
+               {"path": [1, 0, 3], "rect": {"x": 42, "y": 0, "w": 40, "h": 40}, "type": "container", "id": "", "events": ["click"], "values": {"bind.selected_in": "[]"}, "selected": false},
+               {"path": [1, 1], "rect": {"x": 0, "y": 50, "w": 40, "h": 40}, "type": "container", "id": "", "events": ["click"], "values": {}}],
+             "leaves": []}
+            """;
+        var thits = PanelWire.HitBoxes(TilePlan);
+        Eq("§927: a surface carries its row's selected (true, false, absent)",
+            "True|False|(null)", thits is { Count: 3 } ? string.Join("|", thits.Select(h => h.Selected?.ToString() ?? "(null)")) : "(none)");
+        static string TO(bool? sel) => PanelWire.TileOutline(sel) is { } o
+            ? FormattableString.Invariant($"{o.Width}/{o.R:X2}{o.G:X2}{o.B:X2}") : "(null)";
+        Eq("§927: a selected tile's outline is the web's 2px #007aff", "2/007AFF", TO(true));
+        Eq("§927: an unselected tile keeps its own edge", "(null)", TO(false));
+        Eq("§927: a row with no selected_in keeps its own edge", "(null)", TO(null));
+        Eq("§927: UIA ItemStatus of a selected tile", "selected", PanelWire.TileStatus(true));
+        Eq("§927: UIA ItemStatus of an unselected tile", "", PanelWire.TileStatus(false));
+        Eq("§927: UIA ItemStatus of a row with no selected_in", "", PanelWire.TileStatus(null));
+        Check("§927: a selected-tile row reads from the plan entry",
+            PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": true}""").RootElement) == true
+            && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": false}""").RootElement) == false
+            && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": "true"}""").RootElement) is null
+            && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{}""").RootElement) is null, "");
         Eq("finding 6: no border is no border", "(null)", SB(null));
 
         var token = PanelWire.RowValue("a b\tc");
@@ -2140,6 +2168,36 @@ static class Program
         Eq("tool: names compare ordinally, so Rect is not rect", "-1", ToolKnob.Resolve("Rect", tools).ToString());
         Eq("tool: a negative number is refused", "-1", ToolKnob.Resolve("-1", tools).ToString());
 
+        // -- THE GRADIENT TILE (jas 917: the preset strip's leaves, #969/#970) ------
+        // `bind.gradient` is one library gradient as JSON; the tile draws its
+        // stops as a ramp, linear at its angle (0 = left to right, 90 = bottom to
+        // top, as the web's `90 - angle` CSS reads it) or radial.
+        var tileBw = """{"_index":0,"angle":0,"aspect_ratio":100,"dither":false,"method":"classic","name":"Black to White","stops":[{"color":"#000000","location":0,"midpoint_to_next":50,"opacity":100},{"color":"#ffffff","location":100,"midpoint_to_next":50,"opacity":40}],"type":"linear"}""";
+        var tile = GradientTileWire.Read(tileBw);
+        Eq("tile: a library gradient reads its type, angle and stops", "linear|0|#000000@0/100,#ffffff@100/40",
+            tile is null ? "(null)" : $"{tile.Value.Type}|{tile.Value.Angle}|{string.Join(",", tile.Value.Stops.Select(st => $"{st.Color}@{st.Location}/{st.Opacity}"))}");
+        Eq("tile: radial is read as radial", "radial",
+            GradientTileWire.Read("""{"type":"radial","stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":100}]}""")?.Type ?? "(null)");
+        Eq("tile: no type is linear, no angle is 0", "linear|0",
+            GradientTileWire.Read("""{"stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":100}]}""") is { } t0 ? $"{t0.Type}|{t0.Angle}" : "(null)");
+        Eq("tile: fewer than two stops, bad stops, no stops, not JSON, null: no ramp (the muted tile)", "(null)|(null)|(null)|(null)|(null)",
+            string.Join("|", new[] {
+                """{"stops":[{"color":"#000000","location":0}]}""",
+                """{"stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":140}]}""",
+                """{"type":"linear"}""", "{x", null }
+                .Select(j => GradientTileWire.Read(j) is null ? "(null)" : "read")));
+        static string Ends(double a, double w = 32, double h = 24) { var e = GradientTileWire.Ends(a, w, h); return FormattableString.Invariant($"{e.Sx:0.###},{e.Sy:0.###}>{e.Ex:0.###},{e.Ey:0.###}"); }
+        Eq("tile: angle 0 runs left to right", "0,0.5>1,0.5", Ends(0));
+        Eq("tile: angle 90 runs bottom to top", "0.5,1>0.5,0", Ends(90));
+        Eq("tile: angle 180 runs right to left", "1,0.5>0,0.5", Ends(180));
+        Eq("tile: angle -90 runs top to bottom", "0.5,0>0.5,1", Ends(-90));
+        // jas's nit (11-18): CSS runs the line corner to corner, length
+        // |W cos a| + |H sin a|, so an off-axis ramp spans the whole tile.
+        Eq("tile: 45 degrees on a square runs corner to corner", "0,1>1,0", Ends(45, 24, 24));
+        { var e45 = GradientTileWire.Ends(45, 32, 24);
+          Eq("tile: 45 degrees on a 32x24 tile ends on the corners' perpendiculars", "0.0625,1.0833>0.9375,-0.0833",
+             FormattableString.Invariant($"{e45.Sx:0.0000},{e45.Sy:0.0000}>{e45.Ex:0.0000},{e45.Ey:0.0000}")); }
+
         // -- THE PANEL MENU (the owner's note 3, 2026-10-12) ----------------------
         // `jas_panel_menu` rows, read as the shell draws them. The shell evaluates
         // nothing: label, enabled and checked are the core's.
@@ -2163,6 +2221,49 @@ static class Program
         Eq("panel menu knob: no index is refused", "refused", PK("dock1"));
         Eq("panel menu knob: a negative or non-number index is refused", "refused,refused", PK("dock1:-1") + "," + PK("dock1:x"));
         Eq("panel menu knob: unset is refused (the caller reads it as not asked)", "refused", PK(null));
+
+        // -- ROW 8 (jas §915/§916): AN items_from ITEM'S ROWS, THE POPUP, THE WRITES --
+        // A plan row may carry `rows` (a dynamic submenu) and `id`; no `rows` key
+        // is a plain item, and `rows: []` is an EMPTY submenu, not a plain item.
+        var libJson = "[{\"index\":0,\"kind\":\"item\",\"id\":\"bp_menu_open_library\",\"label\":\"Open Brush Library\",\"action\":null,\"enabled\":true,\"checked\":null,"
+                    + "\"rows\":[{\"index\":0,\"label\":\"Default Brushes\",\"action\":\"toggle_brush_library_open\",\"enabled\":true,\"checked\":true},"
+                    + "{\"index\":1,\"label\":\"Other\",\"action\":\"toggle_brush_library_open\",\"enabled\":false,\"checked\":null}]},"
+                    + "{\"index\":1,\"kind\":\"item\",\"id\":null,\"label\":\"Save Brush Library\",\"action\":\"save_brush_library\",\"enabled\":true,\"checked\":null},"
+                    + "{\"index\":2,\"kind\":\"item\",\"label\":\"Open Gradient Library\",\"action\":null,\"enabled\":true,\"checked\":null,\"rows\":[]}]";
+        var lib = PanelMenuWire.Parse(libJson);
+        Eq("row 8: an items_from item's rows are read, in order", "Default Brushes,Other", string.Join(",", lib[0].Rows?.Select(r => r.Label) ?? new[] { "(null)" }));
+        Eq("row 8: a submenu row carries its own index, enabled and check state", "0:True:True,1:False:(null)",
+            string.Join(",", lib[0].Rows?.Select(r => $"{r.Index}:{r.Enabled}:{r.Checked?.ToString() ?? "(null)"}") ?? new[] { "(null)" }));
+        Check("row 8: no rows key is a plain item (null, not empty)", lib[1].Rows is null, $"{lib[1].Rows?.Count}");
+        Check("row 8: rows [] is an EMPTY submenu (not null)", lib[2].Rows is { Count: 0 }, $"{lib[2].Rows?.Count.ToString() ?? "null"}");
+        Eq("row 8: the plan row's id is read; null or absent reads empty", "bp_menu_open_library||", $"{lib[0].Id}|{lib[1].Id}|{lib[2].Id}");
+        Eq("row 8: the row an act reply's menu names is found by id", "0", PanelMenuWire.ById(lib, "bp_menu_open_library")?.Index.ToString() ?? "(null)");
+        Eq("row 8: an id no row carries finds nothing (never row 0)", "(null),(null)",
+            (PanelMenuWire.ById(lib, "bp_menu_nope")?.Index.ToString() ?? "(null)") + "," + (PanelMenuWire.ById(lib, "")?.Index.ToString() ?? "(null)"));
+        Eq("row 8: a plain menu click is {panel, menu_index}", "{\"panel\":\"brushes_panel_content\",\"menu_index\":1}", PanelMenuWire.RunJson("brushes_panel_content", 1, -1));
+        Eq("row 8: a submenu row click adds row", "{\"panel\":\"brushes_panel_content\",\"menu_index\":0,\"row\":1}", PanelMenuWire.RunJson("brushes_panel_content", 0, 1));
+        Eq("row 8: an act reply's menu is read", "bp_menu_open_library",
+            ActWire.Menu("""{"changed":[],"doc_changed":false,"menu":"bp_menu_open_library","writes":[]}""") ?? "(null)");
+        Eq("row 8: menu null, absent, a non-string or unreadable is no popup", "(null)|(null)|(null)|(null)",
+            (ActWire.Menu("""{"menu":null}""") ?? "(null)") + "|" + (ActWire.Menu("""{"changed":[]}""") ?? "(null)") + "|"
+            + (ActWire.Menu("""{"menu":3}""") ?? "(null)") + "|" + (ActWire.Menu("{x") ?? "(null)"));
+        var writesReply = """{"changed":[],"writes":[{"kind":"brush_library","slug":"my_set","manifest":{"name":"My Set","brushes":[]}},"""
+                        + """{"kind":"swatch_library","slug":"warm2","manifest":{"name":"Warm"}},{"kind":"gradient_library","slug":"g","manifest":{"name":"G"}},"""
+                        + """{"kind":"brush_library","slug":"../evil","manifest":{}},{"kind":"brush_library","slug":"Caps","manifest":{}},"""
+                        + """{"kind":"brush_library","slug":"","manifest":{}},{"kind":"font_library","slug":"x","manifest":{}},"""
+                        + """{"kind":"swatch_library","slug":"nomanifest"}]}""";
+        var writes = ActWire.Writes(writesReply);
+        Eq("row 8: every write is read, in order", "8", writes.Count.ToString());
+        Eq("row 8: a write's path is the kind's, under the root",
+            "brushes/my_set/library.json|swatches/warm2.json|gradients/g.json",
+            string.Join("|", writes.Take(3).Select(w => LibraryWrite.RelativePath(w.Kind, w.Slug) ?? "(refused)")));
+        Eq("row 8: a slug outside [a-z0-9_]+ and an unknown kind are refused",
+            "(refused)|(refused)|(refused)|(refused)",
+            string.Join("|", writes.Skip(3).Take(4).Select(w => LibraryWrite.RelativePath(w.Kind, w.Slug) ?? "(refused)")));
+        Check("row 8: the manifest is the whole library JSON, verbatim", writes[0].Manifest is { } m0 && m0.Contains("\"name\":\"My Set\"") && m0.Contains("\"brushes\":[]"), writes[0].Manifest ?? "(null)");
+        Check("row 8: a write with no manifest carries none (the caller refuses it)", writes[7].Manifest is null, writes[7].Manifest ?? "(null)");
+        Eq("row 8: no writes key, [] or unreadable is no write", "0,0,0",
+            $"{ActWire.Writes("""{"changed":[]}""").Count},{ActWire.Writes("""{"writes":[]}""").Count},{ActWire.Writes("{x").Count}");
 
         // The reply's changed rows against the plan read after the click. #360's
         // plan PRUNES a hidden node's rows and lists the node in `hidden`, so a

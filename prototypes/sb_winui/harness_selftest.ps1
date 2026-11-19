@@ -3156,7 +3156,7 @@ Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRender
 # ABSENT there: their rows (RadioGroupRow, IconGroupRow) were StackPanels with no
 # automation peer, so the leaf's id reached no reader. Each now has a Group peer,
 # measured through -EngineOpen (color_picker, artboard_options): 23 kinds, 2 known.
-Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '23 2'
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '25 1'
 
 Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
 Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'
