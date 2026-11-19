@@ -1943,8 +1943,11 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
 /// `{"panel": <content id>, "key": <name>, "mods": {...}}` is a key on a focused
 /// PANEL: it resolves against that panel's `keyboard:` rows in the panel's scope
 /// (`mods.ctrl` or `mods.meta` is the rows' `Ctrl`) and runs the row's action as
-/// `{"panel", "action", "params"}` does. A key no row binds replies EMPTY with
-/// `UnboundPanelKey` (`"<panel>: <key>"`), and is never a menubar shortcut.
+/// `{"panel", "action", "params"}` does. A COMMAND chord (`ctrl` or `meta`) no
+/// row binds continues as the plain key above, so the menubar's shortcuts
+/// (Ctrl+Z's Undo) reach a focused panel. An UNMODIFIED key no row binds
+/// replies EMPTY with `UnboundPanelKey` (`"<panel>: <key>"`): the tool
+/// letters belong to the canvas.
 ///
 /// The owner's notes (2026-10-11): the Windows menus drew every item live and
 /// ran five; File > New made no tab, because nothing ran `new_document`.
@@ -2025,8 +2028,9 @@ unsafe fn jas_dispatch_action_inner(
     // it). It resolves against that panel's `keyboard:` rows in the panel's
     // scope (`resolve_panel_key`, the law the web's `layers_tree_key` and the
     // Mac's `LayersPanel.treeKey` run) and then runs as `{"panel", "action",
-    // "params"}` below. A key no row binds is refused by name: it never falls
-    // through to the menubar's shortcuts, which a focused panel does not own.
+    // "params"}` below. An UNMODIFIED key no row binds is refused by name: the
+    // tool letters are the canvas's, not a focused panel's. A COMMAND chord no
+    // row binds falls through to the key route (row 119, row 76's ruling).
     let panel_key = match (req.get("panel").and_then(serde_json::Value::as_str),
                            req.get("key").and_then(serde_json::Value::as_str)) {
         (Some(pid), Some(name)) => {
@@ -2039,11 +2043,18 @@ unsafe fn jas_dispatch_action_inner(
             let chord = crate::workspace::resolve_key::KeyChord::new(
                 name, held("ctrl") || held("meta"), held("shift"), held("alt"), false);
             let scope = panel_ctx(engine, &ws, pid);
-            let Some(cmd) = crate::workspace::resolve_key::resolve_panel_key(spec, &chord, &scope) else {
-                set_panel_event_error(engine, "UnboundPanelKey", &format!("{pid}: {name}"));
-                return JasBytes::empty();
-            };
-            Some(serde_json::json!({"panel": pid, "action": cmd.action, "params": cmd.params}))
+            match crate::workspace::resolve_key::resolve_panel_key(spec, &chord, &scope) {
+                Some(cmd) => Some(serde_json::json!({"panel": pid, "action": cmd.action, "params": cmd.params})),
+                // Row 119: a COMMAND chord no row binds is the menubar's (Ctrl+Z
+                // on a focused tree undoes, as on the web and in the Mac's menus),
+                // so it continues as the plain key below.
+                None if held("ctrl") || held("meta") => Some(serde_json::json!({
+                    "key": name, "mods": mods.cloned().unwrap_or_else(|| serde_json::json!({}))})),
+                None => {
+                    set_panel_event_error(engine, "UnboundPanelKey", &format!("{pid}: {name}"));
+                    return JasBytes::empty();
+                }
+            }
         }
         _ => None,
     };
@@ -8668,10 +8679,32 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 119 (row 76's fall-through ruling): a COMMAND chord no panel row
+    /// binds reaches the menubar's route, as on the web and in the Mac's menus.
+    /// Ctrl+Z on a focused Layers tree undoes; an unbound command chord with no
+    /// menubar binding is the key route's own `KeyUnhandled`, never a panel
+    /// refusal.
+    #[test]
+    fn a_command_chord_no_panel_row_binds_falls_through_to_the_menubar_route() {
+        // The undo itself (eye click, Ctrl+Z, the document restored) is the
+        // replay arm `an_unbound_panel_key_falls_through_to_the_menubar_shortcut`.
+        // This arm pins the ROUTE: a command chord leaves the panel door.
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let (_, err) = dispatch(e, r#"{"panel":"layers_panel_content","key":"Z","mods":{"ctrl":true}}"#);
+        assert!(!err.contains("UnboundPanelKey"), "Ctrl+Z was refused as a panel key: {err}");
+        // Meta is the vocabulary's Ctrl too. Ctrl+J binds nothing anywhere, so
+        // the key route's own answer comes back, not the panel's refusal.
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","key":"J","mods":{"meta":true}}"#);
+        assert!(reply.is_empty() && err.contains("KeyUnhandled") && !err.contains("UnboundPanelKey"), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_panel_key_no_row_binds_is_refused_by_name_and_runs_nothing() {
-        // Not the menubar's: a panel key never falls through to the app's
-        // shortcuts (`A` alone is the Direct Selection tool there).
+        // An UNMODIFIED key is not the menubar's: it never falls through to
+        // the app's shortcuts (`A` alone is the Direct Selection tool there).
+        // A command chord does (row 119, the next arm).
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_on("multi_layer.svg");
         with_layers_selection(e, serde_json::json!([{"__path__": [1]}]));
