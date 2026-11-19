@@ -7,7 +7,7 @@
 ## Scope -- read this first
 
 **This map covers the ACTION seam (`dispatch_action`) ONLY**: the
-253 actions in the workspace bundle's `actions` map, plus the
+261 actions in the workspace bundle's `actions` map, plus the
 bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 5 |
-| `journaling` | 60 |
+| `journaling` | 64 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 178 |
+| `ui-state` | 182 |
 | `view` | 6 |
-| **total** | **254** |
+| **total** | **262** |
 
-(The bundle's `actions` map has 253 entries; `native-intercept` entries
+(The bundle's `actions` map has 261 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (60)
+## Journaling actions (64)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -69,6 +69,7 @@ come additively from `native_intercepts`.)
 | `delete_selection` | `doc.op` |
 | `delete_symbol_action` | `doc.delete_symbol` |
 | `delete_symbol_orphan_confirm_ok` | `doc.delete_symbol` |
+| `disable_opacity_mask` | `doc.op` |
 | `document_setup_confirm` | `doc.set_document_setup_field` |
 | `duplicate_artboards` | `doc.duplicate_artboard` |
 | `duplicate_layer_selection` | `doc.clone_at`, `doc.insert_after` |
@@ -84,6 +85,7 @@ come additively from `native_intercepts`.)
 | `layers_panel_select` | `doc.op` |
 | `lock` | `doc.op` |
 | `make_instance` | `doc.make_instance` |
+| `make_opacity_mask` | `doc.op` |
 | `move_artboard_down` | `doc.move_artboards_down` |
 | `move_artboard_up` | `doc.move_artboards_up` |
 | `new_artboard` | `doc.create_artboard` |
@@ -99,6 +101,7 @@ come additively from `native_intercepts`.)
 | `print_dialog_done` | `doc.set_advanced_field`, `doc.set_color_management_field`, `doc.set_graphics_field`, `doc.set_marks_and_bleed_field`, `doc.set_output_field`, `doc.set_output_ink_field`, `doc.set_print_preferences_field` |
 | `print_dialog_print` | `doc.set_advanced_field`, `doc.set_color_management_field`, `doc.set_graphics_field`, `doc.set_marks_and_bleed_field`, `doc.set_output_field`, `doc.set_output_ink_field`, `doc.set_print_preferences_field` |
 | `promote_to_concept` | `doc.promote_to_concept` |
+| `release_opacity_mask` | `doc.op` |
 | `remove_brush_from_selection` | `doc.set_attr_on_selection`, `doc.snapshot` |
 | `rotate_options_confirm` | `doc.preview.clear`, `doc.preview.restore`, `doc.rotate.apply` (`doc.rotate.apply` journal:true) |
 | `scale_options_confirm` | `doc.preview.clear`, `doc.preview.restore`, `doc.scale.apply` (`doc.scale.apply` journal:true) |
@@ -112,6 +115,7 @@ come additively from `native_intercepts`.)
 | `toggle_element_lock` | `doc.op` |
 | `ungroup` | `doc.op` |
 | `ungroup_all` | `doc.op` |
+| `unlink_opacity_mask` | `doc.op` |
 | `unlock_all` | `doc.op` |
 
 ## Preview actions (3)
@@ -151,7 +155,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (178)
+## UI-state actions (182)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -198,7 +202,8 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`,
 `toggle_brush_library_open`, `toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`,
 `toggle_dock_collapse`, `toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`,
-`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`,
+`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_new_masks_clipping`, `toggle_new_masks_inverted`,
+`toggle_opacity_options`, `toggle_opacity_thumbnails`, `toggle_pane`, `toggle_panel`,
 `toggle_swatch_library_open`, `toggle_use_preview_bounds`
 
 ## Verb -> journaling evidence table
