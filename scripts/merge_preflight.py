@@ -692,6 +692,60 @@ def self_test(fixture: Path | None = None) -> int:
                     "pins this parser, cannot see forge schema drift)"
                 )
 
+    # (l) THE LEVEL-2 NOTICE'S FORGE READERS (#984): the tab arm reads the
+    #     canvas tab bar at the PR's merge base and head FROM THE FORGE. `_gh`
+    #     is replaced by a stub that answers only the calls this path makes and
+    #     REFUSES (raises, and logs) any other, so no arm can reach the network.
+    old_lay = "root:\n  - id: canvas_tab_bar\n    label: '{{doc.name}}'\n"
+    new_lay = "root:\n  - id: canvas_tab_bar\n    label: '{{doc.name}} *'\n"
+    global _gh
+    real_gh = _gh
+    stray: list[tuple[str, ...]] = []
+
+    def stub(files: str, mb: str, contents: dict[str, str | Exception]):
+        def fake(*args: str) -> str:
+            a = " ".join(args)
+            if "/files" in a:
+                return files
+            if "/compare/" in a:
+                return mb + "\n"
+            if "/contents/" in a:
+                ref = a.rsplit("ref=", 1)[1]
+                got = contents.get(ref, RuntimeError("gh api failed: HTTP 404 Not Found"))
+                if isinstance(got, Exception):
+                    raise got
+                return got
+            stray.append(args)
+            raise RuntimeError(f"self-test stub refused an unexpected gh call: {a}")
+        return fake
+
+    try:
+        for label, files, mb, contents, want in (
+            ("a tab bar moved between merge base and head is listed",
+             "workspace/layout.yaml\n", "MB", {"MB": old_lay, "HEAD": new_lay}, "changed; "),
+            ("a tab bar unchanged reads unchanged",
+             "workspace/layout.yaml\n", "MB", {"MB": old_lay, "HEAD": old_lay}, "canvas_tab_bar unchanged"),
+            ("a merge base that IS the head is listed and says so",
+             "workspace/layout.yaml\n", "HEAD", {"HEAD": new_lay}, "merge base IS the head"),
+            ("a base side absent (404) is a newly added tab bar: listed",
+             "workspace/layout.yaml\n", "MB", {"HEAD": new_lay}, "changed; "),
+            ("a forge failure that is not a 404 is UNAVAILABLE, never unchanged",
+             "workspace/layout.yaml\n", "MB",
+             {"MB": RuntimeError("gh api failed: HTTP 502 Bad Gateway"), "HEAD": new_lay}, "UNAVAILABLE"),
+            ("no layout.yaml in the PR reads no forge content",
+             "README.md\n", "MB", {}, "no panel YAML changed"),
+        ):
+            declared += 1
+            _gh = stub(files, mb, contents)
+            lines = level2_notice(1, "o/r", "HEAD")
+            if not any(want in x for x in lines):
+                failures.append(f"(l) {label}: no line carries {want!r}: {lines}")
+    finally:
+        _gh = real_gh
+    declared += 1
+    if stray:
+        failures.append(f"(l) tripwire: the stub refused {len(stray)} unexpected gh call(s): {stray}")
+
     print(f"merge_preflight --self-test: {declared} arm(s) executed, {declared} declared")
     if failures:
         print(f"FAIL: {len(failures)} arm(s) did not hold")
