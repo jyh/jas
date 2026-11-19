@@ -2140,6 +2140,30 @@ static class Program
         Eq("tool: names compare ordinally, so Rect is not rect", "-1", ToolKnob.Resolve("Rect", tools).ToString());
         Eq("tool: a negative number is refused", "-1", ToolKnob.Resolve("-1", tools).ToString());
 
+        // -- THE GRADIENT TILE (jas 917: the preset strip's leaves, #969/#970) ------
+        // `bind.gradient` is one library gradient as JSON; the tile draws its
+        // stops as a ramp, linear at its angle (0 = left to right, 90 = bottom to
+        // top, as the web's `90 - angle` CSS reads it) or radial.
+        var tileBw = """{"_index":0,"angle":0,"aspect_ratio":100,"dither":false,"method":"classic","name":"Black to White","stops":[{"color":"#000000","location":0,"midpoint_to_next":50,"opacity":100},{"color":"#ffffff","location":100,"midpoint_to_next":50,"opacity":40}],"type":"linear"}""";
+        var tile = GradientTileWire.Read(tileBw);
+        Eq("tile: a library gradient reads its type, angle and stops", "linear|0|#000000@0/100,#ffffff@100/40",
+            tile is null ? "(null)" : $"{tile.Value.Type}|{tile.Value.Angle}|{string.Join(",", tile.Value.Stops.Select(st => $"{st.Color}@{st.Location}/{st.Opacity}"))}");
+        Eq("tile: radial is read as radial", "radial",
+            GradientTileWire.Read("""{"type":"radial","stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":100}]}""")?.Type ?? "(null)");
+        Eq("tile: no type is linear, no angle is 0", "linear|0",
+            GradientTileWire.Read("""{"stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":100}]}""") is { } t0 ? $"{t0.Type}|{t0.Angle}" : "(null)");
+        Eq("tile: fewer than two stops, bad stops, no stops, not JSON, null: no ramp (the muted tile)", "(null)|(null)|(null)|(null)|(null)",
+            string.Join("|", new[] {
+                """{"stops":[{"color":"#000000","location":0}]}""",
+                """{"stops":[{"color":"#000000","location":0},{"color":"#ffffff","location":140}]}""",
+                """{"type":"linear"}""", "{x", null }
+                .Select(j => GradientTileWire.Read(j) is null ? "(null)" : "read")));
+        static string Ends(double a) { var e = GradientTileWire.Ends(a); return FormattableString.Invariant($"{e.Sx:0.###},{e.Sy:0.###}>{e.Ex:0.###},{e.Ey:0.###}"); }
+        Eq("tile: angle 0 runs left to right", "0,0.5>1,0.5", Ends(0));
+        Eq("tile: angle 90 runs bottom to top", "0.5,1>0.5,0", Ends(90));
+        Eq("tile: angle 180 runs right to left", "1,0.5>0,0.5", Ends(180));
+        Eq("tile: angle -90 runs top to bottom", "0.5,0>0.5,1", Ends(-90));
+
         // -- THE PANEL MENU (the owner's note 3, 2026-10-12) ----------------------
         // `jas_panel_menu` rows, read as the shell draws them. The shell evaluates
         // nothing: label, enabled and checked are the core's.
