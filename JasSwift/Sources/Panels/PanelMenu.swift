@@ -192,7 +192,11 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .swatches: SwatchesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .stroke: StrokePanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .properties: PropertiesPanel.dispatch(cmd, addr: addr, layout: &layout)
-    case .character: CharacterPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
+    // Character: Close is the layout's; every other row runs its actions.yaml
+    // entry in the panel's scope, as the engine and the web do (row 174).
+    case .character:
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)) }
+        else { panelDispatchRow(.character, action: cmd, params: [:], model: model) }
     case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
