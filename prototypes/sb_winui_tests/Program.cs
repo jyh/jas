@@ -448,6 +448,32 @@ static class Program
         Eq("finding 6: a style other than solid is refused by name", "(null)", SB("1px dashed #555555"));
         Eq("finding 6: an unresolved template is refused", "(null)", SB("1px solid {{theme.colors.border}}"));
         Eq("finding 6: a zero width draws nothing and is refused", "(null)", SB("0px solid #555555"));
+        // jas row 149: at launch the shell hands the engine its saved-library
+        // root (`jas_engine_load_user_libraries`) and writes what the engine took
+        // as one row; an empty or malformed reply is a RUSTFAIL by name.
+        Eq("row 149: the counts, as the launch row",
+            "USER LIBRARIES brush=1 swatch=0 gradient=2",
+            UserLibrariesWire.Row("""{"brush_libraries":1,"swatch_libraries":0,"gradient_libraries":2}"""));
+        Eq("row 149: an empty span (a NULL engine or bad UTF-8) is refused by name",
+            "RUSTFAIL USER LIBRARIES refused: the core answered nothing (a NULL engine or a root that is not UTF-8)",
+            UserLibrariesWire.Row(""));
+        Eq("row 149: a missing count is refused by name, never read as 0",
+            "RUSTFAIL USER LIBRARIES refused: no gradient_libraries count in {\"brush_libraries\":1,\"swatch_libraries\":0}",
+            UserLibrariesWire.Row("""{"brush_libraries":1,"swatch_libraries":0}"""));
+        Eq("row 149: a reply that is not JSON is refused by name",
+            "RUSTFAIL USER LIBRARIES refused: not JSON: nope",
+            UserLibrariesWire.Row("nope"));
+        // jas §932 item 1: SB_LIBRARY_ROOT moves the data root for the launch
+        // read AND the writes (a proving run's fresh, empty root); unset or
+        // blank keeps `%LOCALAPPDATA%\Jas`.
+        Eq("§932: the knob, when set, is the root",
+            @"C:\T\sb-libroot-ab", UserLibrariesWire.RootFor(@"C:\T\sb-libroot-ab", @"C:\Users\u\AppData\Local"));
+        Eq("§932: unset keeps the app's data root",
+            @"C:\Users\u\AppData\Local\Jas", UserLibrariesWire.RootFor(null, @"C:\Users\u\AppData\Local"));
+        Eq("§932: a blank knob is unset, never a root of nothing",
+            @"C:\Users\u\AppData\Local\Jas", UserLibrariesWire.RootFor("  ", @"C:\Users\u\AppData\Local"));
+        Eq("row 149: the root's bytes are its UTF-8, no terminator",
+            "4A,61,73,C3,A9", string.Join(",", UserLibrariesWire.RootBytes("Jasé").Select(b => b.ToString("X2"))));
         // jas §927 item 1: a tile's selection is the plan row's resolved
         // `selected` (the engine tests `bind.selected_in` membership; the shell
         // tests nothing). A swatch tile is a leaf, a brush tile a surface

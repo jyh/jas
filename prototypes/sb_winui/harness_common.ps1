@@ -4384,3 +4384,45 @@ public static class SbBoxNative {
     return @{ ConsoleSession = $console; ExplorerSessions = $explorer; LogonUISessions = $logonUi;
               ConsentSessions = $consent; RebootPending = $reboot; WindowRows = $rows }
 }
+
+# ---------------------------------------------------------------------------
+# jas STATUS-flask 932 item 1: A PROVING RUN READS NO SAVED LIBRARY.
+# Since row 149 the shell merges the libraries saved under its data root
+# (`%LOCALAPPDATA%\Jas`) into the bundle's at launch, so a person's saves were an
+# input to every certificate on that box. prove_e2e makes a fresh empty root per
+# run (New-SbLibraryRoot), hands it to the shell as SB_LIBRARY_ROOT (forwarded,
+# like every SB_* knob), requires the launch row to read 0/0/0 at that root
+# (Test-SbLibraryRow), and removes it afterwards (Remove-SbLibraryRoot).
+# ---------------------------------------------------------------------------
+
+# A fresh, empty directory `sb-libroot-<32 hex>` directly under the temp folder.
+function New-SbLibraryRoot {
+    $d = Join-Path ([IO.Path]::GetTempPath()) ('sb-libroot-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $d | Out-Null
+    return $d
+}
+
+# Deletes a root New-SbLibraryRoot made, with whatever a run saved in it. ANY OTHER
+# PATH IS REFUSED BY NAME and left in place: the shape (leaf name and parent) is
+# the whole test, so a slip can never reach the person's own data root.
+function Remove-SbLibraryRoot([string]$Root) {
+    $ok = $Root -and ((Split-Path $Root -Leaf) -match '^sb-libroot-[0-9a-f]{32}$') -and
+          ((Split-Path $Root -Parent).TrimEnd('\') -eq ([IO.Path]::GetTempPath()).TrimEnd('\'))
+    if (-not $ok) { return 'REFUSED(not a root New-SbLibraryRoot made)' }
+    if (Test-Path $Root) { Remove-Item -Path $Root -Recurse -Force }
+    return 'removed'
+}
+
+# The shell's launch row against the run's root: PASS only for 0/0/0 AT that root.
+# No row or a refusal is NOT RUN (the isolation was not shown), never a PASS.
+function Test-SbLibraryRow([string]$Row, [string]$Root) {
+    if (-not $Row) { return 'NOT RUN(no USER LIBRARIES row)' }
+    if ($Row -match 'RUSTFAIL') { return "NOT RUN($($Row.Trim()))" }
+    if ($Row -notmatch 'USER LIBRARIES brush=(\d+) swatch=(\d+) gradient=(\d+) root=(.+)$') { return "NOT RUN(unreadable row: $($Row.Trim()))" }
+    $counts = [ordered]@{ brush = [int]$Matches[1]; swatch = [int]$Matches[2]; gradient = [int]$Matches[3] }
+    $at = $Matches[4].Trim()
+    if ($at -ne $Root) { return "FAIL(root=$at, want $Root)" }
+    $nonzero = @($counts.Keys | Where-Object { $counts[$_] -ne 0 } | ForEach-Object { "$_=$($counts[$_])" })
+    if ($nonzero.Count) { return "FAIL($($nonzero -join ' '); a proving run reads no saved library)" }
+    return 'PASS'
+}
