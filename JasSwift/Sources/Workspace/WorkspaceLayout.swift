@@ -327,17 +327,32 @@ public struct WorkspaceLayout: Codable {
         named(defaultLayoutName)
     }
 
+    /// The `Default` layout's dock groups, READ FROM THE SPEC
+    /// (`default_layouts.yaml`, compiled into the bundle), never a hand copy
+    /// (row 160: this used to list `[color, swatches] … [artboards, layers,
+    /// symbols]` while the spec, and the Windows shell reading it, said
+    /// `[color, swatches, brushes] … [artboards, layers]`). The twin of Rust's
+    /// `WorkspaceLayout::spec_default_groups`; a defective bundle is a loud
+    /// stop here, never a silently different dock.
+    static func specDefaultGroups() -> [PanelGroup] {
+        guard let ws = WorkspaceData.load() else {
+            fatalError("workspace/workspace.json missing or malformed: the default dock is read from it")
+        }
+        guard let groups = specDockGroups(ws.data, defaultLayoutName) else {
+            fatalError("default_layouts.yaml declares no readable \(defaultLayoutName) dock")
+        }
+        return groups.map { g in
+            var group = PanelGroup(panels: g.panels.map(layoutParsePanelKind))
+            group.active = g.active
+            return group
+        }
+    }
+
     public static func named(_ name: String) -> WorkspaceLayout {
         WorkspaceLayout(
             version: layoutVersion,
             name: name,
-            anchored: [(.right, Dock(id: DockId(0), groups: [
-                PanelGroup(panels: [.color, .swatches]),
-                PanelGroup(panels: [.align, .boolean]),
-                PanelGroup(panels: [.character, .paragraph]),
-                PanelGroup(panels: [.stroke, .properties]),
-                PanelGroup(panels: [.artboards, .layers, .symbols]),
-            ], width: defaultDockWidth))],
+            anchored: [(.right, Dock(id: DockId(0), groups: specDefaultGroups(), width: defaultDockWidth))],
             floating: [],
             hiddenPanels: [],
             zOrder: [],

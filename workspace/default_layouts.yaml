@@ -19,7 +19,10 @@ default_layouts:
             active: 0
           - panels: [stroke, properties]
             active: 0
-          - panels: [artboards, layers]
+          # Symbols joins Artboards and Layers (Symbols P3b, 06-16, which put
+          # it in the native default docks; this file was not updated then).
+          # Every port's fresh dock is read from these groups (row 160).
+          - panels: [artboards, layers, symbols]
             active: 0
     floating: []
 

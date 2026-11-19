@@ -907,8 +907,13 @@ def self_test():
     check("swatches reads as anchored at bottom in the snap fixture", dock_edge_of(lay, "swatches") == "bottom")
     check("stroke reads as anchored at right in the snap fixture", dock_edge_of(lay, "stroke") == "right")
     check("a panel in no anchored dock reads None", dock_edge_of(lay, "gradient") is None)
+    # The two-docks mutant puts swatches into the right dock's Color group too.
+    # It anchors on the group's OPENING, never its whole list: the list is the
+    # spec's default group, which grew (row 160 added brushes) and left a
+    # whole-list anchor matching nothing.
+    check("the two-docks anchor occurs exactly once", lay.count('"panels":["color"') == 1)
     for bad, why in ((lay.replace('"anchored":', '"anchoredX":', 1), "no anchored member"),
-                     (lay.replace('"panels":["color"]', '"panels":["color","swatches"]', 1), "two docks")):
+                     (lay.replace('"panels":["color"', '"panels":["color","swatches"', 1), "two docks")):
         check(f"the {why} mutant changed the layout", bad != lay)
         check(f"a layout with {why} is refused", refused(lambda: dock_edge_of(bad, "swatches"), "anchored"))
     fl = open(os.path.join(wo, "panel_detach_panel.json"), encoding="utf-8").read().strip()

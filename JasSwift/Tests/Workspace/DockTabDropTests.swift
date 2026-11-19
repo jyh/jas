@@ -73,7 +73,11 @@ private let g1 = GroupAddr(dockId: DockId(0), groupIdx: 1)
 /// Three tabs, as the web probe built them: the default group 0 is two tabs,
 /// so group 1's first panel is moved to its end.
 private func threeTabLayout() -> (WorkspaceLayout, GroupAddr) {
+    // Group 0 is cut to its first two tabs, then the next group's first panel
+    // is moved to its end: three tabs whatever the spec's default group holds
+    // (row 160: [color, swatches, brushes] now), as Rust's twin does.
     var layout = WorkspaceLayout.defaultLayout()
+    layout.anchored[0].1.groups[0].panels = Array(layout.anchored[0].1.groups[0].panels.prefix(2))
     let did = layout.anchored[0].1.id
     layoutApply(&layout, opMovePanelToGroup(PanelAddr(group: GroupAddr(dockId: did, groupIdx: 1), panelIdx: 0),
                                             to: GroupAddr(dockId: did, groupIdx: 0)))

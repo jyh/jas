@@ -64,6 +64,39 @@ pub fn parse_panel_kind(s: &str) -> PanelKind {
     }
 }
 
+/// The dock groups of layout `name` in the bundle's `default_layouts`, as
+/// `(short panel ids, active index)` in the layout's order: THE ONE STRICT
+/// READER of a layout's groups (row 160), shared by the web's default dock
+/// (`WorkspaceLayout::named`) and the shells' `panel_plan::dock_layout`.
+/// `None`, never a repair: no such layout, a group with no panels, a panel id
+/// the bundle does not declare (`<id>_panel_content`) or no `PanelKind` names,
+/// an `active` that is not an index into its group, or no groups at all.
+pub fn spec_dock_groups(data: &serde_json::Value, name: &str) -> Option<Vec<(Vec<String>, usize)>> {
+    let groups = data.get("default_layouts")?.get(name)?.get("dock")?
+        .get("dock_main")?.get("groups")?.as_array()?;
+    let panels = data.get("panels")?;
+    let mut out = vec![];
+    for g in groups {
+        let mut ids = vec![];
+        for short in g.get("panels")?.as_array()? {
+            let short = short.as_str()?;
+            panels.get(format!("{short}_panel_content"))?;
+            // parse_panel_kind falls back to Layers, so the round trip is what
+            // refuses an id no PanelKind names.
+            if panel_kind_str(parse_panel_kind(short)) != short { return None; }
+            ids.push(short.to_string());
+        }
+        if ids.is_empty() { return None; }
+        let active = match g.get("active") {
+            None => 0,
+            Some(v) => v.as_i64().filter(|a| (0..ids.len() as i64).contains(a))? as usize,
+        };
+        out.push((ids, active));
+    }
+    if out.is_empty() { return None; }
+    Some(out)
+}
+
 /// Serialize a `PanelKind` to its canonical lowercase op string (the inverse of
 /// `parse_panel_kind`; matches `test_json::panel_kind_str`). Production
 /// `show_panel` sites use this to build the op JSON, so the round-trip is
@@ -615,10 +648,13 @@ mod tests {
     /// The panel lands where the caret was drawn, end to end through the op.
     #[test]
     fn a_same_group_drop_lands_at_the_caret() {
-        // Three tabs, as the web probe built them: the default group 0 is
-        // [Color, Swatches], so the next group's first panel is moved to its end.
+        // Three tabs, as the web probe built them: group 0 is cut to its first
+        // two tabs, then the next group's first panel is moved to its end. The
+        // cut keeps the fixture three tabs whatever the spec's default group
+        // holds (row 160: it is [Color, Swatches, Brushes] now).
         let three = || {
             let mut l = WorkspaceLayout::default_layout();
+            l.anchored[0].1.groups[0].panels.truncate(2);
             let did = l.anchored[0].1.id;
             layout_apply(&mut l, &op_move_panel_to_group(
                 PanelAddr { group: GroupAddr { dock_id: did, group_idx: 1 }, panel_idx: 0 },
