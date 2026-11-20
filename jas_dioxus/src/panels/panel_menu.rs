@@ -600,13 +600,26 @@ fn live_panel_state(
             ("new_masks_clipping", b(st.opacity_panel.new_masks_clipping)),
             ("new_masks_inverted", b(st.opacity_panel.new_masks_inverted)),
         ],
-        "character_panel_content" => vec![
-            ("snap_to_glyph_visible", b(st.character_panel.snap_to_glyph_visible)),
-            ("all_caps", b(st.character_panel.all_caps)),
-            ("small_caps", b(st.character_panel.small_caps)),
-            ("superscript", b(st.character_panel.superscript)),
-            ("subscript", b(st.character_panel.subscript)),
-        ],
+        "character_panel_content" => {
+            // The four toggles describe the SELECTION, as the panel body shows
+            // them (`character_host::live_values`); the typed slot is the
+            // fallback with no text selected. The slot keeps a stale sibling,
+            // because a toggle writes one key, so reading it checked All Caps
+            // beside Small Caps and made the next All Caps a dead click
+            // (STATUS-flask §944).
+            let live = st.tab()
+                .map(|tab| crate::interpreter::character_host::live_values(tab.model.document()))
+                .unwrap_or_default();
+            let cp = &st.character_panel;
+            let shown = |k: &str, typed: bool| live.get(k).cloned().unwrap_or(b(typed));
+            vec![
+                ("snap_to_glyph_visible", b(cp.snap_to_glyph_visible)),
+                ("all_caps", shown("all_caps", cp.all_caps)),
+                ("small_caps", shown("small_caps", cp.small_caps)),
+                ("superscript", shown("superscript", cp.superscript)),
+                ("subscript", shown("subscript", cp.subscript)),
+            ]
+        }
         "paragraph_panel_content" => {
             vec![("hanging_punctuation", b(st.paragraph_panel.hanging_punctuation))]
         }

@@ -2229,20 +2229,9 @@ pub(crate) fn build_panel_pending_template(
 pub(crate) use crate::geometry::tspan::{parse_em_as_thousandths, parse_pt};
 
 
-/// Inverse of `parse_style_name` — build the Character-panel display
-/// name from an element's font_weight / font_style. Falls back to
-/// `"Regular"` for unrecognised combinations so the dropdown always
-/// shows a concrete value.
-pub(crate) fn format_style_name(font_weight: &str, font_style: &str) -> String {
-    let bold = font_weight == "bold" || font_weight.parse::<u16>().map(|n| n >= 600).unwrap_or(false);
-    let italic = font_style == "italic" || font_style == "oblique";
-    match (bold, italic) {
-        (true, true) => "Bold Italic".into(),
-        (true, false) => "Bold".into(),
-        (false, true) => "Italic".into(),
-        (false, false) => "Regular".into(),
-    }
-}
+// Moved to the shared host with `character_host::live_values`, its one
+// derivation reader; re-exported so the existing call sites keep resolving.
+pub(crate) use crate::interpreter::character_host::format_style_name;
 
 
 

@@ -2147,6 +2147,11 @@ unsafe fn jas_dispatch_action_inner(
                 crate::panel_scope::sync_gradient_state(
                     &mut engine.store.borrow_mut(), &engine.model.borrow(), fill_on_top);
             }
+            // The Character menu's toggles negate `panel.<key>` (§944).
+            if pid == crate::interpreter::character_host::CHARACTER_PANEL {
+                crate::panel_scope::sync_character_state(
+                    &mut engine.store.borrow_mut(), &engine.model.borrow());
+            }
             panel_ctx(engine, &ws, pid)
         }
         None => {
@@ -6985,6 +6990,77 @@ mod tests {
         let before = snap(e);
         item(e, 0);
         assert_ne!(snap(e), before, "Show Snap to Glyph Options did not flip");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// STATUS-flask §944: THE EXCLUSION MUST REACH WHAT A PERSON SEES, NOT ONLY
+    /// THE DOCUMENT. After All Caps then Small Caps the element was right
+    /// (`small-caps`, no transform) while the menu and the panel still checked
+    /// All Caps: the scope read the store, and a toggle writes one key and never
+    /// clears its sibling. Since a toggle writes the NEGATION of what it reads,
+    /// the stale key also made the next All Caps a dead click (`not true`).
+    /// The scope now derives the fields from the selection, as Properties and
+    /// Paragraph do. Driven both ways, for both pairs (W2b-7: the forward
+    /// direction is the one an oracle naturally tests).
+    #[test]
+    fn an_exclusive_character_toggle_unchecks_its_sibling_and_the_next_click_acts() {
+        use crate::geometry::element::Element;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        // flask's setup: one point text, Select All.
+        let e = engine_on("setup_text_hello.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let item = |e, at: u32| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{CHARACTER}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        };
+        let case = |e| engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter().find_map(|es| match doc.get_element(&es.path) {
+                Some(Element::Text(t)) =>
+                    Some((t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone())),
+                _ => None,
+            }).expect("the fixture selects a text element")
+        });
+        // [All Caps, Small Caps, Superscript, Subscript], from the menu the
+        // shell draws and from the scope the panel's toggles bind.
+        let menu = |e| {
+            let (rows, err) = panel_menu(e, CHARACTER);
+            assert!(err.is_empty(), "{err}");
+            [2, 3, 4, 5].map(|i| rows[i]["checked"] == true)
+        };
+        let panel = |e| {
+            let scope = engine_scope_of(engine_of(e), CHARACTER);
+            ["all_caps", "small_caps", "superscript", "subscript"]
+                .map(|k| scope["panel"][k] == true)
+        };
+        let both = |e, want: [bool; 4], what: &str| {
+            assert_eq!(menu(e), want, "the menu's checks, {what}");
+            assert_eq!(panel(e), want, "the panel's toggles, {what}");
+        };
+        let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        both(e, [false; 4], "the control: nothing checked");
+        item(e, 2);
+        item(e, 3);
+        assert_eq!(case(e), s("", "small-caps", ""), "the document was already right");
+        both(e, [false, true, false, false], "after All Caps then Small Caps");
+        item(e, 2);
+        assert_eq!(case(e), s("uppercase", "", ""), "All Caps again acts (it was a dead click)");
+        both(e, [true, false, false, false], "after Small Caps then All Caps");
+        item(e, 4);
+        item(e, 5);
+        assert_eq!(case(e), s("uppercase", "", "sub"), "Subscript clears Superscript");
+        both(e, [true, false, false, true], "after Superscript then Subscript");
+        item(e, 4);
+        assert_eq!(case(e), s("uppercase", "", "super"), "Superscript again acts");
+        both(e, [true, false, true, false], "after Subscript then Superscript");
+        // The panel's own toggle, after the menu set its sibling: Small Caps
+        // from the menu, then the All Caps CHECKBOX.
+        item(e, 3);
+        both(e, [false, true, true, false], "after All Caps then Small Caps, again");
+        let (reply, err) = behave(e, CHARACTER, r#"{"widget":"ch_all_caps","event":"click"}"#);
+        assert!(!reply.is_empty(), "the All Caps toggle was refused: {err}");
+        assert_eq!(case(e), s("uppercase", "", "super"), "the panel's All Caps toggle acts");
+        both(e, [true, false, true, false], "after the All Caps toggle");
         unsafe { jas_engine_free(e) };
     }
 
