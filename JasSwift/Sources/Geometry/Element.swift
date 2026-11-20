@@ -49,6 +49,9 @@ func withFontLookup<T>(_ body: () -> T) -> T {
 /// (STATUS-jas row 188). Written and read under `fontLookupLock`.
 nonisolated(unsafe) private var faceLookupFailureCount = 0
 
+/// The face/traits pairs already logged by ``faceWithTraits``, under the lock.
+nonisolated(unsafe) private var faceLookupLogged: Set<String> = []
+
 /// ``faceLookupFailureCount``, read under the lock.
 func faceLookupFailures() -> Int { withFontLookup { faceLookupFailureCount } }
 
@@ -63,8 +66,13 @@ func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, s
     // the base face's (row 188). Try once more; then SAY so before falling back.
     if let face = lookup(desc, size) ?? lookup(desc, size) { return face }
     faceLookupFailureCount += 1
-    NSLog("jas: no face for %@ with traits 0x%x at %.3f pt; measuring the base face (row 188)",
-          base.fontName, traits.rawValue, Double(size))
+    // Logged ONCE per face and traits: a family with no such face (Futura has
+    // no bold italic) fails on every measure, and CI's first run of this read
+    // 18 lines for it in one suite.
+    if faceLookupLogged.insert("\(base.fontName)/\(traits.rawValue)").inserted {
+        NSLog("jas: no face for %@ with traits 0x%x at %.3f pt; measuring the base face (row 188)",
+              base.fontName, traits.rawValue, Double(size))
+    }
     return base
 }
 #endif
