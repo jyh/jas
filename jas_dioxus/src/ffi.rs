@@ -7064,6 +7064,54 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 181: the Paragraph menu's Hanging Punctuation reads the SELECTION,
+    /// in its check and in its toggle, after a selection change. The web's and
+    /// the Mac's menus read stored state there (both fixed with this arm); the
+    /// engine's scope and its `toggle_paragraph_field` arm already derived it,
+    /// and this measures that instead of reading it. Same fixture as the web's
+    /// `paragraph_panel::tests` and the Mac's `ParagraphMenuSelectionTests`.
+    #[test]
+    fn the_hanging_punctuation_row_reads_the_selection_after_a_selection_change() {
+        use crate::geometry::element::Element;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" width="200" height="100"><text x="0" y="20" font-size="12" style="inline-size: 180px; white-space: pre-wrap;" xml:space="preserve"><tspan jas:role="paragraph"></tspan><tspan>First</tspan></text><text x="0" y="60" font-size="12" style="inline-size: 180px; white-space: pre-wrap;" xml:space="preserve"><tspan jas:role="paragraph" jas:hanging-punctuation="true" jas:left-indent="12"></tspan><tspan>Second</tspan></text></svg>"#;
+        let e = jas_engine_new();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(svg).unwrap());
+        let select = |e, i: usize| engine_of(e).with_model_mut(|m|
+            crate::document::controller::Controller::select_element(m, &vec![0, i]));
+        let wrapper = |e, i: usize| engine_of(e).with_model(|m| match m.document().get_element(&vec![0, i]) {
+            Some(Element::Text(t)) => t.tspans.iter()
+                .find(|s| s.jas_role.as_deref() == Some("paragraph"))
+                .map(|s| (s.jas_hanging_punctuation, s.jas_left_indent))
+                .expect("a paragraph wrapper"),
+            other => panic!("text {i} is not a text: {other:?}"),
+        });
+        let checked = |e| {
+            let (rows, err) = panel_menu(e, PARAGRAPH);
+            assert!(err.is_empty(), "{err}");
+            assert_eq!(rows[0]["action"], "toggle_hanging_punctuation", "paragraph.yaml's menu: row 0");
+            rows[0]["checked"] == true
+        };
+        let toggle = |e| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{PARAGRAPH}","menu_index":0}}"#));
+            assert!(!reply.is_empty(), "Hanging Punctuation was refused: {err}");
+        };
+        assert_eq!(wrapper(e, 1), (Some(true), Some(12.0)), "the control: the fixture's flagged paragraph");
+        select(e, 0);
+        assert!(!checked(e), "the first paragraph has no hanging punctuation");
+        select(e, 1);
+        assert!(checked(e), "the second paragraph has it: the check shows the selection");
+        toggle(e);
+        assert_eq!(wrapper(e, 1), (None, Some(12.0)), "the toggle turns it OFF and keeps the indent");
+        assert!(!checked(e), "and the check follows");
+        select(e, 0);
+        assert!(!checked(e), "back to the first paragraph: unchecked");
+        toggle(e);
+        assert_eq!(wrapper(e, 0), (Some(true), None),
+                   "the first paragraph gains the flag and NOT the second's indent");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 169: Make Mask reads the panel's NEW-MASK PREFERENCES as they stand.
     /// The menu items "New Opacity Masks Are Clipping / Inverted" toggle them;
     /// a mask made after each toggle carries the toggled value, never the

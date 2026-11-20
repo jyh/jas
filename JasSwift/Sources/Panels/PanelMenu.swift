@@ -402,6 +402,12 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
        let live = characterPanelLiveOverrides(model: m) {
         for (k, v) in live { panel[k] = v }
     }
+    // The Paragraph panel's fields describe the selection too: the store holds
+    // what the last write left, so after a selection change the Hanging
+    // Punctuation check showed the previous paragraph's flag (row 181).
+    if contentId == "paragraph_panel_content", let m = model {
+        for (k, v) in paragraphPanelLiveOverrides(model: m) { panel[k] = v }
+    }
     var ctx: [String: Any] = ["panel": panel]
     // The data namespace, read from the store the library effects write, so an
     // `items_from` source such as `keys(data.brush_libraries)` lists what is
