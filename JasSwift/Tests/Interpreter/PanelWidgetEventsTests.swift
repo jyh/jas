@@ -628,3 +628,17 @@ private func firstMask(_ model: Model) -> (clip: Bool, invert: Bool, linked: Boo
         #expect(!src.contains(needle), "a native intercept for \(bind) remains")
     }
 }
+
+// MARK: - Opacity: the chevron's slider (row 175)
+
+@Test func theOpacityChevronRevealsASliderThatCommitsLikeTheField() {
+    let model = modelWithSelectedRect()
+    let route = opacityRoute(model, clipping: true)
+    #expect(model.stateStore.getPanel(opacity, "slider_shown") as? Bool != true, "starts hidden")
+    route.click(shipped(opacity, "op_disclosure"))
+    #expect(model.stateStore.getPanel(opacity, "slider_shown") as? Bool == true, "the chevron reveals the row")
+    // The view's slider path: `handleSliderWrite` → `commitPanelField`, terminal on release.
+    commitPanelField(model: model, panelId: opacity, key: "opacity", value: 40.0, terminal: true)
+    #expect(abs(model.document.getElement([0, 0]).opacity - 0.4) < 1e-9,
+            "the slider's commit writes the selection's opacity")
+}
