@@ -16,40 +16,61 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
     super::panel_menu::menu_items_from_yaml("character_panel_content")
 }
 
-/// Dispatch a menu command for the Character panel. The toggle
-/// commands flip the matching Character-panel state bool and push
-/// the result to the selected text element(s) via the same pipeline
-/// the icon toggles use, so menu and in-panel surfaces stay in sync.
+/// Dispatch a menu command for the Character panel: the generic route, which
+/// runs the item's `actions.yaml` action in the panel's scope, as the engine
+/// does (row 174). The toggles' `set_panel_state` lands in the same typed
+/// field the panel's own toggles write, and applies it to the selection.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
-    match cmd {
-        "close_panel" => crate::workspace::layout_apply::layout_apply(
-            &mut state.workspace_layout,
-            &crate::workspace::layout_apply::op_close_panel(addr),
-        ),
-        "toggle_snap_to_glyph_visible" => {
-            state.character_panel.snap_to_glyph_visible = !state.character_panel.snap_to_glyph_visible;
+    let _ = super::panel_menu::dispatch_yaml_menu("character_panel_content", cmd, addr, state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::workspace::{DockId, GroupAddr};
+
+    fn text_state() -> AppState {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><text x="0" y="20">Hello</text></svg>"#;
+        let mut st = AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        crate::document::controller::Controller::select_all(&mut st.tabs[st.active_tab].model);
+        st
+    }
+
+    fn case(st: &AppState) -> (String, String, String) {
+        use crate::geometry::element::Element;
+        let doc = st.tabs[st.active_tab].model.document();
+        doc.selection.iter().find_map(|es| match doc.get_element(&es.path) {
+            Some(Element::Text(t)) =>
+                Some((t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone())),
+            _ => None,
+        }).expect("a selected text element")
+    }
+
+    /// Row 174: the web's Character menu runs its actions.yaml entries, and
+    /// the result on the ELEMENT is the engine's (`ffi` arm
+    /// `every_live_character_menu_item_runs_in_the_engine`, the same sequence).
+    #[test]
+    fn the_character_menu_runs_its_yaml_on_the_web() {
+        let addr = PanelAddr { group: GroupAddr { dock_id: DockId(0), group_idx: 0 }, panel_idx: 0 };
+        let mut st = text_state();
+        let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        assert_eq!(case(&st), s("", "", ""), "the control");
+        for (cmd, want, why) in [
+            ("toggle_all_caps", s("uppercase", "", ""), "All Caps"),
+            ("toggle_small_caps", s("", "small-caps", ""), "Small Caps clears All Caps"),
+            ("toggle_superscript", s("", "small-caps", "super"), "Superscript"),
+            ("toggle_subscript", s("", "small-caps", "sub"), "Subscript clears Superscript"),
+            ("toggle_subscript", s("", "small-caps", ""), "Subscript again turns it off"),
+            ("toggle_small_caps", s("", "", ""), "Small Caps again turns it off"),
+        ] {
+            dispatch(cmd, addr, &mut st);
+            assert_eq!(case(&st), want, "{why}");
         }
-        "toggle_all_caps" => {
-            state.character_panel.all_caps = !state.character_panel.all_caps;
-            // Mutual exclusion with Small Caps (CHARACTER.md).
-            if state.character_panel.all_caps { state.character_panel.small_caps = false; }
-            state.apply_character_panel_to_selection("all_caps");
-        }
-        "toggle_small_caps" => {
-            state.character_panel.small_caps = !state.character_panel.small_caps;
-            if state.character_panel.small_caps { state.character_panel.all_caps = false; }
-            state.apply_character_panel_to_selection("small_caps");
-        }
-        "toggle_superscript" => {
-            state.character_panel.superscript = !state.character_panel.superscript;
-            if state.character_panel.superscript { state.character_panel.subscript = false; }
-            state.apply_character_panel_to_selection("superscript");
-        }
-        "toggle_subscript" => {
-            state.character_panel.subscript = !state.character_panel.subscript;
-            if state.character_panel.subscript { state.character_panel.superscript = false; }
-            state.apply_character_panel_to_selection("subscript");
-        }
-        _ => {}
+        let before = st.character_panel.snap_to_glyph_visible;
+        dispatch("toggle_snap_to_glyph_visible", addr, &mut st);
+        assert_ne!(st.character_panel.snap_to_glyph_visible, before, "Show Snap to Glyph Options");
     }
 }

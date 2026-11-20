@@ -550,6 +550,15 @@ pub fn typed_panel_slot_keys() -> Vec<(&'static str, &'static str)> {
         ("layers_panel_content", "type_filter"),
         ("layers_panel_content", "collapsed_paths"),
         ("layers_panel_content", "renaming_element"),
+        ("opacity_panel_content", "thumbnails_hidden"),
+        ("opacity_panel_content", "options_shown"),
+        ("opacity_panel_content", "new_masks_clipping"),
+        ("opacity_panel_content", "new_masks_inverted"),
+        ("character_panel_content", "snap_to_glyph_visible"),
+        ("character_panel_content", "all_caps"),
+        ("character_panel_content", "small_caps"),
+        ("character_panel_content", "superscript"),
+        ("character_panel_content", "subscript"),
     ]
 }
 

@@ -26,55 +26,12 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
     super::panel_menu::menu_items_from_yaml("opacity_panel_content")
 }
 
-/// Dispatch a menu command for the Opacity panel.
+/// Dispatch a menu command for the Opacity panel: the generic route, which
+/// runs the item's `actions.yaml` action in the panel's scope, as the engine
+/// does (row 174). Until 2026-11-19 every item here was a native copy of the
+/// action's law.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
-    match cmd {
-        "close_panel" => crate::workspace::layout_apply::layout_apply(
-            &mut state.workspace_layout,
-            &crate::workspace::layout_apply::op_close_panel(addr),
-        ),
-        "toggle_opacity_thumbnails" => {
-            state.opacity_panel.thumbnails_hidden = !state.opacity_panel.thumbnails_hidden;
-        }
-        "toggle_opacity_options" => {
-            state.opacity_panel.options_shown = !state.opacity_panel.options_shown;
-        }
-        "toggle_new_masks_clipping" => {
-            state.opacity_panel.new_masks_clipping = !state.opacity_panel.new_masks_clipping;
-        }
-        "toggle_new_masks_inverted" => {
-            state.opacity_panel.new_masks_inverted = !state.opacity_panel.new_masks_inverted;
-        }
-        // Mask-lifecycle commands route to the document controller. Make
-        // uses the document's new_masks_* preferences; the others are
-        // first-wins toggles on the selection.
-        "make_opacity_mask" => {
-            let clip = state.opacity_panel.new_masks_clipping;
-            let invert = state.opacity_panel.new_masks_inverted;
-            if let Some(tab) = state.tab_mut() {
-                crate::document::controller::Controller::make_mask_on_selection(
-                    &mut tab.model, clip, invert);
-            }
-        }
-        "release_opacity_mask" => {
-            if let Some(tab) = state.tab_mut() {
-                crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
-            }
-        }
-        "disable_opacity_mask" => {
-            if let Some(tab) = state.tab_mut() {
-                crate::document::controller::Controller::toggle_mask_disabled_on_selection(&mut tab.model);
-            }
-        }
-        "unlink_opacity_mask" => {
-            if let Some(tab) = state.tab_mut() {
-                crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
-            }
-        }
-        // Page-level blending commands remain deferred in YAML with
-        // status: pending_renderer; ignored here.
-        _ => {}
-    }
+    let _ = super::panel_menu::dispatch_yaml_menu("opacity_panel_content", cmd, addr, state);
 }
 
 #[cfg(test)]
