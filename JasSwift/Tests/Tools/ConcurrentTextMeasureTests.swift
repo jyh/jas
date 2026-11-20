@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 @testable import JasLib
 
 // STATUS-jas row 140. Swift Testing runs tests on several threads at once, and
@@ -99,3 +102,22 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
         #expect(got[j] == serial, "concurrent and serial widths differ for \(j)")
     }
 }
+
+/// Row 178: an italic lookup never silently measures the REGULAR face. CI's
+/// 4dc577dd red read Georgia-Italic concurrently and Georgia regular serially
+/// (79.364 vs 80.477 at 14.162 pt, measured), so the italic descriptor lookup
+/// can fail and `renderedTextWidth` substituted the base font. Serial, many
+/// times: every measure must equal the width of the face the family names.
+#if canImport(AppKit)
+@Test func anItalicMeasureIsAlwaysTheItalicFace() {
+    let size = 14.161999999999999
+    guard let italic = NSFont(name: "Georgia-Italic", size: CGFloat(size)) else { return }
+    let want = Double(NSAttributedString(string: "Row 140 Wq", attributes: [.font: italic]).size().width)
+    var wrong = 0
+    for _ in 0..<200 {
+        let got = renderedTextWidth("Row 140 Wq", family: "Georgia", weight: "normal", style: "italic", size: size)
+        if got != want { wrong += 1 }
+    }
+    #expect(wrong == 0, "\(wrong) of 200 italic measures were not the italic face")
+}
+#endif
