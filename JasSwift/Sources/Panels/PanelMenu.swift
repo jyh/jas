@@ -278,6 +278,14 @@ public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String:
             for (k, v) in gradientPanelLiveOverrides(model: model) { model.stateStore.setPanel(pid, k, v) }
         }
     }
+    // The Character menu's toggles negate `panel.<key>`, read from the STORE,
+    // whose sibling a toggle never clears: after All Caps then Small Caps the
+    // next All Caps wrote `not true`, a dead click (STATUS-flask §944). Lay
+    // the selection over the store first (the engine's
+    // `panel_scope::sync_character_state`).
+    if pid == "character_panel_content", let live = characterPanelLiveOverrides(model: model) {
+        for (k, v) in live { model.stateStore.setPanel(pid, k, v) }
+    }
     runYamlActionByName(action, params: params, model: model)
 }
 
@@ -386,6 +394,14 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     }
     for (k, v) in layoutHeldPanelState(contentId, layout: layout) { panel[k] = v }
     for (k, v) in modelHeldPanelState(contentId, model: model) { panel[k] = v }
+    // The Character panel's fields describe the SELECTION, as the body shows
+    // them (``DockPanelView.buildPanelCtx``). A toggle writes one store key and
+    // never clears its sibling, so the store checked All Caps beside Small
+    // Caps (STATUS-flask §944). The web's `live_panel_state` reads the same.
+    if contentId == "character_panel_content", let m = model,
+       let live = characterPanelLiveOverrides(model: m) {
+        for (k, v) in live { panel[k] = v }
+    }
     var ctx: [String: Any] = ["panel": panel]
     // The data namespace, read from the store the library effects write, so an
     // `items_from` source such as `keys(data.brush_libraries)` lists what is
