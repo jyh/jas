@@ -78,9 +78,10 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
     #expect(got != nil, "renderedTextWidth did not finish on 8 threads within 30 s (a deadlock)")
     guard let got else { return }
     #expect(got.count == js.count)
+    let failuresBefore = faceLookupFailures()
     for j in js {
         let serial = renderedTextWidth("Row 140 Wq", family: j.family, weight: j.weight, style: j.style, size: j.size)
-        #expect(got[j] == serial, "concurrent and serial widths differ for \(j)")
+        #expect(got[j] == serial, "concurrent and serial widths differ for \(j); face lookups that fell back to the base face so far: \(faceLookupFailures() - failuresBefore)")
     }
     // CONTROL: the instrument can tell two sizes apart, so equality above is not vacuous.
     #expect(renderedTextWidth("Wq", family: "Helvetica", weight: "normal", style: "normal", size: 10)
@@ -116,4 +117,41 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
         if got != want { wrong += 1 }
     }
     #expect(wrong == 0, "\(wrong) of 200 italic measures were not the italic face")
+}
+
+// STATUS-jas row 188. CI has read a SERIAL width in the BASE face for an italic
+// or bold job (Georgia italic 11-19; Helvetica bold+italic 11-20, 74.781 for
+// the 76.936 of Helvetica-Bold): the trait lookup came back nil and the width
+// was the base face's, with nothing said. A nil lookup is now retried once,
+// and a second nil is COUNTED and logged before the base face is measured.
+// The lookup is injected so these arms do not depend on the flake.
+
+@Test func aTraitLookupThatFailsOnceIsRetried() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    var calls = 0
+    let before = faceLookupFailures()
+    let face = withFontLookup {
+        faceWithTraits(base, [.bold, .italic], size: 13) { desc, size in
+            calls += 1
+            return calls == 1 ? nil : NSFont(descriptor: desc, size: size)
+        }
+    }
+    #expect(calls == 2, "a nil lookup is tried once more")
+    #expect(face.fontName == "Helvetica-BoldOblique", "the retry's face is measured, not the base: \(face.fontName)")
+    #expect(faceLookupFailures() == before, "a retry that succeeds is not a failure")
+}
+
+@Test func aTraitLookupThatNeverFindsAFaceIsCounted() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let before = faceLookupFailures()
+    let face = withFontLookup { faceWithTraits(base, [.italic], size: 13) { _, _ in nil } }
+    #expect(face.fontName == base.fontName, "with no face the base is what is left")
+    #expect(faceLookupFailures() >= before + 1, "the fallback is counted, not silent")
+}
+
+@Test func noTraitsIsTheBaseFaceWithNoLookup() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    var calls = 0
+    let face = withFontLookup { faceWithTraits(base, [], size: 13) { _, _ in calls += 1; return nil } }
+    #expect(calls == 0 && face == base)
 }

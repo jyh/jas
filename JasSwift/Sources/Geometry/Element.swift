@@ -18,11 +18,7 @@ func renderedTextWidth(_ s: String, family: String, weight: String, style: Strin
     // regular width, where Georgia-Italic is 80.477), 2 runs in 20 locally.
     return withFontLookup {
         let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
-        var font = baseFont
-        if !traits.isEmpty {
-            let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
-            font = NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
-        }
+        let font = faceWithTraits(baseFont, traits, size: CGFloat(size))
         return Double(NSAttributedString(string: s, attributes: [.font: font]).size().width)
     }
     #else
@@ -47,6 +43,23 @@ func withFontLookup<T>(_ body: () -> T) -> T {
     fontLookupLock.lock()
     defer { fontLookupLock.unlock() }
     return body()
+}
+
+/// How many trait lookups found no face and measured the base face instead
+/// (STATUS-jas row 188). Written and read under `fontLookupLock`.
+nonisolated(unsafe) private var faceLookupFailureCount = 0
+
+/// ``faceLookupFailureCount``, read under the lock.
+func faceLookupFailures() -> Int { withFontLookup { faceLookupFailureCount } }
+
+/// `base` with the symbolic `traits` applied (STATUS-jas row 188). The caller
+/// holds `withFontLookup`. `lookup` is the AppKit lookup, a parameter so a test
+/// can make it fail.
+func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, size: CGFloat,
+                    lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) }) -> NSFont {
+    if traits.isEmpty { return base }
+    let desc = base.fontDescriptor.withSymbolicTraits(traits)
+    return lookup(desc, size) ?? base
 }
 #endif
 

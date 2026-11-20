@@ -42,15 +42,8 @@ private func resolveFontUnlocked(family: String, bold: Bool, italic: Bool,
     var traits: NSFontDescriptor.SymbolicTraits = []
     if bold { traits.insert(.bold) }
     if italic { traits.insert(.italic) }
-    if let baseFont = NSFont(name: family, size: CGFloat(size)) {
-        if traits.isEmpty { return baseFont }
-        let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
-        return NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
-    }
-    let sys = NSFont.systemFont(ofSize: CGFloat(size))
-    if traits.isEmpty { return sys }
-    let desc = sys.fontDescriptor.withSymbolicTraits(traits)
-    return NSFont(descriptor: desc, size: CGFloat(size)) ?? sys
+    let base = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
+    return faceWithTraits(base, traits, size: CGFloat(size))
 }
 
 /// Deterministic stub measurer used by host-side tests.
