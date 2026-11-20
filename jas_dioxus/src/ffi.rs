@@ -7088,6 +7088,48 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 185: the Windows frame DRAWS mask isolation. An Alt-click on the
+    /// mask preview isolates the mask, and the native frame (`emit_frame`, the
+    /// shell's renderer) then hides the content and shows only the mask subtree, as the web canvas
+    /// does; a second Alt-click restores the document. Before this row the
+    /// frame read no isolation state, so the model changed and the canvas did not.
+    #[test]
+    fn the_native_frame_draws_mask_isolation() {
+        use crate::geometry::element::Color;
+        use crate::painter::recording::{Command, RecordingPainter};
+        use crate::painter::Brush;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let colors = |e| {
+            let mut p = RecordingPainter::new();
+            crate::ffi_pointer::emit_frame(engine_of(e), &mut p);
+            let mut out = Vec::new();
+            for c in p.commands() {
+                if let Command::FillPath { brush: Brush::Solid(col), .. } | Command::FillRect { brush: Brush::Solid(col), .. } = c {
+                    out.push(*col);
+                }
+            }
+            out
+        };
+        let (red, blue) = (Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0));
+        let before = colors(e);
+        assert!(before.contains(&red) && before.contains(&blue), "the control: both masked rects draw: {before:?}");
+        let alt = r#"{"widget":"op_mask_preview","event":"click","alt":true}"#;
+        let _ = behave(e, OP, alt);
+        assert!(engine_of(e).model.borrow().mask_isolation_path.is_some(), "Alt isolates");
+        let isolated = colors(e);
+        // Make Mask gives each rect an EMPTY mask, so the isolated canvas shows
+        // neither rect (a drawing subtree is `document::paint`'s unit test).
+        assert!(!isolated.contains(&red) && !isolated.contains(&blue),
+                "isolated: the content is hidden: {isolated:?}");
+        let _ = behave(e, OP, alt);
+        assert_eq!(colors(e), before, "Alt again: the document is back as it was");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 183 (WIDGET_EVENTS.md §Showing a number): a `number_input` shows its
     /// bound number through `fmt_num`, at most four decimals and no float noise.
     /// flask §947 3(a): with `text_basic.svg` selected (font-size 21.3333 px,

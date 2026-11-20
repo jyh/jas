@@ -66,6 +66,33 @@ pub fn emit_document(p: &mut dyn Painter, doc: &Document, precision: f64) {
     }
 }
 
+/// [`emit_document`] under the model's MASK ISOLATION (row 185;
+/// OPACITY.md §Preview interactions: an Alt-click on the mask preview
+/// "isolate[s] the mask on the canvas (show only mask contents)").
+///
+/// With `Some(path)` only the mask subtree of the element at `path` is drawn,
+/// and the rest of the document is hidden, as the web walk's layer 3 does
+/// (`canvas::render::render`). A path naming no element, or an element with no
+/// mask, draws nothing, also as on the web. `None` is [`emit_document`].
+///
+/// The isolation lives on the `Model`, not the `Document`, so the caller
+/// passes it; the paint context is installed either way, because a mask
+/// subtree may hold a by-id reference too.
+pub fn emit_document_isolated(
+    p: &mut dyn Painter,
+    doc: &Document,
+    precision: f64,
+    mask_isolation_path: Option<&[usize]>,
+) {
+    let Some(path) = mask_isolation_path else {
+        return emit_document(p, doc, precision);
+    };
+    let _paint_context = install_paint_context(rebuild_id_index(doc), precision);
+    if let Some(mask) = doc.get_element(&path.to_vec()).and_then(|e| e.common().mask.as_deref()) {
+        emit_element(p, &mask.subtree, 1.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +169,73 @@ mod tests {
             "the document walk's context escaped its own call: {:?}",
             after.commands()
         );
+    }
+
+    fn rect_at(x: f64, color: Color) -> Element {
+        Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color, opacity: 1.0 }), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    /// Layer 0 holds a red rect masked by a green one, then a blue rect.
+    fn masked_document() -> (Document, Element) {
+        use crate::geometry::element::Mask;
+        let subtree = rect_at(50.0, Color::rgb(0.0, 1.0, 0.0));
+        let mut red = rect_at(0.0, Color::rgb(1.0, 0.0, 0.0));
+        if let Element::Rect(r) = &mut red {
+            r.common.mask = Some(Box::new(Mask {
+                subtree: Box::new(subtree.clone()),
+                clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+            }));
+        }
+        let mut doc = Document::default();
+        let kids = doc.layers[0].children_mut().unwrap();
+        kids.push(Rc::new(red));
+        kids.push(Rc::new(rect_at(20.0, Color::rgb(0.0, 0.0, 1.0))));
+        (doc, subtree)
+    }
+
+    /// Row 185 (OPACITY.md §Preview interactions; the web walk's layer 3 in
+    /// `canvas::render::render`): in mask isolation the canvas shows ONLY the
+    /// isolated element's mask subtree, and everything else is hidden. The
+    /// native walk read no isolation state and drew the whole document.
+    #[test]
+    fn mask_isolation_paints_only_the_isolated_elements_mask_subtree() {
+        let (doc, subtree) = masked_document();
+        let mut want = RecordingPainter::new();
+        emit_element(&mut want, &subtree, 1.0);
+        assert_eq!(fills(want.commands()), 1, "the control: the subtree alone is one fill");
+
+        let mut rec = RecordingPainter::new();
+        emit_document_isolated(&mut rec, &doc, DEFAULT_PRECISION, Some(&[0, 0]));
+        assert_eq!(rec.commands(), want.commands(), "isolation draws the mask subtree and nothing else");
+    }
+
+    /// With no isolation the walk is `emit_document`'s, byte for byte.
+    #[test]
+    fn no_isolation_is_the_whole_document() {
+        let (doc, _) = masked_document();
+        let mut whole = RecordingPainter::new();
+        emit_document(&mut whole, &doc, DEFAULT_PRECISION);
+        let mut rec = RecordingPainter::new();
+        emit_document_isolated(&mut rec, &doc, DEFAULT_PRECISION, None);
+        assert_eq!(rec.commands(), whole.commands());
+        assert!(fills(whole.commands()) >= 2, "the control: the whole document draws both rects");
+    }
+
+    /// As on the web: an isolation path that names an element with no mask, or
+    /// no element at all, hides the document and draws nothing.
+    #[test]
+    fn isolating_an_unmasked_or_missing_path_draws_nothing() {
+        let (doc, _) = masked_document();
+        for path in [&[0usize, 1][..], &[0, 9][..], &[3][..]] {
+            let mut rec = RecordingPainter::new();
+            emit_document_isolated(&mut rec, &doc, DEFAULT_PRECISION, Some(path));
+            assert!(rec.commands().is_empty(), "{path:?}: {:?}", rec.commands());
+        }
     }
 
     /// An empty document emits nothing at all — no stray install artefact, no

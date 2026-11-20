@@ -530,6 +530,14 @@ static class Program
         Eq("§941: UIA ItemStatus, disabled", "disabled", PanelWire.PlaceholderStatus(null, "true"));
         Eq("§941: UIA ItemStatus, both", "checked disabled", PanelWire.PlaceholderStatus("true", "true"));
         Eq("§941: UIA ItemStatus, neither", "", PanelWire.PlaceholderStatus("false", "false"));
+        // Row 185: a panel event repaints the canvas when the engine answered
+        // CHANGED, not only when the document moved. An Alt-click on the mask
+        // preview toggles mask isolation, which is model state the frame draws
+        // and the document does not hold; doc_changed is false for it.
+        Check("row 185: a changed answer with no document change repaints", PanelWire.PanelEventRepaints(false, ""), "isolation left the canvas stale");
+        Check("row 185: a document change repaints", PanelWire.PanelEventRepaints(true, ""), "");
+        Check("row 185: Unchanged does not repaint", !PanelWire.PanelEventRepaints(false, "{\"panel_event\":\"Unchanged\"}"), "");
+        Check("row 185: a document change repaints even with a channel", PanelWire.PanelEventRepaints(true, "{\"panel_event\":\"Unchanged\"}"), "");
         Eq("finding 6: no border is no border", "(null)", SB(null));
 
         var token = PanelWire.RowValue("a b\tc");
