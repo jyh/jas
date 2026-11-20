@@ -8102,8 +8102,20 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 return refuse("a key with no panel focus is a gesture key; this runner takes keys after a panel step only")
             }
             guard pid == "layers_panel_content" else { return refuse("no panel key route for \(pid)") }
-            let chord = KeyChord(key: key, ctrl: flag("ctrl") || flag("meta"), shift: flag("shift"), alt: flag("alt"))
-            if !LayersPanel.treeKey(chord, model: model) { refuse("UnboundPanelKey \(pid): \(key)") }
+            let command = flag("ctrl") || flag("meta")
+            let chord = KeyChord(key: key, ctrl: command, shift: flag("shift"), alt: flag("alt"))
+            if !LayersPanel.treeKey(chord, model: model) {
+                // Row 119 (row 76's ruling), mirroring Rust `jas_dispatch_action`:
+                // an UNMODIFIED key no row binds is refused; a COMMAND chord
+                // continues on the key route (`routeKey`), as the menubar does.
+                guard command else { return refuse("UnboundPanelKey \(pid): \(key)") }
+                switch routeKey(key, KeyMods(shift: flag("shift"), ctrl: true, alt: flag("alt")), toolTakes: { _ in false }) {
+                case .undo: model.undo()
+                case .redo: model.redo()
+                case .unhandled: return refuse("KeyUnhandled \(key)")
+                case let other: return refuse("a fall-through route the forms runner does not mirror: \(other)")
+                }
+            }
         } else if let pid = st["panel_menu"] as? String {
             // Design section 8 form 3: the item whose action is the step's and
             // whose declared params equal every param the step names; labels
@@ -8816,11 +8828,46 @@ private func formsSecondaryPress(_ row: [Int]) -> [String: Any] {
         .write(to: URL(fileURLWithPath: out))
 }
 
+/// Row 119's other side, Rust's `a_panel_key_no_row_binds_is_refused_by_name_and_runs_nothing`
+/// and `a_command_chord_no_panel_row_binds_falls_through_to_the_menubar_route`:
+/// an UNMODIFIED key no row binds is still refused by name (`A` alone is a tool
+/// letter, the canvas's), and an unbound command chord with no menubar binding
+/// is the key route's own refusal, not the panel's.
+@Test func formsAnUnmodifiedUnboundPanelKeyIsStillRefused() {
+    let eye: [String: Any] = ["panel": formsLayers, "widget": "lp_eye", "row": [1, 0], "event": "click"]
+    let plain = formsRun(formsLayersScript([eye, ["key": "A"]]))
+    #expect(formsRefusal(plain)?.hasPrefix("UnboundPanelKey") == true, "A alone: \(formsRefusal(plain) ?? "not refused")")
+    let unbound = formsRun(formsLayersScript([eye, ["key": "J", "meta": true]]))
+    #expect(formsRefusal(unbound) == "KeyUnhandled J", "Cmd+J: \(formsRefusal(unbound) ?? "not refused")")
+}
+
 /// The forms runner's twin of Rust `the_forms_replay_delivers_a_double_click_step`
 /// (flask's §757 wired `replay_forms`): G11's script, press, release, press,
 /// release, `double_click` on complex_document.svg's group `[0, 2]`, then a
 /// click, read back, selects `[0, 2, 0]`; the CONTROL without the double
 /// selects `[0, 2]`. The point is the group's line's midpoint, from the fixture.
+/// Row 119 (STATUS-jas; the recommendation of row 76, bus 11-12 15:38): a key
+/// no focused panel binds FALLS THROUGH to the menubar's shortcut, so S1's
+/// `layers.eye_undo` (Ctrl+Z with the Layers tree focused after an eye click)
+/// undoes the click, as the web app does through its panel door (measured
+/// 11-13 on main 4abab25a). RED by design until the key law changes, and NOT
+/// merged before the Mac reading lands (it may refuse, which would change the
+/// recommendation). Its expectation is a relation inside one run, never a
+/// typed document: the last read equals the read taken before the click.
+@Test func formsAnUnboundPanelKeyFallsThroughToTheMenubarShortcut() {
+    let eye: [String: Any] = ["panel": formsLayers, "widget": "lp_eye", "row": [1, 0], "event": "click"]
+    let out = formsRun(formsLayersScript([["read": "document"], eye, ["read": "document"],
+                                          ["key": "Z", "ctrl": true], ["read": "document"]]))
+    #expect(formsRefusal(out) == nil, "Ctrl+Z on the focused tree was refused: \(formsRefusal(out) ?? "")")
+    let docs = formsDocReads(out)
+    guard docs.count == 3 else {
+        Issue.record("expected three document reads, got \(docs.count): \(out)")
+        return
+    }
+    #expect(docs[1] != docs[0], "the eye click changed nothing, so this arm cannot tell an undo from a no-op")
+    #expect(docs[2] == docs[0], "Ctrl+Z did not undo the eye click")
+}
+
 @Test func formsReplayDeliversADoubleClickStep() throws {
     let probe = svgToDocument(readFixture("svg/complex_document.svg"))
     guard case .group(let g) = probe.getElement([0, 2]), case .line(let ln) = g.children[0] else {
