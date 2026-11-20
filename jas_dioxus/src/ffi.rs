@@ -9888,6 +9888,41 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 175: THE CHEVRON REVEALS AN OPACITY SLIDER, AND THE SLIDER COMMITS
+    /// AS THE FIELD DOES. `op_disclosure` named `open_opacity_slider_popover`,
+    /// which no port defined, so it was dead everywhere. Now it toggles
+    /// `panel.slider_shown`, which shows `op_slider_row`, and the row's slider
+    /// is bound to `panel.opacity`: its commit runs the Opacity field's law.
+    #[test]
+    fn the_opacity_chevron_reveals_a_slider_that_commits_like_the_field() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let shown = |e| {
+            let plan: serde_json::Value = serde_json::from_str(&plan_of(e, OPACITY, 228, 0)).unwrap();
+            plan["containers"].as_array().unwrap().iter()
+                .find(|c| c["id"] == "op_slider_row")
+                .unwrap_or_else(|| panic!("no op_slider_row in the plan"))["values"]["bind.visible"].clone()
+        };
+        assert_eq!(shown(e), "false", "the slider row starts hidden");
+        let (reply, err) = behave(e, OPACITY, r#"{"widget":"op_disclosure","event":"click"}"#);
+        assert!(!reply.is_empty(), "the chevron was refused: {err}");
+        assert_eq!(shown(e), "true", "the chevron reveals the slider row");
+
+        assert!(selected_opacities(e).iter().all(|(o, _)| (*o - 0.4).abs() > 1e-9),
+                "the commit could not be seen: something is already at 0.4");
+        let doc_before = doc_json(e);
+        let (reply, err) = behave(e, OPACITY, r#"{"widget":"op_opacity_slider","event":"commit","value":"40"}"#);
+        assert_eq!(err, "", "{reply}");
+        for (i, (o, _)) in selected_opacities(e).iter().enumerate() {
+            assert!((o - 0.4).abs() < 1e-9, "element {i} reads {o} after the slider's commit");
+        }
+        undo(e);
+        assert_eq!(doc_json(e), doc_before, "ONE undo restores the document");
+        let _ = behave(e, OPACITY, r#"{"widget":"op_disclosure","event":"click"}"#);
+        assert_eq!(shown(e), "false", "a second click hides it");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The Opacity panel's other four declared keys reach no element
     /// attribute — two are panel-local UI and two are document preferences
     /// with nowhere yet to live. A write to one must not touch the document.
