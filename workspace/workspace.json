@@ -12588,6 +12588,7 @@
                     "flex": 1,
                     "font_size": 11
                   },
+                  "autofocus": true,
                   "bind": {
                     "visible": "panel.renaming_artboard == ab.id",
                     "value": "ab.name"

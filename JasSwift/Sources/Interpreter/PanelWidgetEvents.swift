@@ -491,7 +491,17 @@ func dispatchPanelAction(
     let ws = WorkspaceData.load()
     let dialogs = ws?.data["dialogs"] as? [String: Any]
     let beforeDlg = store.getDialogId()
-    if actionDef["category"] as? String == "layers" {
+    // An effect Align's table cannot run goes to the Layers registry, in this
+    // caller's scope (the row it was pressed in). The test is the EFFECTS, not
+    // the category label: until row 179 only `category: layers` went there, so
+    // the Artboards panel's rename confirm (`doc.set_artboard_field`) and its
+    // Move Up / Down (`doc.move_artboards_*`) ran their YAML here, found no
+    // handler, and changed nothing.
+    let needsDocRegistry = effects.contains { e in
+        guard let key = (e as? [String: Any])?.keys.first else { return false }
+        return key.hasPrefix("doc.") && platformEffects[key] == nil
+    }
+    if actionDef["category"] as? String == "layers" || needsDocRegistry {
         // A Layers action writes the document (`snapshot`, `doc.op`), and
         // Align's table holds no `doc.*` handler, so run it through the
         // Layers registry, in this caller's scope (the row it was pressed in).
