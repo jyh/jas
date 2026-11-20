@@ -13773,22 +13773,22 @@
         "all_caps": {
           "type": "bool",
           "default": false,
-          "description": "All Caps. Mutually exclusive with Small Caps in the full spec; not enforced yet."
+          "description": "All Caps. Mutually exclusive with Small Caps: turning one on clears the other on the selection. With a text selected the field shows the selection (text-transform uppercase), so the menu check and the toggle never show both on; a toggle writes the negation of that shown value."
         },
         "small_caps": {
           "type": "bool",
           "default": false,
-          "description": "Small Caps."
+          "description": "Small Caps (font-variant small-caps). Mutually exclusive with All Caps; with a text selected the field shows the selection."
         },
         "superscript": {
           "type": "bool",
           "default": false,
-          "description": "Superscript. Mutually exclusive with Subscript in the full spec; not enforced yet."
+          "description": "Superscript. Mutually exclusive with Subscript: turning one on clears the other on the selection. With a text selected the field shows the selection (baseline-shift super), so the menu check and the toggle never show both on; a toggle writes the negation of that shown value."
         },
         "subscript": {
           "type": "bool",
           "default": false,
-          "description": "Subscript."
+          "description": "Subscript (baseline-shift sub). Mutually exclusive with Superscript; with a text selected the field shows the selection."
         },
         "underline": {
           "type": "bool",

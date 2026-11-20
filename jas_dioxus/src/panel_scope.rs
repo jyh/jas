@@ -414,6 +414,20 @@ pub fn sync_gradient_state(store: &mut StateStore, model: &Model, fill_on_top: b
     }
 }
 
+/// The store's Character panel scope takes the selection's fields as SHOWN
+/// (`character_host::live_values`, or nothing without a selected text), so a
+/// menu row run in that panel's scope negates what the menu checks. The
+/// runner reads `panel.*` from the STORE, and a toggle writes one key and
+/// never clears its sibling, so after All Caps then Small Caps the store's
+/// `all_caps` stayed true and the next All Caps wrote `not true`, a dead
+/// click (STATUS-flask §944). [`sync_gradient_state`]'s law, for Character.
+pub fn sync_character_state(store: &mut StateStore, model: &Model) {
+    use crate::interpreter::character_host::{live_values, CHARACTER_PANEL};
+    for (k, v) in live_values(model.document()) {
+        store.set_panel(CHARACTER_PANEL, &k, v);
+    }
+}
+
 /// Give the colour panel a store scope holding ONLY `mode`, the one key a
 /// workspace action writes (`set_color_panel_mode`, `set_panel_state: {panel:
 /// color, key: mode}`). `StateStore::set_panel` drops a write to a panel with
@@ -544,6 +558,14 @@ pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, 
         // negate the wrong value — `paragraph_host::live_values` says how.
         if panel_id == crate::interpreter::paragraph_host::PARAGRAPH_PANEL {
             panel.extend(crate::interpreter::paragraph_host::live_values(model.document()));
+        }
+        // STATUS-flask §944. The Character panel's fields describe the
+        // selection too, and its two exclusive pairs are the W2b-7 defect on
+        // a third panel: a toggle writes one key and never clears its
+        // sibling, so a store-backed scope checked All Caps beside Small Caps
+        // and made the next All Caps negate a stale `true`.
+        if panel_id == crate::interpreter::character_host::CHARACTER_PANEL {
+            panel.extend(crate::interpreter::character_host::live_values(model.document()));
         }
         // The Stroke panel's cap, join, weight and arrowheads describe the
         // selection too (both docks overlay them), so a `disabled` bind reads

@@ -73,4 +73,34 @@ mod tests {
         dispatch("toggle_snap_to_glyph_visible", addr, &mut st);
         assert_ne!(st.character_panel.snap_to_glyph_visible, before, "Show Snap to Glyph Options");
     }
+
+    /// STATUS-flask §944 on the web: an exclusive toggle unchecks its sibling
+    /// in the MENU, and the next click on the sibling acts. The typed slot
+    /// keeps the stale sibling (a toggle writes one key), so the menu reads the
+    /// selection as the panel body does (`character_host::live_values`). The
+    /// engine's arm is `an_exclusive_character_toggle_unchecks_its_sibling_…`.
+    #[test]
+    fn an_exclusive_character_toggle_unchecks_its_sibling_in_the_web_menu() {
+        use crate::panels::{panel_is_checked, PanelKind};
+        let addr = PanelAddr { group: GroupAddr { dock_id: DockId(0), group_idx: 0 }, panel_idx: 0 };
+        let mut st = text_state();
+        let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        let checks = |st: &AppState| ["toggle_all_caps", "toggle_small_caps",
+                                       "toggle_superscript", "toggle_subscript"]
+            .map(|c| panel_is_checked(PanelKind::Character, c, st));
+        assert_eq!(checks(&st), [false; 4], "the control: nothing checked");
+        dispatch("toggle_all_caps", addr, &mut st);
+        dispatch("toggle_small_caps", addr, &mut st);
+        assert_eq!(case(&st), s("", "small-caps", ""), "the document was already right");
+        assert_eq!(checks(&st), [false, true, false, false], "after All Caps then Small Caps");
+        dispatch("toggle_all_caps", addr, &mut st);
+        assert_eq!(case(&st), s("uppercase", "", ""), "All Caps again acts");
+        assert_eq!(checks(&st), [true, false, false, false], "after Small Caps then All Caps");
+        dispatch("toggle_superscript", addr, &mut st);
+        dispatch("toggle_subscript", addr, &mut st);
+        assert_eq!(checks(&st), [true, false, false, true], "after Superscript then Subscript");
+        dispatch("toggle_superscript", addr, &mut st);
+        assert_eq!(case(&st), s("uppercase", "", "super"), "Superscript again acts");
+        assert_eq!(checks(&st), [true, false, true, false], "after Subscript then Superscript");
+    }
 }
