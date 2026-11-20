@@ -1233,7 +1233,17 @@ static class Program
             new uint[] { 0xF700, 0xF701, 0xF702, 0xF703, 0xF705, 0x0D, 0x1B, 0x7F, 0x08 }.All(c => PanelKeys.Forwards(c, ctrl: false)), "");
         Check("panel key: Ctrl+A is forwarded (the tree's select-all)", PanelKeys.Forwards('a', ctrl: true), "");
         Check("panel key: a plain letter is not (it is the document's shortcut)", !PanelKeys.Forwards('a', ctrl: false), "");
-        Check("panel key: Ctrl+Z is not (undo stays the document's)", !PanelKeys.Forwards('z', ctrl: true), "");
+        // jas §934 item 3 (row 119, #934): the engine sends a COMMAND chord no
+        // panel row binds on to the menubar's route, so the shell offers every
+        // Ctrl chord to the panel door. Ctrl+Z on a focused tree undoes there.
+        Check("panel key: Ctrl+Z is forwarded (row 119: the door falls it through to Undo)", PanelKeys.Forwards('z', ctrl: true), "");
+        Check("panel key: any Ctrl+letter is forwarded (the door, not the shell, decides who binds it)",
+            "abcdefghijklmnopqrstuvwxyz".All(c => PanelKeys.Forwards(c, ctrl: true)), "");
+        Check("panel key: Ctrl+= and Ctrl+- are forwarded (Zoom In and Out fall through too)",
+            PanelKeys.Forwards('=', ctrl: true) && PanelKeys.Forwards('-', ctrl: true), "");
+        Check("panel key: a plain letter is still not (A alone is the canvas's tool letter, never the door's)",
+            !"abcdefghijklmnopqrstuvwxyz".Any(c => PanelKeys.Forwards(c, ctrl: false)), "");
+        Check("panel key: no key code is not a chord", !PanelKeys.Forwards(0, ctrl: true), "");
         Check("panel key: Home and Tab are not", !PanelKeys.Forwards(0xF729, false) && !PanelKeys.Forwards(0x09, false), "");
         // flask §656: the keys a scrolling dock would take on their way up (the
         // arrows, Home, End) are routed from the pane's focus BEFORE the
