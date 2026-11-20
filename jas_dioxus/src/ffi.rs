@@ -6924,6 +6924,26 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 177: a disabled placeholder REFUSES its click by name, as any
+    /// disabled widget does (WIDGET_EVENTS.md), and the document is unchanged.
+    /// The mask preview is disabled until the selection has a mask.
+    #[test]
+    fn a_disabled_placeholder_refuses_its_click() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        assert_eq!(leaf(e, OP, "op_mask_preview")["values"]["bind.disabled"], "true", "the control");
+        let before = doc_json(e);
+        let (reply, err) = behave(e, OP, r#"{"widget":"op_mask_preview","event":"click"}"#);
+        assert!(reply.is_empty(), "a disabled click was accepted: {reply}");
+        assert!(err.contains("Disabled"), "refused, but not by name: {err}");
+        assert_eq!(doc_json(e), before);
+        assert_eq!(engine_of(e).model.borrow().editing_target,
+                   crate::document::model::EditingTarget::Content, "the target is unchanged");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 173: EVERY LIVE CHARACTER MENU ITEM RUNS IN THE ENGINE. Until 11-19
     /// the five toggles read `UnknownAction` through the panel door: they named
     /// commands only the web's and the Mac's native dispatch knew, while
