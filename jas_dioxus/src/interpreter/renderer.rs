@@ -7380,8 +7380,14 @@ fn render_separator(el: &serde_json::Value, _ctx: &serde_json::Value) -> Element
     rsx! { div { style: "{style}" } }
 }
 
-fn render_spacer(_el: &serde_json::Value, _ctx: &serde_json::Value) -> Element {
-    rsx! { div { style: "flex:1;" } }
+fn render_spacer(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
+    let style = spacer_style(el, ctx);
+    rsx! { div { style: "{style}" } }
+}
+
+/// The CSS for a `spacer` (row 189).
+fn spacer_style(_el: &serde_json::Value, _ctx: &serde_json::Value) -> String {
+    "flex:1;".to_string()
 }
 
 fn render_disclosure(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
@@ -9711,6 +9717,22 @@ mod tests {
     use super::*;
     use crate::geometry::element::{Color, Fill, Stroke};
     use crate::workspace::app_state::AppState;
+
+    /// Row 189: a `spacer` that declares `style.width` is exactly that wide and
+    /// does not grow; only a spacer with no width is flexible. The width may be
+    /// a template (the Layers indent, `{{node.depth * 16}}`). JasSwift's
+    /// `YamlSpacerWidthRenderTest` pins the same law by pixels; the planner
+    /// already states it (`panel_layout`: a spacer with a width "must not grow").
+    #[test]
+    fn a_spacer_with_a_width_is_fixed_and_one_without_grows() {
+        let ctx = serde_json::json!({"node": {"depth": 2}});
+        let lit = serde_json::json!({"type": "spacer", "style": {"width": 16}});
+        let tmpl = serde_json::json!({"type": "spacer", "style": {"width": "{{node.depth * 16}}"}});
+        let bare = serde_json::json!({"type": "spacer"});
+        assert_eq!(spacer_style(&lit, &ctx), "width:16px;flex:0 0 16px;");
+        assert_eq!(spacer_style(&tmpl, &ctx), "width:32px;flex:0 0 32px;");
+        assert_eq!(spacer_style(&bare, &ctx), "flex:1;");
+    }
 
     /// Row 117: the web's Layers tree is `render_tree_view`, never the generic
     /// foreach expansion, although `lp_tree` carries `foreach` + `do` for the
