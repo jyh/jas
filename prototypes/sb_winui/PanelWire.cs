@@ -998,6 +998,42 @@ internal static class PanelWire
         selected == true ? (2, 0x00, 0x7A, 0xFF) : null;
 
     /// <summary>
+    /// jas §941 (row 169 slice 3): a `placeholder` leaf's persistent highlight,
+    /// the web's `render_placeholder` `outline:2px solid #4a90d9` with
+    /// `outline-offset:-2px` (inset), while `bind.checked` reads "true". The
+    /// Opacity previews use it to mark the active editing target. Null draws
+    /// no outline. Only the canonical "true" checks it.
+    /// </summary>
+    internal static (double Width, byte R, byte G, byte B)? PlaceholderOutline(string? @checked) =>
+        @checked == "true" ? (2, 0x4A, 0x90, 0xD9) : null;
+
+    /// <summary>jas §941: a placeholder's opacity, the web's `opacity:0.5` while `bind.disabled` reads "true", else 1.</summary>
+    internal static double PlaceholderOpacity(string? disabled) => disabled == "true" ? 0.5 : 1;
+
+    /// <summary>
+    /// jas §941: whether a press on a placeholder is sent as `click`. The plan
+    /// must say the node answers it and the node must have an address
+    /// (<see cref="RoutesEvent"/>), and it must not be disabled: the web gives
+    /// a disabled placeholder no handler. Read at the press, since
+    /// `bind.disabled` moves without a rebuild.
+    /// </summary>
+    internal static bool PlaceholderSendsClick(IReadOnlyList<string>? events, string id, string? path, string? disabled) =>
+        disabled != "true" && RoutesEvent(events, id, path, "click");
+
+    /// <summary>jas §941: a placeholder's face, the web's `[{summary}]`, else `[{type}]`.</summary>
+    internal static string PlaceholderText(string? summary, string type) =>
+        $"[{(string.IsNullOrEmpty(summary) ? type : summary)}]";
+
+    /// <summary>
+    /// jas §941: a placeholder's UIA `ItemStatus`: `checked` and/or `disabled`,
+    /// space-separated, exactly when the plan says so. A Grid's peer has no
+    /// toggle or enabled state a reader can see, so this is how a driver reads
+    /// the highlight.
+    /// </summary>
+    internal static string PlaceholderStatus(string? @checked, string? disabled) =>
+        string.Join(" ", new[] { @checked == "true" ? "checked" : null, disabled == "true" ? "disabled" : null }.Where(s => s is not null));
+
+    /// <summary>
     /// jas §927 item 1: a tile's UIA `ItemStatus`, `selected` exactly when the
     /// plan says so, as an option button's is.
     /// </summary>
