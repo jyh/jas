@@ -502,6 +502,34 @@ static class Program
             && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": false}""").RootElement) == false
             && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": "true"}""").RootElement) is null
             && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{}""").RootElement) is null, "");
+        // jas §941 (row 169 slice 3): a `placeholder` leaf is drawn as the web's
+        // `render_placeholder` draws it: `[summary]` (else `[type]`), a 2px #4a90d9
+        // inset outline while `bind.checked` reads "true", dimmed and sending no
+        // click while `bind.disabled` reads "true", and a click only when the plan
+        // says it answers one and it has an address. No widget id is read.
+        static string PO(string? on) => PanelWire.PlaceholderOutline(on) is { } o
+            ? FormattableString.Invariant($"{o.Width}/{o.R:X2}{o.G:X2}{o.B:X2}") : "(null)";
+        Eq("§941: a checked placeholder's outline is the web's 2px #4a90d9", "2/4A90D9", PO("true"));
+        Eq("§941: an unchecked placeholder has no outline", "(null)", PO("false"));
+        Eq("§941: a placeholder with no bind.checked has no outline", "(null)", PO(null));
+        Eq("§941: CONTROL: only the canonical \"true\" checks it", "(null)", PO("True"));
+        Eq("§941: a disabled placeholder is dimmed to the web's 0.5", "0.5", PanelWire.PlaceholderOpacity("true").ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Eq("§941: an enabled placeholder is not dimmed", "1", PanelWire.PlaceholderOpacity(null).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Check("§941: a placeholder that answers click, with an id, sends it",
+            PanelWire.PlaceholderSendsClick(new[] { "click" }, "op_mask_preview", "[1,2]", null), "");
+        Check("§941: a disabled one sends nothing",
+            !PanelWire.PlaceholderSendsClick(new[] { "click" }, "op_mask_preview", "[1,2]", "true"), "");
+        Check("§941: one whose plan declares no click sends nothing",
+            !PanelWire.PlaceholderSendsClick(null, "op_mask_preview", "[1,2]", null)
+            && !PanelWire.PlaceholderSendsClick(new[] { "double_click" }, "op_mask_preview", "[1,2]", null), "");
+        Check("§941: a template's placeholder (no id) is addressed by its path",
+            PanelWire.PlaceholderSendsClick(new[] { "click" }, "", "[1,2]", null), "");
+        Eq("§941: the face is [summary]", "[Mask preview]", PanelWire.PlaceholderText("Mask preview", "placeholder"));
+        Eq("§941: with no summary, the face is [type]", "[placeholder]", PanelWire.PlaceholderText(null, "placeholder"));
+        Eq("§941: UIA ItemStatus, checked", "checked", PanelWire.PlaceholderStatus("true", null));
+        Eq("§941: UIA ItemStatus, disabled", "disabled", PanelWire.PlaceholderStatus(null, "true"));
+        Eq("§941: UIA ItemStatus, both", "checked disabled", PanelWire.PlaceholderStatus("true", "true"));
+        Eq("§941: UIA ItemStatus, neither", "", PanelWire.PlaceholderStatus("false", "false"));
         Eq("finding 6: no border is no border", "(null)", SB(null));
 
         var token = PanelWire.RowValue("a b\tc");

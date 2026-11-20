@@ -484,6 +484,8 @@ public sealed partial class MainWindow
             var (previews, previewEmpty) = (0, 0);
             var gradients = 0;
             var textClicks = 0;
+            // jas §941: `placeholder` leaves drawn as the web draws them.
+            var placeholders = 0;
             foreach (var leaf in leaves)
             {
                 FrameworkElement el;
@@ -777,6 +779,15 @@ public sealed partial class MainWindow
                         el = BuildSeparator(leaf);
                         break;
 
+                    // jas §941 (row 169 slice 3): a `placeholder` is drawn as the
+                    // web's `render_placeholder` draws it, `[summary]`, with its
+                    // `bind.checked` highlight, `bind.disabled` dim and declared
+                    // click (ApplyLeafValues). Generic: no widget id is read.
+                    case "placeholder":
+                        placeholders++;
+                        el = BuildPlaceholder(leaf);
+                        break;
+
                     // A `spacer` is layout-only flex: the plan already gave it
                     // its room, and it draws nothing in any port. Counted, never
                     // drawn as a `[spacer]` placeholder.
@@ -888,7 +899,7 @@ public sealed partial class MainWindow
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused} surfaces={hits.Count} "
-                 + $"clipped={clipRows.Count} clip-walked={clipWalked} clip-drawn={clipDrawn}");
+                 + $"clipped={clipRows.Count} clip-walked={clipWalked} clip-drawn={clipDrawn} placeholders={placeholders}");
             foreach (var row in clipRows) { _w.Report(row); }
             if (_paneIconsPending == 0) { ReportPaneIcons(); }
         }
@@ -1066,6 +1077,42 @@ public sealed partial class MainWindow
                 VerticalAlignment = rule == "horizontal" ? VerticalAlignment.Center : VerticalAlignment.Stretch,
             });
             return host;
+        }
+
+        /// <summary>
+        /// jas §941 (row 169 slice 3): a `placeholder` leaf, as the web's
+        /// `render_placeholder` draws it: its `[summary]` (else `[type]`) in the
+        /// muted colour, centred. ApplyLeafValues draws `bind.checked` (a 2px
+        /// inset outline) and `bind.disabled` (0.5 opacity) on every draw. A
+        /// press is sent as `click`, with the pointer's modifiers
+        /// (<see cref="SendPane"/>), only when the plan says the node answers it
+        /// and it is not disabled at the press (<see cref="PanelWire.PlaceholderSendsClick"/>).
+        /// </summary>
+        private PlaceholderTile BuildPlaceholder(PaneLeaf leaf)
+        {
+            var tile = new PlaceholderTile
+            {
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            };
+            tile.Children.Add(new TextBlock
+            {
+                Text = PanelWire.PlaceholderText(leaf.Literal("summary"), leaf.Type),
+                FontSize = 12,
+                Foreground = _paneMutedBrush,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            var (id, path, events) = (leaf.Id, leaf.Path, leaf.Events);
+            if (PanelWire.RoutesEvent(events, id, path, "click"))
+            {
+                tile.Tapped += (_, _) =>
+                {
+                    if (PanelWire.PlaceholderSendsClick(events, id, path, tile.Disabled)) { OnPaneClick(id, path); }
+                };
+            }
+            return tile;
         }
 
         /// <summary>A kind this shell does not draw: a muted `[type]`, COUNTED by the caller, never dropped.</summary>
@@ -1894,6 +1941,20 @@ public sealed partial class MainWindow
 
                 case SwatchTile tile when leaf.Type == "gradient_tile":
                     tile.Background = GradientTileBrush(leaf.Value("bind.gradient"), leaf.W, leaf.H);
+                    break;
+
+                case PlaceholderTile ph when leaf.Type == "placeholder":
+                    ph.Disabled = leaf.Value("bind.disabled");
+                    ph.Opacity = PanelWire.PlaceholderOpacity(ph.Disabled);
+                    if (PanelWire.PlaceholderOutline(leaf.Value("bind.checked")) is { } o)
+                    {
+                        ph.BorderThickness = new Thickness(o.Width);
+                        ph.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                            Microsoft.UI.ColorHelper.FromArgb(0xFF, o.R, o.G, o.B));
+                    }
+                    else { ph.BorderThickness = new Thickness(0); }
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(
+                        ph, PanelWire.PlaceholderStatus(leaf.Value("bind.checked"), ph.Disabled));
                     break;
 
                 case TextBlock tb when leaf.Type == "text":
@@ -2861,6 +2922,20 @@ public sealed partial class MainWindow
 /// </summary>
 internal sealed partial class SwatchTile : Grid
 {
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// jas §941: a `placeholder` leaf's tile, which UI Automation can SEE, as
+/// <see cref="SwatchTile"/> is. A Grid's border is drawn inside its rect,
+/// which is the web's inset outline. <see cref="Disabled"/> is the plan's
+/// newest `bind.disabled`, read at a press.
+/// </summary>
+internal sealed partial class PlaceholderTile : Grid
+{
+    internal string? Disabled { get; set; }
+
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
 }
