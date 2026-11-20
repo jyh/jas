@@ -661,6 +661,24 @@ Opacity lines below on 8 scripts.
   `SCHEMA.md` now says so for every kind. None of the four shipped `click`
   entries that carry both depends on the order.
 
+## A click on a node that is not a widget kind (a placeholder)
+
+A `placeholder` is not in the event table, but it may declare `click`
+behaviors and bind `checked` and `disabled` (the Opacity panel's two
+previews, STATUS-jas row 169 slice 3).
+
+- **A click runs the node's declared `click` behaviors**, in declaration
+  order, in its scope, with the click's modifiers as `event.shift`,
+  `event.alt`, `event.meta` and `event.ctrl`. A `condition:` on a row
+  reads only the event, so the mask preview's plain, Shift and Alt clicks
+  are three rows. No bound field is written.
+- **`bind.disabled` true refuses the click by name** (`Disabled`), and
+  nothing runs, as for any widget. The engine arm is
+  `a_disabled_placeholder_refuses_its_click`.
+- **`bind.checked` is a persistent highlight**: "this one is the active
+  choice". A placeholder carries no value, so the port draws it (the web
+  and the Mac use a 2 px outline) and nothing reads it back.
+
 ## What this document does not cover
 
 - **The engine's value door** (`jas_panel_behavior` with a `value`) and
