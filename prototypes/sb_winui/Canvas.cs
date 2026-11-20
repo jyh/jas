@@ -5789,7 +5789,8 @@ internal sealed unsafe class Canvas : IDisposable
     ///   * ⛔ SILENCE -- the empty span and an empty channel. The core promises
     ///     never to do this, so it is a RUSTFAIL, never read as any of the above.
     ///
-    /// Returns true when the document moved.
+    /// Returns true when the canvas must repaint (<see cref="PanelWire.PanelEventRepaints"/>):
+    /// the document moved, or the engine answered changed (row 185, mask isolation).
     /// </summary>
     private bool ApplyPanelClick(PanelClickCmd click)
     {
@@ -5874,7 +5875,7 @@ internal sealed unsafe class Canvas : IDisposable
                 + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
                 + $"delta-mismatch={mismatch} delta-hidden={hiddenRows} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
         _report(mismatch == "0" ? row : $"RUSTFAIL {row}");
-        return docChanged;
+        return PanelWire.PanelEventRepaints(docChanged, channel);
     }
 
     /// <summary>
@@ -6022,7 +6023,7 @@ internal sealed unsafe class Canvas : IDisposable
     /// harness's (`Get-SbValueVerdicts`, V1-V6). `abc` is a literal because
     /// the sequence is fixed, and the harness reads only its refusal's class.
     ///
-    /// Returns true when a step moved the document, so the drain paints.
+    /// Returns true when a step needs a repaint (PanelWire.PanelEventRepaints), so the drain paints.
     /// </summary>
     private bool ApplyPanelValueSynth(PanelValueSynthCmd cmd)
     {

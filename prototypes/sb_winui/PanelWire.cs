@@ -998,6 +998,16 @@ internal static class PanelWire
         selected == true ? (2, 0x00, 0x7A, 0xFF) : null;
 
     /// <summary>
+    /// Row 185: whether a panel event repaints the canvas. It does when the
+    /// document moved, and also when the engine answered CHANGED (a clear error
+    /// channel) with the document unchanged: an Alt-click on the mask preview
+    /// toggles mask isolation, model state the frame draws and the document
+    /// does not hold. An `Unchanged` answer with no document change does not.
+    /// </summary>
+    internal static bool PanelEventRepaints(bool docChanged, string channel) =>
+        docChanged || channel.Length == 0;
+
+    /// <summary>
     /// jas §941 (row 169 slice 3): a `placeholder` leaf's persistent highlight,
     /// the web's `render_placeholder` `outline:2px solid #4a90d9` with
     /// `outline-offset:-2px` (inset), while `bind.checked` reads "true". The

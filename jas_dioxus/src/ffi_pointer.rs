@@ -593,7 +593,10 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
                 p.fill_rect(artboard_rect(ab), &crate::painter::Brush::Solid(c), 1.0);
             }
         }
-        crate::document::paint::emit_document(p, doc, crate::geometry::live::DEFAULT_PRECISION);
+        // Row 185: the model's mask isolation, as the web canvas's layer 3.
+        let isolation = engine.with_model(|m| m.mask_isolation_path.clone());
+        crate::document::paint::emit_document_isolated(
+            p, doc, crate::geometry::live::DEFAULT_PRECISION, isolation.as_deref());
         let border = crate::painter::StrokeStyle {
             width: 1.0,
             cap: crate::geometry::element::LineCap::Butt,

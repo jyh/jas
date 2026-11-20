@@ -7090,7 +7090,7 @@ mod tests {
 
     /// Row 185: the Windows frame DRAWS mask isolation. An Alt-click on the
     /// mask preview isolates the mask, and the native frame (`emit_frame`, the
-    /// shell's renderer) then shows only the mask subtree, as the web canvas
+    /// shell's renderer) then hides the content and shows only the mask subtree, as the web canvas
     /// does; a second Alt-click restores the document. Before this row the
     /// frame read no isolation state, so the model changed and the canvas did not.
     #[test]
@@ -7116,13 +7116,15 @@ mod tests {
         };
         let (red, blue) = (Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0));
         let before = colors(e);
-        assert!(before.contains(&red), "the control: the masked red rect draws: {before:?}");
+        assert!(before.contains(&red) && before.contains(&blue), "the control: both masked rects draw: {before:?}");
         let alt = r#"{"widget":"op_mask_preview","event":"click","alt":true}"#;
         let _ = behave(e, OP, alt);
         assert!(engine_of(e).model.borrow().mask_isolation_path.is_some(), "Alt isolates");
         let isolated = colors(e);
-        assert!(!isolated.contains(&red), "isolated: the content is hidden: {isolated:?}");
-        assert!(isolated.contains(&blue), "isolated: the mask subtree (the blue rect) draws: {isolated:?}");
+        // Make Mask gives each rect an EMPTY mask, so the isolated canvas shows
+        // neither rect (a drawing subtree is `document::paint`'s unit test).
+        assert!(!isolated.contains(&red) && !isolated.contains(&blue),
+                "isolated: the content is hidden: {isolated:?}");
         let _ = behave(e, OP, alt);
         assert_eq!(colors(e), before, "Alt again: the document is back as it was");
         unsafe { jas_engine_free(e) };

@@ -66,9 +66,31 @@ pub fn emit_document(p: &mut dyn Painter, doc: &Document, precision: f64) {
     }
 }
 
-/// RED-FIRST STUB (replaced in the next commit).
-pub fn emit_document_isolated(p: &mut dyn Painter, doc: &Document, precision: f64, _mask_isolation_path: Option<&[usize]>) {
-    emit_document(p, doc, precision);
+/// [`emit_document`] under the model's MASK ISOLATION (row 185;
+/// OPACITY.md §Preview interactions: an Alt-click on the mask preview
+/// "isolate[s] the mask on the canvas (show only mask contents)").
+///
+/// With `Some(path)` only the mask subtree of the element at `path` is drawn,
+/// and the rest of the document is hidden, as the web walk's layer 3 does
+/// (`canvas::render::render`). A path naming no element, or an element with no
+/// mask, draws nothing, also as on the web. `None` is [`emit_document`].
+///
+/// The isolation lives on the `Model`, not the `Document`, so the caller
+/// passes it; the paint context is installed either way, because a mask
+/// subtree may hold a by-id reference too.
+pub fn emit_document_isolated(
+    p: &mut dyn Painter,
+    doc: &Document,
+    precision: f64,
+    mask_isolation_path: Option<&[usize]>,
+) {
+    let Some(path) = mask_isolation_path else {
+        return emit_document(p, doc, precision);
+    };
+    let _paint_context = install_paint_context(rebuild_id_index(doc), precision);
+    if let Some(mask) = doc.get_element(&path.to_vec()).and_then(|e| e.common().mask.as_deref()) {
+        emit_element(p, &mask.subtree, 1.0);
+    }
 }
 
 #[cfg(test)]
