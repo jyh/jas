@@ -542,20 +542,10 @@ pub(crate) fn make_keydown_handler(
                     st.set_tool(ToolKind::Hand);
                 }));
             }
-            Key::Escape | Key::Enter => {
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
-                    let kind = st.active_tool;
-                    if let Some(tab) = st.tab_mut() {
-                        if let Some(tool) = tab.tools.get_mut(&kind) {
-                            tool.on_key(&mut tab.model, "Escape");
-                        }
-                        // OPACITY.md §Preview interactions: Escape
-                        // exits mask-isolation first (if active);
-                        // otherwise exits mask-editing mode back to
-                        // content-mode. The law is the Model's, shared
-                        // with the engine's key door (row 186).
-                        tab.model.exit_mask_mode_on_escape();
-                    }
+            ref k @ (Key::Escape | Key::Enter) => {
+                let escape = *k == Key::Escape;
+                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                    escape_or_enter(st, escape);
                 }));
             }
             // --- Fill/Stroke shortcuts ---
@@ -751,9 +741,50 @@ pub(crate) fn make_keyup_handler(
     }
 }
 
+/// Escape or Enter on the canvas: the active tool takes it (as "Escape"), and
+/// then the mask law runs (`Model::exit_mask_mode_on_escape`; OPACITY.md
+/// §Preview interactions, row 186).
+fn escape_or_enter(st: &mut AppState, _escape: bool) {
+    let kind = st.active_tool;
+    if let Some(tab) = st.tab_mut() {
+        if let Some(tool) = tab.tools.get_mut(&kind) {
+            tool.on_key(&mut tab.model, "Escape");
+        }
+        tab.model.exit_mask_mode_on_escape();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Row 187: only ESCAPE runs the mask law. OPACITY.md §Preview
+    /// interactions names Escape alone, and the Mac and the engine's key door
+    /// (row 186) run it on Escape only; the web ran it on Enter too.
+    #[test]
+    fn enter_leaves_mask_isolation_and_mask_editing_alone_and_escape_exits_them() {
+        use crate::document::model::EditingTarget;
+        use crate::workspace::app_state::TabState;
+        let mut st = AppState::new();
+        st.tabs.push(TabState::new());
+        st.active_tab = st.tabs.len() - 1;
+        let set = |st: &mut AppState| {
+            let m = &mut st.tab_mut().unwrap().model;
+            m.mask_isolation_path = Some(vec![0, 0]);
+            m.editing_target = EditingTarget::Mask(vec![0, 0]);
+        };
+        let read = |st: &mut AppState| {
+            let m = &st.tab_mut().unwrap().model;
+            (m.mask_isolation_path.clone(), m.editing_target.clone())
+        };
+        set(&mut st);
+        escape_or_enter(&mut st, false);
+        assert_eq!(read(&mut st), (Some(vec![0, 0]), EditingTarget::Mask(vec![0, 0])),
+                   "Enter changes neither mask mode");
+        escape_or_enter(&mut st, true);
+        assert_eq!(read(&mut st), (None, EditingTarget::Mask(vec![0, 0])),
+                   "the control: Escape exits isolation first");
+    }
 
     // The allowlist's two members, and the reason each is on it.
     #[test]
