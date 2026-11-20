@@ -61,40 +61,31 @@ public enum OpacityPanel {
         menuItemsFromYaml("opacity_panel_content")
     }
 
-    /// Dispatch a menu command. Phase-1 toggles flip panel-local state;
-    /// mask-lifecycle and page-level commands are inert (YAML gates them
-    /// via `enabled_when: "false"`).
+    /// Dispatch a menu command: Close is the layout's, and every other row
+    /// runs its actions.yaml entry in the panel's scope, as the engine and the
+    /// web do (row 174). This app keeps the four panel-local keys on the
+    /// LAYOUT (``opacityHeldPanelState``) while the action reads and writes
+    /// the store, so the layout's values are laid over the store before the
+    /// row runs and the store's are copied back after.
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
-        switch cmd {
-        case "close_panel":
+        if cmd == "close_panel" {
             layoutApply(&layout, opClosePanel(addr))
-        case "toggle_opacity_thumbnails":
-            layout.opacityPanel.thumbnailsHidden.toggle()
-        case "toggle_opacity_options":
-            layout.opacityPanel.optionsShown.toggle()
-        case "toggle_new_masks_clipping":
-            layout.opacityPanel.newMasksClipping.toggle()
-        case "toggle_new_masks_inverted":
-            layout.opacityPanel.newMasksInverted.toggle()
-        // Mask-lifecycle commands route to the document controller.
-        case "make_opacity_mask":
-            guard let model = model else { break }
-            let ctrl = Controller(model: model)
-            ctrl.makeMaskOnSelection(
-                clip: layout.opacityPanel.newMasksClipping,
-                invert: layout.opacityPanel.newMasksInverted)
-        case "release_opacity_mask":
-            guard let model = model else { break }
-            Controller(model: model).releaseMaskOnSelection()
-        case "disable_opacity_mask":
-            guard let model = model else { break }
-            Controller(model: model).toggleMaskDisabledOnSelection()
-        case "unlink_opacity_mask":
-            guard let model = model else { break }
-            Controller(model: model).toggleMaskLinkedOnSelection()
-        default:
-            // Page-level blending commands remain deferred.
-            break
+            return
         }
+        // No document open: the toggles are still the layout's, so the row runs
+        // in a scratch model, whose empty selection makes every mask op a no-op.
+        let model = model ?? Model()
+        let pid = "opacity_panel_content"
+        let store = model.stateStore
+        if !store.hasPanel(pid) {
+            store.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+        }
+        for (k, v) in opacityHeldPanelState(layout.opacityPanel) { store.setPanel(pid, k, v) }
+        panelDispatchRow(.opacity, action: cmd, params: [:], model: model)
+        let flag = { (k: String, old: Bool) in (store.getPanel(pid, k) as? Bool) ?? old }
+        layout.opacityPanel.thumbnailsHidden = flag("thumbnails_hidden", layout.opacityPanel.thumbnailsHidden)
+        layout.opacityPanel.optionsShown = flag("options_shown", layout.opacityPanel.optionsShown)
+        layout.opacityPanel.newMasksClipping = flag("new_masks_clipping", layout.opacityPanel.newMasksClipping)
+        layout.opacityPanel.newMasksInverted = flag("new_masks_inverted", layout.opacityPanel.newMasksInverted)
     }
 }
