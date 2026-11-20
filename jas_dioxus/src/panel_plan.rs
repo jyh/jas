@@ -802,12 +802,29 @@ fn canonical_tabs_node(node: &Value, scope: &Value) -> Value {
 /// evaluates its visibility in the item's scope and drops it itself (the
 /// Layers rename field, the Artboards rename field), so its path is still
 /// listed as hidden and its rows are not reported unjoined.
+/// Whether a bind row's value is false under `to_bool` (expr_types.rs), the
+/// truthiness the layout pass hides a node by. A row carries its canonical
+/// `(type, value)` pair (`bind_values::canon_value`); one without a type is
+/// read as the literal it is.
+fn row_is_falsy(r: &Value) -> bool {
+    let v = r["value"].as_str().unwrap_or("");
+    match r["type"].as_str() {
+        Some("null") => true,
+        Some("bool") => v == "false",
+        Some("number") => v.parse::<f64>().is_ok_and(|n| n == 0.0),
+        Some("string") => v.is_empty(),
+        Some("list") | Some("path") => v == "[]",
+        Some(_) => false,
+        None => v == "false",
+    }
+}
+
 pub(crate) fn laid_out_node(panel_node: &Value, rows: &Value) -> (Value, Vec<Vec<i64>>) {
     let mut node = panel_node.clone();
     let mut hidden: Vec<Vec<i64>> = vec![];
     for r in rows.as_array().into_iter().flatten() {
         let key = r["key"].as_str().unwrap_or("");
-        if !(key == "bind.visible" || key == "visible") || r["value"] != json!("false") {
+        if !(key == "bind.visible" || key == "visible") || !row_is_falsy(r) {
             continue;
         }
         let path = path_of(&r["path"]);
@@ -1047,6 +1064,33 @@ pub(crate) mod checks {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod hidden_set_tests {
+    use serde_json::json;
+
+    /// Row 176: the plan's hidden set reads a row's visibility by `to_bool`,
+    /// the layout pass's own truthiness (`panel_layout::visible_children`).
+    /// Until 2026-11-19 only the literal "false" hid a node, so a visible bind
+    /// that evaluated NULL (a scope without its key) was laid out by neither
+    /// pass and reported as a lost row (found by #1003's slider row).
+    #[test]
+    fn a_falsy_visible_row_of_any_type_hides_its_node() {
+        let cases = [
+            ("null", "", true), ("bool", "false", true), ("number", "0", true),
+            ("string", "", true), ("list", "[]", true),
+            ("bool", "true", false), ("number", "3", false), ("string", "x", false),
+        ];
+        let children: Vec<_> = cases.iter().map(|_| json!({"type": "container"})).collect();
+        let panel = json!({"content": {"type": "container", "children": children}});
+        let rows: Vec<_> = cases.iter().enumerate().map(|(i, (ty, v, _))|
+            json!({"path": [i], "id": "", "key": "bind.visible", "type": ty, "value": v})).collect();
+        let (_, hidden) = super::laid_out_node(&panel, &json!(rows));
+        for (i, (ty, v, want)) in cases.iter().enumerate() {
+            assert_eq!(hidden.contains(&vec![i as i64]), *want, "{ty} {v:?}");
+        }
     }
 }
 
