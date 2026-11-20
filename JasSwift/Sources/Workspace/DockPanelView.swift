@@ -184,6 +184,8 @@ public struct DockPanelView: View {
     var yamlDialogState: Binding<YamlDialogState?>? = nil
 
     private var dock: Dock? { workspaceLayout.dock(dockId) }
+    /// The groups as of the last layout change, for `revealTarget` (row 111).
+    @State private var revealBefore: [PanelGroup] = []
 
     public var body: some View {
         if let dock = dock {
@@ -263,19 +265,56 @@ public struct DockPanelView: View {
                 }
             }
         } else {
-            VStack(spacing: 0) {
-                ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
-                    groupView(gi, group)
+            // A side dock SCROLLS (row 111): its groups can be taller than the
+            // window, and a group below the edge was unreachable. A raise
+            // scrolls the raised group into view by the smallest scroll
+            // (`scrollTo` with no anchor), the web's `nearest_scroll_delta`
+            // rule and the Windows shell's.
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(dock.groups.enumerated()), id: \.offset) { gi, group in
+                            groupView(gi, group).id(gi)
+                        }
+                    }
                 }
-                Spacer()
+                .onAppear { revealBefore = dock.groups }
+                .onChange(of: dock.groups.map {
+                    GroupFace(active: $0.activePanel(), collapsed: $0.collapsed, count: $0.panels.count)
+                }) { _ in
+                    let now = dock.groups
+                    if let target = Self.revealTarget(before: revealBefore, after: now) {
+                        proxy.scrollTo(target)
+                    }
+                    revealBefore = now
+                }
             }
         }
     }
 
     /// The group a layout change RAISED, which the side dock scrolls into view
-    /// (row 111). Stub: names nothing.
+    /// (row 111): an expanded group whose active panel changed, that was
+    /// collapsed before, or that is new. When several qualify, the last. A
+    /// change that REMOVED a group raises nothing (the indices after it shift,
+    /// and a close is not a reveal). The Captain's Mac reading on 11-20:
+    /// Window ▸ Layers raised the tab in the bottom group and the window's
+    /// edge hid it.
     static func revealTarget(before: [PanelGroup], after: [PanelGroup]) -> Int? {
-        nil
+        if after.count < before.count { return nil }
+        var hit: Int? = nil
+        for (i, a) in after.enumerated() where !a.collapsed {
+            guard i < before.count else { hit = i; continue }
+            let b = before[i]
+            if b.collapsed || b.activePanel() != a.activePanel() { hit = i }
+        }
+        return hit
+    }
+
+    /// What `revealTarget` compares, as an Equatable key for `onChange`.
+    private struct GroupFace: Equatable {
+        let active: PanelKind?
+        let collapsed: Bool
+        let count: Int
     }
 
     private func groupView(_ gi: Int, _ group: PanelGroup) -> some View {

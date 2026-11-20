@@ -42,6 +42,13 @@ struct DockRevealTests {
         #expect(DockPanelView.revealTarget(before: before, after: defaults) == 4)
     }
 
+    @Test("Removing a group raises nothing, though the later groups shift")
+    func removingAGroupRaisesNothing() {
+        var after = defaults
+        after.remove(at: 2)  // groups 3 and 4 shift to 2 and 3: their active panels "change"
+        #expect(DockPanelView.revealTarget(before: defaults, after: after) == nil)
+    }
+
     @Test("No change names no group (control)")
     func noChangeNamesNoGroup() {
         #expect(DockPanelView.revealTarget(before: defaults, after: defaults) == nil)
