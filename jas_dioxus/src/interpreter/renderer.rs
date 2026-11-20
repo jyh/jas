@@ -7385,9 +7385,27 @@ fn render_spacer(el: &serde_json::Value, ctx: &serde_json::Value) -> Element {
     rsx! { div { style: "{style}" } }
 }
 
-/// The CSS for a `spacer` (row 189).
-fn spacer_style(_el: &serde_json::Value, _ctx: &serde_json::Value) -> String {
-    "flex:1;".to_string()
+/// The CSS for a `spacer` (row 189). A spacer that declares `style.width` is
+/// exactly that wide and does not grow or shrink; only a spacer with no width
+/// is flexible. The width may be a number or a `{{...}}` template (the Layers
+/// indent); one that does not resolve to a number is 0, since the author
+/// declared a width. The planner's law (`panel_layout`) and JasSwift's
+/// `YamlElementView.spacerWidth`.
+fn spacer_style(el: &serde_json::Value, ctx: &serde_json::Value) -> String {
+    let Some(raw) = el.get("style").and_then(|s| s.get("width")).filter(|w| !w.is_null()) else {
+        return "flex:1;".to_string();
+    };
+    let w = match raw {
+        serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0),
+        serde_json::Value::String(t) => {
+            let resolved = expr::eval_text(t, ctx);
+            let r = resolved.trim();
+            r.strip_suffix("px").unwrap_or(r).trim().parse::<f64>().unwrap_or(0.0)
+        }
+        _ => 0.0,
+    }
+    .max(0.0);
+    format!("width:{w}px;flex:0 0 {w}px;")
 }
 
 fn render_disclosure(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
