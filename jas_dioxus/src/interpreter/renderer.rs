@@ -4787,6 +4787,7 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let step = el.get("step").and_then(|s| s.as_i64()).unwrap_or(1);
     let style = build_style(el, ctx);
 
+    let slider_panel_kind = rctx.panel_kind;
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
     let panel_field = bind_expr.strip_prefix("panel.").or_else(|| {
         bind_expr.strip_prefix("{{panel.").and_then(|s| s.strip_suffix("}}"))
@@ -4872,17 +4873,36 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                 if !dlg_field.is_empty() { return; }
                 if panel_field.is_empty() { return; }
                 let color = compute_color_from_panel(&panel_field, new_val, &panel);
-                if let Some(color) = color {
-                    let app = app.clone();
-                    let mut revision = revision;
-                    spawn(async move {
-                        app.borrow_mut().set_active_color(color);
-                        revision += 1;
-                    });
-                }
+                let app = app.clone();
+                let mut revision = revision;
+                let panel_field = panel_field.clone();
+                spawn(async move {
+                    match color {
+                        Some(color) => app.borrow_mut().set_active_color(color),
+                        // Not a colour field: the panel's own write (row 175).
+                        None => commit_panel_slider_value(
+                            &mut app.borrow_mut(), slider_panel_kind, &panel_field, new_val),
+                    }
+                    revision += 1;
+                });
             },
         }
     }
+}
+
+/// A panel slider's committed value when it is not a Color field: the panel's
+/// own write (`commit_panel_field`), the one the field beside it makes. The
+/// Opacity slider (row 175) writes the selection through the Properties law
+/// this way. Nothing without a panel kind, so a stray slider never writes the
+/// Stroke panel (`commit_panel_field`'s `None` arm).
+pub(crate) fn commit_panel_slider_value(
+    st: &mut crate::workspace::app_state::AppState,
+    panel_kind: Option<PanelKind>,
+    field: &str,
+    value: f64,
+) {
+    if panel_kind.is_none() { return; }
+    commit_panel_field(st, panel_kind, field, &serde_json::json!(value));
 }
 
 /// Compute a color from panel state with one field changed.
@@ -14922,6 +14942,20 @@ mod tests {
         assert_eq!(target(&st), EditingTarget::Content, "and leaves the target");
         opacity_click_with(&mut st, "op_mask_preview", false, true);
         assert_eq!(st.tabs[st.active_tab].model.mask_isolation_path, Some(path.clone()), "Alt isolates");
+    }
+
+    /// Row 175: a panel slider that is not a Color field commits through the
+    /// panel's own write, as the field beside it does. The Opacity slider
+    /// writes the selection's opacity; until 2026-11-19 the web dropped any
+    /// non-colour panel slider's value.
+    #[test]
+    fn a_non_colour_panel_slider_commits_through_the_panel_write() {
+        let mut st = opacity_web_state(true);
+        super::commit_panel_slider_value(&mut st, Some(PanelKind::Opacity), "opacity", 40.0);
+        let doc = st.tabs[st.active_tab].model.document();
+        let path = doc.selection[0].path.clone();
+        let o = doc.get_element(&path).expect("the element").common().opacity;
+        assert!((o - 0.4).abs() < 1e-9, "the element reads {o}");
     }
 
     /// The intercepts that bypassed the YAML are gone from the renderer. The

@@ -11,7 +11,6 @@
     "Do not add to this list to silence a genuinely broken reference."
   ],
   "unresolved_actions": [
-    "open_opacity_slider_popover",
     "toggle_page_isolated_blending",
     "toggle_page_knockout_group"
   ]
