@@ -304,6 +304,19 @@ fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<Str
         }
         return out;
     }
+    // WIDGET_EVENTS.md §Showing a number (row 183): a `number_input` shows its
+    // number through `fmt_num` (at most four decimals, trailing zeros gone),
+    // as the web and the Mac do; the stored value is not rounded. Before this
+    // the canonical text carried float noise (`15.999975000000001`).
+    if node.get("type").and_then(Value::as_str) == Some("number_input") {
+        if let Some(n) = values.get("bind.value").and_then(Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok()).filter(|n| n.is_finite())
+        {
+            out.insert("bind.value".to_string(),
+                       Value::String(crate::interpreter::character_host::fmt_num(n)));
+        }
+        return out;
+    }
     if node.get("type").and_then(Value::as_str) != Some("length_input") {
         return out;
     }
@@ -2299,17 +2312,38 @@ mod tests {
     /// The channel does not leak: a kind whose value needs no core formatting
     /// carries an EMPTY display map, so a shell reading `display` first never
     /// shadows a value with a stale or invented one.
+    ///
+    /// ⚠️ This arm's subject was `number_input` until row 183 (WIDGET_EVENTS.md
+    /// §Showing a number), which gave that kind a display rule; a `text_input`
+    /// shows its text verbatim and is the kind that needs none.
     #[test]
     fn a_kind_that_needs_no_core_formatting_carries_an_empty_display_map() {
         let panel = json!({"content": {"type": "col", "children": [
-            {"type": "number_input", "id": "plain", "unit": "pt", "bind": {"value": "panel.v"}},
+            {"type": "text_input", "id": "plain", "bind": {"value": "panel.v"}},
         ]}});
-        let ctx = json!({"panel": {"v": 12.0}});
+        let ctx = json!({"panel": {"v": "Layer 1.50"}});
         let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         assert_eq!(plan["leaves"][0]["display"], json!({}), "{plan}");
         // The control: the same node DOES carry the resolved value, so the
         // empty display above is a scoping decision and not a dead walk.
-        assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("12"), "{plan}");
+        assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("Layer 1.50"), "{plan}");
+    }
+
+    /// Row 183: a `number_input` carries `display["bind.value"]`, the number by
+    /// the shared rule (`fmt_num`: at most four decimals, trailing zeros gone),
+    /// beside its canonical `values`, which stays unrounded.
+    #[test]
+    fn a_number_input_carries_its_shown_number_in_display() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "number_input", "id": "n", "bind": {"value": "panel.v"}},
+        ]}});
+        for (v, shown) in [(12.0, "12"), (15.999975000000001, "16"), (14.399999999999999, "14.4")] {
+            let ctx = json!({"panel": {"v": v}});
+            let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
+            assert_eq!(plan["leaves"][0]["display"]["bind.value"], json!(shown), "{v}: {plan}");
+            assert_eq!(plan["leaves"][0]["values"]["bind.value"].as_str().and_then(|t| t.parse::<f64>().ok()),
+                       Some(v), "{v}: the canonical value is not rounded");
+        }
     }
 
     /// THE COLOUR BAR'S PICTURE RIDES ON THE PLAN (STATUS-flask §249). A

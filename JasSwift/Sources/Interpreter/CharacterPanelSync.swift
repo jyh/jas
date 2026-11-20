@@ -862,6 +862,12 @@ private func parseEmAsThousandths(_ s: String) -> Double? {
     return Double(rest).map { $0 * 1000.0 }
 }
 
+/// The text a `number_input` shows for `value` (WIDGET_EVENTS.md §Showing a
+/// number, row 183): at most four decimals, trailing zeros removed. One rule
+/// with the web's `number_input_text` and the panel plan's `display`; the
+/// stored value is not rounded.
+func numberInputText(_ value: Double) -> String { fmtNum(value) }
+
 /// Trim trailing zeros from a decimal render — integers have no
 /// decimal point. Mirrors Rust's `fmt_num`.
 /// Internal rather than private so `R9GuardedCastTests` can hold it to that

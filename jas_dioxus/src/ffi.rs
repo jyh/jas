@@ -7064,6 +7064,63 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 182 (flask §946): an Alt-click on the mask preview toggles mask
+    /// isolation, and the door answered `Unchanged` both times, because the
+    /// change test compared neither `mask_isolation_path` nor `editing_target`.
+    /// A shell that redraws on a change never learned of it. Both directions.
+    #[test]
+    fn the_door_reports_a_mask_isolation_change() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let isolation = |e| engine_of(e).model.borrow().mask_isolation_path.clone();
+        assert_eq!(isolation(e), None, "the control: not isolated");
+        for (want_isolated, what) in [(true, "Alt isolates"), (false, "Alt again exits")] {
+            let (reply, err) = behave(e, OP, r#"{"widget":"op_mask_preview","event":"click","alt":true}"#);
+            assert!(!reply.is_empty(), "{what}: refused: {err}");
+            assert_eq!(isolation(e).is_some(), want_isolated, "{what}: the model");
+            // The verdict rides the error channel (`{"panel_event":"Unchanged"}`),
+            // not the reply: a needle on the reply passed this arm before the fix.
+            assert!(!err.contains("Unchanged"), "{what}: the door called it Unchanged: {err}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 183 (WIDGET_EVENTS.md §Showing a number): a `number_input` shows its
+    /// bound number through `fmt_num`, at most four decimals and no float noise.
+    /// flask §947 3(a): with `text_basic.svg` selected (font-size 21.3333 px,
+    /// 15.999975 pt) the plan's `ch_font_size` read `15.999975000000001`.
+    #[test]
+    fn a_number_input_in_the_plan_shows_its_number_without_float_noise() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("text_basic.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        // What a shell SHOWS: `display` over `values` (sb_winui `PanelWire.DisplayText`).
+        let shown = |id: &str| leaf(e, CHARACTER, id)["display"]["bind.value"].as_str()
+            .unwrap_or_else(|| panic!("{id} carries no text")).to_string();
+        // The control: the store holds the unrounded derived value.
+        let raw = engine_of(e).with_model(|m| crate::interpreter::character_host::live_values(m.document()))
+            ["font_size"].as_f64().expect("the selection's font size");
+        assert!((raw - 15.999975).abs() < 1e-9 && raw.to_string().len() > 10,
+                "the fixture's value is the noisy one: {raw}");
+        assert_eq!(shown("ch_font_size"), "16");
+        // Every number_input leaf of the panel, by the same rule.
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, CHARACTER, 228, 0)).unwrap();
+        let mut seen = 0;
+        for l in plan["leaves"].as_array().unwrap() {
+            if l["type"] != "number_input" { continue; }
+            let Some(t) = l["display"]["bind.value"].as_str()
+                .or_else(|| l["values"]["bind.value"].as_str()) else { continue };
+            seen += 1;
+            let decimals = t.split('.').nth(1).map_or(0, str::len);
+            assert!(decimals <= 4 && !t.ends_with('0') || !t.contains('.'), "{}: {t}", l["id"]);
+        }
+        assert!(seen >= 5, "read only {seen} number_input leaves");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 181: the Paragraph menu's Hanging Punctuation reads the SELECTION,
     /// in its check and in its toggle, after a selection change. The web's and
     /// the Mac's menus read stored state there (both fixed with this arm); the

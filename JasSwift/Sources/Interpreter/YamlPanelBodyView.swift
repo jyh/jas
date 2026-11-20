@@ -1391,7 +1391,7 @@ struct YamlElementView: View {
             // Same number → string rule the expression language uses (and so
             // the same string jas_dioxus's `value: "{value}"` renders from an
             // f64): 12 shows as "12", 12.5 as "12.5".
-            externalValue: numberToCanonicalString(currentValue),
+            externalValue: numberInputText(currentValue),
             commit: { newVal in
                 // WIDGET_EVENTS.md: the number grammar and the declared bounds
                 // decide the value (anything else writes nothing), the bind
