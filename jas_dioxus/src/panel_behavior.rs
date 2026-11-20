@@ -1021,9 +1021,18 @@ fn run_batch(
 /// the white swatch on an engine already at white). The Layers isolation stack
 /// too (G11, 2026-11-07): it moved to the model (`effects::ISOLATION_STACK`),
 /// and Enter Isolation Mode then read as `Unchanged`.
-fn model_state(model: &Model) -> (Vec<String>, Option<crate::geometry::element::Fill>,
-                                   Option<crate::geometry::element::Stroke>, Vec<Vec<usize>>) {
-    (model.recent_colors.clone(), model.default_fill, model.default_stroke, model.isolation_stack.clone())
+/// The model state outside the document that an event can change, so a write
+/// to it is a change. Row 182 (flask §946): the mask preview's Alt-click toggles
+/// `mask_isolation_path`, and without it here the door answered `Unchanged`, so
+/// a shell that redraws on a change never learned of it. `editing_target` is
+/// the plain click's write, counted by the same rule.
+type ModelState = (Vec<String>, Option<crate::geometry::element::Fill>,
+                   Option<crate::geometry::element::Stroke>, Vec<Vec<usize>>,
+                   crate::document::model::EditingTarget, Option<Vec<usize>>);
+
+fn model_state(model: &Model) -> ModelState {
+    (model.recent_colors.clone(), model.default_fill, model.default_stroke, model.isolation_stack.clone(),
+     model.editing_target.clone(), model.mask_isolation_path.clone())
 }
 
 /// A value event's behaviors, in declaration order: each one's effects and

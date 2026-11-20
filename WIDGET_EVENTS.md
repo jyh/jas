@@ -508,6 +508,21 @@ expression that reads another root, or that does not parse.
   `^…$` with `re.match`). A widget commit takes the narrow form, which is
   what both active ports already do.
 
+## Showing a number (`number_input`)
+
+A `number_input` SHOWS its bound number as at most four decimals with trailing
+zeros removed, and an integral value with no decimal point: `16` for
+15.999975000000001, `14.4` for 14.399999999999999, `100` for 100.0. It is one
+rule on every port: Rust's `fmt_num`, Swift's `fmtNum`, and the panel plan's
+`bind.value` that a shell draws. The STORED value is not rounded, and showing it
+writes nothing: a commit happens only when a person changes the text (§Committing
+a value). A widget that must show more places is a `length_input`, which declares
+its `precision:`.
+
+Before this rule, each port showed the shortest round-trip text of the float, so
+a derived value such as 21.3333 px in points read `15.999975000000001`. The ports
+agreed with one another, and every one of them showed the noise (STATUS-jas row 183).
+
 ## The bound target
 
 - **The bound expression** is `bind.value`, else `bind.checked`, else a

@@ -5058,6 +5058,13 @@ fn commit_panel_field(
     }
 }
 
+/// The text a `number_input` shows for `value` (WIDGET_EVENTS.md §Showing a
+/// number): at most four decimals, trailing zeros removed, one rule with the
+/// Mac (`fmtNum`) and the panel plan's `display`.
+fn number_input_text(value: f64) -> String {
+    crate::interpreter::character_host::fmt_num(value)
+}
+
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_f64()).unwrap_or(0.0);
@@ -5156,6 +5163,9 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         }))
     } else { None };
 
+    // WIDGET_EVENTS.md §Showing a number (row 183): the text shown is
+    // `fmt_num`'s; the remount key keeps the raw value.
+    let shown = number_input_text(value);
     if panel_handler.is_some() {
         rsx! {
             input {
@@ -5170,7 +5180,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 step: "{step_attr}",
-                value: "{value}",
+                value: "{shown}",
                 // flex-shrink:0 — when the parent row sets `flex:1`
                 // on the slider, the slider's flex-grow eats remaining
                 // space but the default flex-shrink:1 on the
@@ -5195,7 +5205,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 step: "{step_attr}",
-                value: "{value}",
+                value: "{shown}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
                     // Same commit rule as the panel branch above and as
@@ -16413,6 +16423,28 @@ mod layers_row_menu_tests {
     fn a_row_that_is_not_in_the_tree_has_no_menu() {
         let (holder, ctx) = holder_and_ctx(false);
         assert!(layers_row_menu(&holder, &ctx, &[7]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod number_display_tests {
+    use super::*;
+
+    /// Row 183: the number text, and the render showing it rather than the raw
+    /// float (the render itself is a wasm DOM node; its body is read instead).
+    #[test]
+    fn a_number_input_shows_its_number_without_float_noise() {
+        assert_eq!(number_input_text(15.999975000000001), "16");
+        assert_eq!(number_input_text(14.399999999999999), "14.4");
+        assert_eq!(number_input_text(100.0), "100");
+        assert_eq!(number_input_text(0.125), "0.125");
+        let src = include_str!("renderer.rs");
+        let at = src.find("fn render_number_input").expect("the render");
+        let end = at + 3 + src[at + 3..].find("\nfn ").expect("its end");
+        let body = &src[at..end];
+        assert_eq!(body.matches(r#"value: "{shown}""#).count(), 2,
+                   "both branches show the formatted text");
+        assert!(!body.contains(r#"value: "{value}""#), "a branch shows the raw float");
     }
 }
 
