@@ -66,14 +66,15 @@ public enum OpacityPanel {
     /// web do (row 174). This app keeps the four panel-local keys on the
     /// LAYOUT (``opacityHeldPanelState``) while the action reads and writes
     /// the store, so the layout's values are laid over the store before the
-    /// row runs and the store's are copied back after. Without a model there
-    /// is no store to run in, and nothing happens.
+    /// row runs and the store's are copied back after.
     public static func dispatch(_ cmd: String, addr: PanelAddr, layout: inout WorkspaceLayout, model: Model? = nil) {
         if cmd == "close_panel" {
             layoutApply(&layout, opClosePanel(addr))
             return
         }
-        guard let model = model else { return }
+        // No document open: the toggles are still the layout's, so the row runs
+        // in a scratch model, whose empty selection makes every mask op a no-op.
+        let model = model ?? Model()
         let pid = "opacity_panel_content"
         let store = model.stateStore
         if !store.hasPanel(pid) {

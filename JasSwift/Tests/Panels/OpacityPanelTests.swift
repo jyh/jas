@@ -105,6 +105,16 @@ private func makeLayoutAndAddr() -> (WorkspaceLayout, PanelAddr) {
     #expect(layout.opacityPanel.thumbnailsHidden == false)
 }
 
+@Test func opacityPanelPreferencesToggleWithNoDocumentOpen() {
+    // With no document open the dock passes no model; the four panel-local
+    // toggles are the layout's and still flip (the native route did).
+    var (layout, addr) = makeLayoutAndAddr()
+    OpacityPanel.dispatch("toggle_opacity_thumbnails", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_new_masks_clipping", addr: addr, layout: &layout)
+    #expect(layout.opacityPanel.thumbnailsHidden == true)
+    #expect(layout.opacityPanel.newMasksClipping == false)
+}
+
 @Test func opacityPanelDispatchToggleOptionsFlipsField() {
     var (layout, addr) = makeLayoutAndAddr()
     let m = Model()
