@@ -1,8 +1,6 @@
 import Testing
 import Foundation
-#if canImport(AppKit)
 import AppKit
-#endif
 @testable import JasLib
 
 // STATUS-jas row 140. Swift Testing runs tests on several threads at once, and
@@ -108,7 +106,6 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
 /// (79.364 vs 80.477 at 14.162 pt, measured), so the italic descriptor lookup
 /// can fail and `renderedTextWidth` substituted the base font. Serial, many
 /// times: every measure must equal the width of the face the family names.
-#if canImport(AppKit)
 @Test func anItalicMeasureIsAlwaysTheItalicFace() {
     let size = 14.161999999999999
     guard let italic = NSFont(name: "Georgia-Italic", size: CGFloat(size)) else { return }
@@ -120,4 +117,3 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
     }
     #expect(wrong == 0, "\(wrong) of 200 italic measures were not the italic face")
 }
-#endif
