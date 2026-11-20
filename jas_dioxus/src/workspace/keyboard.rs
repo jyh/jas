@@ -552,13 +552,9 @@ pub(crate) fn make_keydown_handler(
                         // OPACITY.md §Preview interactions: Escape
                         // exits mask-isolation first (if active);
                         // otherwise exits mask-editing mode back to
-                        // content-mode.
-                        use crate::document::model::EditingTarget;
-                        if tab.model.mask_isolation_path.is_some() {
-                            tab.model.mask_isolation_path = None;
-                        } else if let EditingTarget::Mask(_) = tab.model.editing_target {
-                            tab.model.editing_target = EditingTarget::Content;
-                        }
+                        // content-mode. The law is the Model's, shared
+                        // with the engine's key door (row 186).
+                        tab.model.exit_mask_mode_on_escape();
                     }
                 }));
             }
