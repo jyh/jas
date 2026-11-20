@@ -3362,19 +3362,23 @@ internal static class PaneRule
 
 /// <summary>
 /// jas §644/#753: which keys pressed in a focused panel go to the panel door.
-/// They are the keys a panel's `keyboard:` rows bind (the tree's arrows,
-/// F2, Enter, Escape, Delete and Backspace, and Ctrl+A). Every other key,
-/// Ctrl+Z and the plain letters among them, stays on the document's route
-/// exactly as before. Which ACTION a forwarded key runs is the engine's.
+/// They are the named keys a panel's `keyboard:` rows bind (the tree's
+/// arrows, F2, Enter, Escape, Delete and Backspace) and EVERY command chord
+/// (row 119, #934): the door runs a chord a row binds (Ctrl+A, the tree's
+/// select-all) and sends one no row binds on to the menubar's route
+/// (Ctrl+Z's Undo), so the engine, not the shell, decides who owns it. The
+/// plain letters stay on the document's route: they are the canvas's tool
+/// letters, which the door refuses (`UnboundPanelKey`). Which ACTION a
+/// forwarded key runs is the engine's.
 /// </summary>
 internal static class PanelKeys
 {
     internal static bool Forwards(uint code, bool ctrl) => code switch
     {
+        0 => false,
         0xF700 or 0xF701 or 0xF702 or 0xF703 or 0xF705 => true,
         0x0D or 0x1B or 0x7F or 0x08 => true,
-        'a' => ctrl,
-        _ => false,
+        _ => ctrl,
     };
 
     /// <summary>
