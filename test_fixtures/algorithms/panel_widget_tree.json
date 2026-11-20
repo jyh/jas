@@ -441,7 +441,7 @@
           1
         ],
         "type": "container",
-        "id": "op_preview_row",
+        "id": "op_slider_row",
         "kind": "container",
         "col": 0,
         "visible": true,
@@ -454,6 +454,37 @@
       {
         "path": [
           1,
+          0
+        ],
+        "type": "slider",
+        "id": "op_opacity_slider",
+        "kind": "slider",
+        "col": 12,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          2
+        ],
+        "type": "container",
+        "id": "op_preview_row",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          2,
           0
         ],
         "type": "placeholder",
@@ -469,7 +500,7 @@
       },
       {
         "path": [
-          1,
+          2,
           1
         ],
         "type": "icon_button",
@@ -486,7 +517,7 @@
       },
       {
         "path": [
-          1,
+          2,
           2
         ],
         "type": "placeholder",
@@ -503,7 +534,7 @@
       },
       {
         "path": [
-          1,
+          2,
           3
         ],
         "type": "container",
@@ -519,7 +550,7 @@
       },
       {
         "path": [
-          1,
+          2,
           3,
           0
         ],
@@ -536,7 +567,7 @@
       },
       {
         "path": [
-          1,
+          2,
           3,
           1
         ],
@@ -554,7 +585,7 @@
       },
       {
         "path": [
-          1,
+          2,
           3,
           2
         ],

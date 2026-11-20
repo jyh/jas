@@ -89,6 +89,13 @@ state:
     description: >
       When true, the preview row (OPACITY_PREVIEW, LINK_INDICATOR,
       MASK_PREVIEW, and the mask-buttons column) is collapsed.
+  slider_shown:
+    type: bool
+    default: false
+    description: >
+      When true, the opacity slider row is revealed under row 1. The
+      chevron (op_disclosure) toggles it. Panel-local UI; the document is
+      unchanged.
   options_shown:
     type: bool
     default: false
@@ -226,11 +233,35 @@ content:
           icon: disclosure_right
           summary: "Opacity slider"
           description: >
-            Opens a popover containing a horizontal opacity slider bound
-            to panel.opacity.
+            Shows or hides the opacity slider row under this row (an
+            inline row rather than a popover, so every app draws it with
+            the kinds it already has).
           behavior:
             - event: click
-              action: open_opacity_slider_popover
+              action: toggle_opacity_slider
+
+    # ── Row 1b: the opacity slider, revealed by the chevron ─────
+    - type: container
+      id: op_slider_row
+      layout: row
+      bind:
+        # `== true` so a scope without the key reads false, not null.
+        visible: "panel.slider_shown == true"
+      children:
+        - id: op_opacity_slider
+          type: slider
+          col: 12
+          summary: "Opacity slider"
+          description: >
+            Drag to set the selection's opacity, 0-100%. Bound to the same
+            panel.opacity as the Opacity field, so a commit writes the
+            selection by the same law; with a mixed selection the value
+            is the panel's, as the field's is.
+          min: 0
+          max: 100
+          step: 1
+          bind:
+            value: "panel.opacity"
 
     # ── Row 2: Preview cells + Mask buttons ────────────────────
     - type: container
