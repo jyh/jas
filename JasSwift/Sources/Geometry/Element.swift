@@ -59,7 +59,13 @@ func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, s
                     lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) }) -> NSFont {
     if traits.isEmpty { return base }
     let desc = base.fontDescriptor.withSymbolicTraits(traits)
-    return lookup(desc, size) ?? base
+    // CI has seen this lookup return nil intermittently, and the width was then
+    // the base face's (row 188). Try once more; then SAY so before falling back.
+    if let face = lookup(desc, size) ?? lookup(desc, size) { return face }
+    faceLookupFailureCount += 1
+    NSLog("jas: no face for %@ with traits 0x%x at %.3f pt; measuring the base face (row 188)",
+          base.fontName, traits.rawValue, Double(size))
+    return base
 }
 #endif
 
