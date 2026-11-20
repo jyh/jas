@@ -802,12 +802,29 @@ fn canonical_tabs_node(node: &Value, scope: &Value) -> Value {
 /// evaluates its visibility in the item's scope and drops it itself (the
 /// Layers rename field, the Artboards rename field), so its path is still
 /// listed as hidden and its rows are not reported unjoined.
+/// Whether a bind row's value is false under `to_bool` (expr_types.rs), the
+/// truthiness the layout pass hides a node by. A row carries its canonical
+/// `(type, value)` pair (`bind_values::canon_value`); one without a type is
+/// read as the literal it is.
+fn row_is_falsy(r: &Value) -> bool {
+    let v = r["value"].as_str().unwrap_or("");
+    match r["type"].as_str() {
+        Some("null") => true,
+        Some("bool") => v == "false",
+        Some("number") => v.parse::<f64>().is_ok_and(|n| n == 0.0),
+        Some("string") => v.is_empty(),
+        Some("list") | Some("path") => v == "[]",
+        Some(_) => false,
+        None => v == "false",
+    }
+}
+
 pub(crate) fn laid_out_node(panel_node: &Value, rows: &Value) -> (Value, Vec<Vec<i64>>) {
     let mut node = panel_node.clone();
     let mut hidden: Vec<Vec<i64>> = vec![];
     for r in rows.as_array().into_iter().flatten() {
         let key = r["key"].as_str().unwrap_or("");
-        if !(key == "bind.visible" || key == "visible") || r["value"] != json!("false") {
+        if !(key == "bind.visible" || key == "visible") || !row_is_falsy(r) {
             continue;
         }
         let path = path_of(&r["path"]);

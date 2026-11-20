@@ -245,8 +245,7 @@ content:
       id: op_slider_row
       layout: row
       bind:
-        # `== true` so a scope without the key reads false, not null.
-        visible: "panel.slider_shown == true"
+        visible: "panel.slider_shown"
       children:
         - id: op_opacity_slider
           type: slider
