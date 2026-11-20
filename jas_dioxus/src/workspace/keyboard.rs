@@ -741,16 +741,19 @@ pub(crate) fn make_keyup_handler(
     }
 }
 
-/// Escape or Enter on the canvas: the active tool takes it (as "Escape"), and
-/// then the mask law runs (`Model::exit_mask_mode_on_escape`; OPACITY.md
-/// §Preview interactions, row 186).
-fn escape_or_enter(st: &mut AppState, _escape: bool) {
+/// Escape or Enter on the canvas: the active tool takes it (as "Escape").
+/// Then, on ESCAPE only, the mask law runs (`Model::exit_mask_mode_on_escape`;
+/// OPACITY.md §Preview interactions names Escape alone, and the Mac and the
+/// engine's key door run it on Escape only; rows 186, 187).
+fn escape_or_enter(st: &mut AppState, escape: bool) {
     let kind = st.active_tool;
     if let Some(tab) = st.tab_mut() {
         if let Some(tool) = tab.tools.get_mut(&kind) {
             tool.on_key(&mut tab.model, "Escape");
         }
-        tab.model.exit_mask_mode_on_escape();
+        if escape {
+            tab.model.exit_mask_mode_on_escape();
+        }
     }
 }
 
