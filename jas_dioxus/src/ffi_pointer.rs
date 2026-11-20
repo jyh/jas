@@ -482,7 +482,16 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
                 }
             }
             let mut slot = engine.tool_slot();
-            let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
+            // Row 186: Escape also exits mask isolation, then mask-editing
+            // (`Model::exit_mask_mode_on_escape`, the web's order: the tool
+            // takes the key, then the mask law runs). It runs with no tool too.
+            let escape_exited = |handled: bool| {
+                key == "Escape" && engine.with_model_mut(Model::exit_mask_mode_on_escape) || handled
+            };
+            let Some((_, tool)) = slot.as_mut() else {
+                drop(slot);
+                return if escape_exited(false) { JasStatus::Ok } else { JasStatus::UnknownVerb };
+            };
             let handled = engine.with_model_mut(|m| tool.on_key_event(m, key, km));
             // A dialog the key opened in the tool (the Artboard tool's Delete
             // falling through to an orphaning `delete_selection`) moves to the
@@ -494,7 +503,7 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
             if let Some((id, params)) = opened {
                 crate::ffi::open_tool_dialog(engine, &id, &params);
             }
-            if handled { JasStatus::Ok } else { JasStatus::UnknownVerb }
+            if escape_exited(handled) { JasStatus::Ok } else { JasStatus::UnknownVerb }
         }
         // Undo / Redo are ACTIONS (`doc.op`): `ffi::dispatch_key` runs them
         // through `jas_dispatch_action` before calling here (item 36).

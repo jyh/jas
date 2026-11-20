@@ -7163,6 +7163,40 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 186 (flask STATUS §954; OPACITY.md §Preview interactions: "Escape
+    /// exits isolation first; a second Escape then leaves mask-editing mode"):
+    /// the engine's key door exits mask isolation, then mask-editing mode, on
+    /// Escape, as the web's `keyboard.rs` and the Mac's `CanvasSubwindow` do.
+    /// Before this row `jas_key_event` sent Escape to the tool only, so on
+    /// Windows only a second Alt-click on the mask preview left isolation.
+    #[test]
+    fn escape_through_the_key_door_exits_isolation_then_mask_editing() {
+        use crate::document::model::EditingTarget;
+        use crate::ffi_pointer::{jas_key_event, KEY_ESCAPE};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("two_rects.svg");
+        let state = |e| {
+            let m = engine_of(e).model.borrow();
+            (m.mask_isolation_path.clone(), m.editing_target.clone())
+        };
+        // Both active: isolation goes first and mask-editing stays.
+        engine_of(e).with_model_mut(|m| {
+            m.mask_isolation_path = Some(vec![0, 0]);
+            m.editing_target = EditingTarget::Mask(vec![0, 0]);
+        });
+        let status = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(status, JasStatus::Ok, "an Escape that exits isolation is handled");
+        assert_eq!(state(e), (None, EditingTarget::Mask(vec![0, 0])), "the first Escape exits isolation only");
+        // The second Escape leaves mask-editing mode.
+        let status = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(status, JasStatus::Ok, "an Escape that leaves mask-editing is handled");
+        assert_eq!(state(e), (None, EditingTarget::Content), "the second Escape leaves mask-editing");
+        // The control: with neither active, Escape changes neither (the tool's answer stands).
+        let _ = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(state(e), (None, EditingTarget::Content));
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 181: the Paragraph menu's Hanging Punctuation reads the SELECTION,
     /// in its check and in its toggle, after a selection change. The web's and
     /// the Mac's menus read stored state there (both fixed with this arm); the
