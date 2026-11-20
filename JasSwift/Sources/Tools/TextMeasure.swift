@@ -15,8 +15,12 @@ public func makeMeasurer(family: String, weight: String, style: String, size: Do
     let attrs: [NSAttributedString.Key: Any] = [.font: font]
     return { s in
         if s.isEmpty { return 0.0 }
-        let str = NSAttributedString(string: s, attributes: attrs)
-        return Double(str.size().width)
+        // The measure holds the font lock too (row 178): measured concurrently
+        // outside it, an italic job read the regular face's width (1 run in 20
+        // of `makeMeasurerIsSafeUnderConcurrency`, 11-19).
+        return withFontLookup {
+            Double(NSAttributedString(string: s, attributes: attrs).size().width)
+        }
     }
 }
 

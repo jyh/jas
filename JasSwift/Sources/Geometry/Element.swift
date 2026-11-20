@@ -12,13 +12,19 @@ func renderedTextWidth(_ s: String, family: String, weight: String, style: Strin
     var traits: NSFontDescriptor.SymbolicTraits = []
     if weight == "bold" { traits.insert(.bold) }
     if style == "italic" { traits.insert(.italic) }
-    let font: NSFont = withFontLookup {
+    // The lookup AND the measure hold the lock (row 178): with the measure
+    // outside it, a concurrent run intermittently measured an italic job in
+    // the REGULAR face (CI 4dc577dd: Georgia 14.162 pt read 79.364, the
+    // regular width, where Georgia-Italic is 80.477), 2 runs in 20 locally.
+    return withFontLookup {
         let baseFont = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
-        if traits.isEmpty { return baseFont }
-        let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
-        return NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
+        var font = baseFont
+        if !traits.isEmpty {
+            let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
+            font = NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
+        }
+        return Double(NSAttributedString(string: s, attributes: [.font: font]).size().width)
     }
-    return Double(NSAttributedString(string: s, attributes: [.font: font]).size().width)
     #else
     return Double(s.count) * size * approxCharWidthFactor
     #endif
