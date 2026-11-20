@@ -97,31 +97,45 @@ private func makeLayoutAndAddr() -> (WorkspaceLayout, PanelAddr) {
 
 @Test func opacityPanelDispatchToggleThumbnailsFlipsField() {
     var (layout, addr) = makeLayoutAndAddr()
+    let m = Model()
     #expect(layout.opacityPanel.thumbnailsHidden == false)
-    OpacityPanel.dispatch("toggle_opacity_thumbnails", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_opacity_thumbnails", addr: addr, layout: &layout, model: m)
     #expect(layout.opacityPanel.thumbnailsHidden == true)
-    OpacityPanel.dispatch("toggle_opacity_thumbnails", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_opacity_thumbnails", addr: addr, layout: &layout, model: m)
     #expect(layout.opacityPanel.thumbnailsHidden == false)
+}
+
+@Test func opacityPanelPreferencesToggleWithNoDocumentOpen() {
+    // With no document open the dock passes no model; the four panel-local
+    // toggles are the layout's and still flip (the native route did).
+    var (layout, addr) = makeLayoutAndAddr()
+    OpacityPanel.dispatch("toggle_opacity_thumbnails", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_new_masks_clipping", addr: addr, layout: &layout)
+    #expect(layout.opacityPanel.thumbnailsHidden == true)
+    #expect(layout.opacityPanel.newMasksClipping == false)
 }
 
 @Test func opacityPanelDispatchToggleOptionsFlipsField() {
     var (layout, addr) = makeLayoutAndAddr()
+    let m = Model()
     #expect(layout.opacityPanel.optionsShown == false)
-    OpacityPanel.dispatch("toggle_opacity_options", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_opacity_options", addr: addr, layout: &layout, model: m)
     #expect(layout.opacityPanel.optionsShown == true)
 }
 
 @Test func opacityPanelDispatchToggleNewMasksClippingFlipsFromDefaultTrue() {
     var (layout, addr) = makeLayoutAndAddr()
+    let m = Model()
     #expect(layout.opacityPanel.newMasksClipping == true)
-    OpacityPanel.dispatch("toggle_new_masks_clipping", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_new_masks_clipping", addr: addr, layout: &layout, model: m)
     #expect(layout.opacityPanel.newMasksClipping == false)
 }
 
 @Test func opacityPanelDispatchToggleNewMasksInvertedFlipsFromDefaultFalse() {
     var (layout, addr) = makeLayoutAndAddr()
+    let m = Model()
     #expect(layout.opacityPanel.newMasksInverted == false)
-    OpacityPanel.dispatch("toggle_new_masks_inverted", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("toggle_new_masks_inverted", addr: addr, layout: &layout, model: m)
     #expect(layout.opacityPanel.newMasksInverted == true)
 }
 
@@ -130,11 +144,12 @@ private func makeLayoutAndAddr() -> (WorkspaceLayout, PanelAddr) {
     // the document; they must not mutate panel-local state (which
     // governs UI chrome).
     var (layout, addr) = makeLayoutAndAddr()
+    let m = Model()
     let before = layout.opacityPanel
-    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout)
-    OpacityPanel.dispatch("release_opacity_mask", addr: addr, layout: &layout)
-    OpacityPanel.dispatch("disable_opacity_mask", addr: addr, layout: &layout)
-    OpacityPanel.dispatch("unlink_opacity_mask", addr: addr, layout: &layout)
+    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &layout, model: m)
+    OpacityPanel.dispatch("release_opacity_mask", addr: addr, layout: &layout, model: m)
+    OpacityPanel.dispatch("disable_opacity_mask", addr: addr, layout: &layout, model: m)
+    OpacityPanel.dispatch("unlink_opacity_mask", addr: addr, layout: &layout, model: m)
     #expect(before == layout.opacityPanel)
 }
 
