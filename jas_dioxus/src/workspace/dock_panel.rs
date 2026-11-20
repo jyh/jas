@@ -240,132 +240,14 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     // into the panel eval context, so Character-panel controls reflect
     // the selection. Falls back to panel-local state when nothing is
     // selected.
-    struct TextAttrs {
-        font_family: String,
-        font_size: f64,
-        font_weight: String,
-        font_style: String,
-        text_decoration: String,
-        text_transform: String,
-        font_variant: String,
-        baseline_shift: String,
-        line_height: String,
-        letter_spacing: String,
-        xml_lang: String,
-        aa_mode: String,
-        rotate: String,
-        horizontal_scale: String,
-        vertical_scale: String,
-        kerning: String,
-    }
-    let sel_text: Option<TextAttrs> = st.tab().and_then(|tab| {
-        let doc = tab.model.document();
-        doc.selection.first().and_then(|es| {
-            let elem = doc.get_element(&es.path)?;
-            match elem {
-                crate::geometry::element::Element::Text(t) => Some(TextAttrs {
-                    font_family: t.font_family.clone(),
-                    font_size: t.font_size,
-                    font_weight: t.font_weight.clone(),
-                    font_style: t.font_style.clone(),
-                    text_decoration: t.text_decoration.clone(),
-                    text_transform: t.text_transform.clone(),
-                    font_variant: t.font_variant.clone(),
-                    baseline_shift: t.baseline_shift.clone(),
-                    line_height: t.line_height.clone(),
-                    letter_spacing: t.letter_spacing.clone(),
-                    xml_lang: t.xml_lang.clone(),
-                    aa_mode: t.aa_mode.clone(),
-                    rotate: t.rotate.clone(),
-                    horizontal_scale: t.horizontal_scale.clone(),
-                    vertical_scale: t.vertical_scale.clone(),
-                    kerning: t.kerning.clone(),
-                }),
-                crate::geometry::element::Element::TextPath(tp) => Some(TextAttrs {
-                    font_family: tp.font_family.clone(),
-                    font_size: tp.font_size,
-                    font_weight: tp.font_weight.clone(),
-                    font_style: tp.font_style.clone(),
-                    text_decoration: tp.text_decoration.clone(),
-                    text_transform: tp.text_transform.clone(),
-                    font_variant: tp.font_variant.clone(),
-                    baseline_shift: tp.baseline_shift.clone(),
-                    line_height: tp.line_height.clone(),
-                    letter_spacing: tp.letter_spacing.clone(),
-                    xml_lang: tp.xml_lang.clone(),
-                    aa_mode: tp.aa_mode.clone(),
-                    rotate: tp.rotate.clone(),
-                    horizontal_scale: tp.horizontal_scale.clone(),
-                    vertical_scale: tp.vertical_scale.clone(),
-                    kerning: tp.kerning.clone(),
-                }),
-                _ => None,
-            }
-        })
-    });
+    // The law is the shared host's (`character_host::live_values`), so the
+    // panel body, the menu and the engine read one derivation.
     let cp = &st.character_panel;
-    if let Some(a) = sel_text {
-        let (u, s) = super::app_state::text_decoration_flags(&a.text_decoration);
-        // Numeric baseline-shift: only read when super/sub isn't set.
-        let bshift_pt = if a.baseline_shift == "super" || a.baseline_shift == "sub" {
-            0.0
-        } else {
-            super::app_state::parse_pt(&a.baseline_shift).unwrap_or(0.0)
-        };
-        // Leading: empty = Auto (120% of font_size), else parsed pt.
-        let leading_pt = if a.line_height.is_empty() {
-            a.font_size * 1.2
-        } else {
-            super::app_state::parse_pt(&a.line_height).unwrap_or(a.font_size * 1.2)
-        };
-        // Tracking: parse "Nem" → N*1000 (panel stores 1/1000 em).
-        let tracking_val = if a.letter_spacing.is_empty() {
-            0.0
-        } else {
-            super::app_state::parse_em_as_thousandths(&a.letter_spacing).unwrap_or(0.0)
-        };
-        let style_name = super::app_state::format_style_name(&a.font_weight, &a.font_style);
-        // Anti-aliasing: empty element field → panel default "Sharp".
-        let aa_mode_display = if a.aa_mode.is_empty() {
-            "Sharp".to_string()
-        } else {
-            a.aa_mode.clone()
-        };
-        m.insert("font_family".into(), J::String(a.font_family));
-        m.insert("font_size".into(), serde_json::json!(a.font_size));
-        m.insert("style_name".into(), J::String(style_name));
-        m.insert("underline".into(), J::Bool(u));
-        m.insert("strikethrough".into(), J::Bool(s));
-        m.insert("all_caps".into(), J::Bool(a.text_transform == "uppercase"));
-        m.insert("small_caps".into(), J::Bool(a.font_variant == "small-caps"));
-        m.insert("superscript".into(), J::Bool(a.baseline_shift == "super"));
-        m.insert("subscript".into(), J::Bool(a.baseline_shift == "sub"));
-        m.insert("baseline_shift".into(), serde_json::json!(bshift_pt));
-        m.insert("leading".into(), serde_json::json!(leading_pt));
-        m.insert("tracking".into(), serde_json::json!(tracking_val));
-        // Character rotation: parse degrees; empty → 0.
-        let rotation = a.rotate.parse::<f64>().unwrap_or(0.0);
-        // V/H scale: parse percent; empty → 100 (identity).
-        let h_scale = a.horizontal_scale.parse::<f64>().unwrap_or(100.0);
-        let v_scale = a.vertical_scale.parse::<f64>().unwrap_or(100.0);
-        // Kerning: named modes pass through to the panel combo_box
-        // verbatim; numeric "{N}em" converts to a plain "{N*1000}"
-        // string (1/1000 em is the panel's numeric unit). Empty
-        // element attribute shows as "Auto" — the spec default.
-        let kerning_display = match a.kerning.as_str() {
-            "" | "Auto" => "Auto".to_string(),
-            "Optical" | "Metrics" => a.kerning.clone(),
-            other => match super::app_state::parse_em_as_thousandths(other) {
-                Some(n) => super::app_state::fmt_num(n),
-                None => a.kerning.clone(),
-            }
-        };
-        m.insert("language".into(), J::String(a.xml_lang));
-        m.insert("anti_aliasing".into(), J::String(aa_mode_display));
-        m.insert("character_rotation".into(), serde_json::json!(rotation));
-        m.insert("horizontal_scale".into(), serde_json::json!(h_scale));
-        m.insert("vertical_scale".into(), serde_json::json!(v_scale));
-        m.insert("kerning".into(), J::String(kerning_display));
+    let live = st.tab()
+        .map(|tab| crate::interpreter::character_host::live_values(tab.model.document()))
+        .unwrap_or_default();
+    if !live.is_empty() {
+        m.extend(live);
     } else {
         m.insert("font_family".into(), J::String(cp.font_family.clone()));
         m.insert("font_size".into(), serde_json::json!(cp.font_size));

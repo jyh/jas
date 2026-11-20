@@ -89,6 +89,13 @@ state:
     description: >
       When true, the preview row (OPACITY_PREVIEW, LINK_INDICATOR,
       MASK_PREVIEW, and the mask-buttons column) is collapsed.
+  slider_shown:
+    type: bool
+    default: false
+    description: >
+      When true, the opacity slider row is revealed under row 1. The
+      chevron (op_disclosure) toggles it. Panel-local UI; the document is
+      unchanged.
   options_shown:
     type: bool
     default: false
@@ -226,11 +233,34 @@ content:
           icon: disclosure_right
           summary: "Opacity slider"
           description: >
-            Opens a popover containing a horizontal opacity slider bound
-            to panel.opacity.
+            Shows or hides the opacity slider row under this row (an
+            inline row rather than a popover, so every app draws it with
+            the kinds it already has).
           behavior:
             - event: click
-              action: open_opacity_slider_popover
+              action: toggle_opacity_slider
+
+    # ── Row 1b: the opacity slider, revealed by the chevron ─────
+    - type: container
+      id: op_slider_row
+      layout: row
+      bind:
+        visible: "panel.slider_shown"
+      children:
+        - id: op_opacity_slider
+          type: slider
+          col: 12
+          summary: "Opacity slider"
+          description: >
+            Drag to set the selection's opacity, 0-100%. Bound to the same
+            panel.opacity as the Opacity field, so a commit writes the
+            selection by the same law; with a mixed selection the value
+            is the panel's, as the field's is.
+          min: 0
+          max: 100
+          step: 1
+          bind:
+            value: "panel.opacity"
 
     # ── Row 2: Preview cells + Mask buttons ────────────────────
     - type: container
@@ -254,6 +284,15 @@ content:
             draw a persistent highlight on this preview while it is
             the active editing target (i.e., while
             ``editing_target_is_mask`` is false).
+          bind:
+            checked: "!editing_target_is_mask"
+          behavior:
+            - event: click
+              description: >-
+                Edit the element's content: the editing target leaves the
+                mask. View state on the document model, never journaled.
+              effects:
+                - doc.set_editing_target: { mask: "false" }
 
         - id: op_link_indicator
           type: icon_button
@@ -270,6 +309,10 @@ content:
           bind:
             icon: 'if selection_mask_linked then "link_linked" else "link_unlinked"'
             disabled: "!selection_has_mask"
+          behavior:
+            - event: click
+              effects:
+                - doc.op: { op: toggle_mask_linked }
 
         - id: op_mask_preview
           type: placeholder
@@ -288,6 +331,29 @@ content:
             persistent highlight on this preview while mask-editing
             is active (``editing_target_is_mask`` is true).
 
+            Shift-click toggles mask.disabled on every selected mask
+            (the document op toggle_mask_disabled). Alt-click toggles
+            mask isolation: the canvas renders only the first selected
+            element's mask subtree until a second Alt-click. A plain
+            click enters mask-editing. Neither the editing target nor
+            isolation is journaled.
+          bind:
+            checked: "editing_target_is_mask"
+            disabled: "!selection_has_mask"
+          behavior:
+            - event: click
+              condition: "event.shift"
+              effects:
+                - doc.op: { op: toggle_mask_disabled }
+            - event: click
+              condition: "event.alt and not event.shift"
+              effects:
+                - doc.toggle_mask_isolation: {}
+            - event: click
+              condition: "not event.shift and not event.alt"
+              effects:
+                - doc.set_editing_target: { mask: "true" }
+
         - type: container
           id: op_buttons_col
           layout: column
@@ -302,9 +368,22 @@ content:
                 Creates an opacity mask on the selected element(s), or
                 releases an existing mask. The label flips between
                 "Make Mask" and "Release" based on selection_has_mask
-                per OPACITY.md § States.
+                per OPACITY.md § States. A click with no mask on the
+                selection makes one on every selected element that has
+                none (an empty group as its subtree, linked, enabled),
+                its clip and invert taken from the panel's "New Opacity
+                Masks Are Clipping" and "... Are Inverted" preferences;
+                an element that already has a mask keeps it. A click when
+                the selection has a mask releases every selected mask.
+                Both are the one document op toggle_mask (release when
+                every selected element has a mask, else make), so every
+                app runs them the same way.
               bind:
                 label: 'if selection_has_mask then "Release" else "Make Mask"'
+              behavior:
+                - event: click
+                  effects:
+                    - doc.op: { op: toggle_mask, clip: "panel.new_masks_clipping", invert: "panel.new_masks_inverted" }
 
             - id: op_clip
               type: checkbox
@@ -316,6 +395,14 @@ content:
               bind:
                 disabled: "!selection_has_mask"
                 checked: "selection_mask_clip"
+              behavior:
+                - event: change
+                  description: >-
+                    This behavior owns the press: event.value is the new checked
+                    state, and every selected mask takes it (the document op
+                    set_mask_clip). An element with no mask is skipped.
+                  effects:
+                    - doc.op: { op: set_mask_clip, clip: "event.value" }
 
             - id: op_invert_mask
               type: checkbox
@@ -327,3 +414,11 @@ content:
               bind:
                 disabled: "!selection_has_mask"
                 checked: "selection_mask_invert"
+              behavior:
+                - event: change
+                  description: >-
+                    This behavior owns the press: event.value is the new checked
+                    state, and every selected mask takes it (the document op
+                    set_mask_invert). An element with no mask is skipped.
+                  effects:
+                    - doc.op: { op: set_mask_invert, invert: "event.value" }

@@ -25,7 +25,7 @@ private func opLiteral(_ v: Value) -> Any? {
 /// verbatim. A path or a list passes as its index array (`opApply`'s path
 /// form, never the store's `__path__` marker); a null as `NSNull`. Rust
 /// `doc_op_args` and the reference's `doc.op` arm are the same.
-private func docOpArgs(_ spec: [String: Any], context: [String: Any]) -> [String: Any] {
+func docOpArgs(_ spec: [String: Any], context: [String: Any]) -> [String: Any] {
     var op: [String: Any] = [:]
     for (k, v) in spec {
         guard k != "op", let expr = v as? String else { op[k] = v; continue }

@@ -15,7 +15,7 @@
 #
 # Shared with Scale and Rotate: state.transform_reference_point
 # (cleared on selection change); reference_point_cross overlay;
-# tool_options_dialog_on_alt_click toolbar dispatcher.
+# and the Alt-click that opens shear_options, written in on_mouseup below.
 
 id: shear
 cursor: crosshair
@@ -23,7 +23,6 @@ menu_label: "Shear Tool"
 shortcut: "Shift+S"
 # No shortcut — Shear is the toolbar alternate of Scale.
 tool_options_dialog: "shear_options"
-tool_options_dialog_on_alt_click: true
 
 state:
   mode:

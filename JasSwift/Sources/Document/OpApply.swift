@@ -2122,6 +2122,31 @@ public func opApply(
         controller.lockSelection()
     case "unlock_all":
         controller.unlockAll()
+    // Row 169: the opacity-mask verbs by name (`doc.op`), each the Controller
+    // law the Opacity panel's Make Mask / Release run; `clip` and `invert`
+    // default false. Rust `op_apply` the same.
+    case "make_mask":
+        controller.makeMaskOnSelection(clip: op["clip"] as? Bool ?? false, invert: op["invert"] as? Bool ?? false)
+    case "release_mask":
+        controller.releaseMaskOnSelection()
+    // Make Mask / Release as ONE verb: release when every selected element has
+    // a mask (`selectionHasMask`), else make. Rust `op_apply` the same.
+    // The Opacity menu's Disable / Unlink Opacity Mask (row 172). Rust the same.
+    // The Opacity panel's Clip and Invert Mask checkboxes (row 169 slice 2).
+    case "set_mask_clip":
+        controller.setMaskClipOnSelection(op["clip"] as? Bool ?? false)
+    case "set_mask_invert":
+        controller.setMaskInvertOnSelection(op["invert"] as? Bool ?? false)
+    case "toggle_mask_disabled":
+        controller.toggleMaskDisabledOnSelection()
+    case "toggle_mask_linked":
+        controller.toggleMaskLinkedOnSelection()
+    case "toggle_mask":
+        if selectionHasMask(model.document) {
+            controller.releaseMaskOnSelection()
+        } else {
+            controller.makeMaskOnSelection(clip: op["clip"] as? Bool ?? false, invert: op["invert"] as? Bool ?? false)
+        }
     case "hide_selection":
         controller.hideSelection()
     case "show_all":

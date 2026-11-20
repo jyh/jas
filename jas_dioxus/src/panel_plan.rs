@@ -304,6 +304,19 @@ fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<Str
         }
         return out;
     }
+    // WIDGET_EVENTS.md §Showing a number (row 183): a `number_input` shows its
+    // number through `fmt_num` (at most four decimals, trailing zeros gone),
+    // as the web and the Mac do; the stored value is not rounded. Before this
+    // the canonical text carried float noise (`15.999975000000001`).
+    if node.get("type").and_then(Value::as_str) == Some("number_input") {
+        if let Some(n) = values.get("bind.value").and_then(Value::as_str)
+            .and_then(|s| s.parse::<f64>().ok()).filter(|n| n.is_finite())
+        {
+            out.insert("bind.value".to_string(),
+                       Value::String(crate::interpreter::character_host::fmt_num(n)));
+        }
+        return out;
+    }
     if node.get("type").and_then(Value::as_str) != Some("length_input") {
         return out;
     }
@@ -802,12 +815,29 @@ fn canonical_tabs_node(node: &Value, scope: &Value) -> Value {
 /// evaluates its visibility in the item's scope and drops it itself (the
 /// Layers rename field, the Artboards rename field), so its path is still
 /// listed as hidden and its rows are not reported unjoined.
+/// Whether a bind row's value is false under `to_bool` (expr_types.rs), the
+/// truthiness the layout pass hides a node by. A row carries its canonical
+/// `(type, value)` pair (`bind_values::canon_value`); one without a type is
+/// read as the literal it is.
+fn row_is_falsy(r: &Value) -> bool {
+    let v = r["value"].as_str().unwrap_or("");
+    match r["type"].as_str() {
+        Some("null") => true,
+        Some("bool") => v == "false",
+        Some("number") => v.parse::<f64>().is_ok_and(|n| n == 0.0),
+        Some("string") => v.is_empty(),
+        Some("list") | Some("path") => v == "[]",
+        Some(_) => false,
+        None => v == "false",
+    }
+}
+
 pub(crate) fn laid_out_node(panel_node: &Value, rows: &Value) -> (Value, Vec<Vec<i64>>) {
     let mut node = panel_node.clone();
     let mut hidden: Vec<Vec<i64>> = vec![];
     for r in rows.as_array().into_iter().flatten() {
         let key = r["key"].as_str().unwrap_or("");
-        if !(key == "bind.visible" || key == "visible") || r["value"] != json!("false") {
+        if !(key == "bind.visible" || key == "visible") || !row_is_falsy(r) {
             continue;
         }
         let path = path_of(&r["path"]);
@@ -1047,6 +1077,33 @@ pub(crate) mod checks {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod hidden_set_tests {
+    use serde_json::json;
+
+    /// Row 176: the plan's hidden set reads a row's visibility by `to_bool`,
+    /// the layout pass's own truthiness (`panel_layout::visible_children`).
+    /// Until 2026-11-19 only the literal "false" hid a node, so a visible bind
+    /// that evaluated NULL (a scope without its key) was laid out by neither
+    /// pass and reported as a lost row (found by #1003's slider row).
+    #[test]
+    fn a_falsy_visible_row_of_any_type_hides_its_node() {
+        let cases = [
+            ("null", "", true), ("bool", "false", true), ("number", "0", true),
+            ("string", "", true), ("list", "[]", true),
+            ("bool", "true", false), ("number", "3", false), ("string", "x", false),
+        ];
+        let children: Vec<_> = cases.iter().map(|_| json!({"type": "container"})).collect();
+        let panel = json!({"content": {"type": "container", "children": children}});
+        let rows: Vec<_> = cases.iter().enumerate().map(|(i, (ty, v, _))|
+            json!({"path": [i], "id": "", "key": "bind.visible", "type": ty, "value": v})).collect();
+        let (_, hidden) = super::laid_out_node(&panel, &json!(rows));
+        for (i, (ty, v, want)) in cases.iter().enumerate() {
+            assert_eq!(hidden.contains(&vec![i as i64]), *want, "{ty} {v:?}");
+        }
     }
 }
 
@@ -2255,17 +2312,38 @@ mod tests {
     /// The channel does not leak: a kind whose value needs no core formatting
     /// carries an EMPTY display map, so a shell reading `display` first never
     /// shadows a value with a stale or invented one.
+    ///
+    /// ⚠️ This arm's subject was `number_input` until row 183 (WIDGET_EVENTS.md
+    /// §Showing a number), which gave that kind a display rule; a `text_input`
+    /// shows its text verbatim and is the kind that needs none.
     #[test]
     fn a_kind_that_needs_no_core_formatting_carries_an_empty_display_map() {
         let panel = json!({"content": {"type": "col", "children": [
-            {"type": "number_input", "id": "plain", "unit": "pt", "bind": {"value": "panel.v"}},
+            {"type": "text_input", "id": "plain", "bind": {"value": "panel.v"}},
         ]}});
-        let ctx = json!({"panel": {"v": 12.0}});
+        let ctx = json!({"panel": {"v": "Layer 1.50"}});
         let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         assert_eq!(plan["leaves"][0]["display"], json!({}), "{plan}");
         // The control: the same node DOES carry the resolved value, so the
         // empty display above is a scoping decision and not a dead walk.
-        assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("12"), "{plan}");
+        assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("Layer 1.50"), "{plan}");
+    }
+
+    /// Row 183: a `number_input` carries `display["bind.value"]`, the number by
+    /// the shared rule (`fmt_num`: at most four decimals, trailing zeros gone),
+    /// beside its canonical `values`, which stays unrounded.
+    #[test]
+    fn a_number_input_carries_its_shown_number_in_display() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "number_input", "id": "n", "bind": {"value": "panel.v"}},
+        ]}});
+        for (v, shown) in [(12.0, "12"), (15.999975000000001, "16"), (14.399999999999999, "14.4")] {
+            let ctx = json!({"panel": {"v": v}});
+            let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
+            assert_eq!(plan["leaves"][0]["display"]["bind.value"], json!(shown), "{v}: {plan}");
+            assert_eq!(plan["leaves"][0]["values"]["bind.value"].as_str().and_then(|t| t.parse::<f64>().ok()),
+                       Some(v), "{v}: the canonical value is not rounded");
+        }
     }
 
     /// THE COLOUR BAR'S PICTURE RIDES ON THE PLAN (STATUS-flask §249). A

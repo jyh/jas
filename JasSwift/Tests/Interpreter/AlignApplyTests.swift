@@ -167,6 +167,11 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         "swatch.save_library",
         // Save Gradient Library's confirm (2026-11-17, design §2).
         "gradient.save_library",
+        // A panel body's `doc.op` (2026-11-19, row 169 slice 1b): the Opacity
+        // mask column's declared acts, until then four native intercepts.
+        "doc.op",
+        // The Opacity previews' view-state acts (2026-11-19, row 169 slice 3).
+        "doc.set_editing_target", "doc.toggle_mask_isolation",
     ]
     // THIS ASSERTION IS THE REGISTRY GATE IN EMBRYO, and it is worth saying so.
     // It compares the built map against a HAND-MAINTAINED literal, which catches

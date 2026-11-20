@@ -3288,6 +3288,40 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
                                           key: (k?.isEmpty ?? true) ? nil : k)
             return nil
         },
+        // A panel body's `doc.op` (row 169 slice 1b): the Opacity mask column
+        // declares its acts as document ops, and this table, which every
+        // panel body's route builds, had no `doc.op`, so on the Mac those
+        // clicks changed nothing behind native intercepts. The same law as
+        // the Layers table's handler: the caller's scope over the store's.
+        "doc.op": { value, callCtx, _ in
+            guard let spec = value as? [String: Any], spec["op"] is String else { return nil }
+            opApply(model, Controller(model: model),
+                    docOpArgs(spec, context: model.stateStore.evalContext(extra: callCtx)))
+            return nil
+        },
+        // The Opacity panel's two previews (row 169 slice 3): VIEW STATE on the
+        // Model, never a document op, so neither journals. Rust's
+        // `doc.set_editing_target` / `doc.toggle_mask_isolation` arms.
+        "doc.set_editing_target": { value, callCtx, _ in
+            let spec = value as? [String: Any] ?? [:]
+            let mask: Bool = {
+                if let e = spec["mask"] as? String {
+                    return evaluate(e, context: model.stateStore.evalContext(extra: callCtx)).toBool()
+                }
+                return spec["mask"] as? Bool ?? false
+            }()
+            if mask, let path = model.document.selection.first?.path {
+                model.editingTarget = .mask(path)
+            } else {
+                model.editingTarget = .content
+            }
+            return nil
+        },
+        "doc.toggle_mask_isolation": { _, _, _ in
+            model.maskIsolationPath = model.maskIsolationPath == nil
+                ? model.document.selection.first?.path : nil
+            return nil
+        },
         "snapshot": { _, _, _ in
             // OP_LOG.md Increment 1: NO-OP on this map. These panel actions
             // (align / boolean / swatch) are dispatched through `runEffects`

@@ -6,8 +6,8 @@ displayed tab title resolves through the i18n key `panel_title.opacity`
 
 - MODE_DROPDOWN selects the mode
 - OPACITY_INPUT is a numeric field for the opacity of the selection (0-100%), with direct text entry and arrow-key stepping
-- OPACITY_DISCLOSURE is a chevron that opens a popover containing OPACITY_SLIDER
-- OPACITY_SLIDER (inside the OPACITY_DISCLOSURE popover) allows setting the opacity by dragging, from 0-100%
+- OPACITY_DISCLOSURE is a chevron that shows or hides an inline row under row 1 containing OPACITY_SLIDER (`panel.slider_shown`; an inline row rather than a popover, decided 2026-11-19, STATUS-jas row 175)
+- OPACITY_SLIDER (in the row the OPACITY_DISCLOSURE reveals) is bound to the same `panel.opacity` as OPACITY_INPUT and allows setting the opacity by dragging, from 0-100%
 - OPACITY_PREVIEW shows a preview of the selection
 - MASK_PREVIEW shows a preview of masked opacity
 - LINK_INDICATOR is a small icon between OPACITY_PREVIEW and MASK_PREVIEW showing whether the mask is linked to the element's transform; clicking it toggles the link state

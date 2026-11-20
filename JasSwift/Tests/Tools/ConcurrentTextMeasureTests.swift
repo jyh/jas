@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 @testable import JasLib
 
 // STATUS-jas row 140. Swift Testing runs tests on several threads at once, and
@@ -77,9 +78,10 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
     #expect(got != nil, "renderedTextWidth did not finish on 8 threads within 30 s (a deadlock)")
     guard let got else { return }
     #expect(got.count == js.count)
+    let failuresBefore = faceLookupFailures()
     for j in js {
         let serial = renderedTextWidth("Row 140 Wq", family: j.family, weight: j.weight, style: j.style, size: j.size)
-        #expect(got[j] == serial, "concurrent and serial widths differ for \(j)")
+        #expect(got[j] == serial, "concurrent and serial widths differ for \(j); face lookups that fell back to the base face so far: \(faceLookupFailures() - failuresBefore)")
     }
     // CONTROL: the instrument can tell two sizes apart, so equality above is not vacuous.
     #expect(renderedTextWidth("Wq", family: "Helvetica", weight: "normal", style: "normal", size: 10)
@@ -98,4 +100,58 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
         let serial = makeMeasurer(family: j.family, weight: j.weight, style: j.style, size: j.size)("Row 140 Wq")
         #expect(got[j] == serial, "concurrent and serial widths differ for \(j)")
     }
+}
+
+/// Row 178: an italic lookup never silently measures the REGULAR face. CI's
+/// 4dc577dd red read Georgia-Italic concurrently and Georgia regular serially
+/// (79.364 vs 80.477 at 14.162 pt, measured), so the italic descriptor lookup
+/// can fail and `renderedTextWidth` substituted the base font. Serial, many
+/// times: every measure must equal the width of the face the family names.
+@Test func anItalicMeasureIsAlwaysTheItalicFace() {
+    let size = 14.161999999999999
+    guard let italic = NSFont(name: "Georgia-Italic", size: CGFloat(size)) else { return }
+    let want = Double(NSAttributedString(string: "Row 140 Wq", attributes: [.font: italic]).size().width)
+    var wrong = 0
+    for _ in 0..<200 {
+        let got = renderedTextWidth("Row 140 Wq", family: "Georgia", weight: "normal", style: "italic", size: size)
+        if got != want { wrong += 1 }
+    }
+    #expect(wrong == 0, "\(wrong) of 200 italic measures were not the italic face")
+}
+
+// STATUS-jas row 188. CI has read a SERIAL width in the BASE face for an italic
+// or bold job (Georgia italic 11-19; Helvetica bold+italic 11-20, 74.781 for
+// the 76.936 of Helvetica-Bold): the trait lookup came back nil and the width
+// was the base face's, with nothing said. A nil lookup is now retried once,
+// and a second nil is COUNTED and logged before the base face is measured.
+// The lookup is injected so these arms do not depend on the flake.
+
+@Test func aTraitLookupThatFailsOnceIsRetried() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    var calls = 0
+    let before = faceLookupFailures()
+    let face = withFontLookup {
+        faceWithTraits(base, [.bold, .italic], size: 13) { desc, size in
+            calls += 1
+            return calls == 1 ? nil : NSFont(descriptor: desc, size: size)
+        }
+    }
+    #expect(calls == 2, "a nil lookup is tried once more")
+    #expect(face.fontName == "Helvetica-BoldOblique", "the retry's face is measured, not the base: \(face.fontName)")
+    #expect(faceLookupFailures() == before, "a retry that succeeds is not a failure")
+}
+
+@Test func aTraitLookupThatNeverFindsAFaceIsCounted() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let before = faceLookupFailures()
+    let face = withFontLookup { faceWithTraits(base, [.italic], size: 13) { _, _ in nil } }
+    #expect(face.fontName == base.fontName, "with no face the base is what is left")
+    #expect(faceLookupFailures() >= before + 1, "the fallback is counted, not silent")
+}
+
+@Test func noTraitsIsTheBaseFaceWithNoLookup() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    var calls = 0
+    let face = withFontLookup { faceWithTraits(base, [], size: 13) { _, _ in calls += 1; return nil } }
+    #expect(calls == 0 && face == base)
 }

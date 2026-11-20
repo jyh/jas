@@ -2158,6 +2158,11 @@ unsafe fn jas_dispatch_action_inner(
                 crate::panel_scope::sync_gradient_state(
                     &mut engine.store.borrow_mut(), &engine.model.borrow(), fill_on_top);
             }
+            // The Character menu's toggles negate `panel.<key>` (§944).
+            if pid == crate::interpreter::character_host::CHARACTER_PANEL {
+                crate::panel_scope::sync_character_state(
+                    &mut engine.store.borrow_mut(), &engine.model.borrow());
+            }
             panel_ctx(engine, &ws, pid)
         }
         None => {
@@ -6795,6 +6800,489 @@ mod tests {
         e
     }
 
+    /// Row 169 slice 1: MAKE MASK IS A YAML ACT. On Windows the click reached
+    /// the door and was refused `EmptyBehavior op_make_mask` (flask, 11-19), so
+    /// no mask could exist and the whole mask column was unreachable. A click
+    /// now makes a mask on the selection (clip and invert from the panel's
+    /// new-mask preferences), the label reads "Release", the mask controls
+    /// enable, and a second click releases it.
+    #[test]
+    fn make_mask_makes_then_releases_through_the_panel_door() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let masked = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .map(|cs| cs.iter().filter(|c| c.common().mask.is_some()).count()).unwrap_or(0);
+        assert_eq!(masked(e), 0, "fixture: no mask before the click");
+        assert_eq!(leaf(e, OP, "op_make_mask")["values"]["bind.label"], "Make Mask");
+        let (reply, err) = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert!(!reply.is_empty(), "Make Mask was refused: {err}");
+        assert_eq!(masked(e), 2, "both selected rects gain a mask");
+        assert_eq!(leaf(e, OP, "op_make_mask")["values"]["bind.label"], "Release");
+        // Plan values carry a bind's result as its text.
+        assert_eq!(leaf(e, OP, "op_clip")["values"]["bind.disabled"], "false", "the mask controls enable");
+        let (reply, err) = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert!(!reply.is_empty(), "Release was refused: {err}");
+        assert_eq!(masked(e), 0, "the second click releases");
+        assert_eq!(leaf(e, OP, "op_make_mask")["values"]["bind.label"], "Make Mask");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 169 slice 2: CLIP, INVERT MASK AND THE LINK INDICATOR ACT. After #996
+    /// they were enabled on the box and changed nothing (flask §937): no YAML
+    /// behavior. A checkbox's `change` carries the new checked state as
+    /// `event.value` (gradient's Dither, the precedent); the link indicator's
+    /// click toggles. Each writes every selected mask.
+    #[test]
+    fn the_mask_controls_change_the_selected_masks() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let masks = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .map(|cs| cs.iter().filter_map(|c| c.common().mask.as_ref().map(|m| (m.clip, m.invert, m.linked))).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert_eq!(masks(e), vec![(true, false, true); 2], "fixture: two masks at the declared defaults");
+        for (ev, want) in [
+            (r#"{"widget":"op_clip","event":"change","value":false}"#, (false, false, true)),
+            (r#"{"widget":"op_invert_mask","event":"change","value":true}"#, (false, true, true)),
+            (r#"{"widget":"op_link_indicator","event":"click"}"#, (false, true, false)),
+            (r#"{"widget":"op_clip","event":"change","value":true}"#, (true, true, false)),
+        ] {
+            let (reply, err) = behave(e, OP, ev);
+            assert!(!reply.is_empty(), "{ev} was refused: {err}");
+            assert_eq!(masks(e), vec![want; 2], "after {ev}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 172: EVERY LIVE OPACITY MENU ITEM RUNS IN THE ENGINE. Until 11-19 all
+    /// ten read `UnknownAction` through the panel door (probed), because they
+    /// named commands only the web's and the Mac's native dispatch knew. Sent
+    /// by index, as the Windows shell sends them (opacity.yaml `menu:`). The two
+    /// page-blending items (11, 12) are pending a renderer and are not here.
+    #[test]
+    fn every_live_opacity_menu_item_runs_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let item = |e, at: u32| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{OP}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        };
+        let panel = |e, k: &str| engine_of(e).store.borrow().get_panel(OP, k).clone();
+        let mask = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .and_then(|cs| cs.first().and_then(|c| c.common().mask.as_ref().map(|m| (m.disabled, m.linked))));
+        for (at, key) in [(0, "thumbnails_hidden"), (1, "options_shown")] {
+            let before = panel(e, key);
+            item(e, at);
+            assert_ne!(panel(e, key), before, "menu item {at} did not flip {key}");
+        }
+        assert_eq!(mask(e), None, "fixture: no mask yet");
+        item(e, 3);
+        assert_eq!(mask(e), Some((false, true)), "Make Opacity Mask: enabled and linked");
+        item(e, 5);
+        assert_eq!(mask(e), Some((true, true)), "Disable Opacity Mask");
+        item(e, 6);
+        assert_eq!(mask(e), Some((true, false)), "Unlink Opacity Mask");
+        item(e, 4);
+        assert_eq!(mask(e), None, "Release Opacity Mask");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 169 slice 3: THE TWO OPACITY PREVIEWS ACT IN THE ENGINE. They were
+    /// `placeholder` leaves with no `behavior:`; their acts and highlight lived
+    /// only in the web's and the Mac's native code, so Windows could not run or
+    /// draw them. A plain click on the mask preview edits the mask, on the
+    /// content preview edits the content; Shift toggles `mask.disabled`; Alt
+    /// toggles mask isolation. `bind.checked` is the highlight, read off the plan.
+    #[test]
+    fn the_opacity_previews_act_in_the_engine() {
+        use crate::document::model::EditingTarget;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let checked = |e, w: &str| leaf(e, OP, w)["values"]["bind.checked"].clone();
+        let target = |e| engine_of(e).model.borrow().editing_target.clone();
+        let isolation = |e| engine_of(e).model.borrow().mask_isolation_path.clone();
+        let disabled = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .and_then(|cs| cs.first().and_then(|c| c.common().mask.as_ref().map(|m| m.disabled)));
+        let click = |e, w: &str, mods: &str| {
+            let (reply, err) = behave(e, OP, &format!(r#"{{"widget":"{w}","event":"click"{mods}}}"#));
+            assert!(!reply.is_empty(), "{w}{mods} was refused: {err}");
+        };
+
+        assert_eq!(leaf(e, OP, "op_mask_preview")["values"]["bind.disabled"], "true",
+                   "no mask yet: the mask preview is disabled");
+        assert_eq!((checked(e, "op_preview"), checked(e, "op_mask_preview")), ("true".into(), "false".into()),
+                   "the content preview is the highlighted target");
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let first = engine_of(e).model.borrow().document().selection[0].path.clone();
+
+        click(e, "op_mask_preview", "");
+        assert_eq!(target(e), EditingTarget::Mask(first.clone()), "a plain click edits the mask");
+        assert_eq!((checked(e, "op_preview"), checked(e, "op_mask_preview")), ("false".into(), "true".into()));
+        click(e, "op_preview", "");
+        assert_eq!(target(e), EditingTarget::Content, "the content preview edits the content");
+
+        click(e, "op_mask_preview", r#","shift":true"#);
+        assert_eq!(disabled(e), Some(true), "Shift toggles mask.disabled");
+        assert_eq!(target(e), EditingTarget::Content, "and leaves the target");
+        click(e, "op_mask_preview", r#","alt":true"#);
+        assert_eq!(isolation(e), Some(first.clone()), "Alt isolates the mask");
+        assert_eq!(target(e), EditingTarget::Content, "and leaves the target");
+        click(e, "op_mask_preview", r#","alt":true"#);
+        assert_eq!(isolation(e), None, "Alt again exits isolation");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 177: a disabled placeholder REFUSES its click by name, as any
+    /// disabled widget does (WIDGET_EVENTS.md), and the document is unchanged.
+    /// The mask preview is disabled until the selection has a mask.
+    #[test]
+    fn a_disabled_placeholder_refuses_its_click() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        assert_eq!(leaf(e, OP, "op_mask_preview")["values"]["bind.disabled"], "true", "the control");
+        let before = doc_json(e);
+        let (reply, err) = behave(e, OP, r#"{"widget":"op_mask_preview","event":"click"}"#);
+        assert!(reply.is_empty(), "a disabled click was accepted: {reply}");
+        assert!(err.contains("Disabled"), "refused, but not by name: {err}");
+        assert_eq!(doc_json(e), before);
+        assert_eq!(engine_of(e).model.borrow().editing_target,
+                   crate::document::model::EditingTarget::Content, "the target is unchanged");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 173: EVERY LIVE CHARACTER MENU ITEM RUNS IN THE ENGINE. Until 11-19
+    /// the five toggles read `UnknownAction` through the panel door: they named
+    /// commands only the web's and the Mac's native dispatch knew, while
+    /// `action_refs_baseline.json` called them "no-op in every app". Sent by
+    /// index, as the Windows shell sends them (character.yaml `menu:`; the
+    /// separators count). Read off the ELEMENT, never through the host.
+    #[test]
+    fn every_live_character_menu_item_runs_in_the_engine() {
+        use crate::geometry::element::Element;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let item = |e, at: u32| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{CHARACTER}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        };
+        let case = |e| engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter().find_map(|es| match doc.get_element(&es.path) {
+                Some(Element::Text(t)) =>
+                    Some((t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone())),
+                _ => None,
+            }).expect("the fixture selects a text element")
+        });
+        let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        assert_eq!(case(e), s("", "", ""), "the control: no case or shift");
+        item(e, 2);
+        assert_eq!(case(e), s("uppercase", "", ""), "All Caps");
+        item(e, 3);
+        assert_eq!(case(e), s("", "small-caps", ""), "Small Caps clears All Caps");
+        item(e, 4);
+        assert_eq!(case(e), s("", "small-caps", "super"), "Superscript");
+        item(e, 5);
+        assert_eq!(case(e), s("", "small-caps", "sub"), "Subscript clears Superscript");
+        item(e, 5);
+        assert_eq!(case(e), s("", "small-caps", ""), "Subscript again turns it off");
+        item(e, 3);
+        assert_eq!(case(e), s("", "", ""), "Small Caps again turns it off");
+        let snap = |e| engine_of(e).store.borrow().get_panel(CHARACTER, "snap_to_glyph_visible").clone();
+        let before = snap(e);
+        item(e, 0);
+        assert_ne!(snap(e), before, "Show Snap to Glyph Options did not flip");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// STATUS-flask §944: THE EXCLUSION MUST REACH WHAT A PERSON SEES, NOT ONLY
+    /// THE DOCUMENT. After All Caps then Small Caps the element was right
+    /// (`small-caps`, no transform) while the menu and the panel still checked
+    /// All Caps: the scope read the store, and a toggle writes one key and never
+    /// clears its sibling. Since a toggle writes the NEGATION of what it reads,
+    /// the stale key also made the next All Caps a dead click (`not true`).
+    /// The scope now derives the fields from the selection, as Properties and
+    /// Paragraph do. Driven both ways, for both pairs (W2b-7: the forward
+    /// direction is the one an oracle naturally tests).
+    #[test]
+    fn an_exclusive_character_toggle_unchecks_its_sibling_and_the_next_click_acts() {
+        use crate::geometry::element::Element;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        // flask's setup: one point text, Select All.
+        let e = engine_on("setup_text_hello.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let item = |e, at: u32| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{CHARACTER}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        };
+        let case = |e| engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter().find_map(|es| match doc.get_element(&es.path) {
+                Some(Element::Text(t)) =>
+                    Some((t.text_transform.clone(), t.font_variant.clone(), t.baseline_shift.clone())),
+                _ => None,
+            }).expect("the fixture selects a text element")
+        });
+        // [All Caps, Small Caps, Superscript, Subscript], from the menu the
+        // shell draws and from the scope the panel's toggles bind.
+        let menu = |e| {
+            let (rows, err) = panel_menu(e, CHARACTER);
+            assert!(err.is_empty(), "{err}");
+            [2, 3, 4, 5].map(|i| rows[i]["checked"] == true)
+        };
+        let panel = |e| {
+            let scope = engine_scope_of(engine_of(e), CHARACTER);
+            ["all_caps", "small_caps", "superscript", "subscript"]
+                .map(|k| scope["panel"][k] == true)
+        };
+        let both = |e, want: [bool; 4], what: &str| {
+            assert_eq!(menu(e), want, "the menu's checks, {what}");
+            assert_eq!(panel(e), want, "the panel's toggles, {what}");
+        };
+        let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+        both(e, [false; 4], "the control: nothing checked");
+        item(e, 2);
+        item(e, 3);
+        assert_eq!(case(e), s("", "small-caps", ""), "the document was already right");
+        both(e, [false, true, false, false], "after All Caps then Small Caps");
+        item(e, 2);
+        assert_eq!(case(e), s("uppercase", "", ""), "All Caps again acts (it was a dead click)");
+        both(e, [true, false, false, false], "after Small Caps then All Caps");
+        item(e, 4);
+        item(e, 5);
+        assert_eq!(case(e), s("uppercase", "", "sub"), "Subscript clears Superscript");
+        both(e, [true, false, false, true], "after Superscript then Subscript");
+        item(e, 4);
+        assert_eq!(case(e), s("uppercase", "", "super"), "Superscript again acts");
+        both(e, [true, false, true, false], "after Subscript then Superscript");
+        // The panel's own toggle, after the menu set its sibling: Small Caps
+        // from the menu, then the All Caps CHECKBOX.
+        item(e, 3);
+        both(e, [false, true, true, false], "after All Caps then Small Caps, again");
+        let (reply, err) = behave(e, CHARACTER, r#"{"widget":"ch_all_caps","event":"click"}"#);
+        assert!(!reply.is_empty(), "the All Caps toggle was refused: {err}");
+        assert_eq!(case(e), s("uppercase", "", "super"), "the panel's All Caps toggle acts");
+        both(e, [true, false, true, false], "after the All Caps toggle");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 182 (flask §946): an Alt-click on the mask preview toggles mask
+    /// isolation, and the door answered `Unchanged` both times, because the
+    /// change test compared neither `mask_isolation_path` nor `editing_target`.
+    /// A shell that redraws on a change never learned of it. Both directions.
+    #[test]
+    fn the_door_reports_a_mask_isolation_change() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let isolation = |e| engine_of(e).model.borrow().mask_isolation_path.clone();
+        assert_eq!(isolation(e), None, "the control: not isolated");
+        for (want_isolated, what) in [(true, "Alt isolates"), (false, "Alt again exits")] {
+            let (reply, err) = behave(e, OP, r#"{"widget":"op_mask_preview","event":"click","alt":true}"#);
+            assert!(!reply.is_empty(), "{what}: refused: {err}");
+            assert_eq!(isolation(e).is_some(), want_isolated, "{what}: the model");
+            // The verdict rides the error channel (`{"panel_event":"Unchanged"}`),
+            // not the reply: a needle on the reply passed this arm before the fix.
+            assert!(!err.contains("Unchanged"), "{what}: the door called it Unchanged: {err}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 185: the Windows frame DRAWS mask isolation. An Alt-click on the
+    /// mask preview isolates the mask, and the native frame (`emit_frame`, the
+    /// shell's renderer) then hides the content and shows only the mask subtree, as the web canvas
+    /// does; a second Alt-click restores the document. Before this row the
+    /// frame read no isolation state, so the model changed and the canvas did not.
+    #[test]
+    fn the_native_frame_draws_mask_isolation() {
+        use crate::geometry::element::Color;
+        use crate::painter::recording::{Command, RecordingPainter};
+        use crate::painter::Brush;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        let colors = |e| {
+            let mut p = RecordingPainter::new();
+            crate::ffi_pointer::emit_frame(engine_of(e), &mut p);
+            let mut out = Vec::new();
+            for c in p.commands() {
+                if let Command::FillPath { brush: Brush::Solid(col), .. } | Command::FillRect { brush: Brush::Solid(col), .. } = c {
+                    out.push(*col);
+                }
+            }
+            out
+        };
+        let (red, blue) = (Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0));
+        let before = colors(e);
+        assert!(before.contains(&red) && before.contains(&blue), "the control: both masked rects draw: {before:?}");
+        let alt = r#"{"widget":"op_mask_preview","event":"click","alt":true}"#;
+        let _ = behave(e, OP, alt);
+        assert!(engine_of(e).model.borrow().mask_isolation_path.is_some(), "Alt isolates");
+        let isolated = colors(e);
+        // Make Mask gives each rect an EMPTY mask, so the isolated canvas shows
+        // neither rect (a drawing subtree is `document::paint`'s unit test).
+        assert!(!isolated.contains(&red) && !isolated.contains(&blue),
+                "isolated: the content is hidden: {isolated:?}");
+        let _ = behave(e, OP, alt);
+        assert_eq!(colors(e), before, "Alt again: the document is back as it was");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 183 (WIDGET_EVENTS.md §Showing a number): a `number_input` shows its
+    /// bound number through `fmt_num`, at most four decimals and no float noise.
+    /// flask §947 3(a): with `text_basic.svg` selected (font-size 21.3333 px,
+    /// 15.999975 pt) the plan's `ch_font_size` read `15.999975000000001`.
+    #[test]
+    fn a_number_input_in_the_plan_shows_its_number_without_float_noise() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("text_basic.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        // What a shell SHOWS: `display` over `values` (sb_winui `PanelWire.DisplayText`).
+        let shown = |id: &str| leaf(e, CHARACTER, id)["display"]["bind.value"].as_str()
+            .unwrap_or_else(|| panic!("{id} carries no text")).to_string();
+        // The control: the store holds the unrounded derived value.
+        let raw = engine_of(e).with_model(|m| crate::interpreter::character_host::live_values(m.document()))
+            ["font_size"].as_f64().expect("the selection's font size");
+        assert!((raw - 15.999975).abs() < 1e-9 && raw.to_string().len() > 10,
+                "the fixture's value is the noisy one: {raw}");
+        assert_eq!(shown("ch_font_size"), "16");
+        // Every number_input leaf of the panel, by the same rule.
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, CHARACTER, 228, 0)).unwrap();
+        let mut seen = 0;
+        for l in plan["leaves"].as_array().unwrap() {
+            if l["type"] != "number_input" { continue; }
+            let Some(t) = l["display"]["bind.value"].as_str()
+                .or_else(|| l["values"]["bind.value"].as_str()) else { continue };
+            seen += 1;
+            let decimals = t.split('.').nth(1).map_or(0, str::len);
+            assert!(decimals <= 4 && !t.ends_with('0') || !t.contains('.'), "{}: {t}", l["id"]);
+        }
+        assert!(seen >= 5, "read only {seen} number_input leaves");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 186 (flask STATUS §954; OPACITY.md §Preview interactions: "Escape
+    /// exits isolation first; a second Escape then leaves mask-editing mode"):
+    /// the engine's key door exits mask isolation, then mask-editing mode, on
+    /// Escape, as the web's `keyboard.rs` and the Mac's `CanvasSubwindow` do.
+    /// Before this row `jas_key_event` sent Escape to the tool only, so on
+    /// Windows only a second Alt-click on the mask preview left isolation.
+    #[test]
+    fn escape_through_the_key_door_exits_isolation_then_mask_editing() {
+        use crate::document::model::EditingTarget;
+        use crate::ffi_pointer::{jas_key_event, KEY_ESCAPE};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("two_rects.svg");
+        let state = |e| {
+            let m = engine_of(e).model.borrow();
+            (m.mask_isolation_path.clone(), m.editing_target.clone())
+        };
+        // Both active: isolation goes first and mask-editing stays.
+        engine_of(e).with_model_mut(|m| {
+            m.mask_isolation_path = Some(vec![0, 0]);
+            m.editing_target = EditingTarget::Mask(vec![0, 0]);
+        });
+        let status = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(status, JasStatus::Ok, "an Escape that exits isolation is handled");
+        assert_eq!(state(e), (None, EditingTarget::Mask(vec![0, 0])), "the first Escape exits isolation only");
+        // The second Escape leaves mask-editing mode.
+        let status = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(status, JasStatus::Ok, "an Escape that leaves mask-editing is handled");
+        assert_eq!(state(e), (None, EditingTarget::Content), "the second Escape leaves mask-editing");
+        // The control: with neither active, Escape changes neither (the tool's answer stands).
+        let _ = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(state(e), (None, EditingTarget::Content));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 181: the Paragraph menu's Hanging Punctuation reads the SELECTION,
+    /// in its check and in its toggle, after a selection change. The web's and
+    /// the Mac's menus read stored state there (both fixed with this arm); the
+    /// engine's scope and its `toggle_paragraph_field` arm already derived it,
+    /// and this measures that instead of reading it. Same fixture as the web's
+    /// `paragraph_panel::tests` and the Mac's `ParagraphMenuSelectionTests`.
+    #[test]
+    fn the_hanging_punctuation_row_reads_the_selection_after_a_selection_change() {
+        use crate::geometry::element::Element;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" width="200" height="100"><text x="0" y="20" font-size="12" style="inline-size: 180px; white-space: pre-wrap;" xml:space="preserve"><tspan jas:role="paragraph"></tspan><tspan>First</tspan></text><text x="0" y="60" font-size="12" style="inline-size: 180px; white-space: pre-wrap;" xml:space="preserve"><tspan jas:role="paragraph" jas:hanging-punctuation="true" jas:left-indent="12"></tspan><tspan>Second</tspan></text></svg>"#;
+        let e = jas_engine_new();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(svg).unwrap());
+        let select = |e, i: usize| engine_of(e).with_model_mut(|m|
+            crate::document::controller::Controller::select_element(m, &vec![0, i]));
+        let wrapper = |e, i: usize| engine_of(e).with_model(|m| match m.document().get_element(&vec![0, i]) {
+            Some(Element::Text(t)) => t.tspans.iter()
+                .find(|s| s.jas_role.as_deref() == Some("paragraph"))
+                .map(|s| (s.jas_hanging_punctuation, s.jas_left_indent))
+                .expect("a paragraph wrapper"),
+            other => panic!("text {i} is not a text: {other:?}"),
+        });
+        let checked = |e| {
+            let (rows, err) = panel_menu(e, PARAGRAPH);
+            assert!(err.is_empty(), "{err}");
+            assert_eq!(rows[0]["action"], "toggle_hanging_punctuation", "paragraph.yaml's menu: row 0");
+            rows[0]["checked"] == true
+        };
+        let toggle = |e| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{PARAGRAPH}","menu_index":0}}"#));
+            assert!(!reply.is_empty(), "Hanging Punctuation was refused: {err}");
+        };
+        assert_eq!(wrapper(e, 1), (Some(true), Some(12.0)), "the control: the fixture's flagged paragraph");
+        select(e, 0);
+        assert!(!checked(e), "the first paragraph has no hanging punctuation");
+        select(e, 1);
+        assert!(checked(e), "the second paragraph has it: the check shows the selection");
+        toggle(e);
+        assert_eq!(wrapper(e, 1), (None, Some(12.0)), "the toggle turns it OFF and keeps the indent");
+        assert!(!checked(e), "and the check follows");
+        select(e, 0);
+        assert!(!checked(e), "back to the first paragraph: unchecked");
+        toggle(e);
+        assert_eq!(wrapper(e, 0), (Some(true), None),
+                   "the first paragraph gains the flag and NOT the second's indent");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 169: Make Mask reads the panel's NEW-MASK PREFERENCES as they stand.
+    /// The menu items "New Opacity Masks Are Clipping / Inverted" toggle them;
+    /// a mask made after each toggle carries the toggled value, never the
+    /// declared default (clip true, invert false).
+    #[test]
+    fn make_mask_reads_the_new_mask_preferences_the_menu_toggled() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const OP: &str = "opacity_panel_content";
+        let e = engine_on("two_rects.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let first_mask = |e| engine_of(e).model.borrow().document().layers[0].children()
+            .and_then(|cs| cs.first().and_then(|c| c.common().mask.as_ref().map(|m| (m.clip, m.invert))));
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert_eq!(first_mask(e), Some((true, false)), "the declared defaults");
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert_eq!(first_mask(e), None, "released");
+        // The menu items as the Windows shell sends them: by index (opacity.yaml
+        // `menu:`: 8 Clipping, 9 Inverted).
+        for at in [8, 9] {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{OP}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+        }
+        let _ = behave(e, OP, r#"{"widget":"op_make_mask","event":"click"}"#);
+        assert_eq!(first_mask(e), Some((false, true)), "a mask made after both toggles");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// BRUSH OPTIONS IN LIBRARY_EDIT LOADS THE BRUSH IT EDITS, in the engine.
     /// Its inits find the brush by `filter(...brushes, fun b -> b.slug == ...)[0]`;
     /// until 2026-10-15 they read a `brushes_by_slug` index no port builds, so
@@ -9707,6 +10195,45 @@ mod tests {
         }
         undo(e);
         assert_eq!(doc_json(e), doc_before, "ONE undo must restore the document");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 175: THE CHEVRON REVEALS AN OPACITY SLIDER, AND THE SLIDER COMMITS
+    /// AS THE FIELD DOES. `op_disclosure` named `open_opacity_slider_popover`,
+    /// which no port defined, so it was dead everywhere. Now it toggles
+    /// `panel.slider_shown`, which shows `op_slider_row`, and the row's slider
+    /// is bound to `panel.opacity`: its commit runs the Opacity field's law.
+    #[test]
+    fn the_opacity_chevron_reveals_a_slider_that_commits_like_the_field() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        // A shown container is in `containers` with its `bind.visible`; a
+        // hidden one is listed by PATH in `hidden` (row 1b is child 1).
+        let shown = |e| {
+            let plan: serde_json::Value = serde_json::from_str(&plan_of(e, OPACITY, 228, 0)).unwrap();
+            let listed = plan["containers"].as_array().unwrap().iter()
+                .any(|c| c["id"] == "op_slider_row" && c["values"]["bind.visible"] == "true");
+            let hidden = plan["hidden"].as_array().unwrap().iter().any(|p| *p == serde_json::json!([1]));
+            assert_ne!(listed, hidden, "op_slider_row must be exactly one of shown or hidden");
+            if listed { "true" } else { "false" }
+        };
+        assert_eq!(shown(e), "false", "the slider row starts hidden");
+        let (reply, err) = behave(e, OPACITY, r#"{"widget":"op_disclosure","event":"click"}"#);
+        assert!(!reply.is_empty(), "the chevron was refused: {err}");
+        assert_eq!(shown(e), "true", "the chevron reveals the slider row");
+
+        assert!(selected_opacities(e).iter().all(|(o, _)| (*o - 0.4).abs() > 1e-9),
+                "the commit could not be seen: something is already at 0.4");
+        let doc_before = doc_json(e);
+        let (reply, err) = behave(e, OPACITY, r#"{"widget":"op_opacity_slider","event":"commit","value":"40"}"#);
+        assert_eq!(err, "", "{reply}");
+        for (i, (o, _)) in selected_opacities(e).iter().enumerate() {
+            assert!((o - 0.4).abs() < 1e-9, "element {i} reads {o} after the slider's commit");
+        }
+        undo(e);
+        assert_eq!(doc_json(e), doc_before, "ONE undo restores the document");
+        let _ = behave(e, OPACITY, r#"{"widget":"op_disclosure","event":"click"}"#);
+        assert_eq!(shown(e), "false", "a second click hides it");
         unsafe { jas_engine_free(e) };
     }
 

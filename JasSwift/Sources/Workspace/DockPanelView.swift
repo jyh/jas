@@ -936,6 +936,13 @@ func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
     // `panel.isolation_stack` was `[]` (STATUS-jas row 141; the store-keyed
     // reader of row 139).
     for (k, v) in modelHeldPanelState(contentId, model: model) { panelMap[k] = v }
+    // The Opacity `panel.*` keys this app holds on the layout
+    // (``OpacityPanelState``), overlaid as ``panelMenuContext`` overlays them,
+    // so Make Mask's `doc.op` reads the menu's New Opacity Masks preferences
+    // (row 169 slice 1b). The store's copy is never written here.
+    if contentId == "opacity_panel_content" {
+        for (k, v) in opacityHeldPanelState(opacityPanel) { panelMap[k] = v }
+    }
     // Selection-driven overrides: when a Text / TextPath is
     // selected, the Character panel reflects its attributes rather
     // than the stored panel defaults. Mirrors the Rust dock
@@ -1037,11 +1044,5 @@ func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
     // `bind.checked: "selection_mask_clip"` resolve uniformly.
     // Mirrors `build_selection_predicates` in jas_dioxus.
     for (k, v) in buildSelectionPredicates(model: model) { ctx[k] = v }
-    // Expose the Opacity panel's new-mask preferences so the
-    // op_make_mask button can read them at click time (they live
-    // on WorkspaceLayout.opacityPanel, not in the shared panel
-    // store).
-    ctx["_opacity_new_masks_clipping"] = opacityPanel.newMasksClipping
-    ctx["_opacity_new_masks_inverted"] = opacityPanel.newMasksInverted
     return ctx
 }

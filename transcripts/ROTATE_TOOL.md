@@ -34,9 +34,8 @@ select it.
   in document space. The reference-point cross moves there. No
   transform applied.
 - **Alt/Option click on canvas** (no movement). Sets the reference
-  point AND opens the Rotate Options dialog. Driven by the
-  `tool_options_dialog_on_alt_click` field on the tool yaml
-  (introduced by the Scale spec).
+  point AND opens the Rotate Options dialog. Written in the
+  tool's own `on_mouseup`, as Scale's is.
 - **Drag** (press → move → release). The press point anchors the
   drag — it does NOT relocate the reference point. Per-frame
   rotation angle is computed as
@@ -202,8 +201,7 @@ The two `rotate_*` keys are Rotate-specific.
 ## Cross-app artifacts
 
 - `workspace/tools/rotate.yaml` — tool spec (id `rotate`, cursor,
-  shortcut `R`, gesture handlers, `tool_options_dialog: rotate_options`,
-  `tool_options_dialog_on_alt_click: true`).
+  shortcut `R`, gesture handlers, `tool_options_dialog: rotate_options`).
 - `workspace/dialogs/rotate_options.yaml` — dialog layout, state-key
   bindings, button actions.
 - `workspace/state.yaml` — declares the two `rotate_*` keys; the
@@ -211,9 +209,7 @@ The two `rotate_*` keys are Rotate-specific.
   Scale spec.
 - `workspace/actions.yaml` — action wiring for OK / Cancel / Copy /
   Reset.
-- The `tool_options_dialog_on_alt_click` field and the
-  `reference_point_cross` / `bbox_ghost` overlay render types are
-  introduced by the Scale spec; Rotate consumes them.
+- The `reference_point_cross` / `bbox_ghost` overlay render types are introduced by the Scale spec; Rotate consumes them.
 - New effects **`doc.rotate.preview_render`** and
   **`doc.rotate.apply`** added to all four native apps.
 - The shared transform math in `algorithms/transform_apply` gains

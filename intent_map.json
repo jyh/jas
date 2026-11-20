@@ -288,6 +288,12 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "disable_opacity_mask": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
+    },
     "discard_and_close_tab": {
       "class": "ui-state",
       "dispatches": [
@@ -535,6 +541,12 @@
         "doc.make_instance"
       ]
     },
+    "make_opacity_mask": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
+    },
     "maximize_canvas": {
       "class": "ui-state",
       "doc_verbs": []
@@ -739,6 +751,12 @@
     "release_compound_shape": {
       "class": "ui-state",
       "doc_verbs": []
+    },
+    "release_opacity_mask": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
     },
     "release_transform": {
       "class": "ui-state",
@@ -1130,6 +1148,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "toggle_all_caps": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "toggle_all_layers_lock": {
       "class": "doc-direct",
       "doc_verbs": [
@@ -1206,11 +1228,47 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "toggle_new_masks_clipping": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_new_masks_inverted": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_opacity_options": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_opacity_slider": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_opacity_thumbnails": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "toggle_pane": {
       "class": "ui-state",
       "doc_verbs": []
     },
     "toggle_panel": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_small_caps": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_snap_to_glyph_visible": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_subscript": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
+    "toggle_superscript": {
       "class": "ui-state",
       "doc_verbs": []
     },
@@ -1235,6 +1293,12 @@
       ]
     },
     "ungroup_all": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.op"
+      ]
+    },
+    "unlink_opacity_mask": {
       "class": "journaling",
       "doc_verbs": [
         "doc.op"
@@ -1267,7 +1331,7 @@
   },
   "generated_from": "workspace/workspace.json",
   "generator": "scripts/gen_intent_map.py",
-  "scope_note": "ACTION seam (dispatch_action) ONLY. 45 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
+  "scope_note": "ACTION seam (dispatch_action) ONLY. 47 doc.* effect verbs -- including every DRAWING verb -- are reachable only from tool/panel/dialog YAML and are NOT in this map. An AI tool schema derived from this map alone would omit drawing entirely. See INTENT_MAP.md.",
   "summary": {
     "action_seam_doc_verbs": [
       "doc.apply_concept_operation",
@@ -1322,11 +1386,11 @@
     ],
     "by_class": {
       "doc-direct": 5,
-      "journaling": 60,
+      "journaling": 64,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 178,
+      "ui-state": 188,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1369,18 +1433,20 @@
       "doc.preview.capture",
       "doc.select_in_rect",
       "doc.select_polygon_from_buffer",
+      "doc.set_editing_target",
       "doc.set_selection",
       "doc.snapshot.restore",
+      "doc.toggle_mask_isolation",
       "doc.toggle_selection",
       "doc.zoom.fit_marquee",
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 60,
+    "journaling_actions": 64,
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 253,
+    "total_actions": 267,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

@@ -1471,6 +1471,20 @@ fn apply_typed_panel_slot(
     resolved: &serde_json::Value,
 ) -> bool {
     match (content_id, key) {
+        // The Opacity menu's four panel-local toggles (row 174): the panel body
+        // and the menu's checks read `AppState.opacity_panel`.
+        ("opacity_panel_content",
+         "thumbnails_hidden" | "options_shown" | "new_masks_clipping" | "new_masks_inverted") => {
+            set_opacity_field(&mut st.opacity_panel, key, resolved);
+            true
+        }
+        // The Character menu's toggles (row 174): the same write the panel's
+        // own toggles make, which applies the field to the selection.
+        ("character_panel_content",
+         "snap_to_glyph_visible" | "all_caps" | "small_caps" | "superscript" | "subscript") => {
+            commit_panel_field(st, Some(PanelKind::Character), key, resolved);
+            true
+        }
         ("color_panel_content", "mode") => {
             if let Some(mode) = resolved
                 .as_str()
@@ -2068,6 +2082,77 @@ fn patch_ctx_for_input(
         root.insert("event".into(), serde_json::json!({ "value": committed }));
     }
     cs
+}
+
+/// Deliver a `keydown` or `blur` to a `text_input`'s declared behaviors
+/// (WIDGET_EVENTS.md, "Typing in a text field"; the reference's `text_entry`,
+/// the Mac's `WidgetEvent.textEntry`). `event.value` is the field's `text`
+/// (for `keydown`, the text before the key acts); `event.key` names the key on
+/// `keydown` only. Only this event's own behaviors run, each under its
+/// `condition`. None is a commit, and no bind is written. A row's names (`ab`)
+/// come from `render_ctx`, as a click's do.
+///
+/// Row 179: the Artboards rename field reached these only through an
+/// id check on `ap_name_edit` that filled `confirm_artboard_rename`'s params
+/// by hand and ignored the blur's declared `condition`.
+fn run_text_entry_behavior(
+    el: &serde_json::Value,
+    text: &str,
+    key: Option<&str>,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+    event: &str,
+) {
+    let behaviors: Vec<&serde_json::Value> = el.get("behavior").and_then(|b| b.as_array())
+        .map(|arr| arr.iter().filter(|b| b.get("event").and_then(|e| e.as_str()) == Some(event)).collect())
+        .unwrap_or_default();
+    if behaviors.is_empty() {
+        return;
+    }
+    let mut cs = render_ctx.clone();
+    if let serde_json::Value::Object(root) = &mut cs {
+        let mut ev = serde_json::json!({ "value": text });
+        if let (Some(k), "keydown") = (key, event) {
+            ev["key"] = serde_json::Value::String(k.to_string());
+        }
+        root.insert("event".into(), ev);
+    }
+    for b in behaviors.iter().filter(|b| behavior_condition_holds(b, &cs)) {
+        if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
+            run_yaml_effects(effects, &cs, st);
+        }
+        if let Some(action) = b.get("action").and_then(|a| a.as_str()) {
+            let empty = serde_json::Map::new();
+            let decl = b.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
+            let params = resolve_behavior_params(decl, &cs);
+            let _ = dispatch_action(action, &params, st);
+        }
+    }
+}
+
+/// The live text of the DOM input with `id`: a key event carries no form
+/// value, so the field is read where the user typed it. Empty off the web.
+fn field_text(id: &str) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id(id))
+            .and_then(|el| js_sys::Reflect::get(&el, &"value".into()).ok())
+            .and_then(|v| v.as_string())
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = id;
+        String::new()
+    }
+}
+
+/// Whether `el` declares a behavior for `event`.
+fn declares_event(el: &serde_json::Value, event: &str) -> bool {
+    el.get("behavior").and_then(|b| b.as_array())
+        .is_some_and(|arr| arr.iter().any(|b| b.get("event").and_then(|e| e.as_str()) == Some(event)))
 }
 
 fn run_input_commit_behavior(
@@ -4043,7 +4128,6 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
         static_label.to_string()
     };
     let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.disabled. When true, the button is rendered dimmed
     // and pointer-events are disabled so the click handler is inert.
@@ -4061,37 +4145,6 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     } else {
         "opacity:1;pointer-events:auto;"
     };
-
-    // Opacity panel: op_make_mask dispatches Controller::make or release
-    // based on the current selection_has_mask predicate. Direct route
-    // rather than yaml-actions because the target lives on the
-    // selection's mask field, not on a panel-state key.
-    if panel_kind == Some(PanelKind::Opacity) && id == "op_make_mask" {
-        let selection_has_mask = expr::eval("selection_has_mask", ctx).to_bool();
-        let app = rctx.app.clone();
-        let mut revision = rctx.revision;
-        let handler = EventHandler::new(move |_evt: Event<MouseData>| {
-            let app = app.clone();
-            spawn(async move {
-                {
-                    let mut st = app.borrow_mut();
-                    if selection_has_mask {
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::release_mask_on_selection(&mut tab.model);
-                        }
-                    } else {
-                        let clip = st.opacity_panel.new_masks_clipping;
-                        let invert = st.opacity_panel.new_masks_inverted;
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::make_mask_on_selection(&mut tab.model, clip, invert);
-                        }
-                    }
-                }
-                revision += 1;
-            });
-        });
-        return rsx! { button { id: "{id}", style: "{style}", onclick: handler, "{label}" } };
-    }
 
     // Try behavior array first, then shorthand action property
     let on_click = build_click_handler(el, ctx, rctx).or_else(|| {
@@ -4260,7 +4313,6 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id = get_id(el);
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
 
     // Evaluate bind.checked + resolve the highlight color. The highlight is
     // applied by CSS via the `data-checked` attribute + `--jas-check-bg`
@@ -4402,28 +4454,7 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     // Toolbar buttons omit `label` entirely and stay icon-only.
     let label_text = el.get("label").and_then(|l| l.as_str()).unwrap_or("").to_string();
 
-    // Opacity panel: op_link_indicator click toggles mask.linked on
-    // every selected mask via Controller. Same pattern as
-    // op_make_mask in render_button. OPACITY.md §Document model.
-    let opacity_link_click: Option<EventHandler<Event<MouseData>>> =
-        if panel_kind == Some(PanelKind::Opacity) && id == "op_link_indicator" {
-            let app = rctx.app.clone();
-            let mut revision = rctx.revision;
-            Some(EventHandler::new(move |_evt: Event<MouseData>| {
-                let app = app.clone();
-                spawn(async move {
-                    let mut st = app.borrow_mut();
-                    if let Some(tab) = st.tab_mut() {
-                        crate::document::controller::Controller::toggle_mask_linked_on_selection(&mut tab.model);
-                    }
-                    revision += 1;
-                });
-            }))
-        } else {
-            None
-        };
-
-    let on_click = opacity_link_click.or_else(|| build_click_handler(el, ctx, rctx));
+    let on_click = build_click_handler(el, ctx, rctx);
     let on_mousedown = build_mousedown_handler(el, ctx, rctx);
     let on_mouseup = build_mouseup_handler(el, ctx, rctx);
 
@@ -4827,6 +4858,7 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let step = el.get("step").and_then(|s| s.as_i64()).unwrap_or(1);
     let style = build_style(el, ctx);
 
+    let slider_panel_kind = rctx.panel_kind;
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
     let panel_field = bind_expr.strip_prefix("panel.").or_else(|| {
         bind_expr.strip_prefix("{{panel.").and_then(|s| s.strip_suffix("}}"))
@@ -4912,17 +4944,36 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                 if !dlg_field.is_empty() { return; }
                 if panel_field.is_empty() { return; }
                 let color = compute_color_from_panel(&panel_field, new_val, &panel);
-                if let Some(color) = color {
-                    let app = app.clone();
-                    let mut revision = revision;
-                    spawn(async move {
-                        app.borrow_mut().set_active_color(color);
-                        revision += 1;
-                    });
-                }
+                let app = app.clone();
+                let mut revision = revision;
+                let panel_field = panel_field.clone();
+                spawn(async move {
+                    match color {
+                        Some(color) => app.borrow_mut().set_active_color(color),
+                        // Not a colour field: the panel's own write (row 175).
+                        None => commit_panel_slider_value(
+                            &mut app.borrow_mut(), slider_panel_kind, &panel_field, new_val),
+                    }
+                    revision += 1;
+                });
             },
         }
     }
+}
+
+/// A panel slider's committed value when it is not a Color field: the panel's
+/// own write (`commit_panel_field`), the one the field beside it makes. The
+/// Opacity slider (row 175) writes the selection through the Properties law
+/// this way. Nothing without a panel kind, so a stray slider never writes the
+/// Stroke panel (`commit_panel_field`'s `None` arm).
+pub(crate) fn commit_panel_slider_value(
+    st: &mut crate::workspace::app_state::AppState,
+    panel_kind: Option<PanelKind>,
+    field: &str,
+    value: f64,
+) {
+    if panel_kind.is_none() { return; }
+    commit_panel_field(st, panel_kind, field, &serde_json::json!(value));
 }
 
 /// Compute a color from panel state with one field changed.
@@ -5005,6 +5056,13 @@ fn commit_panel_field(
         // state.
         _ => {}
     }
+}
+
+/// The text a `number_input` shows for `value` (WIDGET_EVENTS.md §Showing a
+/// number): at most four decimals, trailing zeros removed, one rule with the
+/// Mac (`fmtNum`) and the panel plan's `display`.
+fn number_input_text(value: f64) -> String {
+    crate::interpreter::character_host::fmt_num(value)
 }
 
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
@@ -5105,6 +5163,9 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         }))
     } else { None };
 
+    // WIDGET_EVENTS.md §Showing a number (row 183): the text shown is
+    // `fmt_num`'s; the remount key keeps the raw value.
+    let shown = number_input_text(value);
     if panel_handler.is_some() {
         rsx! {
             input {
@@ -5119,7 +5180,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 step: "{step_attr}",
-                value: "{value}",
+                value: "{shown}",
                 // flex-shrink:0 — when the parent row sets `flex:1`
                 // on the slider, the slider's flex-grow eats remaining
                 // space but the default flex-shrink:1 on the
@@ -5144,7 +5205,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 min: "{min}",
                 max: "{max}",
                 step: "{step_attr}",
-                value: "{value}",
+                value: "{shown}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
                     // Same commit rule as the panel branch above and as
@@ -5401,26 +5462,24 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
         value
     };
 
-    // Artboards rename input: special-cased Enter/Escape/blur
-    // handlers since the generic onchange path can't discover the
-    // ab.id needed for confirm_artboard_rename. The YAML behavior
-    // block declares the actions but the renderer fills params from
-    // ctx (artboard_id) and from the input value (new_name).
-    let is_artboard_rename = panel_kind == Some(PanelKind::Artboards) && id == "ap_name_edit";
-    let rename_artboard_id: Option<String> = if is_artboard_rename {
-        ctx.get("ab")
-            .and_then(|a| a.get("id"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    };
+    // A field that DECLARES `keydown` or `blur` behaviors gets them on the
+    // generic route (`run_text_entry_behavior`; WIDGET_EVENTS.md, "Typing in a
+    // text field"). The rule is the declaration, never the id: until row 179
+    // the Artboards rename field was special-cased here by id. A row's names
+    // (`ab`) are in `ctx`. `autofocus: true` is declared in the YAML too.
+    let declares_keydown = declares_event(el, "keydown");
+    let declares_blur = declares_event(el, "blur");
+    let autofocus = el.get("autofocus").and_then(|v| v.as_bool()).unwrap_or(false);
     let app_for_keydown = app.clone();
     let app_for_blur = app.clone();
     let mut revision_keydown = revision;
     let mut revision_blur = revision;
-    let rename_id_keydown = rename_artboard_id.clone();
-    let rename_id_blur = rename_artboard_id.clone();
+    let el_for_entry_keydown = el.clone();
+    let el_for_entry_blur = el.clone();
+    let ctx_for_entry_keydown = ctx.clone();
+    let ctx_for_entry_blur = ctx.clone();
+    let dom_id_keydown = id.clone();
+    let dom_id_blur = id.clone();
 
     rsx! {
         input {
@@ -5456,64 +5515,29 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             r#type: "text",
             placeholder: "{placeholder}",
             initial_value: "{value}",
-            autofocus: is_artboard_rename,
-            style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{visibility_style}{style}",
+            autofocus: autofocus,
             onkeydown: move |evt: Event<KeyboardData>| {
-                if !is_artboard_rename { return; }
-                let key = evt.data().key();
-                let Some(ref ab_id) = rename_id_keydown else { return; };
-                if key == dioxus::prelude::Key::Enter {
-                    let app = app_for_keydown.clone();
-                    let id = ab_id.clone();
-                    #[cfg(target_arch = "wasm32")]
-                    let new_val = web_sys::window()
-                        .and_then(|w| w.document())
-                        .and_then(|d| d.get_element_by_id("ap_name_edit"))
-                        .and_then(|el| js_sys::Reflect::get(&el, &"value".into()).ok())
-                        .and_then(|v| v.as_string())
-                        .unwrap_or_default();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let new_val = String::new();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        let mut params = serde_json::Map::new();
-                        params.insert("artboard_id".into(), serde_json::Value::String(id));
-                        params.insert("new_name".into(), serde_json::Value::String(new_val));
-                        dispatch_action("confirm_artboard_rename", &params, &mut st);
-                        revision_keydown += 1;
-                    });
-                } else if key == dioxus::prelude::Key::Escape {
-                    let app = app_for_keydown.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        let params = serde_json::Map::new();
-                        dispatch_action("cancel_artboard_rename", &params, &mut st);
-                        revision_keydown += 1;
-                    });
+                if !declares_keydown { return; }
+                // `event.key` is the key's name, as the reference spells it
+                // ("Enter", "Escape", or the character).
+                let key = evt.data().key().to_string();
+                let text = field_text(&dom_id_keydown);
+                {
+                    let mut st = app_for_keydown.borrow_mut();
+                    run_text_entry_behavior(&el_for_entry_keydown, &text, Some(&key),
+                                            &ctx_for_entry_keydown, &mut st, "keydown");
                 }
+                revision_keydown += 1;
             },
             onblur: move |_: Event<FocusData>| {
-                if !is_artboard_rename { return; }
-                let Some(ref ab_id) = rename_id_blur else { return; };
-                let app = app_for_blur.clone();
-                let id = ab_id.clone();
-                #[cfg(target_arch = "wasm32")]
-                let new_val = web_sys::window()
-                    .and_then(|w| w.document())
-                    .and_then(|d| d.get_element_by_id("ap_name_edit"))
-                    .and_then(|el| js_sys::Reflect::get(&el, &"value".into()).ok())
-                    .and_then(|v| v.as_string())
-                    .unwrap_or_default();
-                #[cfg(not(target_arch = "wasm32"))]
-                let new_val = String::new();
-                spawn(async move {
-                    let mut st = app.borrow_mut();
-                    let mut params = serde_json::Map::new();
-                    params.insert("artboard_id".into(), serde_json::Value::String(id));
-                    params.insert("new_name".into(), serde_json::Value::String(new_val));
-                    dispatch_action("confirm_artboard_rename", &params, &mut st);
-                    revision_blur += 1;
-                });
+                if !declares_blur { return; }
+                let text = field_text(&dom_id_blur);
+                {
+                    let mut st = app_for_blur.borrow_mut();
+                    run_text_entry_behavior(&el_for_entry_blur, &text, None,
+                                            &ctx_for_entry_blur, &mut st, "blur");
+                }
+                revision_blur += 1;
             },
             onchange: move |evt: Event<FormData>| {
                 let new_val = evt.value();
@@ -6050,7 +6074,6 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     };
 
     let bind_target = classify_bind(bind_expr);
-    let bind_expr_owned = bind_expr.to_string();
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
@@ -6095,39 +6118,6 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             return;
         }
         let new_val = !checked;
-        // Opacity panel selection-mask bindings: `selection_mask_clip` /
-        // `selection_mask_invert` route directly to Controller methods
-        // (the flag lives on the selected element's mask, not on the
-        // panel-local state). See OPACITY.md § States.
-        if panel_kind == Some(PanelKind::Opacity) {
-            let handled = match bind_expr_owned.as_str() {
-                "selection_mask_clip" => {
-                    let app = app.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::set_mask_clip_on_selection(&mut tab.model, new_val);
-                        }
-                    });
-                    true
-                }
-                "selection_mask_invert" => {
-                    let app = app.clone();
-                    spawn(async move {
-                        let mut st = app.borrow_mut();
-                        if let Some(tab) = st.tab_mut() {
-                            crate::document::controller::Controller::set_mask_invert_on_selection(&mut tab.model, new_val);
-                        }
-                    });
-                    true
-                }
-                _ => false,
-            };
-            if handled {
-                revision += 1;
-                return;
-            }
-        }
         match &bind_target {
             BindTarget::Dialog(field) => {
                 if let Some(mut ds) = dialog_signal() {
@@ -9636,99 +9626,23 @@ fn render_placeholder(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
         .or_else(|| el.get("type"))
         .and_then(|s| s.as_str())
         .unwrap_or("?");
-    let panel_kind = rctx.panel_kind;
-
-    // Opacity panel previews (OPACITY.md §Preview interactions):
-    // op_preview and op_mask_preview handle click to switch the
-    // editing target (content vs mask subtree) and render a
-    // persistent highlight on the active target.
-    let is_opacity_preview =
-        panel_kind == Some(PanelKind::Opacity)
-        && (id == "op_preview" || id == "op_mask_preview");
-    if is_opacity_preview {
-        let editing_mask = expr::eval("editing_target_is_mask", ctx).to_bool();
-        let has_mask = expr::eval("selection_has_mask", ctx).to_bool();
-        let is_mask_preview = id == "op_mask_preview";
-        // Highlight the preview that matches the current editing
-        // target: op_preview when not in mask-editing, op_mask_preview
-        // when in mask-editing.
-        let highlight = editing_mask == is_mask_preview;
-        let border = if highlight { "2px solid #4a90d9" } else { "2px solid transparent" };
-        // Clicking MASK_PREVIEW requires the selection to have a
-        // mask; otherwise the click is a no-op (mirrors the
-        // "Requires element.mask to be present" clause in the spec).
-        let click_enabled = !is_mask_preview || has_mask;
-        let app = rctx.app.clone();
-        let mut revision = rctx.revision;
-        let target_is_mask = is_mask_preview;
-        // MASK_PREVIEW supports modifier-clicks per OPACITY.md
-        // §Preview interactions:
-        //   * plain click → enter mask-editing mode (routed above)
-        //   * Alt/Option-click → toggle mask isolation (render only
-        //     the mask subtree on the canvas)
-        //   * Shift-click → toggle mask.disabled
-        let on_click = EventHandler::new(move |evt: Event<MouseData>| {
-            if !click_enabled {
-                return;
-            }
-            let mods = evt.data().modifiers();
-            let alt = mods.alt();
-            let shift = mods.shift();
-            let app = app.clone();
-            spawn(async move {
-                use crate::workspace::app_state::EditingTarget;
-                let mut st = app.borrow_mut();
-                if target_is_mask && shift {
-                    // Shift-click: toggle mask.disabled on every
-                    // selected mask via the existing Controller.
-                    if let Some(tab) = st.tab_mut() {
-                        crate::document::controller::Controller::toggle_mask_disabled_on_selection(&mut tab.model);
-                    }
-                } else if target_is_mask && alt {
-                    // Alt-click: toggle mask isolation on the first
-                    // selected element's mask. Enters isolation if
-                    // off; exits otherwise.
-                    if let Some(tab) = st.tab_mut() {
-                        let first_path = tab.model.document().selection.first()
-                            .map(|es| es.path.clone());
-                        tab.model.mask_isolation_path = match (&tab.model.mask_isolation_path, first_path) {
-                            (Some(_), _) => None,
-                            (None, Some(p)) => Some(p),
-                            (None, None) => None,
-                        };
-                    }
-                } else {
-                    // Plain click: flip editing target between
-                    // content and the first selected element's mask
-                    // subtree.
-                    if let Some(tab) = st.tab_mut() {
-                        tab.model.editing_target = if target_is_mask {
-                            tab.model.document().selection.first()
-                                .map(|es| EditingTarget::Mask(es.path.clone()))
-                                .unwrap_or(EditingTarget::Content)
-                        } else {
-                            EditingTarget::Content
-                        };
-                    }
-                }
-                revision += 1;
-            });
-        });
-        let cursor = if click_enabled { "pointer" } else { "default" };
-        return rsx! {
-            div {
-                id: "{id}",
-                style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;outline:{border};outline-offset:-2px;cursor:{cursor};",
-                title: "{summary}",
-                onclick: move |evt| on_click.call(evt),
-                "[{summary}]"
-            }
-        };
-    }
-
+    // A placeholder may carry `bind.checked` (drawn as a persistent highlight:
+    // the Opacity previews mark the active editing target), `bind.disabled`,
+    // and declared click behaviors. All three are generic; until row 169
+    // slice 3 the previews' were a web special case keyed on their ids.
+    let bind = |k: &str| el.get("bind").and_then(|b| b.get(k)).and_then(|v| v.as_str())
+        .map(|e| expr::eval(e, ctx).to_bool()).unwrap_or(false);
+    let (checked, disabled) = (bind("checked"), bind("disabled"));
+    let border = if checked { "2px solid #4a90d9" } else { "2px solid transparent" };
+    let on_click = if disabled { None } else { build_click_handler(el, ctx, rctx) };
+    let cursor = if on_click.is_some() { "pointer" } else { "default" };
+    let dim = if disabled { "opacity:0.5;" } else { "opacity:1;" };
     rsx! {
         div {
-            style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;",
+            id: "{id}",
+            style: "padding:12px;color:var(--jas-text-dim,#999);font-size:12px;text-align:center;min-height:30px;outline:{border};outline-offset:-2px;cursor:{cursor};{dim}",
+            title: "{summary}",
+            onclick: move |evt| if let Some(h) = &on_click { h.call(evt) },
             "[{summary}]"
         }
     }
@@ -14660,6 +14574,7 @@ mod tests {
                 | "button"                // render_button
                 | "toggle" | "checkbox"   // render_toggle
                 | "tree_view"             // render_tree_view (native)
+                | "placeholder"           // render_placeholder (row 169 slice 3)
         )
     }
 
@@ -14956,6 +14871,154 @@ mod tests {
         assert_eq!(actions.len(), 1, "one click behavior");
         super::run_click_behaviors(&actions, &ctx, &mut st);
         assert_eq!(brush_names(&st), vec!["a", "c"]);
+    }
+
+    // ── The Opacity mask column runs its YAML on the web (row 169 slice 1b) ──
+    //
+    // Make Mask and the link indicator had NATIVE web intercepts that ran the
+    // Controller directly and never read the `doc.op` behaviors the YAML
+    // declares (the ones Windows and the engine run). These drive the
+    // declared behaviors through the web's own click loop, with the panel
+    // body's real context, and pin that the intercepts are gone.
+
+    fn opacity_web_state(clipping: bool) -> AppState {
+        let svg = include_str!("../../../test_fixtures/svg/rect_with_stroke.svg");
+        let mut st = AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        crate::document::controller::Controller::select_all(&mut st.tabs[st.active_tab].model);
+        st.opacity_panel.new_masks_clipping = clipping;
+        st
+    }
+
+    fn opacity_click(st: &mut AppState, widget: &str) {
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match node {
+                serde_json::Value::Object(m) if m.get("id").and_then(|v| v.as_str()) == Some(id) => Some(node),
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(st, "opacity_panel_content")
+            .expect("the Opacity body context");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let el = find(ws.panel("opacity_panel_content").expect("opacity"), widget).expect(widget).clone();
+        // A boolean kind's press runs with `event.value` the new checked state,
+        // as `render_toggle` builds its handler.
+        let ctx = if super::is_boolean_kind(&el) {
+            let checked = el["bind"]["checked"].as_str().expect("a checked bind");
+            super::boolean_press_ctx(&ctx, expr::eval(checked, &ctx).to_bool())
+        } else {
+            ctx
+        };
+        let actions = super::resolve_click_behaviors(&el, &ctx, "click");
+        assert_eq!(actions.len(), 1, "{widget}: one declared click behavior");
+        super::run_click_behaviors(&actions, &ctx, st);
+    }
+
+    /// One click with modifiers, merged into the context as the web's mouse
+    /// handler merges them (`merge_event_modifiers`).
+    fn opacity_click_with(st: &mut AppState, widget: &str, shift: bool, alt: bool) {
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match node {
+                serde_json::Value::Object(m) if m.get("id").and_then(|v| v.as_str()) == Some(id) => Some(node),
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let mut ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(st, "opacity_panel_content")
+            .expect("the Opacity body context");
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let el = find(ws.panel("opacity_panel_content").expect("opacity"), widget).expect(widget).clone();
+        let actions = super::resolve_click_behaviors(&el, &ctx, "click");
+        assert!(!actions.is_empty(), "{widget}: a declared click behavior");
+        super::merge_event_modifiers(&mut ctx, alt, shift, false, false);
+        super::run_click_behaviors(&actions, &ctx, st);
+    }
+
+    fn first_mask(st: &AppState) -> Option<(bool, bool, bool)> {
+        let doc = st.tabs[st.active_tab].model.document();
+        let path = doc.selection.first().expect("a selection").path.clone();
+        doc.get_element(&path).expect("the element").common().mask.as_ref()
+            .map(|m| (m.clip, m.invert, m.linked))
+    }
+
+    #[test]
+    fn make_mask_on_the_web_runs_its_yaml_and_reads_the_clipping_preference() {
+        for clipping in [true, false] {
+            let mut st = opacity_web_state(clipping);
+            assert_eq!(first_mask(&st), None, "the control: no mask before the click");
+            opacity_click(&mut st, "op_make_mask");
+            assert_eq!(first_mask(&st), Some((clipping, false, true)), "Make Mask, clipping={clipping}");
+            opacity_click(&mut st, "op_link_indicator");
+            assert_eq!(first_mask(&st), Some((clipping, false, false)), "the link indicator unlinks");
+            opacity_click(&mut st, "op_clip");
+            assert_eq!(first_mask(&st), Some((!clipping, false, false)), "Clip flips the shown value");
+            opacity_click(&mut st, "op_invert_mask");
+            assert_eq!(first_mask(&st), Some((!clipping, true, false)), "Invert Mask flips the shown value");
+            opacity_click(&mut st, "op_make_mask");
+            assert_eq!(first_mask(&st), None, "a second click releases");
+        }
+    }
+
+    /// The previews on the web (row 169 slice 3): a plain click on the mask
+    /// preview edits the mask, the content preview edits the content, and
+    /// Shift on the mask preview toggles `mask.disabled`, each from its YAML
+    /// through the web's click loop with the click's modifiers merged in.
+    #[test]
+    fn the_previews_on_the_web_run_their_yaml() {
+        use crate::document::model::EditingTarget;
+        let mut st = opacity_web_state(true);
+        opacity_click(&mut st, "op_make_mask");
+        let path = st.tabs[st.active_tab].model.document().selection[0].path.clone();
+        let target = |st: &AppState| st.tabs[st.active_tab].model.editing_target.clone();
+        opacity_click_with(&mut st, "op_mask_preview", false, false);
+        assert_eq!(target(&st), EditingTarget::Mask(path.clone()), "a plain click edits the mask");
+        opacity_click_with(&mut st, "op_preview", false, false);
+        assert_eq!(target(&st), EditingTarget::Content, "the content preview edits the content");
+        let disabled = |st: &AppState| { let doc = st.tabs[st.active_tab].model.document();
+            doc.get_element(&path).and_then(|e| e.common().mask.as_ref().map(|m| m.disabled)) };
+        opacity_click_with(&mut st, "op_mask_preview", true, false);
+        assert_eq!(disabled(&st), Some(true), "Shift toggles mask.disabled");
+        assert_eq!(target(&st), EditingTarget::Content, "and leaves the target");
+        opacity_click_with(&mut st, "op_mask_preview", false, true);
+        assert_eq!(st.tabs[st.active_tab].model.mask_isolation_path, Some(path.clone()), "Alt isolates");
+    }
+
+    /// Row 175: a panel slider that is not a Color field commits through the
+    /// panel's own write, as the field beside it does. The Opacity slider
+    /// writes the selection's opacity; until 2026-11-19 the web dropped any
+    /// non-colour panel slider's value.
+    #[test]
+    fn a_non_colour_panel_slider_commits_through_the_panel_write() {
+        let mut st = opacity_web_state(true);
+        super::commit_panel_slider_value(&mut st, Some(PanelKind::Opacity), "opacity", 40.0);
+        let doc = st.tabs[st.active_tab].model.document();
+        let path = doc.selection[0].path.clone();
+        let o = doc.get_element(&path).expect("the element").common().opacity;
+        assert!((o - 0.4).abs() < 1e-9, "the element reads {o}");
+    }
+
+    /// The intercepts that bypassed the YAML are gone from the renderer. The
+    /// needles are built at run time so this test's own text cannot match.
+    #[test]
+    fn the_web_renderer_has_no_native_opacity_mask_intercept() {
+        let src = include_str!("renderer.rs");
+        for widget in ["op_make_mask", "op_link_indicator"] {
+            let needle = format!("id == {}{widget}{}", '"', '"');
+            assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {widget} remains");
+        }
+        // The two previews were keyed on their ids in render_placeholder.
+        let needle = format!("(id == {q}op_preview{q} || id == {q}op_mask_preview{q})", q = '"');
+        assert_eq!(src.matches(&needle).count(), 0, "a native intercept for the previews remains");
+        // Clip and Invert Mask were keyed on their checkbox's bind.
+        for bind in ["selection_mask_clip", "selection_mask_invert"] {
+            let needle = format!("{}{bind}{} =>", '"', '"');
+            assert_eq!(src.matches(&needle).count(), 0, "a native intercept for {bind} remains");
+        }
     }
 
     // ── Save / Open Brush Library on the web route (STATUS-jas row 8) ──
@@ -16360,5 +16423,134 @@ mod layers_row_menu_tests {
     fn a_row_that_is_not_in_the_tree_has_no_menu() {
         let (holder, ctx) = holder_and_ctx(false);
         assert!(layers_row_menu(&holder, &ctx, &[7]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod number_display_tests {
+    use super::*;
+
+    /// Row 183: the number text, and the render showing it rather than the raw
+    /// float (the render itself is a wasm DOM node; its body is read instead).
+    #[test]
+    fn a_number_input_shows_its_number_without_float_noise() {
+        assert_eq!(number_input_text(15.999975000000001), "16");
+        assert_eq!(number_input_text(14.399999999999999), "14.4");
+        assert_eq!(number_input_text(100.0), "100");
+        assert_eq!(number_input_text(0.125), "0.125");
+        let src = include_str!("renderer.rs");
+        let at = src.find("fn render_number_input").expect("the render");
+        let end = at + 3 + src[at + 3..].find("\nfn ").expect("its end");
+        let body = &src[at..end];
+        assert_eq!(body.matches(r#"value: "{shown}""#).count(), 2,
+                   "both branches show the formatted text");
+        assert!(!body.contains(r#"value: "{value}""#), "a branch shows the raw float");
+    }
+}
+
+#[cfg(test)]
+mod text_entry_tests {
+    //! Row 179: a `text_input`'s declared `keydown` and `blur` behaviors run on
+    //! the generic route (WIDGET_EVENTS.md, "Typing in a text field": the
+    //! field's text is `event.value`, and `event.key` names the key on
+    //! `keydown`; no bind is written). The Artboards rename field reached them
+    //! only through an id check that filled the params by hand. These arms
+    //! drive the YAML's own node through [`run_text_entry_behavior`].
+    use super::*;
+
+    fn find<'a>(v: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+        if v.get("id").and_then(|x| x.as_str()) == Some(id) {
+            return Some(v);
+        }
+        match v {
+            serde_json::Value::Object(o) => o.values().find_map(|c| find(c, id)),
+            serde_json::Value::Array(a) => a.iter().find_map(|c| find(c, id)),
+            _ => None,
+        }
+    }
+
+    fn rename_field() -> serde_json::Value {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace loads");
+        find(ws.panel("artboards_panel_content").expect("the Artboards panel"), "ap_name_edit")
+            .expect("artboards.yaml declares ap_name_edit").clone()
+    }
+
+    /// An app with one document, the row's artboard being renamed.
+    fn renaming() -> (crate::workspace::app_state::AppState, String, serde_json::Value) {
+        let mut st = crate::workspace::app_state::AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        let ab = st.tabs[st.active_tab].model.document().artboards.first()
+            .expect("a new document has an artboard").clone();
+        st.artboards_renaming = Some(ab.id.clone());
+        let ctx = serde_json::json!({
+            "ab": {"id": ab.id, "name": ab.name},
+            "panel": {"renaming_artboard": ab.id},
+        });
+        (st, ab.id, ctx)
+    }
+
+    fn name_of(st: &crate::workspace::app_state::AppState, id: &str) -> String {
+        st.tabs[st.active_tab].model.document().artboards.iter()
+            .find(|a| a.id == id).map(|a| a.name.clone()).expect("the artboard")
+    }
+
+    #[test]
+    fn enter_confirms_the_rename_with_the_fields_text() {
+        let (mut st, id, ctx) = renaming();
+        let before = name_of(&st, &id);
+        assert_ne!(before, "Cover", "the control: the name is not already the new one");
+        run_text_entry_behavior(&rename_field(), "Cover", Some("Enter"), &ctx, &mut st, "keydown");
+        assert_eq!(name_of(&st, &id), "Cover");
+    }
+
+    #[test]
+    fn escape_cancels_and_another_key_does_nothing() {
+        let (mut st, id, ctx) = renaming();
+        let before = name_of(&st, &id);
+        run_text_entry_behavior(&rename_field(), "Cov", Some("v"), &ctx, &mut st, "keydown");
+        assert_eq!(name_of(&st, &id), before, "a letter is not Enter");
+        assert_eq!(st.artboards_renaming.as_deref(), Some(id.as_str()), "and the field stays open");
+        run_text_entry_behavior(&rename_field(), "Cov", Some("Escape"), &ctx, &mut st, "keydown");
+        assert_eq!(name_of(&st, &id), before, "Escape writes no name");
+        assert_eq!(st.artboards_renaming, None, "and closes the field");
+    }
+
+    #[test]
+    fn blur_confirms_only_while_the_row_is_renaming() {
+        let (mut st, id, ctx) = renaming();
+        run_text_entry_behavior(&rename_field(), "Back", None, &ctx, &mut st, "blur");
+        assert_eq!(name_of(&st, &id), "Back", "a blur while renaming confirms");
+        // A blur after Enter finds the row no longer renaming (artboards.yaml).
+        let mut closed = ctx.clone();
+        closed["panel"]["renaming_artboard"] = serde_json::Value::Null;
+        run_text_entry_behavior(&rename_field(), "Late", None, &closed, &mut st, "blur");
+        assert_eq!(name_of(&st, &id), "Back", "a blur on a closed field does nothing");
+    }
+
+    /// A BARE `id == "<literal>"`: the widget-id shape, not a field compare
+    /// like `a.id == "ab2"` (a `.` or an identifier character before `id`).
+    fn keys_on_a_widget_id(line: &str) -> bool {
+        let needle = "id == \"";
+        line.match_indices(needle).any(|(at, _)| {
+            line[..at].chars().next_back()
+                .map_or(true, |c| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
+        })
+    }
+
+    /// The renderer keys no behavior on a widget's id: the rule is what the
+    /// widget DECLARES. Read from the source, so an id check added later reds.
+    #[test]
+    fn the_renderer_keys_no_behavior_on_a_widget_id() {
+        // The instrument first: the removed intercept's own line is caught,
+        // and a field compare is not.
+        assert!(keys_on_a_widget_id(
+            r#"    let is_artboard_rename = panel_kind == Some(PanelKind::Artboards) && id == "ap_name_edit";"#));
+        assert!(!keys_on_a_widget_id(r#"find(|a| a.id == "ab2")"#));
+        assert!(!keys_on_a_widget_id(r#"if layer_id == "x""#));
+        let src = include_str!("renderer.rs");
+        let body = &src[..src.find("mod text_entry_tests").expect("this module")];
+        assert!(body.lines().count() > 10_000, "read only part of renderer.rs");
+        let hits: Vec<&str> = body.lines().filter(|l| keys_on_a_widget_id(l)).collect();
+        assert!(hits.is_empty(), "id-keyed checks in renderer.rs: {hits:#?}");
     }
 }

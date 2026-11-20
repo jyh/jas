@@ -192,7 +192,11 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .swatches: SwatchesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .stroke: StrokePanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .properties: PropertiesPanel.dispatch(cmd, addr: addr, layout: &layout)
-    case .character: CharacterPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
+    // Character: Close is the layout's; every other row runs its actions.yaml
+    // entry in the panel's scope, as the engine and the web do (row 174).
+    case .character:
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)) }
+        else { panelDispatchRow(.character, action: cmd, params: [:], model: model) }
     case .paragraph: ParagraphPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .artboards: ArtboardsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .align: AlignPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
@@ -273,6 +277,14 @@ public func panelDispatchRow(_ kind: PanelKind, action: String, params: [String:
         if held == nil || held is NSNull {
             for (k, v) in gradientPanelLiveOverrides(model: model) { model.stateStore.setPanel(pid, k, v) }
         }
+    }
+    // The Character menu's toggles negate `panel.<key>`, read from the STORE,
+    // whose sibling a toggle never clears: after All Caps then Small Caps the
+    // next All Caps wrote `not true`, a dead click (STATUS-flask §944). Lay
+    // the selection over the store first (the engine's
+    // `panel_scope::sync_character_state`).
+    if pid == "character_panel_content", let live = characterPanelLiveOverrides(model: model) {
+        for (k, v) in live { model.stateStore.setPanel(pid, k, v) }
     }
     runYamlActionByName(action, params: params, model: model)
 }
@@ -382,6 +394,20 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
     }
     for (k, v) in layoutHeldPanelState(contentId, layout: layout) { panel[k] = v }
     for (k, v) in modelHeldPanelState(contentId, model: model) { panel[k] = v }
+    // The Character panel's fields describe the SELECTION, as the body shows
+    // them (``DockPanelView.buildPanelCtx``). A toggle writes one store key and
+    // never clears its sibling, so the store checked All Caps beside Small
+    // Caps (STATUS-flask §944). The web's `live_panel_state` reads the same.
+    if contentId == "character_panel_content", let m = model,
+       let live = characterPanelLiveOverrides(model: m) {
+        for (k, v) in live { panel[k] = v }
+    }
+    // The Paragraph panel's fields describe the selection too: the store holds
+    // what the last write left, so after a selection change the Hanging
+    // Punctuation check showed the previous paragraph's flag (row 181).
+    if contentId == "paragraph_panel_content", let m = model {
+        for (k, v) in paragraphPanelLiveOverrides(model: m) { panel[k] = v }
+    }
     var ctx: [String: Any] = ["panel": panel]
     // The data namespace, read from the store the library effects write, so an
     // `items_from` source such as `keys(data.brush_libraries)` lists what is
@@ -563,15 +589,21 @@ private func layoutHeldPanelState(_ contentId: String,
         }
         return ["mode": mode]
     case "opacity_panel_content":
-        return [
-            "thumbnails_hidden": layout.opacityPanel.thumbnailsHidden,
-            "options_shown": layout.opacityPanel.optionsShown,
-            "new_masks_clipping": layout.opacityPanel.newMasksClipping,
-            "new_masks_inverted": layout.opacityPanel.newMasksInverted,
-        ]
+        return opacityHeldPanelState(layout.opacityPanel)
     default:
         return [:]
     }
+}
+
+/// The Opacity panel's `panel.*` values this app keeps on
+/// ``OpacityPanelState``: one map for the menu's context and the body's.
+func opacityHeldPanelState(_ op: OpacityPanelState) -> [String: Any] {
+    [
+        "thumbnails_hidden": op.thumbnailsHidden,
+        "options_shown": op.optionsShown,
+        "new_masks_clipping": op.newMasksClipping,
+        "new_masks_inverted": op.newMasksInverted,
+    ]
 }
 
 /// Query whether a menu command is enabled for a panel kind.

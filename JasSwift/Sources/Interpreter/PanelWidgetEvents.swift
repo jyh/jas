@@ -155,6 +155,7 @@ struct PanelWidgetEvents {
             // `panel.` targets and `set_panel_state` write the active panel.
             store.setActivePanel(pid)
             Self.seedTwoWayGlobals(panel: panel, panelId: pid, store: store)
+            Self.seedLayoutHeldPanelState(scope: scope, panelId: pid, store: store)
         }
         let dialogBefore = store.getDialogId()
         let host = WidgetEvent.Host(scope: scope, writeBind: writeBind, dispatch: dispatch)
@@ -220,6 +221,24 @@ struct PanelWidgetEvents {
                   let field = store.getPanel(panelId, key), !(field is NSNull)
             else { continue }
             store.set(global, field)
+        }
+    }
+}
+
+extension PanelWidgetEvents {
+    /// The `panel.*` keys this app holds on the LAYOUT (Opacity's New Opacity
+    /// Masks preferences, ``opacityHeldPanelState``), taken from the scope the
+    /// view rendered into the store before an event. A behavior reads
+    /// `panel.*` from the store (``WidgetEvent/scopeLocals`` leaves `panel` to
+    /// it), and the Mac's menu writes the layout, so without this Make Mask's
+    /// `doc.op` read the bundle's default whatever the menu showed (row 169
+    /// slice 1b). The engine's store holds these keys itself.
+    static func seedLayoutHeldPanelState(scope: [String: Any], panelId: String,
+                                         store: StateStore) {
+        guard panelId == "opacity_panel_content",
+              let shown = scope["panel"] as? [String: Any] else { return }
+        for key in opacityHeldPanelState(OpacityPanelState()).keys.sorted() {
+            if let v = shown[key] { store.setPanel(panelId, key, v) }
         }
     }
 }
@@ -472,7 +491,17 @@ func dispatchPanelAction(
     let ws = WorkspaceData.load()
     let dialogs = ws?.data["dialogs"] as? [String: Any]
     let beforeDlg = store.getDialogId()
-    if actionDef["category"] as? String == "layers" {
+    // An effect Align's table cannot run goes to the Layers registry, in this
+    // caller's scope (the row it was pressed in). The test is the EFFECTS, not
+    // the category label: until row 179 only `category: layers` went there, so
+    // the Artboards panel's rename confirm (`doc.set_artboard_field`) and its
+    // Move Up / Down (`doc.move_artboards_*`) ran their YAML here, found no
+    // handler, and changed nothing.
+    let needsDocRegistry = effects.contains { e in
+        guard let key = (e as? [String: Any])?.keys.first else { return false }
+        return key.hasPrefix("doc.") && platformEffects[key] == nil
+    }
+    if actionDef["category"] as? String == "layers" || needsDocRegistry {
         // A Layers action writes the document (`snapshot`, `doc.op`), and
         // Align's table holds no `doc.*` handler, so run it through the
         // Layers registry, in this caller's scope (the row it was pressed in).

@@ -1111,35 +1111,6 @@ struct YamlElementView: View {
         // release of a press whose hold timer fired (the flyout opened) is
         // not a click.
         if PressHoldGate.shared.consumesClick(PressHoldGate.holdTimerIds(element)) { return }
-        // Opacity panel: op_make_mask dispatches Controller make or
-        // release based on selection_has_mask. The button has no
-        // ``action`` in yaml — routing is resolved here against the
-        // panel id and the element id. Mirrors the Rust special-case
-        // in ``render_button``.
-        if panelId == "opacity_panel_content",
-           let id = element["id"] as? String, id == "op_make_mask",
-           let m = model {
-            let hasMask = evaluate("selection_has_mask", context: context).toBool()
-            let ctrl = Controller(model: m)
-            if hasMask {
-                ctrl.releaseMaskOnSelection()
-            } else {
-                let clip = (context["_opacity_new_masks_clipping"] as? Bool) ?? true
-                let invert = (context["_opacity_new_masks_inverted"] as? Bool) ?? false
-                ctrl.makeMaskOnSelection(clip: clip, invert: invert)
-            }
-            return
-        }
-        // Opacity panel: op_link_indicator toggles mask.linked on
-        // every selected mask via Controller. OPACITY.md §Document
-        // model. Mirrors the Rust special-case in
-        // ``render_icon_button``.
-        if panelId == "opacity_panel_content",
-           let id = element["id"] as? String, id == "op_link_indicator",
-           let m = model {
-            Controller(model: m).toggleMaskLinkedOnSelection()
-            return
-        }
         // WIDGET_EVENTS.md, "Clicking a button": a declared `click` behavior
         // IS the click, so the node's `action` runs only when none is declared.
         if WidgetEvent.clickRunsNodeAction(element),
@@ -1420,7 +1391,7 @@ struct YamlElementView: View {
             // Same number → string rule the expression language uses (and so
             // the same string jas_dioxus's `value: "{value}"` renders from an
             // f64): 12 shows as "12", 12.5 as "12.5".
-            externalValue: numberToCanonicalString(currentValue),
+            externalValue: numberInputText(currentValue),
             commit: { newVal in
                 // WIDGET_EVENTS.md: the number grammar and the declared bounds
                 // decide the value (anything else writes nothing), the bind
@@ -1466,11 +1437,27 @@ struct YamlElementView: View {
         // sees their typed characters disappear. Buffer in a local
         // @State and commit only on Enter / blur so the typed text
         // survives the round-trip.
+        // A field that DECLARES `keydown` or `blur` behaviors gets them
+        // through the text-entry door (WIDGET_EVENTS.md, "Typing in a text
+        // field"; `event.key` names the key). Row 179: the Artboards rename
+        // field declares Enter, Escape and blur, and until this the view sent
+        // only a commit, so a rename could be neither confirmed nor cancelled.
+        let declared = Set(((element["behavior"] as? [[String: Any]]) ?? [])
+            .compactMap { $0["event"] as? String })
+        let entry = widgetEvents
+        let el = element
         BufferedTextField(
             placeholder: placeholder,
             externalValue: currentValue,
             // The text is the value, verbatim (WIDGET_EVENTS.md).
-            commit: { newVal in widgetEvents?.commit(element, text: newVal) }
+            commit: { newVal in widgetEvents?.commit(element, text: newVal) },
+            keydown: declared.contains("keydown")
+                ? { text, key in entry?.textEntry(el, event: "keydown", text: text, key: key) }
+                : nil,
+            blur: declared.contains("blur")
+                ? { text in entry?.textEntry(el, event: "blur", text: text) }
+                : nil,
+            autofocus: (element["autofocus"] as? Bool) ?? false
         )
             .textFieldStyle(.roundedBorder)
             // Text follows the window color scheme (see renderNumberInput):
@@ -2862,67 +2849,34 @@ struct YamlElementView: View {
         let summary = element["summary"] as? String
             ?? element["type"] as? String
             ?? "?"
-        // Opacity panel previews (OPACITY.md §Preview interactions):
-        // op_preview / op_mask_preview handle click to switch the
-        // editing target and render a persistent highlight on the
-        // active target. Mirrors the Rust special-case in
-        // ``render_placeholder``.
-        let id = element["id"] as? String
-        if panelId == "opacity_panel_content",
-           let id, id == "op_preview" || id == "op_mask_preview" {
-            let editingMask = evaluate("editing_target_is_mask", context: context).toBool()
-            let hasMask = evaluate("selection_has_mask", context: context).toBool()
-            let isMaskPreview = id == "op_mask_preview"
-            // Highlight the preview that matches the current editing
-            // target: op_preview when content-mode, op_mask_preview
-            // when mask-mode.
-            let highlight = editingMask == isMaskPreview
-            // MASK_PREVIEW click requires the selection to have a
-            // mask; otherwise the click is a no-op.
-            let clickEnabled = !isMaskPreview || hasMask
-            SwiftUI.Text("[\(summary)]")
-                .foregroundColor(.gray)
-                .frame(minHeight: 30)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 2)
-                        .stroke(highlight
-                                ? SwiftUI.Color(red: 74 / 255, green: 144 / 255, blue: 217 / 255)
-                                : SwiftUI.Color.clear,
-                                lineWidth: 2)
-                )
-                .contentShape(SwiftUI.Rectangle())
-                .onTapGesture {
-                    guard clickEnabled, let m = model else { return }
-                    // MASK_PREVIEW supports modifier-clicks per
-                    // OPACITY.md §Preview interactions. Query the
-                    // current NSEvent modifier flags at tap time.
-                    let flags = NSEvent.modifierFlags
-                    let shift = flags.contains(.shift)
-                    let alt = flags.contains(.option)
-                    if isMaskPreview && shift {
-                        // Shift-click: toggle mask.disabled on every
-                        // selected mask via Controller.
-                        Controller(model: m).toggleMaskDisabledOnSelection()
-                    } else if isMaskPreview && alt {
-                        // Alt-click: toggle mask isolation on the
-                        // first selected element's mask.
-                        if m.maskIsolationPath != nil {
-                            m.maskIsolationPath = nil
-                        } else {
-                            m.maskIsolationPath = m.document.selection.first?.path
-                        }
-                    } else {
-                        // Plain click: flip editing target.
-                        m.editingTarget = isMaskPreview
-                            ? .mask(m.document.selection.first?.path ?? [])
-                            : .content
-                    }
-                }
-        } else {
-            SwiftUI.Text("[\(summary)]")
-                .foregroundColor(.gray)
-                .frame(minHeight: 30)
+        // A placeholder may carry `bind.checked` (drawn as a persistent
+        // highlight: the Opacity previews mark the active editing target),
+        // `bind.disabled`, and declared click behaviors, all generic. Until
+        // row 169 slice 3 the previews' were a special case keyed on their ids.
+        let bind = element["bind"] as? [String: Any]
+        let flag = { (k: String) -> Bool in
+            (bind?[k] as? String).map { evaluate($0, context: context).toBool() } ?? false
         }
+        let checked = flag("checked")
+        let disabled = flag("disabled")
+        let clicks = (element["behavior"] as? [[String: Any]])?
+            .contains { ($0["event"] as? String ?? "click") == "click" } ?? false
+        SwiftUI.Text("[\(summary)]")
+            .foregroundColor(.gray)
+            .frame(minHeight: 30)
+            .opacity(disabled ? 0.5 : 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(checked
+                            ? SwiftUI.Color(red: 74 / 255, green: 144 / 255, blue: 217 / 255)
+                            : SwiftUI.Color.clear,
+                            lineWidth: 2)
+            )
+            .contentShape(SwiftUI.Rectangle())
+            .onTapGesture {
+                guard clicks, !disabled else { return }
+                widgetEvents?.behavior(element, event: "click", modifiers: currentEventModifiers())
+            }
     }
 
     // MARK: - Select
@@ -3082,30 +3036,7 @@ struct YamlElementView: View {
             }
             return false
         }()
-        // Opacity panel selection-mask bindings route write-backs to
-        // the document controller (the flag lives on the selected
-        // element's mask, not on a panel-state key). See OPACITY.md §
-        // States. Mirrors the Rust ``render_toggle`` special-case.
-        let maskRoute: String? = {
-            guard panelId == "opacity_panel_content" else { return nil }
-            switch stateExpr?.trimmingCharacters(in: .whitespaces) {
-            case "selection_mask_clip": return "clip"
-            case "selection_mask_invert": return "invert"
-            default: return nil
-            }
-        }()
-        let capturedModel = model
-
         let onToggle: (Bool) -> Void = { newVal in
-            if let route = maskRoute, let m = capturedModel {
-                let ctrl = Controller(model: m)
-                if route == "clip" {
-                    ctrl.setMaskClipOnSelection(newVal)
-                } else {
-                    ctrl.setMaskInvertOnSelection(newVal)
-                }
-                return
-            }
             // WIDGET_EVENTS.md: a declared `click` / `change` behavior IS the
             // press (Magic Wand's flips, Stroke's Dashed); otherwise the
             // negated value is written. The value negated is the one this
@@ -3546,6 +3477,13 @@ private struct BufferedTextField: View {
     let placeholder: String
     let externalValue: String
     let commit: (String) -> Void
+    /// The declared `keydown` behaviors, given the text and the key's name
+    /// ("Enter", "Escape"); nil when the widget declares none.
+    var keydown: ((String, String) -> Void)? = nil
+    /// The declared `blur` behaviors, given the text; nil when none.
+    var blur: ((String) -> Void)? = nil
+    /// The widget's declared `autofocus`: take focus when it appears.
+    var autofocus: Bool = false
     @State private var text: String = ""
     @State private var syncOnNextChange: Bool = false
     @FocusState private var focused: Bool
@@ -3553,7 +3491,15 @@ private struct BufferedTextField: View {
     var body: some View {
         TextField(placeholder, text: $text)
             .focused($focused)
-            .onAppear { text = externalValue }
+            .onAppear {
+                text = externalValue
+                if autofocus { DispatchQueue.main.async { focused = true } }
+            }
+            .onSubmit { keydown?(text, "Enter") }
+            .onExitCommand { keydown?(text, "Escape") }
+            .onChange(of: focused) { isFocused in
+                if !isFocused { blur?(text) }
+            }
             .onChange(of: externalValue) { newValue in
                 // After a commit we always pull the post-commit
                 // (possibly transformed, e.g. Web Safe snap) value

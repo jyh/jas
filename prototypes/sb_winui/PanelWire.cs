@@ -998,6 +998,52 @@ internal static class PanelWire
         selected == true ? (2, 0x00, 0x7A, 0xFF) : null;
 
     /// <summary>
+    /// Row 185: whether a panel event repaints the canvas. It does when the
+    /// document moved, and also when the engine answered CHANGED (a clear error
+    /// channel) with the document unchanged: an Alt-click on the mask preview
+    /// toggles mask isolation, model state the frame draws and the document
+    /// does not hold. An `Unchanged` answer with no document change does not.
+    /// </summary>
+    internal static bool PanelEventRepaints(bool docChanged, string channel) =>
+        docChanged || channel.Length == 0;
+
+    /// <summary>
+    /// jas §941 (row 169 slice 3): a `placeholder` leaf's persistent highlight,
+    /// the web's `render_placeholder` `outline:2px solid #4a90d9` with
+    /// `outline-offset:-2px` (inset), while `bind.checked` reads "true". The
+    /// Opacity previews use it to mark the active editing target. Null draws
+    /// no outline. Only the canonical "true" checks it.
+    /// </summary>
+    internal static (double Width, byte R, byte G, byte B)? PlaceholderOutline(string? @checked) =>
+        @checked == "true" ? (2, 0x4A, 0x90, 0xD9) : null;
+
+    /// <summary>jas §941: a placeholder's opacity, the web's `opacity:0.5` while `bind.disabled` reads "true", else 1.</summary>
+    internal static double PlaceholderOpacity(string? disabled) => disabled == "true" ? 0.5 : 1;
+
+    /// <summary>
+    /// jas §941: whether a press on a placeholder is sent as `click`. The plan
+    /// must say the node answers it and the node must have an address
+    /// (<see cref="RoutesEvent"/>), and it must not be disabled: the web gives
+    /// a disabled placeholder no handler. Read at the press, since
+    /// `bind.disabled` moves without a rebuild.
+    /// </summary>
+    internal static bool PlaceholderSendsClick(IReadOnlyList<string>? events, string id, string? path, string? disabled) =>
+        disabled != "true" && RoutesEvent(events, id, path, "click");
+
+    /// <summary>jas §941: a placeholder's face, the web's `[{summary}]`, else `[{type}]`.</summary>
+    internal static string PlaceholderText(string? summary, string type) =>
+        $"[{(string.IsNullOrEmpty(summary) ? type : summary)}]";
+
+    /// <summary>
+    /// jas §941: a placeholder's UIA `ItemStatus`: `checked` and/or `disabled`,
+    /// space-separated, exactly when the plan says so. A Grid's peer has no
+    /// toggle or enabled state a reader can see, so this is how a driver reads
+    /// the highlight.
+    /// </summary>
+    internal static string PlaceholderStatus(string? @checked, string? disabled) =>
+        string.Join(" ", new[] { @checked == "true" ? "checked" : null, disabled == "true" ? "disabled" : null }.Where(s => s is not null));
+
+    /// <summary>
     /// jas §927 item 1: a tile's UIA `ItemStatus`, `selected` exactly when the
     /// plan says so, as an option button's is.
     /// </summary>
@@ -3060,6 +3106,57 @@ internal static class ActWire
         catch (System.Text.Json.JsonException)
         {
             return null;
+        }
+    }
+}
+
+/// <summary>
+/// jas row 149: the launch row for the saved libraries the engine took
+/// (<c>jas_engine_load_user_libraries</c>). Every count is read, never
+/// defaulted: a reply without one, an empty span or a non-JSON reply is a
+/// RUSTFAIL row that names what was wrong.
+/// </summary>
+internal static class UserLibrariesWire
+{
+    /// <summary>
+    /// jas §932 item 1: the data root. <c>SB_LIBRARY_ROOT</c> when set and not
+    /// blank (a proving run's fresh, empty root), else
+    /// <c>&lt;LocalApplicationData&gt;\Jas</c>, the Mac's <c>Application Support/Jas</c>.
+    /// </summary>
+    internal static string RootFor(string? knob, string localAppData) =>
+        string.IsNullOrWhiteSpace(knob) ? System.IO.Path.Combine(localAppData, "Jas") : knob;
+
+    /// <summary>The root as the entry takes it: its UTF-8 bytes, no terminator.</summary>
+    internal static byte[] RootBytes(string root) => System.Text.Encoding.UTF8.GetBytes(root);
+
+    /// <summary>The row for the entry's <paramref name="reply"/>.</summary>
+    internal static string Row(string reply)
+    {
+        const string Refused = "RUSTFAIL USER LIBRARIES refused: ";
+        if (string.IsNullOrEmpty(reply))
+        {
+            return Refused + "the core answered nothing (a NULL engine or a root that is not UTF-8)";
+        }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            var counts = new List<long>();
+            foreach (var key in new[] { "brush_libraries", "swatch_libraries", "gradient_libraries" })
+            {
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !doc.RootElement.TryGetProperty(key, out var v)
+                    || v.ValueKind != System.Text.Json.JsonValueKind.Number
+                    || !v.TryGetInt64(out var n))
+                {
+                    return Refused + $"no {key} count in {reply}";
+                }
+                counts.Add(n);
+            }
+            return $"USER LIBRARIES brush={counts[0]} swatch={counts[1]} gradient={counts[2]}";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Refused + $"not JSON: {reply}";
         }
     }
 }

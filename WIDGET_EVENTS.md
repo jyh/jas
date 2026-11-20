@@ -508,6 +508,21 @@ expression that reads another root, or that does not parse.
   `^…$` with `re.match`). A widget commit takes the narrow form, which is
   what both active ports already do.
 
+## Showing a number (`number_input`)
+
+A `number_input` SHOWS its bound number as at most four decimals with trailing
+zeros removed, and an integral value with no decimal point: `16` for
+15.999975000000001, `14.4` for 14.399999999999999, `100` for 100.0. It is one
+rule on every port: Rust's `fmt_num`, Swift's `fmtNum`, and the panel plan's
+`bind.value` that a shell draws. The STORED value is not rounded, and showing it
+writes nothing: a commit happens only when a person changes the text (§Committing
+a value). A widget that must show more places is a `length_input`, which declares
+its `precision:`.
+
+Before this rule, each port showed the shortest round-trip text of the float, so
+a derived value such as 21.3333 px in points read `15.999975000000001`. The ports
+agreed with one another, and every one of them showed the noise (STATUS-jas row 183).
+
 ## The bound target
 
 - **The bound expression** is `bind.value`, else `bind.checked`, else a
@@ -561,8 +576,9 @@ expression that reads another root, or that does not parse.
     writable bind and no behavior is `inert` (`EmptyBehavior`).
 - **Every other bind is read, never written, by this layer.** That
   covers a `state.` path, a `foreach` item's field (`ab.name`), an
-  indexed path (`panel.stops[…].opacity`), an expression, and a name a
-  port routes to native code (Opacity's `selection_mask_clip`). A widget
+  indexed path (`panel.stops[…].opacity`), an expression, and a fact
+  derived from the document (Opacity's `selection_mask_clip`, whose
+  checkbox writes through its declared `doc.op` behavior). A widget
   with such a bind does its work through its declared behaviors, or
   through its port's native code, which this document does not rule.
 - **The write is a store write** (both halves), and a store write notifies
@@ -659,6 +675,24 @@ Opacity lines below on 8 scripts.
   (`renderer.rs:4700-4711`, `YamlPanelBodyView.swift:1175-1186`).
   `SCHEMA.md` now says so for every kind. None of the four shipped `click`
   entries that carry both depends on the order.
+
+## A click on a node that is not a widget kind (a placeholder)
+
+A `placeholder` is not in the event table, but it may declare `click`
+behaviors and bind `checked` and `disabled` (the Opacity panel's two
+previews, STATUS-jas row 169 slice 3).
+
+- **A click runs the node's declared `click` behaviors**, in declaration
+  order, in its scope, with the click's modifiers as `event.shift`,
+  `event.alt`, `event.meta` and `event.ctrl`. A `condition:` on a row
+  reads only the event, so the mask preview's plain, Shift and Alt clicks
+  are three rows. No bound field is written.
+- **`bind.disabled` true refuses the click by name** (`Disabled`), and
+  nothing runs, as for any widget. The engine arm is
+  `a_disabled_placeholder_refuses_its_click`.
+- **`bind.checked` is a persistent highlight**: "this one is the active
+  choice". A placeholder carries no value, so the port draws it (the web
+  and the Mac use a 2 px outline) and nothing reads it back.
 
 ## What this document does not cover
 

@@ -436,6 +436,24 @@ impl Default for Model {
 }
 
 impl Model {
+    /// Escape's mask law (OPACITY.md §Preview interactions): "Escape exits
+    /// isolation first; a second Escape then leaves mask-editing mode." Clears
+    /// `mask_isolation_path` if set, otherwise returns `editing_target` from
+    /// `Mask` to `Content`. Returns whether it changed either. One copy, so the
+    /// web's key handler and the engine's key door (`ffi_pointer::jas_key_event`,
+    /// row 186) cannot disagree on the order.
+    pub fn exit_mask_mode_on_escape(&mut self) -> bool {
+        if self.mask_isolation_path.is_some() {
+            self.mask_isolation_path = None;
+            true
+        } else if let EditingTarget::Mask(_) = self.editing_target {
+            self.editing_target = EditingTarget::Content;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Create a new model wrapping `document`. If `filename` is `None`,
     /// allocate a fresh `Untitled-N` placeholder. The provided document
     /// is also recorded as the saved baseline, so [`is_modified`] returns
@@ -1568,6 +1586,21 @@ impl Model {
 mod tests {
     use super::*;
     use crate::geometry::element::*;
+
+    /// Row 186: Escape exits isolation first, then mask-editing, then nothing.
+    #[test]
+    fn escape_exits_isolation_first_then_mask_editing() {
+        let mut m = Model::default();
+        m.mask_isolation_path = Some(vec![0, 1]);
+        m.editing_target = EditingTarget::Mask(vec![0, 1]);
+        assert!(m.exit_mask_mode_on_escape());
+        assert_eq!((m.mask_isolation_path.clone(), m.editing_target.clone()),
+                   (None, EditingTarget::Mask(vec![0, 1])), "isolation goes first");
+        assert!(m.exit_mask_mode_on_escape());
+        assert_eq!(m.editing_target, EditingTarget::Content, "then mask-editing");
+        assert!(!m.exit_mask_mode_on_escape(), "then Escape changes nothing");
+        assert_eq!((m.mask_isolation_path.clone(), m.editing_target.clone()), (None, EditingTarget::Content));
+    }
 
     fn make_layer(name: &str) -> Element {
         Element::Layer(LayerElem {

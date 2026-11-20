@@ -3482,6 +3482,47 @@ Test-Case 'edge docks on screen: rows it cannot read, or no edge dock, are REFUS
     (Test-SbEdgeDockUia -RectsRow $edgeLeftRects -DrawnRow 'EDGE DOCK DRAWN left=- bottom=- cut=0,0,0,0 cause=draw' -Uia $edgeLeftUia -Scale 1.5)
 } 'REFUSED: the EDGE RECTS row has no cell and canvas | REFUSED: the EDGE DOCK DRAWN row names no edge dock'
 
+# jas STATUS-flask 932 item 1: a proving run reads NO saved library. prove_e2e
+# makes a fresh empty root, hands it to the shell as SB_LIBRARY_ROOT, requires the
+# launch row to read 0/0/0 at that root, and removes the root afterwards. Remove
+# refuses any directory New did not make, so a slip can never delete the real one.
+Test-Case 'library root: New makes a fresh, empty directory under the temp folder' {
+    $d = New-SbLibraryRoot
+    try { "$((Test-Path $d -PathType Container)) $(@(Get-ChildItem $d -Force).Count) $((Split-Path $d -Leaf) -match '^sb-libroot-[0-9a-f]{32}$') $((Split-Path $d -Parent).TrimEnd('\') -eq ([IO.Path]::GetTempPath()).TrimEnd('\'))" }
+    finally { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+} 'True 0 True True'
+Test-Case 'library root: two runs never share a root' {
+    $a = New-SbLibraryRoot; $b = New-SbLibraryRoot
+    try { $a -ne $b } finally { Remove-Item $a, $b -Recurse -Force -ErrorAction SilentlyContinue }
+} 'True'
+Test-Case 'library root: Remove deletes New''s root and what a run saved in it' {
+    $d = New-SbLibraryRoot
+    New-Item -ItemType Directory (Join-Path $d 'brushes\x') | Out-Null
+    Set-Content (Join-Path $d 'brushes\x\library.json') '{}'
+    $r = Remove-SbLibraryRoot $d
+    "$r $(Test-Path $d)"
+} 'removed False'
+Test-Case 'library root: Remove REFUSES a directory New did not make, and leaves it' {
+    $d = Join-Path ([IO.Path]::GetTempPath()) ('not-a-libroot-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory $d | Out-Null
+    try { "$(Remove-SbLibraryRoot $d) $(Test-Path $d)" } finally { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+} 'REFUSED(not a root New-SbLibraryRoot made) True'
+Test-Case 'library root: Remove REFUSES the real data root by name' {
+    Remove-SbLibraryRoot (Join-Path $env:LOCALAPPDATA 'Jas')
+} 'REFUSED(not a root New-SbLibraryRoot made)'
+Test-Case 'library row: 0/0/0 at the run''s root passes' {
+    Test-SbLibraryRow 'USER LIBRARIES brush=0 swatch=0 gradient=0 root=C:\T\sb-libroot-ab' 'C:\T\sb-libroot-ab'
+} 'PASS'
+Test-Case 'library row: a saved library read in a proving run is a FAIL by count' {
+    Test-SbLibraryRow 'USER LIBRARIES brush=1 swatch=0 gradient=2 root=C:\T\sb-libroot-ab' 'C:\T\sb-libroot-ab'
+} 'FAIL(brush=1 gradient=2; a proving run reads no saved library)'
+Test-Case 'library row: another root (the knob not forwarded) is a FAIL by name' {
+    Test-SbLibraryRow 'USER LIBRARIES brush=0 swatch=0 gradient=0 root=C:\Users\u\AppData\Local\Jas' 'C:\T\sb-libroot-ab'
+} 'FAIL(root=C:\Users\u\AppData\Local\Jas, want C:\T\sb-libroot-ab)'
+Test-Case 'library row: no row, or a refusal, is NOT RUN, never a PASS' {
+    (Test-SbLibraryRow $null 'C:\T\r') + ' | ' + (Test-SbLibraryRow 'RUSTFAIL USER LIBRARIES refused: not JSON: x' 'C:\T\r')
+} 'NOT RUN(no USER LIBRARIES row) | NOT RUN(RUSTFAIL USER LIBRARIES refused: not JSON: x)'
+
 Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state can read as a FAIL' {
     @((New-SbBoxSnap), (New-SbBoxSnap -LogonUI $true), (New-SbBoxSnap -Rows $null)) | ForEach-Object { (Get-SbBoxReadiness $_) -match '^(READY|NOT RUN\(box: .+\))$' } | Sort-Object -Unique } 'True'
 

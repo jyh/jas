@@ -1666,7 +1666,7 @@ public sealed partial class MainWindow : Window
         // innocent and the search moves on. The row exists so the next head does
         // not have to rebuild it.
         var reported = false;
-        void OnceLaidOut(object s2, object e2)
+        void OnceLaidOut(object? s2, object e2)
         {
             if (reported) { return; }
             var el = (FrameworkElement)target;

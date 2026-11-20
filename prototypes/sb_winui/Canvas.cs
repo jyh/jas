@@ -1389,9 +1389,12 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>jas §916: the app's data root, `%LOCALAPPDATA%\Jas` (the Mac's is
-    /// `Application Support/Jas`); library writes go under it.</summary>
-    internal static string LibraryRoot =>
-        System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Jas");
+    /// `Application Support/Jas`); library writes go under it and the launch reads
+    /// it back (row 149). `SB_LIBRARY_ROOT` moves it (jas §932: a proving run's
+    /// fresh, empty root), see `UserLibrariesWire.RootFor`.</summary>
+    internal static string LibraryRoot => UserLibrariesWire.RootFor(
+        Environment.GetEnvironmentVariable("SB_LIBRARY_ROOT"),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 
     /// <summary>
     /// jas §915: an act reply that names a `menu` asks the shell to pop up that
@@ -1823,7 +1826,7 @@ internal sealed unsafe class Canvas : IDisposable
         {
             while (true)
             {
-                Cmd first = null!;
+                Cmd? first = null;
                 bool got;
 
                 // ⛔ THE HEAD OF THE LOOP IS BOUNDED ONLY WHEN A LATCH IS ARMED,
@@ -1860,7 +1863,9 @@ internal sealed unsafe class Canvas : IDisposable
                     continue;
                 }
 
-                var batch = new List<Cmd> { first };
+                // `got` is true only when Take or TryTake handed back a command,
+                // so `first` is set here; the compiler cannot see that through `got`.
+                var batch = new List<Cmd> { first! };
                 while (_queue.TryTake(out var more))
                 {
                     batch.Add(more);
@@ -2461,6 +2466,12 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         JasCore.jas_set_dpi_scale(_engine, _scaleX);
+        // jas row 149: the libraries this shell saved (under `LibraryRoot`, where
+        // `ApplyLibraryWrites` puts them) join the bundle's before the first plan,
+        // as the Mac's do at launch. One row says what the engine took.
+        var root = UserLibrariesWire.RootBytes(LibraryRoot);
+        _report(UserLibrariesWire.Row(JasCore.TakeString(
+            JasCore.jas_engine_load_user_libraries(_engine, root, (nuint)root.Length))) + $" root={LibraryRoot}");
         TellViewport();
         // The window validated SB_TOOL against `jas_tool_count`; a refusal
         // here would mean the core's list moved under it, and it is named.
@@ -5778,7 +5789,8 @@ internal sealed unsafe class Canvas : IDisposable
     ///   * ⛔ SILENCE -- the empty span and an empty channel. The core promises
     ///     never to do this, so it is a RUSTFAIL, never read as any of the above.
     ///
-    /// Returns true when the document moved.
+    /// Returns true when the canvas must repaint (<see cref="PanelWire.PanelEventRepaints"/>):
+    /// the document moved, or the engine answered changed (row 185, mask isolation).
     /// </summary>
     private bool ApplyPanelClick(PanelClickCmd click)
     {
@@ -5863,7 +5875,7 @@ internal sealed unsafe class Canvas : IDisposable
                 + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
                 + $"delta-mismatch={mismatch} delta-hidden={hiddenRows} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
         _report(mismatch == "0" ? row : $"RUSTFAIL {row}");
-        return docChanged;
+        return PanelWire.PanelEventRepaints(docChanged, channel);
     }
 
     /// <summary>
@@ -6011,7 +6023,7 @@ internal sealed unsafe class Canvas : IDisposable
     /// harness's (`Get-SbValueVerdicts`, V1-V6). `abc` is a literal because
     /// the sequence is fixed, and the harness reads only its refusal's class.
     ///
-    /// Returns true when a step moved the document, so the drain paints.
+    /// Returns true when a step needs a repaint (PanelWire.PanelEventRepaints), so the drain paints.
     /// </summary>
     private bool ApplyPanelValueSynth(PanelValueSynthCmd cmd)
     {

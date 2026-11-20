@@ -147,6 +147,14 @@
       ]
     },
     "lock_selection": {},
+    "make_mask": {
+      "clip": [
+        "boolean"
+      ],
+      "invert": [
+        "boolean"
+      ]
+    },
     "make_symbol": {
       "master_id": [
         "string"
@@ -226,6 +234,7 @@
         "string"
       ]
     },
+    "release_mask": {},
     "rotate_transform": {
       "angle": [
         "number"
@@ -412,6 +421,16 @@
         "number"
       ]
     },
+    "set_mask_clip": {
+      "clip": [
+        "boolean"
+      ]
+    },
+    "set_mask_invert": {
+      "invert": [
+        "boolean"
+      ]
+    },
     "set_output_field": {
       "field": [
         "string"
@@ -477,6 +496,16 @@
         "array"
       ]
     },
+    "toggle_mask": {
+      "clip": [
+        "boolean"
+      ],
+      "invert": [
+        "boolean"
+      ]
+    },
+    "toggle_mask_disabled": {},
+    "toggle_mask_linked": {},
     "unlock_all": {},
     "unpack_group_at": {
       "path": [
@@ -567,6 +596,10 @@
       "parent_path": "witnessed"
     },
     "lock_selection": {},
+    "make_mask": {
+      "clip": "witnessed",
+      "invert": "witnessed"
+    },
     "make_symbol": {
       "master_id": "witnessed",
       "path": "witnessed",
@@ -605,6 +638,7 @@
       "path": "witnessed",
       "ref_id": "witnessed"
     },
+    "release_mask": {},
     "rotate_transform": {
       "angle": "witnessed",
       "rx": "witnessed",
@@ -689,6 +723,12 @@
       "field": "witnessed",
       "value": "witnessed"
     },
+    "set_mask_clip": {
+      "clip": "witnessed"
+    },
+    "set_mask_invert": {
+      "invert": "witnessed"
+    },
     "set_output_field": {
       "field": "witnessed",
       "value": "witnessed"
@@ -719,6 +759,12 @@
     "toggle_element_lock": {
       "path": "witnessed"
     },
+    "toggle_mask": {
+      "clip": "witnessed",
+      "invert": "witnessed"
+    },
+    "toggle_mask_disabled": {},
+    "toggle_mask_linked": {},
     "unlock_all": {},
     "unpack_group_at": {
       "path": "witnessed"

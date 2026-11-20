@@ -696,6 +696,100 @@ pub fn is_field_key(key: &str) -> bool {
     CharacterEditGroup::from_field(key).is_some()
 }
 
+/// Inverse of `parse_style_name`: build the Character-panel display name
+/// from an element's font_weight / font_style. Falls back to `"Regular"`
+/// for unrecognised combinations so the dropdown always shows a concrete
+/// value.
+pub fn format_style_name(font_weight: &str, font_style: &str) -> String {
+    let bold = font_weight == "bold" || font_weight.parse::<u16>().map(|n| n >= 600).unwrap_or(false);
+    let italic = font_style == "italic" || font_style == "oblique";
+    match (bold, italic) {
+        (true, true) => "Bold Italic".into(),
+        (true, false) => "Bold".into(),
+        (false, true) => "Italic".into(),
+        (false, false) => "Regular".into(),
+    }
+}
+
+/// **The Character panel's fields as the SELECTION holds them**: the first
+/// selected Text / TextPath's attributes in the panel's units. Empty when no
+/// text element is selected, and then the panel shows its stored values.
+///
+/// One law for the web's panel body (`dock_panel::build_live_panel_overrides`),
+/// the web's menu (`panel_menu::live_panel_state`) and the engine's scope
+/// (`panel_scope::engine_scope`). Swift's is `characterPanelLiveOverrides`.
+///
+/// ⛔ The fields describe the selection, so a scope read from the STORE is
+/// wrong for them, and visibly so for the two exclusive pairs (STATUS-flask
+/// §944): a toggle writes one key and never clears its sibling, so after All
+/// Caps then Small Caps the store still holds `all_caps: true` while the
+/// element carries no transform. Since a toggle writes the NEGATION of what
+/// it reads, that stale key also turns the next All Caps into a dead click.
+/// It is W2b-7's law again (`paragraph_host::live_values`).
+pub fn live_values(doc: &crate::document::document::Document)
+    -> serde_json::Map<String, serde_json::Value> {
+    use crate::geometry::tspan::{parse_em_as_thousandths, parse_pt};
+    use serde_json::{json, Value as J};
+    let mut m = serde_json::Map::new();
+    let Some(a) = doc.selection.first()
+        .and_then(|es| doc.get_element(&es.path))
+        .and_then(character_attrs_of) else { return m };
+    let (u, s) = text_decoration_flags(&a.text_decoration);
+    // Numeric baseline-shift: only read when super/sub isn't set.
+    let bshift_pt = if a.baseline_shift == "super" || a.baseline_shift == "sub" {
+        0.0
+    } else {
+        parse_pt(&a.baseline_shift).unwrap_or(0.0)
+    };
+    // Leading: empty = Auto (120% of font_size), else parsed pt.
+    let leading_pt = if a.line_height.is_empty() {
+        a.font_size * 1.2
+    } else {
+        parse_pt(&a.line_height).unwrap_or(a.font_size * 1.2)
+    };
+    // Tracking: parse "Nem" → N*1000 (panel stores 1/1000 em).
+    let tracking_val = if a.letter_spacing.is_empty() {
+        0.0
+    } else {
+        parse_em_as_thousandths(&a.letter_spacing).unwrap_or(0.0)
+    };
+    // Anti-aliasing: empty element field → panel default "Sharp".
+    let aa_mode_display = if a.aa_mode.is_empty() { "Sharp".to_string() } else { a.aa_mode.clone() };
+    // Kerning: named modes pass through to the panel combo_box verbatim;
+    // numeric "{N}em" converts to a plain "{N*1000}" string (1/1000 em is the
+    // panel's numeric unit). Empty element attribute shows as "Auto", the
+    // spec default.
+    let kerning_display = match a.kerning.as_str() {
+        "" | "Auto" => "Auto".to_string(),
+        "Optical" | "Metrics" => a.kerning.clone(),
+        other => match parse_em_as_thousandths(other) {
+            Some(n) => fmt_num(n),
+            None => a.kerning.clone(),
+        },
+    };
+    m.insert("font_family".into(), J::String(a.font_family.clone()));
+    m.insert("font_size".into(), json!(a.font_size));
+    m.insert("style_name".into(), J::String(format_style_name(&a.font_weight, &a.font_style)));
+    m.insert("underline".into(), J::Bool(u));
+    m.insert("strikethrough".into(), J::Bool(s));
+    m.insert("all_caps".into(), J::Bool(a.text_transform == "uppercase"));
+    m.insert("small_caps".into(), J::Bool(a.font_variant == "small-caps"));
+    m.insert("superscript".into(), J::Bool(a.baseline_shift == "super"));
+    m.insert("subscript".into(), J::Bool(a.baseline_shift == "sub"));
+    m.insert("baseline_shift".into(), json!(bshift_pt));
+    m.insert("leading".into(), json!(leading_pt));
+    m.insert("tracking".into(), json!(tracking_val));
+    m.insert("language".into(), J::String(a.xml_lang.clone()));
+    m.insert("anti_aliasing".into(), J::String(aa_mode_display));
+    // Character rotation: parse degrees; empty → 0.
+    m.insert("character_rotation".into(), json!(a.rotate.parse::<f64>().unwrap_or(0.0)));
+    // V/H scale: parse percent; empty → 100 (identity).
+    m.insert("horizontal_scale".into(), json!(a.horizontal_scale.parse::<f64>().unwrap_or(100.0)));
+    m.insert("vertical_scale".into(), json!(a.vertical_scale.parse::<f64>().unwrap_or(100.0)));
+    m.insert("kerning".into(), J::String(kerning_display));
+    m
+}
+
 impl CharacterPanelState {
     /// Write ONE field from a YAML-interpreted value. A value of the wrong
     /// type, and an unknown key, write nothing — the panel keeps its default

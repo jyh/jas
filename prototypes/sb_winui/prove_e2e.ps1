@@ -146,6 +146,12 @@ $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
 # ---- launch, holding, with the probe on ------------------------------------
 $env:SB_PROBE = 'sb-probe.json'
+# jas STATUS-flask 932: NO SAVED LIBRARY IS AN INPUT TO A CERTIFICATE. The shell
+# merges the libraries saved under its data root at launch (row 149), so this run
+# gets a fresh, empty root of its own, read back from the launch row below and
+# removed on every way out (`Remove-SbLibraryRoot` refuses any other directory).
+$libRoot = New-SbLibraryRoot
+$env:SB_LIBRARY_ROOT = $libRoot
 # The script's tool, by NAME: the shell resolves it against the core's list and
 # refuses an unknown one by name (`ToolKnob.Resolve`). Selection is the shell's
 # default, so the selection script launches exactly as it always has.
@@ -165,9 +171,11 @@ function Stop-OurApps {
 $up = Wait-SbRow -Log $log -Mark $mark -Patterns @('RUSTOK APP pid=', 'RUSTFAIL ') -TimeoutSeconds $TimeoutSeconds
 Remove-Item Env:\SB_PROBE
 Remove-Item Env:\SB_TOOL -ErrorAction SilentlyContinue
+Remove-Item Env:\SB_LIBRARY_ROOT
 if ($null -eq $up.Row -or $up.Row -match 'RUSTFAIL ') {
     Stop-OurApps
     if (-not $launcher.HasExited) { $launcher | Stop-Process -Force -ErrorAction SilentlyContinue }
+    Remove-SbLibraryRoot $libRoot | Out-Null
     $why = if ($null -ne $up.Row) { "the shell said: $($up.Row.Trim())" } else { "no APP row within $($up.Waited)s" }
     Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the app did not come up (after $($up.Waited)s); $why"
     exit 3
@@ -177,6 +185,14 @@ $launcher.WaitForExit(30000) | Out-Null
 
 $tasks = @('jas-e2e-hand', 'jas-e2e-shot')
 try {
+    # The launch row names the root the shell READ and what it took there: 0/0/0
+    # at this run's root, or the run proves nothing about the bundle alone.
+    $lib = Wait-SbRow -Log $log -Mark $mark -Patterns @('USER LIBRARIES ') -TimeoutSeconds 5
+    $libVerdict = Test-SbLibraryRow $(if ($null -ne $lib.Row) { ($lib.Row -split "`t")[-1].Trim() }) $libRoot
+    if ($libVerdict -ne 'PASS') {
+        Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the run's library root was not the only one read: $libVerdict"
+        exit 3
+    }
     $ht = Wait-SbRow -Log $log -Mark $mark -Patterns @('HITTARGET which=', 'RUSTFAIL ') -TimeoutSeconds $TimeoutSeconds
     if ($null -ne $ht.Row -and $ht.Row -match 'RUSTFAIL ') {
         Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the shell failed before the drive: $($ht.Row.Trim())"
@@ -238,7 +254,9 @@ finally {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'sitting.ps1') -Stop $appPid *> $null
     Stop-OurApps
     foreach ($t in $tasks) { Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue }
+    $libGone = Remove-SbLibraryRoot $libRoot
     if (Get-Process -Id $appPid -ErrorAction SilentlyContinue) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the app (pid $appPid) is STILL ALIVE after -Stop"; exit 5 }
+    if ($libGone -ne 'removed' -or (Test-Path $libRoot)) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the run's library root was not removed ($libGone): $libRoot"; exit 5 }
 }
 
 $selCount = @($r.selection).Count

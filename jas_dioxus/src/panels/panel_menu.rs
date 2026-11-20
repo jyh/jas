@@ -550,6 +550,15 @@ pub fn typed_panel_slot_keys() -> Vec<(&'static str, &'static str)> {
         ("layers_panel_content", "type_filter"),
         ("layers_panel_content", "collapsed_paths"),
         ("layers_panel_content", "renaming_element"),
+        ("opacity_panel_content", "thumbnails_hidden"),
+        ("opacity_panel_content", "options_shown"),
+        ("opacity_panel_content", "new_masks_clipping"),
+        ("opacity_panel_content", "new_masks_inverted"),
+        ("character_panel_content", "snap_to_glyph_visible"),
+        ("character_panel_content", "all_caps"),
+        ("character_panel_content", "small_caps"),
+        ("character_panel_content", "superscript"),
+        ("character_panel_content", "subscript"),
     ]
 }
 
@@ -591,15 +600,42 @@ fn live_panel_state(
             ("new_masks_clipping", b(st.opacity_panel.new_masks_clipping)),
             ("new_masks_inverted", b(st.opacity_panel.new_masks_inverted)),
         ],
-        "character_panel_content" => vec![
-            ("snap_to_glyph_visible", b(st.character_panel.snap_to_glyph_visible)),
-            ("all_caps", b(st.character_panel.all_caps)),
-            ("small_caps", b(st.character_panel.small_caps)),
-            ("superscript", b(st.character_panel.superscript)),
-            ("subscript", b(st.character_panel.subscript)),
-        ],
+        "character_panel_content" => {
+            // The four toggles describe the SELECTION, as the panel body shows
+            // them (`character_host::live_values`); the typed slot is the
+            // fallback with no text selected. The slot keeps a stale sibling,
+            // because a toggle writes one key, so reading it checked All Caps
+            // beside Small Caps and made the next All Caps a dead click
+            // (STATUS-flask §944).
+            let live = st.tab()
+                .map(|tab| crate::interpreter::character_host::live_values(tab.model.document()))
+                .unwrap_or_default();
+            let cp = &st.character_panel;
+            let shown = |k: &str, typed: bool| live.get(k).cloned().unwrap_or(b(typed));
+            vec![
+                ("snap_to_glyph_visible", b(cp.snap_to_glyph_visible)),
+                ("all_caps", shown("all_caps", cp.all_caps)),
+                ("small_caps", shown("small_caps", cp.small_caps)),
+                ("superscript", shown("superscript", cp.superscript)),
+                ("subscript", shown("subscript", cp.subscript)),
+            ]
+        }
         "paragraph_panel_content" => {
-            vec![("hanging_punctuation", b(st.paragraph_panel.hanging_punctuation))]
+            // The flag describes the SELECTION (`paragraph_host::live_values`,
+            // as the engine's scope reads it); the typed slot holds whatever
+            // the last write left, so after a selection change it showed the
+            // previous paragraph's flag (row 181). The slot is the fallback
+            // with no text selected.
+            let live = st.tab()
+                .map(|tab| crate::interpreter::paragraph_host::live_values(tab.model.document()))
+                .unwrap_or_default();
+            let shown = if live.get("text_selected") == Some(&J::Bool(true)) {
+                live.get("hanging_punctuation").cloned()
+                    .unwrap_or(b(st.paragraph_panel.hanging_punctuation))
+            } else {
+                b(st.paragraph_panel.hanging_punctuation)
+            };
+            vec![("hanging_punctuation", shown)]
         }
         "align_panel_content" => vec![
             ("use_preview_bounds", b(st.align_panel.use_preview_bounds)),

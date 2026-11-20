@@ -1761,6 +1761,182 @@
         }
       ]
     },
+    "toggle_opacity_thumbnails": {
+      "description": "Show or hide the Opacity panel's preview thumbnails (the panel menu's Hide Thumbnails / Show Thumbnails). The checkmark reads panel.thumbnails_hidden.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "opacity",
+            "key": "thumbnails_hidden",
+            "value": "not panel.thumbnails_hidden"
+          }
+        }
+      ]
+    },
+    "toggle_opacity_options": {
+      "description": "Show or hide the Opacity panel's options row (the panel menu's Show Options). The checkmark reads panel.options_shown.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "opacity",
+            "key": "options_shown",
+            "value": "not panel.options_shown"
+          }
+        }
+      ]
+    },
+    "toggle_opacity_slider": {
+      "description": "Show or hide the Opacity panel's slider row (the chevron beside the Opacity field). Panel-local UI: the document is unchanged.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "opacity",
+            "key": "slider_shown",
+            "value": "not panel.slider_shown"
+          }
+        }
+      ]
+    },
+    "toggle_new_masks_clipping": {
+      "description": "Flip the document preference for whether a newly made opacity mask clips (the panel menu's New Opacity Masks Are Clipping). Existing masks are unchanged. Make Mask and Make Opacity Mask read it.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "opacity",
+            "key": "new_masks_clipping",
+            "value": "not panel.new_masks_clipping"
+          }
+        }
+      ]
+    },
+    "toggle_new_masks_inverted": {
+      "description": "Flip the document preference for whether a newly made opacity mask is inverted (the panel menu's New Opacity Masks Are Inverted). Existing masks are unchanged. Make Mask and Make Opacity Mask read it.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "opacity",
+            "key": "new_masks_inverted",
+            "value": "not panel.new_masks_inverted"
+          }
+        }
+      ]
+    },
+    "toggle_snap_to_glyph_visible": {
+      "description": "Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.\n",
+      "category": "panel",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "snap_to_glyph_visible",
+            "value": "not panel.snap_to_glyph_visible"
+          }
+        }
+      ]
+    },
+    "toggle_all_caps": {
+      "description": "Toggle All Caps on the selected text (the Character panel menu's All Caps, the same field as the panel's All Caps toggle). Turning it on clears Small Caps; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "all_caps",
+            "value": "not panel.all_caps"
+          }
+        }
+      ]
+    },
+    "toggle_small_caps": {
+      "description": "Toggle Small Caps on the selected text (the Character panel menu's Small Caps, the same field as the panel's Small Caps toggle). Turning it on clears All Caps; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "small_caps",
+            "value": "not panel.small_caps"
+          }
+        }
+      ]
+    },
+    "toggle_superscript": {
+      "description": "Toggle Superscript on the selected text (the Character panel menu's Superscript, the same field as the panel's Superscript toggle). Turning it on clears Subscript; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "superscript",
+            "value": "not panel.superscript"
+          }
+        }
+      ]
+    },
+    "toggle_subscript": {
+      "description": "Toggle Subscript on the selected text (the Character panel menu's Subscript, the same field as the panel's Subscript toggle). Turning it on clears Superscript; the write goes through the Character panel's field-scoped apply, so no other character attribute changes.\n",
+      "category": "paragraph",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "character",
+            "key": "subscript",
+            "value": "not panel.subscript"
+          }
+        }
+      ]
+    },
+    "make_opacity_mask": {
+      "description": "Make an opacity mask on every selected element that has none (the panel menu's Make Opacity Mask): an empty group as its subtree, linked and enabled, its clip and invert taken from the panel's new-mask preferences. An element that already has a mask keeps it. The document op make_mask.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.op": {
+            "op": "make_mask",
+            "clip": "panel.new_masks_clipping",
+            "invert": "panel.new_masks_inverted"
+          }
+        }
+      ]
+    },
+    "release_opacity_mask": {
+      "description": "Remove the opacity mask from every selected element (the panel menu's Release Opacity Mask). The document op release_mask.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.op": {
+            "op": "release_mask"
+          }
+        }
+      ]
+    },
+    "disable_opacity_mask": {
+      "description": "Toggle whether the selected opacity masks are disabled (the panel menu's Disable Opacity Mask), first-wins: the first selected mask's state decides, and every selected mask takes the opposite. A selection with no mask changes nothing. The document op toggle_mask_disabled.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.op": {
+            "op": "toggle_mask_disabled"
+          }
+        }
+      ]
+    },
+    "unlink_opacity_mask": {
+      "description": "Toggle whether the selected opacity masks' transforms are linked to their elements (the panel menu's Unlink Opacity Mask), first-wins as Disable is. A selection with no mask changes nothing. The document op toggle_mask_linked.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.op": {
+            "op": "toggle_mask_linked"
+          }
+        }
+      ]
+    },
     "toggle_dashed_line": {
       "description": "Toggle dashed stroke on or off. When disabled, the dash/gap fields are grayed out but retain their values. Updates both panel state and global state.\n",
       "category": "stroke",
@@ -12412,6 +12588,7 @@
                     "flex": 1,
                     "font_size": 11
                   },
+                  "autofocus": true,
                   "bind": {
                     "visible": "panel.renaming_artboard == ab.id",
                     "value": "ab.name"
@@ -13597,22 +13774,22 @@
         "all_caps": {
           "type": "bool",
           "default": false,
-          "description": "All Caps. Mutually exclusive with Small Caps in the full spec; not enforced yet."
+          "description": "All Caps. Mutually exclusive with Small Caps: turning one on clears the other on the selection. With a text selected the field shows the selection (text-transform uppercase), so the menu check and the toggle never show both on; a toggle writes the negation of that shown value."
         },
         "small_caps": {
           "type": "bool",
           "default": false,
-          "description": "Small Caps."
+          "description": "Small Caps (font-variant small-caps). Mutually exclusive with All Caps; with a text selected the field shows the selection."
         },
         "superscript": {
           "type": "bool",
           "default": false,
-          "description": "Superscript. Mutually exclusive with Subscript in the full spec; not enforced yet."
+          "description": "Superscript. Mutually exclusive with Subscript: turning one on clears the other on the selection. With a text selected the field shows the selection (baseline-shift super), so the menu check and the toggle never show both on; a toggle writes the negation of that shown value."
         },
         "subscript": {
           "type": "bool",
           "default": false,
-          "description": "Subscript."
+          "description": "Subscript (baseline-shift sub). Mutually exclusive with Superscript; with a text selected the field shows the selection."
         },
         "underline": {
           "type": "bool",
@@ -18686,6 +18863,11 @@
           "default": false,
           "description": "When true, the preview row (OPACITY_PREVIEW, LINK_INDICATOR, MASK_PREVIEW, and the mask-buttons column) is collapsed.\n"
         },
+        "slider_shown": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, the opacity slider row is revealed under row 1. The chevron (op_disclosure) toggles it. Panel-local UI; the document is unchanged.\n"
+        },
         "options_shown": {
           "type": "bool",
           "default": false,
@@ -18892,13 +19074,36 @@
                 "col": 1,
                 "icon": "disclosure_right",
                 "summary": "Opacity slider",
-                "description": "Opens a popover containing a horizontal opacity slider bound to panel.opacity.\n",
+                "description": "Shows or hides the opacity slider row under this row (an inline row rather than a popover, so every app draws it with the kinds it already has).\n",
                 "behavior": [
                   {
                     "event": "click",
-                    "action": "open_opacity_slider_popover"
+                    "action": "toggle_opacity_slider"
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "id": "op_slider_row",
+            "layout": "row",
+            "bind": {
+              "visible": "panel.slider_shown"
+            },
+            "children": [
+              {
+                "id": "op_opacity_slider",
+                "type": "slider",
+                "col": 12,
+                "summary": "Opacity slider",
+                "description": "Drag to set the selection's opacity, 0-100%. Bound to the same panel.opacity as the Opacity field, so a commit writes the selection by the same law; with a mixed selection the value is the panel's, as the field's is.\n",
+                "min": 0,
+                "max": 100,
+                "step": 1,
+                "bind": {
+                  "value": "panel.opacity"
+                }
               }
             ]
           },
@@ -18915,7 +19120,23 @@
                 "type": "placeholder",
                 "col": 3,
                 "summary": "Opacity preview",
-                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\nClicking this preview sets the editing target to the element's main content (exits mask-editing mode) per OPACITY.md \u00a7Preview interactions. The native renderers draw a persistent highlight on this preview while it is the active editing target (i.e., while ``editing_target_is_mask`` is false).\n"
+                "description": "Thumbnail of the selection. Phase-1 renders as a placeholder box in Flask; native apps render actual selection artwork.\nClicking this preview sets the editing target to the element's main content (exits mask-editing mode) per OPACITY.md \u00a7Preview interactions. The native renderers draw a persistent highlight on this preview while it is the active editing target (i.e., while ``editing_target_is_mask`` is false).\n",
+                "bind": {
+                  "checked": "!editing_target_is_mask"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "description": "Edit the element's content: the editing target leaves the mask. View state on the document model, never journaled.",
+                    "effects": [
+                      {
+                        "doc.set_editing_target": {
+                          "mask": "false"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "op_link_indicator",
@@ -18926,14 +19147,63 @@
                 "bind": {
                   "icon": "if selection_mask_linked then \"link_linked\" else \"link_unlinked\"",
                   "disabled": "!selection_has_mask"
-                }
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "effects": [
+                      {
+                        "doc.op": {
+                          "op": "toggle_mask_linked"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "id": "op_mask_preview",
                 "type": "placeholder",
                 "col": 3,
                 "summary": "Mask preview",
-                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\nClicking this preview enters mask-editing mode per OPACITY.md \u00a7Preview interactions: the editing target switches to the first selected element's mask subtree, and subsequent tool drawing adds to ``element.mask.subtree`` instead of the active layer. Requires ``selection_has_mask``; a no-op otherwise. The native renderers draw a persistent highlight on this preview while mask-editing is active (``editing_target_is_mask`` is true).\n"
+                "description": "Thumbnail of the opacity mask (or an empty-mask glyph when no mask exists). Phase-1 renders as a placeholder box.\nClicking this preview enters mask-editing mode per OPACITY.md \u00a7Preview interactions: the editing target switches to the first selected element's mask subtree, and subsequent tool drawing adds to ``element.mask.subtree`` instead of the active layer. Requires ``selection_has_mask``; a no-op otherwise. The native renderers draw a persistent highlight on this preview while mask-editing is active (``editing_target_is_mask`` is true).\nShift-click toggles mask.disabled on every selected mask (the document op toggle_mask_disabled). Alt-click toggles mask isolation: the canvas renders only the first selected element's mask subtree until a second Alt-click. A plain click enters mask-editing. Neither the editing target nor isolation is journaled.\n",
+                "bind": {
+                  "checked": "editing_target_is_mask",
+                  "disabled": "!selection_has_mask"
+                },
+                "behavior": [
+                  {
+                    "event": "click",
+                    "condition": "event.shift",
+                    "effects": [
+                      {
+                        "doc.op": {
+                          "op": "toggle_mask_disabled"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "event.alt and not event.shift",
+                    "effects": [
+                      {
+                        "doc.toggle_mask_isolation": {}
+                      }
+                    ]
+                  },
+                  {
+                    "event": "click",
+                    "condition": "not event.shift and not event.alt",
+                    "effects": [
+                      {
+                        "doc.set_editing_target": {
+                          "mask": "true"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "type": "container",
@@ -18948,10 +19218,24 @@
                     "id": "op_make_mask",
                     "type": "button",
                     "summary": "Make or Release Opacity Mask",
-                    "description": "Creates an opacity mask on the selected element(s), or releases an existing mask. The label flips between \"Make Mask\" and \"Release\" based on selection_has_mask per OPACITY.md \u00a7 States.\n",
+                    "description": "Creates an opacity mask on the selected element(s), or releases an existing mask. The label flips between \"Make Mask\" and \"Release\" based on selection_has_mask per OPACITY.md \u00a7 States. A click with no mask on the selection makes one on every selected element that has none (an empty group as its subtree, linked, enabled), its clip and invert taken from the panel's \"New Opacity Masks Are Clipping\" and \"... Are Inverted\" preferences; an element that already has a mask keeps it. A click when the selection has a mask releases every selected mask. Both are the one document op toggle_mask (release when every selected element has a mask, else make), so every app runs them the same way.\n",
                     "bind": {
                       "label": "if selection_has_mask then \"Release\" else \"Make Mask\""
-                    }
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "doc.op": {
+                              "op": "toggle_mask",
+                              "clip": "panel.new_masks_clipping",
+                              "invert": "panel.new_masks_inverted"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   },
                   {
                     "id": "op_clip",
@@ -18962,7 +19246,21 @@
                     "bind": {
                       "disabled": "!selection_has_mask",
                       "checked": "selection_mask_clip"
-                    }
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "description": "This behavior owns the press: event.value is the new checked state, and every selected mask takes it (the document op set_mask_clip). An element with no mask is skipped.",
+                        "effects": [
+                          {
+                            "doc.op": {
+                              "op": "set_mask_clip",
+                              "clip": "event.value"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   },
                   {
                     "id": "op_invert_mask",
@@ -18973,7 +19271,21 @@
                     "bind": {
                       "disabled": "!selection_has_mask",
                       "checked": "selection_mask_invert"
-                    }
+                    },
+                    "behavior": [
+                      {
+                        "event": "change",
+                        "description": "This behavior owns the press: event.value is the new checked state, and every selected mask takes it (the document op set_mask_invert). An element with no mask is skipped.",
+                        "effects": [
+                          {
+                            "doc.op": {
+                              "op": "set_mask_invert",
+                              "invert": "event.value"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   }
                 ]
               }
@@ -25939,7 +26251,6 @@
       "menu_label": "Rotate Tool",
       "shortcut": "R",
       "tool_options_dialog": "rotate_options",
-      "tool_options_dialog_on_alt_click": true,
       "state": {
         "mode": {
           "default": "idle",
@@ -26333,7 +26644,6 @@
       "menu_label": "Scale Tool",
       "shortcut": "S",
       "tool_options_dialog": "scale_options",
-      "tool_options_dialog_on_alt_click": true,
       "state": {
         "mode": {
           "default": "idle",
@@ -27109,7 +27419,6 @@
       "menu_label": "Shear Tool",
       "shortcut": "Shift+S",
       "tool_options_dialog": "shear_options",
-      "tool_options_dialog_on_alt_click": true,
       "state": {
         "mode": {
           "default": "idle",

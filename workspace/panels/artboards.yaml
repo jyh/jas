@@ -284,6 +284,9 @@ content:
           - id: ap_name_edit
             type: text_input
             style: { flex: 1, font_size: 11 }
+            # The field takes keyboard focus when it appears, so a person can
+            # type the new name straight after the double-click that opened it.
+            autofocus: true
             bind:
               visible: "panel.renaming_artboard == ab.id"
               value: "ab.name"

@@ -448,6 +448,32 @@ static class Program
         Eq("finding 6: a style other than solid is refused by name", "(null)", SB("1px dashed #555555"));
         Eq("finding 6: an unresolved template is refused", "(null)", SB("1px solid {{theme.colors.border}}"));
         Eq("finding 6: a zero width draws nothing and is refused", "(null)", SB("0px solid #555555"));
+        // jas row 149: at launch the shell hands the engine its saved-library
+        // root (`jas_engine_load_user_libraries`) and writes what the engine took
+        // as one row; an empty or malformed reply is a RUSTFAIL by name.
+        Eq("row 149: the counts, as the launch row",
+            "USER LIBRARIES brush=1 swatch=0 gradient=2",
+            UserLibrariesWire.Row("""{"brush_libraries":1,"swatch_libraries":0,"gradient_libraries":2}"""));
+        Eq("row 149: an empty span (a NULL engine or bad UTF-8) is refused by name",
+            "RUSTFAIL USER LIBRARIES refused: the core answered nothing (a NULL engine or a root that is not UTF-8)",
+            UserLibrariesWire.Row(""));
+        Eq("row 149: a missing count is refused by name, never read as 0",
+            "RUSTFAIL USER LIBRARIES refused: no gradient_libraries count in {\"brush_libraries\":1,\"swatch_libraries\":0}",
+            UserLibrariesWire.Row("""{"brush_libraries":1,"swatch_libraries":0}"""));
+        Eq("row 149: a reply that is not JSON is refused by name",
+            "RUSTFAIL USER LIBRARIES refused: not JSON: nope",
+            UserLibrariesWire.Row("nope"));
+        // jas §932 item 1: SB_LIBRARY_ROOT moves the data root for the launch
+        // read AND the writes (a proving run's fresh, empty root); unset or
+        // blank keeps `%LOCALAPPDATA%\Jas`.
+        Eq("§932: the knob, when set, is the root",
+            @"C:\T\sb-libroot-ab", UserLibrariesWire.RootFor(@"C:\T\sb-libroot-ab", @"C:\Users\u\AppData\Local"));
+        Eq("§932: unset keeps the app's data root",
+            @"C:\Users\u\AppData\Local\Jas", UserLibrariesWire.RootFor(null, @"C:\Users\u\AppData\Local"));
+        Eq("§932: a blank knob is unset, never a root of nothing",
+            @"C:\Users\u\AppData\Local\Jas", UserLibrariesWire.RootFor("  ", @"C:\Users\u\AppData\Local"));
+        Eq("row 149: the root's bytes are its UTF-8, no terminator",
+            "4A,61,73,C3,A9", string.Join(",", UserLibrariesWire.RootBytes("Jasé").Select(b => b.ToString("X2"))));
         // jas §927 item 1: a tile's selection is the plan row's resolved
         // `selected` (the engine tests `bind.selected_in` membership; the shell
         // tests nothing). A swatch tile is a leaf, a brush tile a surface
@@ -476,6 +502,42 @@ static class Program
             && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": false}""").RootElement) == false
             && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{"selected": "true"}""").RootElement) is null
             && PanelWire.ReadSelected(System.Text.Json.JsonDocument.Parse("""{}""").RootElement) is null, "");
+        // jas §941 (row 169 slice 3): a `placeholder` leaf is drawn as the web's
+        // `render_placeholder` draws it: `[summary]` (else `[type]`), a 2px #4a90d9
+        // inset outline while `bind.checked` reads "true", dimmed and sending no
+        // click while `bind.disabled` reads "true", and a click only when the plan
+        // says it answers one and it has an address. No widget id is read.
+        static string PO(string? on) => PanelWire.PlaceholderOutline(on) is { } o
+            ? FormattableString.Invariant($"{o.Width}/{o.R:X2}{o.G:X2}{o.B:X2}") : "(null)";
+        Eq("§941: a checked placeholder's outline is the web's 2px #4a90d9", "2/4A90D9", PO("true"));
+        Eq("§941: an unchecked placeholder has no outline", "(null)", PO("false"));
+        Eq("§941: a placeholder with no bind.checked has no outline", "(null)", PO(null));
+        Eq("§941: CONTROL: only the canonical \"true\" checks it", "(null)", PO("True"));
+        Eq("§941: a disabled placeholder is dimmed to the web's 0.5", "0.5", PanelWire.PlaceholderOpacity("true").ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Eq("§941: an enabled placeholder is not dimmed", "1", PanelWire.PlaceholderOpacity(null).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Check("§941: a placeholder that answers click, with an id, sends it",
+            PanelWire.PlaceholderSendsClick(new[] { "click" }, "op_mask_preview", "[1,2]", null), "");
+        Check("§941: a disabled one sends nothing",
+            !PanelWire.PlaceholderSendsClick(new[] { "click" }, "op_mask_preview", "[1,2]", "true"), "");
+        Check("§941: one whose plan declares no click sends nothing",
+            !PanelWire.PlaceholderSendsClick(null, "op_mask_preview", "[1,2]", null)
+            && !PanelWire.PlaceholderSendsClick(new[] { "double_click" }, "op_mask_preview", "[1,2]", null), "");
+        Check("§941: a template's placeholder (no id) is addressed by its path",
+            PanelWire.PlaceholderSendsClick(new[] { "click" }, "", "[1,2]", null), "");
+        Eq("§941: the face is [summary]", "[Mask preview]", PanelWire.PlaceholderText("Mask preview", "placeholder"));
+        Eq("§941: with no summary, the face is [type]", "[placeholder]", PanelWire.PlaceholderText(null, "placeholder"));
+        Eq("§941: UIA ItemStatus, checked", "checked", PanelWire.PlaceholderStatus("true", null));
+        Eq("§941: UIA ItemStatus, disabled", "disabled", PanelWire.PlaceholderStatus(null, "true"));
+        Eq("§941: UIA ItemStatus, both", "checked disabled", PanelWire.PlaceholderStatus("true", "true"));
+        Eq("§941: UIA ItemStatus, neither", "", PanelWire.PlaceholderStatus("false", "false"));
+        // Row 185: a panel event repaints the canvas when the engine answered
+        // CHANGED, not only when the document moved. An Alt-click on the mask
+        // preview toggles mask isolation, which is model state the frame draws
+        // and the document does not hold; doc_changed is false for it.
+        Check("row 185: a changed answer with no document change repaints", PanelWire.PanelEventRepaints(false, ""), "isolation left the canvas stale");
+        Check("row 185: a document change repaints", PanelWire.PanelEventRepaints(true, ""), "");
+        Check("row 185: Unchanged does not repaint", !PanelWire.PanelEventRepaints(false, "{\"panel_event\":\"Unchanged\"}"), "");
+        Check("row 185: a document change repaints even with a channel", PanelWire.PanelEventRepaints(true, "{\"panel_event\":\"Unchanged\"}"), "");
         Eq("finding 6: no border is no border", "(null)", SB(null));
 
         var token = PanelWire.RowValue("a b\tc");

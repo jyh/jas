@@ -15,8 +15,12 @@ public func makeMeasurer(family: String, weight: String, style: String, size: Do
     let attrs: [NSAttributedString.Key: Any] = [.font: font]
     return { s in
         if s.isEmpty { return 0.0 }
-        let str = NSAttributedString(string: s, attributes: attrs)
-        return Double(str.size().width)
+        // The measure holds the font lock too (row 178): measured concurrently
+        // outside it, an italic job read the regular face's width (1 run in 20
+        // of `makeMeasurerIsSafeUnderConcurrency`, 11-19).
+        return withFontLookup {
+            Double(NSAttributedString(string: s, attributes: attrs).size().width)
+        }
     }
 }
 
@@ -38,15 +42,8 @@ private func resolveFontUnlocked(family: String, bold: Bool, italic: Bool,
     var traits: NSFontDescriptor.SymbolicTraits = []
     if bold { traits.insert(.bold) }
     if italic { traits.insert(.italic) }
-    if let baseFont = NSFont(name: family, size: CGFloat(size)) {
-        if traits.isEmpty { return baseFont }
-        let desc = baseFont.fontDescriptor.withSymbolicTraits(traits)
-        return NSFont(descriptor: desc, size: CGFloat(size)) ?? baseFont
-    }
-    let sys = NSFont.systemFont(ofSize: CGFloat(size))
-    if traits.isEmpty { return sys }
-    let desc = sys.fontDescriptor.withSymbolicTraits(traits)
-    return NSFont(descriptor: desc, size: CGFloat(size)) ?? sys
+    let base = NSFont(name: family, size: CGFloat(size)) ?? NSFont.systemFont(ofSize: CGFloat(size))
+    return faceWithTraits(base, traits, size: CGFloat(size))
 }
 
 /// Deterministic stub measurer used by host-side tests.
