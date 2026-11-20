@@ -1728,6 +1728,13 @@ actions:
     effects:
       - set_panel_state: { panel: opacity, key: options_shown, value: "not panel.options_shown" }
 
+  toggle_opacity_slider:
+    description: >
+      Show or hide the Opacity panel's slider row (the chevron beside the Opacity field). Panel-local UI: the document is unchanged.
+    category: appearance
+    effects:
+      - set_panel_state: { panel: opacity, key: slider_shown, value: "not panel.slider_shown" }
+
   toggle_new_masks_clipping:
     description: >
       Flip the document preference for whether a newly made opacity mask clips (the panel menu's New Opacity Masks Are Clipping). Existing masks are unchanged. Make Mask and Make Opacity Mask read it.

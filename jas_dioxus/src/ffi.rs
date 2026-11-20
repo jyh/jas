@@ -9897,11 +9897,15 @@ mod tests {
     fn the_opacity_chevron_reveals_a_slider_that_commits_like_the_field() {
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = untransformed_engine();
+        // A shown container is in `containers` with its `bind.visible`; a
+        // hidden one is listed by PATH in `hidden` (row 1b is child 1).
         let shown = |e| {
             let plan: serde_json::Value = serde_json::from_str(&plan_of(e, OPACITY, 228, 0)).unwrap();
-            plan["containers"].as_array().unwrap().iter()
-                .find(|c| c["id"] == "op_slider_row")
-                .unwrap_or_else(|| panic!("no op_slider_row in the plan"))["values"]["bind.visible"].clone()
+            let listed = plan["containers"].as_array().unwrap().iter()
+                .any(|c| c["id"] == "op_slider_row" && c["values"]["bind.visible"] == "true");
+            let hidden = plan["hidden"].as_array().unwrap().iter().any(|p| *p == serde_json::json!([1]));
+            assert_ne!(listed, hidden, "op_slider_row must be exactly one of shown or hidden");
+            if listed { "true" } else { "false" }
         };
         assert_eq!(shown(e), "false", "the slider row starts hidden");
         let (reply, err) = behave(e, OPACITY, r#"{"widget":"op_disclosure","event":"click"}"#);

@@ -1787,6 +1787,19 @@
         }
       ]
     },
+    "toggle_opacity_slider": {
+      "description": "Show or hide the Opacity panel's slider row (the chevron beside the Opacity field). Panel-local UI: the document is unchanged.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "opacity",
+            "key": "slider_shown",
+            "value": "not panel.slider_shown"
+          }
+        }
+      ]
+    },
     "toggle_new_masks_clipping": {
       "description": "Flip the document preference for whether a newly made opacity mask clips (the panel menu's New Opacity Masks Are Clipping). Existing masks are unchanged. Make Mask and Make Opacity Mask read it.\n",
       "category": "appearance",
@@ -18849,6 +18862,11 @@
           "default": false,
           "description": "When true, the preview row (OPACITY_PREVIEW, LINK_INDICATOR, MASK_PREVIEW, and the mask-buttons column) is collapsed.\n"
         },
+        "slider_shown": {
+          "type": "bool",
+          "default": false,
+          "description": "When true, the opacity slider row is revealed under row 1. The chevron (op_disclosure) toggles it. Panel-local UI; the document is unchanged.\n"
+        },
         "options_shown": {
           "type": "bool",
           "default": false,
@@ -19055,13 +19073,36 @@
                 "col": 1,
                 "icon": "disclosure_right",
                 "summary": "Opacity slider",
-                "description": "Opens a popover containing a horizontal opacity slider bound to panel.opacity.\n",
+                "description": "Shows or hides the opacity slider row under this row (an inline row rather than a popover, so every app draws it with the kinds it already has).\n",
                 "behavior": [
                   {
                     "event": "click",
-                    "action": "open_opacity_slider_popover"
+                    "action": "toggle_opacity_slider"
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "type": "container",
+            "id": "op_slider_row",
+            "layout": "row",
+            "bind": {
+              "visible": "panel.slider_shown"
+            },
+            "children": [
+              {
+                "id": "op_opacity_slider",
+                "type": "slider",
+                "col": 12,
+                "summary": "Opacity slider",
+                "description": "Drag to set the selection's opacity, 0-100%. Bound to the same panel.opacity as the Opacity field, so a commit writes the selection by the same law; with a mixed selection the value is the panel's, as the field's is.\n",
+                "min": 0,
+                "max": 100,
+                "step": 1,
+                "bind": {
+                  "value": "panel.opacity"
+                }
               }
             ]
           },
