@@ -815,7 +815,24 @@ public sealed partial class MainWindow
                 host.Children.Add(el);
                 _paneControls[leaf.Path] = el;
             }
+            // Row 119: a rebuild REPLACES the host, so the control holding the
+            // keyboard (the Layers eye a click just cycled) leaves the tree and
+            // WinUI hands the keyboard to the next tab stop, the toolbar's: a
+            // Ctrl+Z after an eye click then missed the panel's door. A keyboard
+            // that was in this pane stays in it, on the new host's focus control,
+            // unless the draw has already put it somewhere in the new host (the
+            // rename field F2 shows).
+            var keptKeyboard = !_dialog && KeyboardWithin(_scroll.Content as DependencyObject);
             _scroll.Content = host;
+            if (keptKeyboard && _paneFocus is { } carried)
+            {
+                void Carry(object _, RoutedEventArgs __)
+                {
+                    carried.Loaded -= Carry;
+                    if (!KeyboardWithin(host)) { carried.Focus(FocusState.Programmatic); }
+                }
+                carried.Loaded += Carry;
+            }
 
             // O97 rung B: a control whose content passes its plan rect is CLIPPED
             // (sitting findings 14 and 15: a radio and a slider below their
@@ -2856,6 +2873,21 @@ public sealed partial class MainWindow
         /// `EditableText`), or null when the template has none.
         /// </summary>
         private static string? EditableText(ComboBox combo) => EditableTextBox(combo)?.Text;
+
+        /// <summary>
+        /// Row 119: whether the control holding the keyboard sits in
+        /// <paramref name="root"/> (false for a null root, or no focus).
+        /// </summary>
+        private bool KeyboardWithin(DependencyObject? root)
+        {
+            if (root is null || _host.XamlRoot is null) { return false; }
+            for (var node = FocusManager.GetFocusedElement(_host.XamlRoot) as DependencyObject;
+                 node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (ReferenceEquals(node, root)) { return true; }
+            }
+            return false;
+        }
 
         /// <summary>
         /// Finding 13: run the blur commit of the edit control holding keyboard

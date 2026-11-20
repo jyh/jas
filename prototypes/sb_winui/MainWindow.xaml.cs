@@ -2070,10 +2070,12 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
         }
         // jas §644/#753: a key the focused PANEL binds (its `keyboard:` rows: the
-        // tree's arrows, F2, Enter, Escape, Delete, Backspace, Ctrl+A) goes to
-        // the panel door, and is kept from XAML's own focus navigation. One the
-        // panel does not bind comes back `UnboundPanelKey` and is re-sent to the
-        // document (`Canvas.ApplyKey`). Any other key is unchanged.
+        // tree's arrows, F2, Enter, Escape, Delete, Backspace) and every command
+        // chord (row 119) go to the panel door, and are kept from XAML's own
+        // focus navigation. A named key the panel does not bind comes back
+        // `UnboundPanelKey` and is re-sent to the document (`Canvas.ApplyKey`);
+        // a chord it does not bind runs on the door's menubar route (Ctrl+Z
+        // undoes). Any other key is unchanged.
         if (code != 0 && PanelKeyTarget(e.OriginalSource as DependencyObject) is { } panel
             && PanelKeys.Forwards(code, (mods & JasCore.ModCmd) != 0))
         {
