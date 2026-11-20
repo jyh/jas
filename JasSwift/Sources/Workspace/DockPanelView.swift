@@ -272,6 +272,12 @@ public struct DockPanelView: View {
         }
     }
 
+    /// The group a layout change RAISED, which the side dock scrolls into view
+    /// (row 111). Stub: names nothing.
+    static func revealTarget(before: [PanelGroup], after: [PanelGroup]) -> Int? {
+        nil
+    }
+
     private func groupView(_ gi: Int, _ group: PanelGroup) -> some View {
         PanelGroupView(
             workspaceLayout: $workspaceLayout,
