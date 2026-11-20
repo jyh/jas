@@ -19088,7 +19088,7 @@
             "id": "op_slider_row",
             "layout": "row",
             "bind": {
-              "visible": "panel.slider_shown"
+              "visible": "panel.slider_shown == true"
             },
             "children": [
               {
