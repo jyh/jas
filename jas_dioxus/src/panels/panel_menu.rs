@@ -621,7 +621,21 @@ fn live_panel_state(
             ]
         }
         "paragraph_panel_content" => {
-            vec![("hanging_punctuation", b(st.paragraph_panel.hanging_punctuation))]
+            // The flag describes the SELECTION (`paragraph_host::live_values`,
+            // as the engine's scope reads it); the typed slot holds whatever
+            // the last write left, so after a selection change it showed the
+            // previous paragraph's flag (row 181). The slot is the fallback
+            // with no text selected.
+            let live = st.tab()
+                .map(|tab| crate::interpreter::paragraph_host::live_values(tab.model.document()))
+                .unwrap_or_default();
+            let shown = if live.get("text_selected") == Some(&J::Bool(true)) {
+                live.get("hanging_punctuation").cloned()
+                    .unwrap_or(b(st.paragraph_panel.hanging_punctuation))
+            } else {
+                b(st.paragraph_panel.hanging_punctuation)
+            };
+            vec![("hanging_punctuation", shown)]
         }
         "align_panel_content" => vec![
             ("use_preview_bounds", b(st.align_panel.use_preview_bounds)),
