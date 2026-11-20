@@ -309,7 +309,7 @@ struct YamlElementView: View {
             case "separator":
                 renderSeparator()
             case "spacer":
-                Spacer()
+                renderSpacer()
             case "disclosure":
                 renderDisclosure()
             case "panel":
@@ -504,7 +504,11 @@ struct YamlElementView: View {
                 }
             }
         } else {
-            VStack(spacing: gap) {
+            // LEADING, as `containerBody`'s column is: rows of different
+            // widths (the Layers tree's indented rows) must share a left
+            // edge, or a deeper row's indent is partly cancelled by
+            // centring (row 189).
+            VStack(alignment: .leading, spacing: gap) {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
                     YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
@@ -651,6 +655,40 @@ struct YamlElementView: View {
     @ViewBuilder
     private func containerStyledBody(width w: CGFloat?, height h: CGFloat?,
                                      style: [String: Any], selected: Bool) -> some View {
+        containerChrome(width: w, height: h, style: style, selected: selected)
+            .background(containerBackgroundColor(style) ?? SwiftUI.Color.clear)
+    }
+
+    /// A container's background (row 190), as `render_container` resolves it:
+    /// `bind.background` is template-substituted (`{{...}}`) and then evaluated
+    /// as an expression (the panel-selection highlights, e.g. layers.yaml's
+    /// `if node.panel_selected then theme.colors.selection else 'transparent'`).
+    /// A non-empty string or color from it WINS, `transparent` included (on the
+    /// web it is the later CSS declaration); when it yields nothing,
+    /// `style.background` (evaluated as text) applies. Only a `#hex` paints.
+    /// This path drew the border and never the background, so a selected
+    /// Layers, Artboards, Symbols or Concepts row showed no highlight.
+    private func containerBackgroundColor(_ style: [String: Any]) -> SwiftUI.Color? {
+        var raw: String? = nil
+        if let bind = element["bind"] as? [String: Any],
+           let expr = bind["background"] as? String {
+            switch evaluate(evaluateText(expr, context: context), context: context) {
+            case .string(let v), .color(let v): raw = v.isEmpty ? nil : v
+            default: raw = nil
+            }
+        }
+        if raw == nil, let t = style["background"] as? String {
+            raw = evaluateText(t, context: context)
+        }
+        guard let r = raw?.trimmingCharacters(in: .whitespaces), r.hasPrefix("#") else {
+            return nil
+        }
+        return cssHexColor(r)
+    }
+
+    @ViewBuilder
+    private func containerChrome(width w: CGFloat?, height h: CGFloat?,
+                                 style: [String: Any], selected: Bool) -> some View {
         let hasBorder = style["border"] != nil
         if selected {
             if hasBorder {
@@ -2505,6 +2543,42 @@ struct YamlElementView: View {
                 .foregroundColor(.gray)
                 .frame(minHeight: 30)
         }
+    }
+
+    // MARK: - Spacer
+
+    /// A `spacer` that declares `style.width` is exactly that wide; only a
+    /// spacer with no width grows. The width may be a template (the Layers
+    /// indent is `{{node.depth * 16}}`). This is the planner's law
+    /// (`PanelLayout.flexWeight`); drawing every spacer flexible made the
+    /// Layers indent and the leaf's twirl gap stretch, pushing the icons
+    /// right (the Captain's Mac reading, 11-20; row 189).
+    @ViewBuilder
+    private func renderSpacer() -> some View {
+        if let w = YamlElementView.spacerWidth(element, context: context) {
+            SwiftUI.Color.clear.frame(width: w, height: 0)
+        } else {
+            Spacer()
+        }
+    }
+
+    /// The declared width of a spacer, or nil when it declares none (then it
+    /// is flexible). A number is taken as is; a string is evaluated as text
+    /// (`{{...}}`) and parsed. A width that does not resolve to a number is
+    /// 0, not flexible: the author declared a width.
+    static func spacerWidth(_ element: [String: Any], context: [String: Any]) -> CGFloat? {
+        guard let style = element["style"] as? [String: Any],
+              let raw = style["width"], !(raw is NSNull) else { return nil }
+        if let n = raw as? Int { return CGFloat(max(n, 0)) }
+        if let n = raw as? Double { return CGFloat(max(n, 0)) }
+        if let n = raw as? CGFloat { return max(n, 0) }
+        if let t = raw as? String {
+            let resolved = evaluateText(t, context: context)
+                .trimmingCharacters(in: .whitespaces)
+            let digits = resolved.hasSuffix("px") ? String(resolved.dropLast(2)) : resolved
+            return CGFloat(max(Double(digits) ?? 0, 0))
+        }
+        return 0
     }
 
     // MARK: - Element Preview
