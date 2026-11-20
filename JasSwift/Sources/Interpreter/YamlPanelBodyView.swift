@@ -651,6 +651,40 @@ struct YamlElementView: View {
     @ViewBuilder
     private func containerStyledBody(width w: CGFloat?, height h: CGFloat?,
                                      style: [String: Any], selected: Bool) -> some View {
+        containerChrome(width: w, height: h, style: style, selected: selected)
+            .background(containerBackgroundColor(style) ?? SwiftUI.Color.clear)
+    }
+
+    /// A container's background (row 190), as `render_container` resolves it:
+    /// `bind.background` is template-substituted (`{{...}}`) and then evaluated
+    /// as an expression (the panel-selection highlights, e.g. layers.yaml's
+    /// `if node.panel_selected then theme.colors.selection else 'transparent'`).
+    /// A non-empty string or color from it WINS, `transparent` included (on the
+    /// web it is the later CSS declaration); when it yields nothing,
+    /// `style.background` (evaluated as text) applies. Only a `#hex` paints.
+    /// This path drew the border and never the background, so a selected
+    /// Layers, Artboards, Symbols or Concepts row showed no highlight.
+    private func containerBackgroundColor(_ style: [String: Any]) -> SwiftUI.Color? {
+        var raw: String? = nil
+        if let bind = element["bind"] as? [String: Any],
+           let expr = bind["background"] as? String {
+            switch evaluate(evaluateText(expr, context: context), context: context) {
+            case .string(let v), .color(let v): raw = v.isEmpty ? nil : v
+            default: raw = nil
+            }
+        }
+        if raw == nil, let t = style["background"] as? String {
+            raw = evaluateText(t, context: context)
+        }
+        guard let r = raw?.trimmingCharacters(in: .whitespaces), r.hasPrefix("#") else {
+            return nil
+        }
+        return cssHexColor(r)
+    }
+
+    @ViewBuilder
+    private func containerChrome(width w: CGFloat?, height h: CGFloat?,
+                                 style: [String: Any], selected: Bool) -> some View {
         let hasBorder = style["border"] != nil
         if selected {
             if hasBorder {

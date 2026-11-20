@@ -77,6 +77,29 @@ struct YamlContainerBackgroundRenderTest {
         #expect(isBlack(p), "centre pixel \(p), expected the black ground")
     }
 
+    @Test("A bound theme colour paints (the Layers highlight's own form)")
+    func boundThemeColourPaints() throws {
+        let e = box(bind: ["background": "if node.panel_selected then theme.colors.selection else 'transparent'"])
+        let ctx: [String: Any] = ["node": ["panel_selected": true],
+                                  "theme": ["colors": ["selection": "#ff0000"]]]
+        let p = try #require(centrePixel(e, context: ctx))
+        #expect(isRed(p), "centre pixel \(p), expected red")
+    }
+
+    @Test("A bind that yields nothing leaves the style background (render_container's cascade)")
+    func emptyBindFallsBackToStyle() throws {
+        let e = box(style: ["background": "#00ff00"], bind: ["background": "node.missing"])
+        let p = try #require(centrePixel(e, context: ["node": [String: Any]()]))
+        #expect(isGreen(p), "centre pixel \(p), expected the style's green")
+    }
+
+    @Test("A bound 'transparent' overrides the style background")
+    func boundTransparentOverridesStyle() throws {
+        let e = box(style: ["background": "#00ff00"], bind: ["background": "'transparent'"])
+        let p = try #require(centrePixel(e, context: [:]))
+        #expect(isBlack(p), "centre pixel \(p), expected the black ground")
+    }
+
     @Test("A container with no background paints nothing (control)")
     func noBackgroundPaintsNothing() throws {
         let p = try #require(centrePixel(box(), context: [:]))
