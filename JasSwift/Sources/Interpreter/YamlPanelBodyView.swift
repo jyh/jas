@@ -1437,11 +1437,27 @@ struct YamlElementView: View {
         // sees their typed characters disappear. Buffer in a local
         // @State and commit only on Enter / blur so the typed text
         // survives the round-trip.
+        // A field that DECLARES `keydown` or `blur` behaviors gets them
+        // through the text-entry door (WIDGET_EVENTS.md, "Typing in a text
+        // field"; `event.key` names the key). Row 179: the Artboards rename
+        // field declares Enter, Escape and blur, and until this the view sent
+        // only a commit, so a rename could be neither confirmed nor cancelled.
+        let declared = Set(((element["behavior"] as? [[String: Any]]) ?? [])
+            .compactMap { $0["event"] as? String })
+        let entry = widgetEvents
+        let el = element
         BufferedTextField(
             placeholder: placeholder,
             externalValue: currentValue,
             // The text is the value, verbatim (WIDGET_EVENTS.md).
-            commit: { newVal in widgetEvents?.commit(element, text: newVal) }
+            commit: { newVal in widgetEvents?.commit(element, text: newVal) },
+            keydown: declared.contains("keydown")
+                ? { text, key in entry?.textEntry(el, event: "keydown", text: text, key: key) }
+                : nil,
+            blur: declared.contains("blur")
+                ? { text in entry?.textEntry(el, event: "blur", text: text) }
+                : nil,
+            autofocus: (element["autofocus"] as? Bool) ?? false
         )
             .textFieldStyle(.roundedBorder)
             // Text follows the window color scheme (see renderNumberInput):
@@ -3461,6 +3477,13 @@ private struct BufferedTextField: View {
     let placeholder: String
     let externalValue: String
     let commit: (String) -> Void
+    /// The declared `keydown` behaviors, given the text and the key's name
+    /// ("Enter", "Escape"); nil when the widget declares none.
+    var keydown: ((String, String) -> Void)? = nil
+    /// The declared `blur` behaviors, given the text; nil when none.
+    var blur: ((String) -> Void)? = nil
+    /// The widget's declared `autofocus`: take focus when it appears.
+    var autofocus: Bool = false
     @State private var text: String = ""
     @State private var syncOnNextChange: Bool = false
     @FocusState private var focused: Bool
@@ -3468,7 +3491,15 @@ private struct BufferedTextField: View {
     var body: some View {
         TextField(placeholder, text: $text)
             .focused($focused)
-            .onAppear { text = externalValue }
+            .onAppear {
+                text = externalValue
+                if autofocus { DispatchQueue.main.async { focused = true } }
+            }
+            .onSubmit { keydown?(text, "Enter") }
+            .onExitCommand { keydown?(text, "Escape") }
+            .onChange(of: focused) { isFocused in
+                if !isFocused { blur?(text) }
+            }
             .onChange(of: externalValue) { newValue in
                 // After a commit we always pull the post-commit
                 // (possibly transformed, e.g. Web Safe snap) value
