@@ -3197,6 +3197,22 @@ Test-Case 'box: a topmost window entirely off the screen (minimized) is not an i
     Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=tool rect=-32000,-32000,-31840,-31972 class=ToolWnd')) } 'READY'
 Test-Case 'box: a topmost window touching the screen by its edge only is not an intruder' {
     Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=tool rect=2560,0,2800,200 class=ToolWnd')) } 'READY'
+# Row 199 (flask STATUS-flask 978): every app stop leaves the taskbar's hover
+# popup up until the next input -- explorer, Xaml_WindowedPopupClass, owned by
+# Shell_TrayWnd, 54x42 at 1032,1347 on the box -- and the gate read it as an
+# intruder, so a night that re-reads the box after a red item went NOT RUN.
+# Only THAT shape is excused: the taskbar's owner, and no larger than 96x96.
+$boxPop = 'TOPMOST process=explorer rect=1032,1347,1086,1389 owner=Shell_TrayWnd class=Xaml_WindowedPopupClass'
+Test-Case 'box: the taskbar hover popup (owner Shell_TrayWnd, 54x42) is not an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, $boxPop)) } 'READY'
+Test-Case 'box: the same popup with no owner field (an older read) is still an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=explorer rect=1032,1347,1086,1389 class=Xaml_WindowedPopupClass')) } 'NOT RUN(box: a topmost window is up: class=Xaml_WindowedPopupClass process=explorer)'
+Test-Case 'box: a taskbar-owned popup larger than 96x96 is an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=explorer rect=800,600,1400,1000 owner=Shell_TrayWnd class=Xaml_WindowedPopupClass')) } 'NOT RUN(box: a topmost window is up: class=Xaml_WindowedPopupClass process=explorer)'
+Test-Case 'box: a small popup owned by anything else is an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=explorer rect=1032,1347,1086,1389 owner=none class=Xaml_WindowedPopupClass')) } 'NOT RUN(box: a topmost window is up: class=Xaml_WindowedPopupClass process=explorer)'
+Test-Case 'box: an owner field before a class with spaces still reads the whole class' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=setup rect=100,100,600,400 owner=none class=Some Dialog Class')) } 'NOT RUN(box: a topmost window is up: class=Some Dialog Class process=setup)'
 Test-Case 'box: no window rows at all is NOT RUN, never READY (the read did not run)' { Get-SbBoxReadiness (New-SbBoxSnap -Rows $null) } 'NOT RUN(box: the session-1 window read wrote no BOX WINDOWS row)'
 Test-Case 'box: TOPMOST rows without the header are NOT RUN, never READY' { Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxTray)) } 'NOT RUN(box: the session-1 window read wrote no BOX WINDOWS row)'
 Test-Case 'box: a window read from another session is NOT RUN (it saw another desktop)' {

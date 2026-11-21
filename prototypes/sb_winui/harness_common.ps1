@@ -4335,13 +4335,18 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console, [string[]]$IgnoreProcess =
     if ($tops.Count -ne $want) { return @("the window read is torn: topmost=$want but $($tops.Count) TOPMOST row(s)") }
     $out = @()
     foreach ($row in $tops) {
-        if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) class=(.+)$') {
+        if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) (?:owner=(\S+) )?class=(.+)$') {
             $out += "unreadable window row: '$(ConvertTo-SbParenSafe $row)'"
             continue
         }
-        $proc = $Matches[1]; $cls = $Matches[6]
+        $proc = $Matches[1]; $owner = "$($Matches[6])"; $cls = $Matches[7]
         $wL = [int]$Matches[2]; $wT = [int]$Matches[3]; $wR = [int]$Matches[4]; $wB = [int]$Matches[5]
         if ($SbShellTopmostClasses -ccontains $cls) { continue }
+        # Row 199 (flask STATUS-flask 978): the taskbar's hover popup, which every
+        # app stop leaves up until the next input. Only its shape is excused: the
+        # taskbar's own window owns it and it is no larger than 96x96.
+        if ($proc -eq 'explorer' -and $cls -ceq 'Xaml_WindowedPopupClass' -and $owner -ceq 'Shell_TrayWnd' `
+            -and ($wR - $wL) -le 96 -and ($wB - $wT) -le 96) { continue }
         if (@($IgnoreProcess) -contains $proc) { continue }
         if ($wR -le $sL -or $wL -ge $sR -or $wB -le $sT -or $wT -ge $sB) { continue }
         $out += "a topmost window is up: class=$(ConvertTo-SbParenSafe $cls) process=$(ConvertTo-SbParenSafe $proc)"
