@@ -49,6 +49,11 @@ four ways:
                   tracing, which is what the ledger is for. Guessing function
                   names does not do it -- this gate's author tried and got one
                   of three.
+  deferred        dispatched by name in neither port, and its `enabled_when`
+                  is the literal false: no control can ever run it, so the log
+                  stub is its whole behaviour (a spec deferral shown greyed out,
+                  "Coming soon"). DERIVED from the YAML, never declared. An
+                  expression that is merely false today is not a deferral.
   bypassed        declared, dispatched by name in neither port, but the FEATURE
                   exists natively behind a different entry point. Judgement, so
                   it must be DECLARED in `action_implementation_ledger.json`
@@ -245,7 +250,14 @@ def never_enabled(doc: dict) -> set[str]:
     """Actions whose `enabled_when` is the literal false: no control can ever
     run them, so a log stub is their whole and honest behaviour (a spec
     deferral, "Coming soon"). Derived from the YAML, never declared."""
-    return set()
+    out = set()
+    for name, spec in (doc.get("actions") or {}).items():
+        if not isinstance(spec, dict) or "enabled_when" not in spec:
+            continue
+        ew = spec["enabled_when"]
+        if ew is False or (isinstance(ew, str) and ew.strip() == "false"):
+            out.add(name)
+    return out
 
 
 def native_declared(doc: dict) -> dict[str, str]:
@@ -453,6 +465,8 @@ def classify(log_only, rust, swift, declared_bypassed, deferred=frozenset()):
             rows[a] = "native_both"
         elif r or s:
             rows[a] = "DIVERGENT:rust" if r else "DIVERGENT:swift"
+        elif a in deferred:
+            rows[a] = "deferred"
         else:
             rows[a] = "dead_both"
     return rows
@@ -539,7 +553,7 @@ def self_test() -> int:
         rust = port_handlers(RUST_DISPATCH, RUST_CASE, "rust")
         rust.update(rust_extra_handlers())
         swift = port_handlers(SWIFT_DISPATCH, SWIFT_CASE, "swift")
-        rows = classify(lo, rust, swift, load_ledger())
+        rows = classify(lo, rust, swift, load_ledger(), never_enabled(doc))
     except (OSError, ParseFailure, yaml.YAMLError) as e:
         print(f"SELF-TEST FAILED -- cannot read the tree: {e}")
         return 1
@@ -594,7 +608,10 @@ def self_test() -> int:
         # artboards_panel.rs, which hands it to the YAML pipeline (its log),
         # and in a test that pins the log; `open_file` is found native in both
         # as the control.
-        "rearrange_artboards": "dead_both",
+        # Since 2026-11-20 it is `deferred` (enabled_when: "false"), like
+        # convert_to_artboards, so no live action holds `dead_both`; arm (d)
+        # holds that class on a fixture.
+        "rearrange_artboards": "deferred",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any
@@ -764,7 +781,7 @@ def main() -> int:
         rust = port_handlers(RUST_DISPATCH, RUST_CASE, "rust")
         rust.update(rust_extra_handlers())
         swift = port_handlers(SWIFT_DISPATCH, SWIFT_CASE, "swift")
-        rows = classify(lo, rust, swift, load_ledger())
+        rows = classify(lo, rust, swift, load_ledger(), never_enabled(doc))
     except (OSError, yaml.YAMLError, json.JSONDecodeError) as e:
         print(f"ERROR: cannot read the dispatch tables: {e}", file=sys.stderr)
         return 1
@@ -821,9 +838,11 @@ def main() -> int:
     dead = [a for a, v in rows.items() if v == "dead_both"]   # = unclassified
     both = [a for a, v in rows.items() if v == "native_both"]
     byp = [a for a, v in rows.items() if v == "bypassed"]
+    deferred = [a for a, v in rows.items() if v == "deferred"]
 
     print(f"action implementations: {len(lo)} log-only action(s) -- "
           f"{len(both)} native in both ports, {len(byp)} declared bypassed, "
+          f"{len(deferred)} deferred (never enabled), "
           f"{len(dead)} with no dispatch entry (MIXED -- see below), "
           f"{len(known)} DECLARED divergence(s) awaiting their queued fix, "
           f"{len(divergent)} UNDECLARED.")
@@ -850,6 +869,11 @@ def main() -> int:
     if byp:
         print()
         print(f"  declared bypassed ({len(byp)}): {', '.join(sorted(byp))}")
+    if deferred:
+        print()
+        print(f"  deferred, never enabled ({len(deferred)}; `enabled_when` is the "
+              f"literal false, so no control can run the stub): "
+              f"{', '.join(sorted(deferred))}")
 
     if not divergent:
         return 0
