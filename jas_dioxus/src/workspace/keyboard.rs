@@ -186,11 +186,23 @@ pub(crate) fn make_keydown_handler(
             evt.prevent_default();
         }
 
+        // Whether the active tool is in a text-editing session (read here,
+        // before the Escape order below asks it).
+        let tool_captures = {
+            let st = app_for_keys.borrow();
+            st.tab().and_then(|tab| {
+                tab.tools.get(&st.active_tool).map(|t| t.captures_keyboard())
+            }).unwrap_or(false)
+        };
+
         // The Gradient eyedropper's armed pick takes an Escape FIRST and
         // nothing else sees it (row 198; the engine's key door and the Mac
-        // do the same). Not gated on the app surface: right after the click
-        // that armed it, focus is on the eyedropper button itself.
-        if matches!(key, Key::Escape) && app_for_keys.borrow().gradient_panel.picking {
+        // do the same), by [`escape_taker`]'s order (row 201). Not gated on
+        // the app surface: right after the click that armed it, focus is on
+        // the eyedropper button itself.
+        if matches!(key, Key::Escape)
+            && escape_taker(app_for_keys.borrow().gradient_panel.picking, tool_captures) == EscapeTaker::Pick
+        {
             evt.prevent_default();
             (act.borrow_mut())(Box::new(|st: &mut AppState| {
                 st.try_cancel_gradient_pick();
@@ -203,12 +215,6 @@ pub(crate) fn make_keydown_handler(
         // characters, navigation, deletion, and the in-session shortcuts
         // (Cmd+A/C/X/Z). Cmd+V still goes through the async clipboard
         // path below; we then call `paste_text` on the tool.
-        let tool_captures = {
-            let st = app_for_keys.borrow();
-            st.tab().and_then(|tab| {
-                tab.tools.get(&st.active_tool).map(|t| t.captures_keyboard())
-            }).unwrap_or(false)
-        };
         if tool_captures {
             // Cmd+V is handled by the async clipboard path so the tool
             // can receive the actual text.
@@ -753,6 +759,27 @@ pub(crate) fn make_keyup_handler(
     }
 }
 
+/// Who takes an Escape, in `keydown`'s order (row 201): the armed eyedropper
+/// pick first (row 198), then a tool's text-editing session, then the canvas
+/// ([`escape_or_enter`]: the tool, then the mask law). The Mac's `keyDown` and
+/// the engine's key door keep the same order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EscapeTaker {
+    Pick,
+    ToolSession,
+    Canvas,
+}
+
+pub(crate) fn escape_taker(picking: bool, tool_captures: bool) -> EscapeTaker {
+    if picking {
+        EscapeTaker::Pick
+    } else if tool_captures {
+        EscapeTaker::ToolSession
+    } else {
+        EscapeTaker::Canvas
+    }
+}
+
 /// Escape or Enter on the canvas: the active tool takes it (as "Escape").
 /// Then, on ESCAPE only, the mask law runs (`Model::exit_mask_mode_on_escape`;
 /// OPACITY.md §Preview interactions names Escape alone, and the Mac and the
@@ -799,6 +826,17 @@ mod tests {
         escape_or_enter(&mut st, true);
         assert_eq!(read(&mut st), (None, EditingTarget::Mask(vec![0, 0])),
                    "the control: Escape exits isolation first");
+    }
+
+    /// Row 201: the Escape ORDER. An armed pick takes it before a capturing
+    /// tool and before the canvas (whose path runs the mask law); all four
+    /// input pairs, so moving the pick below either reds.
+    #[test]
+    fn an_armed_pick_takes_the_escape_before_a_tool_session_and_the_canvas() {
+        assert_eq!(escape_taker(true, true), EscapeTaker::Pick, "before a tool's session");
+        assert_eq!(escape_taker(true, false), EscapeTaker::Pick, "before the canvas and its mask law");
+        assert_eq!(escape_taker(false, true), EscapeTaker::ToolSession);
+        assert_eq!(escape_taker(false, false), EscapeTaker::Canvas);
     }
 
     /// Row 198 (GRADIENT.md EYEDROPPER_BUTTON): an Escape while the
