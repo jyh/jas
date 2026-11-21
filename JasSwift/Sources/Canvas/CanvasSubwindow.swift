@@ -3952,6 +3952,13 @@ class CanvasNSView: NSView {
         let z = ctx.model.zoomLevel
         let docX: Double = z == 0 ? Double(pt.x) : (Double(pt.x) - ctx.model.viewOffsetX) / z
         let docY: Double = z == 0 ? Double(pt.y) : (Double(pt.y) - ctx.model.viewOffsetY) / z
+        // The Gradient panel's eyedropper pick (row 198), before the Align
+        // intercept and the tool, as the engine and the web order them.
+        if gradientStopPickPressIntercept(model: ctx.model, store: ctx.model.stateStore,
+                                          docX: docX, docY: docY) {
+            ensureBlinkTimer()
+            return
+        }
         if alignKeyObjectPressIntercept(model: ctx.model, store: ctx.model.stateStore,
                                         docX: docX, docY: docY, shift: shift, alt: alt) {
             ensureBlinkTimer()
