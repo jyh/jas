@@ -1468,13 +1468,13 @@ static class Program
         // on a STOP sends `double_press {index}` after its second release; a
         // double on a midpoint, or with nothing held, sends nothing.
         Eq("gradient double: a stop's double is double_press {index}", "{\"index\":1}",
-            GradientSliderWire.DoublePress("stop", 1) is { } dp ? PanelWire.GestureRowValue(dp) : "(null)");
+            GradientSliderWire.DoublePress("stop", 1) is { } dblStop ? PanelWire.GestureRowValue(dblStop) : "(null)");
         Eq("gradient double: a midpoint's double sends nothing", "(null)",
-            GradientSliderWire.DoublePress("midpoint", 0) is { } dm ? PanelWire.GestureRowValue(dm) : "(null)");
+            GradientSliderWire.DoublePress("midpoint", 0) is { } dblMid ? PanelWire.GestureRowValue(dblMid) : "(null)");
         Eq("gradient double: no held marker sends nothing", "(null)",
-            GradientSliderWire.DoublePress(null, 0) is { } dn ? PanelWire.GestureRowValue(dn) : "(null)");
+            GradientSliderWire.DoublePress(null, 0) is { } dblNone ? PanelWire.GestureRowValue(dblNone) : "(null)");
         Eq("gradient double: a stop with no index sends nothing", "(null)",
-            GradientSliderWire.DoublePress("stop", -1) is { } di ? PanelWire.GestureRowValue(di) : "(null)");
+            GradientSliderWire.DoublePress("stop", -1) is { } dblIdx ? PanelWire.GestureRowValue(dblIdx) : "(null)");
         Eq("gradient gesture: the row token is the compact object", "{\"location\":30.5,\"dy\":-2}",
             PanelWire.GestureRowValue(new Dictionary<string, object> { ["location"] = 30.5, ["dy"] = -2.0 }));
         // The shell's named keys, by the code `OnKeyDown` sends (`JasCore.Key*`).
