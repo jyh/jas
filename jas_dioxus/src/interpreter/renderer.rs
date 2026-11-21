@@ -5679,14 +5679,14 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
 
 /// A dropdown's inline style, then the element's own declared style.
 fn select_style(style: &str) -> String {
-    format!("color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}")
+    format!("max-width:100%;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}")
 }
 
 /// A number input's inline style (the committing branch), then the element's
 /// own declared style. `flex-shrink:0` keeps the declared width in a row whose
 /// slider grows; `box-sizing:border-box` makes that width include the border.
 fn number_input_style(style: &str) -> String {
-    format!("flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);padding:1px 4px;{style}")
+    format!("flex-shrink:0;max-width:100%;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);padding:1px 4px;{style}")
 }
 
 fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
