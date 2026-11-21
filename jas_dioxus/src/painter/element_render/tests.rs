@@ -2577,7 +2577,9 @@ fn a_live_element_painted_with_no_context_installed_panics_in_a_debug_build() {
         let mut rec = RecordingPainter::new();
         emit_element(&mut rec, &shape(), 1.0);
     });
-    let msg = caught.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+    // A panic payload is a `String` (formatted) or a `&str` (a bare literal).
+    let msg = caught.err().map(|e| e.downcast_ref::<String>().cloned()
+        .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()).unwrap_or_default();
     assert!(msg.contains("no paint context installed"), "uninstalled, the live arm must refuse loudly: {msg:?}");
 }
 
