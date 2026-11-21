@@ -87,6 +87,19 @@ func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, s
     // CI has seen this lookup return nil intermittently, and the width was then
     // the base face's (row 188). Try once more; then SAY so before falling back.
     if let face = lookup(desc, size) ?? lookup(desc, size) { return face }
+    // 11-21 (CI run 44884499909): both tries missed Georgia bold, a face macOS
+    // ships. Ask CoreText before falling back, and take its face only when it
+    // carries every trait asked for. A rescue is counted apart from a failure
+    // and logged once, so a CI log still says the AppKit lookup missed.
+    if let face = alternate(base, traits, size),
+       face.fontDescriptor.symbolicTraits.isSuperset(of: traits) {
+        faceLookupRescueCount += 1
+        if faceLookupLogged.insert("rescue/\(base.fontName)/\(traits.rawValue)").inserted {
+            NSLog("jas: the AppKit lookup missed %@ with traits 0x%x at %.3f pt; CoreText found %@ (row 188)",
+                  base.fontName, traits.rawValue, Double(size), face.fontName)
+        }
+        return face
+    }
     faceLookupFailureCount += 1
     // Row 188(b): keep as many of the traits as the family has. Bold alone,
     // then italic alone, then the base face. Futura-Medium has no bold italic
