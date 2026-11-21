@@ -1485,37 +1485,37 @@ pub(crate) type FeedbackRect = (f64, f64, f64, f64);
 
 /// The row: grip, tabs, chevron, menu button.
 pub(crate) fn tab_bar_style(border_bottom: &str) -> String {
-    format!("display:flex; background-color:{THEME_BG_DARK}; border-bottom:{border_bottom}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;")
+    format!("display:flex; background-color:{THEME_BG_DARK}; border-bottom:{border_bottom}; align-items:center; overflow-x:hidden; overflow-y:hidden; min-height:24px; min-width:0;")
 }
 
 /// The grip that drags the whole group.
 pub(crate) fn tab_bar_grip_style() -> String {
-    format!("padding:2px 4px; cursor:grab; color:{THEME_TEXT_HINT}; font-size:10px; user-select:none;")
+    format!("padding:2px 4px; cursor:grab; color:{THEME_TEXT_HINT}; font-size:10px; user-select:none; flex-shrink:0;")
 }
 
 /// One panel's tab.
 pub(crate) fn tab_style(font_weight: &str, bg: &str, border_bottom: &str, outline: &str) -> String {
-    format!("padding:3px 8px; cursor:pointer; font-size:11px; color:{THEME_TEXT}; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}")
+    format!("display:flex; align-items:center; flex-shrink:1; min-width:0; padding:3px 8px; cursor:pointer; font-size:11px; color:{THEME_TEXT}; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}")
 }
 
 /// A tab's label, inside the tab.
 pub(crate) fn tab_label_style() -> String {
-    String::new()
+    "overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;".to_string()
 }
 
 /// A tab's close mark, after its label.
 pub(crate) fn tab_close_style() -> String {
-    format!("margin-left:4px; color:{THEME_TEXT_BODY}; cursor:pointer; font-size:10px; line-height:1;")
+    format!("margin-left:4px; color:{THEME_TEXT_BODY}; cursor:pointer; font-size:10px; line-height:1; flex-shrink:0;")
 }
 
 /// The collapse chevron, pushed to the right end.
 pub(crate) fn tab_bar_chevron_style() -> String {
-    format!("margin-left:auto; padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;")
+    format!("margin-left:auto; padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1; flex-shrink:0;")
 }
 
 /// The panel menu button.
 pub(crate) fn tab_bar_menu_style() -> String {
-    format!("padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;")
+    format!("padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1; flex-shrink:0;")
 }
 
 /// Where a group-slot bar goes (STATUS-jas row 124). `rect_of(g)` is group
