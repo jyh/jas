@@ -3211,6 +3211,14 @@ Test-Case 'box: a taskbar-owned popup larger than 96x96 is an intruder' {
     Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=explorer rect=800,600,1400,1000 owner=Shell_TrayWnd class=Xaml_WindowedPopupClass')) } 'NOT RUN(box: a topmost window is up: class=Xaml_WindowedPopupClass process=explorer)'
 Test-Case 'box: a small popup owned by anything else is an intruder' {
     Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=explorer rect=1032,1347,1086,1389 owner=none class=Xaml_WindowedPopupClass')) } 'NOT RUN(box: a topmost window is up: class=Xaml_WindowedPopupClass process=explorer)'
+# jas STATUS-flask 980: the excuse names the PROCESS and the CLASS too, each
+# pinned by its own arm. The rect is in the window read's own unit: box_windows
+# runs DPI-unaware (screen=2560x1440 on a 3840x2160 panel), so a 54x42 popup
+# reads 54x42 at any display scale; a DPI-AWARE reader would read it larger.
+Test-Case 'box: a small taskbar-owned popup from another process is an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=setup rect=1032,1347,1086,1389 owner=Shell_TrayWnd class=Xaml_WindowedPopupClass')) } 'NOT RUN(box: a topmost window is up: class=Xaml_WindowedPopupClass process=setup)'
+Test-Case 'box: a small taskbar-owned explorer window of another class is an intruder' {
+    Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=explorer rect=1032,1347,1086,1389 owner=Shell_TrayWnd class=PickerHost')) } 'NOT RUN(box: a topmost window is up: class=PickerHost process=explorer)'
 Test-Case 'box: an owner field before a class with spaces still reads the whole class' {
     Get-SbBoxReadiness (New-SbBoxSnap -Rows @($boxHead, $boxTray, 'TOPMOST process=setup rect=100,100,600,400 owner=none class=Some Dialog Class')) } 'NOT RUN(box: a topmost window is up: class=Some Dialog Class process=setup)'
 Test-Case 'box: no window rows at all is NOT RUN, never READY (the read did not run)' { Get-SbBoxReadiness (New-SbBoxSnap -Rows $null) } 'NOT RUN(box: the session-1 window read wrote no BOX WINDOWS row)'
@@ -3558,9 +3566,14 @@ Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state
 # One builder, Get-SbSession1Command; the census refuses a script that registers
 # powershell.exe as a task action itself.
 # ---------------------------------------------------------------------------
+# jas STATUS-flask 980: the census reads EVERY prototype's scripts, not only
+# sb_winui's -- sc_panel's run_c1/run_c2 registered plain powershell.exe and a
+# sb_winui-scoped census could not see them. Names are relative to prototypes/.
 function Get-SbSession1Hardcoders {
-  @(Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' | Where-Object { $_.Name -ne 'harness_selftest.ps1' } |
-    Where-Object { (Get-Content $_.FullName -Raw) -match "New-ScheduledTaskAction\s+-Execute\s+['""]powershell\.exe['""]" } | ForEach-Object { $_.Name } | Sort-Object)
+  $root = Split-Path -Parent $PSScriptRoot
+  @(Get-ChildItem -Path $root -Filter '*.ps1' -Recurse | Where-Object { $_.Name -ne 'harness_selftest.ps1' } |
+    Where-Object { (Get-Content $_.FullName -Raw) -match "New-ScheduledTaskAction\s+-Execute\s+['""]powershell\.exe['""]" } |
+    ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\', '/') } | Sort-Object)
 }
 Test-Case 'session-1: the command is powershell under a headless conhost, the argument verbatim' { $c = Get-SbSession1Command '-NoProfile -File "a b.ps1" -K "x,y"'; "$($c.Execute) | $($c.Argument)" } 'conhost.exe | --headless powershell.exe -NoProfile -File "a b.ps1" -K "x,y"'
 Test-Case 'session-1: no script registers powershell.exe as a task action itself' { (Get-SbSession1Hardcoders) -join ',' } ''
