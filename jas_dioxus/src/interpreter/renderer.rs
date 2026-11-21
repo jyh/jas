@@ -7571,6 +7571,56 @@ fn path_b_enabled() -> bool {
     }
 }
 
+/// The canonical Path B content width in a dock: the dock's 240 less its 12.
+pub(crate) const PATH_B_DOCK_W: i64 = 228;
+
+/// The Path B width beside a dock scrollbar `scrollbar_px` wide (row 66 (b)).
+/// A classic scrollbar takes layout width from the dock's client box; an
+/// overlay one takes none.
+pub(crate) fn path_b_avail_w(scrollbar_px: i64) -> i64 {
+    PATH_B_DOCK_W - scrollbar_px.clamp(0, PATH_B_DOCK_W)
+}
+
+/// The width this browser's classic scrollbar takes, measured once: 0 where
+/// scrollbars overlay the content (macOS by default), about 16 px on Windows
+/// and Linux Chrome. Off the web there is no scrollbar.
+pub(crate) fn scrollbar_px() -> i64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        thread_local! {
+            static SCROLLBAR_PX: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+        }
+        if let Some(px) = SCROLLBAR_PX.with(|c| c.get()) {
+            return px;
+        }
+        // A 100-px scrolling box, off screen: offsetWidth - clientWidth is the
+        // bar's layout width (0 for an overlay bar). Unmeasurable reads as 0,
+        // which is the canonical 228.
+        let px = (|| {
+            use wasm_bindgen::JsCast;
+            let doc = web_sys::window()?.document()?;
+            let body = doc.body()?;
+            let probe: web_sys::HtmlElement = doc.create_element("div").ok()?.dyn_into().ok()?;
+            // The whole style as the ATTRIBUTE: `style().set_property("cssText", ..)`
+            // sets nothing (cssText is not a property name), the box then has no
+            // overflow, and every browser read 0 (measured on #1023's bundle).
+            probe.set_attribute("style",
+                "position:absolute;top:-1000px;left:-1000px;width:100px;height:100px;overflow-y:scroll;visibility:hidden;").ok()?;
+            let node: &web_sys::Node = probe.as_ref();
+            body.append_child(node).ok()?;
+            let w = (probe.offset_width() - probe.client_width()) as i64;
+            let _ = body.remove_child(node);
+            Some(w.max(0))
+        })().unwrap_or(0);
+        SCROLLBAR_PX.with(|c| c.set(Some(px)));
+        px
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        0
+    }
+}
+
 /// Render a panel from the canonical Path B layout pass: each leaf widget is
 /// placed in an absolutely-positioned box at its computed rect, inside a
 /// position:relative panel of the computed height. Containers contribute
@@ -7581,14 +7631,14 @@ fn render_panel_absolute(
     ctx: &serde_json::Value,
     rctx: &RenderCtx,
 ) -> Element {
-    const AVAIL_W: i64 = 228;
+    let avail_w = path_b_avail_w(scrollbar_px());
     // Path B preview: render from the shared pass with the live eval scope `ctx`
     // so foreach lists + text bindings resolve to real data. avail_h=0 keeps the
     // panel content-height in the preview. `render_plan` carries each leaf's node
     // AND its (child) scope, so foreach-expanded rows render with their per-row
     // scope — a flat `node_at_path` over `children` cannot resolve a foreach row,
     // whose node comes from the `do` template, not from `children[i]`.
-    let plan = crate::interpreter::panel_layout::render_plan(panel_el, AVAIL_W, 0, ctx);
+    let plan = crate::interpreter::panel_layout::render_plan(panel_el, avail_w, 0, ctx);
     let panel_h = plan.height;
 
     // Draw chrome FIRST so it sits BEHIND the leaves (z-order). Each chrome entry
@@ -7628,7 +7678,7 @@ fn render_panel_absolute(
         leaves.push(rsx! { div { style: "{st}", {inner} } });
     }
 
-    let outer = format!("position:relative;width:{AVAIL_W}px;height:{panel_h}px;color:var(--jas-text,#ccc);");
+    let outer = format!("position:relative;width:{avail_w}px;height:{panel_h}px;color:var(--jas-text,#ccc);");
     rsx! {
         div {
             style: "{outer}",
@@ -16660,5 +16710,25 @@ mod control_fits_cell_tests {
         let s = number_input_style("width:135px;");
         assert!(has(&s, "max-width", "100%") && has(&s, "box-sizing", "border-box"), "{s}");
         assert!(s.ends_with("width:135px;"), "the declared width still comes last: {s}");
+    }
+}
+
+/// Row 66 (b): a Path B body beside a classic dock scrollbar. Measured on main
+/// a0f939ea with 16-px bars: the dock's client box is 222 and the body 228, so
+/// the dock scrolled sideways by 6 px on any classic-scrollbar platform.
+#[cfg(test)]
+mod path_b_scrollbar_tests {
+    use super::{path_b_avail_w, PATH_B_DOCK_W};
+
+    #[test]
+    fn with_no_scrollbar_the_width_is_the_canonical_228() {
+        assert_eq!(path_b_avail_w(0), PATH_B_DOCK_W);
+        assert_eq!(PATH_B_DOCK_W, 228);
+    }
+
+    #[test]
+    fn a_classic_scrollbar_takes_its_width_from_the_body() {
+        assert_eq!(path_b_avail_w(16), 212);
+        assert_eq!(path_b_avail_w(11), 217);
     }
 }

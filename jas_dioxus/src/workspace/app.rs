@@ -1152,7 +1152,7 @@ pub fn App() -> Element {
         r.x, r.y, r.w, r.h,
     );
     let left_dock_style: Option<String> = edge_rects.and_then(|r| r.left).map(|r|
-        format!("{} flex-direction:column; overflow-y:auto;", edge_dock_style(r)));
+        format!("{} flex-direction:column; {}", edge_dock_style(r), dock_scroll_y()));
     let edge_dock_left_key = "edge-dock-left";
     let edge_dock_bottom_key = "edge-dock-bottom";
     let bottom_dock_style: Option<String> = edge_rects.and_then(|r| r.bottom).map(|r|
@@ -1822,7 +1822,7 @@ pub fn App() -> Element {
 
                 // Panel groups
                 div {
-                    style: "flex:1; overflow-y:auto;",
+                    style: "flex:1; {dock_scroll_y()}",
                     DockGroupsView { edge: DockEdge::Right }
                 }
 
@@ -2002,5 +2002,28 @@ mod tests {
         for m in ["Control", "Shift", "Alt", "Meta"] {
             assert!(js.contains(m), "{m} is in the modifier-exclusion set");
         }
+    }
+}
+
+/// A dock column's vertical scroll (row 66 (b)): the right dock and a left
+/// edge dock. Path B bodies inside it are planned at
+/// `renderer::path_b_avail_w(renderer::scrollbar_px())`.
+pub(crate) fn dock_scroll_y() -> &'static str {
+    "overflow-y:auto; scrollbar-gutter:stable;"
+}
+
+/// Row 66 (b): the dock reserves its scrollbar's gutter at all times, so the
+/// Path B width does not depend on whether the panels overflow the column
+/// today. Where scrollbars overlay the content the gutter is 0 wide.
+#[cfg(test)]
+mod dock_scroll_gutter_tests {
+    use super::dock_scroll_y;
+
+    #[test]
+    fn a_dock_column_reserves_its_scrollbar_gutter() {
+        let s = dock_scroll_y();
+        let decls: Vec<(&str, &str)> = s.split(';').filter_map(|d| d.split_once(':')).map(|(k, v)| (k.trim(), v.trim())).collect();
+        assert!(decls.contains(&("overflow-y", "auto")), "{s}");
+        assert!(decls.contains(&("scrollbar-gutter", "stable")), "{s}");
     }
 }
