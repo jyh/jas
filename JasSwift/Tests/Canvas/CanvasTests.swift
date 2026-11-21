@@ -410,3 +410,31 @@ private func testMaskLinked(_ linked: Bool, unlink: Transform?) -> Mask {
     let elem = testRect(testTransform(7, 8))
     #expect(effectiveMaskTransform(mask, elem) == nil)
 }
+
+// MARK: - Row 201: the Escape order in keyDown
+
+/// Row 201: the canvas's `keyDown` gives an Escape to the armed eyedropper
+/// pick BEFORE the mask law and the active tool. Driven through `keyDown`
+/// itself with a synthesized Escape, with mask isolation set, so a pick moved
+/// below the mask law reads as isolation cleared on the first Escape. The
+/// second Escape is ordinary and exits isolation (the control: the mask law
+/// is live in this setup).
+@MainActor
+@Test func keyDownGivesAnArmedPickTheEscapeBeforeTheMaskLaw() throws {
+    let model = Model()
+    let controller = Controller(model: model)
+    let view = CanvasNSView()
+    view.document = model.document
+    view.controller = controller
+    let escape = try #require(NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+        windowNumber: 0, context: nil, characters: "\u{1B}",
+        charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 53))
+    model.maskIsolationPath = [0, 0]
+    model.stateStore.set(gradientPickingKey, true)
+    view.keyDown(with: escape)
+    #expect((model.stateStore.get(gradientPickingKey) as? Bool) == false, "the pick took the Escape")
+    #expect(model.maskIsolationPath == [0, 0], "and the mask law did not see it")
+    view.keyDown(with: escape)
+    #expect(model.maskIsolationPath == nil, "CONTROL: the next Escape exits isolation")
+}
