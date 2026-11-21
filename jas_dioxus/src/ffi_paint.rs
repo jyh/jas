@@ -569,6 +569,7 @@ fn first_unpaintable(doc: &Document, caps: Caps) -> Option<usize> {
 unsafe fn paint_document_into(
     surface: *mut c_void,
     doc: &Document,
+    precision: f64,
 ) -> i32 {
     if surface.is_null() {
         return JAS_PAINT_NULL_SURFACE;
@@ -614,17 +615,11 @@ unsafe fn paint_document_into(
         // `JAS_PAINT_OK`. See `document::paint`, which owns the install so a
         // caller cannot forget it.
         //
-        // ⚠️ `DEFAULT_PRECISION` IS NAMED HERE, AT THE CALL SITE, BECAUSE IT IS A
-        // KNOWN DIVERGENCE AND NOT A DEFAULT WORTH HIDING. The web walk
-        // evaluates live geometry at the Boolean panel's precision; this host
-        // has no such control yet, so a document whose panel is off the default
-        // tessellates differently on the two ports. When the WinUI host grows a
-        // precision it passes it here and the divergence closes.
-        crate::document::paint::emit_document(
-            &mut painter,
-            doc,
-            crate::geometry::live::DEFAULT_PRECISION,
-        );
+        // Row 203: the caller's precision. The live export passes the engine
+        // store's `boolean_precision` (`ffi_pointer::engine_paint_precision`),
+        // which is what the web walk paints at; the no-engine test seam passes
+        // `DEFAULT_PRECISION`.
+        crate::document::paint::emit_document(&mut painter, doc, precision);
         // EndDraw on EVERY path, including the error one: leaving a render
         // target open poisons the NEXT frame with a failure a frame older.
         if let Err(e) = rt.EndDraw(None, None) {
@@ -642,7 +637,7 @@ unsafe fn jas_paint_document_for_test(
     _width: f32,
     _height: f32,
 ) -> i32 {
-    unsafe { paint_document_into(surface, doc) }
+    unsafe { paint_document_into(surface, doc, crate::geometry::live::DEFAULT_PRECISION) }
 }
 
 /// Paint the ENGINE'S LIVE DOCUMENT into a caller-owned DXGI surface.
@@ -677,7 +672,8 @@ pub unsafe extern "C" fn jas_paint_document(
     // DIP-vs-physical scaling booked as jyh/jas#16) needs it, and widening a C
     // ABI later is a change every caller makes in step.
     let _ = (width, height);
-    engine.with_document(|doc| unsafe { paint_document_into(surface, doc) })
+    let precision = crate::ffi_pointer::engine_paint_precision(engine);
+    engine.with_document(|doc| unsafe { paint_document_into(surface, doc, precision) })
 }
 
 /// Paint ONE FRAME: the engine's live document, then the active tool's overlay
