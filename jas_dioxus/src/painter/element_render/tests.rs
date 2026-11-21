@@ -2389,6 +2389,9 @@ fn unreadable_or_anchored_tracking_stays_legacy() {
 /// by painting a bounding box.
 #[test]
 fn a_live_compound_shape_paints_its_evaluated_geometry_through_the_painter() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     let elem = live_union(
         overlapping_operands(),
         fill(Color::rgb(1.0, 0.0, 0.0)),
@@ -2428,6 +2431,9 @@ fn a_live_compound_shape_paints_its_evaluated_geometry_through_the_painter() {
 /// by mutation (emit an unconditional fill), not by red-first.
 #[test]
 fn a_live_element_with_no_paint_emits_no_ops() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     let mut rec = RecordingPainter::new();
     emit_element(&mut rec, &live_union(overlapping_operands(), None, None), 1.0);
     assert!(rec.commands().is_empty(), "no paint, no ops: {:?}", rec.commands());
@@ -2590,6 +2596,9 @@ fn a_live_element_painted_with_no_context_installed_panics_in_a_debug_build() {
 /// by saying the router sent them to legacy — a reason this row removes.
 #[test]
 fn a_live_element_in_outline_mode_is_one_black_hairline_and_no_fill() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     let mut elem = live_union(
         overlapping_operands(),
         fill(Color::rgb(1.0, 0.0, 0.0)),
@@ -2617,6 +2626,9 @@ fn a_live_element_in_outline_mode_is_one_black_hairline_and_no_fill() {
 /// route production actually takes for a Live layer under an outlined group.
 #[test]
 fn a_live_element_under_an_outlined_group_outlines() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     let live = live_union(overlapping_operands(), fill(Color::rgb(1.0, 0.0, 0.0)), None);
     let mut g = GroupElem {
         children: vec![Rc::new(live)],
@@ -2635,6 +2647,9 @@ fn a_live_element_under_an_outlined_group_outlines() {
 /// rect: `render.rs` uses `base_alpha * fill_op` / `base_alpha * stroke_op`.
 #[test]
 fn live_geometry_rides_the_inherited_alpha_and_its_own_paint_opacities() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     let elem = live_union(
         overlapping_operands(),
         fill_op(Color::rgb(1.0, 0.0, 0.0), 0.5),
@@ -2705,6 +2720,9 @@ fn a_subtree_holding_a_live_element_no_longer_forces_legacy() {
 /// this reds and says which of the two changed.
 #[test]
 fn the_subtract_rings_are_co_oriented_and_are_read_under_the_declared_even_odd_rule() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     /// Twice the signed area — positive and negative are opposite orientations.
     fn signed_area2(ring: &[(f64, f64)]) -> f64 {
         let mut a = 0.0;
@@ -2781,6 +2799,9 @@ fn the_subtract_rings_are_co_oriented_and_are_read_under_the_declared_even_odd_r
 /// as such rather than counted as a red.
 #[test]
 fn a_ring_with_one_point_is_skipped_and_emits_no_degenerate_path() {
+    // The empty index at the default precision these arms always ran under,
+    // now INSTALLED, as a host must (row 202).
+    let _ctx = install_paint_context(IdIndex::new(), crate::geometry::live::DEFAULT_PRECISION);
     use crate::geometry::element::PolygonElem;
     let single_point = Element::Polygon(PolygonElem {
         points: vec![(5.0, 5.0)],

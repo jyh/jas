@@ -160,13 +160,18 @@ mod tests {
         let mut rec = RecordingPainter::new();
         emit_document(&mut rec, &doc, DEFAULT_PRECISION);
 
-        // Outside the walk, the id must be unknown again: paint a bare
-        // reference with nothing installed and it evaluates to empty.
+        // Outside the walk nothing is installed again (row 202: painting a
+        // live element uninstalled now asserts, so the claim is read
+        // directly), and an empty install does not know the id.
+        assert!(!crate::document::id_index::paint_context_installed(),
+                "the document walk's context escaped its own call");
+        let _empty = crate::document::id_index::install_paint_context(
+            crate::document::id_index::IdIndex::new(), DEFAULT_PRECISION);
         let mut after = RecordingPainter::new();
         emit_element(&mut after, &reference_to("m1"), 1.0);
         assert_eq!(
             fills(after.commands()), 0,
-            "the document walk's context escaped its own call: {:?}",
+            "the walk's index is not the next install's: {:?}",
             after.commands()
         );
     }
