@@ -7025,6 +7025,15 @@ mod tests {
             closed += 1;
         }
         assert!(closed >= 3, "the census closed the Default layout's on-screen panels, not a filtered few: {closed}");
+        // A named panel is the target, not the menu's own: every shipped Close
+        // item names its own panel, so only this shape tells the two apart.
+        let _ = dispatch(e, r#"{"menu_item":"menu_boolean"}"#);
+        assert_eq!(on(e, PanelKind::Boolean), Some(true), "fixture: Boolean back on screen");
+        let (_, err) = dispatch(e, r#"{"panel":"layers_panel_content","action":"close_panel","params":{"panel":"boolean"}}"#);
+        assert_eq!(on(e, PanelKind::Boolean), Some(false), "the named panel closed: {err}");
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","action":"close_panel","params":{"panel":"zz_none"}}"#);
+        assert!(reply.is_empty() && err.contains("UnknownEffect:close_panel"),
+                "a name that is no panel is refused, never read as Layers: {reply} {err}");
         unsafe { jas_engine_free(e) };
     }
 
