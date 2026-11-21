@@ -34,6 +34,10 @@ struct CanvasRenderSignature: Equatable {
     // Chrome that rides on non-document state.
     let artboardsPanelSelection: [String]
     let keyObjectPath: [Int]?
+    /// The precision `draw` paints live geometry at (row 203), read as `draw`
+    /// reads it (`canvasPaintPrecision`). Row 207: without it, Boolean
+    /// Options' OK changed the picture and the canvas did not repaint.
+    let paintPrecision: Double
 
     init(model: Model, tool: Tool, artboardsPanelSelection: [String]) {
         self.modelId = ObjectIdentifier(model)
@@ -48,6 +52,7 @@ struct CanvasRenderSignature: Equatable {
         self.editingTarget = model.editingTarget
         self.layersIsolation = model.layersIsolationStack
         self.artboardsPanelSelection = artboardsPanelSelection
+        self.paintPrecision = canvasPaintPrecision(store: model.stateStore)
         // Mirrors draw()'s align key-object read.
         self.keyObjectPath = {
             guard let dict = model.stateStore.get("align_key_object_path") as? [String: Any],
