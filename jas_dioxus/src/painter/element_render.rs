@@ -156,6 +156,18 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
             return true;
         }
     }
+    // STATUS-jas row 195: an UNMASKED leaf with a non-Normal mode is emitted
+    // under `push_group(1.0, mode)` (see `emit_element_with_vis`). A backend
+    // that cannot composite a group blend would draw it Normal and say
+    // nothing, so it is not routed there: the same protection the clause above
+    // gives a masked element.
+    if active_mask(elem).is_none()
+        && elem.common().mode != crate::painter::BlendMode::Normal
+        && !matches!(elem, Element::Group(_) | Element::Layer(_))
+        && !caps.supplies(Caps::NONE.with(Capability::NonNormalGroupBlend))
+    {
+        return true;
+    }
     // Freeform gradient on fill or stroke (never crosses the seam).
     if elem
         .fill_gradient()
@@ -1714,6 +1726,23 @@ pub fn emit_element_with_vis(
     // bracket, not as a bare body. See `emit_masked_element` for the derivation.
     if let Some(mask) = active_mask(elem) {
         emit_masked_element(p, elem, mask, incoming_alpha, vis);
+        return;
+    }
+    // STATUS-jas row 195: a LEAF's own blend mode rides the NON-isolated
+    // `push_group(1.0, mode)`, which is per-primitive compositing against the
+    // live backdrop: what the web walk's per-element `globalCompositeOperation`
+    // and Swift's `setBlendMode` do. The opacity is already folded into the
+    // body's alpha, so the group carries 1.0. Before this, the A6 bracket above
+    // was the only place a blend crossed the seam, and an unmasked Multiply
+    // shape painted as Normal on every native backend (Windows included). A
+    // container's own mode stays inert (D3, the contract's "Group blend is
+    // inert by construction"): on the web its children override it.
+    let mode = elem.common().mode;
+    let leaf = !matches!(elem, Element::Group(_) | Element::Layer(_));
+    if leaf && mode != BlendMode::Normal {
+        p.push_group(1.0, mode);
+        emit_element_body(p, elem, incoming_alpha * elem.opacity(), vis);
+        p.pop_group();
         return;
     }
     emit_element_body(p, elem, incoming_alpha * elem.opacity(), vis);

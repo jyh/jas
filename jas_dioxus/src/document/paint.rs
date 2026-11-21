@@ -171,6 +171,67 @@ mod tests {
         );
     }
 
+    /// STATUS-jas row 195: the native walk carried a blend ONLY inside the A6
+    /// mask bracket, so every backend it feeds (Windows, through
+    /// `jas_paint_document`) drew an unmasked Multiply shape as Normal, while
+    /// the web walk (`render.rs`, per-element `globalCompositeOperation`) and
+    /// Swift (`setBlendMode`) apply it. A leaf's own mode now rides the
+    /// existing NON-isolated `push_group(1.0, mode)`, which is the per-primitive
+    /// semantics both of them have (the Painter contract's "somewhere to land"
+    /// for today's per-element composite op). A group's own mode stays inert
+    /// (D3): on the web its children override it.
+    fn groups(cmds: &[Command]) -> Vec<String> {
+        cmds.iter().filter_map(|c| match c {
+            Command::PushGroup { alpha, blend } => Some(format!("push({alpha},{blend:?})")),
+            Command::PopGroup => Some("pop".into()),
+            _ => None,
+        }).collect()
+    }
+
+    fn doc_with(children: Vec<Element>, layer_mode: crate::painter::BlendMode) -> Document {
+        let mut doc = Document::default();
+        doc.layers[0].common_mut().mode = layer_mode;
+        let kids = doc.layers[0].children_mut().unwrap();
+        for c in children { kids.push(Rc::new(c)); }
+        doc
+    }
+
+    fn with_mode(mut e: Element, m: crate::painter::BlendMode) -> Element {
+        e.common_mut().mode = m;
+        e
+    }
+
+    #[test]
+    fn an_unmasked_leafs_blend_mode_reaches_the_painter() {
+        use crate::painter::BlendMode as B;
+        let doc = doc_with(vec![with_mode(rect_at(0.0, Color::rgb(1.0, 0.0, 0.0)), B::Multiply)], B::Normal);
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &doc, DEFAULT_PRECISION);
+        assert_eq!(groups(rec.commands()), vec!["push(1,Multiply)".to_string(), "pop".into()],
+                   "a Multiply rect must be bracketed by push_group(1.0, Multiply): {:?}", rec.commands());
+        assert_eq!(fills(rec.commands()), 1, "the rect still paints once");
+    }
+
+    #[test]
+    fn a_normal_leaf_emits_no_group() {
+        use crate::painter::BlendMode as B;
+        let doc = doc_with(vec![rect_at(0.0, Color::rgb(1.0, 0.0, 0.0))], B::Normal);
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &doc, DEFAULT_PRECISION);
+        assert!(groups(rec.commands()).is_empty(), "Normal is today's command list, unchanged: {:?}", rec.commands());
+    }
+
+    #[test]
+    fn a_containers_own_mode_stays_inert_and_its_childs_does_not() {
+        use crate::painter::BlendMode as B;
+        let doc = doc_with(vec![rect_at(0.0, Color::rgb(1.0, 0.0, 0.0)),
+                                with_mode(rect_at(20.0, Color::rgb(0.0, 0.0, 1.0)), B::Screen)], B::Multiply);
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &doc, DEFAULT_PRECISION);
+        assert_eq!(groups(rec.commands()), vec!["push(1,Screen)".to_string(), "pop".into()],
+                   "the Multiply layer brackets nothing (D3); the Screen child is bracketed: {:?}", rec.commands());
+    }
+
     fn rect_at(x: f64, color: Color) -> Element {
         Element::Rect(RectElem {
             x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,

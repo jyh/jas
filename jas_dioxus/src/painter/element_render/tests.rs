@@ -4469,3 +4469,22 @@ fn a_flat_laid_out_text_with_what_the_line_draw_lacks_takes_the_plan() {
     assert!(super::runs_plan_excludes(&unread), "the subject: the plan refuses it");
     assert_eq!(flat_layout_route(&unread, true), R::Legacy);
 }
+
+/// STATUS-jas row 195: an unmasked leaf with a non-Normal mode is emitted under
+/// `push_group(1.0, mode)`, so a backend that cannot composite a group blend
+/// would discard it silently. The router refuses to route it there, as it does
+/// for a masked non-Normal element without `NonNormalBlend`. One variable: the
+/// SAME element routes the moment the capability arrives, and a Normal one
+/// never needed it.
+#[test]
+fn an_unmasked_blended_leaf_needs_a_backend_that_composites_group_blends() {
+    let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    r.common_mut().mode = crate::painter::BlendMode::Multiply;
+    let without = Capability::ALL.into_iter()
+        .filter(|c| *c != Capability::NonNormalGroupBlend)
+        .fold(Caps::NONE, Caps::with);
+    assert!(element_needs_legacy(&r, without), "a dropped Multiply must not route");
+    assert!(!element_needs_legacy(&r, all_caps()), "the same element routes with the capability");
+    let normal = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    assert!(!element_needs_legacy(&normal, without), "a Normal leaf never needed it");
+}
