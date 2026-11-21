@@ -3549,9 +3549,17 @@ class CanvasNSView: NSView {
            let mask = document.getElement(path).mask {
             drawElement(ctx, mask.subtreeElement)
         } else {
+            // Row 192 B1 (OPACITY.md §Page-level items; the Rust walks'
+            // `emit_layers` / `draw_page_layers`): an isolated page draws its
+            // layers in ONE transparency layer, which composites onto the
+            // artboard fills once, so a blended layer never blends with them.
+            // page_knockout_group is stored only (the A7 amendment).
+            let isolatedPage = document.documentSetup.pageIsolatedBlending
+            if isolatedPage { ctx.beginTransparencyLayer(auxiliaryInfo: nil) }
             for layer in document.layers {
                 drawElement(ctx, .layer(layer))
             }
+            if isolatedPage { ctx.endTransparencyLayer() }
         }
         setCanvasCull(dirtyDoc: nil, docToDevice: .identity)
         // Layer 4: fade overlay (dims regions outside any artboard).

@@ -860,6 +860,10 @@ private func documentSetupJson(_ s: DocumentSetup) -> String {
     o.str("grid_color", s.gridColor)
     o.num("grid_size", s.gridSize)
     o.bool("highlight_substituted_glyphs", s.highlightSubstitutedGlyphs)
+    // The page flags (row 192 A1) are written only when true, so every
+    // document written before they existed keeps its canonical bytes.
+    if s.pageIsolatedBlending { o.bool("page_isolated_blending", true) }
+    if s.pageKnockoutGroup { o.bool("page_knockout_group", true) }
     o.str("paper_color", s.paperColor)
     o.bool("show_images_outline", s.showImagesOutline)
     o.bool("simulate_colored_paper", s.simulateColoredPaper)
@@ -1629,7 +1633,9 @@ private func parseDocumentSetup(_ v: Any?) -> DocumentSetup {
         paperColor: (d["paper_color"] as? String) ?? def.paperColor,
         simulateColoredPaper: (d["simulate_colored_paper"] as? Bool) ?? def.simulateColoredPaper,
         transparencyFlattenerPreset: FlattenerPreset(rawValue: (d["transparency_flattener_preset"] as? String) ?? "") ?? def.transparencyFlattenerPreset,
-        discardWhiteOverprint: (d["discard_white_overprint"] as? Bool) ?? def.discardWhiteOverprint
+        discardWhiteOverprint: (d["discard_white_overprint"] as? Bool) ?? def.discardWhiteOverprint,
+        pageIsolatedBlending: (d["page_isolated_blending"] as? Bool) ?? def.pageIsolatedBlending,
+        pageKnockoutGroup: (d["page_knockout_group"] as? Bool) ?? def.pageKnockoutGroup
     )
 }
 
