@@ -1043,7 +1043,7 @@ pub(crate) fn build_dock_groups(
                 div {
                     key: "dock-tab-{gi}-{pi}",
                     id: "{tab_id}",
-                    style: "padding:3px 8px; cursor:pointer; font-size:11px; color:{THEME_TEXT}; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}",
+                    style: "{tab_style(font_weight, bg, &border_bottom, outline)}",
                     draggable: "true",
                     ondragstart: move |evt: Event<DragData>| {
                         evt.stop_propagation();
@@ -1097,13 +1097,13 @@ pub(crate) fn build_dock_groups(
                             );
                         }));
                     },
-                    "{label}"
+                    span { style: "{tab_label_style()}", "{label}" }
                     // Close button
                     {
                         let act_close = act_click.clone();
                         rsx! {
                             span {
-                                style: "margin-left:4px; color:{THEME_TEXT_BODY}; cursor:pointer; font-size:10px; line-height:1;",
+                                style: "{tab_close_style()}",
                                 onclick: move |evt: Event<MouseData>| {
                                     evt.stop_propagation();
                                     (act_close.borrow_mut())(Box::new(move |st: &mut AppState| {
@@ -1225,7 +1225,7 @@ pub(crate) fn build_dock_groups(
                 // Tab bar with grip handle
                 {let panel_count = group.panels.len();
                 rsx! { div {
-                    style: "display:flex; background-color:{THEME_BG_DARK}; border-bottom:{tab_bar_border}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;",
+                    style: "{tab_bar_style(&tab_bar_border)}",
                     ondragover: move |evt: Event<DragData>| {
                         evt.prevent_default();
                         evt.stop_propagation();
@@ -1236,7 +1236,7 @@ pub(crate) fn build_dock_groups(
 
                     // Grip handle for dragging the whole group
                     div {
-                        style: "padding:2px 4px; cursor:grab; color:{THEME_TEXT_HINT}; font-size:10px; user-select:none;",
+                        style: "{tab_bar_grip_style()}",
                         draggable: "true",
                         ondragstart: move |evt: Event<DragData>| {
                             evt.stop_propagation();
@@ -1257,7 +1257,7 @@ pub(crate) fn build_dock_groups(
                     }
 
                     div {
-                        style: "margin-left:auto; padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;",
+                        style: "{tab_bar_chevron_style()}",
                         onclick: {
                             let act = act_chevron.clone();
                             move |_| {
@@ -1281,7 +1281,7 @@ pub(crate) fn build_dock_groups(
                             let (active_kind, active_idx) = active_panel_info.unwrap();
                             rsx! {
                                 div {
-                                    style: "padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;",
+                                    style: "{tab_bar_menu_style()}",
                                     onmousedown: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();
                                         let coords = evt.data().page_coordinates();
@@ -1479,6 +1479,44 @@ pub(crate) fn DockGroupsView(edge: DockEdge) -> Element {
 
 /// A drop-feedback rectangle in the pane area's frame: `(x, y, w, h)`.
 pub(crate) type FeedbackRect = (f64, f64, f64, f64);
+
+// The tab bar's styles (WORKSPACE.md "A Group's Tab Bar"), as functions so the
+// layout law can be tested without a browser.
+
+/// The row: grip, tabs, chevron, menu button.
+pub(crate) fn tab_bar_style(border_bottom: &str) -> String {
+    format!("display:flex; background-color:{THEME_BG_DARK}; border-bottom:{border_bottom}; align-items:center; overflow-x:auto; overflow-y:hidden; min-height:24px;")
+}
+
+/// The grip that drags the whole group.
+pub(crate) fn tab_bar_grip_style() -> String {
+    format!("padding:2px 4px; cursor:grab; color:{THEME_TEXT_HINT}; font-size:10px; user-select:none;")
+}
+
+/// One panel's tab.
+pub(crate) fn tab_style(font_weight: &str, bg: &str, border_bottom: &str, outline: &str) -> String {
+    format!("padding:3px 8px; cursor:pointer; font-size:11px; color:{THEME_TEXT}; font-weight:{font_weight}; background:{bg}; border-bottom:{border_bottom}; user-select:none; {outline}")
+}
+
+/// A tab's label, inside the tab.
+pub(crate) fn tab_label_style() -> String {
+    String::new()
+}
+
+/// A tab's close mark, after its label.
+pub(crate) fn tab_close_style() -> String {
+    format!("margin-left:4px; color:{THEME_TEXT_BODY}; cursor:pointer; font-size:10px; line-height:1;")
+}
+
+/// The collapse chevron, pushed to the right end.
+pub(crate) fn tab_bar_chevron_style() -> String {
+    format!("margin-left:auto; padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;")
+}
+
+/// The panel menu button.
+pub(crate) fn tab_bar_menu_style() -> String {
+    format!("padding:3px 6px; cursor:pointer; font-size:18px; color:{THEME_TEXT_BUTTON}; user-select:none; line-height:1;")
+}
 
 /// Where a group-slot bar goes (STATUS-jas row 124). `rect_of(g)` is group
 /// `g`'s rectangle in the dock, `None` past its last group. A slot at an
@@ -2410,5 +2448,62 @@ mod gradient_scope_tests {
         let ctx = panel_body_eval_ctx_for(&st, GRADIENT_PANEL).expect("the body context");
         assert_eq!(ctx["panel"]["dither"], json!(true));
         assert_eq!(ctx["panel"]["type"], json!("linear"), "the declared default");
+    }
+}
+
+/// WORKSPACE.md "A Group's Tab Bar": the grip, the chevron and the menu button
+/// are always whole; the tab labels shrink and are cut with an ellipsis; the
+/// bar never scrolls sideways. Measured on main 295f6259 (row 66): every
+/// 3-tab group's chevron and menu button sat 22-33 px past a 238 px dock,
+/// reachable only by scrolling the bar.
+#[cfg(test)]
+mod tab_bar_fit_tests {
+    use super::*;
+
+    fn decls(style: &str) -> Vec<(String, String)> {
+        style.split(';').filter_map(|d| {
+            let (k, v) = d.split_once(':')?;
+            Some((k.trim().to_string(), v.trim().to_string()))
+        }).collect()
+    }
+
+    fn get(style: &str, key: &str) -> Option<String> {
+        decls(style).into_iter().rev().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    #[test]
+    fn the_tab_bar_never_scrolls_sideways() {
+        let s = tab_bar_style("1px solid #000");
+        assert_eq!(get(&s, "overflow-x").as_deref(), Some("hidden"), "{s}");
+    }
+
+    #[test]
+    fn the_grip_chevron_and_menu_button_never_shrink() {
+        for (name, s) in [("grip", tab_bar_grip_style()), ("chevron", tab_bar_chevron_style()), ("menu", tab_bar_menu_style())] {
+            assert_eq!(get(&s, "flex-shrink").as_deref(), Some("0"), "{name}: {s}");
+        }
+    }
+
+    #[test]
+    fn a_tab_shrinks_below_its_label() {
+        let s = tab_style("bold", "#111", "2px solid #111", "");
+        assert_eq!(get(&s, "min-width").as_deref(), Some("0"), "{s}");
+        assert_eq!(get(&s, "flex-shrink").as_deref(), Some("1"), "{s}");
+        assert_eq!(get(&s, "display").as_deref(), Some("flex"), "the label and the close mark sit side by side: {s}");
+    }
+
+    #[test]
+    fn a_cut_label_ends_in_an_ellipsis() {
+        let s = tab_label_style();
+        assert_eq!(get(&s, "text-overflow").as_deref(), Some("ellipsis"), "{s}");
+        assert_eq!(get(&s, "white-space").as_deref(), Some("nowrap"), "{s}");
+        assert_eq!(get(&s, "overflow").as_deref(), Some("hidden"), "{s}");
+        assert_eq!(get(&s, "min-width").as_deref(), Some("0"), "{s}");
+    }
+
+    #[test]
+    fn the_close_mark_never_shrinks() {
+        let s = tab_close_style();
+        assert_eq!(get(&s, "flex-shrink").as_deref(), Some("0"), "{s}");
     }
 }
