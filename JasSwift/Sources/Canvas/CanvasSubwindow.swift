@@ -76,6 +76,31 @@ private func setCanvasRefResolver(_ resolver: ElementResolver) {
     _currentRefResolver = resolver
 }
 
+// Row 203: the precision live geometry paints at, render-scoped like the
+// resolver above. `draw(_:)` installs the store's `boolean_precision`, as the
+// web's `render::render` and the engine's frame paint (Rust
+// `ffi_pointer::engine_paint_precision`); outside a draw it is the default.
+private var _currentPaintPrecision: Double = DEFAULT_PRECISION
+
+/// The store's `boolean_precision`, read as the Boolean ops read it
+/// (`booleanOptionsFromStore`), or the default when absent.
+func canvasPaintPrecision(store: StateStore) -> Double {
+    switch store.get("boolean_precision") {
+    case let d as Double: return d
+    case let i as Int: return Double(i)
+    default: return BooleanOptions().precision
+    }
+}
+
+/// Run `body` with `precision` installed as the paint precision, restoring
+/// the prior value after.
+func withCanvasPaintPrecision<T>(_ precision: Double, _ body: () -> T) -> T {
+    let prior = _currentPaintPrecision
+    _currentPaintPrecision = precision
+    defer { _currentPaintPrecision = prior }
+    return body()
+}
+
 private func lookupBrush(_ slug: String) -> [String: Any]? {
     guard let sep = slug.firstIndex(of: "/") else { return nil }
     let libId = String(slug[..<sep])
@@ -2180,12 +2205,12 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         let liveStroke: Stroke?
         switch v {
         case .compoundShape(let cs):
-            ps = cs.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = cs.evaluateWith(precision: _currentPaintPrecision,
                                  resolver: _currentRefResolver, visiting: &visiting)
             liveFill = cs.fill
             liveStroke = cs.stroke
         case .reference(let r):
-            ps = r.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = r.evaluateWith(precision: _currentPaintPrecision,
                                 resolver: _currentRefResolver, visiting: &visiting)
             let target = _currentRefResolver.resolve(r.target)
             liveFill = r.fill ?? target?.fill
@@ -2194,21 +2219,21 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             // A recorded element renders its replayed (derived) geometry,
             // resolved against its inputs (RECORDED_ELEMENTS.md). Mirrors the
             // Rust render arm.
-            ps = rec.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = rec.evaluateWith(precision: _currentPaintPrecision,
                                   resolver: _currentRefResolver, visiting: &visiting)
             liveFill = rec.fill
             liveStroke = rec.stroke
         case .generated(let gen):
             // A generated element renders its concept's evaluated geometry,
             // resolving the concept via the resolver's registry (CONCEPTS.md).
-            ps = gen.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = gen.evaluateWith(precision: _currentPaintPrecision,
                                   resolver: _currentRefResolver, visiting: &visiting)
             liveFill = gen.fill
             liveStroke = gen.stroke
         case .transformed(let t):
             // Drawn by the `.live(.transformed)` arm above; here only so the
             // switch is total.
-            ps = t.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = t.evaluateWith(precision: _currentPaintPrecision,
                                 resolver: _currentRefResolver, visiting: &visiting)
             liveFill = nil
             liveStroke = nil
@@ -2513,19 +2538,19 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         let ps: BoolPolygonSet
         switch v {
         case .compoundShape(let cs):
-            ps = cs.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = cs.evaluateWith(precision: _currentPaintPrecision,
                                  resolver: _currentRefResolver, visiting: &visiting)
         case .reference(let r):
-            ps = r.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = r.evaluateWith(precision: _currentPaintPrecision,
                                 resolver: _currentRefResolver, visiting: &visiting)
         case .recorded(let rec):
-            ps = rec.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = rec.evaluateWith(precision: _currentPaintPrecision,
                                   resolver: _currentRefResolver, visiting: &visiting)
         case .generated(let gen):
-            ps = gen.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = gen.evaluateWith(precision: _currentPaintPrecision,
                                   resolver: _currentRefResolver, visiting: &visiting)
         case .transformed(let t):
-            ps = t.evaluateWith(precision: DEFAULT_PRECISION,
+            ps = t.evaluateWith(precision: _currentPaintPrecision,
                                 resolver: _currentRefResolver, visiting: &visiting)
         }
         for ring in ps where ring.count >= 2 {
@@ -3495,6 +3520,8 @@ class CanvasNSView: NSView {
         // `do { }` and re-indenting them, and the visual result of this function
         // has no test. A latent hazard is not worth a blind edit to untested
         // paint code; it IS worth the next reader not having to re-derive this.
+        let priorPaintPrecision = _currentPaintPrecision
+        _currentPaintPrecision = controller.map { canvasPaintPrecision(store: $0.model.stateStore) } ?? DEFAULT_PRECISION
         if let model = controller?.model {
             setCanvasRefResolver(IdIndexResolver(
                 index: model.idIndex,
@@ -3551,6 +3578,7 @@ class CanvasNSView: NSView {
                               zoom: CGFloat(controller?.model.zoomLevel ?? 1))
         // Restore the prior resolver now the live-evaluating passes are done.
         setCanvasRefResolver(priorRefResolver)
+        _currentPaintPrecision = priorPaintPrecision
         ctx.restoreGState()
         // Active tool overlay (screen-space, post-transform).
         // YamlTool's marquee rect is stored in screen coords so it
