@@ -4803,8 +4803,8 @@
         ],
         "id": "grad_stop_location_combo",
         "key": "bind.value",
-        "type": "null",
-        "value": ""
+        "type": "number",
+        "value": "32"
       }
     ]
   },

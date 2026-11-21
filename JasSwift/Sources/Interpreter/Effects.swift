@@ -416,7 +416,7 @@ private func runOne(
         // `global_written` applies one key per write.
         if let hook = platformEffects["apply_gradient_panel"] {
             for k in pairs.keys.filter({ isGradientRenderKey($0) || gradientStopKeys[$0] != nil
-                                         || $0 == gradientStopsKey }).sorted() {
+                                         || $0 == gradientStopsKey || $0 == gradientMidpointKey }).sorted() {
                 _ = hook(k, ctx, store)
             }
         }
@@ -1189,6 +1189,12 @@ public func editStop(_ stops: [GradientStop], index: Int, field: String,
 /// (WIDGET_EVENTS.md §The stops kind; `gradient_host::STOPS_KEY`).
 public let gradientStopsKey = "gradient_stops"
 
+/// The global key the Location combo sets with a MIDPOINT selected (GRADIENT.md
+/// STOP_LOCATION_COMBO): the midpoint's absolute location, applied to the
+/// selected pair by ``dragMidpoint(_:pair:location:)``. Mirrors
+/// `gradient_host::MIDPOINT_KEY`.
+public let gradientMidpointKey = "gradient_midpoint_location"
+
 /// Stops in the YAML's shape (`{color, opacity, location, midpoint_to_next}`);
 /// nil when any stop does not parse. A missing midpoint reads as 50. Mirrors
 /// `gradient_host::stops_from_json`.
@@ -1627,6 +1633,13 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
         g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
                      dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes)
         store.setPanel("gradient_panel_content", "selected_stop_index", moved)
+    } else if key == gradientMidpointKey {
+        // The Location combo on a midpoint: the selected pair, by the slider
+        // law's drag_midpoint; the selection does not move.
+        let pair = (store.getPanel("gradient_panel_content", "selected_midpoint_index") as? NSNumber)?.intValue ?? -1
+        guard let stops = dragMidpoint(g.stops, pair: pair, location: store.get(gradientMidpointKey)) else { return }
+        g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                     dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes)
     } else {
         let keys = key.map { [$0] } ?? gradientRenderKeys.sorted().filter { store.get($0) != nil }
         for k in keys {
@@ -1675,6 +1688,12 @@ private func applyGradientPanelToMixed(store: StateStore, controller: Controller
         let index = (store.getPanel("gradient_panel_content", "selected_stop_index") as? NSNumber)?.intValue ?? -1
         guard let (stops, moved) = stopKeyEdit(first.stops, index: index, field: field, value: store.get(key)) else { return }
         store.setPanel("gradient_panel_content", "selected_stop_index", moved)
+        edit = { g in Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                               dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes) }
+    } else if key == gradientMidpointKey {
+        guard let first = firstMemberGradient(controller.model.document, fillOnTop: fillOnTop) else { return }
+        let pair = (store.getPanel("gradient_panel_content", "selected_midpoint_index") as? NSNumber)?.intValue ?? -1
+        guard let stops = dragMidpoint(first.stops, pair: pair, location: store.get(gradientMidpointKey)) else { return }
         edit = { g in Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
                                dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes) }
     } else {

@@ -1180,7 +1180,7 @@ impl AppState {
         let writes: Vec<(String, serde_json::Value)> = keys.iter().filter_map(|k| {
             if gh::is_render_key(k) {
                 value(k).map(|v| (k.to_string(), v))
-            } else if *k == gh::STOPS_KEY || gh::stop_field(k).is_some() {
+            } else if *k == gh::STOPS_KEY || *k == gh::MIDPOINT_KEY || gh::stop_field(k).is_some() {
                 Some((gh::STOPS_KEY.to_string(), gh::stops_to_json(&gp.stops)))
             } else {
                 None
