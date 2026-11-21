@@ -395,6 +395,9 @@ pub(crate) struct GradientPanelState {
     pub selected_stop_index: i64,
     /// Index of the selected midpoint, or `-1` when nothing is selected.
     pub selected_midpoint_index: i64,
+    /// The eyedropper button's one-shot pick is armed (row 198;
+    /// `gradient_host::PICKING_KEY`): the canvas's next press samples.
+    pub picking: bool,
     /// Active library id (filename stem under workspace/gradients/).
     pub active_library_id: String,
     /// "small", "medium", or "large".
@@ -430,6 +433,7 @@ impl Default for GradientPanelState {
             ],
             selected_stop_index: 0,
             selected_midpoint_index: -1,
+            picking: false,
             active_library_id: "neutrals".into(),
             thumbnail_size: "large".into(),
             preview_state: false,
@@ -1858,6 +1862,30 @@ impl AppState {
     /// Returns `true` when the click was consumed (selection tool
     /// should not see it) and `false` when Align To is not in
     /// key-object mode (click falls through to the tool).
+    /// The Gradient panel eyedropper's press (row 198, step 4), in the web
+    /// canvas's order before the Align intercept and the tool: when the pick
+    /// is armed, disarm it and write the colour the engine's
+    /// `gradient_host::stop_colour_at` samples at canvas (`x`, `y`) to the
+    /// selected stop of the selection, by the stop-colour law. `true` when the
+    /// press was the pick's, hit or miss; the tool must not see it.
+    pub(crate) fn try_pick_gradient_stop(&mut self, x: f64, y: f64) -> bool {
+        use crate::interpreter::gradient_host as gh;
+        if !self.gradient_panel.picking {
+            return false;
+        }
+        self.gradient_panel.picking = false;
+        let fill_on_top = self.fill_on_top;
+        let Some(colour) = self.tabs.get(self.active_tab)
+            .and_then(|tab| gh::stop_colour_at(&tab.model, x, y, fill_on_top)) else { return true };
+        self.sync_gradient_panel_from_selection();
+        let gp = &mut self.gradient_panel;
+        if let Some((stops, _)) = gh::set_stop_color(&gp.stops, gp.selected_stop_index, &serde_json::json!(colour)) {
+            gp.stops = stops;
+            self.apply_gradient_panel_keys(&[gh::STOPS_KEY]);
+        }
+        true
+    }
+
     pub(crate) fn try_designate_align_key_object(&mut self, x: f64, y: f64) -> bool {
         if self.align_panel.align_to != AlignTo::KeyObject {
             return false;
