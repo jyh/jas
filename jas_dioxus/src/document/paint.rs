@@ -84,12 +84,38 @@ pub fn emit_document_isolated(
     precision: f64,
     mask_isolation_path: Option<&[usize]>,
 ) {
-    let Some(path) = mask_isolation_path else {
-        return emit_document(p, doc, precision);
-    };
-    let _paint_context = install_paint_context(rebuild_id_index(doc), precision);
-    if let Some(mask) = doc.get_element(&path.to_vec()).and_then(|e| e.common().mask.as_deref()) {
-        emit_element(p, &mask.subtree, 1.0);
+    emit_document_with_index(p, doc, rebuild_id_index(doc), precision, mask_isolation_path)
+}
+
+/// [`emit_document_isolated`] with the document's index BORROWED rather than
+/// rebuilt (row 202): a host that paints every frame from a persistent
+/// `Model` passes `Model::id_index().clone()`, an O(1) rpds clone, as the web
+/// walk does (`render()` installs the Model's index), instead of paying
+/// O(document) per paint. `index` must be the document's own: the Model's gate
+/// keeps it equal to `rebuild_id_index(doc)`, and a debug build asserts that
+/// here, so a stale or foreign index is loud in every test rather than a
+/// reference silently resolving to the wrong element.
+pub fn emit_document_with_index(
+    p: &mut dyn Painter,
+    doc: &Document,
+    index: crate::document::id_index::IdIndex,
+    precision: f64,
+    mask_isolation_path: Option<&[usize]>,
+) {
+    debug_assert!(index == rebuild_id_index(doc),
+        "emit_document_with_index: the index is not this document's own");
+    let _paint_context = install_paint_context(index, precision);
+    match mask_isolation_path {
+        None => {
+            for layer in &doc.layers {
+                emit_element(p, layer, 1.0);
+            }
+        }
+        Some(path) => {
+            if let Some(mask) = doc.get_element(&path.to_vec()).and_then(|e| e.common().mask.as_deref()) {
+                emit_element(p, &mask.subtree, 1.0);
+            }
+        }
     }
 }
 
@@ -126,6 +152,31 @@ mod tests {
 
     fn fills(cmds: &[Command]) -> usize {
         cmds.iter().filter(|c| matches!(c, Command::FillPath { .. } | Command::FillRect { .. })).count()
+    }
+
+    /// Row 202: the BORROWING entry paints what the rebuilding one paints
+    /// when it is handed the document's own index, and a foreign index is
+    /// loud in a debug build (the reference would otherwise resolve against
+    /// the wrong document, or not at all).
+    #[test]
+    fn the_borrowing_walk_paints_as_the_rebuilding_walk_and_refuses_a_foreign_index() {
+        let mut doc = Document::default();
+        doc.layers[0].children_mut().unwrap().push(Rc::new(ided_rect("m1")));
+        doc.layers[0].children_mut().unwrap().push(Rc::new(reference_to("m1")));
+        let mut rebuilt = RecordingPainter::new();
+        emit_document(&mut rebuilt, &doc, DEFAULT_PRECISION);
+        let mut borrowed = RecordingPainter::new();
+        emit_document_with_index(&mut borrowed, &doc, rebuild_id_index(&doc), DEFAULT_PRECISION, None);
+        assert_eq!(fills(rebuilt.commands()), 2, "CONTROL: the rect and the reference paint");
+        assert_eq!(format!("{:?}", borrowed.commands()), format!("{:?}", rebuilt.commands()));
+        if cfg!(debug_assertions) {
+            let foreign = std::panic::catch_unwind(|| {
+                let mut p = RecordingPainter::new();
+                emit_document_with_index(&mut p, &doc, crate::document::id_index::IdIndex::new(),
+                                         DEFAULT_PRECISION, None);
+            });
+            assert!(foreign.is_err(), "a foreign (empty) index is loud in a debug build");
+        }
     }
 
     /// A document whose ONLY live element is a reference to a sibling: it paints
