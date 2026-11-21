@@ -1826,6 +1826,18 @@
         }
       ]
     },
+    "toggle_page_isolated_blending": {
+      "description": "Turn Page Isolated Blending on or off (the Opacity panel menu). When it is on, the document's top-level layers composite onto a transparent backdrop first, and the result lands on the page once, so a layer with a blending mode blends with the layers beneath it but never with the artboard's fill. When it is off (the default, and every document saved before the setting existed), the layers composite straight onto the page. The setting is saved with the document, and changing it is one undoable step.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.set_document_setup_field": {
+            "field": "page_isolated_blending",
+            "value": "not active_document.document_setup.page_isolated_blending"
+          }
+        }
+      ]
+    },
     "toggle_snap_to_glyph_visible": {
       "description": "Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.\n",
       "category": "panel",
@@ -10132,6 +10144,7 @@
         "selection_is_single_brushed_stroke": false,
         "selection_orphan_count": 0,
         "symbol_usage": {},
+        "document_setup": {},
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
         "element_tree": [],
@@ -10232,6 +10245,10 @@
         "symbol_usage": {
           "type": "object",
           "description": "Every symbol master's id mapped to how many live references (instances) target it (SYMBOLS.md \u00a78): its reverse-dependency count in the dependency index, 0 for a master no instance uses. Every master in the store is present, so `symbol_usage[id] > 0` reads a number for any master that exists. Empty when there are no masters. delete_symbol_action asks before it empties an instance.\n"
+        },
+        "document_setup": {
+          "type": "object",
+          "description": "The document's own setup record (PRINT.md \u00a71A; OPACITY.md \u00a7Page-level items), one key per field: bleed_top/right/bottom/left, bleed_uniform, show_images_outline, highlight_substituted_glyphs, grid_size, grid_color, paper_color, simulate_colored_paper, transparency_flattener_preset, discard_white_overprint, page_isolated_blending and page_knockout_group. Built by every active port's active-document view; the Document Setup dialog seeds from it and the Opacity panel menu's Page Isolated Blending item is checked from it. Empty when no document is open, so every field reads as absent there. Declared here when that menu item became the first panel-menu read of it (row 192).\n"
         },
         "artboards_count": {
           "type": "number",
@@ -18993,14 +19010,14 @@
         {
           "label": "Page Isolated Blending",
           "action": "toggle_page_isolated_blending",
-          "enabled_when": "false",
-          "description": "status: pending_renderer. Enables once the renderer supports isolated blending for the document root group.\n"
+          "checked_when": "active_document.document_setup.page_isolated_blending",
+          "description": "Checked when the page is isolated: the document's top-level layers composite onto a transparent backdrop first, and the result lands on the page once, so a layer with a blending mode never blends with the artboard's fill (it still blends with the layers beneath it).\n"
         },
         {
           "label": "Page Knockout Group",
           "action": "toggle_page_knockout_group",
           "enabled_when": "false",
-          "description": "status: pending_renderer. Enables once the renderer supports knockout group compositing for the document root group.\n"
+          "description": "status: pending_renderer. The document carries the field (document_setup.page_knockout_group, default false), and no renderer composites knockout yet: it needs a compositing operation the renderers do not have. Enables once that is built.\n"
         },
         "separator",
         {

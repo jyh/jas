@@ -469,5 +469,31 @@
     "expected_dialog": {
       "id": "save_changes_window"
     }
+  },
+  {
+    "name": "toggle_page_isolated_blending_turns_the_page_flag_on",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "toggle_page_isolated_blending",
+        "params": {}
+      }
+    ],
+    "expected_json": "toggle_page_isolated_blending_on_expected.json"
+  },
+  {
+    "name": "toggle_page_isolated_blending_twice_turns_it_back_off",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "toggle_page_isolated_blending",
+        "params": {}
+      },
+      {
+        "action": "toggle_page_isolated_blending",
+        "params": {}
+      }
+    ],
+    "expected_json": "toggle_page_isolated_blending_twice_expected.json"
   }
 ]

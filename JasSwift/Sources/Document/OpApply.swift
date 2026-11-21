@@ -292,6 +292,8 @@ private func applyDocumentSetupField(
     case "highlight_substituted_glyphs": guard let b = bool() else { return nil }; return _withDocSetup(s, highlightSubstitutedGlyphs: b)
     case "simulate_colored_paper": guard let b = bool() else { return nil }; return _withDocSetup(s, simulateColoredPaper: b)
     case "discard_white_overprint": guard let b = bool() else { return nil }; return _withDocSetup(s, discardWhiteOverprint: b)
+    case "page_isolated_blending": guard let b = bool() else { return nil }; return _withDocSetup(s, pageIsolatedBlending: b)
+    case "page_knockout_group": guard let b = bool() else { return nil }; return _withDocSetup(s, pageKnockoutGroup: b)
     case "grid_size": guard let n = num() else { return nil }; return _withDocSetup(s, gridSize: n)
     case "grid_color": guard let g = str() else { return nil }; return _withDocSetup(s, gridColor: g)
     case "paper_color": guard let g = str() else { return nil }; return _withDocSetup(s, paperColor: g)
