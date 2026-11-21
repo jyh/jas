@@ -310,6 +310,8 @@ pub const STOP_KEYS: &[(&str, &str)] = &[
     ("gradient_stop_location", "location"),
     // The trash button (GRADIENT.md TRASH_BUTTON): its value is not read.
     ("gradient_stop_delete", "delete"),
+    // The colour picker's OK for a stop, and the eyedropper (row 198).
+    ("gradient_stop_color", "color"),
 ];
 
 /// A [`STOP_KEYS`] write on `stops` at the selected `index`: `delete` is
@@ -317,11 +319,26 @@ pub const STOP_KEYS: &[(&str, &str)] = &[
 /// The stops and the index now selected, or `None` when the law refuses.
 pub fn stop_key_edit(stops: &[GradientStop], index: i64, field: &str, value: &Value)
                      -> Option<(Vec<GradientStop>, usize)> {
-    if field == "delete" {
-        delete_stop(stops, index)
-    } else {
-        edit_stop(stops, index, field, value)
+    match field {
+        "delete" => delete_stop(stops, index),
+        "color" => set_stop_color(stops, index, value),
+        _ => edit_stop(stops, index, field, value),
     }
+}
+
+/// The stop-colour law (row 198; reference `gradient_law.set_stop_color`,
+/// pinned by `test_fixtures/gradient_stop/stop_color.json`): stop `index`
+/// takes `color`, a `#rrggbb` string with six hex digits, and the index
+/// stays. A plain set: no re-sort, no midpoint reset. `None` when `index`
+/// names no stop or `color` is anything else.
+pub fn set_stop_color(stops: &[GradientStop], index: i64, color: &Value)
+                      -> Option<(Vec<GradientStop>, usize)> {
+    let i = usize::try_from(index).ok().filter(|&i| i < stops.len())?;
+    let hex = color.as_str().filter(|s| s.len() == 7 && s.starts_with('#')
+        && s[1..].chars().all(|c| c.is_ascii_hexdigit()))?;
+    let mut out = stops.to_vec();
+    out[i].color = crate::geometry::element::Color::from_hex(hex)?;
+    Some((out, i))
 }
 
 /// The stop field a [`STOP_KEYS`] key edits, or `None` for any other key.

@@ -8236,6 +8236,41 @@ pub(crate) mod tests {
         assert!(refused >= 3 && written >= 5, "corpus too thin: {} refused, {} written", refused, written);
     }
 
+    // Runs test_fixtures/gradient_stop/stop_color.json, the shared corpus for
+    // the stop-colour law (row 198). The reference (`gradient_law.set_stop_color`)
+    // and Swift read the same file.
+    #[test]
+    fn gradient_stop_color_corpus() {
+        use crate::geometry::element::{Color, GradientStop};
+        use crate::interpreter::gradient_host::set_stop_color;
+        fn stop(v: &serde_json::Value) -> GradientStop {
+            GradientStop {
+                color: Color::from_hex(v["color"].as_str().unwrap()).unwrap(),
+                opacity: v["opacity"].as_f64().unwrap(),
+                location: v["location"].as_f64().unwrap(),
+                midpoint_to_next: v["midpoint_to_next"].as_f64().unwrap(),
+            }
+        }
+        let corpus: serde_json::Value = serde_json::from_str(&read_fixture("gradient_stop/stop_color.json")).unwrap();
+        let (mut refused, mut written) = (0usize, 0usize);
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let stops: Vec<GradientStop> = vec["stops"].as_array().unwrap().iter().map(stop).collect();
+            let got = set_stop_color(&stops, vec["index"].as_i64().unwrap(), &vec["value"]);
+            if vec["expected"].is_null() {
+                assert!(got.is_none(), "stop_color '{}': must refuse, got {:?}", name, got);
+                refused += 1;
+            } else {
+                let (out, idx) = got.unwrap_or_else(|| panic!("stop_color '{}': refused", name));
+                let want: Vec<GradientStop> = vec["expected"]["stops"].as_array().unwrap().iter().map(stop).collect();
+                assert_eq!(out, want, "stop_color '{}': stops", name);
+                assert_eq!(idx as i64, vec["expected"]["index"].as_i64().unwrap(), "stop_color '{}': index", name);
+                written += 1;
+            }
+        }
+        assert!(refused >= 6 && written >= 2, "corpus too thin: {} refused, {} written", refused, written);
+    }
+
     // Runs test_fixtures/gradient_stop/menu_transform.json, the shared corpus
     // for the Gradient panel menu's three stop transforms (GRADIENT.md §Panel
     // menu), through the law and through the expression builtin the YAML

@@ -107,3 +107,30 @@ def test_the_location_combo_shows_the_selected_marker(name):
     row = _location_row(case)
     assert row["type"] == "number", row
     assert float(row["value"]) == pytest.approx(want), row
+
+
+# ── The stop-colour law (row 198) ────────────────────────────────────────
+
+def _color_corpus():
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
+                        "gradient_stop", "stop_color.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["vectors"]
+
+
+def test_the_colour_corpus_is_not_vacuous():
+    vecs = _color_corpus()
+    assert sum(v["expected"] is None for v in vecs) >= 4
+    assert sum(v["expected"] is not None for v in vecs) >= 2
+
+
+@pytest.mark.parametrize("vec", _color_corpus(), ids=lambda v: v["name"])
+def test_stop_color_vector(vec):
+    from workspace_interpreter.gradient_law import set_stop_color
+    stops = copy.deepcopy(vec["stops"])
+    got = set_stop_color(stops, vec["index"], vec["value"])
+    assert stops == vec["stops"], "the law does not mutate its input"
+    if vec["expected"] is None:
+        assert got is None
+    else:
+        assert got == (vec["expected"]["stops"], vec["expected"]["index"])

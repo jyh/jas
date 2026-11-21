@@ -222,6 +222,13 @@ color_picker:
                                   condition: 'param.target == "stroke"'
                                   then:
                                     - set: { stroke_color: "dialog.color" }
+                              # A gradient stop (GRADIENT.md: double-click a
+                              # stop; the stop-colour law writes the selected
+                              # stop of the selection's gradient).
+                              - if:
+                                  condition: 'param.target == "gradient_stop"'
+                                  then:
+                                    - set: { gradient_stop_color: "dialog.color" }
                               # A dialog-field target ("dialog.color") gets the
                               # color as the picker's RESULT, written into the
                               # dialog it was opened over (open_color_picker's

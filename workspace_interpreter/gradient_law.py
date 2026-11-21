@@ -64,6 +64,24 @@ def edit_stop(stops: list[dict], index: int, field: str,
     return [out[i] for i in order], order.index(index)
 
 
+def set_stop_color(stops: list[dict], index: Any,
+                   color: Any) -> tuple[list[dict], int] | None:
+    """``stops`` with stop ``index``'s colour set to ``color``, and ``index``;
+    ``None`` (refused, nothing written) when ``index`` names no stop or
+    ``color`` is not a ``#rrggbb`` hex string. A plain set: no re-sort and no
+    midpoint reset. The colour is stored lowercase. Pinned by
+    ``test_fixtures/gradient_stop/stop_color.json`` (row 198).
+    """
+    i = _index(index, len(stops))
+    # Every digit a hex digit: int(.., 16) alone also takes a sign or a space.
+    if i is None or not isinstance(color, str) or len(color) != 7 or color[0] != "#" \
+            or not all(c in "0123456789abcdefABCDEF" for c in color[1:]):
+        return None
+    out = [dict(s) for s in stops]
+    out[i]["color"] = color.lower()
+    return out, i
+
+
 # ── The slider law (GRADIENT.md, The slider law (precisely)) ─────────────
 #
 # Five pure functions for the GRADIENT_SLIDER's gestures, pinned by
