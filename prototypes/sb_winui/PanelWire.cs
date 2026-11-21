@@ -1035,6 +1035,13 @@ internal static class PanelWire
         $"[{(string.IsNullOrEmpty(summary) ? type : summary)}]";
 
     /// <summary>
+    /// jas STATUS-flask 967: a placeholder tile's UIA <c>IsEnabled</c>, the plan's
+    /// <c>bind.disabled</c> turned round. A Grid's plain peer always says enabled,
+    /// so the rendered tree read `op_mask_preview enabled: plan=false rendered=true`.
+    /// </summary>
+    internal static bool PlaceholderEnabled(string? disabled) => disabled != "true";
+
+    /// <summary>
     /// jas §941: a placeholder's UIA `ItemStatus`: `checked` and/or `disabled`,
     /// space-separated, exactly when the plan says so. A Grid's peer has no
     /// toggle or enabled state a reader can see, so this is how a driver reads

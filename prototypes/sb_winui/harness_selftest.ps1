@@ -3156,7 +3156,13 @@ Test-Case 'kinds verdict: no map is NOT RUN carrying the census' { Test-SbRender
 # ABSENT there: their rows (RadioGroupRow, IconGroupRow) were StackPanels with no
 # automation peer, so the leaf's id reached no reader. Each now has a Group peer,
 # measured through -EngineOpen (color_picker, artboard_options): 23 kinds, 2 known.
-Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '25 1'
+Test-Case 'kinds verdict: CONTROL -- the shipped map parses and names every kind flask measured' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; "$(@($m.allowed.PSObject.Properties).Count) $(@($m.known).Count)" } '26 0'
+# jas STATUS-flask 967: a placeholder is a PlaceholderTile since #1008, whose peer
+# reports Custom (the O97 nightly 11-20 read placeholder->Custom:2 under
+# opacity_panel_content, and flask re-read it at c6986144). No shell path still
+# draws a placeholder as Text, so placeholder->Text is struck from known: 26 kinds, 0 known.
+Test-Case 'kinds verdict: the shipped map passes the Opacity panel census flask read on the box (STATUS-flask 967)' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; Test-SbRenderedKinds 'button->Button:1 checkbox->CheckBox:2 icon_button->Button:2 number_input->Edit:1 placeholder->Custom:2 select->ComboBox:1' $m } 'PASS(pairs=6; known: none)'
+Test-Case 'kinds verdict: a placeholder drawn as Text again FAILS as new (the struck known pair)' { $m = Get-Content -Raw (Join-Path $PSScriptRoot 'e2e_baselines\uia_kinds.json') | ConvertFrom-Json; Test-SbRenderedKinds 'placeholder->Text:1' $m } 'FAIL(new: placeholder->Text:1)'
 
 Test-Case 'ledger text: CRLF becomes LF, with exactly one trailing LF (flask STATUS 730)' { $t = ConvertTo-SbLfText ("{`r`n  `"a`": 1`r`n}`r`n`r`n"); "$($t.Contains("`r")) $($t.EndsWith("}`n")) $($t.Length)" } 'False True 13'
 Test-Case 'ledger text: an LF-only text without a trailing LF gains one' { (ConvertTo-SbLfText "x`ny").Length } '4'

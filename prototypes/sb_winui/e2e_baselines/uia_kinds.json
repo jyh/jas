@@ -1,5 +1,5 @@
 {
-  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815; plus radio, reference_point_widget, color_gradient and color_hue_bar from the engine-opened dialogs, STATUS-flask 795 (jas 796); plus radio_group and icon_button_group -> Group once their rows got an automation peer, STATUS-flask 798; plus gradient_tile -> Custom, read under gradient_panel_content on the box 11-18 (STATUS-flask 920); plus element_preview -> Custom once its square got an automation peer (STATUS-flask 923)",
+  "_source": "measured by flask on the box, STATUS-flask 728: rendered_tree KINDS over the 16 panels at #813 8a66840c + #815; plus radio, reference_point_widget, color_gradient and color_hue_bar from the engine-opened dialogs, STATUS-flask 795 (jas 796); plus radio_group and icon_button_group -> Group once their rows got an automation peer, STATUS-flask 798; plus gradient_tile -> Custom, read under gradient_panel_content on the box 11-18 (STATUS-flask 920); plus element_preview -> Custom once its square got an automation peer (STATUS-flask 923); plus placeholder -> Custom once a placeholder became a PlaceholderTile (#1008), read under opacity_panel_content by the O97 nightly 11-20 and by flask at c6986144, and placeholder->Text struck from known because no shell path draws a placeholder as Text any more (STATUS-flask 967)",
   "allowed": {
     "button": [
       "Button"
@@ -50,6 +50,9 @@
     "number_input": [
       "Edit"
     ],
+    "placeholder": [
+      "Custom"
+    ],
     "radio": [
       "RadioButton"
     ],
@@ -78,7 +81,5 @@
       "CheckBox"
     ]
   },
-  "known": [
-    "placeholder->Text"
-  ]
+  "known": []
 }
