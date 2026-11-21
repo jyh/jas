@@ -2435,8 +2435,13 @@ struct YamlElementView: View {
                 )
             )
             .offset(x: x, y: 30)
+            // Row 198: a double click on a stop is the stops kind's
+            // `double_press` gesture (WIDGET_EVENTS.md), which selects it and
+            // runs the slider's double_click behaviors: the colour picker
+            // seeded with the stop's colour. It replaces an onWidgetAction
+            // signal nothing in the Swift app handled.
             .simultaneousGesture(TapGesture(count: 2).onEnded {
-                onWidgetAction?("gradient_slider_stop_dblclick", ["stop_index": index])
+                widgetEvents?.gesture(element, name: "double_press", params: ["index": index])
             })
             .gesture(sliderDrag(midpoint: false, width: width) { _ in index })
     }
