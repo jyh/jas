@@ -155,3 +155,61 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
     let face = withFontLookup { faceWithTraits(base, [], size: 13) { _, _ in calls += 1; return nil } }
     #expect(calls == 0 && face == base)
 }
+
+// STATUS-jas row 188(b). When a family has no face with ALL the requested
+// traits, the fallback keeps as many of them as the family has: bold alone,
+// then italic alone, and the base face only when neither exists. Before this,
+// a bold-italic job in Futura-Medium (no bold italic, measured on macOS 11-20:
+// the [bold, italic] lookup is nil, [bold] is Futura-Bold, [italic] is
+// Futura-MediumItalic) measured Futura-Medium and lost the bold as well. A
+// partial face is still COUNTED as a failure: it is not the face asked for.
+
+/// A lookup that finds a face only when the descriptor's traits are in `has`.
+private final class LookupLog { var traits: [UInt32] = [] }
+
+private func lookupOnly(_ has: [NSFontDescriptor.SymbolicTraits], calls: LookupLog)
+    -> (NSFontDescriptor, CGFloat) -> NSFont? {
+    return { desc, size in
+        let t = desc.symbolicTraits.intersection([.bold, .italic])
+        calls.traits.append(t.rawValue)
+        return has.contains(t) ? NSFont(descriptor: desc, size: size) : nil
+    }
+}
+
+@Test func aMissingBoldItalicKeepsTheBold() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let calls = LookupLog()
+    let before = faceLookupFailures()
+    let face = withFontLookup {
+        faceWithTraits(base, [.bold, .italic], size: 13, lookup: lookupOnly([[.bold], [.italic]], calls: calls))
+    }
+    #expect(face.fontName == "Helvetica-Bold", "bold is tried before italic and before the base: \(face.fontName)")
+    #expect(faceLookupFailures() >= before + 1, "a partial face is still counted")
+}
+
+@Test func aMissingBoldItalicWithNoBoldKeepsTheItalic() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let calls = LookupLog()
+    let face = withFontLookup {
+        faceWithTraits(base, [.bold, .italic], size: 13, lookup: lookupOnly([[.italic]], calls: calls))
+    }
+    #expect(face.fontName == "Helvetica-Oblique", "italic alone when the family has no bold: \(face.fontName)")
+}
+
+@Test func aSingleTraitMissDoesNotTryOtherTraits() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let calls = LookupLog()
+    let face = withFontLookup {
+        faceWithTraits(base, [.italic], size: 13, lookup: lookupOnly([[.bold]], calls: calls))
+    }
+    #expect(face == base, "an italic job never measures a bold face: \(face.fontName)")
+    #expect(!calls.traits.contains(NSFontDescriptor.SymbolicTraits.bold.rawValue), "bold was never asked for: \(calls.traits)")
+}
+
+/// The real lookup, no injection: Futura-Medium has no bold italic on macOS.
+@Test func futuraBoldItalicMeasuresFuturaBold() {
+    guard let base = NSFont(name: "Futura-Medium", size: 13),
+          NSFont(name: "Futura-Bold", size: 13) != nil else { return }
+    let face = withFontLookup { faceWithTraits(base, [.bold, .italic], size: 13) }
+    #expect(face.fontName == "Futura-Bold", "the bold is kept when the italic is absent: \(face.fontName)")
+}
