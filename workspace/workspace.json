@@ -17512,7 +17512,7 @@
                 "behavior": [
                   {
                     "event": "click",
-                    "description": "Arms a one-shot pick (GRADIENT.md EYEDROPPER_BUTTON): the canvas's next press samples the colour of the topmost element under it, through groups, on the active attribute (its fill, or its stroke when the stroke is on top), and writes it to the selected stop by the stop-colour law. The tool never sees that press. A press on nothing, or on an element with no solid colour there, writes nothing and still ends the pick. Disabled when no stop is selected (a midpoint, or nothing).",
+                    "description": "Arms a one-shot pick (GRADIENT.md EYEDROPPER_BUTTON): the canvas's next press samples the colour of the topmost element under it, through groups, on the active attribute (its fill, or its stroke when the stroke is on top), and writes it to the selected stop by the stop-colour law. The tool never sees that press. A press on nothing, or on an element with no solid colour there, writes nothing and still ends the pick. An Escape while the pick is armed cancels it instead, and nothing else sees that Escape (the active tool, the mask-isolation exit); the next Escape is ordinary. Disabled when no stop is selected (a midpoint, or nothing).",
                     "effects": [
                       {
                         "set": {
