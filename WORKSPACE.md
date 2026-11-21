@@ -259,6 +259,10 @@ The tab bar never scrolls sideways, and it never makes the dock scroll
 sideways. A cut label is still the whole panel's tab: clicking or dragging
 it acts on that panel as before.
 
+The grip is the group's drag handle, and this section rules only where it
+sits and that it stays whole. It does not rule how it looks: a drawn glyph
+and an empty strip that starts the drag are both a grip.
+
 ## Anchored Docks by Edge
 
 `anchored` holds at most one dock per `DockEdge`: `Right`, `Left` or
