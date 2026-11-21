@@ -17459,6 +17459,15 @@
                         }
                       }
                     ]
+                  },
+                  {
+                    "event": "double_click",
+                    "description": "A double click on a stop (WIDGET_EVENTS.md \u00a7The stops kind, double_press): the procedure has already selected the stop, so this opens the shared colour picker seeded with that stop's colour, and its OK writes the colour to the stop by the stop-colour law (GRADIENT.md, Color stops: \"Double-click a stop\"; the picker's gradient_stop target).",
+                    "action": "open_color_picker",
+                    "params": {
+                      "target": "\"gradient_stop\"",
+                      "color": "panel.stops[panel.selected_stop_index].color"
+                    }
                   }
                 ]
               },

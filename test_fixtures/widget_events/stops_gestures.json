@@ -2418,6 +2418,200 @@
       ]
     },
     {
+      "name": "a_double_press_selects_the_stop_and_runs_double_click",
+      "setup": {
+        "midpoint": 0,
+        "stops": [
+          {
+            "color": "#ff0000",
+            "location": 0,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#00ff00",
+            "location": 50,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#0000ff",
+            "location": 100,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          }
+        ]
+      },
+      "steps": [
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": 0,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "WrongEvent",
+            "stop": -1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "double_press",
+          "params": {
+            "index": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "a_double_press_on_no_stop_is_refused",
+      "setup": {
+        "stop": 1,
+        "stops": [
+          {
+            "color": "#ff0000",
+            "location": 0,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#00ff00",
+            "location": 50,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#0000ff",
+            "location": 100,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          }
+        ]
+      },
+      "steps": [
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "WrongEvent",
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "double_press",
+          "params": {
+            "index": 3
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "WrongEvent",
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "double_press",
+          "params": {
+            "index": true
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "WrongEvent",
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "double_press",
+          "params": {}
+        }
+      ]
+    },
+    {
       "name": "a_press_without_a_location_is_refused",
       "setup": {
         "stop": 2,
