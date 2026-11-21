@@ -3313,6 +3313,17 @@ public func gradientStopPickPressIntercept(model: Model, store: StateStore, docX
     return true
 }
 
+/// The eyedropper's Escape, before every other Escape path (the engine's and
+/// the web's order): when the pick is armed, disarm it. True when the Escape
+/// was the pick's, so nothing else may see it. Mirrors
+/// `gradient_host::cancel_pick`.
+public func gradientStopPickEscapeIntercept(store: StateStore) -> Bool {
+    let armed = (store.get(gradientPickingKey) as? Bool) ?? (store.get(gradientPickingKey) as? NSNumber)?.boolValue ?? false
+    guard armed else { return false }
+    store.set(gradientPickingKey, false)
+    return true
+}
+
 public func alignKeyObjectPressIntercept(model: Model, store: StateStore,
                                          docX: Double, docY: Double,
                                          shift: Bool, alt: Bool) -> Bool {
