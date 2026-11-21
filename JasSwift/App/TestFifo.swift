@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import AppKit
 import JasLib
 
 // ── Test-only FIFO command channel ──────────────────────────────────────
@@ -17,6 +18,8 @@ import JasLib
 //     open <path>               -> File > Open's document, no dialog
 //     view <zoom> <offx> <offy> -> set the active canvas's view (level 2)
 //     read <path>               -> write the document's test JSON to path
+//     shot <path>               -> the main window's content as a PNG, drawn
+//                                  in-process (works with the console locked)
 //     action <name> [json]      -> <name> with optional JSON params, run
 //                                  through the shared YAML effects pipeline
 //                                  (LayersPanel.dispatchYamlAction — the same
@@ -146,6 +149,20 @@ extension JasAppDelegate {
                 workspace?.addCanvas(Model(document: Document.newEmptyDocument()))
                 return
             }
+            // The Window menu's layout verbs (Tile, Toolbar, Panels, every
+            // panel item) apply the menu's own shared op (WindowLayoutVerb);
+            // the generic dispatcher does not apply a layout op. A harness
+            // launch never saves the layout (TestHarness.isolatesSession), so
+            // the op is applied without the menu's save.
+            if let ws = workspace, let op = WindowLayoutVerb.op(name, params: params) {
+                layoutApply(&ws.workspaceLayout, op)
+                return
+            }
+            // Window > Workspace > Reset to Default, the menu's own call.
+            if name == "reset_workspace" {
+                workspace?.resetToDefault()
+                return
+            }
             guard let model = workspace?.activeModel else { return }
             FifoActionRouting.dispatch(name, model: model, params: params)
         case "open":
@@ -223,6 +240,24 @@ extension JasAppDelegate {
                 NSLog("test-fifo: layout wrote %@", rest)
             } catch {
                 NSLog("test-fifo: layout REFUSED %@ (%@)", rest, "\(error)")
+            }
+        case "shot":
+            // shot <path>: the main window's content drawn in-process to a
+            // PNG (FifoShot), so a harness reads the window while the console
+            // is locked, where screencapture cannot.
+            guard let window = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }),
+                  let view = window.contentView else {
+                NSLog("test-fifo: shot REFUSED (no visible window)")
+                return
+            }
+            // The FIFO's read source runs on the main queue.
+            MainActor.assumeIsolated {
+                do {
+                    let size = try FifoShot.write(view: view, to: rest)
+                    NSLog("test-fifo: shot wrote %@ %.0fx%.0f", rest, size.width, size.height)
+                } catch {
+                    NSLog("test-fifo: %@", "\(error)")
+                }
             }
         default:
             NSLog("test-fifo: unknown command %@", cmd)
