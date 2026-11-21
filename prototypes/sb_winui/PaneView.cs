@@ -2969,7 +2969,21 @@ internal sealed partial class PlaceholderTile : Grid
     internal string? Disabled { get; set; }
 
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
-        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+        new PlaceholderTilePeer(this);
+}
+
+/// <summary>
+/// jas STATUS-flask 967: the plain element peer, whose <c>IsEnabled</c> is the
+/// plan's (<see cref="PanelWire.PlaceholderEnabled"/>), read when UI Automation
+/// asks, since `bind.disabled` moves without a rebuild.
+/// </summary>
+internal sealed partial class PlaceholderTilePeer : Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer
+{
+    private readonly PlaceholderTile _tile;
+
+    internal PlaceholderTilePeer(PlaceholderTile tile) : base(tile) { _tile = tile; }
+
+    protected override bool IsEnabledCore() => PanelWire.PlaceholderEnabled(_tile.Disabled);
 }
 
 /// <summary>
