@@ -6982,8 +6982,8 @@ mod tests {
         let on = |e, k| engine_of(e).layout.borrow().as_ref().map(|l| l.panel_on_screen(k));
         let name = "Default";
         assert!(!take(unsafe { jas_layout_load(e, name.as_ptr(), name.len()) }).is_empty(), "fixture: a layout");
-        // Show it first, so the close has something to close.
-        let (reply, err) = dispatch(e, r#"{"action":"show_panel","params":{"panel":"boolean"}}"#);
+        // Show it first (Window > Boolean), so the close has something to close.
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_boolean"}"#);
         assert_eq!(on(e, PanelKind::Boolean), Some(true), "fixture: Boolean on screen: {reply} {err}");
         let layers_before = on(e, PanelKind::Layers);
         let (rows, err) = panel_menu(e, "boolean_panel_content");
