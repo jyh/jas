@@ -5836,6 +5836,43 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// BOOLEAN OPTIONS' OK REPAINTS WHEN IT MOVES THE PAINT PRECISION (row 204,
+    /// flask STATUS §986). Live geometry paints at the store's
+    /// `boolean_precision` (row 203), so OK changing it changes the picture
+    /// while the document stays put; a reply's `doc_changed` is the repaint
+    /// signal (`jas_document_modified` is the dirty flag), and the WinUI
+    /// canvas drew the old precision until an unrelated repaint. The control:
+    /// an OK that leaves the precision where it was repaints nothing.
+    #[test]
+    fn boolean_options_ok_repaints_when_the_paint_precision_moves() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        let before = crate::ffi_pointer::engine_paint_precision(engine_of(e));
+        let ok = |e| {
+            let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+            let (reply, err) = dialog_event(e, &ev);
+            let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+            assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the dialog: {reply}");
+            v
+        };
+        // The control first: OK at the precision the dialog opened with.
+        let (reply, err) = dispatch(e, r#"{"action":"open_boolean_options"}"#);
+        assert!(reply.contains("boolean_options"), "the dialog opened: {reply} {err}");
+        let v = ok(e);
+        assert_eq!(v["doc_changed"], false, "CONTROL: an OK that moves nothing repaints nothing: {v}");
+        assert_eq!(crate::ffi_pointer::engine_paint_precision(engine_of(e)), before, "CONTROL: unmoved");
+        // Now OK at 5 pt.
+        let (reply, err) = dispatch(e, r#"{"action":"open_boolean_options"}"#);
+        assert!(reply.contains("boolean_options"), "the dialog reopened: {reply} {err}");
+        let (reply, err) = dialog_event(e, r#"{"widget":"bo_precision_input","event":"commit","value":"5"}"#);
+        assert!(!reply.is_empty(), "the commit ran: {err}");
+        let v = ok(e);
+        assert_eq!(crate::ffi_pointer::engine_paint_precision(engine_of(e)), 5.0, "OK wrote the precision: {v}");
+        assert_eq!(v["doc_changed"], true, "OK moved the paint precision, so the shell repaints: {v}");
+        assert_eq!(unsafe { jas_document_modified(e) }, 0, "and the document is not an edit");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// THE DIALOG DOOR, the plan: `jas_dialog_plan` is the panel planner over
     /// the OPEN dialog's `content`, evaluated with the dialog's own scope
     /// (`dialog.*`, `param.*`) beside the engine's. With no dialog open it
