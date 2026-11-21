@@ -11769,6 +11769,20 @@ mod tests {
                 if !same_json(store.get("gradient_stops"), &x["committed"]) {
                     failures.push(format!("{at}: committed {} != {}", store.get("gradient_stops"), x["committed"]));
                 }
+                // A double press runs double_click, not commit, so the line
+                // above cannot see it (row 198): its shipped behavior opens the
+                // colour picker exactly when the corpus says behaviors ran.
+                if step["gesture"] == "double_press" {
+                    let ran = x["behaviors_run"].as_i64().unwrap_or(0) > 0;
+                    let open = store.dialog_id() == Some("color_picker");
+                    if open != ran {
+                        failures.push(format!("{at}: picker open {open}, behaviors_run {}", x["behaviors_run"]));
+                    }
+                    drop(store);
+                    if open {
+                        unsafe { jas_dialog_dismiss(e) };
+                    }
+                }
             }
             unsafe { jas_engine_free(e) };
         }
