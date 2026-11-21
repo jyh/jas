@@ -16,10 +16,11 @@ description: >
       boxes.
     - MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX are present but
       disabled until the document model carries element.mask.
-    - Mask-lifecycle and page-level menu items use enabled_when: "false"
-      until their respective phases land (pending_model for disable_mask /
-      unlink_mask; pending_renderer for page_isolated_blending /
-      page_knockout_group).
+    - Mask-lifecycle menu items use enabled_when: "false" until their
+      phase lands (pending_model for disable_mask / unlink_mask). The two
+      page-level items, page_isolated_blending and page_knockout_group, are
+      built in every active renderer and carry a check mark read from the
+      document.
 
   === Layout ===
 

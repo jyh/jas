@@ -181,9 +181,13 @@ class TestOpacityPanel:
         assert "enabled_when" not in entry
         assert entry.get("checked_when") == "active_document.document_setup.page_isolated_blending"
 
-    def test_menu_page_knockout_group_pending_renderer(self, panel):
+    def test_menu_page_knockout_group_is_enabled_and_checked_from_the_document(self, panel):
+        # Row 209 (AMENDMENT A7): every active renderer composites the page
+        # knockout group, so the item is enabled and its check mark reads the
+        # document's own flag.
         entry = self._menu_by_label(panel, "Page Knockout Group")
-        assert entry.get("enabled_when") == "false"
+        assert "enabled_when" not in entry
+        assert entry.get("checked_when") == "active_document.document_setup.page_knockout_group"
 
     def test_menu_hide_thumbnails_checkmark_bound(self, panel):
         entry = self._menu_by_label(panel, "Hide Thumbnails")
