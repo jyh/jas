@@ -336,6 +336,40 @@ fn the_gradient_trash_button_deletes_the_selected_stop() {
         "a trash click at the two-stop floor must be refused as Disabled, got {at_floor:?}");
 }
 
+/// **The Location combo on a selected midpoint moves the midpoint** (GRADIENT.md
+/// STOP_LOCATION_COMBO: for a midpoint, its absolute location; the law is
+/// `drag_midpoint`, pinned by `gradient_stop/slider.json`). Until row 198 the
+/// commit went to the selected STOP, index -1 once a midpoint is picked, and
+/// the law refused it, so the combo was enabled and did nothing. On the seed
+/// (stops at 0 and 100) an absolute 30 is `midpoint_to_next` 30; the control is
+/// the same commit with a stop selected, which moves that stop.
+#[test]
+fn the_location_combo_on_a_midpoint_moves_the_midpoint() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = |steps: Value| serde_json::json!({
+        "item": "t", "setup_svg": "rect_with_stroke.svg", "tool": "selection", "app_state": {},
+        "steps": steps, "expected_json": "-"});
+    let press = serde_json::json!([{"kind": "press", "x": 36, "y": 18}, {"kind": "release", "x": 36, "y": 18}]);
+    let slider = |event: &str, value: Value| serde_json::json!({"panel": "gradient_panel_content",
+        "widget": "grad_slider", "event": event, "value": value});
+    let pick_mid = slider("press_midpoint", serde_json::json!({"pair": 0, "location": 50}));
+    let up_mid = slider("release_midpoint", serde_json::json!({"location": 50}));
+    let commit = serde_json::json!({"panel": "gradient_panel_content", "widget": "grad_stop_location_combo",
+        "event": "commit", "value": "30"});
+    let read = serde_json::json!({"read": "document"});
+    let stops_of = |r: Result<String, String>| -> Value {
+        let doc: Value = serde_json::from_str(&r.expect("the script must run")).unwrap();
+        doc["layers"][0]["children"][0]["fill_gradient"]["stops"].clone()
+    };
+    let mid = stops_of(replay(&script(serde_json::json!([press[0], press[1], pick_mid, up_mid, commit, read]))));
+    assert_eq!(mid[0]["midpoint_to_next"].as_f64(), Some(30.0), "the midpoint moves to 30, got {mid}");
+    assert_eq!((mid[0]["location"].as_f64(), mid[1]["location"].as_f64()), (Some(0.0), Some(100.0)),
+        "the stops do not move, got {mid}");
+    let stop = stops_of(replay(&script(serde_json::json!([press[0], press[1], commit, read]))));
+    assert_eq!(stop[0]["location"].as_f64(), Some(30.0), "with stop 0 selected the stop moves, got {stop}");
+    assert_eq!(stop[0]["midpoint_to_next"].as_f64(), Some(50.0), "got {stop}");
+}
+
 #[test]
 fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
     // The ABI's counters are process-wide; the tests that read them serialise
