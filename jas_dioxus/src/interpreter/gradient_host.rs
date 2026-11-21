@@ -354,6 +354,33 @@ pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value:
     Some(moved)
 }
 
+/// The global key the Location combo sets with a MIDPOINT selected (GRADIENT.md
+/// STOP_LOCATION_COMBO): the midpoint's absolute location, applied by
+/// [`drag_midpoint`] to the selected pair.
+pub const MIDPOINT_KEY: &str = "gradient_midpoint_location";
+
+/// The engine's midpoint write: pair `pair` of the selection's gradient (the
+/// same base as [`apply_stop_edit`]) takes the absolute `location` by
+/// [`drag_midpoint`]. `None`, and nothing written, when nothing is selected or
+/// the law refuses. The selection indices do not move.
+pub fn apply_midpoint_edit(model: &mut Model, fill_on_top: bool, location: &Value,
+                           pair: i64) -> Option<()> {
+    let mut g = match selection_gradient(model.document(), fill_on_top) {
+        SelectionGradient::Empty => return None,
+        SelectionGradient::Uniform(g) => g,
+        SelectionGradient::Solid(c) => seed_gradient(c),
+        SelectionGradient::Mixed => {
+            let first = first_member_gradient(model.document(), fill_on_top)?;
+            let stops = drag_midpoint(&first.stops, pair, location)?;
+            map_member_gradients(model, fill_on_top, &|mut g| { g.stops = stops.clone(); g });
+            return Some(());
+        }
+    };
+    g.stops = drag_midpoint(&g.stops, pair, location)?;
+    apply_gradient_to_selection(model, fill_on_top, g);
+    Some(())
+}
+
 /// The global key the slider's `commit` behavior sets (gradient.yaml
 /// `grad_slider`; WIDGET_EVENTS.md §The stops kind): the whole stops list.
 pub const STOPS_KEY: &str = "gradient_stops";

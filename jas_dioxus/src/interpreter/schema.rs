@@ -123,6 +123,8 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "gradient_stop_location" => Some(SchemaEntry::new(Number, false, true)),
         // The trash button's key; its value is not read.
         "gradient_stop_delete" => Some(SchemaEntry::new(Bool, false, true)),
+        // The Location combo with a midpoint selected (gradient_host::MIDPOINT_KEY).
+        "gradient_midpoint_location" => Some(SchemaEntry::new(Number, false, true)),
         // The slider's finished gesture: the whole stops list (gradient_host::STOPS_KEY).
         "gradient_stops" => Some(SchemaEntry::new(List, false, true)),
         "fill_on_top" => Some(SchemaEntry::new(Bool, false, true)),

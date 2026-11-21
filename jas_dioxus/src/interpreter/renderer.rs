@@ -1034,6 +1034,15 @@ fn set_app_state_field(
                 gp.selected_stop_index = moved as i64;
             }
         }
+        // The Location combo on a midpoint: the selected pair takes the
+        // absolute location by the slider law (gradient_host::drag_midpoint).
+        "gradient_midpoint_location" => {
+            let gp = &mut st.gradient_panel;
+            if let Some(stops) = crate::interpreter::gradient_host::drag_midpoint(
+                &gp.stops, gp.selected_midpoint_index, val) {
+                gp.stops = stops;
+            }
+        }
         // Align panel fields — mirrors of AlignPanelState per
         // ALIGN.md Panel state.
         "align_to" => {

@@ -4499,6 +4499,626 @@
     ]
   },
   {
+    "name": "gradient@midpoint_selected",
+    "function": "bind_values",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "state": {
+          "fill_on_top": true
+        },
+        "panel": {
+          "stops": [
+            {
+              "color": "#0000ff",
+              "opacity": 100,
+              "location": 20,
+              "midpoint_to_next": 30
+            },
+            {
+              "color": "#ffffff",
+              "opacity": 100,
+              "location": 60,
+              "midpoint_to_next": 50
+            }
+          ],
+          "selected_stop_index": -1,
+          "selected_midpoint_index": 0
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1
+        ],
+        "id": "grad_library_dropdown",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "id": "grad_size_dropdown",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "id": "grad_fill_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "id": "grad_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          3,
+          0,
+          1
+        ],
+        "id": "grad_stroke_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0,
+          1
+        ],
+        "id": "grad_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          1,
+          0
+        ],
+        "id": "grad_linear_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          1,
+          1
+        ],
+        "id": "grad_radial_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          1,
+          2
+        ],
+        "id": "grad_freeform_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1,
+          1,
+          0
+        ],
+        "id": "grad_stroke_within_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1,
+          1,
+          1
+        ],
+        "id": "grad_stroke_along_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1,
+          1,
+          2
+        ],
+        "id": "grad_stroke_across_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          2,
+          1
+        ],
+        "id": "grad_angle_combo",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          3,
+          1
+        ],
+        "id": "grad_aspect_combo",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          4,
+          1
+        ],
+        "id": "grad_method_dropdown",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          5,
+          1
+        ],
+        "id": "grad_dither_checkbox",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "grad_slider",
+        "key": "bind.selected_midpoint_index",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "grad_slider",
+        "key": "bind.selected_stop_index",
+        "type": "number",
+        "value": "-1"
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "grad_slider",
+        "key": "bind.stops",
+        "type": "list",
+        "value": "[{\"color\":\"#0000ff\",\"location\":20,\"midpoint_to_next\":30,\"opacity\":100},{\"color\":\"#ffffff\",\"location\":60,\"midpoint_to_next\":50,\"opacity\":100}]"
+      },
+      {
+        "path": [
+          4,
+          2
+        ],
+        "id": "grad_trash_button",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          5,
+          1,
+          0,
+          1
+        ],
+        "id": "grad_stop_opacity_combo",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          5,
+          1,
+          0,
+          1
+        ],
+        "id": "grad_stop_opacity_combo",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          5,
+          1,
+          1,
+          1
+        ],
+        "id": "grad_stop_location_combo",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          1,
+          1,
+          1
+        ],
+        "id": "grad_stop_location_combo",
+        "key": "bind.value",
+        "type": "number",
+        "value": "32"
+      }
+    ]
+  },
+  {
+    "name": "gradient@stop_selected",
+    "function": "bind_values",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "state": {
+          "fill_on_top": true
+        },
+        "panel": {
+          "stops": [
+            {
+              "color": "#0000ff",
+              "opacity": 100,
+              "location": 20,
+              "midpoint_to_next": 30
+            },
+            {
+              "color": "#ffffff",
+              "opacity": 100,
+              "location": 60,
+              "midpoint_to_next": 50
+            }
+          ],
+          "selected_stop_index": 1,
+          "selected_midpoint_index": -1
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1
+        ],
+        "id": "grad_library_dropdown",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "id": "grad_size_dropdown",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "id": "grad_fill_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "id": "grad_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          3,
+          0,
+          1
+        ],
+        "id": "grad_stroke_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0,
+          1
+        ],
+        "id": "grad_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          1,
+          0
+        ],
+        "id": "grad_linear_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          1,
+          1
+        ],
+        "id": "grad_radial_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          1,
+          2
+        ],
+        "id": "grad_freeform_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1,
+          1,
+          0
+        ],
+        "id": "grad_stroke_within_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1,
+          1,
+          1
+        ],
+        "id": "grad_stroke_along_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          1,
+          1,
+          2
+        ],
+        "id": "grad_stroke_across_button",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          1,
+          2,
+          1
+        ],
+        "id": "grad_angle_combo",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          3,
+          1
+        ],
+        "id": "grad_aspect_combo",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          4,
+          1
+        ],
+        "id": "grad_method_dropdown",
+        "key": "bind.value",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          1,
+          5,
+          1
+        ],
+        "id": "grad_dither_checkbox",
+        "key": "bind.checked",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "grad_slider",
+        "key": "bind.selected_midpoint_index",
+        "type": "number",
+        "value": "-1"
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "grad_slider",
+        "key": "bind.selected_stop_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "grad_slider",
+        "key": "bind.stops",
+        "type": "list",
+        "value": "[{\"color\":\"#0000ff\",\"location\":20,\"midpoint_to_next\":30,\"opacity\":100},{\"color\":\"#ffffff\",\"location\":60,\"midpoint_to_next\":50,\"opacity\":100}]"
+      },
+      {
+        "path": [
+          4,
+          2
+        ],
+        "id": "grad_trash_button",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          5,
+          1,
+          0,
+          1
+        ],
+        "id": "grad_stop_opacity_combo",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          1,
+          0,
+          1
+        ],
+        "id": "grad_stop_opacity_combo",
+        "key": "bind.value",
+        "type": "number",
+        "value": "100"
+      },
+      {
+        "path": [
+          5,
+          1,
+          1,
+          1
+        ],
+        "id": "grad_stop_location_combo",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          1,
+          1,
+          1
+        ],
+        "id": "grad_stop_location_combo",
+        "key": "bind.value",
+        "type": "number",
+        "value": "60"
+      }
+    ]
+  },
+  {
     "name": "artboard_options@fill_transparent",
     "function": "bind_values",
     "args": {
