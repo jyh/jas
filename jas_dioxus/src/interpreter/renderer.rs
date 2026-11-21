@@ -7601,7 +7601,10 @@ pub(crate) fn scrollbar_px() -> i64 {
             let doc = web_sys::window()?.document()?;
             let body = doc.body()?;
             let probe: web_sys::HtmlElement = doc.create_element("div").ok()?.dyn_into().ok()?;
-            probe.style().set_property("cssText",
+            // The whole style as the ATTRIBUTE: `style().set_property("cssText", ..)`
+            // sets nothing (cssText is not a property name), the box then has no
+            // overflow, and every browser read 0 (measured on #1023's bundle).
+            probe.set_attribute("style",
                 "position:absolute;top:-1000px;left:-1000px;width:100px;height:100px;overflow-y:scroll;visibility:hidden;").ok()?;
             let node: &web_sys::Node = probe.as_ref();
             body.append_child(node).ok()?;
