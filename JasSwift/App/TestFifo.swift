@@ -18,6 +18,8 @@ import JasLib
 //     open <path>               -> File > Open's document, no dialog
 //     view <zoom> <offx> <offy> -> set the active canvas's view (level 2)
 //     read <path>               -> write the document's test JSON to path
+//     dialog_open <id>          -> open a dialog as the menu does (ContentView)
+//     dialog_action <name> [json] -> a dialog's OK route, as its button runs it
 //     repaints <path>           -> {"repaints": N}, how many times the canvas's
 //                                  repaint gate fired (shot cannot see that)
 //     shot <path>               -> the main window's content as a PNG, drawn
@@ -242,6 +244,24 @@ extension JasAppDelegate {
                 NSLog("test-fifo: layout wrote %@", rest)
             } catch {
                 NSLog("test-fifo: layout REFUSED %@ (%@)", rest, "\(error)")
+            }
+        case "dialog_open":
+            // dialog_open <id>: ContentView's own dialog opener (the menu's).
+            if !FifoDialogDrive.open(rest) {
+                NSLog("test-fifo: dialog_open REFUSED %@ (ContentView published no opener)", rest)
+            }
+        case "dialog_action":
+            // dialog_action <name> [json]: the dialog's own OK route.
+            let dp = rest.split(separator: " ", maxSplits: 1,
+                                omittingEmptySubsequences: true).map(String.init)
+            guard let name = dp.first else { return }
+            var params: [String: Any] = [:]
+            if dp.count > 1, let data = dp[1].data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                params = obj
+            }
+            if !FifoDialogDrive.act(name, params: params) {
+                NSLog("test-fifo: dialog_action REFUSED %@ (ContentView published no dialog route)", name)
             }
         case "repaints":
             // repaints <path>: the canvas repaint gate's count (FifoRepaints).

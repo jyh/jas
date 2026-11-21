@@ -179,3 +179,31 @@ private func pixel(_ path: String, x: Double, yFromTop: Double, viewWidth: Doubl
     let obj = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
     #expect(obj?["repaints"] as? Int == 7, "\(json)")
 }
+
+// ── `dialog_open <id>` / `dialog_action <name> [json]`: the real dialog path ──
+// The FIFO's `action` runs the generic dispatcher, which cannot open a SwiftUI
+// dialog (`action open_boolean_options` left no dialog open), so a dialog's OK
+// (which clears ContentView's dialog state, a view-state change) was not
+// drivable. ContentView publishes its own opener and its OK route; the FIFO
+// calls them, and refuses by name when nothing was published.
+
+@Test func theDialogDriveCallsWhatContentViewPublishedAndRefusesWithout() {
+    let savedOpen = FifoLive.openDialog, savedAct = FifoLive.dialogAction
+    defer { FifoLive.openDialog = savedOpen; FifoLive.dialogAction = savedAct }
+    var opened: [String] = []
+    var acted: [(String, [String: Any])] = []
+    FifoLive.openDialog = { opened.append($0) }
+    FifoLive.dialogAction = { acted.append(($0, $1)) }
+    #expect(FifoDialogDrive.open("boolean_options"))
+    #expect(opened == ["boolean_options"])
+    #expect(FifoDialogDrive.act("boolean_options_confirm", params: ["precision": 5]))
+    #expect(acted.count == 1 && acted[0].0 == "boolean_options_confirm")
+    #expect((acted.first?.1["precision"] as? Int) == 5)
+    // ONE test, not two: both halves write the global FifoLive, and
+    // swift-testing runs separate tests in parallel (measured: split, the
+    // refusal half read the other test's published closure).
+    FifoLive.openDialog = nil
+    FifoLive.dialogAction = nil
+    #expect(!FifoDialogDrive.open("boolean_options"))
+    #expect(!FifoDialogDrive.act("boolean_options_confirm", params: [:]))
+}
