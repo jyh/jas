@@ -5245,6 +5245,12 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
 /// and routed to the same per-panel dispatch as `number_input`. An
 /// empty entry on a `nullable: true` widget commits `None`; on a
 /// non-nullable widget it reverts.
+/// A length input's inline style (both branches), then the element's own
+/// declared style.
+fn length_input_style(style: &str) -> String {
+    format!("min-width:0;max-width:100%;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}")
+}
+
 fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     use super::length;
 
@@ -5381,7 +5387,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 r#type: "text",
                 placeholder: "{placeholder}",
                 value: "{display_value}",
-                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
+                style: "{length_input_style(&style)}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -5398,7 +5404,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 placeholder: "{placeholder}",
                 value: "{display_value}",
                 readonly: true,
-                style: "min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}",
+                style: "{length_input_style(&style)}",
                 oninput: move |_evt: Event<FormData>| {
                     revision += 1;
                 },
@@ -16734,5 +16740,23 @@ mod path_b_scrollbar_tests {
     fn a_classic_scrollbar_takes_its_width_from_the_body() {
         assert_eq!(path_b_avail_w(16), 212);
         assert_eq!(path_b_avail_w(11), 217);
+    }
+}
+
+/// Row 193: a length input never draws wider than its box. Measured on the PR
+/// bundle of #1023 with every dock tab shown: the Properties panel's X, Y, W
+/// and H inputs drew 131 px in 79-90-px Path B cells, each cell's
+/// `overflow:hidden` cutting the right edge. Their `flex:1` cannot apply in a
+/// block-level cell, so the input kept its intrinsic width.
+#[cfg(test)]
+mod length_input_fits_tests {
+    use super::length_input_style;
+
+    #[test]
+    fn a_length_input_never_draws_wider_than_its_box() {
+        let s = length_input_style("flex:1;");
+        let has = |k: &str, v: &str| s.split(';').filter_map(|d| d.split_once(':')).any(|(a, b)| a.trim() == k && b.trim() == v);
+        assert!(has("max-width", "100%") && has("box-sizing", "border-box"), "{s}");
+        assert!(s.ends_with("flex:1;"), "the declared style still comes last: {s}");
     }
 }

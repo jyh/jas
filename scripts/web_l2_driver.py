@@ -459,6 +459,16 @@ FIT_CONDITIONS = ("overlay", "classic")
 CLASSIC_BARS_JS = """(() => { const css = '*{scrollbar-width:auto !important} *::-webkit-scrollbar{width:16px !important;height:16px !important;background:#888}';
   const add = () => { const st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st); };
   if (document.documentElement) add(); else document.addEventListener('DOMContentLoaded', add); })()"""
+# Row 193: every input/select/textarea in a dock cell, on the dock tab now
+# shown, that draws past its Path B cell (the cell's overflow:hidden cuts it).
+CUT_READ_JS = r"""() => { const out = [];
+  for (const e of document.querySelectorAll('input,select,textarea')) {
+    const r = e.getBoundingClientRect(); if (r.width === 0) continue;
+    let p = e.parentElement; while (p && getComputedStyle(p).position !== 'absolute') p = p.parentElement;
+    if (!p || !p.closest('[id^="dock_group_"]')) continue;
+    const pr = p.getBoundingClientRect();
+    if (r.right > pr.right + 0.5) out.push(`${e.tagName.toLowerCase()}#${e.id} ${r.width.toFixed(0)}/${pr.width.toFixed(0)}`);
+  } return out; }"""
 FIT_READ_JS = r"""() => {
   const bars = [...document.querySelectorAll('[id^="dock_group_"] > div')].filter(b => b.querySelector('[id$="_tab"]'));
   let bad = 0, n = 0;
@@ -507,11 +517,14 @@ def fit_line(readings):
             return f"FIT NOT RUN ({c}: no tab bar found, so the tab-bar law was not read)"
         if c == "classic" and r["vbar"] <= 0:
             return f"FIT NOT RUN (classic: the dock shows no scrollbar width, so the classic bars did not take)"
-    ok = [c for c in FIT_CONDITIONS if readings[c]["bad"] == 0 and readings[c]["hscroll"] == 0]
+    ok = [c for c in FIT_CONDITIONS
+          if readings[c]["bad"] == 0 and readings[c]["hscroll"] == 0 and not readings[c].get("cut")]
     if len(ok) == len(FIT_CONDITIONS):
         return f"FIT {len(ok)}/{len(FIT_CONDITIONS)}"
     bad = "; ".join(f"FAIL {c}: bad={readings[c]['bad']} hscroll={readings[c]['hscroll']}"
+                    + (f" cut={len(readings[c]['cut'])}" if readings[c].get("cut") else "")
                     + (f" [{', '.join(readings[c]['who'])}]" if readings[c].get("who") else "")
+                    + (f" [{', '.join(readings[c]['cut'][:4])}]" if readings[c].get("cut") else "")
                     for c in FIT_CONDITIONS if c not in ok)
     return f"FIT RED {len(ok)}/{len(FIT_CONDITIONS)} ({bad})"
 
@@ -532,6 +545,17 @@ def run_fit(br):
             page.wait_for_selector(".jas-menu-title", timeout=HOOK_TIMEOUT_MS)
             page.wait_for_timeout(1500)
             out[c] = page.evaluate(FIT_READ_JS)
+            if c == "overlay":
+                # Show every dock tab in turn: a panel's controls exist only
+                # while its tab is the active one (row 193 sat on a tab the
+                # default layout does not show).
+                cut = []
+                for t in page.evaluate("() => [...document.querySelectorAll('[id$=\"_tab\"]')].map(t => t.id)"):
+                    page.locator(f"#{t}").scroll_into_view_if_needed()
+                    page.locator(f"#{t}").click()
+                    page.wait_for_timeout(300)
+                    cut += [w for w in page.evaluate(CUT_READ_JS) if w not in cut]
+                out[c]["cut"] = cut
         except Exception as e:
             out[c] = {"error": f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"}
         finally:
@@ -841,6 +865,9 @@ def self_test():
     check(fit_line({"overlay": good, "classic": dict(goodc, vbar=0)}).startswith("FIT NOT RUN (classic: the dock shows no scrollbar width"),
           "classic bars that did not take are NOT RUN, never an overlay read under the classic label")
     check(fit_line({}) == "FIT NOT RUN (no condition read)", "no readings is NOT RUN")
+    check(fit_line({"overlay": dict(good, cut=["input#prop_x 131/90"]), "classic": goodc})
+          == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=0 cut=1 [input#prop_x 131/90])",
+          "a control drawn past its cell on ANY dock tab is RED and named (row 193)")
     check(fit_line({"overlay": dict(good, hscroll=1, who=["div#x[245/238] by input#y+7"]), "classic": goodc})
           == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=1 [div#x[245/238] by input#y+7])", "a RED names the scroller and what overruns it")
     check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
