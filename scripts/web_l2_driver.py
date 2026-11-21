@@ -449,6 +449,46 @@ def press_label(d):
     raise _plan.Refused(f"the press reading {d!r} names no known place")
 
 
+# --fit: row 66's live arm. WORKSPACE.md "A Group's Tab Bar", and a dock that
+# never scrolls sideways, read under BOTH scrollbar conditions: overlay bars
+# (macOS, and Chromium's headless default) and classic 16-px bars (Windows and
+# Linux browsers), injected before the first paint because the app measures
+# its scrollbar once. Row 66 was closed once on overlay-only reads, which
+# cannot see a 228-px body beside a 16-px bar.
+FIT_CONDITIONS = ("overlay", "classic")
+CLASSIC_BARS_JS = """(() => { const css = '*{scrollbar-width:auto !important} *::-webkit-scrollbar{width:16px !important;height:16px !important;background:#888}';
+  const add = () => { const st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st); };
+  if (document.documentElement) add(); else document.addEventListener('DOMContentLoaded', add); })()"""
+FIT_READ_JS = r"""() => {
+  const bars = [...document.querySelectorAll('[id^="dock_group_"] > div')].filter(b => b.querySelector('[id$="_tab"]'));
+  let bad = 0, n = 0;
+  for (const b of bars) {
+    if (b.getBoundingClientRect().width === 0) continue;
+    n += 1;
+    let a = b.parentElement, box = null;
+    while (a) { if (getComputedStyle(a).overflowX !== 'visible') { box = a; break; } a = a.parentElement; }
+    const lim = box ? box.getBoundingClientRect().left + box.clientWidth : window.innerWidth;
+    const over = [...b.children].slice(-2).some(k => k.getBoundingClientRect().right > lim + 0.5);
+    if (over || b.scrollWidth > b.clientWidth + 1) bad += 1;
+  }
+  let hscroll = 0, vbar = 0;
+  for (const e of document.querySelectorAll('*')) {
+    const c = getComputedStyle(e);
+    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && e.scrollWidth > e.clientWidth + 1) hscroll += 1;
+    if ((c.overflowY === 'auto' || c.overflowY === 'scroll') && e.querySelector('[id^="dock_group_"]')) vbar = Math.max(vbar, e.offsetWidth - e.clientWidth);
+  }
+  return {bars: n, bad, hscroll, vbar};
+}"""
+
+
+def fit_line(readings):
+    """readings: {condition: {bars, bad, hscroll, vbar}} -> one receipt line.
+    NOT RUN when a condition found no tab bar (the needle missed), or when the
+    classic condition's dock shows no scrollbar width (the bars did not take,
+    so it would be an overlay read wearing the classic label)."""
+    return "FIT NOT RUN"
+
+
 def dock_summary(cases):
     """The DOCK line for cases that carry a preview dict after the four
     fields _plan.dock_line reads (kind, edge, status, detail)."""
@@ -732,6 +772,19 @@ def self_test():
             ("layers", "bottom", "FAIL", "x", {"up": "none", "src": "gone"}),
             ("align", None, "PASS", "", {"via": "left", "up": "left"})]
     check(dock_summary(five) == "DOCK RED 2/3 (FAIL layers->bottom: x)", "dock_summary reads cases that carry a preview")
+    # --fit (row 66): the reader refuses a read that could not have failed.
+    good = {"bars": 5, "bad": 0, "hscroll": 0, "vbar": 0}
+    goodc = {"bars": 5, "bad": 0, "hscroll": 0, "vbar": 16}
+    check(fit_line({"overlay": good, "classic": goodc}) == "FIT 2/2", "both conditions fitting is FIT 2/2")
+    check(fit_line({"overlay": good, "classic": dict(goodc, hscroll=1)}) == "FIT RED 1/2 (FAIL classic: bad=0 hscroll=1)",
+          "a classic-bar sideways scroll is RED and names its condition")
+    check(fit_line({"overlay": dict(good, bad=2), "classic": goodc}) == "FIT RED 1/2 (FAIL overlay: bad=2 hscroll=0)",
+          "a tab bar past the dock is RED")
+    check(fit_line({"overlay": dict(good, bars=0), "classic": goodc}).startswith("FIT NOT RUN (overlay: no tab bar found"),
+          "no tab bar found is NOT RUN, never a pass over nothing")
+    check(fit_line({"overlay": good, "classic": dict(goodc, vbar=0)}).startswith("FIT NOT RUN (classic: the dock shows no scrollbar width"),
+          "classic bars that did not take are NOT RUN, never an overlay read under the classic label")
+    check(fit_line({}) == "FIT NOT RUN (no condition read)", "no readings is NOT RUN")
     check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
           "preview_line names every case, PASS included, in the order via, up, src")
     check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
