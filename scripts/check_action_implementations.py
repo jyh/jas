@@ -241,6 +241,13 @@ def log_only_actions(doc: dict) -> set[str]:
     return out
 
 
+def never_enabled(doc: dict) -> set[str]:
+    """Actions whose `enabled_when` is the literal false: no control can ever
+    run them, so a log stub is their whole and honest behaviour (a spec
+    deferral, "Coming soon"). Derived from the YAML, never declared."""
+    return set()
+
+
 def native_declared(doc: dict) -> dict[str, str]:
     """Actions that DECLARE themselves native: `native: <reason>` on the action
     entry (a non-empty string), the host acts a YAML cannot do (an OS dialog,
@@ -431,7 +438,7 @@ def port_handlers(files, case_re, lang) -> dict[str, bool]:
     return out
 
 
-def classify(log_only, rust, swift, declared_bypassed):
+def classify(log_only, rust, swift, declared_bypassed, deferred=frozenset()):
     rows = {}
     for a in sorted(log_only):
         r = any(rust.get(c, False) for c in rust_cmds(a)) or any(
@@ -549,6 +556,24 @@ def self_test() -> int:
     if native_declared({"actions": {"x": {"native": ""}, "y": {"native": 3},
                                     "z": {"native": "the OS"}}}) != {"z": "the OS"}:
         failures.append("  c: only a non-empty string declares")
+
+    # (d) DEFERRED: a log-only action no port dispatches whose `enabled_when`
+    #     is the literal false is a spec deferral, not an unknown. Only the
+    #     literal counts (quoted or bare); an expression that is false today
+    #     is not a deferral.
+    nev = never_enabled({"actions": {"q": {"enabled_when": "false"},
+                                     "b": {"enabled_when": False},
+                                     "e": {"enabled_when": "selection_count == 0"},
+                                     "n": {}, "s": {"enabled_when": " false "}}})
+    if nev != {"q", "b", "s"}:
+        failures.append(f"  d: never_enabled must read exactly the literal false, read {sorted(nev)}")
+    d_rows = classify({"q", "u"}, {}, {}, {}, deferred={"q"})
+    if d_rows != {"q": "deferred", "u": "dead_both"}:
+        failures.append(f"  d: an undispatched never-enabled action is deferred, the rest dead_both; read {d_rows}")
+    if classify({"q"}, {"q": True}, {"q": True}, {}, deferred={"q"}) != {"q": "native_both"}:
+        failures.append("  d: a native arm outranks a deferral (it is what the ports do)")
+    if classify({"q"}, {}, {}, {"q": "x"}, deferred={"q"}) != {"q": "bypassed"}:
+        failures.append("  d: a declared bypass outranks a deferral")
 
     anchors = {
         # verified by hand 2026-10-27: menu_bar.rs:44 (`"open"`, mapped from
