@@ -451,6 +451,16 @@ public struct ContentView: View {
             .onAppear {
                 FifoLive.tool = yamlToolString(currentTool)
                 FifoLive.dialog = yamlDialogState?.id
+                // The FIFO's dialog verbs (FifoDialogDrive) drive the same
+                // opener the menu uses and the same OK route the dialog's
+                // button uses, so a harness reaches the real dialog path.
+                FifoLive.openDialog = { id in openYamlDialogFromMenu(id) }
+                FifoLive.dialogAction = { name, params in
+                    guard let m = workspace.activeModel else { return }
+                    if DialogWidgetActions.run(name, params: params, model: m) {
+                        yamlDialogState = nil
+                    }
+                }
             }
             .onChange(of: currentTool) { newTool in
                 FifoLive.tool = yamlToolString(newTool)
