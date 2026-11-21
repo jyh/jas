@@ -61,16 +61,45 @@ func faceLookupFailures() -> Int { withFontLookup { faceLookupFailureCount } }
 /// parallel).
 func faceLookupFailuresHoldingLock() -> Int { faceLookupFailureCount }
 
+/// How many trait lookups the AppKit lookup missed and CoreText found
+/// (STATUS-jas row 188, 11-21). Written and read under `fontLookupLock`.
+nonisolated(unsafe) private var faceLookupRescueCount = 0
+
+/// ``faceLookupRescueCount`` for a caller that already holds `withFontLookup`.
+func faceLookupRescuesHoldingLock() -> Int { faceLookupRescueCount }
+
+/// `base` with `traits` by CoreText (`CTFontCreateCopyWithSymbolicTraits`), the
+/// second mechanism ``faceWithTraits`` asks when the AppKit lookup misses.
+func coreTextFace(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, _ size: CGFloat) -> NSFont? {
+    let t = CTFontSymbolicTraits(rawValue: traits.rawValue)
+    guard let ct = CTFontCreateCopyWithSymbolicTraits(base as CTFont, size, nil, t, t) else { return nil }
+    return ct as NSFont
+}
+
 /// `base` with the symbolic `traits` applied (STATUS-jas row 188). The caller
-/// holds `withFontLookup`. `lookup` is the AppKit lookup, a parameter so a test
-/// can make it fail.
+/// holds `withFontLookup`. `lookup` is the AppKit lookup and `alternate` the
+/// CoreText one, parameters so a test can make either fail.
 func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, size: CGFloat,
-                    lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) }) -> NSFont {
+                    lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) },
+                    alternate: (NSFont, NSFontDescriptor.SymbolicTraits, CGFloat) -> NSFont? = coreTextFace) -> NSFont {
     if traits.isEmpty { return base }
     let desc = base.fontDescriptor.withSymbolicTraits(traits)
     // CI has seen this lookup return nil intermittently, and the width was then
     // the base face's (row 188). Try once more; then SAY so before falling back.
     if let face = lookup(desc, size) ?? lookup(desc, size) { return face }
+    // 11-21 (CI run 44884499909): both tries missed Georgia bold, a face macOS
+    // ships. Ask CoreText before falling back, and take its face only when it
+    // carries every trait asked for. A rescue is counted apart from a failure
+    // and logged once, so a CI log still says the AppKit lookup missed.
+    if let face = alternate(base, traits, size),
+       face.fontDescriptor.symbolicTraits.isSuperset(of: traits) {
+        faceLookupRescueCount += 1
+        if faceLookupLogged.insert("rescue/\(base.fontName)/\(traits.rawValue)").inserted {
+            NSLog("jas: the AppKit lookup missed %@ with traits 0x%x at %.3f pt; CoreText found %@ (row 188)",
+                  base.fontName, traits.rawValue, Double(size), face.fontName)
+        }
+        return face
+    }
     faceLookupFailureCount += 1
     // Row 188(b): keep as many of the traits as the family has. Bold alone,
     // then italic alone, then the base face. Futura-Medium has no bold italic
