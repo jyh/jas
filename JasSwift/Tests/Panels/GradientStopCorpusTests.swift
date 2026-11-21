@@ -51,6 +51,30 @@ private func stop(_ d: Any) -> GradientStop {
     #expect(refused >= 3 && written >= 5, "corpus too thin: \(refused) refused, \(written) written")
 }
 
+// The stop-colour law (row 198, Swift arm). Runs
+// test_fixtures/gradient_stop/stop_color.json, which the reference and Rust
+// read too. `setStopColor` mirrors `gradient_host::set_stop_color`.
+@Test func gradientStopColorCorpus() {
+    var refused = 0, written = 0
+    for vec in gradientStopCorpus("gradient_stop/stop_color.json") {
+        let name = vec["name"] as! String
+        let stops = (vec["stops"] as! [Any]).map(stop)
+        let got = setStopColor(stops, index: (vec["index"] as! NSNumber).intValue, color: vec["value"])
+        if let expected = vec["expected"] as? [String: Any] {
+            guard let (out, idx) = got else {
+                Issue.record("stop_color '\(name)': refused"); continue
+            }
+            #expect(out == (expected["stops"] as! [Any]).map(stop), "stop_color '\(name)': stops")
+            #expect(idx == (expected["index"] as! NSNumber).intValue, "stop_color '\(name)': index")
+            written += 1
+        } else {
+            #expect(got == nil, "stop_color '\(name)': must refuse")
+            refused += 1
+        }
+    }
+    #expect(refused >= 6 && written >= 2, "corpus too thin: \(refused) refused, \(written) written")
+}
+
 // The Gradient slider's law (Swift arm). Runs
 // test_fixtures/gradient_stop/slider.json, which the reference and Rust read
 // too. The five functions mirror `gradient_host.rs`.

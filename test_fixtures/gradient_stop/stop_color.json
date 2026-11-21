@@ -261,6 +261,87 @@
       "index": 1,
       "value": 50,
       "expected": null
+    },
+    {
+      "name": "a_signed_digit_refuses",
+      "_comment": "Integer parsers accept a sign ('+f'); a colour digit is a hex digit, nothing else.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "#+f+f+f",
+      "expected": null
+    },
+    {
+      "name": "a_space_refuses",
+      "_comment": "Integer parsers accept a leading space (' f').",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "# f0000",
+      "expected": null
+    },
+    {
+      "name": "no_hash_refuses",
+      "_comment": "#rrggbb, with the hash.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "336699",
+      "expected": null
     }
   ]
 }
