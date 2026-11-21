@@ -5527,3 +5527,69 @@ mod page_isolation_pixel_tests {
         assert!(px[2] > 215 && px[0] < 40, "the layer's own colour: {px:?}");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A7 (f), THIS BACKEND: Canvas2D's ADDITIVE composite (`lighter`), measured
+// against the law S + T before the ratified knockout bracket is built (his
+// 11-21 condition; design block §6). One premultiplied pixel S is put in place
+// with `copy`, T is drawn over it with `lighter`, and getImageData reads it
+// back UNpremultiplied, so the law's sum is compared un-premultiplied. The
+// expectation is computed from the same inputs, never typed. The CONTROL
+// draws the same pair `source-over` and must MISS the law. Measured locally
+// (headless Chrome 158, software raster): worst 1 on all three pairs.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod a7_plus_pixel_tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    const CASES: [(&str, [f64; 4], [f64; 4]); 3] = [
+        ("edge f=0.5", [0.5, 0.0, 0.0, 0.5], [0.2, 0.3, 0.1, 0.5]),
+        ("partial alpha", [0.5, 0.0, 0.0, 0.5], [0.1, 0.15, 0.05, 0.25]),
+        ("f=0.25", [0.75, 0.0, 0.0, 0.75], [0.1, 0.15, 0.05, 0.25]),
+    ];
+
+    fn css(p: [f64; 4]) -> String {
+        if p[3] == 0.0 { return "rgba(0,0,0,0)".into(); }
+        format!("rgba({},{},{},{})", p[0] / p[3] * 255.0, p[1] / p[3] * 255.0, p[2] / p[3] * 255.0, p[3])
+    }
+
+    fn composite(s: [f64; 4], t: [f64; 4], op: &str) -> [i32; 4] {
+        let surf = WebSurface::offscreen(1, 1).expect("a DOM is present in the browser lane");
+        let ctx = surf.ctx();
+        ctx.set_global_composite_operation("copy").ok();
+        ctx.set_fill_style_str(&css(s));
+        ctx.fill_rect(0.0, 0.0, 1.0, 1.0);
+        ctx.set_global_composite_operation(op).ok();
+        ctx.set_fill_style_str(&css(t));
+        ctx.fill_rect(0.0, 0.0, 1.0, 1.0);
+        let px = surf.read_rgba(0, 0, 1, 1).expect("readback");
+        [px[0] as i32, px[1] as i32, px[2] as i32, px[3] as i32]
+    }
+
+    fn law(s: [f64; 4], t: [f64; 4]) -> [i32; 4] {
+        let sum: Vec<f64> = (0..4).map(|i| (s[i] + t[i]).min(1.0)).collect();
+        let a = sum[3];
+        [sum[0] / a, sum[1] / a, sum[2] / a, a].map(|v| (v.min(1.0) * 255.0).round() as i32)
+    }
+
+    #[wasm_bindgen_test]
+    fn a7_the_additive_composite_is_s_plus_t() {
+        let mut report = Vec::new();
+        let (mut worst_plus, mut best_control) = (0, i32::MAX);
+        for (name, s, t) in CASES {
+            let want = law(s, t);
+            let off = |g: [i32; 4]| (0..4).map(|i| (g[i] - want[i]).abs()).max().unwrap();
+            let plus = composite(s, t, "lighter");
+            let over = composite(s, t, "source-over");
+            worst_plus = worst_plus.max(off(plus));
+            best_control = best_control.min(off(over));
+            report.push(format!("{name}: lighter {plus:?} source-over {over:?} law {want:?}"));
+        }
+        let report = report.join("; ");
+        assert!(best_control > 3, "CONTROL: source-over met the law: {report}");
+        assert!(worst_plus <= 3, "A7 (f) NOT EXACT on Canvas2D (worst {worst_plus}): STOP, bring this to him: {report}");
+    }
+}
