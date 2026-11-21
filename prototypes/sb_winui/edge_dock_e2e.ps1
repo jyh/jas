@@ -48,7 +48,7 @@ $ids.Add('CanvasStripScroll')
 $arg = '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $dir 'uia_rects.ps1') + '" -ProcessId ' + $st.Pid +
     ' -Ids ' + ($ids -join ',') + ' -Out "' + $uiaOut + '" -Png "' + $Png + '"'
 $pr = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $uTask -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg) -Principal $pr -Force | Out-Null
+Register-ScheduledTask -TaskName $uTask -Action (New-SbSession1Action $arg) -Principal $pr -Force | Out-Null
 Start-ScheduledTask -TaskName $uTask
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while (-not (Test-Path $uiaOut) -and $sw.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 250 }

@@ -63,7 +63,7 @@ try {
                 'undo' { }
                 default { "VERDICT: NOT RUN (the plan names an artist act this driver does not know: $act)"; exit 2 }
             }
-            Register-ScheduledTask -TaskName 'jas-mcp-e2e-act' -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg) -Principal $pr -Force | Out-Null
+            Register-ScheduledTask -TaskName 'jas-mcp-e2e-act' -Action (New-SbSession1Action $arg) -Principal $pr -Force | Out-Null
             Start-ScheduledTask -TaskName 'jas-mcp-e2e-act'
             $sw2 = [Diagnostics.Stopwatch]::StartNew()
             while (-not (Test-Path $res) -and $sw2.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 200 }

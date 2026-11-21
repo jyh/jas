@@ -536,8 +536,7 @@ try {
 }
 "@ | Set-Content -Path $dupWrap -Encoding utf8
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-    $dupAction = New-ScheduledTaskAction -Execute "powershell.exe" `
-        -Argument ('-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + $dupWrap + '"')
+    $dupAction = New-SbSession1Action ('-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + $dupWrap + '"')
     Register-ScheduledTask -TaskName $dupTask -Action $dupAction -Principal $principal -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $dupTask
 }
@@ -599,7 +598,7 @@ if ($Scene -eq 'stall') {
         $liveArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'sample_liveness.ps1') + '"' +
                     " -ProcessId $appPid -At 2,5,10 -Out `"$liveReceipt`"")
         $livePrincipal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-        $liveAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $liveArg
+        $liveAction = New-SbSession1Action $liveArg
         Register-ScheduledTask -TaskName $liveTask -Action $liveAction -Principal $livePrincipal -Force -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskName $liveTask
         $liveDispatched = $true
@@ -707,7 +706,7 @@ if ($Hand) {
                             " -TargetOffsetXDips $offX -TargetOffsetYDips $offY" +
                             $(if ($HandSettleMs -gt 0) { " -SettleMs $HandSettleMs" } else { '' }))
                 $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-                $handAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $handArg
+                $handAction = New-SbSession1Action $handArg
                 Register-ScheduledTask -TaskName $handTask -Action $handAction -Principal $principal -Force -ErrorAction Stop | Out-Null
                 Start-ScheduledTask -TaskName $handTask
                 $verdicts += "ok  : hand dispatched to session 1 -- pid $appPid, doc ($aimX,$aimY), delta ($handDx,$handDy), k=$HandMoves$(if ($HandEmpty) { ' [EMPTY-CANVAS CONTROL]' })"
@@ -879,7 +878,7 @@ if ($liveDispatched) {
 # photographing itself.
 $capArg = '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $tools 'capture_desktop.ps1') + '" -Out "' + $png + '"'
 $capPrincipal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-$capAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $capArg
+$capAction = New-SbSession1Action $capArg
 Register-ScheduledTask -TaskName $capTask -Action $capAction -Principal $capPrincipal -Force -ErrorAction Stop | Out-Null
 Start-ScheduledTask -TaskName $capTask
 $capSw = [System.Diagnostics.Stopwatch]::StartNew()

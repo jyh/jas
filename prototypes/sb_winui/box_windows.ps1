@@ -7,7 +7,9 @@
 # Writes one header and one row per visible, uncloaked, non-empty TOPMOST
 # top-level window, in the rows Get-SbBoxWindowReasons reads:
 #   BOX WINDOWS session=<n> screen=<l>,<t>,<r>,<b> topmost=<count>
-#   TOPMOST process=<name> rect=<l>,<t>,<r>,<b> class=<class>
+#   TOPMOST process=<name> rect=<l>,<t>,<r>,<b> owner=<owner class> class=<class>
+# (the owner's class with spaces written as `_`, or `none`; the class stays last
+# because a class name may hold spaces)
 #   BOX IDLE seconds=<since the console session's last input>
 # The screen is the primary monitor, read through GetSystemMetrics in this same
 # process, so it and every rect share one DPI context. The class goes last
@@ -36,6 +38,7 @@ public static class SbBoxWindows {
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int n);
     [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO i);
@@ -52,7 +55,7 @@ public static class SbBoxWindows {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
     const int GWL_EXSTYLE = -20, WS_EX_TOPMOST = 0x8, DWMWA_CLOAKED = 14;
 
-    // One entry per topmost window: pid, l, t, r, b, class.
+    // One entry per topmost window: pid, l, t, r, b, class, owner class.
     public static List<object[]> Topmost() {
         var o = new List<object[]>();
         EnumWindows((h, l) => {
@@ -67,7 +70,11 @@ public static class SbBoxWindows {
             GetClassName(h, c, 256);
             uint pid;
             GetWindowThreadProcessId(h, out pid);
-            o.Add(new object[] { (int)pid, r.L, r.T, r.R, r.B, c.ToString() });
+            var owner = GetWindow(h, 4); // GW_OWNER
+            var oc = new StringBuilder(256);
+            if (owner != IntPtr.Zero) { GetClassName(owner, oc, 256); }
+            var ownerName = oc.Length == 0 ? "none" : oc.ToString().Replace(' ', '_');
+            o.Add(new object[] { (int)pid, r.L, r.T, r.R, r.B, c.ToString(), ownerName });
             return true;
         }, IntPtr.Zero);
         return o;
@@ -79,7 +86,7 @@ $rows = New-Object System.Collections.Generic.List[string]
 foreach ($w in [SbBoxWindows]::Topmost()) {
     $proc = (Get-Process -Id $w[0] -ErrorAction SilentlyContinue).ProcessName
     if (-not $proc) { $proc = "pid$($w[0])" }
-    $rows.Add("TOPMOST process=$proc rect=$($w[1]),$($w[2]),$($w[3]),$($w[4]) class=$($w[5])")
+    $rows.Add("TOPMOST process=$proc rect=$($w[1]),$($w[2]),$($w[3]),$($w[4]) owner=$($w[6]) class=$($w[5])")
 }
 $session = (Get-Process -Id $PID).SessionId
 $cx = [SbBoxWindows]::GetSystemMetrics(0)

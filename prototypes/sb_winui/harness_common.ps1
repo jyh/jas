@@ -421,6 +421,20 @@ function Get-SbForwardedEnv {
     return @{ Prefix = $prefix; Names = $names }
 }
 
+# Row 199 (flask STATUS-flask 976): the ONE builder of a session-1 task's action.
+# On the Windows box a task whose action is powershell.exe shows a Windows
+# Terminal window for its whole run -- the default terminal host ignores
+# -WindowStyle Hidden -- and a pointer act aimed under that window is eaten
+# (measured: 33 of 90 desktop frames). Under `conhost.exe --headless` no window
+# is drawn (0 of 74 frames) and the argument reaches powershell verbatim.
+# harness_selftest.ps1's census refuses a script that builds its own.
+function Get-SbSession1Command([string]$Argument) {
+    return [pscustomobject]@{ Execute = 'conhost.exe'; Argument = '--headless powershell.exe ' + $Argument }
+}
+function New-SbSession1Action([string]$Argument) {
+    $c = Get-SbSession1Command $Argument
+    return New-ScheduledTaskAction -Execute $c.Execute -Argument $c.Argument
+}
 function New-SbLaunchTask {
     param(
         [string]$TaskName,
@@ -439,7 +453,7 @@ function New-SbLaunchTask {
     $arg = '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command ' +
         '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; ' +
         $EnvPrefix + '& ''' + $Exe + '''"'
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
+    $action = New-SbSession1Action $arg
     Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
     if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
         throw "task registration reported success but no task exists: $TaskName"
@@ -4321,13 +4335,18 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console, [string[]]$IgnoreProcess =
     if ($tops.Count -ne $want) { return @("the window read is torn: topmost=$want but $($tops.Count) TOPMOST row(s)") }
     $out = @()
     foreach ($row in $tops) {
-        if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) class=(.+)$') {
+        if ($row -cnotmatch '^TOPMOST process=(\S+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+) (?:owner=(\S+) )?class=(.+)$') {
             $out += "unreadable window row: '$(ConvertTo-SbParenSafe $row)'"
             continue
         }
-        $proc = $Matches[1]; $cls = $Matches[6]
+        $proc = $Matches[1]; $owner = "$($Matches[6])"; $cls = $Matches[7]
         $wL = [int]$Matches[2]; $wT = [int]$Matches[3]; $wR = [int]$Matches[4]; $wB = [int]$Matches[5]
         if ($SbShellTopmostClasses -ccontains $cls) { continue }
+        # Row 199 (flask STATUS-flask 978): the taskbar's hover popup, which every
+        # app stop leaves up until the next input. Only its shape is excused: the
+        # taskbar's own window owns it and it is no larger than 96x96.
+        if ($proc -eq 'explorer' -and $cls -ceq 'Xaml_WindowedPopupClass' -and $owner -ceq 'Shell_TrayWnd' `
+            -and ($wR - $wL) -le 96 -and ($wB - $wT) -le 96) { continue }
         if (@($IgnoreProcess) -contains $proc) { continue }
         if ($wR -le $sL -or $wL -ge $sR -or $wB -le $sT -or $wT -ge $sB) { continue }
         $out += "a topmost window is up: class=$(ConvertTo-SbParenSafe $cls) process=$(ConvertTo-SbParenSafe $proc)"
@@ -4369,7 +4388,7 @@ public static class SbBoxNative {
     try {
         $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
         Register-ScheduledTask -TaskName $task -Principal $principal -Force -ErrorAction Stop `
-            -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg) | Out-Null
+            -Action (New-SbSession1Action $arg) | Out-Null
         Start-ScheduledTask -TaskName $task -ErrorAction Stop
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         while (-not (Test-Path -LiteralPath $WindowsOut) -and $sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
