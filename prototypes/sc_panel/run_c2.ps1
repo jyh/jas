@@ -59,7 +59,10 @@ $principal = New-ScheduledTaskPrincipal -UserId $uid -LogonType Interactive -Run
 # "You must install or update .NET" (breadcrumb 5b trap 2).
 $arg = '-NoProfile -ExecutionPolicy Bypass -Command ' +
        '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; & ''' + $exe + '''"'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+# Row 199 (jas STATUS-flask 980): under conhost --headless, as sb_winui's
+# New-SbSession1Action builds every session-1 task: a plain powershell.exe
+# task shows a Windows Terminal window on the box for its whole run.
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument ('--headless powershell.exe ' + $arg)
 
 Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
 try {

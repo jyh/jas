@@ -4345,6 +4345,9 @@ function Get-SbBoxWindowReasons($Rows, [int]$Console, [string[]]$IgnoreProcess =
         # Row 199 (flask STATUS-flask 978): the taskbar's hover popup, which every
         # app stop leaves up until the next input. Only its shape is excused: the
         # taskbar's own window owns it and it is no larger than 96x96.
+        # The rect is box_windows.ps1's own unit: it runs DPI-UNAWARE (2560x1440 on a
+        # 3840x2160 panel), so the popup reads 54x42 at any display scale. Making that
+        # reader DPI-aware would scale it past 96 at 200% (jas STATUS-flask 980).
         if ($proc -eq 'explorer' -and $cls -ceq 'Xaml_WindowedPopupClass' -and $owner -ceq 'Shell_TrayWnd' `
             -and ($wR - $wL) -le 96 -and ($wB - $wT) -le 96) { continue }
         if (@($IgnoreProcess) -contains $proc) { continue }
