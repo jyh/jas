@@ -3533,6 +3533,24 @@ Test-Case 'box: CONTROL -- the verdict is READY or NOT RUN only, so no box state
     @((New-SbBoxSnap), (New-SbBoxSnap -LogonUI $true), (New-SbBoxSnap -Rows $null)) | ForEach-Object { (Get-SbBoxReadiness $_) -match '^(READY|NOT RUN\(box: .+\))$' } | Sort-Object -Unique } 'True'
 
 # ---------------------------------------------------------------------------
+# Row 199 (flask STATUS-flask 976): EVERY session-1 task runs under a HEADLESS
+# console. On the Windows box a scheduled task whose action is powershell.exe
+# shows a Windows Terminal window for its whole run, -WindowStyle Hidden or not
+# (the default terminal host ignores it), and a pointer act aimed under that
+# window is eaten: measured, 33 of 90 desktop frames showed it, and the
+# `conhost.exe --headless` form showed none (0 of 74 frames, args verbatim).
+# One builder, Get-SbSession1Command; the census refuses a script that registers
+# powershell.exe as a task action itself.
+# ---------------------------------------------------------------------------
+function Get-SbSession1Hardcoders {
+  @(Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' | Where-Object { $_.Name -ne 'harness_selftest.ps1' } |
+    Where-Object { (Get-Content $_.FullName -Raw) -match "New-ScheduledTaskAction\s+-Execute\s+['""]powershell\.exe['""]" } | ForEach-Object { $_.Name } | Sort-Object)
+}
+Test-Case 'session-1: the command is powershell under a headless conhost, the argument verbatim' { $c = Get-SbSession1Command '-NoProfile -File "a b.ps1" -K "x,y"'; "$($c.Execute) | $($c.Argument)" } 'conhost.exe | --headless powershell.exe -NoProfile -File "a b.ps1" -K "x,y"'
+Test-Case 'session-1: no script registers powershell.exe as a task action itself' { (Get-SbSession1Hardcoders) -join ',' } ''
+Test-Case 'session-1: CONTROL -- the census pattern matches the old action line' { "New-ScheduledTaskAction -Execute 'powershell.exe' -Argument `$arg" -match "New-ScheduledTaskAction\s+-Execute\s+['""]powershell\.exe['""]" } $true
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

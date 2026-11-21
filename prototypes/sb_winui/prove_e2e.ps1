@@ -209,7 +209,7 @@ try {
                 " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY")
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
-        -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $handArg) | Out-Null
+        -Action (New-SbSession1Action $handArg) | Out-Null
     Start-ScheduledTask -TaskName $tasks[0]
 
     # ---- the shell's own reading, written after the release lands -----------
@@ -246,7 +246,7 @@ try {
     $wrap = Join-Path $exeDir 'run-e2e-shot.ps1'
     "& '$capExe' '$shot' *> '$shot.log'" | Set-Content -Path $wrap -Encoding ascii
     Register-ScheduledTask -TaskName $tasks[1] -Principal $principal -Force `
-        -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + $wrap + '"')) | Out-Null
+        -Action (New-SbSession1Action ('-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + $wrap + '"')) | Out-Null
     Start-ScheduledTask -TaskName $tasks[1]
     for ($i = 0; $i -lt 40 -and -not (Test-Path $shot); $i++) { Start-Sleep -Milliseconds 250 }
 }

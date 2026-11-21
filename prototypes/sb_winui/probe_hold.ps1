@@ -510,7 +510,7 @@ function Invoke-SbProbeRun {
     $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$script:me`" -Worker -Out `"$file`" $ExtraArgs"
     $task = "jas-sb-hold-$Tag"
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
+    $action = New-SbSession1Action $arg
     Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $task
 
