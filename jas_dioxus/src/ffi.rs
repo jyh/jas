@@ -6968,6 +6968,49 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 205: THE BOOLEAN MENU'S MAKE AND RELEASE COMPOUND SHAPE RUN IN THE
+    /// ENGINE. On Windows, Boolean ▸ ≡ ▸ Make Compound Shape read `PlatformEffect`
+    /// `UnknownEffect:make_compound_shape` (flask STATUS §986): the engine host
+    /// hosted the panel's 14 button keys and declined the two menu-only
+    /// effects, which the web runs through `Controller` (`renderer.rs`). Sent
+    /// by index, as the Windows shell sends them, each index read from the
+    /// menu by its label. Make is one undo step.
+    #[test]
+    fn the_boolean_menus_make_and_release_compound_shape_run_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const BP: &str = "boolean_panel_content";
+        let e = engine_on("circle_ellipse_mix.svg");
+        let (rows, err) = panel_menu(e, BP);
+        let at = |label: &str| rows.iter().find(|r| r["label"] == label)
+            .and_then(|r| r["index"].as_u64()).unwrap_or_else(|| panic!("no {label} row: {rows:?} {err}"));
+        let (make, release) = (at("Make Compound Shape"), at("Release Compound Shape"));
+        let shape = |e| {
+            let model = engine_of(e).model.borrow();
+            let cs = model.document().layers[0].children().unwrap_or_default();
+            let compounds = cs.iter().filter(|c| matches!(c,
+                crate::geometry::element::Element::Live(crate::geometry::live::LiveVariant::CompoundShape(_)))).count();
+            (cs.len(), compounds, model.document().selection.len())
+        };
+        assert_eq!(shape(e), (3, 0, 0), "fixture: three plain shapes, none selected");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let item = |e, at: u64| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{BP}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+            let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+            assert_eq!(v["doc_changed"], true, "menu item {at} changed the document: {reply}");
+        };
+        item(e, make);
+        assert_eq!(shape(e), (1, 1, 1), "Make: one compound shape, selected");
+        item(e, release);
+        assert_eq!(shape(e), (3, 0, 3), "Release: the three operands back, selected");
+        undo(e);
+        assert_eq!(shape(e).1, 1, "Undo takes Release back");
+        undo(e);
+        assert_eq!(shape(e).0, 3, "and one more takes Make back");
+        assert_eq!(shape(e).1, 0, "with no compound left");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 172: EVERY LIVE OPACITY MENU ITEM RUNS IN THE ENGINE. Until 11-19 all
     /// ten read `UnknownAction` through the panel door (probed), because they
     /// named commands only the web's and the Mac's native dispatch knew. Sent
