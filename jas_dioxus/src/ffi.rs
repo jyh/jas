@@ -6659,8 +6659,6 @@ mod tests {
         let (_, err) = dialog_event(e, r##"{"widget":"cp_hex","event":"commit","value":"ff0000"}"##);
         let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
         let (reply, err2) = dialog_event(e, &ev);
-            engine_of(e).store.borrow().get_panel("gradient_panel_content", "selected_stop_index"),
-            engine_of(e).model.borrow().document().selection.len());
         let model = engine_of(e).model.borrow();
         let g = model.document().layers[0].children().unwrap()[0].fill_gradient().cloned()
             .unwrap_or_else(|| panic!("a gradient after OK: {reply} {err} {err2}"));
