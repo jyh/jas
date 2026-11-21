@@ -530,6 +530,11 @@ static class Program
         Eq("§941: UIA ItemStatus, disabled", "disabled", PanelWire.PlaceholderStatus(null, "true"));
         Eq("§941: UIA ItemStatus, both", "checked disabled", PanelWire.PlaceholderStatus("true", "true"));
         Eq("§941: UIA ItemStatus, neither", "", PanelWire.PlaceholderStatus("false", "false"));
+        // O97 (jas §967): the tile's UIA IsEnabled is the plan's, so the rendered
+        // tree stops reading `op_mask_preview enabled: plan=false rendered=true`.
+        Eq("§967: a disabled placeholder reports not enabled", "False", PanelWire.PlaceholderEnabled("true").ToString());
+        Eq("§967: an unbound placeholder reports enabled", "True", PanelWire.PlaceholderEnabled(null).ToString());
+        Eq("§967: bind.disabled=false reports enabled", "True", PanelWire.PlaceholderEnabled("false").ToString());
         // Row 185: a panel event repaints the canvas when the engine answered
         // CHANGED, not only when the document moved. An Alt-click on the mask
         // preview toggles mask isolation, which is model state the frame draws
