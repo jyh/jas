@@ -2009,7 +2009,7 @@ mod tests {
 /// edge dock. Path B bodies inside it are planned at
 /// `renderer::path_b_avail_w(renderer::scrollbar_px())`.
 pub(crate) fn dock_scroll_y() -> &'static str {
-    "overflow-y:auto;"
+    "overflow-y:auto; scrollbar-gutter:stable;"
 }
 
 /// Row 66 (b): the dock reserves its scrollbar's gutter at all times, so the

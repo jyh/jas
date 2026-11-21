@@ -7578,15 +7578,44 @@ pub(crate) const PATH_B_DOCK_W: i64 = 228;
 /// A classic scrollbar takes layout width from the dock's client box; an
 /// overlay one takes none.
 pub(crate) fn path_b_avail_w(scrollbar_px: i64) -> i64 {
-    let _ = scrollbar_px;
-    PATH_B_DOCK_W
+    PATH_B_DOCK_W - scrollbar_px.clamp(0, PATH_B_DOCK_W)
 }
 
 /// The width this browser's classic scrollbar takes, measured once: 0 where
 /// scrollbars overlay the content (macOS by default), about 16 px on Windows
 /// and Linux Chrome. Off the web there is no scrollbar.
 pub(crate) fn scrollbar_px() -> i64 {
-    0
+    #[cfg(target_arch = "wasm32")]
+    {
+        thread_local! {
+            static SCROLLBAR_PX: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+        }
+        if let Some(px) = SCROLLBAR_PX.with(|c| c.get()) {
+            return px;
+        }
+        // A 100-px scrolling box, off screen: offsetWidth - clientWidth is the
+        // bar's layout width (0 for an overlay bar). Unmeasurable reads as 0,
+        // which is the canonical 228.
+        let px = (|| {
+            use wasm_bindgen::JsCast;
+            let doc = web_sys::window()?.document()?;
+            let body = doc.body()?;
+            let probe: web_sys::HtmlElement = doc.create_element("div").ok()?.dyn_into().ok()?;
+            probe.style().set_property("cssText",
+                "position:absolute;top:-1000px;left:-1000px;width:100px;height:100px;overflow-y:scroll;visibility:hidden;").ok()?;
+            let node: &web_sys::Node = probe.as_ref();
+            body.append_child(node).ok()?;
+            let w = (probe.offset_width() - probe.client_width()) as i64;
+            let _ = body.remove_child(node);
+            Some(w.max(0))
+        })().unwrap_or(0);
+        SCROLLBAR_PX.with(|c| c.set(Some(px)));
+        px
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        0
+    }
 }
 
 /// Render a panel from the canonical Path B layout pass: each leaf widget is
