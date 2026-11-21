@@ -1199,6 +1199,79 @@ mod tests {
         Brush::Solid(Color::new(1.0, 0.0, 0.0, 1.0))
     }
 
+    /// ⭐ A7 (f), THIS BACKEND: the ADDITIVE composite the ratified knockout
+    /// bracket needs (S ← (1−f)·S + f·T is an erase, a keep and S + T), measured
+    /// BEFORE anything is built on it (his 11-21 condition; design block §6: a
+    /// platform's additive composite may clamp or un-premultiply differently
+    /// from S + T). One premultiplied pixel `s` is put in place by `Clear`, a
+    /// second surface holding `t` is drawn over it with `DrawImage(...,
+    /// D2D1_COMPOSITE_MODE_PLUS)`, exactly as `apply_mask` draws its bitmaps,
+    /// and the premultiplied bytes are read back. The expectation is the law's
+    /// S + T computed from the same inputs, never typed. The CONTROL draws the
+    /// same pair SOURCE_OVER and must MISS the law, so a pass cannot be an
+    /// instrument that reads the same bytes whatever the mode. The Mac
+    /// (`.plusLighter`) and Canvas2D (`lighter`) halves measured within 1.
+    #[test]
+    fn a7_the_additive_composite_is_s_plus_t() {
+        use windows::core::Interface;
+        use windows::Win32::Graphics::Direct2D::Common::{
+            D2D1_COMPOSITE_MODE, D2D1_COMPOSITE_MODE_PLUS,
+        };
+        // (name, S, T), premultiplied RGBA: the block's §5 edge pixel at f = 0.5
+        // (S = the red overlap erased to (1−f)·S, T = (0.4, 0.6, 0.2) kept to
+        // f·T), a pair whose sum has alpha < 1, and f = 0.25.
+        let cases: [(&str, [f32; 4], [f32; 4]); 3] = [
+            ("edge f=0.5", [0.5, 0.0, 0.0, 0.5], [0.2, 0.3, 0.1, 0.5]),
+            ("partial alpha", [0.5, 0.0, 0.0, 0.5], [0.1, 0.15, 0.05, 0.25]),
+            ("f=0.25", [0.75, 0.0, 0.0, 0.75], [0.1, 0.15, 0.05, 0.25]),
+        ];
+        // D2D1_COLOR_F is straight; the PBGRA target stores premultiplied.
+        let straight = |p: [f32; 4]| if p[3] == 0.0 {
+            D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+        } else {
+            D2D1_COLOR_F { r: p[0] / p[3], g: p[1] / p[3], b: p[2] / p[3], a: p[3] }
+        };
+        let composite = |s: [f32; 4], t: [f32; 4], mode: D2D1_COMPOSITE_MODE| -> [i32; 4] {
+            let target = HeadlessTarget::new(1, 1).expect("target");
+            let dc: ID2D1DeviceContext = target.target().cast().expect("device context");
+            unsafe {
+                target.target().BeginDraw();
+                target.target().Clear(Some(&straight(s)));
+                let brt = dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+                    .expect("the source surface");
+                let rt: ID2D1RenderTarget = brt.cast().expect("its render target");
+                rt.BeginDraw();
+                rt.Clear(Some(&straight(t)));
+                rt.EndDraw(None, None).expect("source EndDraw");
+                let bmp = brt.GetBitmap().expect("the source bitmap");
+                dc.DrawImage(&bmp, None, None, D2D1_INTERPOLATION_MODE_LINEAR, mode);
+                target.target().EndDraw(None, None).expect("EndDraw");
+            }
+            let buf = target.read_bgra().expect("readback");
+            [buf[2] as i32, buf[1] as i32, buf[0] as i32, buf[3] as i32]
+        };
+        let mut report = Vec::new();
+        let mut worst_plus = 0;
+        let mut best_control = i32::MAX;
+        for (name, s, t) in cases {
+            let want: Vec<i32> = (0..4)
+                .map(|i| ((s[i] + t[i]).min(1.0) * 255.0).round() as i32)
+                .collect();
+            let off = |got: [i32; 4]| (0..4).map(|i| (got[i] - want[i]).abs()).max().unwrap();
+            let plus = composite(s, t, D2D1_COMPOSITE_MODE_PLUS);
+            let over = composite(s, t, D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            worst_plus = worst_plus.max(off(plus));
+            best_control = best_control.min(off(over));
+            report.push(format!("{name}: PLUS {plus:?} SOURCE_OVER {over:?} law {want:?}"));
+        }
+        let report = report.join("; ");
+        assert!(best_control > 3,
+            "CONTROL: SOURCE_OVER met the law, so this instrument cannot tell the modes apart: {report}");
+        assert!(worst_plus <= 3,
+            "A7 (f) NOT EXACT on Direct2D (worst {worst_plus} > 3): STOP, bring this to him: {report}");
+    }
+
+
     /// Read one pixel as (b, g, r, a).
     fn px(buf: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
         let i = ((y * w + x) * 4) as usize;
