@@ -449,6 +449,97 @@ def press_label(d):
     raise _plan.Refused(f"the press reading {d!r} names no known place")
 
 
+# --fit: row 66's live arm. WORKSPACE.md "A Group's Tab Bar", and a dock that
+# never scrolls sideways, read under BOTH scrollbar conditions: overlay bars
+# (macOS, and Chromium's headless default) and classic 16-px bars (Windows and
+# Linux browsers), injected before the first paint because the app measures
+# its scrollbar once. Row 66 was closed once on overlay-only reads, which
+# cannot see a 228-px body beside a 16-px bar.
+FIT_CONDITIONS = ("overlay", "classic")
+CLASSIC_BARS_JS = """(() => { const css = '*{scrollbar-width:auto !important} *::-webkit-scrollbar{width:16px !important;height:16px !important;background:#888}';
+  const add = () => { const st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st); };
+  if (document.documentElement) add(); else document.addEventListener('DOMContentLoaded', add); })()"""
+FIT_READ_JS = r"""() => {
+  const bars = [...document.querySelectorAll('[id^="dock_group_"] > div')].filter(b => b.querySelector('[id$="_tab"]'));
+  let bad = 0, n = 0;
+  for (const b of bars) {
+    if (b.getBoundingClientRect().width === 0) continue;
+    n += 1;
+    let a = b.parentElement, box = null;
+    while (a) { if (getComputedStyle(a).overflowX !== 'visible') { box = a; break; } a = a.parentElement; }
+    const lim = box ? box.getBoundingClientRect().left + box.clientWidth : window.innerWidth;
+    const over = [...b.children].slice(-2).some(k => k.getBoundingClientRect().right > lim + 0.5);
+    if (over || b.scrollWidth > b.clientWidth + 1) bad += 1;
+  }
+  let hscroll = 0, vbar = 0; const who = [];
+  for (const e of document.querySelectorAll('*')) {
+    const c = getComputedStyle(e);
+    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && e.scrollWidth > e.clientWidth + 1) {
+      hscroll += 1;
+      if (who.length < 3) {
+        // name the scroller and its widest overrunning child, so a RED names its subject
+        const lim = e.getBoundingClientRect().left + e.clientWidth; let wide = null, wr = lim;
+        for (const k of e.querySelectorAll('*')) { const r = k.getBoundingClientRect(); if (r.width > 0 && r.right > wr + 0.5) { wr = r.right; wide = k; } }
+        const nm = el => el ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}` : '-';
+        who.push(`${nm(e)}[${e.scrollWidth}/${e.clientWidth}] by ${nm(wide)}+${(wr - lim).toFixed(0)}`);
+      }
+    }
+    if ((c.overflowY === 'auto' || c.overflowY === 'scroll') && e.querySelector('[id^="dock_group_"]')) vbar = Math.max(vbar, e.offsetWidth - e.clientWidth);
+  }
+  return {bars: n, bad, hscroll, vbar, who};
+}"""
+
+
+def fit_line(readings):
+    """readings: {condition: {bars, bad, hscroll, vbar}} -> one receipt line.
+    NOT RUN when a condition found no tab bar (the needle missed), or when the
+    classic condition's dock shows no scrollbar width (the bars did not take,
+    so it would be an overlay read wearing the classic label)."""
+    if not readings:
+        return "FIT NOT RUN (no condition read)"
+    for c in FIT_CONDITIONS:
+        r = readings.get(c)
+        if r is None:
+            return f"FIT NOT RUN ({c}: not read)"
+        if "error" in r:
+            return f"FIT NOT RUN ({c}: {r['error']})"
+        if r["bars"] == 0:
+            return f"FIT NOT RUN ({c}: no tab bar found, so the tab-bar law was not read)"
+        if c == "classic" and r["vbar"] <= 0:
+            return f"FIT NOT RUN (classic: the dock shows no scrollbar width, so the classic bars did not take)"
+    ok = [c for c in FIT_CONDITIONS if readings[c]["bad"] == 0 and readings[c]["hscroll"] == 0]
+    if len(ok) == len(FIT_CONDITIONS):
+        return f"FIT {len(ok)}/{len(FIT_CONDITIONS)}"
+    bad = "; ".join(f"FAIL {c}: bad={readings[c]['bad']} hscroll={readings[c]['hscroll']}"
+                    + (f" [{', '.join(readings[c]['who'])}]" if readings[c].get("who") else "")
+                    for c in FIT_CONDITIONS if c not in ok)
+    return f"FIT RED {len(ok)}/{len(FIT_CONDITIONS)} ({bad})"
+
+
+def run_fit(br):
+    """-> {condition: reading}. Each condition is its own browser launch: the
+    classic one without Chromium's --hide-scrollbars, with 16-px bars injected
+    before the app's first paint."""
+    out = {}
+    for c in FIT_CONDITIONS:
+        b = None
+        try:
+            b = br._pw.chromium.launch(headless=True, **({"ignore_default_args": ["--hide-scrollbars"]} if c == "classic" else {}))
+            page = b.new_context(viewport=VIEWPORT, device_scale_factor=1).new_page()
+            if c == "classic":
+                page.add_init_script(CLASSIC_BARS_JS)
+            page.goto(br.url)
+            page.wait_for_selector(".jas-menu-title", timeout=HOOK_TIMEOUT_MS)
+            page.wait_for_timeout(1500)
+            out[c] = page.evaluate(FIT_READ_JS)
+        except Exception as e:
+            out[c] = {"error": f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"}
+        finally:
+            if b is not None:
+                b.close()
+    return out
+
+
 def dock_summary(cases):
     """The DOCK line for cases that carry a preview dict after the four
     fields _plan.dock_line reads (kind, edge, status, detail)."""
@@ -557,7 +648,7 @@ def run(args):
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = None
+    dock = dock_cases = fit = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -585,6 +676,8 @@ def run(args):
         if args.dock:
             dock_cases = [(k, e) + run_dock_case(br, k, e, v) for k, e, v in DOCK_CASES] if not not_run else []
             dock = dock_summary(dock_cases)
+        if args.fit:
+            fit = fit_line(run_fit(br)) if not not_run else "FIT NOT RUN (" + not_run + ")"
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -593,6 +686,8 @@ def run(args):
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
         body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+    if fit is not None:
+        body.append(fit + " (the --fit check: row 66's live arm; the dock's tab bars and sideways scroll under overlay and classic 16-px scrollbars)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -601,7 +696,8 @@ def run(args):
     if args.advisory and args.receipt:
         return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
     dock_ok = dock_cases is None or (bool(dock_cases) and all(c[2] == "PASS" for c in dock_cases))
-    return 0 if " verdict=GREEN " in first and dock_ok else 1
+    fit_ok = fit is None or fit == f"FIT {len(FIT_CONDITIONS)}/{len(FIT_CONDITIONS)}"
+    return 0 if " verdict=GREEN " in first and dock_ok and fit_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -732,6 +828,21 @@ def self_test():
             ("layers", "bottom", "FAIL", "x", {"up": "none", "src": "gone"}),
             ("align", None, "PASS", "", {"via": "left", "up": "left"})]
     check(dock_summary(five) == "DOCK RED 2/3 (FAIL layers->bottom: x)", "dock_summary reads cases that carry a preview")
+    # --fit (row 66): the reader refuses a read that could not have failed.
+    good = {"bars": 5, "bad": 0, "hscroll": 0, "vbar": 0}
+    goodc = {"bars": 5, "bad": 0, "hscroll": 0, "vbar": 16}
+    check(fit_line({"overlay": good, "classic": goodc}) == "FIT 2/2", "both conditions fitting is FIT 2/2")
+    check(fit_line({"overlay": good, "classic": dict(goodc, hscroll=1)}) == "FIT RED 1/2 (FAIL classic: bad=0 hscroll=1)",
+          "a classic-bar sideways scroll is RED and names its condition")
+    check(fit_line({"overlay": dict(good, bad=2), "classic": goodc}) == "FIT RED 1/2 (FAIL overlay: bad=2 hscroll=0)",
+          "a tab bar past the dock is RED")
+    check(fit_line({"overlay": dict(good, bars=0), "classic": goodc}).startswith("FIT NOT RUN (overlay: no tab bar found"),
+          "no tab bar found is NOT RUN, never a pass over nothing")
+    check(fit_line({"overlay": good, "classic": dict(goodc, vbar=0)}).startswith("FIT NOT RUN (classic: the dock shows no scrollbar width"),
+          "classic bars that did not take are NOT RUN, never an overlay read under the classic label")
+    check(fit_line({}) == "FIT NOT RUN (no condition read)", "no readings is NOT RUN")
+    check(fit_line({"overlay": dict(good, hscroll=1, who=["div#x[245/238] by input#y+7"]), "classic": goodc})
+          == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=1 [div#x[245/238] by input#y+7])", "a RED names the scroller and what overruns it")
     check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
           "preview_line names every case, PASS included, in the order via, up, src")
     check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
@@ -803,6 +914,8 @@ def main(argv):
     ap.add_argument("--artifacts")
     ap.add_argument("--dock", action="store_true",
                     help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
+    ap.add_argument("--fit", action="store_true",
+                    help="also read the dock's fit under overlay and classic scrollbars (row 66)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)

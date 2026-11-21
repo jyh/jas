@@ -7581,9 +7581,9 @@ pub(crate) fn path_b_avail_w(scrollbar_px: i64) -> i64 {
     PATH_B_DOCK_W - scrollbar_px.clamp(0, PATH_B_DOCK_W)
 }
 
-/// The width this browser's classic scrollbar takes, measured once: 0 where
-/// scrollbars overlay the content (macOS by default), about 16 px on Windows
-/// and Linux Chrome. Off the web there is no scrollbar.
+/// The width a dock column's reserved scrollbar gutter takes, measured once:
+/// 0 where scrollbars overlay the content (macOS by default), about 16 px on
+/// Windows and Linux Chrome. Off the web there is no scrollbar.
 pub(crate) fn scrollbar_px() -> i64 {
     #[cfg(target_arch = "wasm32")]
     {
@@ -7593,9 +7593,13 @@ pub(crate) fn scrollbar_px() -> i64 {
         if let Some(px) = SCROLLBAR_PX.with(|c| c.get()) {
             return px;
         }
-        // A 100-px scrolling box, off screen: offsetWidth - clientWidth is the
-        // bar's layout width (0 for an overlay bar). Unmeasurable reads as 0,
-        // which is the canonical 228.
+        // A 100-px box off screen that reserves its gutter exactly as the dock
+        // does (`scrollbar-gutter:stable`): offsetWidth - clientWidth is the
+        // width the dock gives up, which is what Path B must leave. Measuring a
+        // SCROLLING box instead read its bar, and the two differ under Chromium's
+        // --hide-scrollbars (Linux CI: a 0-px bar beside a 15-px gutter, so the
+        // body stayed 228 in a 223 client). Unmeasurable reads as 0, the
+        // canonical 228.
         let px = (|| {
             use wasm_bindgen::JsCast;
             let doc = web_sys::window()?.document()?;
@@ -7605,7 +7609,7 @@ pub(crate) fn scrollbar_px() -> i64 {
             // sets nothing (cssText is not a property name), the box then has no
             // overflow, and every browser read 0 (measured on #1023's bundle).
             probe.set_attribute("style",
-                "position:absolute;top:-1000px;left:-1000px;width:100px;height:100px;overflow-y:scroll;visibility:hidden;").ok()?;
+                "position:absolute;top:-1000px;left:-1000px;width:100px;height:100px;overflow-y:auto;scrollbar-gutter:stable;visibility:hidden;").ok()?;
             let node: &web_sys::Node = probe.as_ref();
             body.append_child(node).ok()?;
             let w = (probe.offset_width() - probe.client_width()) as i64;
