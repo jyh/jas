@@ -176,13 +176,20 @@ private let noAlternate: (NSFont, NSFontDescriptor.SymbolicTraits, CGFloat) -> N
 }
 
 /// CoreText's answer is taken only when it carries every trait asked for: a
-/// face it returns without them is no rescue.
+/// face it returns without them is no rescue. The FACE cannot tell (the
+/// alternate here returns the base, which the fallback also returns), so the
+/// counters do: a failure, not a rescue. A mutant without the traits check
+/// survived the face-only form of this arm (11-21).
 @Test func aCoreTextFaceWithoutTheTraitsIsNoRescue() {
     let base = NSFont(name: "Helvetica", size: 13)!
-    let face = withFontLookup {
-        faceWithTraits(base, [.italic], size: 13, lookup: { _, _ in nil }, alternate: { b, _, _ in b })
+    let (face, failed, rescued) = withFontLookup {
+        let (f0, r0) = (faceLookupFailuresHoldingLock(), faceLookupRescuesHoldingLock())
+        let face = faceWithTraits(base, [.italic], size: 13, lookup: { _, _ in nil }, alternate: { b, _, _ in b })
+        return (face, faceLookupFailuresHoldingLock() - f0, faceLookupRescuesHoldingLock() - r0)
     }
-    #expect(face == base, "the base face came back, so the fallback ran: \(face.fontName)")
+    #expect(face == base, "\(face.fontName)")
+    #expect(rescued == 0, "a face without the traits is no rescue")
+    #expect(failed == 1, "it is a failure, counted")
 }
 
 @Test func noTraitsIsTheBaseFaceWithNoLookup() {
