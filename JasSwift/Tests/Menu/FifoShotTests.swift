@@ -152,3 +152,58 @@ private func pixel(_ path: String, x: Double, yFromTop: Double, viewWidth: Doubl
     layoutApply(&l, verb)
     #expect(!l.isPanelVisible(.layers), "hidden by the second")
 }
+
+// ── `repaints <path>`: how many times the canvas's repaint gate fired ──
+// `shot` draws on demand, so it cannot tell whether the window was ever
+// invalidated (row 207: the mutant with the precision field missing from the
+// signature shot the same image). The gate's own count can: a harness reads
+// it, changes state through the app, and reads it again.
+
+@Test @MainActor func theRepaintCountStepsOnlyWhenTheGateFires() {
+    let view = CanvasNSView()
+    view.frame = NSRect(x: 0, y: 0, width: 50, height: 50)
+    let model = Model(document: Document.newEmptyDocument())
+    view.controller = Controller(model: model)
+    let start = FifoLive.canvasRepaints
+    #expect(view.repaintIfRenderStateChanged(), "the first check always repaints")
+    #expect(FifoLive.canvasRepaints == start + 1)
+    #expect(!view.repaintIfRenderStateChanged(), "nothing changed")
+    #expect(FifoLive.canvasRepaints == start + 1, "an unchanged signature does not count")
+    model.stateStore.set("boolean_precision", 5.0)
+    #expect(view.repaintIfRenderStateChanged(), "row 207: precision is in the signature")
+    #expect(FifoLive.canvasRepaints == start + 2)
+}
+
+@Test func theRepaintReportIsOneParsableObject() throws {
+    let json = FifoRepaints.json(count: 7)
+    let obj = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+    #expect(obj?["repaints"] as? Int == 7, "\(json)")
+}
+
+// ── `dialog_open <id>` / `dialog_action <name> [json]`: the real dialog path ──
+// The FIFO's `action` runs the generic dispatcher, which cannot open a SwiftUI
+// dialog (`action open_boolean_options` left no dialog open), so a dialog's OK
+// (which clears ContentView's dialog state, a view-state change) was not
+// drivable. ContentView publishes its own opener and its OK route; the FIFO
+// calls them, and refuses by name when nothing was published.
+
+@Test func theDialogDriveCallsWhatContentViewPublishedAndRefusesWithout() {
+    let savedOpen = FifoLive.openDialog, savedAct = FifoLive.dialogAction
+    defer { FifoLive.openDialog = savedOpen; FifoLive.dialogAction = savedAct }
+    var opened: [String] = []
+    var acted: [(String, [String: Any])] = []
+    FifoLive.openDialog = { opened.append($0) }
+    FifoLive.dialogAction = { acted.append(($0, $1)) }
+    #expect(FifoDialogDrive.open("boolean_options"))
+    #expect(opened == ["boolean_options"])
+    #expect(FifoDialogDrive.act("boolean_options_confirm", params: ["precision": 5]))
+    #expect(acted.count == 1 && acted[0].0 == "boolean_options_confirm")
+    #expect((acted.first?.1["precision"] as? Int) == 5)
+    // ONE test, not two: both halves write the global FifoLive, and
+    // swift-testing runs separate tests in parallel (measured: split, the
+    // refusal half read the other test's published closure).
+    FifoLive.openDialog = nil
+    FifoLive.dialogAction = nil
+    #expect(!FifoDialogDrive.open("boolean_options"))
+    #expect(!FifoDialogDrive.act("boolean_options_confirm", params: [:]))
+}

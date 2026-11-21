@@ -163,6 +163,51 @@ public enum FifoLive {
     nonisolated(unsafe) public static var tool: String? = nil
     /// The id of the open dialog, or nil when none is open.
     nonisolated(unsafe) public static var dialog: String? = nil
+    /// How many times a canvas's repaint gate fired
+    /// (`CanvasNSView.repaintIfRenderStateChanged` returned true). The FIFO's
+    /// `repaints` reads it; `shot` cannot, because it draws on demand.
+    nonisolated(unsafe) public static var canvasRepaints: Int = 0
+    /// ContentView's own dialog opener (the menu's `openYamlDialogFromMenu`),
+    /// published so the FIFO's `dialog_open` opens a real SwiftUI dialog.
+    nonisolated(unsafe) public static var openDialog: ((String) -> Void)? = nil
+    /// ContentView's dialog OK route: the dialog's own action through
+    /// `DialogWidgetActions.run`, then the dialog state cleared when the act
+    /// closed it, as the dialog's button does. The FIFO's `dialog_action`.
+    nonisolated(unsafe) public static var dialogAction: ((String, [String: Any]) -> Void)? = nil
+}
+
+/// The FIFO's `dialog_open` / `dialog_action`: call what ContentView published
+/// (FifoLive), or refuse (false) when nothing was, so a harness never reads a
+/// dialog that was not driven as one that was.
+public enum FifoDialogDrive {
+    public static func open(_ id: String) -> Bool {
+        guard let f = FifoLive.openDialog else { return false }
+        f(id)
+        return true
+    }
+
+    public static func act(_ name: String, params: [String: Any]) -> Bool {
+        guard let f = FifoLive.dialogAction else { return false }
+        f(name, params)
+        return true
+    }
+}
+
+/// `repaints <path>`: `{"repaints": N}`, the canvas repaint gate's count
+/// (FifoLive.canvasRepaints), written to `path` (atomically, replacing). A
+/// harness reads it before and after a change: a step means the live app ran
+/// its update pass and the gate saw the change.
+public enum FifoRepaints {
+    public static func json(count: Int) -> String {
+        let data = try! JSONSerialization.data(
+            withJSONObject: ["repaints": count], options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public static func write(count: Int, to path: String) throws {
+        try Data(json(count: count).utf8)
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
 }
 
 /// A read the app cannot answer truthfully. It is refused, by name, so a
