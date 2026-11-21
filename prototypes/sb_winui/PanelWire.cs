@@ -3337,6 +3337,33 @@ internal static class GradientSliderWire
     }
 
     /// <summary>
+    /// jas STATUS-flask 974 (WIDGET_EVENTS.md, the stops kind): the parameters of
+    /// the `double_press` a double click sends, or null when it sends none. Only a
+    /// STOP answers a double (the engine selects it and runs the slider's
+    /// `double_click` behaviors); a midpoint, no held marker, or a stop with no
+    /// index sends nothing.
+    /// </summary>
+    internal static Dictionary<string, object>? DoublePress(string? held, int index) =>
+        held == "stop" && index >= 0 ? new Dictionary<string, object> { ["index"] = index } : null;
+
+    /// <summary>A press on a stop: its index, the pointer's timestamp in
+    /// microseconds, and where it fell in DIPs.</summary>
+    internal readonly record struct Press(int Index, ulong TimeUs, double X, double Y);
+
+    /// <summary>
+    /// Whether <paramref name="now"/> is the second press of a double click after
+    /// <paramref name="prev"/>: the same stop, no later than the system's
+    /// double-click time, and inside its double-click rectangle (half-widths in
+    /// DIPs). WinUI raised no `DoubleTapped` on the slider on the box (its marker
+    /// press is handled and captured), so the shell decides it from the presses,
+    /// by the system's own two numbers.
+    /// </summary>
+    internal static bool IsDouble(Press? prev, Press now, uint limitMs, double slopX, double slopY) =>
+        prev is { } p && p.Index == now.Index && now.TimeUs >= p.TimeUs
+        && now.TimeUs - p.TimeUs <= (ulong)limitMs * 1000
+        && Math.Abs(now.X - p.X) <= slopX && Math.Abs(now.Y - p.Y) <= slopY;
+
+    /// <summary>
     /// A key on the focused slider in GRADIENT.md's keyboard table's names, from
     /// the `VirtualKey`'s name (`Left`, `Back`, ...); null for a key the table
     /// does not name, which the slider leaves to the window. Mirrors the web's
