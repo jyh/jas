@@ -1293,6 +1293,9 @@ private func documentSetupToSvg(_ s: DocumentSetup, indent: String) -> String {
         + " simulate-colored-paper=\"\(boolStr(s.simulateColoredPaper))\""
         + " transparency-flattener-preset=\"\(s.transparencyFlattenerPreset.rawValue)\""
         + " discard-white-overprint=\"\(boolStr(s.discardWhiteOverprint))\""
+        // The page flags (row 192 A1) are written only when true.
+        + (s.pageIsolatedBlending ? " page-isolated-blending=\"true\"" : "")
+        + (s.pageKnockoutGroup ? " page-knockout-group=\"true\"" : "")
         + "/>"
 }
 
@@ -2906,7 +2909,9 @@ private func parseDocumentSetupNode(_ node: XMLElement) -> DocumentSetup {
         paperColor: attrAny(node, "paper-color") ?? d.paperColor,
         simulateColoredPaper: parseBoolAttr(node, "simulate-colored-paper", d.simulateColoredPaper),
         transparencyFlattenerPreset: FlattenerPreset(rawValue: attrAny(node, "transparency-flattener-preset") ?? "") ?? d.transparencyFlattenerPreset,
-        discardWhiteOverprint: parseBoolAttr(node, "discard-white-overprint", d.discardWhiteOverprint)
+        discardWhiteOverprint: parseBoolAttr(node, "discard-white-overprint", d.discardWhiteOverprint),
+        pageIsolatedBlending: parseBoolAttr(node, "page-isolated-blending", d.pageIsolatedBlending),
+        pageKnockoutGroup: parseBoolAttr(node, "page-knockout-group", d.pageKnockoutGroup)
     )
 }
 

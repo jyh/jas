@@ -58,11 +58,31 @@ use crate::painter::Painter;
 /// frame from a persistent model should grow a borrowing entry beside this one.
 ///
 /// Each root layer starts from alpha 1.0: the layers are siblings with no
-/// enclosing group, each carrying its own opacity.
+/// enclosing group, each carrying its own opacity. A page with
+/// `page_isolated_blending` set wraps them in one isolated layer
+/// ([`emit_layers`]).
 pub fn emit_document(p: &mut dyn Painter, doc: &Document, precision: f64) {
     let _paint_context = install_paint_context(rebuild_id_index(doc), precision);
+    emit_layers(p, doc);
+}
+
+/// The top-level layers, under the page's compositing (OPACITY.md §Page-level
+/// items, row 192 B1). With `page_isolated_blending` the layers composite into
+/// ONE fresh transparent layer (the A6 op `push_isolated_layer`, alpha 1 and
+/// Normal) that lands on the target once, so a blended layer blends with the
+/// layers beneath it but never with the page the host painted (the artboard
+/// fill). `page_knockout_group` is stored and NOT composited here: knockout
+/// needs an op the frozen contract does not have (the A7 amendment, row 192).
+fn emit_layers(p: &mut dyn Painter, doc: &Document) {
+    let isolated = doc.document_setup.page_isolated_blending;
+    if isolated {
+        p.push_isolated_layer(1.0, crate::painter::BlendMode::Normal);
+    }
     for layer in &doc.layers {
         emit_element(p, layer, 1.0);
+    }
+    if isolated {
+        p.pop_isolated_layer();
     }
 }
 
@@ -106,11 +126,7 @@ pub fn emit_document_with_index(
         "emit_document_with_index: the index is not this document's own");
     let _paint_context = install_paint_context(index, precision);
     match mask_isolation_path {
-        None => {
-            for layer in &doc.layers {
-                emit_element(p, layer, 1.0);
-            }
-        }
+        None => emit_layers(p, doc),
         Some(path) => {
             if let Some(mask) = doc.get_element(&path.to_vec()).and_then(|e| e.common().mask.as_deref()) {
                 emit_element(p, &mask.subtree, 1.0);
@@ -353,6 +369,71 @@ mod tests {
             emit_document_isolated(&mut rec, &doc, DEFAULT_PRECISION, Some(path));
             assert!(rec.commands().is_empty(), "{path:?}: {:?}", rec.commands());
         }
+    }
+
+    /// The isolated-layer brackets in a command list, in order.
+    fn isolated(cmds: &[Command]) -> Vec<String> {
+        cmds.iter().filter_map(|c| match c {
+            Command::PushIsolatedLayer { alpha, blend } => Some(format!("push_isolated({alpha},{blend:?})")),
+            Command::PopIsolatedLayer => Some("pop_isolated".into()),
+            _ => None,
+        }).collect()
+    }
+
+    fn page_doc(isolated: bool, knockout: bool) -> Document {
+        use crate::painter::BlendMode as B;
+        let mut doc = doc_with(vec![with_mode(rect_at(0.0, Color::rgb(0.0, 0.5, 1.0)), B::Multiply)], B::Normal);
+        doc.document_setup.page_isolated_blending = isolated;
+        doc.document_setup.page_knockout_group = knockout;
+        doc
+    }
+
+    /// Row 192 B1 (OPACITY.md §Page Isolated Blending): with the page
+    /// isolated, the layers composite into ONE fresh transparent layer that
+    /// lands on the host's target once, so a blended layer cannot blend with
+    /// the page (the artboard fill the host painted beneath). The bracket is
+    /// the FIRST and LAST command, around every layer, at alpha 1 and Normal.
+    #[test]
+    fn page_isolated_blending_brackets_every_layer_in_one_isolated_layer() {
+        for walk in ["rebuild", "borrow"] {
+            let doc = page_doc(true, false);
+            let mut rec = RecordingPainter::new();
+            match walk {
+                "rebuild" => emit_document(&mut rec, &doc, DEFAULT_PRECISION),
+                _ => emit_document_with_index(&mut rec, &doc, rebuild_id_index(&doc), DEFAULT_PRECISION, None),
+            }
+            let c = rec.commands();
+            assert_eq!(isolated(c), vec!["push_isolated(1,Normal)".to_string(), "pop_isolated".into()],
+                       "{walk}: one page bracket: {c:?}");
+            assert!(matches!(c.first(), Some(Command::PushIsolatedLayer { .. })), "{walk}: opens first: {c:?}");
+            assert!(matches!(c.last(), Some(Command::PopIsolatedLayer)), "{walk}: closes last: {c:?}");
+            assert_eq!(fills(c), 1, "{walk}: the rect still paints once");
+        }
+    }
+
+    /// The default page (the flag false, every old file) is today's command
+    /// list: no isolated layer at all.
+    #[test]
+    fn a_page_that_is_not_isolated_emits_no_isolated_layer() {
+        for (iso, ko) in [(false, false), (false, true)] {
+            let doc = page_doc(iso, ko);
+            let mut rec = RecordingPainter::new();
+            emit_document(&mut rec, &doc, DEFAULT_PRECISION);
+            assert!(isolated(rec.commands()).is_empty(),
+                    "isolated={iso} knockout={ko}: {:?}", rec.commands());
+        }
+    }
+
+    /// Mask isolation draws one mask subtree, not the page composite, so the
+    /// page bracket is not applied there.
+    #[test]
+    fn mask_isolation_is_not_bracketed_by_the_page() {
+        let (mut doc, _) = masked_document();
+        doc.document_setup.page_isolated_blending = true;
+        let mut rec = RecordingPainter::new();
+        emit_document_isolated(&mut rec, &doc, DEFAULT_PRECISION, Some(&[0, 0]));
+        assert_eq!(fills(rec.commands()), 1, "the mask subtree drew: {:?}", rec.commands());
+        assert!(isolated(rec.commands()).is_empty(), "{:?}", rec.commands());
     }
 
     /// An empty document emits nothing at all — no stray install artefact, no

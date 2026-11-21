@@ -57,18 +57,20 @@ import Testing
 
 @Test func opacityPanelMenuHasFourMaskLifecycleActionsInOrder() {
     // The menu DATA now comes from workspace/panels/opacity.yaml
-    // (review #15). The two page-level rows
-    // (`toggle_page_isolated_blending` / `toggle_page_knockout_group`)
-    // carry no `checked` expression in the YAML, so the generic builder
-    // surfaces them as actions rather than toggles — they appear in the
-    // action list between the mask-lifecycle group and `close_panel`.
-    // This matches the YAML source of truth (the previous native list
-    // mislabeled them as toggles).
+    // (review #15). A row with a `checked_when` is a toggle, so Page Isolated
+    // Blending (checked from the document's flag since row 192) is a toggle,
+    // and Page Knockout Group (no check expression; disabled until knockout is
+    // built) is still an action between the mask-lifecycle group and
+    // `close_panel`.
     let items = OpacityPanel.menuItems()
     var actionCmds: [String] = []
+    var toggleCmds: [String] = []
     for item in items {
         if case .action(_, let cmd, _) = item {
             actionCmds.append(cmd)
+        }
+        if case .toggle(_, let cmd) = item {
+            toggleCmds.append(cmd)
         }
     }
     #expect(actionCmds == [
@@ -76,10 +78,10 @@ import Testing
         "release_opacity_mask",
         "disable_opacity_mask",
         "unlink_opacity_mask",
-        "toggle_page_isolated_blending",
         "toggle_page_knockout_group",
         "close_panel",
     ])
+    #expect(toggleCmds.contains("toggle_page_isolated_blending"), "\(toggleCmds)")
 }
 
 // ── Dispatch toggles panel-local state ───────────────────────

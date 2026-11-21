@@ -583,7 +583,9 @@ func _withDocSetup(
     paperColor: String? = nil,
     simulateColoredPaper: Bool? = nil,
     transparencyFlattenerPreset: FlattenerPreset? = nil,
-    discardWhiteOverprint: Bool? = nil
+    discardWhiteOverprint: Bool? = nil,
+    pageIsolatedBlending: Bool? = nil,
+    pageKnockoutGroup: Bool? = nil
 ) -> DocumentSetup {
     return DocumentSetup(
         bleedTop: bleedTop ?? s.bleedTop,
@@ -598,7 +600,9 @@ func _withDocSetup(
         paperColor: paperColor ?? s.paperColor,
         simulateColoredPaper: simulateColoredPaper ?? s.simulateColoredPaper,
         transparencyFlattenerPreset: transparencyFlattenerPreset ?? s.transparencyFlattenerPreset,
-        discardWhiteOverprint: discardWhiteOverprint ?? s.discardWhiteOverprint
+        discardWhiteOverprint: discardWhiteOverprint ?? s.discardWhiteOverprint,
+        pageIsolatedBlending: pageIsolatedBlending ?? s.pageIsolatedBlending,
+        pageKnockoutGroup: pageKnockoutGroup ?? s.pageKnockoutGroup
     )
 }
 

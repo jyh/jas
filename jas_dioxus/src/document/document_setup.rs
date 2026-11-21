@@ -46,6 +46,16 @@ pub struct DocumentSetup {
     /// from white text on a black background being marked
     /// overprint). Stored only in v1.
     pub discard_white_overprint: bool,
+    /// Page Isolated Blending (OPACITY.md §Page-level items, row 192 A1): the
+    /// top-level layers composite onto a transparent backdrop first and the
+    /// result lands on the page once, so a blended layer cannot blend with
+    /// the page (the artboard fill). Default false: a file written before
+    /// the field existed reads as a page that is not isolated.
+    pub page_isolated_blending: bool,
+    /// Page Knockout Group: each top-level layer composites against the
+    /// page's initial backdrop only. STORED ONLY: no renderer composites it
+    /// until the A7 Painter amendment is ratified (row 192). Default false.
+    pub page_knockout_group: bool,
 }
 
 impl Default for DocumentSetup {
@@ -65,6 +75,8 @@ impl Default for DocumentSetup {
             transparency_flattener_preset:
                 crate::document::print_preferences::FlattenerPreset::MediumResolution,
             discard_white_overprint: false,
+            page_isolated_blending: false,
+            page_knockout_group: false,
         }
     }
 }
@@ -72,6 +84,15 @@ impl Default for DocumentSetup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Row 192 A1: the page flags default false, so a file written before
+    /// they existed reads as a page that is neither isolated nor knockout.
+    #[test]
+    fn the_page_flags_default_false() {
+        let s = DocumentSetup::default();
+        assert!(!s.page_isolated_blending);
+        assert!(!s.page_knockout_group);
+    }
 
     #[test]
     fn document_setup_defaults() {

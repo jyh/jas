@@ -967,6 +967,46 @@ thread_local! {
     /// `crate::surface::promote_to_luminance`), and as the isolated artwork
     /// surface of the alpha-based laws.
     static MASK_LUMA_CANVAS: RefCell<Vec<WebSurface>> = const { RefCell::new(Vec::new()) };
+    /// The page's isolated layer (row 192 B1): the top-level layers draw here
+    /// when `page_isolated_blending` is set, and the result composites onto
+    /// the canvas once. One slot: the page is never nested in itself.
+    static PAGE_CANVAS: RefCell<Vec<WebSurface>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The top-level layers, under the page's compositing (OPACITY.md §Page-level
+/// items, row 192 B1; the native walk's `document::paint::emit_layers`). With
+/// `page_isolated_blending` the layers draw onto a transparent scratch at the
+/// canvas's transform and composite onto `ctx` once (source-over, at `ctx`'s
+/// alpha), so a blended layer blends with the layers beneath it but never with
+/// the artboard fill already on `ctx`. Without a DOM for the scratch, it draws
+/// the layers straight onto `ctx` (not isolated) rather than draw nothing.
+/// `page_knockout_group` is stored and not composited (the A7 amendment).
+fn draw_page_layers(
+    ctx: &CanvasRenderingContext2d,
+    target: TargetSize,
+    doc: &Document,
+    precision: f64,
+) {
+    let page = if doc.document_setup.page_isolated_blending && target.w > 0 && target.h > 0 {
+        scratch_from_cell(&PAGE_CANVAS, 0, target.w, target.h)
+    } else {
+        None
+    };
+    let Some(page) = page else {
+        for layer in &doc.layers {
+            draw_element(ctx, target, layer, Visibility::Preview, precision);
+        }
+        return;
+    };
+    page.reset();
+    let page_ctx = page.ctx();
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) {
+        page_ctx.set_transform(a, b, c, d, e, f).ok();
+    }
+    for layer in &doc.layers {
+        draw_element(page_ctx, target, layer, Visibility::Preview, precision);
+    }
+    page.composite_onto(ctx, CompositeOp::Blend(crate::painter::BlendMode::Normal), ctx.global_alpha());
 }
 
 /// Read the six-component current transform from a Canvas2D context.
@@ -3205,9 +3245,7 @@ pub fn render(
             draw_element(ctx, target, iso_elem, Visibility::Preview, precision);
         }
     } else {
-        for layer in &doc.layers {
-            draw_element(ctx, target, layer, Visibility::Preview, precision);
-        }
+        draw_page_layers(ctx, target, doc, precision);
     }
 
     // Layer 4: fade overlay (dims regions outside any artboard).
@@ -5437,5 +5475,55 @@ mod laid_out_runs_pixel_tests {
         };
         assert!(!inks(&styled(""), 26, 40), "control: the styled text fits one line untracked");
         assert!(inks(&styled("0.1em"), 26, 40), "tracked, the styled text wraps");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Row 192 B1, IN PIXELS: page isolation in the web walk. A Multiply layer over
+// a yellow "artboard" (painted on the target first, as `render` paints the
+// artboard fills) blends with it when the page is not isolated, and shows its
+// own colour when it is (Multiply over a transparent backdrop is the source).
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod page_isolation_pixel_tests {
+    use super::*;
+    use crate::geometry::element::{Color, CommonProps, Fill, RectElem};
+    use std::rc::Rc;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn centre(isolated: bool) -> [u8; 4] {
+        let s = WebSurface::offscreen(16, 16).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        ctx.set_fill_style_str("#ffff00");
+        ctx.fill_rect(0.0, 0.0, 16.0, 16.0);
+        let mut doc = Document::default();
+        let mut rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 16.0, height: 16.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::rgb(0.0, 0.5, 1.0), opacity: 1.0 }), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        rect.common_mut().mode = crate::painter::BlendMode::Multiply;
+        doc.layers[0].children_mut().unwrap().push(Rc::new(rect));
+        doc.document_setup.page_isolated_blending = isolated;
+        draw_page_layers(&ctx, TargetSize::of(&s), &doc, 1.0);
+        let px = s.read_rgba(8, 8, 1, 1).expect("in bounds");
+        [px[0], px[1], px[2], px[3]]
+    }
+
+    #[wasm_bindgen_test]
+    fn a_page_that_is_not_isolated_blends_its_layers_with_the_artboard() {
+        let px = centre(false);
+        // Multiply of (0, .5, 1) over yellow (1, 1, 0): blue is gone.
+        assert!(px[2] < 40 && px[1] > 90, "multiplied against the artboard: {px:?}");
+    }
+
+    #[wasm_bindgen_test]
+    fn an_isolated_page_composites_its_layers_onto_the_artboard_once() {
+        let px = centre(true);
+        // Multiply over the scratch's transparent backdrop is the source, which
+        // then lands Normal: the layer's own blue.
+        assert!(px[2] > 215 && px[0] < 40, "the layer's own colour: {px:?}");
     }
 }

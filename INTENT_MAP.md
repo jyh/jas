@@ -7,7 +7,7 @@
 ## Scope -- read this first
 
 **This map covers the ACTION seam (`dispatch_action`) ONLY**: the
-267 actions in the workspace bundle's `actions` map, plus the
+268 actions in the workspace bundle's `actions` map, plus the
 bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 5 |
-| `journaling` | 64 |
+| `journaling` | 65 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
 | `ui-state` | 188 |
 | `view` | 6 |
-| **total** | **268** |
+| **total** | **269** |
 
-(The bundle's `actions` map has 267 entries; `native-intercept` entries
+(The bundle's `actions` map has 268 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (64)
+## Journaling actions (65)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -113,6 +113,7 @@ come additively from `native_intercepts`.)
 | `show_all` | `doc.op` |
 | `solo_element_visibility` | `doc.op` |
 | `toggle_element_lock` | `doc.op` |
+| `toggle_page_isolated_blending` | `doc.set_document_setup_field` |
 | `ungroup` | `doc.op` |
 | `ungroup_all` | `doc.op` |
 | `unlink_opacity_mask` | `doc.op` |

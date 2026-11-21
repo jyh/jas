@@ -29,6 +29,14 @@ public struct DocumentSetup: Equatable, Hashable {
     public let simulateColoredPaper: Bool
     public let transparencyFlattenerPreset: FlattenerPreset
     public let discardWhiteOverprint: Bool
+    /// Page Isolated Blending (OPACITY.md §Page-level items, row 192 A1): the
+    /// top-level layers composite onto a transparent backdrop first and land
+    /// on the page once, so a blended layer cannot blend with the artboard
+    /// fill. Default false: an older file reads as a page that is not isolated.
+    public let pageIsolatedBlending: Bool
+    /// Page Knockout Group. STORED ONLY: no renderer composites it until the
+    /// A7 Painter amendment is ratified (row 192). Default false.
+    public let pageKnockoutGroup: Bool
 
     public init(
         bleedTop: Double = 0,
@@ -43,7 +51,9 @@ public struct DocumentSetup: Equatable, Hashable {
         paperColor: String = "#ffffff",
         simulateColoredPaper: Bool = false,
         transparencyFlattenerPreset: FlattenerPreset = .mediumResolution,
-        discardWhiteOverprint: Bool = false
+        discardWhiteOverprint: Bool = false,
+        pageIsolatedBlending: Bool = false,
+        pageKnockoutGroup: Bool = false
     ) {
         self.bleedTop = bleedTop
         self.bleedRight = bleedRight
@@ -58,6 +68,8 @@ public struct DocumentSetup: Equatable, Hashable {
         self.simulateColoredPaper = simulateColoredPaper
         self.transparencyFlattenerPreset = transparencyFlattenerPreset
         self.discardWhiteOverprint = discardWhiteOverprint
+        self.pageIsolatedBlending = pageIsolatedBlending
+        self.pageKnockoutGroup = pageKnockoutGroup
     }
 
     public static let `default` = DocumentSetup()

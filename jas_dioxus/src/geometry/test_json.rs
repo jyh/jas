@@ -1106,6 +1106,10 @@ fn document_setup_json(s: &DocumentSetup) -> String {
     o.str_val("grid_color", &s.grid_color);
     o.num("grid_size", s.grid_size);
     o.bool_val("highlight_substituted_glyphs", s.highlight_substituted_glyphs);
+    // The page flags (row 192 A1) are written only when true, so every
+    // document written before they existed keeps its canonical bytes.
+    if s.page_isolated_blending { o.bool_val("page_isolated_blending", true); }
+    if s.page_knockout_group { o.bool_val("page_knockout_group", true); }
     o.str_val("paper_color", &s.paper_color);
     o.bool_val("show_images_outline", s.show_images_outline);
     o.bool_val("simulate_colored_paper", s.simulate_colored_paper);
@@ -2025,6 +2029,8 @@ fn parse_document_setup(v: &serde_json::Value) -> DocumentSetup {
         transparency_flattener_preset: v["transparency_flattener_preset"].as_str()
             .and_then(flattener_preset_from).unwrap_or(d.transparency_flattener_preset),
         discard_white_overprint: v["discard_white_overprint"].as_bool().unwrap_or(d.discard_white_overprint),
+        page_isolated_blending: v["page_isolated_blending"].as_bool().unwrap_or(d.page_isolated_blending),
+        page_knockout_group: v["page_knockout_group"].as_bool().unwrap_or(d.page_knockout_group),
     }
 }
 
@@ -2746,10 +2752,34 @@ mod tests {
             simulate_colored_paper: true,
             transparency_flattener_preset: FlattenerPreset::HighResolution,
             discard_white_overprint: true,
+            page_isolated_blending: true,
+            page_knockout_group: true,
         };
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);
         assert_eq!(d2.document_setup, d.document_setup);
+    }
+
+    /// Row 192 A1: the page flags are written only when true (every older
+    /// document keeps its canonical bytes), each one independently, and a
+    /// document without them reads both as false.
+    #[test]
+    fn the_page_flags_are_written_only_when_true_and_read_back() {
+        let mut d = Document::default();
+        d.document_setup.bleed_top = 9.0;
+        let plain = document_to_test_json(&d);
+        assert!(!plain.contains("page_isolated_blending") && !plain.contains("page_knockout_group"), "{plain}");
+        let back = test_json_to_document(&plain);
+        assert!(!back.document_setup.page_isolated_blending && !back.document_setup.page_knockout_group);
+        for (iso, ko) in [(true, false), (false, true), (true, true)] {
+            let mut e = d.clone();
+            e.document_setup.page_isolated_blending = iso;
+            e.document_setup.page_knockout_group = ko;
+            let json = document_to_test_json(&e);
+            assert_eq!(json.contains("\"page_isolated_blending\":true"), iso, "{json}");
+            assert_eq!(json.contains("\"page_knockout_group\":true"), ko, "{json}");
+            assert_eq!(test_json_to_document(&json).document_setup, e.document_setup, "iso={iso} ko={ko}");
+        }
     }
 
     #[test]

@@ -502,6 +502,8 @@ private func documentSetupView(_ s: DocumentSetup) -> [String: Any] {
         "simulate_colored_paper": s.simulateColoredPaper,
         "transparency_flattener_preset": s.transparencyFlattenerPreset.rawValue,
         "discard_white_overprint": s.discardWhiteOverprint,
+        "page_isolated_blending": s.pageIsolatedBlending,
+        "page_knockout_group": s.pageKnockoutGroup,
     ]
 }
 
