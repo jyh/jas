@@ -1254,6 +1254,12 @@
         "doc.set_document_setup_field"
       ]
     },
+    "toggle_page_knockout_group": {
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.set_document_setup_field"
+      ]
+    },
     "toggle_pane": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1392,7 +1398,7 @@
     ],
     "by_class": {
       "doc-direct": 5,
-      "journaling": 65,
+      "journaling": 66,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
@@ -1448,11 +1454,11 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 65,
+    "journaling_actions": 66,
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 268,
+    "total_actions": 269,
     "verb_table": {
       "always": [
         "doc.apply_concept_operation",

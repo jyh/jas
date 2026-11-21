@@ -1838,6 +1838,18 @@
         }
       ]
     },
+    "toggle_page_knockout_group": {
+      "description": "Turn Page Knockout Group on or off (the Opacity panel menu). When it is on, each of the document's top-level layers composites against what was on the page before any layer was drawn (the artboard's fill) rather than against the layers beneath it: where a layer paints, nothing of the layers beneath it shows through, however transparent the layer is or whatever its blending mode, and where it paints nothing they show as usual. With Page Isolated Blending also on, the layers knock out against a transparent backdrop and the result lands on the page once. When it is off (the default, and every document saved before the setting existed), the layers composite onto each other as usual. The setting is saved with the document, and changing it is one undoable step.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.set_document_setup_field": {
+            "field": "page_knockout_group",
+            "value": "not active_document.document_setup.page_knockout_group"
+          }
+        }
+      ]
+    },
     "toggle_snap_to_glyph_visible": {
       "description": "Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.\n",
       "category": "panel",
@@ -19016,8 +19028,8 @@
         {
           "label": "Page Knockout Group",
           "action": "toggle_page_knockout_group",
-          "enabled_when": "false",
-          "description": "status: pending_renderer. The document carries the field (document_setup.page_knockout_group, default false), and no renderer composites knockout yet: it needs a compositing operation the renderers do not have. Enables once that is built.\n"
+          "checked_when": "active_document.document_setup.page_knockout_group",
+          "description": "Checked when the page is a knockout group: each of the document's top-level layers composites against what was on the page before any layer was drawn (the artboard's fill), never against the layers beneath it, so where a layer paints, the layers beneath it do not show through, however transparent the layer is or whatever its blending mode. Where a layer paints nothing, the layers beneath it show as usual. With Page Isolated Blending also checked, the layers knock out against a transparent backdrop and the result lands on the page once.\n"
         },
         "separator",
         {

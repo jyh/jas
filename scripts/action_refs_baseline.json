@@ -10,7 +10,5 @@
     "listed action becomes resolved but is left here (implement it -> remove it here).",
     "Do not add to this list to silence a genuinely broken reference."
   ],
-  "unresolved_actions": [
-    "toggle_page_knockout_group"
-  ]
+  "unresolved_actions": []
 }

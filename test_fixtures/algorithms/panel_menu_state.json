@@ -819,7 +819,8 @@
         "selection_has_mask": false,
         "active_document": {
           "document_setup": {
-            "page_isolated_blending": true
+            "page_isolated_blending": true,
+            "page_knockout_group": false
           }
         }
       }
@@ -922,8 +923,8 @@
         ],
         "action": "toggle_page_knockout_group",
         "label": "Page Knockout Group",
-        "enabled": false,
-        "checked": null
+        "enabled": true,
+        "checked": false
       },
       {
         "path": [
@@ -2378,7 +2379,8 @@
         "selection_has_mask": true,
         "active_document": {
           "document_setup": {
-            "page_isolated_blending": false
+            "page_isolated_blending": false,
+            "page_knockout_group": true
           }
         }
       }
@@ -2481,8 +2483,8 @@
         ],
         "action": "toggle_page_knockout_group",
         "label": "Page Knockout Group",
-        "enabled": false,
-        "checked": null
+        "enabled": true,
+        "checked": true
       },
       {
         "path": [
