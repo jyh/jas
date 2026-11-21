@@ -74,7 +74,7 @@ dropdown: toggle, alt_toggle
 radio_group: toggle
 button: click, mouse_down, mouse_up
 icon_button: click, mouse_down, mouse_up
-gradient_slider: commit
+gradient_slider: commit, double_click
 ```
 <!-- widget-event-table:end -->
 
