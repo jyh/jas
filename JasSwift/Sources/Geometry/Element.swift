@@ -61,11 +61,27 @@ func faceLookupFailures() -> Int { withFontLookup { faceLookupFailureCount } }
 /// parallel).
 func faceLookupFailuresHoldingLock() -> Int { faceLookupFailureCount }
 
+/// How many trait lookups the AppKit lookup missed and CoreText found
+/// (STATUS-jas row 188, 11-21). Written and read under `fontLookupLock`.
+nonisolated(unsafe) private var faceLookupRescueCount = 0
+
+/// ``faceLookupRescueCount`` for a caller that already holds `withFontLookup`.
+func faceLookupRescuesHoldingLock() -> Int { faceLookupRescueCount }
+
+/// `base` with `traits` by CoreText (`CTFontCreateCopyWithSymbolicTraits`), the
+/// second mechanism ``faceWithTraits`` asks when the AppKit lookup misses.
+func coreTextFace(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, _ size: CGFloat) -> NSFont? {
+    let t = CTFontSymbolicTraits(rawValue: traits.rawValue)
+    guard let ct = CTFontCreateCopyWithSymbolicTraits(base as CTFont, size, nil, t, t) else { return nil }
+    return ct as NSFont
+}
+
 /// `base` with the symbolic `traits` applied (STATUS-jas row 188). The caller
-/// holds `withFontLookup`. `lookup` is the AppKit lookup, a parameter so a test
-/// can make it fail.
+/// holds `withFontLookup`. `lookup` is the AppKit lookup and `alternate` the
+/// CoreText one, parameters so a test can make either fail.
 func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, size: CGFloat,
-                    lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) }) -> NSFont {
+                    lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) },
+                    alternate: (NSFont, NSFontDescriptor.SymbolicTraits, CGFloat) -> NSFont? = coreTextFace) -> NSFont {
     if traits.isEmpty { return base }
     let desc = base.fontDescriptor.withSymbolicTraits(traits)
     // CI has seen this lookup return nil intermittently, and the width was then
