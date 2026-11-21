@@ -129,16 +129,19 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
 @Test func aTraitLookupThatFailsOnceIsRetried() {
     let base = NSFont(name: "Helvetica", size: 13)!
     var calls = 0
-    let before = faceLookupFailures()
-    let face = withFontLookup {
-        faceWithTraits(base, [.bold, .italic], size: 13) { desc, size in
+    // Both reads of the process-wide counter sit inside the one lock hold, so a
+    // parallel arm's counted failure cannot land between them.
+    let (face, before, after) = withFontLookup {
+        let before = faceLookupFailuresHoldingLock()
+        let face = faceWithTraits(base, [.bold, .italic], size: 13) { desc, size in
             calls += 1
             return calls == 1 ? nil : NSFont(descriptor: desc, size: size)
         }
+        return (face, before, faceLookupFailuresHoldingLock())
     }
     #expect(calls == 2, "a nil lookup is tried once more")
     #expect(face.fontName == "Helvetica-BoldOblique", "the retry's face is measured, not the base: \(face.fontName)")
-    #expect(faceLookupFailures() == before, "a retry that succeeds is not a failure")
+    #expect(after == before, "a retry that succeeds is not a failure")
 }
 
 @Test func aTraitLookupThatNeverFindsAFaceIsCounted() {

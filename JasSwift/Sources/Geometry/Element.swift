@@ -55,6 +55,12 @@ nonisolated(unsafe) private var faceLookupLogged: Set<String> = []
 /// ``faceLookupFailureCount``, read under the lock.
 func faceLookupFailures() -> Int { withFontLookup { faceLookupFailureCount } }
 
+/// ``faceLookupFailureCount`` for a caller that already holds `withFontLookup`,
+/// so a test can read it before and after a lookup with no other thread's
+/// failure landing in between (the counter is process-wide and tests run in
+/// parallel).
+func faceLookupFailuresHoldingLock() -> Int { faceLookupFailureCount }
+
 /// `base` with the symbolic `traits` applied (STATUS-jas row 188). The caller
 /// holds `withFontLookup`. `lookup` is the AppKit lookup, a parameter so a test
 /// can make it fail.
@@ -66,14 +72,24 @@ func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, s
     // the base face's (row 188). Try once more; then SAY so before falling back.
     if let face = lookup(desc, size) ?? lookup(desc, size) { return face }
     faceLookupFailureCount += 1
-    // Logged ONCE per face and traits: a family with no such face (Futura has
-    // no bold italic) fails on every measure, and CI's first run of this read
-    // 18 lines for it in one suite.
-    if faceLookupLogged.insert("\(base.fontName)/\(traits.rawValue)").inserted {
-        NSLog("jas: no face for %@ with traits 0x%x at %.3f pt; measuring the base face (row 188)",
-              base.fontName, traits.rawValue, Double(size))
+    // Row 188(b): keep as many of the traits as the family has. Bold alone,
+    // then italic alone, then the base face. Futura-Medium has no bold italic
+    // (measured on macOS 11-20), and the base face lost the bold as well.
+    // Bold goes first because the weight moves a width more than the slant.
+    // A partial face is still counted above: it is not the face asked for.
+    var face = base
+    if traits.isSuperset(of: [.bold, .italic]) {
+        for single: NSFontDescriptor.SymbolicTraits in [.bold, .italic] {
+            if let f = lookup(base.fontDescriptor.withSymbolicTraits(single), size) { face = f; break }
+        }
     }
-    return base
+    // Logged ONCE per face and traits: a family with no such face fails on
+    // every measure, and CI's first run of this read 18 lines for it in one suite.
+    if faceLookupLogged.insert("\(base.fontName)/\(traits.rawValue)").inserted {
+        NSLog("jas: no face for %@ with traits 0x%x at %.3f pt; measuring %@ (row 188)",
+              base.fontName, traits.rawValue, Double(size), face.fontName)
+    }
+    return face
 }
 #endif
 
