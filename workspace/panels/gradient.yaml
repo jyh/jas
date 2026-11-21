@@ -506,7 +506,9 @@ content:
                   col: 9
                   summary: "Selected stop location (percentage)"
                   bind:
-                    value: "panel.stops[panel.selected_stop_index].location"
+                    # A selected midpoint shows its absolute location, a + (b - a) * midpoint / 100
+                    # for its pair a, b (GRADIENT.md STOP_LOCATION_COMBO); a selected stop, its own.
+                    value: "if panel.selected_midpoint_index >= 0 then panel.stops[panel.selected_midpoint_index].location + (panel.stops[panel.selected_midpoint_index + 1].location - panel.stops[panel.selected_midpoint_index].location) * panel.stops[panel.selected_midpoint_index].midpoint_to_next / 100 else panel.stops[panel.selected_stop_index].location"
                     disabled: "panel.selected_stop_index < 0 and panel.selected_midpoint_index < 0"
                   min: 0
                   max: 100
@@ -517,6 +519,17 @@ content:
                         writes (WIDGET_EVENTS.md), so this copies the committed location
                         into gradient_stop_location, which edits the selected stop of the selection's
                         gradient by the stop-edit law (GRADIENT.md STOP_LOCATION_COMBO; a location that
-                        crosses a neighbour re-sorts the stops, Combo-driven reorder).
+                        crosses a neighbour re-sorts the stops, Combo-driven reorder). With a
+                        midpoint selected the value is the midpoint's absolute location, and
+                        gradient_midpoint_location moves that midpoint by the slider law's
+                        drag_midpoint (clamped between its two stops; refused when they share a
+                        location).
                       effects:
-                        - set: { gradient_stop_location: "event.value" }
+                        - if:
+                            condition: "panel.selected_midpoint_index >= 0"
+                            then:
+                              - set: { gradient_midpoint_location: "event.value" }
+                        - if:
+                            condition: "panel.selected_midpoint_index < 0"
+                            then:
+                              - set: { gradient_stop_location: "event.value" }

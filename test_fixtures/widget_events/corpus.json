@@ -1790,7 +1790,7 @@
           "value": 30.0
         },
         "state_changed": {
-          "gradient_stop_location": 30
+          "gradient_midpoint_location": 30
         }
       },
       "name": "gradient_stop_location_enabled_on_a_midpoint",

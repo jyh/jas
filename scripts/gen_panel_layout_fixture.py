@@ -410,6 +410,24 @@ _BV_LAYERS_TREE = {
                         "element_tree": _element_tree_rows()},
 }
 
+# The Gradient panel's Location combo (GRADIENT.md STOP_LOCATION_COMBO, row
+# 198): with a MIDPOINT selected it shows the midpoint's absolute location,
+# `a + (b - a) * midpoint_to_next / 100` (here 20 + 40 * 30 / 100 = 32); with a
+# stop selected, that stop's location (the control, 60). The stops are a flat
+# list of objects, whose key order the three ports agree on since row #50.
+_GRADIENT_STOPS = [
+    {"color": "#0000ff", "opacity": 100, "location": 20, "midpoint_to_next": 30},
+    {"color": "#ffffff", "opacity": 100, "location": 60, "midpoint_to_next": 50},
+]
+_BV_GRADIENT_MIDPOINT = {
+    "state": {"fill_on_top": True},
+    "panel": {"stops": _GRADIENT_STOPS, "selected_stop_index": -1, "selected_midpoint_index": 0},
+}
+_BV_GRADIENT_STOP = {
+    "state": {"fill_on_top": True},
+    "panel": {"stops": _GRADIENT_STOPS, "selected_stop_index": 1, "selected_midpoint_index": -1},
+}
+
 # (case name, compiled panel id, ctx)
 BIND_SEED = [
     ("color@hsb_selected", "color_panel_content", _BV_COLOR_SELECTED),
@@ -421,6 +439,8 @@ BIND_SEED = [
      _BV_SWATCHES_NESTED),
     ("layers@selection_lists", "layers_panel_content", _BV_LAYERS_LISTS),
     ("layers@element_tree_rows", "layers_panel_content", _BV_LAYERS_TREE),
+    ("gradient@midpoint_selected", "gradient_panel_content", _BV_GRADIENT_MIDPOINT),
+    ("gradient@stop_selected", "gradient_panel_content", _BV_GRADIENT_STOP),
 ]
 
 # (case name, dialog id, ctx): a dialog's binds, read the same way. The

@@ -274,6 +274,23 @@ private let gradient = "gradient_panel_content"
     #expect(model.document.getElement([0, 0]).fillGradient?.stops.count == 2, "a refused click writes nothing")
 }
 
+/// Row 198: with a midpoint selected, the Location combo moves that midpoint
+/// by `dragMidpoint` (GRADIENT.md STOP_LOCATION_COMBO): on stops at 0 and 100
+/// an absolute 30 is a midpoint of 30, and the stops stay. Mirrors Rust
+/// `the_location_combo_on_a_midpoint_moves_the_midpoint`.
+@Test func theLocationComboOnAMidpointMovesTheMidpoint() {
+    let model = modelWithSelectedRect(stroke: nil)
+    Controller(model: model).setSelectionFillGradient(Gradient(stops: [
+        GradientStop(color: "#0000ff", location: 0), GradientStop(color: "#ffffff", location: 100)]))
+    _ = events(model, gradient)  // open the panel, so the selection below lands in its state
+    model.stateStore.setPanel(gradient, "selected_stop_index", -1)
+    model.stateStore.setPanel(gradient, "selected_midpoint_index", 0)
+    let r = events(model, gradient).commit(shipped(gradient, "grad_stop_location_combo"), text: "30")
+    #expect(r.outcome == "committed", "\(r)")
+    let stops = model.document.getElement([0, 0]).fillGradient?.stops ?? []
+    #expect(stops.map { "\($0.location)/\($0.midpointToNext)" } == ["0.0/30.0", "100.0/50.0"])
+}
+
 @Test func aGradientAngleCommitIsClampedToItsDeclaredBounds() {
     let model = Model()
     let r = events(model, gradient).commit(shipped(gradient, "grad_angle_combo"), text: "500")

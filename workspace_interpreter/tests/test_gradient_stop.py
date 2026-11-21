@@ -64,3 +64,46 @@ def test_the_corpus_rejects_a_law_that_never_resets_midpoints():
              and no_reset(v["stops"], v["index"], v["field"], v["value"])
              != (v["expected"]["stops"], v["expected"]["index"])]
     assert fails
+
+
+# ── The Location combo on a selected MIDPOINT (row 198) ──────────────────
+# GRADIENT.md STOP_LOCATION_COMBO: "For a selected midpoint: the midpoint's
+# absolute location, clamped between the two neighbor stops." The bind_values
+# corpus carries the panel at a midpoint and at a stop; the expectation is
+# derived from each case's own ctx, never typed.
+
+def _bind_case(name):
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
+                        "algorithms", "panel_bind_values.json")
+    with open(path, encoding="utf-8") as f:
+        cases = json.load(f)
+    hits = [c for c in cases if c["name"] == name]
+    assert len(hits) == 1, f"{name}: {len(hits)} cases"
+    return hits[0]
+
+
+def _location_row(case):
+    rows = [r for r in case["expected"]
+            if r["id"] == "grad_stop_location_combo" and r["key"] == "bind.value"]
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+def _ctx_panel(case):
+    ctx = case["args"]["ctx"] if "ctx" in case["args"] else case["args"][-1]
+    return ctx["panel"]
+
+
+@pytest.mark.parametrize("name", ["gradient@midpoint_selected", "gradient@stop_selected"])
+def test_the_location_combo_shows_the_selected_marker(name):
+    case = _bind_case(name)
+    panel = _ctx_panel(case)
+    stops, mid, stop = panel["stops"], panel["selected_midpoint_index"], panel["selected_stop_index"]
+    if mid >= 0:
+        a, b = stops[mid], stops[mid + 1]
+        want = a["location"] + (b["location"] - a["location"]) * a["midpoint_to_next"] / 100
+    else:
+        want = stops[stop]["location"]
+    row = _location_row(case)
+    assert row["type"] == "number", row
+    assert float(row["value"]) == pytest.approx(want), row

@@ -501,6 +501,18 @@ impl EffectHost for EngineHost {
             }
             return;
         }
+        // The Location combo with a midpoint selected: the selected pair, by
+        // the slider law's drag_midpoint.
+        if key == gradient_host::MIDPOINT_KEY {
+            let fill_on_top = store.get("fill_on_top").as_bool().unwrap_or(true);
+            let value = store.get(key).clone();
+            let pair = store.get_panel(GRADIENT_PANEL, "selected_midpoint_index").as_i64().unwrap_or(-1);
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            gradient_host::apply_midpoint_edit(model, fill_on_top, &value, pair);
+            return;
+        }
         if !stroke_host::is_render_key(key) {
             return;
         }
