@@ -5248,7 +5248,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
 /// A length input's inline style (both branches), then the element's own
 /// declared style.
 fn length_input_style(style: &str) -> String {
-    format!("min-width:0;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}")
+    format!("min-width:0;max-width:100%;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);{style}")
 }
 
 fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
