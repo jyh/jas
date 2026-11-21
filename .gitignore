@@ -9,6 +9,12 @@
 .venv
 .venv*/
 *.lock
+# The ACTIVE Rust port's lock is tracked: the crate ships binaries and the
+# cdylib the Windows shell links, and without the lock every CI run (and every
+# clone) resolved its 411 dependencies fresh, so an upstream release could
+# change the engine with no commit here. JasSwift/Package.resolved was already
+# tracked for the same reason.
+!jas_dioxus/Cargo.lock
 bazel*
 [xyz]
 
