@@ -10144,6 +10144,7 @@
         "selection_is_single_brushed_stroke": false,
         "selection_orphan_count": 0,
         "symbol_usage": {},
+        "document_setup": {},
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
         "element_tree": [],
@@ -10244,6 +10245,10 @@
         "symbol_usage": {
           "type": "object",
           "description": "Every symbol master's id mapped to how many live references (instances) target it (SYMBOLS.md \u00a78): its reverse-dependency count in the dependency index, 0 for a master no instance uses. Every master in the store is present, so `symbol_usage[id] > 0` reads a number for any master that exists. Empty when there are no masters. delete_symbol_action asks before it empties an instance.\n"
+        },
+        "document_setup": {
+          "type": "object",
+          "description": "The document's own setup record (PRINT.md \u00a71A; OPACITY.md \u00a7Page-level items), one key per field: bleed_top/right/bottom/left, bleed_uniform, show_images_outline, highlight_substituted_glyphs, grid_size, grid_color, paper_color, simulate_colored_paper, transparency_flattener_preset, discard_white_overprint, page_isolated_blending and page_knockout_group. Built by every active port's active-document view; the Document Setup dialog seeds from it and the Opacity panel menu's Page Isolated Blending item is checked from it. Empty when no document is open, so every field reads as absent there. Declared here when that menu item became the first panel-menu read of it (row 192).\n"
         },
         "artboards_count": {
           "type": "number",

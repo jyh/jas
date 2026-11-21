@@ -816,7 +816,12 @@
           "new_masks_clipping": false,
           "new_masks_inverted": true
         },
-        "selection_has_mask": false
+        "selection_has_mask": false,
+        "active_document": {
+          "document_setup": {
+            "page_isolated_blending": true
+          }
+        }
       }
     },
     "expected": [
@@ -907,8 +912,8 @@
         ],
         "action": "toggle_page_isolated_blending",
         "label": "Page Isolated Blending",
-        "enabled": false,
-        "checked": null
+        "enabled": true,
+        "checked": true
       },
       {
         "path": [
@@ -2370,7 +2375,12 @@
           "new_masks_clipping": true,
           "new_masks_inverted": false
         },
-        "selection_has_mask": true
+        "selection_has_mask": true,
+        "active_document": {
+          "document_setup": {
+            "page_isolated_blending": false
+          }
+        }
       }
     },
     "expected": [
@@ -2461,8 +2471,8 @@
         ],
         "action": "toggle_page_isolated_blending",
         "label": "Page Isolated Blending",
-        "enabled": false,
-        "checked": null
+        "enabled": true,
+        "checked": false
       },
       {
         "path": [
