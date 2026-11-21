@@ -75,7 +75,7 @@ def test_the_corpus_rejects_a_law_that_never_resets_midpoints():
 def _bind_case(name):
     path = os.path.join(os.path.dirname(__file__), "..", "..", "test_fixtures",
                         "algorithms", "panel_bind_values.json")
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         cases = json.load(f)
     hits = [c for c in cases if c["name"] == name]
     assert len(hits) == 1, f"{name}: {len(hits)} cases"
