@@ -1029,6 +1029,9 @@ struct JasBytes jas_dialog_plan(struct JasEngine *e, int64_t avail_w, int64_t av
  * AFTER the act: `null` when the click closed it, the parent's id when a
  * nested dialog returned to it, a new id when the click opened one. The
  * shell then re-reads [`jas_dialog_plan`].
+ * Its `doc_changed` is also true when the act moved the store's
+ * `boolean_precision` (Boolean Options' OK), which live geometry paints at,
+ * so the shell repaints though the document did not move.
  *
  * # ⛔ A refusal runs NOTHING
  *

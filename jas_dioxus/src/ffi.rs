@@ -2493,6 +2493,9 @@ fn dialog_ctx(engine: &JasEngine, store_ctx: &serde_json::Value) -> serde_json::
 /// AFTER the act: `null` when the click closed it, the parent's id when a
 /// nested dialog returned to it, a new id when the click opened one. The
 /// shell then re-reads [`jas_dialog_plan`].
+/// Its `doc_changed` is also true when the act moved the store's
+/// `boolean_precision` (Boolean Options' OK), which live geometry paints at,
+/// so the shell repaints though the document did not move.
 ///
 /// # ⛔ A refusal runs NOTHING
 ///
@@ -2542,6 +2545,10 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
         Err(r) => return refuse(r),
     };
     let scope = dialog_ctx(engine, &store_ctx);
+    // Live geometry paints at the store's `boolean_precision` (row 203), and
+    // Boolean Options' OK writes it, so an act that moves it changes the
+    // picture with the document unmoved (row 204, flask STATUS §986).
+    let precision = crate::ffi_pointer::engine_paint_precision(engine);
     let (ran, named) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
@@ -2566,12 +2573,15 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
     // A tool write that was REFUSED was also undone, so it changed nothing.
     let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
-    if ran.doc_changed || state_changed || moved {
+    // The reply's `doc_changed` is the repaint signal (`jas_document_modified`
+    // is the dirty flag), so a moved paint precision sets it.
+    let repaint = ran.doc_changed || crate::ffi_pointer::engine_paint_precision(engine) != precision;
+    if repaint || state_changed || moved {
         *engine.last_error.borrow_mut() = None;
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
+    let reply = act_reply(engine, &sync.changed, repaint, named);
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
 }
 
