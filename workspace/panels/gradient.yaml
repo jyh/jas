@@ -441,6 +441,15 @@ content:
                 list, and gradient_stops writes it to the selection's gradient.
               effects:
                 - set: { gradient_stops: "event.value" }
+            - event: double_click
+              description: >-
+                A double click on a stop (WIDGET_EVENTS.md §The stops kind, double_press):
+                the procedure has already selected the stop, and event.value is its colour,
+                so this opens the shared colour picker seeded with it, and its OK writes the
+                colour to the stop by the stop-colour law (GRADIENT.md, Color stops:
+                "Double-click a stop"; the picker's gradient_stop target).
+              action: open_color_picker
+              params: { target: '"gradient_stop"', color: "event.value" }
         - id: grad_trash_button
           type: icon_button
           col: 2

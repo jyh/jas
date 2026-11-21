@@ -7061,11 +7061,26 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
         let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
         let sel_class = if sel_stop == i as i64 { " jas-gradient-stop-selected" } else { "" };
         let (app_s, dom_s) = (app.clone(), id.clone());
+        // Row 198: a double click on a stop selects it (`double_press`) and runs
+        // the slider's declared double_click behaviors with event.value this
+        // stop's colour (WIDGET_EVENTS.md §The stops kind), by the generic
+        // handler every other widget's double_click uses.
+        let mut stop_ctx = ctx.clone();
+        if let Some(m) = stop_ctx.as_object_mut() {
+            m.insert("event".into(), serde_json::json!({"value": color.clone()}));
+        }
+        let on_stop_dblclick = build_dblclick_handler(el, &stop_ctx, rctx);
+        let app_d = app.clone();
         stop_markers.push(rsx! {
             div {
                 class: "jas-gradient-stop{sel_class}",
                 "data-role": "stop",
                 "data-stop-index": "{i}",
+                ondoubleclick: move |evt: Event<MouseData>| {
+                    evt.stop_propagation();
+                    let _ = app_d.borrow_mut().gradient_slider_gesture("double_press", &serde_json::json!({"index": i}));
+                    if let Some(ref h) = on_stop_dblclick { h.call(evt); }
+                },
                 onpointerdown: move |evt: Event<PointerData>| {
                     evt.stop_propagation();
                     capture_pointer_on(&dom_s, evt.data().pointer_id());
@@ -13077,6 +13092,52 @@ mod tests {
         assert_eq!(st.gradient_slider_gesture("key", &json!({"key": "Right", "shift": true})), Ok(true));
         assert_eq!(doc(&st), vec![45.0, 100.0]);
         assert_eq!(st.gradient_slider_gesture("key", &json!({"key": "q"})), Ok(false));
+    }
+
+    /// Row 198, the web's half of a double click on a stop: `double_press`
+    /// selects the stop (the midpoint goes to -1) and writes neither stops nor
+    /// document, and the slider's shipped double_click behavior, resolved with
+    /// event.value the stop's colour as the stop marker resolves it, is
+    /// open_color_picker with target gradient_stop and that colour.
+    #[test]
+    fn a_web_double_click_on_a_stop_selects_it_and_resolves_the_picker_with_its_colour() {
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        use serde_json::json;
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(Color::BLACK, 0.0), stop(Color::WHITE, 100.0)],
+            ..Gradient::default()
+        }));
+        st.sync_gradient_panel_from_selection();
+        st.gradient_panel.selected_midpoint_index = 0;
+        let stops_of = |st: &AppState| st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().unwrap().stops.clone();
+        let before = stops_of(&st);
+        assert_eq!(st.gradient_slider_gesture("double_press", &json!({"index": 1})), Ok(true));
+        assert_eq!((st.gradient_panel.selected_stop_index, st.gradient_panel.selected_midpoint_index), (1, -1));
+        assert_eq!(stops_of(&st), before, "a double press writes no stops");
+        assert_eq!(st.gradient_slider_gesture("double_press", &json!({"index": 2})), Err("LawRefused"));
+        fn by_id<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) {
+                return Some(n);
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(|v| by_id(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| by_id(v, id)),
+                _ => None,
+            }
+        }
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        let slider = by_id(ws.panel("gradient_panel_content").unwrap(), "grad_slider").expect("the shipped slider");
+        let ctx = json!({"event": {"value": "#ffffff"}, "panel": {}});
+        let resolved = resolve_click_behaviors(slider, &ctx, "double_click");
+        assert_eq!(resolved.len(), 1, "one double_click behavior");
+        assert_eq!(resolved[0].0.as_deref(), Some("open_color_picker"));
+        assert_eq!(resolved[0].1.get("target"), Some(&json!("gradient_stop")));
+        assert_eq!(resolved[0].1.get("color"), Some(&json!("#ffffff")), "seeded with the stop's colour");
+        assert!(resolve_click_behaviors(slider, &ctx, "click").is_empty(), "a single click runs nothing");
     }
 
     #[test]

@@ -589,7 +589,8 @@ pub fn drag_midpoint(stops: &[GradientStop], pair: i64, location: &Value) -> Opt
 
 /// What one stops gesture writes: the stops and selection, the snapshot
 /// (`Some(Null)` clears it, `None` leaves it), and whether the gesture
-/// finished, so its `commit` behaviors run.
+/// finished, so its `commit` behaviors run. `double_click` is a double press's
+/// `event.value`, the stop's colour (row 198): its `double_click` behaviors run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StopsStep {
     pub stops: Value,
@@ -597,6 +598,7 @@ pub struct StopsStep {
     pub midpoint: i64,
     pub snapshot: Option<Value>,
     pub commit: bool,
+    pub double_click: Option<Value>,
 }
 
 /// One slider gesture over the panel's CURRENT stops and selection and the
@@ -616,7 +618,7 @@ pub fn stops_step(gesture: &str, params: &Value, current: &Value, stop: i64, mid
     let stops = stops_from_json(current).ok_or("LawRefused")?;
     let step = |s: &[GradientStop], stop: i64, midpoint: i64,
                 snapshot: Option<Value>, commit: bool| Some(StopsStep {
-        stops: stops_to_json(s), stop, midpoint, snapshot, commit,
+        stops: stops_to_json(s), stop, midpoint, snapshot, commit, double_click: None,
     });
     match gesture {
         "press" | "press_midpoint" => {
@@ -663,6 +665,14 @@ pub fn stops_step(gesture: &str, params: &Value, current: &Value, stop: i64, mid
             };
             let finished = gesture.starts_with("release");
             Ok(step(&out, st, mid, finished.then_some(Value::Null), finished))
+        }
+        "double_press" => {
+            // Row 198: select the stop as a press does, with no snapshot and
+            // no stops written; the caller runs the double_click behaviors
+            // with the stop's colour.
+            let i = int("index").filter(|&i| i >= 0 && (i as usize) < stops.len()).ok_or("LawRefused")?;
+            let color = json!(format!("#{}", stops[i as usize].color.to_hex()));
+            Ok(step(&stops, i, -1, None, false).map(|s| StopsStep { double_click: Some(color), ..s }))
         }
         "add" => {
             let (out, at) = add_stop(&stops, &p("location")).ok_or("LawRefused")?;

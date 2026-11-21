@@ -110,9 +110,9 @@ CLICK_MODIFIERS = ("shift", "ctrl", "meta", "alt")
 # raw parameters and the slider law (gradient_law) applies it. Its one
 # behavior event, ``commit``, is "a gesture finished".
 STOPS_KINDS = frozenset({"gradient_slider"})
-STOPS_EVENTS = ("commit",)
+STOPS_EVENTS = ("commit", "double_click")
 STOPS_GESTURES = ("press", "drag", "release", "press_midpoint", "drag_midpoint",
-                  "release_midpoint", "add", "key")
+                  "release_midpoint", "add", "key", "double_press")
 
 ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: COMMIT_EVENTS for kind in INPUT_KINDS},
@@ -780,7 +780,7 @@ def gesture(widget: dict, name: str, params: dict, store: StateStore, *,
     def finish(new_stops, stop: int, midpoint: int) -> EventResult:
         write(keys["stops"], new_stops)
         select(stop, midpoint)
-        ran = _run_behaviors(_declared(widget, STOPS_EVENTS), new_stops, store,
+        ran = _run_behaviors(_declared(widget, ("commit",)), new_stops, store,
                              run_kwargs)
         return EventResult("committed", value=new_stops, bind_written=True,
                            behaviors_run=ran)
@@ -831,6 +831,18 @@ def gesture(widget: dict, name: str, params: dict, store: StateStore, *,
             return EventResult("committed", value=new_stops, bind_written=True)
         write(press_key, None)
         return finish(new_stops, sel_stop, sel_mid)
+
+    if name == "double_press":
+        # Row 198: select the stop as a press does (no snapshot: a double
+        # press is not a drag), then run the double_click behaviors with
+        # event.value the stop's colour. No stops are written.
+        i = params.get("index")
+        if isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < len(stops):
+            return refused
+        select(i, -1)
+        ran = _run_behaviors(_declared(widget, ("double_click",)), stops[i].get("color"),
+                             store, run_kwargs)
+        return EventResult("committed", bind_written=True, behaviors_run=ran)
 
     if name == "add":
         got = law.add_stop(stops, params.get("location"))

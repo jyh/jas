@@ -52,14 +52,15 @@ def panel(st, key):
 
 
 class TestTable:
-    def test_the_stops_kind_takes_commit_only(self):
+    def test_the_stops_kind_takes_commit_and_double_click(self):
+        # Row 198: double_click joined commit (a double press on a stop).
         assert we.STOPS_KINDS == {"gradient_slider"}
-        assert we.ALLOWED_EVENTS["gradient_slider"] == ("commit",)
+        assert we.ALLOWED_EVENTS["gradient_slider"] == ("commit", "double_click")
 
     def test_the_gestures_are_named(self):
         assert we.STOPS_GESTURES == (
             "press", "drag", "release", "press_midpoint", "drag_midpoint",
-            "release_midpoint", "add", "key")
+            "release_midpoint", "add", "key", "double_press")
 
 
 class TestStopDrag:

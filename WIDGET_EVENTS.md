@@ -74,7 +74,7 @@ dropdown: toggle, alt_toggle
 radio_group: toggle
 button: click, mouse_down, mouse_up
 icon_button: click, mouse_down, mouse_up
-gradient_slider: commit
+gradient_slider: commit, double_click
 ```
 <!-- widget-event-table:end -->
 
@@ -112,9 +112,10 @@ gradient_slider: commit
   tool's options, never an alternate's. The panel plan names
   `double_click` in the slot's `events`.
 
-- **The stops kind** is `gradient_slider`. Its one behavior event,
-  `commit`, names "a gesture finished". A shell reports gestures, not
-  values (see §The stops kind).
+- **The stops kind** is `gradient_slider`. It has two behavior events:
+  `commit` names "a gesture finished", and `double_click` names "a stop
+  was double-clicked" (row 198). A shell reports gestures, not values
+  (see §The stops kind).
 
 **Outside this contract, deliberately:** every other widget kind. That
 includes the color widgets other than `color_bar`, `color_hue_bar` and
@@ -147,6 +148,7 @@ refused `NotWritable`.
 | `release_midpoint` | `location` | as `drag_midpoint`, then clears the snapshot and runs the `commit` behaviors |
 | `add` | `location` | `add_stop` over the current stops; selects the new stop; runs the `commit` behaviors |
 | `key` | `key`, `shift` | GRADIENT.md's keyboard table over the current stops; runs the `commit` behaviors |
+| `double_press` | `index` | selects the stop (the midpoint becomes −1), takes NO snapshot and writes no stops, then runs the `double_click` behaviors with `event.value` the stop's colour. A shell sends it for the second press of a double click on a stop, after that press's own `press`/`release` |
 
 - **A marker moves by how far the pointer moved, never to the pointer.** A
   press carries the pointer's `location` too, and the snapshot keeps the

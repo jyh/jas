@@ -89,6 +89,12 @@ SEED = [
     ("a_midpoint_drag_keeps_the_grab_offset", {"stops": THREE},
      [("press_midpoint", {"pair": 0, "location": 22}), ("drag_midpoint", {"location": 32}),
       ("release_midpoint", {"location": 32})]),
+    # Row 198: a double press on a stop selects it (a midpoint was selected)
+    # and runs the double_click behaviors; one on no stop is refused.
+    ("a_double_press_selects_the_stop_and_runs_double_click", {"stops": THREE, "midpoint": 0},
+     [("double_press", {"index": 2})]),
+    ("a_double_press_on_no_stop_is_refused", {"stops": THREE, "stop": 1},
+     [("double_press", {"index": 3}), ("double_press", {"index": True}), ("double_press", {})]),
     ("a_press_without_a_location_is_refused", {"stops": THREE, "stop": 2},
      [("press", {"index": 1}), ("press_midpoint", {"pair": 0}),
       ("press", {"index": 1, "location": True}), ("release", {"location": 50, "dy": 0})]),

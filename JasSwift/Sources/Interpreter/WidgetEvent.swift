@@ -960,12 +960,13 @@ private func jsonValueEqual(_ a: Any?, _ b: Any?) -> Bool {
 
 extension WidgetEvent {
     /// The stops kind: a shell reports a slider gesture with its raw
-    /// parameters, and the slider law applies it. Its one behavior event,
-    /// `commit`, is "a gesture finished".
+    /// parameters, and the slider law applies it. Its behavior events are
+    /// `commit`, "a gesture finished", and `double_click`, "a stop was
+    /// double-clicked" (row 198).
     static let stopsKinds: Set<String> = ["gradient_slider"]
-    static let stopsEvents = ["commit"]
+    static let stopsEvents = ["commit", "double_click"]
     static let stopsGestures = ["press", "drag", "release", "press_midpoint", "drag_midpoint",
-                                "release_midpoint", "add", "key"]
+                                "release_midpoint", "add", "key", "double_press"]
     static let noPress = "NoPress"
     static let lawRefused = "LawRefused"
     static let notWritable = "NotWritable"
@@ -1022,13 +1023,24 @@ extension WidgetEvent {
         func finish(_ out: [GradientStop], _ stop: Int, _ midpoint: Int) -> Result {
             write(out, stop, midpoint)
             let value = gradientStopsToJSON(out)
-            let ran = runBehaviors(declared(widget, events: stopsEvents), value: value,
+            let ran = runBehaviors(declared(widget, events: ["commit"]), value: value,
                                    store: store, actions: actions, dialogs: dialogs,
                                    platformEffects: platformEffects, model: model, host: host)
             return Result(outcome: "committed", value: value, bindWritten: true, behaviorsRun: ran)
         }
 
         switch name {
+        case "double_press":
+            // Row 198: select the stop as a press does, with no snapshot and
+            // no stops written, then run the double_click behaviors with
+            // event.value the stop's colour.
+            guard let i = int(params["index"]), i >= 0, i < stops.count else { return refused }
+            put(stopKey, i)
+            put(midKey, -1)
+            let ran = runBehaviors(declared(widget, events: ["double_click"]), value: stops[i].color,
+                                   store: store, actions: actions, dialogs: dialogs,
+                                   platformEffects: platformEffects, model: model, host: host)
+            return Result(outcome: "committed", bindWritten: true, behaviorsRun: ran)
         case "press", "press_midpoint":
             let isStop = name == "press"
             let n = isStop ? stops.count : stops.count - 1

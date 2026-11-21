@@ -55,5 +55,31 @@ def test_a_commit_runs_the_shipped_behavior_and_a_drag_does_not():
         e = s["expected"]
         if s["gesture"] in ("press", "drag", "press_midpoint", "drag_midpoint"):
             assert e["behaviors_run"] == 0 and e["committed"] is None, s
+        elif s["gesture"] == "double_press":
+            continue  # its own arm below: it runs double_click, not commit
         elif e["outcome"] == "committed":
             assert e["behaviors_run"] == 1 and e["committed"] == e["stops"], s
+
+
+def _shipped_slider():
+    bundle = json.loads((ROOT / "workspace" / "workspace.json").read_text(encoding="utf-8"))
+    from workspace_interpreter.loader import find_element_by_id
+    return find_element_by_id(bundle["panels"]["gradient_panel_content"], "grad_slider")
+
+
+def test_a_double_press_selects_the_stop_and_runs_the_double_click_behaviors():
+    # Row 198, GRADIENT.md: double-click a stop opens the colour picker. The
+    # gesture selects the stop as a press does and runs the slider's declared
+    # double_click behaviors, never its commit ones; it writes no stops.
+    declared = [b for b in _shipped_slider().get("behavior", []) if b.get("event") == "double_click"]
+    assert len(declared) >= 1, "the shipped slider declares a double_click"
+    hits = [s for s in _steps() if s["gesture"] == "double_press"]
+    assert {s["expected"]["outcome"] for s in hits} == {"committed", "refused"}, hits
+    for s in hits:
+        e = s["expected"]
+        if e["outcome"] != "committed":
+            assert e["reason"] == we.LAW_REFUSED and e["behaviors_run"] == 0, s
+            continue
+        assert (e["stop"], e["midpoint"]) == (s["params"]["index"], -1), s
+        assert e["behaviors_run"] == len(declared), s
+        assert e["committed"] is None and not e["pressed"], s
