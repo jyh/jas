@@ -248,6 +248,17 @@ tabs `[a, b, c]`, `a` dropped on `b`'s right half (position 2) becomes
 (Conformance: `panel_ops.json` `move_panel_to_group`,
 `move_panel_to_group_at_index`, `move_panel_to_group_index_past_the_end_appends`.)
 
+## A Group's Tab Bar
+
+Each panel group draws one tab bar: the grip, then one tab per panel, then the
+collapse chevron and the panel menu button at the right end. The grip, the
+chevron and the menu button are always drawn whole and inside the dock's
+width, however many panels the group holds. When the tabs do not fit in the
+width that is left, each tab label shrinks and is cut with an ellipsis.
+The tab bar never scrolls sideways, and it never makes the dock scroll
+sideways. A cut label is still the whole panel's tab: clicking or dragging
+it acts on that panel as before.
+
 ## Anchored Docks by Edge
 
 `anchored` holds at most one dock per `DockEdge`: `Right`, `Left` or

@@ -4851,6 +4851,14 @@ fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value
     }
 }
 
+/// A slider's inline style: it takes the row's remaining width (`flex:1`), then
+/// the element's own declared style.
+fn slider_style(style: &str) -> String {
+    // min-width:0 lets it shrink below the browser's intrinsic range width
+    // (row 66), so a row's number input and unit stay inside it.
+    format!("flex:1;min-width:0;{style}")
+}
+
 fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_i64()).unwrap_or(0);
@@ -4905,7 +4913,7 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             // continue the drag past the first oninput.
             value: "{value}",
             disabled: disabled,
-            style: "flex:1;{style}",
+            style: "{slider_style(&style)}",
             // oninput fires on every drag tick — use the "live"
             // setter that updates the canvas color but skips the
             // recent-colors push (CLR-070). onchange fires on
@@ -5190,7 +5198,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 // box-sizing:border-box so the yaml `width` includes
                 // the border + padding, matching the visual size the
                 // author asked for.
-                style: "flex-shrink:0;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);padding:1px 4px;{style}",
+                style: "{number_input_style(&style)}",
                 onchange: move |evt: Event<FormData>| {
                     if let Some(ref h) = panel_handler { h.call(evt); }
                 },
@@ -5669,6 +5677,18 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     }
 }
 
+/// A dropdown's inline style, then the element's own declared style.
+fn select_style(style: &str) -> String {
+    format!("max-width:100%;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}")
+}
+
+/// A number input's inline style (the committing branch), then the element's
+/// own declared style. `flex-shrink:0` keeps the declared width in a row whose
+/// slider grows; `box-sizing:border-box` makes that width include the border.
+fn number_input_style(style: &str) -> String {
+    format!("flex-shrink:0;max-width:100%;box-sizing:border-box;color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);padding:1px 4px;{style}")
+}
+
 fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let style = build_style(el, ctx);
@@ -5708,7 +5728,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             id: "{id}",
             value: "{current_value}",
             disabled: disabled,
-            style: "color:var(--jas-text,#ccc);background-color:var(--jas-pane-bg-dark,#333);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);font-size:11px;padding:2px 4px;{style}",
+            style: "{select_style(&style)}",
             onchange: move |evt: Event<FormData>| {
                 let new_val = evt.value();
                 match &bind_target {
@@ -16592,5 +16612,53 @@ mod text_entry_tests {
         assert!(body.lines().count() > 10_000, "read only part of renderer.rs");
         let hits: Vec<&str> = body.lines().filter(|l| keys_on_a_widget_id(l)).collect();
         assert!(hits.is_empty(), "id-keyed checks in renderer.rs: {hits:#?}");
+    }
+}
+
+/// Row 66 (2): a slider in a row must be able to shrink below the browser's
+/// intrinsic range width (129 px in Chrome). With CSS's default `min-width:auto`
+/// it could not, so the Color panel's H/S/B row (172.5 px wide) laid out about
+/// 216 px of children and pushed its 64-px number inputs 22 px past the dock.
+#[cfg(test)]
+mod slider_shrink_tests {
+    use super::slider_style;
+
+    #[test]
+    fn a_slider_can_shrink_below_its_intrinsic_width() {
+        let s = slider_style("");
+        let decls: Vec<(&str, &str)> = s.split(';').filter_map(|d| d.split_once(':')).map(|(k, v)| (k.trim(), v.trim())).collect();
+        assert!(decls.contains(&("min-width", "0")), "{s}");
+        assert!(decls.contains(&("flex", "1")), "{s}");
+    }
+
+    #[test]
+    fn a_declared_style_still_comes_last() {
+        assert!(slider_style("opacity:0.5;").ends_with("opacity:0.5;"));
+    }
+}
+
+/// Row 66 (3): a dropdown or a number input never draws wider than the box
+/// that holds it. On main the Stroke panel's arrowhead dropdowns drew 111 px
+/// in 70-px Path B cells and `distribute_spacing_value` 135 px in a 103-px
+/// cell; each cell's `overflow:hidden` cut off the control's right edge.
+#[cfg(test)]
+mod control_fits_cell_tests {
+    use super::{number_input_style, select_style};
+
+    fn has(s: &str, k: &str, v: &str) -> bool {
+        s.split(';').filter_map(|d| d.split_once(':')).any(|(a, b)| a.trim() == k && b.trim() == v)
+    }
+
+    #[test]
+    fn a_dropdown_never_draws_wider_than_its_box() {
+        let s = select_style("");
+        assert!(has(&s, "max-width", "100%") && has(&s, "box-sizing", "border-box"), "{s}");
+    }
+
+    #[test]
+    fn a_number_input_never_draws_wider_than_its_box() {
+        let s = number_input_style("width:135px;");
+        assert!(has(&s, "max-width", "100%") && has(&s, "box-sizing", "border-box"), "{s}");
+        assert!(s.ends_with("width:135px;"), "the declared width still comes last: {s}");
     }
 }
