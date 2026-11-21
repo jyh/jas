@@ -471,13 +471,22 @@ FIT_READ_JS = r"""() => {
     const over = [...b.children].slice(-2).some(k => k.getBoundingClientRect().right > lim + 0.5);
     if (over || b.scrollWidth > b.clientWidth + 1) bad += 1;
   }
-  let hscroll = 0, vbar = 0;
+  let hscroll = 0, vbar = 0; const who = [];
   for (const e of document.querySelectorAll('*')) {
     const c = getComputedStyle(e);
-    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && e.scrollWidth > e.clientWidth + 1) hscroll += 1;
+    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && e.scrollWidth > e.clientWidth + 1) {
+      hscroll += 1;
+      if (who.length < 3) {
+        // name the scroller and its widest overrunning child, so a RED names its subject
+        const lim = e.getBoundingClientRect().left + e.clientWidth; let wide = null, wr = lim;
+        for (const k of e.querySelectorAll('*')) { const r = k.getBoundingClientRect(); if (r.width > 0 && r.right > wr + 0.5) { wr = r.right; wide = k; } }
+        const nm = el => el ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}` : '-';
+        who.push(`${nm(e)}[${e.scrollWidth}/${e.clientWidth}] by ${nm(wide)}+${(wr - lim).toFixed(0)}`);
+      }
+    }
     if ((c.overflowY === 'auto' || c.overflowY === 'scroll') && e.querySelector('[id^="dock_group_"]')) vbar = Math.max(vbar, e.offsetWidth - e.clientWidth);
   }
-  return {bars: n, bad, hscroll, vbar};
+  return {bars: n, bad, hscroll, vbar, who};
 }"""
 
 
@@ -502,6 +511,7 @@ def fit_line(readings):
     if len(ok) == len(FIT_CONDITIONS):
         return f"FIT {len(ok)}/{len(FIT_CONDITIONS)}"
     bad = "; ".join(f"FAIL {c}: bad={readings[c]['bad']} hscroll={readings[c]['hscroll']}"
+                    + (f" [{', '.join(readings[c]['who'])}]" if readings[c].get("who") else "")
                     for c in FIT_CONDITIONS if c not in ok)
     return f"FIT RED {len(ok)}/{len(FIT_CONDITIONS)} ({bad})"
 
@@ -831,6 +841,8 @@ def self_test():
     check(fit_line({"overlay": good, "classic": dict(goodc, vbar=0)}).startswith("FIT NOT RUN (classic: the dock shows no scrollbar width"),
           "classic bars that did not take are NOT RUN, never an overlay read under the classic label")
     check(fit_line({}) == "FIT NOT RUN (no condition read)", "no readings is NOT RUN")
+    check(fit_line({"overlay": dict(good, hscroll=1, who=["div#x[245/238] by input#y+7"]), "classic": goodc})
+          == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=1 [div#x[245/238] by input#y+7])", "a RED names the scroller and what overruns it")
     check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
           "preview_line names every case, PASS included, in the order via, up, src")
     check(preview_line([]) == "DOCK PREVIEW NOT RUN", "no case is NOT RUN")
