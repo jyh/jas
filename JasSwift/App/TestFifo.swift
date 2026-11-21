@@ -149,6 +149,20 @@ extension JasAppDelegate {
                 workspace?.addCanvas(Model(document: Document.newEmptyDocument()))
                 return
             }
+            // The Window menu's layout verbs (Tile, Toolbar, Panels, every
+            // panel item) apply the menu's own shared op (WindowLayoutVerb);
+            // the generic dispatcher does not apply a layout op. A harness
+            // launch never saves the layout (TestHarness.isolatesSession), so
+            // the op is applied without the menu's save.
+            if let ws = workspace, let op = WindowLayoutVerb.op(name, params: params) {
+                layoutApply(&ws.workspaceLayout, op)
+                return
+            }
+            // Window > Workspace > Reset to Default, the menu's own call.
+            if name == "reset_workspace" {
+                workspace?.resetToDefault()
+                return
+            }
             guard let model = workspace?.activeModel else { return }
             FifoActionRouting.dispatch(name, model: model, params: params)
         case "open":

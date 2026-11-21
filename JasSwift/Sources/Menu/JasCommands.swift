@@ -334,34 +334,12 @@ public struct JasCommands: Commands {
             guard let model = model else { return }
             ViewActions.dispatch(action, model: model)
         // Window
-        case "tile_panes":
-            guard let ws = workspace else { return }
-            // OP_LOG 3d-2: dispatch through the shared layout-op runtime.
-            // Swift's menu Tile neither clears canvas maximization nor
-            // applies a collapsed-dock override, so both params are omitted —
-            // byte-identical to the prior `pl.tilePanes(collapsedOverride:
-            // nil)` call and matching the bare corpus `tile_panes` path.
-            layoutApply(&ws.workspaceLayout,
-                        opTilePanes(setCanvasMaximized: nil, overridePane: nil))
-            ws.workspaceLayout.saveIfNeeded()
-        case "toggle_pane":
+        case _ where WindowLayoutVerb.op(action, params: params) != nil:
+            // Window: Tile, Toolbar, Panels and every panel item apply their
+            // shared layout op (WindowLayoutVerb, also the FIFO's path).
             guard let ws = workspace,
-                  let paneId = params["pane"] as? String,
-                  let kind = paneKindForId(paneId) else { return }
-            // The shared `toggle_pane` op decides hide vs show from the live
-            // pane layout (a no-op when there is none, as `panesMut` is).
-            layoutApply(&ws.workspaceLayout, opTogglePane(kind))
-            ws.workspaceLayout.saveIfNeeded()
-        case "toggle_panel":
-            guard let ws = workspace,
-                  let panelId = params["panel"] as? String else { return }
-            guard let kind = panelKindForMenuId(panelId) else {
-                // Unknown panel id — graceful no-op.
-                return
-            }
-            // The shared `toggle_panel` op (the action's YAML `layout:` effect):
-            // hide a panel that is on screen, else reveal it.
-            layoutApply(&ws.workspaceLayout, opTogglePanel(kind))
+                  let op = WindowLayoutVerb.op(action, params: params) else { return }
+            layoutApply(&ws.workspaceLayout, op)
             ws.workspaceLayout.saveIfNeeded()
         default:
             break
@@ -658,6 +636,34 @@ let menuPanelIds: [String] = [
 
 /// Map a bundle pane id (`"toolbar"`, `"dock"`) to ``PaneKind``. Free function
 /// shared by the menu dispatch and the menu-ctx builder.
+/// The Window menu's layout verbs: the ONE mapping from a Window menu action to
+/// its shared layout op. The menu applies the op (and saves the layout); the
+/// test FIFO applies the same op, so a harness drives the menu's own path.
+/// nil means the action is not a Window layout verb, or names no known pane or
+/// panel (a graceful no-op, as the menu always was).
+public enum WindowLayoutVerb {
+    public static func op(_ action: String, params: [String: Any]) -> [String: Any]? {
+        switch action {
+        case "tile_panes":
+            // Swift's menu Tile neither clears canvas maximization nor applies
+            // a collapsed-dock override, so both params are omitted (OP_LOG
+            // 3d-2: byte-identical to the bare corpus `tile_panes` path).
+            return opTilePanes(setCanvasMaximized: nil, overridePane: nil)
+        case "toggle_pane":
+            // Hide vs show is decided by the op from the live pane layout.
+            guard let id = params["pane"] as? String, let kind = paneKindForId(id) else { return nil }
+            return opTogglePane(kind)
+        case "toggle_panel":
+            // The action's YAML `layout:` effect: hide a panel that is on
+            // screen, else reveal it.
+            guard let id = params["panel"] as? String, let kind = panelKindForMenuId(id) else { return nil }
+            return opTogglePanel(kind)
+        default:
+            return nil
+        }
+    }
+}
+
 func paneKindForId(_ id: String) -> PaneKind? {
     switch id {
     case "toolbar": return .toolbar

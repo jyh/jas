@@ -110,3 +110,45 @@ private func pixel(_ path: String, x: Double, yFromTop: Double, viewWidth: Doubl
     #expect(throws: FifoReadError.self) { try FifoShot.write(view: view, to: path) }
     #expect(!FileManager.default.fileExists(atPath: path))
 }
+
+// ── The Window menu's layout verbs, shared by the menu and the FIFO ──
+// The FIFO's `action` verb runs the generic YAML dispatcher, which does not
+// apply a Window verb's layout op, so `action toggle_panel {"panel":"layers"}`
+// did nothing to the dock. `WindowLayoutVerb.op` is the ONE mapping from a
+// Window menu action to its shared layout op; the menu and the FIFO both
+// apply what it returns, so a harness drives the menu's own path.
+
+@Test func theWindowVerbsMapToTheirSharedLayoutOps() {
+    let panel = WindowLayoutVerb.op("toggle_panel", params: ["panel": "layers"])
+    #expect(panel?["op"] as? String == "toggle_panel")
+    #expect(panel?["kind"] as? String == (opTogglePanel(.layers)["kind"] as? String))
+    let pane = WindowLayoutVerb.op("toggle_pane", params: ["pane": "dock"])
+    #expect(pane?["op"] as? String == "toggle_pane")
+    #expect(WindowLayoutVerb.op("tile_panes", params: [:])?["op"] as? String == "tile_panes")
+}
+
+@Test func aWindowVerbWithAnUnknownSubjectOrANonWindowActionIsNotAVerb() {
+    // nil means "not mine": the caller falls through (the FIFO to the generic
+    // dispatcher), never applies an empty op.
+    #expect(WindowLayoutVerb.op("toggle_panel", params: ["panel": "no_such_panel"]) == nil)
+    #expect(WindowLayoutVerb.op("toggle_panel", params: [:]) == nil)
+    #expect(WindowLayoutVerb.op("toggle_pane", params: ["pane": "no_such_pane"]) == nil)
+    #expect(WindowLayoutVerb.op("select_all", params: [:]) == nil)
+}
+
+@Test func applyingTheLayersVerbRevealsTheLayersPanel() {
+    // The op the verb returns, applied to a dock without Layers, is what the
+    // menu does: the first toggle shows the panel, the second hides it.
+    var l = WorkspaceLayout.fromParts(
+        version: layoutVersion, name: "Test",
+        anchored: [(.right, Dock(id: DockId(0), groups: [PanelGroup(panels: [.color])],
+                                 width: defaultDockWidth))],
+        floating: [], hiddenPanels: [], zOrder: [], focusedPanel: nil,
+        appearance: "dark_gray", paneLayout: nil, nextId: 1)
+    let verb = WindowLayoutVerb.op("toggle_panel", params: ["panel": "layers"])!
+    #expect(!l.isPanelVisible(.layers))
+    layoutApply(&l, verb)
+    #expect(l.panelOnScreen(.layers), "shown by the first toggle")
+    layoutApply(&l, verb)
+    #expect(!l.isPanelVisible(.layers), "hidden by the second")
+}
