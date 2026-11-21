@@ -4331,6 +4331,20 @@ mod tests {
         assert_eq!(h, 18.0);
     }
 
+    /// Row 202: CHARWIDTH's second half. The old native arm counted
+    /// `l.len()`, UTF-8 BYTES, so non-ASCII content inflated the box; the
+    /// fixture below uses ASCII `"hello"`, where bytes and chars agree, so it
+    /// could not see that half. `"héllo"` is 5 chars and 6 bytes.
+    #[test]
+    fn point_text_bounds_width_counts_characters_not_utf8_bytes() {
+        let font_size = 16.0;
+        let content = "héllo";
+        assert_eq!((content.chars().count(), content.len()), (5, 6), "fixture: chars and bytes differ");
+        let (_, _, w, _) = point_text(content, 0.0, 0.0, font_size).bounds();
+        let (_, _, ascii, _) = point_text("hello", 0.0, 0.0, font_size).bounds();
+        assert!((w - ascii).abs() < 1e-9, "five characters measure as five, not six: {w} vs {ascii}");
+    }
+
     #[test]
     fn point_text_bounds_width_matches_real_measurer_not_stub() {
         // Regression: the selection bounding box used to derive its
