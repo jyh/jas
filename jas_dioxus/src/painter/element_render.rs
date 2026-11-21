@@ -156,6 +156,18 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
             return true;
         }
     }
+    // STATUS-jas row 195: an UNMASKED leaf with a non-Normal mode is emitted
+    // under `push_group(1.0, mode)` (see `emit_element_with_vis`). A backend
+    // that cannot composite a group blend would draw it Normal and say
+    // nothing, so it is not routed there: the same protection the clause above
+    // gives a masked element.
+    if active_mask(elem).is_none()
+        && elem.common().mode != crate::painter::BlendMode::Normal
+        && !matches!(elem, Element::Group(_) | Element::Layer(_))
+        && !caps.supplies(Caps::NONE.with(Capability::NonNormalGroupBlend))
+    {
+        return true;
+    }
     // Freeform gradient on fill or stroke (never crosses the seam).
     if elem
         .fill_gradient()
