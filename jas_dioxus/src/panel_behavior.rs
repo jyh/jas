@@ -262,6 +262,11 @@ pub struct EngineHost {
     /// The timer acts this run asked for, in order. Cleared by
     /// [`EffectHost::rewind`], so the pre-flight's copies are not kept.
     pub timers: Vec<TimerOp>,
+    /// The panel a panel-menu item's `close_panel` closes, resolved by the
+    /// panel-menu door ([`EngineHost::for_panel_menu`]): the panel the item's
+    /// params name, else the menu's own, as each panel's `dispatch` closes
+    /// its own address on the web and the Mac (row 205).
+    pub menu_panel: Option<crate::workspace::workspace::PanelKind>,
 }
 
 /// One timer act a behavior asked for (`start_timer` / `cancel_timer`). The
@@ -284,6 +289,13 @@ impl EngineHost {
     /// [`EngineHost::timers`], for a door that passes them on to its shell.
     pub fn accepting_timers() -> EngineHost {
         EngineHost { accepts_timers: true, ..Default::default() }
+    }
+
+    /// This host runs a panel-menu item whose Close target is `panel`: a
+    /// `close_panel` closes that panel in the lent layout.
+    pub fn for_panel_menu(mut self, panel: Option<crate::workspace::workspace::PanelKind>) -> EngineHost {
+        self.menu_panel = panel;
+        self
     }
 
     /// This host also claims `start_timer` / `cancel_timer`, as
@@ -344,6 +356,19 @@ impl EffectHost for EngineHost {
             self.timers.push(TimerOp::Cancel(id.to_string()));
             return true;
         }
+        // Close <panel> from a panel menu (row 205): closed at its address in
+        // the lent layout (`op_close_panel`), as each panel's `dispatch`
+        // closes its own on the web and the Mac. The argument is the raw
+        // `{panel: "param.panel"}` (a host is handed effects unevaluated), so
+        // the DOOR resolves the target from the item. Any other `close_panel`
+        // stays unclaimed and is refused by name. A panel not in the layout
+        // closes nothing.
+        if key == "close_panel" {
+            use crate::workspace::layout_apply::{find_panel, op_close_panel};
+            let (Some(kind), Some(layout)) = (self.menu_panel, self.layout.as_ref()) else { return false };
+            let Some(addr) = find_panel(layout, kind) else { return true };
+            return matches!(self.layout_op(&op_close_panel(addr)), Some(None));
+        }
         let Some(model) = model else { return false };
         if key == "snapshot" {
             model.begin_txn();
@@ -374,6 +399,19 @@ impl EffectHost for EngineHost {
         if crate::interpreter::boolean_host::BooleanKey::from_key(key).is_some() {
             let options = crate::interpreter::boolean_host::options_from_store(store);
             return crate::interpreter::boolean_host::run(model, key, &options);
+        }
+        // The Boolean panel MENU's Make and Release Compound Shape (row 205):
+        // no button names them, so W2b-13's census left them unhosted, and the
+        // Windows panel-menu door then refused Make `UnknownEffect` (flask
+        // STATUS §986). The web runs the same two `Controller` laws
+        // (`renderer.rs`); each action's `snapshot` makes it one undo step.
+        if key == "make_compound_shape" {
+            crate::document::controller::Controller::make_compound_shape(model);
+            return true;
+        }
+        if key == "release_compound_shape" {
+            crate::document::controller::Controller::release_compound_shape(model);
+            return true;
         }
         // Repeat Boolean Operation: the operation `state.last_boolean_op`
         // names (`union`, `union_compound`, ...), as its `boolean_<op>` key; a
@@ -1764,10 +1802,13 @@ mod tests {
         model.commit_txn();
         assert!(model.can_undo(), "the align move landed in the transaction");
         // `boolean_union` sat in this list until W2b-13 hosted it (and the arm
-        // below shows it is claimed). `make_compound_shape` is a Boolean MENU
-        // key no button reaches, unhosted by design (census 2b-iii §3a).
+        // below shows it is claimed). `make_compound_shape` sat here too, "a
+        // Boolean MENU key no button reaches" (census 2b-iii §3a), until the
+        // panel-menu door reached it on Windows (row 205): it is claimed now.
         assert!(host.run("boolean_union", &Value::Null, &mut store, Some(&mut model)));
-        for declined in ["make_compound_shape", "set", "doc.snapshot", "zz_planted"] {
+        assert!(host.run("make_compound_shape", &Value::Null, &mut store, Some(&mut model)));
+        assert!(host.run("release_compound_shape", &Value::Null, &mut store, Some(&mut model)));
+        for declined in ["set", "doc.snapshot", "zz_planted"] {
             assert!(!host.run(declined, &Value::Null, &mut store, Some(&mut model)),
                     "the engine host claimed {declined}");
             assert_eq!(host.refuse(declined, &Value::Null), None,

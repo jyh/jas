@@ -2197,7 +2197,21 @@ unsafe fn jas_dispatch_action_inner(
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone());
+        // A panel-menu item's Close target (row 205): the panel its params
+        // name (`{panel: artboards}`, a literal kind, checked by the inverse
+        // because `parse_panel_kind` answers Layers for a name it does not
+        // know), else the panel whose menu it is (Boolean's Close has none).
+        // A named panel that is no panel leaves no target, so the effect is
+        // refused by name.
+        let close_target = panel.and_then(|pid| match params.and_then(|p| p.get("panel")).filter(|v| !v.is_null()) {
+            Some(v) => v.as_str().and_then(|s| {
+                let k = crate::workspace::layout_apply::parse_panel_kind(s);
+                (crate::workspace::layout_apply::panel_kind_str(k) == s).then_some(k)
+            }),
+            None => crate::layout_seed::kind_of_content_id(pid),
+        });
+        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone())
+            .for_panel_menu(close_target);
         let ran = crate::panel_behavior::run_action(
             panel, action, params, params_are_values, &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
@@ -2493,6 +2507,9 @@ fn dialog_ctx(engine: &JasEngine, store_ctx: &serde_json::Value) -> serde_json::
 /// AFTER the act: `null` when the click closed it, the parent's id when a
 /// nested dialog returned to it, a new id when the click opened one. The
 /// shell then re-reads [`jas_dialog_plan`].
+/// Its `doc_changed` is also true when the act moved the store's
+/// `boolean_precision` (Boolean Options' OK), which live geometry paints at,
+/// so the shell repaints though the document did not move.
 ///
 /// # ⛔ A refusal runs NOTHING
 ///
@@ -2542,6 +2559,10 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
         Err(r) => return refuse(r),
     };
     let scope = dialog_ctx(engine, &store_ctx);
+    // Live geometry paints at the store's `boolean_precision` (row 203), and
+    // Boolean Options' OK writes it, so an act that moves it changes the
+    // picture with the document unmoved (row 204, flask STATUS §986).
+    let precision = crate::ffi_pointer::engine_paint_precision(engine);
     let (ran, named) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
@@ -2566,12 +2587,15 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
     // A tool write that was REFUSED was also undone, so it changed nothing.
     let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
-    if ran.doc_changed || state_changed || moved {
+    // The reply's `doc_changed` is the repaint signal (`jas_document_modified`
+    // is the dirty flag), so a moved paint precision sets it.
+    let repaint = ran.doc_changed || crate::ffi_pointer::engine_paint_precision(engine) != precision;
+    if repaint || state_changed || moved {
         *engine.last_error.borrow_mut() = None;
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
+    let reply = act_reply(engine, &sync.changed, repaint, named);
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
 }
 
@@ -5836,6 +5860,43 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// BOOLEAN OPTIONS' OK REPAINTS WHEN IT MOVES THE PAINT PRECISION (row 204,
+    /// flask STATUS §986). Live geometry paints at the store's
+    /// `boolean_precision` (row 203), so OK changing it changes the picture
+    /// while the document stays put; a reply's `doc_changed` is the repaint
+    /// signal (`jas_document_modified` is the dirty flag), and the WinUI
+    /// canvas drew the old precision until an unrelated repaint. The control:
+    /// an OK that leaves the precision where it was repaints nothing.
+    #[test]
+    fn boolean_options_ok_repaints_when_the_paint_precision_moves() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        let before = crate::ffi_pointer::engine_paint_precision(engine_of(e));
+        let ok = |e| {
+            let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+            let (reply, err) = dialog_event(e, &ev);
+            let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+            assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the dialog: {reply}");
+            v
+        };
+        // The control first: OK at the precision the dialog opened with.
+        let (reply, err) = dispatch(e, r#"{"action":"open_boolean_options"}"#);
+        assert!(reply.contains("boolean_options"), "the dialog opened: {reply} {err}");
+        let v = ok(e);
+        assert_eq!(v["doc_changed"], false, "CONTROL: an OK that moves nothing repaints nothing: {v}");
+        assert_eq!(crate::ffi_pointer::engine_paint_precision(engine_of(e)), before, "CONTROL: unmoved");
+        // Now OK at 5 pt.
+        let (reply, err) = dispatch(e, r#"{"action":"open_boolean_options"}"#);
+        assert!(reply.contains("boolean_options"), "the dialog reopened: {reply} {err}");
+        let (reply, err) = dialog_event(e, r#"{"widget":"bo_precision_input","event":"commit","value":"5"}"#);
+        assert!(!reply.is_empty(), "the commit ran: {err}");
+        let v = ok(e);
+        assert_eq!(crate::ffi_pointer::engine_paint_precision(engine_of(e)), 5.0, "OK wrote the precision: {v}");
+        assert_eq!(v["doc_changed"], true, "OK moved the paint precision, so the shell repaints: {v}");
+        assert_eq!(unsafe { jas_document_modified(e) }, 0, "and the document is not an edit");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// THE DIALOG DOOR, the plan: `jas_dialog_plan` is the panel planner over
     /// the OPEN dialog's `content`, evaluated with the dialog's own scope
     /// (`dialog.*`, `param.*`) beside the engine's. With no dialog open it
@@ -6918,6 +6979,122 @@ mod tests {
             assert!(!reply.is_empty(), "{ev} was refused: {err}");
             assert_eq!(masks(e), vec![want; 2], "after {ev}");
         }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 205: A PANEL MENU'S "Close <panel>" CLOSES THAT PANEL IN THE ENGINE'S
+    /// LAYOUT. Sixteen panel menus end in `action: close_panel` with no params;
+    /// the web and the Mac close the panel whose menu it is (each panel's
+    /// `dispatch`, `op_close_panel(addr)`), and the engine refused
+    /// `UnknownEffect:close_panel` (the Boolean menu census, row 205). The
+    /// reply names the layout after it, for the shell to apply.
+    #[test]
+    fn a_panel_menus_close_item_closes_that_panel_in_the_engine_layout() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::workspace::workspace::PanelKind;
+        let e = engine_on("circle_ellipse_mix.svg");
+        let on = |e, k| engine_of(e).layout.borrow().as_ref().map(|l| l.panel_on_screen(k));
+        let name = "Default";
+        assert!(!take(unsafe { jas_layout_load(e, name.as_ptr(), name.len()) }).is_empty(), "fixture: a layout");
+        // Show it first (Window > Boolean), so the close has something to close.
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_boolean"}"#);
+        assert_eq!(on(e, PanelKind::Boolean), Some(true), "fixture: Boolean on screen: {reply} {err}");
+        let layers_before = on(e, PanelKind::Layers);
+        let (rows, err) = panel_menu(e, "boolean_panel_content");
+        let close = rows.iter().find(|r| r["action"] == "close_panel")
+            .and_then(|r| r["index"].as_u64()).unwrap_or_else(|| panic!("no close row: {rows:?} {err}"));
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"boolean_panel_content","menu_index":{close}}}"#));
+        assert!(!reply.is_empty(), "Close Boolean was refused: {err}");
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert!(!v["layout"].is_null(), "the reply names the layout for the shell: {reply}");
+        assert_eq!(on(e, PanelKind::Boolean), Some(false), "Close Boolean closed Boolean");
+        assert_eq!(on(e, PanelKind::Layers), layers_before, "and no other panel");
+        // Every panel menu with a Close item, not only Boolean's: each closes
+        // its own panel when it is on screen.
+        let ws = Workspace::load().unwrap();
+        let mut closed = 0;
+        for pid in ws.panels().as_object().unwrap().keys() {
+            let Some(kind) = crate::layout_seed::kind_of_content_id(pid) else { continue };
+            let (rows, _) = panel_menu(e, pid);
+            let Some(close) = rows.iter().find(|r| r["action"] == "close_panel").and_then(|r| r["index"].as_u64())
+                else { continue };
+            if on(e, kind) != Some(true) { continue; }
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{pid}","menu_index":{close}}}"#));
+            assert!(!reply.is_empty(), "Close on {pid} was refused: {err}");
+            assert_eq!(on(e, kind), Some(false), "Close on {pid} closed it");
+            closed += 1;
+        }
+        assert!(closed >= 3, "the census closed the Default layout's on-screen panels, not a filtered few: {closed}");
+        // A named panel is the target, not the menu's own: every shipped Close
+        // item names its own panel, so only this shape tells the two apart.
+        let _ = dispatch(e, r#"{"menu_item":"menu_boolean"}"#);
+        assert_eq!(on(e, PanelKind::Boolean), Some(true), "fixture: Boolean back on screen");
+        let (_, err) = dispatch(e, r#"{"panel":"layers_panel_content","action":"close_panel","params":{"panel":"boolean"}}"#);
+        assert_eq!(on(e, PanelKind::Boolean), Some(false), "the named panel closed: {err}");
+        let (reply, err) = dispatch(e, r#"{"panel":"layers_panel_content","action":"close_panel","params":{"panel":"zz_none"}}"#);
+        assert!(reply.is_empty() && err.contains("UnknownEffect:close_panel"),
+                "a name that is no panel is refused, never read as Layers: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 205: THE BOOLEAN MENU'S MAKE AND RELEASE COMPOUND SHAPE RUN IN THE
+    /// ENGINE. On Windows, Boolean ▸ ≡ ▸ Make Compound Shape read `PlatformEffect`
+    /// `UnknownEffect:make_compound_shape` (flask STATUS §986): the engine host
+    /// hosted the panel's 14 button keys and declined the two menu-only
+    /// effects, which the web runs through `Controller` (`renderer.rs`). Sent
+    /// by index, as the Windows shell sends them, each index read from the
+    /// menu by its label. Make is one undo step.
+    #[test]
+    fn the_boolean_menus_make_and_release_compound_shape_run_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const BP: &str = "boolean_panel_content";
+        let e = engine_on("circle_ellipse_mix.svg");
+        let (rows, err) = panel_menu(e, BP);
+        let at = |label: &str| rows.iter().find(|r| r["label"] == label)
+            .and_then(|r| r["index"].as_u64()).unwrap_or_else(|| panic!("no {label} row: {rows:?} {err}"));
+        let (make, release) = (at("Make Compound Shape"), at("Release Compound Shape"));
+        let shape = |e| {
+            let model = engine_of(e).model.borrow();
+            let cs = model.document().layers[0].children().unwrap_or(&[]);
+            let compounds = cs.iter().filter(|c| matches!(&***c,
+                crate::geometry::element::Element::Live(crate::geometry::live::LiveVariant::CompoundShape(_)))).count();
+            (cs.len(), compounds, model.document().selection.len())
+        };
+        assert_eq!(shape(e), (3, 0, 0), "fixture: three plain shapes, none selected");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let item = |e, at: u64| {
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{BP}","menu_index":{at}}}"#));
+            assert!(!reply.is_empty(), "menu item {at} was refused: {err}");
+            let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+            assert_eq!(v["doc_changed"], true, "menu item {at} changed the document: {reply}");
+        };
+        item(e, make);
+        assert_eq!(shape(e), (1, 1, 1), "Make: one compound shape, selected");
+        item(e, release);
+        assert_eq!(shape(e), (3, 0, 3), "Release: the three operands back, selected");
+        undo(e);
+        assert_eq!(shape(e).1, 1, "Undo takes Release back");
+        undo(e);
+        assert_eq!(shape(e).0, 3, "and one more takes Make back");
+        assert_eq!(shape(e).1, 0, "with no compound left");
+        // Every item of the menu, not only the one the box hit: none names an
+        // effect the engine does not know (a Repeat with nothing to repeat
+        // may answer `Unchanged`, which is not this refusal). Close needs the
+        // layout a shell loads.
+        let name = "Default";
+        assert!(!take(unsafe { jas_layout_load(e, name.as_ptr(), name.len()) }).is_empty(), "fixture: a layout");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        item(e, make);
+        let mut ran = 0;
+        for r in rows.iter().filter(|r| r["kind"] == "item") {
+            let at = r["index"].as_u64().unwrap();
+            let (_, err) = dispatch(e, &format!(r#"{{"panel":"{BP}","menu_index":{at}}}"#));
+            assert!(!err.contains("UnknownEffect") && !err.contains("UnknownAction"),
+                    "menu item {at} {}: {err}", r["label"]);
+            let _ = unsafe { jas_dialog_dismiss(e) };
+            ran += 1;
+        }
+        assert!(ran >= 6, "the census ran the menu's items, not a filtered few: {ran} of {rows:?}");
         unsafe { jas_engine_free(e) };
     }
 

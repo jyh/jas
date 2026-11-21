@@ -25,7 +25,7 @@ const CONTENT_SUFFIX: &str = "_panel_content";
 /// `None` for an id that names no `PanelKind`. Strict: `parse_panel_kind`
 /// falls back to `Layers` for anything it does not know, so the answer is
 /// checked by the inverse rather than trusted.
-fn kind_of_content_id(id: &str) -> Option<PanelKind> {
+pub(crate) fn kind_of_content_id(id: &str) -> Option<PanelKind> {
     let short = id.strip_suffix(CONTENT_SUFFIX)?;
     let kind = parse_panel_kind(short);
     (panel_kind_str(kind) == short).then_some(kind)
