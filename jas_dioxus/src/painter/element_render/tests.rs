@@ -2557,6 +2557,30 @@ fn the_live_arm_evaluates_at_the_installed_precision() {
     );
 }
 
+/// Row 202: A LIVE ELEMENT PAINTED WITH NO CONTEXT INSTALLED IS LOUD. The
+/// uninstalled default is an empty index, so every reference dangles and the
+/// element paints NOTHING with no error (`document::paint`'s module docs): a
+/// new host that loops `emit_element` without `emit_document` would ship that
+/// silence. In a debug build the live arm now asserts an install; the
+/// control paints the same element under one.
+#[test]
+#[cfg(debug_assertions)]
+fn a_live_element_painted_with_no_context_installed_panics_in_a_debug_build() {
+    let shape = || live_union(vec![rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)], fill(Color::WHITE), None);
+    {
+        let _guard = install_paint_context(IdIndex::new(), 0.5);
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, &shape(), 1.0);
+        assert!(!fill_paths(rec.commands()).is_empty(), "CONTROL: installed, it paints");
+    }
+    let caught = std::panic::catch_unwind(|| {
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, &shape(), 1.0);
+    });
+    let msg = caught.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+    assert!(msg.contains("no paint context installed"), "uninstalled, the live arm must refuse loudly: {msg:?}");
+}
+
 /// ⛔ OUTLINE MODE REACHES LIVE GEOMETRY TOO. `render.rs`'s Live arm branches on
 /// `outline` exactly as every other arm does: `apply_outline_style`, then NO
 /// fill and a stroke over the evaluated rings. Before this row the outline arm
