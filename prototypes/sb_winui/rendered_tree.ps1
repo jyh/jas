@@ -59,7 +59,7 @@ $w = Wait-SbRow -Log $log -Mark $mark -Patterns @('PLAN OUT ', 'RUSTFAIL') -Time
 Start-Sleep -Seconds $SettleSec
 $arg = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $dir 'uia_tree.ps1') + '" -ProcessId ' + $st.Pid + ' -Root ' + $root + ' -Through ' + $Panel + ' -Out "' + $uiaOut + '"'
 $pr = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $uTask -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg) -Principal $pr -Force | Out-Null
+Register-ScheduledTask -TaskName $uTask -Action (New-SbSession1Action $arg) -Principal $pr -Force | Out-Null
 Start-ScheduledTask -TaskName $uTask
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while (-not (Test-Path $uiaOut) -and $sw.Elapsed.TotalSeconds -lt 60) { Start-Sleep -Milliseconds 250 }

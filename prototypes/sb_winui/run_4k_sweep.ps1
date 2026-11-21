@@ -34,6 +34,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $here 'harness_common.ps1')
 $exe  = Join-Path $here 'bin\Debug\net10.0-windows10.0.22621.0\win-x64\SbWinUi.exe'
 $log  = Join-Path (Split-Path -Parent $exe) 'sb-runs.log'
 $task = 'jas-sb-4k'
@@ -76,7 +77,7 @@ function Run-Arm([string]$mode, [string]$size, [string]$label) {
     if ($size) { $sets += "`$env:SB_SIZE='$size';" }
     $arg = '-NoProfile -ExecutionPolicy Bypass -Command "' + $sets + " & '$exe'" + '"'
 
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+    $action = New-SbSession1Action $arg
     Register-ScheduledTask -TaskName $task -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $task
 
