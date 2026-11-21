@@ -14,7 +14,10 @@
 //! the engine path the batch's `snapshot` owns the step.
 //!
 //! Not here: the panel MENU's four keys (make, release, repeat, reset) and
-//! `open_boolean_options`. No button reaches them (census 2b-iii §3a).
+//! `open_boolean_options`, which no button reaches (census 2b-iii §3a). The
+//! panel-menu door does reach them: `EngineHost` hosts make, release and
+//! repeat itself (row 205), reset is a `set:` the runner applies, and the
+//! dialog opens through the runner's `open_dialog` arm.
 
 use serde_json::Value;
 

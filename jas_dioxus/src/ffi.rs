@@ -6968,6 +6968,34 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 205: A PANEL MENU'S "Close <panel>" CLOSES THAT PANEL IN THE ENGINE'S
+    /// LAYOUT. Sixteen panel menus end in `action: close_panel` with no params;
+    /// the web and the Mac close the panel whose menu it is (each panel's
+    /// `dispatch`, `op_close_panel(addr)`), and the engine refused
+    /// `UnknownEffect:close_panel` (the Boolean menu census, row 205). The
+    /// reply names the layout after it, for the shell to apply.
+    #[test]
+    fn a_panel_menus_close_item_closes_that_panel_in_the_engine_layout() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::workspace::workspace::PanelKind;
+        let e = engine_on("circle_ellipse_mix.svg");
+        let on = |e, k| engine_of(e).layout.borrow().as_ref().map(|l| l.panel_on_screen(k));
+        // Show it first, so the close has something to close.
+        let (reply, err) = dispatch(e, r#"{"action":"show_panel","params":{"panel":"boolean"}}"#);
+        assert_eq!(on(e, PanelKind::Boolean), Some(true), "fixture: Boolean on screen: {reply} {err}");
+        let layers_before = on(e, PanelKind::Layers);
+        let (rows, err) = panel_menu(e, "boolean_panel_content");
+        let close = rows.iter().find(|r| r["action"] == "close_panel")
+            .and_then(|r| r["index"].as_u64()).unwrap_or_else(|| panic!("no close row: {rows:?} {err}"));
+        let (reply, err) = dispatch(e, &format!(r#"{{"panel":"boolean_panel_content","menu_index":{close}}}"#));
+        assert!(!reply.is_empty(), "Close Boolean was refused: {err}");
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert!(!v["layout"].is_null(), "the reply names the layout for the shell: {reply}");
+        assert_eq!(on(e, PanelKind::Boolean), Some(false), "Close Boolean closed Boolean");
+        assert_eq!(on(e, PanelKind::Layers), layers_before, "and no other panel");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 205: THE BOOLEAN MENU'S MAKE AND RELEASE COMPOUND SHAPE RUN IN THE
     /// ENGINE. On Windows, Boolean ▸ ≡ ▸ Make Compound Shape read `PlatformEffect`
     /// `UnknownEffect:make_compound_shape` (flask STATUS §986): the engine host
@@ -7008,6 +7036,21 @@ mod tests {
         undo(e);
         assert_eq!(shape(e).0, 3, "and one more takes Make back");
         assert_eq!(shape(e).1, 0, "with no compound left");
+        // Every item of the menu, not only the one the box hit: none names an
+        // effect the engine does not know (a Repeat with nothing to repeat
+        // may answer `Unchanged`, which is not this refusal).
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        item(e, make);
+        let mut ran = 0;
+        for r in rows.iter().filter(|r| r["kind"] == "item") {
+            let at = r["index"].as_u64().unwrap();
+            let (_, err) = dispatch(e, &format!(r#"{{"panel":"{BP}","menu_index":{at}}}"#));
+            assert!(!err.contains("UnknownEffect") && !err.contains("UnknownAction"),
+                    "menu item {at} {}: {err}", r["label"]);
+            let _ = unsafe { jas_dialog_dismiss(e) };
+            ran += 1;
+        }
+        assert!(ran >= 6, "the census ran the menu's items, not a filtered few: {ran} of {rows:?}");
         unsafe { jas_engine_free(e) };
     }
 

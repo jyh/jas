@@ -375,6 +375,19 @@ impl EffectHost for EngineHost {
             let options = crate::interpreter::boolean_host::options_from_store(store);
             return crate::interpreter::boolean_host::run(model, key, &options);
         }
+        // The Boolean panel MENU's Make and Release Compound Shape (row 205):
+        // no button names them, so W2b-13's census left them unhosted, and the
+        // Windows panel-menu door then refused Make `UnknownEffect` (flask
+        // STATUS §986). The web runs the same two `Controller` laws
+        // (`renderer.rs`); each action's `snapshot` makes it one undo step.
+        if key == "make_compound_shape" {
+            crate::document::controller::Controller::make_compound_shape(model);
+            return true;
+        }
+        if key == "release_compound_shape" {
+            crate::document::controller::Controller::release_compound_shape(model);
+            return true;
+        }
         // Repeat Boolean Operation: the operation `state.last_boolean_op`
         // names (`union`, `union_compound`, ...), as its `boolean_<op>` key; a
         // null is a no-op. Expand is not repeatable, so `from_key` refuses it
@@ -1764,10 +1777,13 @@ mod tests {
         model.commit_txn();
         assert!(model.can_undo(), "the align move landed in the transaction");
         // `boolean_union` sat in this list until W2b-13 hosted it (and the arm
-        // below shows it is claimed). `make_compound_shape` is a Boolean MENU
-        // key no button reaches, unhosted by design (census 2b-iii §3a).
+        // below shows it is claimed). `make_compound_shape` sat here too, "a
+        // Boolean MENU key no button reaches" (census 2b-iii §3a), until the
+        // panel-menu door reached it on Windows (row 205): it is claimed now.
         assert!(host.run("boolean_union", &Value::Null, &mut store, Some(&mut model)));
-        for declined in ["make_compound_shape", "set", "doc.snapshot", "zz_planted"] {
+        assert!(host.run("make_compound_shape", &Value::Null, &mut store, Some(&mut model)));
+        assert!(host.run("release_compound_shape", &Value::Null, &mut store, Some(&mut model)));
+        for declined in ["set", "doc.snapshot", "zz_planted"] {
             assert!(!host.run(declined, &Value::Null, &mut store, Some(&mut model)),
                     "the engine host claimed {declined}");
             assert_eq!(host.refuse(declined, &Value::Null), None,
