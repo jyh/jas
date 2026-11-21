@@ -117,6 +117,65 @@
 //! and lowers at BUILD time to `Mask::AlphaClipOut`. A fourth law was transcript
 //! overreach; ratified as such, zero further contract change.
 //!
+//! ## AMENDMENT A7 — THE KNOCKOUT BRACKET (ratified 2026-11-21, Captain)
+//!
+//! Four ops added (16 → 20), candidate C4 of the design block.
+//!
+//! ```text
+//! push_knockout_layer()
+//!     ( push_knockout_shape()
+//!           <shape artwork ops>        — full vocabulary
+//!       pop_knockout_shape()
+//!       <child body ops> )*            — full vocabulary, to the next shape
+//! pop_knockout_layer()                   bracket or the layer's pop
+//! ```
+//!
+//! Per pixel, premultiplied, every channel alpha included. A knockout group has
+//! children `E_1..E_n`, bottom to top, and an INITIAL BACKDROP `B0`: what the
+//! parent surface holds when the group opens. Child `i` has a SHAPE `f_i` and a
+//! result `T_i` = `B0` with the child's body composited onto it by the ordinary
+//! rules. The group surface `S` starts as `B0`, and
+//! `S ← (1 − f_i)·S + f_i·T_i`. Where `f_i = 1` nothing of `E_1..E_{i-1}`
+//! survives, however transparent child `i` is. ⛔ SHAPE IS NOT ALPHA: with
+//! `f := α` the law is source-over, so knockout exists only for partial alpha
+//! and non-Normal blends. Shape is the union of the child's painted geometry
+//! under its clips; opacity, brush and stop alpha, blend and MASKS do not
+//! reduce it (ratified: "a mask does not reduce shape").
+//!
+//! - `push_knockout_layer` fixes `B0`: the parent surface as it stands. No
+//!   alpha, no blend: a group's own alpha and blend, and isolation, are A6's
+//!   layer around this one (isolated knockout is this bracket inside A6's
+//!   layer, where `B0` is transparent).
+//! - `pop_knockout_shape` derives `f` = raw `A` of the artwork rendered inside
+//!   the bracket (itself isolated: fresh transparent surface, alpha context
+//!   1.0, as A6's mask bracket), and opens the child surface `T ← B0`. The body
+//!   then draws on `T` NON-isolated; the open-group product is unchanged
+//!   inside it.
+//! - The next `push_knockout_shape`, or `pop_knockout_layer`, closes the child:
+//!   `S ← (1−f)·S + f·T`, exactly, as an erase and an ADDITIVE composite.
+//!   Source-over in its place is a contract violation, not an approximation.
+//! - A paint op at the layer's own level before the first shape bracket is a
+//!   contract violation. All brackets strictly nest.
+//! - ⛔ THE SHAPE IS THE CALLER'S. A backend never derives it from the body.
+//!   The walker emits each child twice, the first time through a decorator
+//!   that forces every brush opaque and every alpha 1
+//!   ([`element_render::OpaqueShape`]): one copy for every Painter backend,
+//!   visible in every golden.
+//! - The Mac implements the same law in its own code, as it does A6's.
+//!
+//! Document lowering (the walk, not the seam): `page_isolated_blending` → A6's
+//! layer around the layer loop; `page_knockout_group` → A7's bracket, one child
+//! per top-level layer; both → A7 inside A6. Per-group `knockout_group` stays
+//! storage-only.
+//!
+//! ⚖️ AND THE TRAIT GREW, WHICH r.6c SAYS IT DOES NOT — so the ruling's scope
+//! was ruled with it (the Captain, 2026-11-21): **r.6c governs queries,
+//! readback and foreign surfaces; a write-only compositing bracket grows the
+//! trait by amendment.** These four ops return nothing, take no surface and
+//! record as commands, so the painter stays a command list. The same line is
+//! homed where r.6c is stated (`surface/mod.rs`) and in the portability gate's
+//! copy (`scripts/check_canvas_portability.py`).
+//!
 //! See `SPIKE_FINDINGS.md` in this directory for the ergonomics verdict, the
 //! R7 float-law decision, the R10 first number, and the "PH1 status" note
 //! recording the now-ratified amendments A1-A5 (A1: FastRun carries a baseline
@@ -533,6 +592,34 @@ pub trait Painter {
     /// rendering, so documents with masked elements at opacity < 1 WILL render
     /// differently after the repair, and that is accepted.
     fn pop_isolated_layer(&mut self);
+
+    /// AMENDMENT A7 (ratified 2026-11-21). Open a KNOCKOUT group: fix the
+    /// initial backdrop `B0` = the parent surface as it stands. No alpha, no
+    /// blend (those, and isolation, are A6's layer around this one). Only
+    /// shape brackets and child bodies may follow; a paint op before the first
+    /// [`push_knockout_shape`](Painter::push_knockout_shape) is a contract
+    /// violation. See the module docs for the law.
+    fn push_knockout_layer(&mut self);
+
+    /// Open the SHAPE bracket of the next child (closing the previous child
+    /// first, if one is open): what is drawn until
+    /// [`pop_knockout_shape`](Painter::pop_knockout_shape) is shape artwork on a
+    /// fresh transparent surface, at alpha context 1.0, and never lands.
+    ///
+    /// ⛔ THE SHAPE IS THE CALLER'S: the artwork arrives already opaque
+    /// ([`element_render::OpaqueShape`]); a backend never derives `f` from the
+    /// body.
+    fn push_knockout_shape(&mut self);
+
+    /// Close the shape bracket: `f` = raw `A` of the artwork. Opens the child
+    /// surface `T ← B0`; the body that follows draws on `T` NON-isolated, with
+    /// the open-group product unchanged.
+    fn pop_knockout_shape(&mut self);
+
+    /// Close the last child, `S ← (1−f)·S + f·T` — an erase and an ADDITIVE
+    /// composite, exactly; source-over in its place is a contract violation —
+    /// and close the group.
+    fn pop_knockout_layer(&mut self);
 
     /// Draw a text run (see [`TextRun`]). Interleaves in z-order with the other
     /// primitives — text is a PH1 op, not a separate pass.

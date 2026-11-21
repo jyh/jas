@@ -256,7 +256,8 @@ private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
         if lines.isEmpty { return true }
         let (r, g, b, _): (Double, Double, Double, Double) =
             v.stroke.map { $0.color.toRgba() } ?? (0, 0, 0, 1)
-        ctx.setStrokeColor(CGColor(red: r, green: g, blue: b, alpha: br.alpha()))
+        ctx.setStrokeColor(CGColor(red: r, green: g, blue: b,
+                                   alpha: _knockoutShapeOpaque ? 1 : br.alpha()))
         ctx.setLineWidth(br.lineWidth())
         ctx.setLineCap(.round)
         for line in lines where line.count >= 2 {
@@ -277,12 +278,36 @@ private func drawBrushedPath(_ ctx: CGContext, _ v: Path) -> Bool {
 
 private func nsColor(_ c: Color) -> NSColor {
     let (r, g, b, a) = c.toRgba()
-    return NSColor(red: r, green: g, blue: b, alpha: a)
+    return NSColor(red: r, green: g, blue: b, alpha: _knockoutShapeOpaque ? 1 : a)
 }
 
 private func cgColor(_ c: Color) -> CGColor {
     let (r, g, b, a) = c.toRgba()
-    return CGColor(red: r, green: g, blue: b, alpha: a)
+    return CGColor(red: r, green: g, blue: b, alpha: _knockoutShapeOpaque ? 1 : a)
+}
+
+// MARK: - A7 knockout SHAPE mode (the Swift spelling of jas_dioxus's
+// `element_render::OpaqueShape`)
+//
+// AMENDMENT A7 (ratified 2026-11-21): a knockout child's SHAPE is the union of
+// its painted geometry under its clips; opacity, brush and stop alpha, blend
+// and masks do not reduce it, and THE SHAPE IS THE CALLER'S. CoreGraphics has
+// no decorator seam, so the walk sets this flag while it draws a child a
+// second time as its shape artwork, and the element drawing reads it at its
+// three choke points: the colour (`cgColor`, gradient stops, bristles), the
+// element alpha (`setElementAlpha`) and the element blend
+// (`setElementBlend`); `drawElement` drops an active mask while it is set.
+// One paint at a time on the main thread, restored by the caller.
+internal var _knockoutShapeOpaque = false
+
+/// `ctx.setAlpha` for an element's own opacity product; 1 in shape mode.
+private func setElementAlpha(_ ctx: CGContext, _ a: CGFloat) {
+    ctx.setAlpha(_knockoutShapeOpaque ? 1 : a)
+}
+
+/// `ctx.setBlendMode` for an element's own blend; Normal in shape mode.
+private func setElementBlend(_ ctx: CGContext, _ m: BlendMode) {
+    ctx.setBlendMode(_knockoutShapeOpaque ? .normal : cgBlendMode(m))
 }
 
 /// Map a BlendMode to its CoreGraphics counterpart. CoreGraphics natively
@@ -444,7 +469,7 @@ private func makeCGGradient(_ g: Gradient) -> CGGradient? {
     var colors: [CGColor] = []
     var locs: [CGFloat] = []
     for stop in g.stops {
-        colors.append(cgColorFromHex(stop.color, alpha: stop.opacity / 100.0))
+        colors.append(cgColorFromHex(stop.color, alpha: _knockoutShapeOpaque ? 1 : stop.opacity / 100.0))
         locs.append(CGFloat(stop.location / 100.0))
     }
     let cs = CGColorSpaceCreateDeviceRGB()
@@ -1250,7 +1275,7 @@ private func drawElementWithMask(
     // a full white mask rendered at 0.25, with the same element unmasked at
     // 0.5 as the control. Pinned by NestedOpacityTests.
     ctx.setAlpha(CGFloat(ancestorAlpha))
-    ctx.setBlendMode(cgBlendMode(elem.blendMode))
+    setElementBlend(ctx, elem.blendMode)
     ctx.beginTransparencyLayer(auxiliaryInfo: nil)
     // Inside the layer start from an identity compositing state so
     // the element body / mask subtree don't double-apply the
@@ -1325,7 +1350,8 @@ func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .p
     // encodes which of the three supported composite strategies to
     // use. ``disabled`` / ``linked: false`` fall through to the
     // plain path for now. OPACITY.md §Rendering.
-    if let mask = elem.mask, let plan = maskPlan(mask) {
+    // A7: a mask does not reduce shape, so shape mode draws the body alone.
+    if !_knockoutShapeOpaque, let mask = elem.mask, let plan = maskPlan(mask) {
         drawElementWithMask(ctx, elem, mask, plan: plan, ancestorVis: ancestorVis,
                             elementScale: elementScale, ancestorAlpha: ancestorAlpha)
         return
@@ -1378,8 +1404,8 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
     // `ancestorVis` and `elementScale` are threaded the same way for the same
     // reason. Pinned by NestedOpacityTests.
     let baseAlpha = ancestorAlpha * elementOpacity(elem)
-    ctx.setAlpha(CGFloat(baseAlpha))
-    ctx.setBlendMode(cgBlendMode(elem.blendMode))
+    setElementAlpha(ctx, CGFloat(baseAlpha))
+    setElementBlend(ctx, elem.blendMode)
     switch elem {
     case .line(let v):
         applyTransform(ctx, v.transform)
@@ -1389,7 +1415,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         } else {
             let (op, al) = setStroke(ctx, v.stroke)
             strokeAlign = al
-            ctx.setAlpha(CGFloat(baseAlpha * op))
+            setElementAlpha(ctx, CGFloat(baseAlpha * op))
         }
         // Shorten line for arrowheads
         var lx1 = v.x1, ly1 = v.y1, lx2 = v.x2, ly2 = v.y2
@@ -1424,7 +1450,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         }
 
     case .rect(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.x, y: v.y, width: v.width, height: v.height)
         if !outline,
@@ -1469,14 +1495,14 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
 
 
     case .ellipse(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2)
         ctx.addEllipse(in: rect)
         fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
 
     case .polyline(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         guard !v.points.isEmpty else { break }
         ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
@@ -1487,7 +1513,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline)
 
     case .polygon(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         guard !v.points.isEmpty else { break }
         ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
@@ -1499,7 +1525,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline)
 
     case .path(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         if outline {
             buildPath(ctx, v.d)
@@ -1597,7 +1623,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         }
 
     case .text(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         // Multi-tspan Text renders each tspan with its own effective
         // font (family / size / weight / style) and text-decoration on
@@ -2059,7 +2085,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         ctx.restoreGState()
 
     case .textPath(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         let font = resolveFont(family: v.fontFamily,
                                bold: v.fontWeight == "bold",
@@ -2163,7 +2189,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         ctx.restoreGState()
 
     case .group(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         // Thread the accumulated element scale (including this group's own
         // transform) so a stroked descendant is counter-scaled by the full
@@ -2175,7 +2201,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         }
 
     case .layer(let v):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         for child in v.children {
             drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale,
@@ -2186,7 +2212,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
     // group: the child draws itself, under the wrapper's own transform and
     // alpha. See `drawTransformed`.
     case .live(.transformed(let t)):
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, t.transform)
         drawTransformed(ctx, t, ancestorVis: effective, elementScale: elemScale,
                         ancestorAlpha: baseAlpha)
@@ -2197,7 +2223,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         // top-level evaluate. Per variant we also pick the paint: a
         // reference inherits the resolved target's paint when its own is
         // nil (Fork F3). Mirrors the Rust render arm.
-        ctx.setAlpha(CGFloat(baseAlpha))
+        setElementAlpha(ctx, CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         var visiting = VisitSet()
         let ps: BoolPolygonSet
@@ -2258,7 +2284,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 ctx.closePath()
             }
             if !outline && liveFill != nil {
-                ctx.setAlpha(CGFloat(baseAlpha * fillOp))
+                setElementAlpha(ctx, CGFloat(baseAlpha * fillOp))
                 // ⛔ ROW EH. NOT a bare `ctx.fillPath()`, which means winding:
                 // these rings are the algorithm layer's own output and it
                 // declares them EVEN-ODD (BOOLEAN.md clause 4,
@@ -2273,7 +2299,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 ctx.fillPath(using: cgFillRule(FillRule(boolResultFillRule)))
             }
             if outline || liveStroke != nil {
-                ctx.setAlpha(CGFloat(baseAlpha * strokeOp))
+                setElementAlpha(ctx, CGFloat(baseAlpha * strokeOp))
                 // strokeAligned consumes the current path (clip/stroke);
                 // the path must be re-traced if both fill and stroke run.
                 if !outline && liveFill != nil {
@@ -2665,6 +2691,60 @@ private func cgColorFromHex(_ hex: String) -> CGColor? {
         blue: CGFloat(bv) / 255.0,
         alpha: 1.0
     )
+}
+
+/// AMENDMENT A7 (row 209) on the Mac: the top-level `layers` are the children
+/// of one knockout group whose initial backdrop `B0` is what `backdrop` paints
+/// (nil: transparent, the isolated page). Per child, premultiplied,
+/// `S ← (1 − f)·S + f·T` with `T = B0` + the child's body and `f` its SHAPE:
+///
+/// 1. erase — a `.destinationOut` transparency layer of the shape artwork:
+///    `S ← S·(1 − f)`;
+/// 2. add — a `.plusLighter` transparency layer holding `T`: `B0`, then the
+///    body NON-isolated against it, then a `.destinationIn` transparency
+///    layer of the shape artwork, so the layer holds `f·T`; it lands as
+///    `S + f·T` (the ADDITIVE composite, measured exact against `S + T` by
+///    `A7PlusCompositeTests`). ⛔ `.normal` in its place is source-over, a
+///    contract violation.
+///
+/// A transparency layer composites back over the whole clip region, so the
+/// `.destinationIn` erases `T` everywhere outside the shape, not only where
+/// the artwork drew (the same property `compositeMaskArtwork` rests on).
+/// The shape artwork is the child drawn a second time with
+/// `_knockoutShapeOpaque` set (THE SHAPE IS THE CALLER'S).
+internal func drawKnockoutLayers(_ ctx: CGContext, _ layers: [Layer],
+                                 backdrop: ((CGContext) -> Void)?) {
+    func shape(_ layer: Layer) {
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        ctx.setBlendMode(.normal)
+        ctx.setAlpha(1.0)
+        let prior = _knockoutShapeOpaque
+        _knockoutShapeOpaque = true
+        drawElement(ctx, .layer(layer))
+        _knockoutShapeOpaque = prior
+        ctx.endTransparencyLayer()
+    }
+    for layer in layers {
+        // 1. S ← S·(1 − f)
+        ctx.saveGState()
+        ctx.setBlendMode(.destinationOut)
+        shape(layer)
+        ctx.restoreGState()
+        // 2. S ← S + f·T
+        ctx.saveGState()
+        ctx.setBlendMode(.plusLighter)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        ctx.setBlendMode(.normal)
+        ctx.setAlpha(1.0)
+        backdrop?(ctx)
+        drawElement(ctx, .layer(layer))
+        ctx.saveGState()
+        ctx.setBlendMode(.destinationIn)
+        shape(layer)
+        ctx.restoreGState()
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
+    }
 }
 
 private func drawArtboardFills(_ ctx: CGContext, _ doc: Document) {
@@ -3555,11 +3635,33 @@ class CanvasNSView: NSView {
             // `emit_layers` / `draw_page_layers`): an isolated page draws its
             // layers in ONE transparency layer, which composites onto the
             // artboard fills once, so a blended layer never blends with them.
-            // page_knockout_group is stored only (the A7 amendment).
+            // Row 209 (AMENDMENT A7): a knockout page draws each top-level
+            // layer as one child of a knockout group (`drawKnockoutLayers`),
+            // inside the isolated layer when both are set.
             let isolatedPage = document.documentSetup.pageIsolatedBlending
             if isolatedPage { ctx.beginTransparencyLayer(auxiliaryInfo: nil) }
-            for layer in document.layers {
-                drawElement(ctx, .layer(layer))
+            if document.documentSetup.pageKnockoutGroup {
+                // B0 is what the target holds when the group opens: the
+                // pasteboard and the artboard fills, re-emitted (CoreGraphics
+                // cannot read the window's pixels back); transparent inside
+                // the isolated layer.
+                let view = CGAffineTransform(translationX: CGFloat(controller?.model.viewOffsetX ?? 0),
+                                             y: CGFloat(controller?.model.viewOffsetY ?? 0))
+                    .scaledBy(x: CGFloat(controller?.model.zoomLevel ?? 1),
+                              y: CGFloat(controller?.model.zoomLevel ?? 1))
+                let backdrop: ((CGContext) -> Void)? = isolatedPage ? nil : { [bounds, document] c in
+                    c.saveGState()
+                    c.concatenate(view.inverted())
+                    c.setFillColor(canvasBackgroundColor)
+                    c.fill(bounds)
+                    c.restoreGState()
+                    drawArtboardFills(c, document)
+                }
+                drawKnockoutLayers(ctx, document.layers, backdrop: backdrop)
+            } else {
+                for layer in document.layers {
+                    drawElement(ctx, .layer(layer))
+                }
             }
             if isolatedPage { ctx.endTransparencyLayer() }
         }

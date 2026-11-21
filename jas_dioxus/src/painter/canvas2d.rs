@@ -44,6 +44,22 @@ enum LayerKind {
     /// composites by UPDATING THE PARENT'S ALPHA CHANNEL under `law`, never by
     /// drawing the artwork's colour into the parent.
     Mask { law: Mask },
+    /// A7 — the SHAPE artwork of the innermost knockout group's next child.
+    /// Never lands: at `pop_knockout_shape` it becomes that group's `f`.
+    KnockoutShape,
+    /// A7 — the child surface `T`, seeded from the group's `B0`. Closed by
+    /// the next shape push or the group's pop: `S ← (1−f)·S + f·T`.
+    KnockoutChild,
+}
+
+/// One open knockout group (A7).
+struct KnockoutGroup {
+    /// `B0`: the parent surface as it stood at `push_knockout_layer`, copied.
+    b0: WebSurface,
+    /// `f` of the child currently open (set at `pop_knockout_shape`).
+    shape: Option<WebSurface>,
+    /// `layers.len()` at the push: the group's children sit at this depth.
+    depth: usize,
 }
 
 struct LayerTarget {
@@ -101,11 +117,66 @@ pub struct Canvas2dPainter<'a> {
     /// `canvas::render`, which already does exactly that for the legacy masked
     /// path (`read_ctx_transform`). The value crosses the seam explicitly.
     base_frame: Option<Transform>,
+    /// A7: open knockout groups, innermost last. A group that could not copy
+    /// its backdrop is `None` and degrades to ordinary compositing.
+    knockouts: Vec<Option<KnockoutGroup>>,
+    /// ⛔ A FAILED OPEN MUTES, IT NEVER LANDS THE SHAPE. When a knockout
+    /// surface could not be made, the shape artwork draws under an EMPTY clip
+    /// (a `save()` counted here, undone at `pop_knockout_shape`) so nothing of
+    /// it paints, and the child body draws straight onto the parent: ordinary
+    /// compositing, a wrong picture but never the opaque artwork on screen.
+    muted_shapes: Vec<bool>,
 }
 
 impl<'a> Canvas2dPainter<'a> {
     pub fn new(ctx: &'a CanvasRenderingContext2d) -> Self {
-        Self { base: ctx, layers: Vec::new(), state_stack: Vec::new(), failed_layers: 0, group_alpha_stack: Vec::new(), base_frame: None }
+        Self { base: ctx, layers: Vec::new(), state_stack: Vec::new(), failed_layers: 0, group_alpha_stack: Vec::new(), base_frame: None, knockouts: Vec::new(), muted_shapes: Vec::new() }
+    }
+
+    /// Run `f` on the context every drawing op currently uses (the innermost
+    /// open surface, or the base). NOT a trait method: it is how the web's
+    /// LEGACY walk draws a knockout child's body onto this backend's child
+    /// surface `T` (A7, `canvas::render::draw_knockout_layers`), so the web
+    /// has one implementation of the bracket and the body renders exactly as
+    /// the legacy walk renders it everywhere else.
+    pub fn with_target<R>(&self, f: impl FnOnce(&CanvasRenderingContext2d) -> R) -> R {
+        f(self.target())
+    }
+
+    /// A7: a device-space copy of the current target (`B0`).
+    fn copy_target(&self) -> Option<WebSurface> {
+        let canvas = self.target().canvas()?;
+        let (w, h) = (canvas.width(), canvas.height());
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let copy = WebSurface::offscreen(w, h)?;
+        let src = WebSurface::from_canvas(canvas)?;
+        src.composite_onto(copy.ctx(), CompositeOp::Copy, 1.0);
+        Some(copy)
+    }
+
+    /// A7: close the innermost group's open child, if one is open:
+    /// `T ← T·f` (destination-in), `S ← S·(1−f)` (destination-out), then
+    /// `S ← S + T` (`lighter`, the ADDITIVE composite measured exact against
+    /// `S + T` by `a7_plus_pixel_tests`). Source-over in place of the last is
+    /// a contract violation: it gives `T + (1−α_T)·S`, not `S + T`.
+    fn close_knockout_child(&mut self) {
+        let Some(Some(g)) = self.knockouts.last() else { return };
+        let depth = g.depth;
+        if self.layers.len() != depth + 1
+            || !matches!(self.layers.last().map(|l| &l.kind), Some(LayerKind::KnockoutChild))
+        {
+            return;
+        }
+        let child = self.layers.pop().expect("checked above");
+        self.group_alpha_stack = child.saved_group_alphas;
+        let Some(Some(g)) = self.knockouts.last_mut() else { return };
+        let Some(shape) = g.shape.take() else { return };
+        shape.composite_onto(child.surface.ctx(), CompositeOp::DestinationIn, 1.0);
+        let parent = self.target();
+        shape.composite_onto(parent, CompositeOp::DestinationOut, 1.0);
+        child.surface.composite_onto(parent, CompositeOp::Plus, 1.0);
     }
 
     /// As [`Self::new`], but told the world transform `ctx` is ALREADY in.
@@ -566,6 +637,64 @@ impl Painter for Canvas2dPainter<'_> {
         // Forced back rather than merely restored, exactly as before this
         // refactor -- see the note in `pop_mask_layer`.
         let _ = parent.set_global_composite_operation("source-over");
+    }
+
+    /// A7: fix `B0` — a device-space copy of the current target. `S` is the
+    /// target itself, updated in place per child, so the group's pop
+    /// composites nothing of its own.
+    fn push_knockout_layer(&mut self) {
+        let group = self.copy_target().map(|b0| KnockoutGroup { b0, shape: None, depth: self.layers.len() });
+        self.knockouts.push(group);
+    }
+
+    /// A7: close the open child (if any), then open the shape surface: fresh,
+    /// transparent, in the parent's frame, alpha context 1.0 (`open_layer`
+    /// restarts the group product, as for A6's mask bracket).
+    fn push_knockout_shape(&mut self) {
+        self.close_knockout_child();
+        let live = matches!(self.knockouts.last(), Some(Some(_)))
+            && self.open_layer(LayerKind::KnockoutShape).is_some();
+        if !live {
+            // Muted: an empty clip, so the shape artwork paints nothing.
+            let t = self.target();
+            t.save();
+            t.begin_path();
+            t.clip();
+        }
+        self.muted_shapes.push(!live);
+    }
+
+    /// A7: `f` = the shape artwork's raw alpha; open the child surface
+    /// `T ← B0`. The body draws on `T` NON-isolated: the open-group product
+    /// is the one at the bracket, unchanged.
+    fn pop_knockout_shape(&mut self) {
+        if self.muted_shapes.pop().unwrap_or(true) {
+            self.target().restore();
+            return;
+        }
+        let Some(shape) = self.layers.pop() else { return };
+        let LayerKind::KnockoutShape = shape.kind else {
+            panic!("pop_knockout_shape with another bracket open -- brackets must nest (A7)");
+        };
+        self.group_alpha_stack = shape.saved_group_alphas;
+        let product = self.group_alpha_stack.clone();
+        if self.open_layer(LayerKind::KnockoutChild).is_none() {
+            // No child surface: the body draws on the parent (ordinary
+            // compositing), and the shape is dropped with it.
+            return;
+        }
+        // NON-isolated: the body keeps the open-group product.
+        self.group_alpha_stack = product;
+        let Some(Some(g)) = self.knockouts.last_mut() else { return };
+        let child = self.layers.last().expect("just opened");
+        g.b0.composite_onto(child.surface.ctx(), CompositeOp::Copy, 1.0);
+        g.shape = Some(shape.surface);
+    }
+
+    /// A7: close the last child and the group.
+    fn pop_knockout_layer(&mut self) {
+        self.close_knockout_child();
+        self.knockouts.pop();
     }
 
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
@@ -2058,5 +2187,64 @@ mod stroke_alignment_laws {
         assert_ne!(centre, inside, "`align` must change the picture; Center == Inside");
         assert_ne!(outside, inside, "`align` must change the picture; Outside == Inside");
         assert_ne!(centre, outside, "`align` must change the picture; Center == Outside");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A7 — THE KNOCKOUT BRACKET THROUGH THIS BACKEND, driven by the NATIVE walk
+// (`document::paint::emit_document`, the same ops the corpus scene
+// `a7_knockout.json` records) onto a canvas holding `B0`. The web's shipping
+// walk is armed separately (`canvas::render::a7_knockout_pixel_tests`); this
+// arm is the seam's: four regimes × three pixels, each expectation computed by
+// the law (`a7_fixture::expect`), never typed.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod a7_knockout_bracket_tests {
+    use super::browser_probe::{rgba_at, surface};
+    use super::*;
+    use crate::document::paint::a7_fixture as fx;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn render_at(doc: &crate::document::document::Document, xs: &[u32]) -> Vec<[i32; 3]> {
+        let (_c, ctx) = surface(fx::W, fx::H);
+        ctx.set_fill_style_str(&format!("rgb({},{},{})",
+            (fx::B0[0] * 255.0).round(), (fx::B0[1] * 255.0).round(), (fx::B0[2] * 255.0).round()));
+        ctx.fill_rect(0.0, 0.0, fx::W as f64, fx::H as f64);
+        let mut p = Canvas2dPainter::new(&ctx);
+        crate::document::paint::emit_document(&mut p, doc, crate::geometry::live::DEFAULT_PRECISION);
+        xs.iter().map(|&x| {
+            let (r, g, b, _) = rgba_at(&ctx, x as f64, fx::Y as f64);
+            [r as i32, g as i32, b as i32]
+        }).collect()
+    }
+
+    #[wasm_bindgen_test]
+    fn a7_the_bracket_composites_the_native_walk_by_the_law() {
+        let xs = [fx::OVERLAP_X, fx::LEAF_X, fx::OUTSIDE_X];
+        let mut report = Vec::new();
+        let mut worst = 0;
+        for (name, iso, ko) in fx::REGIMES {
+            let got = render_at(&fx::document(iso, ko), &xs);
+            for (i, &x) in xs.iter().enumerate() {
+                let want = fx::expect(iso, ko, &fx::children_at(x));
+                worst = worst.max(fx::off(got[i], want));
+                report.push(format!("{name} x={x}: got {:?} law {want:?}", got[i]));
+            }
+        }
+        let report = report.join("; ");
+        assert!(worst <= fx::TOL, "A7 on Canvas2dPainter off the law by {worst}: {report}");
+    }
+
+    /// The edge arm through the seam (mutant 5's).
+    #[wasm_bindgen_test]
+    fn a7_the_bracket_edge_pixel_is_the_additive_law() {
+        let got = render_at(&fx::edge_document(false, true), &[fx::EDGE_X]);
+        let ordinary = render_at(&fx::edge_document(false, false), &[fx::EDGE_X]);
+        let want = fx::expect(false, true, &fx::edge_children());
+        assert!(fx::off(got[0], want) <= fx::TOL,
+                "edge pixel: got {:?}, the law gives {want:?} (ordinary compositing reads {:?})",
+                got[0], ordinary[0]);
     }
 }

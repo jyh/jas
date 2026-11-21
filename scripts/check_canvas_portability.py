@@ -38,6 +38,9 @@ provider (`text_measure`); `get_image_data` / `put_image_data` /
 deleted in favour of a `TargetSize` parameter threaded from `render()`. The
 `UNMAPPED` table below is therefore EMPTY -- kept as a table, with its rule,
 because a new unmappable method is exactly the event this gate must red on.
+The ruling's scope (the Captain, 2026-11-21, with amendment A7): r.6c governs
+queries, readback and foreign surfaces; a write-only compositing bracket grows
+the trait by amendment.
 
 ⛔ AND THE BACKENDS DO NOT REACH INTO `canvas/`. Before 2026-09-01 the web
 painter called `canvas::render::promote_mask_to_luminance` and

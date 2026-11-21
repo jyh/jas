@@ -96,7 +96,7 @@ private func canvasCentre(isolated: Bool, knockout: Bool = false) -> (Int, Int, 
 @Test func aPageThatIsNotIsolatedBlendsItsLayersWithTheArtboard() {
     for ko in [false, true] {
         let (r, g, b) = canvasCentre(isolated: false, knockout: ko)
-        #expect(b < 40 && g > 90 && r < 40, "multiplied against the artboard (knockout \(ko) is storage only): \((r, g, b))")
+        #expect(b < 40 && g > 90 && r < 40, "multiplied against the artboard (a ONE-layer knockout page is the same picture: its one child composites against B0 = the artboard; knockout \(ko)): \((r, g, b))")
     }
 }
 

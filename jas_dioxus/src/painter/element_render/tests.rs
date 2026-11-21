@@ -1340,6 +1340,10 @@ impl crate::painter::Painter for MaskBlind {
         self.0.push_isolated_layer(a, b)
     }
     fn pop_isolated_layer(&mut self) { self.0.pop_isolated_layer() }
+    fn push_knockout_layer(&mut self) { self.0.push_knockout_layer() }
+    fn push_knockout_shape(&mut self) { self.0.push_knockout_shape() }
+    fn pop_knockout_shape(&mut self) { self.0.pop_knockout_shape() }
+    fn pop_knockout_layer(&mut self) { self.0.pop_knockout_layer() }
     fn draw_text_run(&mut self, r: &crate::painter::TextRun, b: &crate::painter::Brush, a: f64) {
         self.0.draw_text_run(r, b, a)
     }

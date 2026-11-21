@@ -36,8 +36,8 @@ use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_BLEND_MODE_SOFT_LIGHT,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D1_COMPOSITE_MODE_DESTINATION_OUT, D2D1_COMPOSITE_MODE_SOURCE_IN,
-    D2D1_COMPOSITE_MODE_SOURCE_OVER,
+    D2D1_COMPOSITE_MODE_DESTINATION_IN, D2D1_COMPOSITE_MODE_DESTINATION_OUT,
+    D2D1_COMPOSITE_MODE_PLUS, D2D1_COMPOSITE_MODE_SOURCE_IN, D2D1_COMPOSITE_MODE_SOURCE_OVER,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D_RECT_F,
@@ -96,6 +96,31 @@ struct LayerTarget {
     /// earlier would mean masking a surface that is still open for drawing, and
     /// D2D has no way to re-run a composite over a target mid-`BeginDraw`.
     mask: Option<(ID2D1Bitmap, Mask)>,
+    /// A6's isolated layer, or one of A7's two knockout surfaces.
+    kind: LayerKind,
+}
+
+/// What an entry of the layer stack is.
+enum LayerKind {
+    /// A6 — an isolated layer, composited once at its pop.
+    Isolated,
+    /// A7 — the shape artwork of the innermost knockout group's next child,
+    /// drawn at alpha context 1.0 with no inherited group blend; it never
+    /// lands, it becomes `f`. The parent's group blends are set aside here.
+    KnockoutShape { saved_group_blends: Vec<BlendMode> },
+    /// A7 — the child surface `T`, seeded from the group's `B0`; the body
+    /// draws on it NON-isolated (the open-group product unchanged).
+    KnockoutChild,
+}
+
+/// One open knockout group (A7).
+struct KnockoutGroup {
+    /// `B0`: the parent's device pixels at `push_knockout_layer`.
+    b0: ID2D1Bitmap,
+    /// `f` of the child currently open.
+    shape: Option<ID2D1Bitmap>,
+    /// `layers.len()` at the push: the group's children sit at this depth.
+    depth: usize,
 }
 
 /// One open mask bracket: its own surface, and the law to apply on close.
@@ -147,6 +172,14 @@ pub struct Direct2DPainter<'a> {
     /// Same shape as `failed_layers` above and for the same reason — a failure
     /// the display list cannot express must still be counted somewhere.
     text_refusal: Option<&'static str>,
+    /// A7: open knockout groups, innermost last; `None` for a group whose
+    /// backdrop could not be snapshotted (it degrades to ordinary compositing).
+    knockouts: Vec<Option<KnockoutGroup>>,
+    /// ⛔ A FAILED OPEN MUTES, IT NEVER LANDS THE SHAPE: when a knockout shape
+    /// surface cannot be made, its artwork draws under an EMPTY axis-aligned
+    /// clip (popped at `pop_knockout_shape`), so nothing of it paints and the
+    /// body that follows composites ordinarily onto the parent.
+    muted_shapes: Vec<bool>,
 }
 
 impl<'a> Direct2DPainter<'a> {
@@ -160,6 +193,8 @@ impl<'a> Direct2DPainter<'a> {
             masks: Vec::new(),
             failed_layers: 0,
             text_refusal: None,
+            knockouts: Vec::new(),
+            muted_shapes: Vec::new(),
         }
     }
 
@@ -478,6 +513,48 @@ impl<'a> Direct2DPainter<'a> {
         Some((brt, rt))
     }
 
+    /// A7: close the innermost knockout group's open child, if one is open:
+    /// `T ← T·f` (DESTINATION_IN on the child), then on the parent
+    /// `S ← S·(1−f)` (DESTINATION_OUT) and `S ← S + T` (PLUS) — the law
+    /// `S ← (1−f)·S + f·T` exactly. All at identity: every surface here is a
+    /// device-space bitmap. ⛔ SOURCE_OVER in place of PLUS gives
+    /// `T + (1−α_T)·S`, a contract violation, not an approximation.
+    fn close_knockout_child(&mut self) {
+        let Some(Some(g)) = self.knockouts.last() else { return };
+        if self.layers.len() != g.depth + 1
+            || !matches!(self.layers.last().map(|l| &l.kind), Some(LayerKind::KnockoutChild))
+        {
+            return;
+        }
+        let child = self.layers.pop().expect("checked above");
+        self.group_alphas = child.saved_group_alphas;
+        let Some(Some(g)) = self.knockouts.last_mut() else { return };
+        let Some(f) = g.shape.take() else {
+            unsafe { let _ = child.rt.EndDraw(None, None); }
+            return;
+        };
+        let Ok(cdc) = child.rt.cast::<ID2D1DeviceContext>() else { return };
+        unsafe {
+            child.rt.SetTransform(&Matrix3x2::identity());
+            cdc.DrawImage(&f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_DESTINATION_IN);
+            let _ = child.rt.EndDraw(None, None);
+        }
+        let Ok(t) = (unsafe { child.brt.GetBitmap() }) else { return };
+        let parent = self.rt();
+        let Ok(pdc) = parent.cast::<ID2D1DeviceContext>() else { return };
+        let mut saved = Matrix3x2::identity();
+        unsafe {
+            parent.GetTransform(&mut saved);
+            parent.SetTransform(&Matrix3x2::identity());
+            pdc.DrawImage(&f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+            pdc.DrawImage(&t, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_PLUS);
+            parent.SetTransform(&saved);
+        }
+    }
+
     /// `product(open group alphas) * paint_alpha`, clamped. This is the whole
     /// of group alpha and it is why no offscreen is needed.
     pub fn effective_alpha(&self, paint_alpha: f64) -> f64 {
@@ -710,6 +787,11 @@ impl<'a> Painter for Direct2DPainter<'a> {
             // `NonNormalGroupBlend` was the last NO, and `blended_primitive`
             // answers it — per-primitive compositing against the live backdrop.
             C::IsolatedLayers | C::MaskLayers | C::NonNormalBlend | C::NonNormalGroupBlend => true,
+            // A7 (2026-11-21): the knockout bracket, synthesised from a
+            // `CopyFromRenderTarget` backdrop, `DESTINATION_IN`,
+            // `DESTINATION_OUT` and `D2D1_COMPOSITE_MODE_PLUS` (the additive
+            // composite, measured exact by `a7_the_additive_composite_is_s_plus_t`).
+            C::KnockoutLayers => true,
         }
     }
 
@@ -1033,6 +1115,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
                     brt, rt, alpha, blend,
                     saved_group_alphas: saved,
                     mask: None,
+                    kind: LayerKind::Isolated,
                 });
             }
             None => self.failed_layers += 1,
@@ -1105,6 +1188,90 @@ impl<'a> Painter for Direct2DPainter<'a> {
             }
         }
         unsafe { parent.SetTransform(&saved) };
+    }
+
+    /// A7: fix `B0` — a `CopyFromRenderTarget` snapshot of the current target
+    /// (device pixels, as the blend's backdrop is). `S` is the target itself,
+    /// updated in place per child.
+    fn push_knockout_layer(&mut self) {
+        let parent = self.rt();
+        let group = self.snapshot(&parent)
+            .map(|b0| KnockoutGroup { b0, shape: None, depth: self.layers.len() });
+        self.knockouts.push(group);
+    }
+
+    /// A7: close the open child (if any), then open the shape surface: fresh,
+    /// transparent, in the parent's frame, alpha context 1.0 and no inherited
+    /// group blend (A6's mask-bracket isolation).
+    fn push_knockout_shape(&mut self) {
+        self.close_knockout_child();
+        let opened = if matches!(self.knockouts.last(), Some(Some(_))) { self.open_surface() } else { None };
+        match opened {
+            Some((brt, rt)) => {
+                let saved = std::mem::take(&mut self.group_alphas);
+                let saved_group_blends = std::mem::take(&mut self.group_blends);
+                self.layers.push(LayerTarget {
+                    brt, rt, alpha: 1.0, blend: BlendMode::Normal,
+                    saved_group_alphas: saved, mask: None,
+                    kind: LayerKind::KnockoutShape { saved_group_blends },
+                });
+                self.muted_shapes.push(false);
+            }
+            None => {
+                // Muted: an empty clip, so the shape artwork paints nothing.
+                let empty = D2D_RECT_F { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+                unsafe { self.rt().PushAxisAlignedClip(&empty, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE) };
+                self.muted_shapes.push(true);
+            }
+        }
+    }
+
+    /// A7: `f` = the shape artwork's raw alpha; open the child surface
+    /// `T ← B0`. The body draws on `T` NON-isolated: the open-group product is
+    /// the one at the bracket, unchanged.
+    fn pop_knockout_shape(&mut self) {
+        if self.muted_shapes.pop().unwrap_or(true) {
+            unsafe { self.rt().PopAxisAlignedClip() };
+            return;
+        }
+        let Some(shape) = self.layers.pop() else { return };
+        let LayerKind::KnockoutShape { saved_group_blends } = shape.kind else {
+            panic!("pop_knockout_shape with another bracket open -- brackets must nest (A7)");
+        };
+        self.group_alphas = shape.saved_group_alphas;
+        self.group_blends = saved_group_blends;
+        unsafe { let _ = shape.rt.EndDraw(None, None); }
+        let Ok(f) = (unsafe { shape.brt.GetBitmap() }) else { return };
+        let Some(Some(g)) = self.knockouts.last() else { return };
+        let b0 = g.b0.clone();
+        // No child surface: the body draws on the parent (ordinary
+        // compositing) and the shape is dropped with it.
+        let Some((brt, rt)) = self.open_surface() else { return };
+        let Ok(dc) = rt.cast::<ID2D1DeviceContext>() else { return };
+        let mut frame = Matrix3x2::identity();
+        unsafe {
+            rt.GetTransform(&mut frame);
+            rt.SetTransform(&Matrix3x2::identity());
+            // T ← B0: onto a cleared surface, source-over IS a copy.
+            dc.DrawImage(&b0, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                         D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            rt.SetTransform(&frame);
+        }
+        self.layers.push(LayerTarget {
+            brt, rt, alpha: 1.0, blend: BlendMode::Normal,
+            // NON-isolated: the body keeps the open-group product.
+            saved_group_alphas: self.group_alphas.clone(), mask: None,
+            kind: LayerKind::KnockoutChild,
+        });
+        if let Some(Some(g)) = self.knockouts.last_mut() {
+            g.shape = Some(f);
+        }
+    }
+
+    /// A7: close the last child and the group.
+    fn pop_knockout_layer(&mut self) {
+        self.close_knockout_child();
+        self.knockouts.pop();
     }
 }
 
@@ -1288,6 +1455,74 @@ mod tests {
             t.target().EndDraw(None, None).expect("EndDraw");
         }
         t.read_bgra().expect("readback")
+    }
+
+    /// The `a7_knockout` scene (`document::paint::a7_fixture`) painted the way
+    /// the Windows host paints a document: `B0` first, on the same target,
+    /// then the native walk through this backend. Returns straight RGB at
+    /// `(x, Y)` (every sample pixel is opaque, so premultiplied = straight).
+    fn a7_render(doc: &crate::document::document::Document, xs: &[u32]) -> Vec<[i32; 3]> {
+        use crate::document::paint::a7_fixture as fx;
+        let t = HeadlessTarget::new(fx::W, fx::H).expect("target");
+        unsafe {
+            t.target().BeginDraw();
+            t.target().Clear(Some(&D2D1_COLOR_F {
+                r: fx::B0[0] as f32, g: fx::B0[1] as f32, b: fx::B0[2] as f32, a: 1.0,
+            }));
+            let mut p = Direct2DPainter::new(t.target());
+            crate::document::paint::emit_document(&mut p, doc, crate::geometry::live::DEFAULT_PRECISION);
+            t.target().EndDraw(None, None).expect("EndDraw");
+        }
+        let buf = t.read_bgra().expect("readback");
+        xs.iter().map(|&x| {
+            let q = px(&buf, fx::W, x, fx::Y);
+            [q[2] as i32, q[1] as i32, q[0] as i32]
+        }).collect()
+    }
+
+    /// ⭐ A7 ON DIRECT2D: the §5 scene, four regimes × three pixels (overlap,
+    /// leaf over bare backdrop, outside every shape), each expectation
+    /// computed from the scene's inputs by the law (`a7_fixture::expect`, see
+    /// its derivation), never typed. The failure message carries every
+    /// measured value, because this arm runs only in CI's windows-native lane.
+    #[test]
+    fn a7_the_page_knockout_group_composites_by_the_law() {
+        use crate::document::paint::a7_fixture as fx;
+        let xs = [fx::OVERLAP_X, fx::LEAF_X, fx::OUTSIDE_X];
+        let mut report = Vec::new();
+        let mut worst = 0;
+        for (name, iso, ko) in fx::REGIMES {
+            let got = a7_render(&fx::document(iso, ko), &xs);
+            for (i, &x) in xs.iter().enumerate() {
+                let want = fx::expect(iso, ko, &fx::children_at(x));
+                worst = worst.max(fx::off(got[i], want));
+                report.push(format!("{name} x={x}: got {:?} law {want:?}", got[i]));
+            }
+        }
+        let report = report.join("; ");
+        assert!(worst <= fx::TOL, "A7 on Direct2D off the law by {worst}: {report}");
+    }
+
+    /// ⭐ THE EDGE ARM (mutant 5's): both layers opaque and Normal, layer 2's
+    /// edge on a half pixel, so `f = 0.5` there. The law's value at that pixel
+    /// (`a7_fixture::expect` on `edge_children`) is what an ADDITIVE close
+    /// gives; source-over in its place gives `f·T + (1 − f·α_T)·(1 − f)·S`,
+    /// off by a quarter of the red channel. The interior pixels of the same
+    /// scene must equal ordinary compositing (opaque Normal children).
+    #[test]
+    fn a7_the_knockout_edge_pixel_is_the_additive_law() {
+        use crate::document::paint::a7_fixture as fx;
+        let got = a7_render(&fx::edge_document(false, true), &[fx::EDGE_X, 5, 25])[..].to_vec();
+        let ordinary = a7_render(&fx::edge_document(false, false), &[fx::EDGE_X, 5, 25]);
+        let want = fx::expect(false, true, &fx::edge_children());
+        assert!(fx::off(got[0], want) <= fx::TOL,
+                "edge pixel: got {:?}, the law gives {want:?} (ordinary compositing reads {:?})",
+                got[0], ordinary[0]);
+        for i in 1..3 {
+            assert!(fx::off(got[i], ordinary[i]) <= fx::TOL,
+                    "interior pixel {i}: knockout {:?} != ordinary {:?} for opaque Normal children",
+                    got[i], ordinary[i]);
+        }
     }
 
     /// END TO END: a solid brush lands the right pixels at the right place.

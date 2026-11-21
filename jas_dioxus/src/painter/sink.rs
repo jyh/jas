@@ -82,6 +82,18 @@ impl Painter for NoOpPainter {
     fn pop_isolated_layer(&mut self) {
         self.calls += 1;
     }
+    fn push_knockout_layer(&mut self) {
+        self.calls += 1;
+    }
+    fn push_knockout_shape(&mut self) {
+        self.calls += 1;
+    }
+    fn pop_knockout_shape(&mut self) {
+        self.calls += 1;
+    }
+    fn pop_knockout_layer(&mut self) {
+        self.calls += 1;
+    }
     fn draw_text_run(&mut self, _run: &TextRun, _brush: &Brush, _paint_alpha: f64) {
         self.calls += 1;
     }

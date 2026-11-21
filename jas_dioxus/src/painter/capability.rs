@@ -26,6 +26,7 @@
 //! | …and it RIDES TWO DIFFERENT OPS, so it cannot be a group-only name | `group_blend.json` + `a6_blend.json` | [`tests::a_non_normal_blend_rides_two_different_ops`] |
 //! | an op may need TWO capabilities, and neither may absorb the other | `a6_blend.json` | [`tests::a_blended_layer_requires_the_layer_AND_the_blend`] |
 //! | a mask never appears outside a layer | all 20 scenes | [`tests::no_scene_carries_a_mask_outside_an_isolated_layer`] |
+//! | the knockout bracket is its own thing (A7) | `a7_knockout.json` | [`tests::the_capability_set_is_exactly_what_the_corpus_exercises`] |
 //!
 //! The separability row is the load-bearing one and it is NEW. Until
 //! `a6_layer_no_mask.json` landed, every isolated layer in the corpus was
@@ -93,6 +94,12 @@ pub enum Capability {
     /// implementation: per-primitive blending, not one closing composite. See
     /// that variant's note for why the two were merged and then split.
     NonNormalGroupBlend,
+    /// `push_knockout_layer` / `push_knockout_shape` / `pop_knockout_shape` /
+    /// `pop_knockout_layer` — the knockout bracket (A7, 2026-11-21). One
+    /// capability for all four ops: a backend that opens the group but cannot
+    /// close a child has nothing it can honestly execute, so they are one
+    /// missing thing. Driven by `a7_knockout.json`.
+    KnockoutLayers,
 }
 
 impl Capability {
@@ -102,11 +109,12 @@ impl Capability {
     /// the corpus produces but this array omits REDS.
     ///
     /// [`index`]: Capability::index
-    pub const ALL: [Capability; 4] = [
+    pub const ALL: [Capability; 5] = [
         Capability::IsolatedLayers,
         Capability::MaskLayers,
         Capability::NonNormalBlend,
         Capability::NonNormalGroupBlend,
+        Capability::KnockoutLayers,
     ];
 
     /// Bit position in [`Caps`]. The match is exhaustive on purpose: a new
@@ -118,6 +126,7 @@ impl Capability {
             Capability::MaskLayers => 1,
             Capability::NonNormalBlend => 2,
             Capability::NonNormalGroupBlend => 3,
+            Capability::KnockoutLayers => 4,
         }
     }
 }
@@ -211,6 +220,10 @@ pub(crate) fn capabilities_of(op: &serde_json::Value) -> Caps {
         // capability is what left a backend that had built exactly one of them
         // unable to answer honestly about either.
         Some("push_group") if non_normal => Caps::NONE.with(Capability::NonNormalGroupBlend),
+        Some("push_knockout_layer") | Some("push_knockout_shape")
+        | Some("pop_knockout_shape") | Some("pop_knockout_layer") => {
+            Caps::NONE.with(Capability::KnockoutLayers)
+        }
         _ => Caps::NONE,
     }
 }

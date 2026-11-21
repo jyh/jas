@@ -974,39 +974,101 @@ thread_local! {
 }
 
 /// The top-level layers, under the page's compositing (OPACITY.md §Page-level
-/// items, row 192 B1; the native walk's `document::paint::emit_layers`). With
-/// `page_isolated_blending` the layers draw onto a transparent scratch at the
-/// canvas's transform and composite onto `ctx` once (source-over, at `ctx`'s
-/// alpha), so a blended layer blends with the layers beneath it but never with
-/// the artboard fill already on `ctx`. Without a DOM for the scratch, it draws
-/// the layers straight onto `ctx` (not isolated) rather than draw nothing.
-/// `page_knockout_group` is stored and not composited (the A7 amendment).
+/// items, rows 192 B1 and 209; the native walk's `document::paint::emit_layers`).
+///
+/// * `page_isolated_blending` — the layers draw onto a transparent scratch at
+///   the canvas's transform and composite onto `ctx` once (source-over, at
+///   `ctx`'s alpha), so a blended layer blends with the layers beneath it but
+///   never with the artboard fill already on `ctx`. Without a DOM for the
+///   scratch, it draws the layers straight onto `ctx` (not isolated) rather
+///   than draw nothing.
+/// * `page_knockout_group` — the layers are the children of one knockout group
+///   (AMENDMENT A7), see [`draw_knockout_layers`]; inside the isolated scratch
+///   when both are set, where the initial backdrop is transparent.
 fn draw_page_layers(
     ctx: &CanvasRenderingContext2d,
     target: TargetSize,
     doc: &Document,
     precision: f64,
 ) {
-    let page = if doc.document_setup.page_isolated_blending && target.w > 0 && target.h > 0 {
+    let sized = target.w > 0 && target.h > 0;
+    let page = if doc.document_setup.page_isolated_blending && sized {
         scratch_from_cell(&PAGE_CANVAS, 0, target.w, target.h)
     } else {
         None
     };
-    let Some(page) = page else {
-        for layer in &doc.layers {
-            draw_element(ctx, target, layer, Visibility::Preview, precision);
+    let surface_ctx = match &page {
+        Some(page) => {
+            page.reset();
+            if let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) {
+                page.ctx().set_transform(a, b, c, d, e, f).ok();
+            }
+            page.ctx()
         }
-        return;
+        None => ctx,
     };
-    page.reset();
-    let page_ctx = page.ctx();
-    if let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) {
-        page_ctx.set_transform(a, b, c, d, e, f).ok();
+    let knocked_out = doc.document_setup.page_knockout_group
+        && sized
+        && draw_knockout_layers(surface_ctx, target, doc, precision);
+    if !knocked_out {
+        for layer in &doc.layers {
+            draw_element(surface_ctx, target, layer, Visibility::Preview, precision);
+        }
     }
+    if let Some(page) = page {
+        page.composite_onto(ctx, CompositeOp::Blend(crate::painter::BlendMode::Normal), ctx.global_alpha());
+    }
+}
+
+/// THE PAGE KNOCKOUT GROUP ON THE WEB (AMENDMENT A7, row 209): the top-level
+/// layers are the children of one knockout group whose initial backdrop `B0`
+/// is what `ctx` holds now (the artboard fills; transparent inside the
+/// isolated page scratch). The bracket is the web PAINTER's
+/// (`Canvas2dPainter`'s four A7 ops, one implementation for both walks): it
+/// copies `B0`, takes each layer's SHAPE from the seam lowering of the layer
+/// through [`OpaqueShape`](crate::painter::element_render::OpaqueShape) (the
+/// caller's shape, never derived from the body), and the layer's BODY is drawn
+/// by this legacy walk onto the painter's child surface `T ← B0`, so a body
+/// renders exactly as it does without knockout.
+///
+/// Returns `false`, having drawn nothing, when it cannot take the bracket —
+/// no transform to open the painter's surfaces in, or a top-level layer whose
+/// subtree the seam cannot lower (rich text, a freeform gradient): that
+/// layer's shape would be missing, and a missing shape makes the layer vanish
+/// (`f = 0` leaves `S` untouched), which is worse than the ordinary
+/// compositing the caller then draws. ⚠️ So on the web such a page renders
+/// WITHOUT knockout; `a_page_the_seam_cannot_shape_falls_back_to_ordinary`
+/// pins that limit.
+fn draw_knockout_layers(
+    ctx: &CanvasRenderingContext2d,
+    target: TargetSize,
+    doc: &Document,
+    precision: f64,
+) -> bool {
+    use crate::painter::capability::Caps;
+    use crate::painter::element_render::{emit_element, subtree_needs_legacy, OpaqueShape};
+    use crate::painter::Painter as _;
+    let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) else {
+        return false;
+    };
+    let mut painter = crate::painter::canvas2d::Canvas2dPainter::at_frame(
+        ctx,
+        Transform { a, b, c, d, e, f },
+    );
+    let caps = Caps::of(&painter);
+    if doc.layers.iter().any(|l| subtree_needs_legacy(l, caps)) {
+        return false;
+    }
+    let _ctx_guard = CtxSaveGuard::new(ctx);
+    painter.push_knockout_layer();
     for layer in &doc.layers {
-        draw_element(page_ctx, target, layer, Visibility::Preview, precision);
+        painter.push_knockout_shape();
+        emit_element(&mut OpaqueShape::new(&mut painter), layer, 1.0);
+        painter.pop_knockout_shape();
+        painter.with_target(|t| draw_element(t, target, layer, Visibility::Preview, precision));
     }
-    page.composite_onto(ctx, CompositeOp::Blend(crate::painter::BlendMode::Normal), ctx.global_alpha());
+    painter.pop_knockout_layer();
+    true
 }
 
 /// Read the six-component current transform from a Canvas2D context.
@@ -5591,5 +5653,92 @@ mod a7_plus_pixel_tests {
         let report = report.join("; ");
         assert!(best_control > 3, "CONTROL: source-over met the law: {report}");
         assert!(worst_plus <= 3, "A7 (f) NOT EXACT on Canvas2D (worst {worst_plus}): STOP, bring this to him: {report}");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A7 — THE PAGE KNOCKOUT GROUP ON THE WEB (row 209), in a real browser. The
+// SHIPPING walk (`draw_page_layers`) on the design block's §5 scene
+// (`document::paint::a7_fixture`): `B0` painted first, as `render()` paints
+// the artboard fills, then the page. Four regimes × three pixels, each
+// expectation computed from the scene's inputs by the law
+// (`a7_fixture::expect`, see its derivation), never typed; every failure
+// message carries the measured values.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod a7_knockout_pixel_tests {
+    use super::*;
+    use crate::document::paint::a7_fixture as fx;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn render_at(doc: &Document, xs: &[u32]) -> Vec<[i32; 3]> {
+        let s = WebSurface::offscreen(fx::W, fx::H).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        ctx.set_fill_style_str(&format!("rgb({},{},{})",
+            (fx::B0[0] * 255.0).round(), (fx::B0[1] * 255.0).round(), (fx::B0[2] * 255.0).round()));
+        ctx.fill_rect(0.0, 0.0, fx::W as f64, fx::H as f64);
+        draw_page_layers(&ctx, TargetSize::of(&s), doc, 1.0);
+        xs.iter().map(|&x| {
+            let p = s.read_rgba(x, fx::Y, 1, 1).expect("in bounds");
+            [p[0] as i32, p[1] as i32, p[2] as i32]
+        }).collect()
+    }
+
+    #[wasm_bindgen_test]
+    fn a7_the_web_page_knockout_group_composites_by_the_law() {
+        let xs = [fx::OVERLAP_X, fx::LEAF_X, fx::OUTSIDE_X];
+        let mut report = Vec::new();
+        let mut worst = 0;
+        for (name, iso, ko) in fx::REGIMES {
+            let got = render_at(&fx::document(iso, ko), &xs);
+            for (i, &x) in xs.iter().enumerate() {
+                let want = fx::expect(iso, ko, &fx::children_at(x));
+                worst = worst.max(fx::off(got[i], want));
+                report.push(format!("{name} x={x}: got {:?} law {want:?}", got[i]));
+            }
+        }
+        let report = report.join("; ");
+        assert!(worst <= fx::TOL, "A7 on the web walk off the law by {worst}: {report}");
+    }
+
+    /// THE EDGE ARM (mutant 5's): `f = 0.5` at layer 2's half-pixel edge; the
+    /// ADDITIVE close gives the law's value there, source-over does not. The
+    /// interior pixels of the same scene equal ordinary compositing.
+    #[wasm_bindgen_test]
+    fn a7_the_web_knockout_edge_pixel_is_the_additive_law() {
+        let got = render_at(&fx::edge_document(false, true), &[fx::EDGE_X, 5, 25]);
+        let ordinary = render_at(&fx::edge_document(false, false), &[fx::EDGE_X, 5, 25]);
+        let want = fx::expect(false, true, &fx::edge_children());
+        assert!(fx::off(got[0], want) <= fx::TOL,
+                "edge pixel: got {:?}, the law gives {want:?} (ordinary compositing reads {:?})",
+                got[0], ordinary[0]);
+        for i in 1..3 {
+            assert!(fx::off(got[i], ordinary[i]) <= fx::TOL,
+                    "interior pixel {i}: knockout {:?} != ordinary {:?}", got[i], ordinary[i]);
+        }
+    }
+
+    /// ⚠️ THE STATED LIMIT: a page whose layer the seam cannot shape (here a
+    /// freeform-gradient fill, which never crosses the seam) draws WITHOUT
+    /// knockout on the web, exactly as the neither-flag page does, rather than
+    /// lose that layer's shape (and so the layer itself).
+    #[wasm_bindgen_test]
+    fn a_page_the_seam_cannot_shape_falls_back_to_ordinary() {
+        use crate::geometry::element::{Gradient, GradientType};
+        let mut doc = fx::document(false, true);
+        let mut plain = fx::document(false, false);
+        for d in [&mut doc, &mut plain] {
+            let kids = d.layers[0].children_mut().unwrap();
+            let mut e = (*kids[0]).clone();
+            if let Element::Rect(r) = &mut e {
+                r.fill_gradient = Some(Box::new(Gradient { gtype: GradientType::Freeform, ..Gradient::default() }));
+            }
+            kids[0] = std::rc::Rc::new(e);
+        }
+        let xs = [fx::OVERLAP_X, fx::LEAF_X];
+        let (ko, ordinary) = (render_at(&doc, &xs), render_at(&plain, &xs));
+        assert_eq!(ko, ordinary, "the unshapeable page must draw as the neither-flag page");
     }
 }
