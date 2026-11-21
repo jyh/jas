@@ -1334,6 +1334,13 @@ public sealed partial class MainWindow
                 }
                 e.Handled = true;
                 SendGesture(slider, gesture, p);
+                // jas STATUS-flask 974: a double marked on this press is sent
+                // AFTER its release, as the contract orders.
+                if (lift && slider.Double.TakeOnRelease(true)
+                    && GradientSliderWire.DoublePress(slider.LastHeld, slider.HeldIndex) is { } dp)
+                {
+                    SendGesture(slider, "double_press", dp);
+                }
             }
             slider.PointerMoved += (_, e) => Track(e, false);
             slider.PointerReleased += (_, e) => Track(e, true);
@@ -1356,6 +1363,7 @@ public sealed partial class MainWindow
         private void AddAt(GradientSliderSurface slider, GradientSliderWire.Layout g, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
         {
             e.Handled = true;
+            slider.LastPress = null;
             slider.Focus(FocusState.Pointer);
             var at = e.GetCurrentPoint(slider).Position;
             SendGesture(slider, "add", new Dictionary<string, object> { ["location"] = GradientSliderWire.Point(g, at.X, at.Y).Location });
@@ -1373,9 +1381,28 @@ public sealed partial class MainWindow
             if (slider.Geometry is not { } g) { return; }
             e.Handled = true;
             slider.Held = held;
+            slider.LastHeld = held;
+            slider.HeldIndex = at;
             slider.Focus(FocusState.Pointer);
             slider.CapturePointer(e.Pointer);
-            var down = e.GetCurrentPoint(slider).Position;
+            var point = e.GetCurrentPoint(slider);
+            var down = point.Position;
+            // jas STATUS-flask 974: the second press on the same stop inside the
+            // system's double-click time and rectangle marks a double, sent after
+            // this press's release. A third press starts a new pair.
+            if (held == "stop")
+            {
+                var now = new GradientSliderWire.Press(at, point.Timestamp, down.X, down.Y);
+                var scale = slider.XamlRoot?.RasterizationScale ?? 1.0;
+                var (sx, sy) = DoubleClickMetrics.HalfRectPx();
+                if (GradientSliderWire.IsDouble(slider.LastPress, now, DoubleClickMetrics.TimeMs(), sx / scale, sy / scale))
+                {
+                    slider.Double.OnDoubleTapped(true);
+                    slider.LastPress = null;
+                }
+                else { slider.LastPress = now; }
+            }
+            else { slider.LastPress = null; }
             SendGesture(slider, gesture, new Dictionary<string, object>
             {
                 [key] = at,
@@ -3073,6 +3100,20 @@ internal sealed partial class GradientSliderSurface : Microsoft.UI.Xaml.Controls
     /// every redraw replaces.</summary>
     internal string? Held;
 
+    /// <summary>The index of the marker the last press took (a stop's or a
+    /// midpoint's), kept past the lift so a double read after it names it.</summary>
+    internal int HeldIndex = -1;
+
+    /// <summary>The kind the last press took (`stop` or `midpoint`), kept past the lift.</summary>
+    internal string? LastHeld;
+
+    /// <summary>jas STATUS-flask 974: a double marked on a press, sent after the
+    /// release that closes it, as the canvas's double is (`DoubleClickGate`).</summary>
+    internal readonly DoubleClickGate Double = new();
+
+    /// <summary>The last press on a stop that did not complete a double.</summary>
+    internal GradientSliderWire.Press? LastPress;
+
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
 }
@@ -3120,4 +3161,29 @@ internal sealed partial class RadioGroupRow : StackPanel
         Viewbox { Child: RadioButton r } => r,
         _ => null,
     };
+}
+
+/// <summary>
+/// jas STATUS-flask 974: the system's double-click time and rectangle, read
+/// each press so a person's setting is honoured at once. The rectangle's
+/// metrics are physical pixels centred on the first press; the half-widths are
+/// returned, and the caller turns them into DIPs.
+/// </summary>
+internal static partial class DoubleClickMetrics
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
+    private const int SmCxDoubleClk = 36;
+    private const int SmCyDoubleClk = 37;
+
+    /// <summary>The double-click time in milliseconds.</summary>
+    internal static uint TimeMs() => GetDoubleClickTime();
+
+    /// <summary>The double-click rectangle's half-width and half-height, in physical pixels.</summary>
+    internal static (double X, double Y) HalfRectPx() =>
+        (GetSystemMetrics(SmCxDoubleClk) / 2.0, GetSystemMetrics(SmCyDoubleClk) / 2.0);
 }
