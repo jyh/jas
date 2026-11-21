@@ -486,7 +486,48 @@ def fit_line(readings):
     NOT RUN when a condition found no tab bar (the needle missed), or when the
     classic condition's dock shows no scrollbar width (the bars did not take,
     so it would be an overlay read wearing the classic label)."""
-    return "FIT NOT RUN"
+    if not readings:
+        return "FIT NOT RUN (no condition read)"
+    for c in FIT_CONDITIONS:
+        r = readings.get(c)
+        if r is None:
+            return f"FIT NOT RUN ({c}: not read)"
+        if "error" in r:
+            return f"FIT NOT RUN ({c}: {r['error']})"
+        if r["bars"] == 0:
+            return f"FIT NOT RUN ({c}: no tab bar found, so the tab-bar law was not read)"
+        if c == "classic" and r["vbar"] <= 0:
+            return f"FIT NOT RUN (classic: the dock shows no scrollbar width, so the classic bars did not take)"
+    ok = [c for c in FIT_CONDITIONS if readings[c]["bad"] == 0 and readings[c]["hscroll"] == 0]
+    if len(ok) == len(FIT_CONDITIONS):
+        return f"FIT {len(ok)}/{len(FIT_CONDITIONS)}"
+    bad = "; ".join(f"FAIL {c}: bad={readings[c]['bad']} hscroll={readings[c]['hscroll']}"
+                    for c in FIT_CONDITIONS if c not in ok)
+    return f"FIT RED {len(ok)}/{len(FIT_CONDITIONS)} ({bad})"
+
+
+def run_fit(br):
+    """-> {condition: reading}. Each condition is its own browser launch: the
+    classic one without Chromium's --hide-scrollbars, with 16-px bars injected
+    before the app's first paint."""
+    out = {}
+    for c in FIT_CONDITIONS:
+        b = None
+        try:
+            b = br._pw.chromium.launch(headless=True, **({"ignore_default_args": ["--hide-scrollbars"]} if c == "classic" else {}))
+            page = b.new_context(viewport=VIEWPORT, device_scale_factor=1).new_page()
+            if c == "classic":
+                page.add_init_script(CLASSIC_BARS_JS)
+            page.goto(br.url)
+            page.wait_for_selector(".jas-menu-title", timeout=HOOK_TIMEOUT_MS)
+            page.wait_for_timeout(1500)
+            out[c] = page.evaluate(FIT_READ_JS)
+        except Exception as e:
+            out[c] = {"error": f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"}
+        finally:
+            if b is not None:
+                b.close()
+    return out
 
 
 def dock_summary(cases):
@@ -597,7 +638,7 @@ def run(args):
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = None
+    dock = dock_cases = fit = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -625,6 +666,8 @@ def run(args):
         if args.dock:
             dock_cases = [(k, e) + run_dock_case(br, k, e, v) for k, e, v in DOCK_CASES] if not not_run else []
             dock = dock_summary(dock_cases)
+        if args.fit:
+            fit = fit_line(run_fit(br)) if not not_run else "FIT NOT RUN (" + not_run + ")"
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -633,6 +676,8 @@ def run(args):
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
         body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+    if fit is not None:
+        body.append(fit + " (the --fit check: row 66's live arm; the dock's tab bars and sideways scroll under overlay and classic 16-px scrollbars)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -641,7 +686,8 @@ def run(args):
     if args.advisory and args.receipt:
         return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
     dock_ok = dock_cases is None or (bool(dock_cases) and all(c[2] == "PASS" for c in dock_cases))
-    return 0 if " verdict=GREEN " in first and dock_ok else 1
+    fit_ok = fit is None or fit == f"FIT {len(FIT_CONDITIONS)}/{len(FIT_CONDITIONS)}"
+    return 0 if " verdict=GREEN " in first and dock_ok and fit_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -856,6 +902,8 @@ def main(argv):
     ap.add_argument("--artifacts")
     ap.add_argument("--dock", action="store_true",
                     help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
+    ap.add_argument("--fit", action="store_true",
+                    help="also read the dock's fit under overlay and classic scrollbars (row 66)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)
