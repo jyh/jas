@@ -4851,6 +4851,12 @@ fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value
     }
 }
 
+/// A slider's inline style: it takes the row's remaining width (`flex:1`), then
+/// the element's own declared style.
+fn slider_style(style: &str) -> String {
+    format!("flex:1;{style}")
+}
+
 fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_i64()).unwrap_or(0);
@@ -4905,7 +4911,7 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             // continue the drag past the first oninput.
             value: "{value}",
             disabled: disabled,
-            style: "flex:1;{style}",
+            style: "{slider_style(&style)}",
             // oninput fires on every drag tick — use the "live"
             // setter that updates the canvas color but skips the
             // recent-colors push (CLR-070). onchange fires on
@@ -16592,5 +16598,27 @@ mod text_entry_tests {
         assert!(body.lines().count() > 10_000, "read only part of renderer.rs");
         let hits: Vec<&str> = body.lines().filter(|l| keys_on_a_widget_id(l)).collect();
         assert!(hits.is_empty(), "id-keyed checks in renderer.rs: {hits:#?}");
+    }
+}
+
+/// Row 66 (2): a slider in a row must be able to shrink below the browser's
+/// intrinsic range width (129 px in Chrome). With CSS's default `min-width:auto`
+/// it could not, so the Color panel's H/S/B row (172.5 px wide) laid out about
+/// 216 px of children and pushed its 64-px number inputs 22 px past the dock.
+#[cfg(test)]
+mod slider_shrink_tests {
+    use super::slider_style;
+
+    #[test]
+    fn a_slider_can_shrink_below_its_intrinsic_width() {
+        let s = slider_style("");
+        let decls: Vec<(&str, &str)> = s.split(';').filter_map(|d| d.split_once(':')).map(|(k, v)| (k.trim(), v.trim())).collect();
+        assert!(decls.contains(&("min-width", "0")), "{s}");
+        assert!(decls.contains(&("flex", "1")), "{s}");
+    }
+
+    #[test]
+    fn a_declared_style_still_comes_last() {
+        assert!(slider_style("opacity:0.5;").ends_with("opacity:0.5;"));
     }
 }
