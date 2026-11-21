@@ -2197,7 +2197,21 @@ unsafe fn jas_dispatch_action_inner(
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone());
+        // A panel-menu item's Close target (row 205): the panel its params
+        // name (`{panel: artboards}`, a literal kind, checked by the inverse
+        // because `parse_panel_kind` answers Layers for a name it does not
+        // know), else the panel whose menu it is (Boolean's Close has none).
+        // A named panel that is no panel leaves no target, so the effect is
+        // refused by name.
+        let close_target = panel.and_then(|pid| match params.and_then(|p| p.get("panel")).filter(|v| !v.is_null()) {
+            Some(v) => v.as_str().and_then(|s| {
+                let k = crate::workspace::layout_apply::parse_panel_kind(s);
+                (crate::workspace::layout_apply::panel_kind_str(k) == s).then_some(k)
+            }),
+            None => crate::layout_seed::kind_of_content_id(pid),
+        });
+        let mut host = crate::panel_behavior::EngineHost::with_layout(engine.layout.borrow().clone())
+            .for_panel_menu(close_target);
         let ran = crate::panel_behavior::run_action(
             panel, action, params, params_are_values, &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
@@ -6995,6 +7009,22 @@ mod tests {
         assert!(!v["layout"].is_null(), "the reply names the layout for the shell: {reply}");
         assert_eq!(on(e, PanelKind::Boolean), Some(false), "Close Boolean closed Boolean");
         assert_eq!(on(e, PanelKind::Layers), layers_before, "and no other panel");
+        // Every panel menu with a Close item, not only Boolean's: each closes
+        // its own panel when it is on screen.
+        let ws = Workspace::load().unwrap();
+        let mut closed = 0;
+        for pid in ws.panels().as_object().unwrap().keys() {
+            let Some(kind) = crate::layout_seed::kind_of_content_id(pid) else { continue };
+            let (rows, _) = panel_menu(e, pid);
+            let Some(close) = rows.iter().find(|r| r["action"] == "close_panel").and_then(|r| r["index"].as_u64())
+                else { continue };
+            if on(e, kind) != Some(true) { continue; }
+            let (reply, err) = dispatch(e, &format!(r#"{{"panel":"{pid}","menu_index":{close}}}"#));
+            assert!(!reply.is_empty(), "Close on {pid} was refused: {err}");
+            assert_eq!(on(e, kind), Some(false), "Close on {pid} closed it");
+            closed += 1;
+        }
+        assert!(closed >= 3, "the census closed the Default layout's on-screen panels, not a filtered few: {closed}");
         unsafe { jas_engine_free(e) };
     }
 
@@ -7040,7 +7070,10 @@ mod tests {
         assert_eq!(shape(e).1, 0, "with no compound left");
         // Every item of the menu, not only the one the box hit: none names an
         // effect the engine does not know (a Repeat with nothing to repeat
-        // may answer `Unchanged`, which is not this refusal).
+        // may answer `Unchanged`, which is not this refusal). Close needs the
+        // layout a shell loads.
+        let name = "Default";
+        assert!(!take(unsafe { jas_layout_load(e, name.as_ptr(), name.len()) }).is_empty(), "fixture: a layout");
         let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
         item(e, make);
         let mut ran = 0;

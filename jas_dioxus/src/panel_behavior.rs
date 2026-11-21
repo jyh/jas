@@ -262,6 +262,11 @@ pub struct EngineHost {
     /// The timer acts this run asked for, in order. Cleared by
     /// [`EffectHost::rewind`], so the pre-flight's copies are not kept.
     pub timers: Vec<TimerOp>,
+    /// The panel a panel-menu item's `close_panel` closes, resolved by the
+    /// panel-menu door ([`EngineHost::for_panel_menu`]): the panel the item's
+    /// params name, else the menu's own, as each panel's `dispatch` closes
+    /// its own address on the web and the Mac (row 205).
+    pub menu_panel: Option<crate::workspace::workspace::PanelKind>,
 }
 
 /// One timer act a behavior asked for (`start_timer` / `cancel_timer`). The
@@ -284,6 +289,13 @@ impl EngineHost {
     /// [`EngineHost::timers`], for a door that passes them on to its shell.
     pub fn accepting_timers() -> EngineHost {
         EngineHost { accepts_timers: true, ..Default::default() }
+    }
+
+    /// This host runs a panel-menu item whose Close target is `panel`: a
+    /// `close_panel` closes that panel in the lent layout.
+    pub fn for_panel_menu(mut self, panel: Option<crate::workspace::workspace::PanelKind>) -> EngineHost {
+        self.menu_panel = panel;
+        self
     }
 
     /// This host also claims `start_timer` / `cancel_timer`, as
@@ -343,6 +355,19 @@ impl EffectHost for EngineHost {
             let Some(id) = arg.as_str() else { return false };
             self.timers.push(TimerOp::Cancel(id.to_string()));
             return true;
+        }
+        // Close <panel> from a panel menu (row 205): closed at its address in
+        // the lent layout (`op_close_panel`), as each panel's `dispatch`
+        // closes its own on the web and the Mac. The argument is the raw
+        // `{panel: "param.panel"}` (a host is handed effects unevaluated), so
+        // the DOOR resolves the target from the item. Any other `close_panel`
+        // stays unclaimed and is refused by name. A panel not in the layout
+        // closes nothing.
+        if key == "close_panel" {
+            use crate::workspace::layout_apply::{find_panel, op_close_panel};
+            let (Some(kind), Some(layout)) = (self.menu_panel, self.layout.as_ref()) else { return false };
+            let Some(addr) = find_panel(layout, kind) else { return true };
+            return matches!(self.layout_op(&op_close_panel(addr)), Some(None));
         }
         let Some(model) = model else { return false };
         if key == "snapshot" {
