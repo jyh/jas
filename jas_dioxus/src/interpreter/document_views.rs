@@ -786,6 +786,8 @@ pub fn active_document_view(
             "bleed_uniform": doc.document_setup.bleed_uniform,
             "show_images_outline": doc.document_setup.show_images_outline,
             "highlight_substituted_glyphs": doc.document_setup.highlight_substituted_glyphs,
+            "page_isolated_blending": doc.document_setup.page_isolated_blending,
+            "page_knockout_group": doc.document_setup.page_knockout_group,
             "grid_size": doc.document_setup.grid_size,
             "grid_color": doc.document_setup.grid_color.clone(),
             "paper_color": doc.document_setup.paper_color.clone(),

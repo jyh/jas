@@ -3459,7 +3459,7 @@ fn document_setup_to_xml(
 ) -> String {
     use crate::document::print_preferences::flattener_preset_str;
     format!(
-        "{indent}<jas:document-setup bleed-top=\"{bt}\" bleed-right=\"{br}\" bleed-bottom=\"{bb}\" bleed-left=\"{bl}\" bleed-uniform=\"{bu}\" show-images-outline=\"{sio}\" highlight-substituted-glyphs=\"{hsg}\" grid-size=\"{gs}\" grid-color=\"{gc}\" paper-color=\"{pc}\" simulate-colored-paper=\"{scp}\" transparency-flattener-preset=\"{tfp}\" discard-white-overprint=\"{dwo}\"/>",
+        "{indent}<jas:document-setup bleed-top=\"{bt}\" bleed-right=\"{br}\" bleed-bottom=\"{bb}\" bleed-left=\"{bl}\" bleed-uniform=\"{bu}\" show-images-outline=\"{sio}\" highlight-substituted-glyphs=\"{hsg}\" grid-size=\"{gs}\" grid-color=\"{gc}\" paper-color=\"{pc}\" simulate-colored-paper=\"{scp}\" transparency-flattener-preset=\"{tfp}\" discard-white-overprint=\"{dwo}\"{page}/>",
         indent = indent,
         bt = fmt(s.bleed_top), br = fmt(s.bleed_right),
         bb = fmt(s.bleed_bottom), bl = fmt(s.bleed_left),
@@ -3472,6 +3472,11 @@ fn document_setup_to_xml(
         scp = bool_str(s.simulate_colored_paper),
         tfp = flattener_preset_str(&s.transparency_flattener_preset),
         dwo = bool_str(s.discard_white_overprint),
+        // The page flags (row 192 A1) are written only when true, so every
+        // document written before they existed keeps its bytes.
+        page = format!("{}{}",
+            if s.page_isolated_blending { " page-isolated-blending=\"true\"" } else { "" },
+            if s.page_knockout_group { " page-knockout-group=\"true\"" } else { "" }),
     )
 }
 
@@ -3510,6 +3515,12 @@ fn parse_document_setup(
         discard_white_overprint: get_attr(node, "discard-white-overprint")
             .map(|s| parse_bool(s, d.discard_white_overprint))
             .unwrap_or(d.discard_white_overprint),
+        page_isolated_blending: get_attr(node, "page-isolated-blending")
+            .map(|s| parse_bool(s, d.page_isolated_blending))
+            .unwrap_or(d.page_isolated_blending),
+        page_knockout_group: get_attr(node, "page-knockout-group")
+            .map(|s| parse_bool(s, d.page_knockout_group))
+            .unwrap_or(d.page_knockout_group),
     }
 }
 
@@ -6148,6 +6159,26 @@ mod tests {
         assert!(!svg.contains("<jas:document-setup"), "svg:\n{svg}");
         assert!(!svg.contains("<jas:print-preferences"), "svg:\n{svg}");
         assert!(!svg.contains("<sodipodi:namedview"), "svg:\n{svg}");
+    }
+
+    /// Row 192 A1: the page flags ride on `<jas:document-setup>`, written
+    /// only when true, each independently, and read back.
+    #[test]
+    fn the_page_flags_round_trip_through_svg_and_are_absent_by_default() {
+        let mut doc = Document::default();
+        doc.document_setup.bleed_top = 9.0;
+        let plain = document_to_svg(&doc);
+        assert!(plain.contains("<jas:document-setup"), "{plain}");
+        assert!(!plain.contains("page-isolated-blending") && !plain.contains("page-knockout-group"), "{plain}");
+        for (iso, ko) in [(true, false), (false, true), (true, true)] {
+            let mut e = doc.clone();
+            e.document_setup.page_isolated_blending = iso;
+            e.document_setup.page_knockout_group = ko;
+            let svg = document_to_svg(&e);
+            assert_eq!(svg.contains("page-isolated-blending=\"true\""), iso, "{svg}");
+            assert_eq!(svg.contains("page-knockout-group=\"true\""), ko, "{svg}");
+            assert_eq!(svg_to_document(&svg).document_setup, e.document_setup, "iso={iso} ko={ko}");
+        }
     }
 
     #[test]

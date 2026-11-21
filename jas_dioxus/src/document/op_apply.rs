@@ -233,6 +233,8 @@ pub fn apply_print_config_field(
                 "highlight_substituted_glyphs" => match as_bool { Some(b) => { d.highlight_substituted_glyphs = b; true } None => false },
                 "simulate_colored_paper" => match as_bool { Some(b) => { d.simulate_colored_paper = b; true } None => false },
                 "discard_white_overprint" => match as_bool { Some(b) => { d.discard_white_overprint = b; true } None => false },
+                "page_isolated_blending" => match as_bool { Some(b) => { d.page_isolated_blending = b; true } None => false },
+                "page_knockout_group" => match as_bool { Some(b) => { d.page_knockout_group = b; true } None => false },
                 "grid_size" => match as_num { Some(n) => { d.grid_size = n; true } None => false },
                 // grid_color/paper_color accept any string (the inline block
                 // accepted both Value::Str and the hex-coerced Value::Color,
