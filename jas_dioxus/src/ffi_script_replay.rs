@@ -296,6 +296,46 @@ fn a_stroke_commit_on_a_widget_the_selection_disables_is_refused() {
         "the commit after Miter must run, got {at_miter:?}");
 }
 
+/// **The Gradient panel's trash button deletes the selected stop** (GRADIENT.md
+/// TRASH_BUTTON: disabled when no stop is selected or only two remain; the law
+/// is `delete_stop`, pinned by `gradient_stop/slider.json`). Until row 198 the
+/// YAML declared the button with no behavior, so a click did nothing in any
+/// port. A slider `add` at 40 gives the rect's seed (blue to white) a third
+/// stop, and a press/release on stop 0 selects the blue, so the click leaves
+/// the added stop at 40 and the white. The control is the same click on the
+/// two-stop seed, refused as Disabled.
+#[test]
+fn the_gradient_trash_button_deletes_the_selected_stop() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = |steps: Value| serde_json::json!({
+        "item": "t", "setup_svg": "rect_with_stroke.svg", "tool": "selection", "app_state": {},
+        "steps": steps, "expected_json": "-"});
+    let press = serde_json::json!([{"kind": "press", "x": 36, "y": 18}, {"kind": "release", "x": 36, "y": 18}]);
+    let slider = |event: &str, value: Value| serde_json::json!({"panel": "gradient_panel_content",
+        "widget": "grad_slider", "event": event, "value": value});
+    let add = slider("add", serde_json::json!({"location": 40}));
+    let pick0 = slider("press", serde_json::json!({"index": 0, "location": 0}));
+    let up0 = slider("release", serde_json::json!({"location": 0, "dy": 0}));
+    let trash = serde_json::json!({"panel": "gradient_panel_content", "widget": "grad_trash_button", "event": "click"});
+    let read = serde_json::json!({"read": "document"});
+    let three = replay(&script(serde_json::json!([press[0], press[1], add, pick0, up0, read])));
+    let three: Value = serde_json::from_str(three.as_ref().expect("the add and the pick must run")).unwrap();
+    assert_eq!(three["layers"][0]["children"][0]["fill_gradient"]["stops"].as_array().map(Vec::len), Some(3),
+        "the setup must reach three stops before the click means anything, got {three}");
+    let deleted = replay(&script(serde_json::json!([press[0], press[1], add, pick0, up0, trash, read])));
+    let doc = deleted.as_ref().expect("the trash click on three stops must run");
+    let v: Value = serde_json::from_str(doc).unwrap();
+    let stops = &v["layers"][0]["children"][0]["fill_gradient"]["stops"];
+    let got: Vec<(f64, f64)> = stops.as_array().expect("the rect has gradient stops").iter()
+        .map(|s| (s["location"].as_f64().unwrap(), s["color"]["r"].as_f64().unwrap())).collect();
+    assert_eq!(got.len(), 2, "one stop deleted, got {stops}");
+    assert_eq!(got[0].0, 40.0, "the selected stop 0 (blue at 0) is the one deleted, got {stops}");
+    assert_eq!(got[1].0, 100.0, "got {stops}");
+    let at_floor = replay(&script(serde_json::json!([press[0], press[1], trash, read])));
+    assert!(at_floor.as_ref().is_err_and(|e| e.contains("Disabled")),
+        "a trash click at the two-stop floor must be refused as Disabled, got {at_floor:?}");
+}
+
 #[test]
 fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
     // The ABI's counters are process-wide; the tests that read them serialise

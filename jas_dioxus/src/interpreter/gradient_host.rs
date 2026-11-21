@@ -308,7 +308,21 @@ pub fn stops_to_json(stops: &[GradientStop]) -> Value {
 pub const STOP_KEYS: &[(&str, &str)] = &[
     ("gradient_stop_opacity", "opacity"),
     ("gradient_stop_location", "location"),
+    // The trash button (GRADIENT.md TRASH_BUTTON): its value is not read.
+    ("gradient_stop_delete", "delete"),
 ];
+
+/// A [`STOP_KEYS`] write on `stops` at the selected `index`: `delete` is
+/// [`delete_stop`] (the value is not read), any other field [`edit_stop`].
+/// The stops and the index now selected, or `None` when the law refuses.
+pub fn stop_key_edit(stops: &[GradientStop], index: i64, field: &str, value: &Value)
+                     -> Option<(Vec<GradientStop>, usize)> {
+    if field == "delete" {
+        delete_stop(stops, index)
+    } else {
+        edit_stop(stops, index, field, value)
+    }
+}
 
 /// The stop field a [`STOP_KEYS`] key edits, or `None` for any other key.
 pub fn stop_field(key: &str) -> Option<&'static str> {
@@ -318,7 +332,7 @@ pub fn stop_field(key: &str) -> Option<&'static str> {
 /// The engine's stop write: stop `index` of the selection's gradient (the
 /// same base as [`apply_render_key`]: its own gradient, the seed when it is
 /// solid/none; when mixed, the first member's stops, which then overwrite every
-/// member's stops) gets `field` by [`edit_stop`].
+/// member's stops) gets `field` by [`stop_key_edit`].
 /// Returns the index the stop now sits at, or `None` when nothing is
 /// selected or the law refuses; nothing is written then.
 pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value: &Value,
@@ -329,12 +343,12 @@ pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value:
         SelectionGradient::Solid(c) => seed_gradient(c),
         SelectionGradient::Mixed => {
             let first = first_member_gradient(model.document(), fill_on_top)?;
-            let (stops, moved) = edit_stop(&first.stops, index, field, value)?;
+            let (stops, moved) = stop_key_edit(&first.stops, index, field, value)?;
             map_member_gradients(model, fill_on_top, &|mut g| { g.stops = stops.clone(); g });
             return Some(moved);
         }
     };
-    let (stops, moved) = edit_stop(&g.stops, index, field, value)?;
+    let (stops, moved) = stop_key_edit(&g.stops, index, field, value)?;
     g.stops = stops;
     apply_gradient_to_selection(model, fill_on_top, g);
     Some(moved)

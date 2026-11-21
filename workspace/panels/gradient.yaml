@@ -446,6 +446,21 @@ content:
           col: 2
           summary: "Delete selected stop"
           icon: trash
+          bind:
+            disabled: "panel.selected_stop_index < 0 or panel.stops.length <= 2"
+          behavior:
+            - event: click
+              description: >-
+                Deletes the selected stop by the slider law's delete_stop (GRADIENT.md
+                TRASH_BUTTON, The slider law (precisely)): the stop is removed without
+                sorting, and the selection moves to the stop on its left, or to stop 0
+                when the first stop was deleted. Disabled when no stop is selected
+                (a selected midpoint sets the stop index to -1) or when only two stops
+                remain, the minimum. gradient_stop_delete edits the selected stop of the
+                selection's gradient, as the two stop combos do; the value it carries
+                is not read.
+              effects:
+                - set: { gradient_stop_delete: true }
 
     # ── Row 6: Selected-stop properties ──
     - type: row
