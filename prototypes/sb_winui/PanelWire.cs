@@ -1044,8 +1044,9 @@ internal static class PanelWire
     /// <summary>
     /// jas §941: a placeholder's UIA `ItemStatus`: `checked` and/or `disabled`,
     /// space-separated, exactly when the plan says so. A Grid's peer has no
-    /// toggle or enabled state a reader can see, so this is how a driver reads
-    /// the highlight.
+    /// toggle state a reader can see, so this is how a driver reads the
+    /// highlight. Its enabled state is also on the peer's own `IsEnabled`
+    /// (<see cref="PlaceholderEnabled"/>, jas STATUS-flask 967/968).
     /// </summary>
     internal static string PlaceholderStatus(string? @checked, string? disabled) =>
         string.Join(" ", new[] { @checked == "true" ? "checked" : null, disabled == "true" ? "disabled" : null }.Where(s => s is not null));
