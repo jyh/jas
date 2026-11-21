@@ -841,6 +841,9 @@ def self_test():
     check(fit_line({"overlay": good, "classic": dict(goodc, vbar=0)}).startswith("FIT NOT RUN (classic: the dock shows no scrollbar width"),
           "classic bars that did not take are NOT RUN, never an overlay read under the classic label")
     check(fit_line({}) == "FIT NOT RUN (no condition read)", "no readings is NOT RUN")
+    check(fit_line({"overlay": dict(good, cut=["input#prop_x 131/90"]), "classic": goodc})
+          == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=0 cut=1 [input#prop_x 131/90])",
+          "a control drawn past its cell on ANY dock tab is RED and named (row 193)")
     check(fit_line({"overlay": dict(good, hscroll=1, who=["div#x[245/238] by input#y+7"]), "classic": goodc})
           == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=1 [div#x[245/238] by input#y+7])", "a RED names the scroller and what overruns it")
     check(preview_line(five) == "DOCK PREVIEW stroke->left[up=left src=kept] layers->bottom[up=none src=gone] align->float[via=left up=left]",
