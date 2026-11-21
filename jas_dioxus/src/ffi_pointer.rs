@@ -461,6 +461,11 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
             None => return JasStatus::BadParamType,
         },
     };
+    // The eyedropper's armed pick takes an Escape first, and nothing else sees
+    // it (`gradient_host::cancel_pick`; the web's and the Mac's order too).
+    if code == KEY_ESCAPE && engine.with_store_mut(crate::interpreter::gradient_host::cancel_pick) {
+        return JasStatus::Ok;
+    }
     use crate::workspace::resolve_key::{route_key, KeyRoute};
     // The ORDER is `route_key`'s, shared with the level-1 input-script runner.
     // flask STATUS §277: a YAML tool reports EVERY key handled once it declares

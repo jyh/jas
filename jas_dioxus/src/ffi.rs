@@ -7271,6 +7271,30 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 198 (GRADIENT.md EYEDROPPER_BUTTON): an Escape while the
+    /// eyedropper's pick is armed CANCELS the pick and nothing else sees it.
+    /// Mask isolation is the observable "else": armed, the first Escape clears
+    /// the pick and leaves isolation; the second Escape is the ordinary key
+    /// and exits isolation.
+    #[test]
+    fn escape_through_the_key_door_cancels_an_armed_eyedropper_pick_first() {
+        use crate::ffi_pointer::{jas_key_event, KEY_ESCAPE};
+        use crate::interpreter::gradient_host::PICKING_KEY;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("two_rects.svg");
+        let picking = |e| engine_of(e).with_store_mut(|s| s.get(PICKING_KEY).clone());
+        let isolation = |e| engine_of(e).model.borrow().mask_isolation_path.clone();
+        engine_of(e).with_model_mut(|m| m.mask_isolation_path = Some(vec![0, 0]));
+        engine_of(e).with_store_mut(|s| s.set(PICKING_KEY, serde_json::json!(true)));
+        let status = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(status, JasStatus::Ok, "an Escape that cancels the pick is handled");
+        assert_eq!(picking(e), serde_json::json!(false), "the first Escape cancels the pick");
+        assert_eq!(isolation(e), Some(vec![0, 0]), "and nothing else saw it: isolation stays");
+        let _ = unsafe { jas_key_event(e, KEY_ESCAPE, 0) };
+        assert_eq!(isolation(e), None, "the control: the second Escape is the ordinary key");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 181: the Paragraph menu's Hanging Punctuation reads the SELECTION,
     /// in its check and in its toggle, after a selection change. The web's and
     /// the Mac's menus read stored state there (both fixed with this arm); the

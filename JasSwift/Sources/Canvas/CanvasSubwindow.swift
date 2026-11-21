@@ -3652,6 +3652,12 @@ class CanvasNSView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // The Gradient eyedropper's armed pick takes an Escape FIRST, and
+        // nothing else sees it (row 198; the engine's key door and the web).
+        if canonicalKeyName(event) == "Escape", let model = controller?.model,
+           gradientStopPickEscapeIntercept(store: model.stateStore) {
+            return
+        }
         // If the active tool is in an editing session, route ALL key events
         // (including shortcuts that would otherwise hit global handlers) to
         // it first. This is the "captures keyboard" path used by the type

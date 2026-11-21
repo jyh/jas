@@ -314,6 +314,24 @@ private let gradient = "gradient_panel_content"
     #expect(model.document.selection.map(\.path) == [[0, 0]], "the selection is untouched")
 }
 
+/// Row 198: an Escape while the pick is armed cancels it, and the canvas's
+/// `keyDown` asks this intercept before every other Escape path, so nothing
+/// else sees that Escape. The next Escape is ordinary. Mirrors Rust
+/// `escape_through_the_key_door_cancels_an_armed_eyedropper_pick_first` and the
+/// web's `an_armed_eyedropper_pick_takes_the_escape_and_isolation_stays`.
+@Test func anEscapeCancelsAnArmedGradientEyedropperPick() {
+    let model = Model()
+    let store = model.stateStore
+    #expect(!gradientStopPickEscapeIntercept(store: store), "unarmed, the Escape is not the pick's")
+    store.setPanel(gradient, "selected_stop_index", 0)
+    let r = events(model, gradient).click(shipped(gradient, "grad_eyedropper_button"))
+    #expect(r.outcome != "refused", "\(r)")
+    #expect((store.get(gradientPickingKey) as? Bool) == true, "the button arms the pick")
+    #expect(gradientStopPickEscapeIntercept(store: store), "armed, the Escape is the pick's")
+    #expect((store.get(gradientPickingKey) as? Bool) == false, "and it cancels the pick")
+    #expect(!gradientStopPickEscapeIntercept(store: store), "the next Escape is ordinary")
+}
+
 @Test func aGradientAngleCommitIsClampedToItsDeclaredBounds() {
     let model = Model()
     let r = events(model, gradient).commit(shipped(gradient, "grad_angle_combo"), text: "500")

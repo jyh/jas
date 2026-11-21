@@ -1886,6 +1886,14 @@ impl AppState {
         true
     }
 
+    /// The eyedropper's Escape (row 198, GRADIENT.md EYEDROPPER_BUTTON), the
+    /// engine's `gradient_host::cancel_pick` on the web's state: when the pick
+    /// is armed, disarm it. `true` when the Escape was the pick's; nothing
+    /// else may see it.
+    pub(crate) fn try_cancel_gradient_pick(&mut self) -> bool {
+        std::mem::replace(&mut self.gradient_panel.picking, false)
+    }
+
     pub(crate) fn try_designate_align_key_object(&mut self, x: f64, y: f64) -> bool {
         if self.align_panel.align_to != AlignTo::KeyObject {
             return false;
