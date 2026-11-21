@@ -250,6 +250,30 @@ private let gradient = "gradient_panel_content"
             "fill gradient: \(String(describing: model.document.getElement([0, 0]).fillGradient))")
 }
 
+/// Row 198: the trash button deletes the selected stop (GRADIENT.md
+/// TRASH_BUTTON, `deleteStop`), and it is refused at the two-stop floor.
+/// Mirrors Rust `the_gradient_trash_button_deletes_the_selected_stop`.
+@Test func theGradientTrashButtonDeletesTheSelectedStop() {
+    let stops: [GradientStop] = [GradientStop(color: "#ff0000", location: 0),
+                                 GradientStop(color: "#000000", location: 40),
+                                 GradientStop(color: "#ffffff", location: 100)]
+    let json: ([GradientStop]) -> [[String: Any]] = { list in list.map {
+        ["color": $0.color, "opacity": $0.opacity, "location": $0.location,
+         "midpoint_to_next": $0.midpointToNext] } }
+    let model = modelWithSelectedRect(stroke: nil)
+    Controller(model: model).setSelectionFillGradient(Gradient(stops: stops))
+    let trash = shipped(gradient, "grad_trash_button")
+    let r = events(model, gradient, panelOverlay: ["stops": json(stops)]).click(trash)
+    #expect(r.outcome != "refused" && r.behaviorsRun == 1, "\(r)")
+    #expect(model.document.getElement([0, 0]).fillGradient?.stops.map { "\($0.color)@\($0.location)" }
+            == ["#000000@40.0", "#ffffff@100.0"], "the selected stop 0 is the one deleted")
+    #expect(number(model.stateStore.getPanel(gradient, "selected_stop_index")) == 0)
+    let two = Array(stops.dropFirst())
+    let floor = events(model, gradient, panelOverlay: ["stops": json(two)]).click(trash)
+    #expect(floor.outcome == "refused", "two stops are the floor: \(floor)")
+    #expect(model.document.getElement([0, 0]).fillGradient?.stops.count == 2, "a refused click writes nothing")
+}
+
 @Test func aGradientAngleCommitIsClampedToItsDeclaredBounds() {
     let model = Model()
     let r = events(model, gradient).commit(shipped(gradient, "grad_angle_combo"), text: "500")

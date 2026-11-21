@@ -1025,10 +1025,10 @@ fn set_app_state_field(
         }
         // A stop combo: the panel's stops take the stop-edit law at the
         // selected index, which follows the stop (gradient_host::edit_stop).
-        "gradient_stop_opacity" | "gradient_stop_location" => {
+        "gradient_stop_opacity" | "gradient_stop_location" | "gradient_stop_delete" => {
             let field = crate::interpreter::gradient_host::stop_field(key).unwrap_or_default();
             let gp = &mut st.gradient_panel;
-            if let Some((stops, moved)) = crate::interpreter::gradient_host::edit_stop(
+            if let Some((stops, moved)) = crate::interpreter::gradient_host::stop_key_edit(
                 &gp.stops, gp.selected_stop_index, field, val) {
                 gp.stops = stops;
                 gp.selected_stop_index = moved as i64;

@@ -1122,13 +1122,24 @@ public func isGradientRenderKey(_ key: String) -> Bool {
     gradientRenderKeys.contains(key)
 }
 
-/// The global keys the two stop combos `set`, with the stop field each edits.
-/// Not render keys: they need the selected stop's index. Mirrors
-/// `gradient_host::STOP_KEYS`.
+/// The global keys the two stop combos and the trash button `set`, with the
+/// stop field each edits. Not render keys: they need the selected stop's
+/// index. Mirrors `gradient_host::STOP_KEYS`.
 public let gradientStopKeys: [String: String] = [
     "gradient_stop_opacity": "opacity",
     "gradient_stop_location": "location",
+    // The trash button (GRADIENT.md TRASH_BUTTON): its value is not read.
+    "gradient_stop_delete": "delete",
 ]
+
+/// A ``gradientStopKeys`` write on `stops` at the selected `index`: `delete`
+/// is ``deleteStop(_:index:)`` (the value is not read), any other field
+/// ``editStop(_:index:field:value:)``. Mirrors `gradient_host::stop_key_edit`.
+public func stopKeyEdit(_ stops: [GradientStop], index: Int, field: String,
+                        value: Any?) -> ([GradientStop], Int)? {
+    field == "delete" ? deleteStop(stops, index: index)
+        : editStop(stops, index: index, field: field, value: value)
+}
 
 /// The Gradient panel's stop-edit law (GRADIENT.md STOP_OPACITY_COMBO,
 /// STOP_LOCATION_COMBO; reference `gradient_law.edit_stop`, pinned by
@@ -1611,7 +1622,7 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
         // A stop combo: the selected stop of the same base, by the stop-edit
         // law; the panel's selected index follows the stop.
         let index = (store.getPanel("gradient_panel_content", "selected_stop_index") as? NSNumber)?.intValue ?? -1
-        guard let (stops, moved) = editStop(g.stops, index: index, field: field,
+        guard let (stops, moved) = stopKeyEdit(g.stops, index: index, field: field,
                                             value: store.get(key)) else { return }
         g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
                      dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes)
@@ -1662,7 +1673,7 @@ private func applyGradientPanelToMixed(store: StateStore, controller: Controller
     } else if let key = key, let field = gradientStopKeys[key] {
         guard let first = firstMemberGradient(controller.model.document, fillOnTop: fillOnTop) else { return }
         let index = (store.getPanel("gradient_panel_content", "selected_stop_index") as? NSNumber)?.intValue ?? -1
-        guard let (stops, moved) = editStop(first.stops, index: index, field: field, value: store.get(key)) else { return }
+        guard let (stops, moved) = stopKeyEdit(first.stops, index: index, field: field, value: store.get(key)) else { return }
         store.setPanel("gradient_panel_content", "selected_stop_index", moved)
         edit = { g in Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
                                dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes) }

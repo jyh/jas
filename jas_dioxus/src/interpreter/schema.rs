@@ -118,9 +118,11 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "gradient_method" => Some(SchemaEntry::new(Enum(GRADIENT_METHOD_VALUES), false, true)),
         "gradient_dither" => Some(SchemaEntry::new(Bool, false, true)),
         "gradient_stroke_sub_mode" => Some(SchemaEntry::new(Enum(GRADIENT_STROKE_SUB_MODE_VALUES), false, true)),
-        // The two stop combos' keys (gradient_host::STOP_KEYS).
+        // The stop keys (gradient_host::STOP_KEYS): the two combos and the trash.
         "gradient_stop_opacity" => Some(SchemaEntry::new(Number, false, true)),
         "gradient_stop_location" => Some(SchemaEntry::new(Number, false, true)),
+        // The trash button's key; its value is not read.
+        "gradient_stop_delete" => Some(SchemaEntry::new(Bool, false, true)),
         // The slider's finished gesture: the whole stops list (gradient_host::STOPS_KEY).
         "gradient_stops" => Some(SchemaEntry::new(List, false, true)),
         "fill_on_top" => Some(SchemaEntry::new(Bool, false, true)),
