@@ -480,6 +480,21 @@ content:
           col: 2
           summary: "Pick color for selected stop"
           icon: eyedropper
+          bind:
+            disabled: "panel.selected_stop_index < 0"
+          behavior:
+            - event: click
+              description: >-
+                Arms a one-shot pick (GRADIENT.md EYEDROPPER_BUTTON): the canvas's
+                next press samples the colour of the topmost element under it,
+                through groups, on the active attribute (its fill, or its stroke
+                when the stroke is on top), and writes it to the selected stop by
+                the stop-colour law. The tool never sees that press. A press on
+                nothing, or on an element with no solid colour there, writes
+                nothing and still ends the pick. Disabled when no stop is
+                selected (a midpoint, or nothing).
+              effects:
+                - set: { gradient_stop_picking: true }
         - type: container
           col: 10
           layout: column

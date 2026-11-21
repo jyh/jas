@@ -125,6 +125,8 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "gradient_stop_delete" => Some(SchemaEntry::new(Bool, false, true)),
         // The stop-colour key (gradient_host::STOP_KEYS, row 198).
         "gradient_stop_color" => Some(SchemaEntry::new(Color, false, true)),
+        // The eyedropper button's one-shot pick (gradient_host::PICKING_KEY, row 198).
+        "gradient_stop_picking" => Some(SchemaEntry::new(Bool, false, true)),
         // The Location combo with a midpoint selected (gradient_host::MIDPOINT_KEY).
         "gradient_midpoint_location" => Some(SchemaEntry::new(Number, false, true)),
         // The slider's finished gesture: the whole stops list (gradient_host::STOPS_KEY).

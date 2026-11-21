@@ -371,6 +371,54 @@ pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value:
     Some(moved)
 }
 
+/// The global key the Gradient panel's eyedropper button sets (row 198, step
+/// 4): while true, the canvas's next press picks a stop colour
+/// ([`pick_stop_colour`]) and the tool never sees it.
+pub const PICKING_KEY: &str = "gradient_stop_picking";
+
+/// The eyedropper's sample (GRADIENT.md EYEDROPPER_BUTTON; design brief
+/// 2026-11-21 §3): the colour, as `#rrggbb`, of the topmost element under
+/// CANVAS point (`x`, `y`), through groups (`doc_primitives::hit_test_deep`),
+/// on the ACTIVE attribute: its fill when `fill_on_top`, else its stroke.
+/// `None` when nothing is hit or that attribute has no solid colour (none, or a
+/// gradient over it).
+pub fn stop_colour_at(model: &Model, x: f64, y: f64, fill_on_top: bool) -> Option<String> {
+    let zoom = model.zoom_level;
+    let (doc_x, doc_y) = ((x - model.view_offset_x) / zoom, (y - model.view_offset_y) / zoom);
+    let _doc = crate::interpreter::doc_primitives::register_document(model.document().clone());
+    let crate::interpreter::expr_types::Value::Path(path) =
+        crate::interpreter::doc_primitives::hit_test_deep(doc_x, doc_y) else { return None };
+    let e = model.document().get_element(&path)?;
+    let (gradient, colour) = if fill_on_top {
+        (e.fill_gradient().is_some(), e.fill().map(|f| f.color))
+    } else {
+        (e.stroke_gradient().is_some(), e.stroke().map(|s| s.color))
+    };
+    if gradient {
+        return None;
+    }
+    colour.map(|c| format!("#{}", c.to_hex()))
+}
+
+/// The picking press (row 198, step 4), on the engine's store: when
+/// [`PICKING_KEY`] is set, clear it and write [`stop_colour_at`]'s sample to
+/// the selected stop by the stop-colour law, in one transaction. `true` when
+/// the press was the pick's (the key was set), whether or not anything was
+/// hit, so a miss also leaves the mode; the tool must not see it.
+pub fn pick_stop_colour(model: &mut Model, store: &mut crate::interpreter::state_store::StateStore,
+                        x: f64, y: f64) -> bool {
+    if store.get(PICKING_KEY).as_bool() != Some(true) {
+        return false;
+    }
+    store.set(PICKING_KEY, json!(false));
+    let fill_on_top = store.get("fill_on_top").as_bool().unwrap_or(true);
+    let index = store.get_panel(GRADIENT_PANEL, "selected_stop_index").as_i64().unwrap_or(-1);
+    if let Some(colour) = stop_colour_at(model, x, y, fill_on_top) {
+        model.with_txn(|m| { apply_stop_edit(m, fill_on_top, "color", &json!(colour), index); });
+    }
+    true
+}
+
 /// The global key the Location combo sets with a MIDPOINT selected (GRADIENT.md
 /// STOP_LOCATION_COMBO): the midpoint's absolute location, applied by
 /// [`drag_midpoint`] to the selected pair.
