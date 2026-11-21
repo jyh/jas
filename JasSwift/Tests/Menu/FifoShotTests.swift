@@ -152,3 +152,30 @@ private func pixel(_ path: String, x: Double, yFromTop: Double, viewWidth: Doubl
     layoutApply(&l, verb)
     #expect(!l.isPanelVisible(.layers), "hidden by the second")
 }
+
+// ── `repaints <path>`: how many times the canvas's repaint gate fired ──
+// `shot` draws on demand, so it cannot tell whether the window was ever
+// invalidated (row 207: the mutant with the precision field missing from the
+// signature shot the same image). The gate's own count can: a harness reads
+// it, changes state through the app, and reads it again.
+
+@Test @MainActor func theRepaintCountStepsOnlyWhenTheGateFires() {
+    let view = CanvasNSView()
+    view.frame = NSRect(x: 0, y: 0, width: 50, height: 50)
+    let model = Model(document: Document.newEmptyDocument())
+    view.controller = Controller(model: model)
+    let start = FifoLive.canvasRepaints
+    #expect(view.repaintIfRenderStateChanged(), "the first check always repaints")
+    #expect(FifoLive.canvasRepaints == start + 1)
+    #expect(!view.repaintIfRenderStateChanged(), "nothing changed")
+    #expect(FifoLive.canvasRepaints == start + 1, "an unchanged signature does not count")
+    model.stateStore.set("boolean_precision", 5.0)
+    #expect(view.repaintIfRenderStateChanged(), "row 207: precision is in the signature")
+    #expect(FifoLive.canvasRepaints == start + 2)
+}
+
+@Test func theRepaintReportIsOneParsableObject() throws {
+    let json = FifoRepaints.json(count: 7)
+    let obj = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+    #expect(obj?["repaints"] as? Int == 7, "\(json)")
+}

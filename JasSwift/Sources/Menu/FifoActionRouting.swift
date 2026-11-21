@@ -163,6 +163,27 @@ public enum FifoLive {
     nonisolated(unsafe) public static var tool: String? = nil
     /// The id of the open dialog, or nil when none is open.
     nonisolated(unsafe) public static var dialog: String? = nil
+    /// How many times a canvas's repaint gate fired
+    /// (`CanvasNSView.repaintIfRenderStateChanged` returned true). The FIFO's
+    /// `repaints` reads it; `shot` cannot, because it draws on demand.
+    nonisolated(unsafe) public static var canvasRepaints: Int = 0
+}
+
+/// `repaints <path>`: `{"repaints": N}`, the canvas repaint gate's count
+/// (FifoLive.canvasRepaints), written to `path` (atomically, replacing). A
+/// harness reads it before and after a change: a step means the live app ran
+/// its update pass and the gate saw the change.
+public enum FifoRepaints {
+    public static func json(count: Int) -> String {
+        let data = try! JSONSerialization.data(
+            withJSONObject: ["repaints": count], options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public static func write(count: Int, to path: String) throws {
+        try Data(json(count: count).utf8)
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
 }
 
 /// A read the app cannot answer truthfully. It is refused, by name, so a

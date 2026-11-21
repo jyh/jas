@@ -3090,11 +3090,13 @@ class CanvasNSView: NSView {
     func repaintIfRenderStateChanged() -> Bool {
         guard let sig = currentRenderSignature() else {
             needsDisplay = true
+            FifoLive.canvasRepaints += 1
             return true
         }
         if sig != lastRenderSignature {
             lastRenderSignature = sig
             needsDisplay = true
+            FifoLive.canvasRepaints += 1
             return true
         }
         return false

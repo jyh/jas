@@ -18,6 +18,8 @@ import JasLib
 //     open <path>               -> File > Open's document, no dialog
 //     view <zoom> <offx> <offy> -> set the active canvas's view (level 2)
 //     read <path>               -> write the document's test JSON to path
+//     repaints <path>           -> {"repaints": N}, how many times the canvas's
+//                                  repaint gate fired (shot cannot see that)
 //     shot <path>               -> the main window's content as a PNG, drawn
 //                                  in-process (works with the console locked)
 //     action <name> [json]      -> <name> with optional JSON params, run
@@ -240,6 +242,14 @@ extension JasAppDelegate {
                 NSLog("test-fifo: layout wrote %@", rest)
             } catch {
                 NSLog("test-fifo: layout REFUSED %@ (%@)", rest, "\(error)")
+            }
+        case "repaints":
+            // repaints <path>: the canvas repaint gate's count (FifoRepaints).
+            do {
+                try FifoRepaints.write(count: FifoLive.canvasRepaints, to: rest)
+                NSLog("test-fifo: repaints wrote %@ %ld", rest, FifoLive.canvasRepaints)
+            } catch {
+                NSLog("test-fifo: repaints REFUSED %@ (%@)", rest, "\(error)")
             }
         case "shot":
             // shot <path>: the main window's content drawn in-process to a
