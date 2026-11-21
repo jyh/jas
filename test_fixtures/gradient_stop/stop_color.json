@@ -1,0 +1,347 @@
+{
+  "_doc": [
+    "The Gradient panel's stop-colour law (transcripts/GRADIENT.md: double-click a stop opens the colour picker, OK writes the colour to the stop; EYEDROPPER_BUTTON applies a picked colour to the selected stop). Row 198.",
+    "set_stop_color(stops, index, color) -> (stops, index), or refused (expected: null) when index names no stop or color is not a #rrggbb hex string.",
+    "A plain set: no re-sort, no midpoint reset, the index is unchanged; the colour is stored lowercase.",
+    "edit_stop (stop_edit.json) still refuses field 'color': this is a separate law, not a third edit_stop field.",
+    "Read by workspace_interpreter/tests/test_gradient_stop.py (reference), jas_dioxus/src/cross_language_test.rs and JasSwift/Tests/Panels/GradientStopCorpusTests.swift."
+  ],
+  "vectors": [
+    {
+      "name": "color_sets_one_stop",
+      "_comment": "A plain set on the selected stop; order, locations, opacities and midpoints are untouched, and the index stays.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "#336699",
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#336699",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "uppercase_hex_is_stored_lowercase",
+      "_comment": "The colour is stored in the canonical lowercase #rrggbb form.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "value": "#ABCDEF",
+      "expected": {
+        "stops": [
+          {
+            "color": "#abcdef",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "index_out_of_range_refuses",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 3,
+      "value": "#336699",
+      "expected": null
+    },
+    {
+      "name": "no_stop_selected_refuses",
+      "_comment": "-1 is the panel's 'nothing selected' (a midpoint is).",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": -1,
+      "value": "#336699",
+      "expected": null
+    },
+    {
+      "name": "a_name_is_not_a_colour",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "red",
+      "expected": null
+    },
+    {
+      "name": "short_hex_refuses",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "#369",
+      "expected": null
+    },
+    {
+      "name": "non_hex_digits_refuse",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "#33669g",
+      "expected": null
+    },
+    {
+      "name": "a_number_is_not_a_colour",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": 50,
+      "expected": null
+    },
+    {
+      "name": "a_signed_digit_refuses",
+      "_comment": "Integer parsers accept a sign ('+f'); a colour digit is a hex digit, nothing else.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "#+f+f+f",
+      "expected": null
+    },
+    {
+      "name": "a_space_refuses",
+      "_comment": "Integer parsers accept a leading space (' f').",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "# f0000",
+      "expected": null
+    },
+    {
+      "name": "no_hash_refuses",
+      "_comment": "#rrggbb, with the hash.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "value": "336699",
+      "expected": null
+    }
+  ]
+}

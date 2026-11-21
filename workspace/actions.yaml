@@ -829,7 +829,8 @@ actions:
     description: >
       Open the modal color picker dialog for the color the target param
       names. The target is "fill" or "stroke", the active fill or stroke
-      color, or a field of the dialog that is open now, written
+      color, "gradient_stop", the selected stop of the selection's gradient
+      (the Gradient panel), or a field of the dialog that is open now, written
       "dialog.<field>" (Layer Options' swatch passes "dialog.color",
       Artboard Options' passes "dialog.fill"), and then the opener also
       passes that field's current color as the color param. The picker

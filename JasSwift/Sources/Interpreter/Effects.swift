@@ -1130,6 +1130,8 @@ public let gradientStopKeys: [String: String] = [
     "gradient_stop_location": "location",
     // The trash button (GRADIENT.md TRASH_BUTTON): its value is not read.
     "gradient_stop_delete": "delete",
+    // The colour picker's OK for a stop, and the eyedropper (row 198).
+    "gradient_stop_color": "color",
 ]
 
 /// A ``gradientStopKeys`` write on `stops` at the selected `index`: `delete`
@@ -1137,8 +1139,27 @@ public let gradientStopKeys: [String: String] = [
 /// ``editStop(_:index:field:value:)``. Mirrors `gradient_host::stop_key_edit`.
 public func stopKeyEdit(_ stops: [GradientStop], index: Int, field: String,
                         value: Any?) -> ([GradientStop], Int)? {
-    field == "delete" ? deleteStop(stops, index: index)
-        : editStop(stops, index: index, field: field, value: value)
+    switch field {
+    case "delete": return deleteStop(stops, index: index)
+    case "color": return setStopColor(stops, index: index, color: value)
+    default: return editStop(stops, index: index, field: field, value: value)
+    }
+}
+
+/// The stop-colour law (row 198; reference `gradient_law.set_stop_color`,
+/// pinned by `test_fixtures/gradient_stop/stop_color.json`): stop `index`
+/// takes `color`, a `#rrggbb` string with six hex digits, stored lowercase,
+/// and the index stays. A plain set: no re-sort, no midpoint reset. Nil when
+/// `index` names no stop or `color` is anything else. Mirrors
+/// `gradient_host::set_stop_color`.
+public func setStopColor(_ stops: [GradientStop], index: Int, color: Any?) -> ([GradientStop], Int)? {
+    guard stops.indices.contains(index), let hex = color as? String, hex.count == 7,
+          hex.first == "#", hex.dropFirst().allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
+    var out = stops
+    let s = out[index]
+    out[index] = GradientStop(color: hex.lowercased(), opacity: s.opacity, location: s.location,
+                              midpointToNext: s.midpointToNext)
+    return (out, index)
 }
 
 /// The Gradient panel's stop-edit law (GRADIENT.md STOP_OPACITY_COMBO,

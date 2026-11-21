@@ -101,3 +101,26 @@ private func dispatch(_ store: StateStore, _ action: String, _ params: [String: 
     #expect(store.getDialogId() == nil)
     #expect(store.dialogDepth() == 0)
 }
+
+/// Row 198: the picker's OK for a gradient STOP (GRADIENT.md: double-click a
+/// stop opens the picker; OK writes the colour to the stop). The OK effects
+/// are the shipped workspace's; the gradient hook applies `gradient_stop_color`
+/// to the selected stop (0). Mirrors Rust
+/// `the_color_pickers_ok_for_a_stop_writes_the_stops_colour`.
+@Test func okForAGradientStopWritesTheStopsColour() {
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))])],
+        selection: [ElementSelection.all([0, 0])]))
+    Controller(model: model).setSelectionFillGradient(Gradient(stops: [
+        GradientStop(color: "#0000ff", location: 0), GradientStop(color: "#ffffff", location: 100)]))
+    let store = StateStore()
+    store.initPanel("gradient_panel_content", defaults: ["selected_stop_index": 0])
+    dispatch(store, "open_color_picker", ["target": "\"gradient_stop\"", "color": "\"#ff0000\""])
+    #expect(store.getDialogId() == "color_picker")
+    #expect(store.getDialog("color") as? String == "#ff0000", "the picker starts from the stop's colour")
+    runEffects(pickerOkEffects(), ctx: [:], store: store, actions: nestedActions, dialogs: nestedDialogs,
+               platformEffects: alignPlatformEffects(model: model))
+    #expect(store.getDialogId() == nil, "OK closes the picker")
+    #expect(model.document.getElement([0, 0]).fillGradient?.stops.map(\.color) == ["#ff0000", "#ffffff"],
+            "stop 0 takes the picked colour")
+}

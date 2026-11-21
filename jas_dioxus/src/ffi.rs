@@ -6632,6 +6632,33 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// ROW 198: THE COLOUR PICKER'S OK FOR A STOP WRITES THAT STOP'S COLOUR
+    /// (GRADIENT.md: double-click a stop opens the picker seeded with its
+    /// colour; OK writes the colour to the stop). The target is
+    /// `gradient_stop`; OK sets `gradient_stop_color`, which the stop-colour law
+    /// applies to the selected stop (stop 0 by default), so the rect's seed
+    /// (its blue fill to white) reads red at stop 0 and white at stop 1.
+    #[test]
+    fn the_color_pickers_ok_for_a_stop_writes_the_stops_colour() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let (reply, err) = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"gradient_stop","color":"#ff0000"}}"##);
+        assert!(reply.contains(r#""dialog":"color_picker""#), "the picker opened: {reply} {err}");
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the picker: {reply}");
+        let model = engine_of(e).model.borrow();
+        let g = model.document().layers[0].children().unwrap()[0].fill_gradient().cloned()
+            .unwrap_or_else(|| panic!("OK gave the rect a gradient: {reply} {err}"));
+        let hex: Vec<String> = g.stops.iter().map(|s| s.color.to_hex()).collect();
+        assert_eq!(hex, vec!["ff0000".to_string(), "ffffff".to_string()], "stop 0 takes the picked colour");
+        drop(model);
+        unsafe { jas_engine_free(e) };
+    }
+
     /// HYPHENATION'S OK WRITES THE DOCUMENT IN THE ENGINE, the same law: the
     /// master checkbox and a detail field reach the wrapper.
     #[test]
