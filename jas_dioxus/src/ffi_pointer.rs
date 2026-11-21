@@ -591,6 +591,13 @@ pub(crate) fn pasteboard_color_of(theme: &serde_json::Value) -> Option<crate::ge
     own.or_else(base)?.as_str().and_then(crate::geometry::element::Color::from_hex)
 }
 
+/// The precision live geometry paints at (row 203): the store's
+/// `boolean_precision`, read as the Boolean ops read it
+/// (`boolean_host::options_from_store`, the bundle default when absent).
+pub(crate) fn engine_paint_precision(engine: &JasEngine) -> f64 {
+    engine.with_store_mut(|s| crate::interpreter::boolean_host::options_from_store(s).precision)
+}
+
 pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter) {
     // THE VIEW, as the web canvas applies it (`app_state.rs`:
     // `translate(view_offset) . scale(zoom)` around `render::render`): the
@@ -622,8 +629,10 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
         }
         // Row 185: the model's mask isolation, as the web canvas's layer 3.
         let isolation = engine.with_model(|m| m.mask_isolation_path.clone());
+        // Row 203: live geometry at the store's `boolean_precision`, as the
+        // web's `render::render` paints it (the Boolean Options precision).
         crate::document::paint::emit_document_isolated(
-            p, doc, crate::geometry::live::DEFAULT_PRECISION, isolation.as_deref());
+            p, doc, engine_paint_precision(engine), isolation.as_deref());
         let border = crate::painter::StrokeStyle {
             width: 1.0,
             cap: crate::geometry::element::LineCap::Butt,
@@ -1222,6 +1231,36 @@ mod tests {
     /// draws the document alone, so a selected element looked exactly like an
     /// unselected one. Asserted through a `RecordingPainter` rather than a GPU
     /// surface, which is why the law is testable at all.
+    /// Row 203: the frame paints live geometry at the STORE's
+    /// `boolean_precision`, as the web's `render::render` does
+    /// (`app_state.rs`, `boolean_panel.precision`), not at a fixed
+    /// `DEFAULT_PRECISION`. A live union of two CIRCLES (curves, so the
+    /// flattening depends on the precision; rects would not) paints a
+    /// different display list at 0.5 than at the default, and setting the
+    /// store back to the default paints the default frame again.
+    #[test]
+    fn a_frame_paints_live_geometry_at_the_stores_boolean_precision() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::painter::recording::RecordingPainter;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 200 120" width="200" height="120"><g inkscape:groupmode="layer" inkscape:label="Layer 1"><g data-jas-live="compound_shape" data-jas-operation="union" fill="rgb(0,255,0)" stroke="none"><circle cx="60" cy="60" r="40" fill="rgb(0,0,255)" stroke="none"/><circle cx="110" cy="60" r="40" fill="rgb(0,0,255)" stroke="none"/></g></g></svg>"#;
+        let e = jas_engine_new();
+        unsafe { &*e }.replace_document(crate::geometry::svg::try_svg_to_document(svg).unwrap());
+        let frame = |e: *mut JasEngine| {
+            let mut p = RecordingPainter::new();
+            emit_frame(unsafe { &*e }, &mut p);
+            format!("{:?}", p.commands())
+        };
+        let set = |e: *mut JasEngine, v: f64| unsafe { &*e }.with_store_mut(|s| s.set("boolean_precision", serde_json::json!(v)));
+        set(e, crate::geometry::live::DEFAULT_PRECISION);
+        let at_default = frame(e);
+        set(e, 0.5);
+        let coarse = frame(e);
+        assert_ne!(coarse, at_default, "the frame reads the store's precision");
+        set(e, crate::geometry::live::DEFAULT_PRECISION);
+        assert_eq!(frame(e), at_default, "the control: the default again paints the default frame");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_frame_draws_the_document_then_the_overlay_on_top() {
         // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
