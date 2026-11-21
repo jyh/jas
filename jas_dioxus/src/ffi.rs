@@ -6986,7 +6986,7 @@ mod tests {
         let (make, release) = (at("Make Compound Shape"), at("Release Compound Shape"));
         let shape = |e| {
             let model = engine_of(e).model.borrow();
-            let cs = model.document().layers[0].children().unwrap_or_default();
+            let cs = model.document().layers[0].children().unwrap_or(&[]);
             let compounds = cs.iter().filter(|c| matches!(c,
                 crate::geometry::element::Element::Live(crate::geometry::live::LiveVariant::CompoundShape(_)))).count();
             (cs.len(), compounds, model.document().selection.len())
