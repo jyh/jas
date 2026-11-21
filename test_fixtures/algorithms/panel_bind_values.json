@@ -4761,6 +4761,16 @@
       {
         "path": [
           5,
+          0
+        ],
+        "id": "grad_eyedropper_button",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          5,
           1,
           0,
           1
@@ -5067,6 +5077,16 @@
         "key": "bind.disabled",
         "type": "bool",
         "value": "true"
+      },
+      {
+        "path": [
+          5,
+          0
+        ],
+        "id": "grad_eyedropper_button",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
       },
       {
         "path": [

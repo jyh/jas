@@ -700,6 +700,11 @@ pub fn App() -> Element {
                 // active tool. Shift / alt clicks are selection
                 // modifiers — let them through so shift-toggle and
                 // alt-drag still work in key-object mode.
+                // The Gradient panel's eyedropper pick (row 198), before the
+                // Align intercept, as the engine's pointer route orders them.
+                if st.try_pick_gradient_stop(cx, cy) {
+                    return;
+                }
                 if !shift && !alt && st.try_designate_align_key_object(cx, cy) {
                     return;
                 }

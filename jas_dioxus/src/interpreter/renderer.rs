@@ -1035,6 +1035,11 @@ fn set_app_state_field(
                 gp.selected_stop_index = moved as i64;
             }
         }
+        // The eyedropper button arms a one-shot pick (row 198, step 4);
+        // `AppState::try_pick_gradient_stop` answers the next canvas press.
+        "gradient_stop_picking" => {
+            st.gradient_panel.picking = val.as_bool().unwrap_or(false);
+        }
         // The Location combo on a midpoint: the selected pair takes the
         // absolute location by the slider law (gradient_host::drag_midpoint).
         "gradient_midpoint_location" => {
@@ -13138,6 +13143,55 @@ mod tests {
         assert_eq!(resolved[0].1.get("target"), Some(&json!("gradient_stop")));
         assert_eq!(resolved[0].1.get("color"), Some(&json!("#ffffff")), "seeded with the stop's colour");
         assert!(resolve_click_behaviors(slider, &ctx, "click").is_empty(), "a single click runs nothing");
+    }
+
+    /// Row 198, step 4, the web's eyedropper press: with the pick armed, a press
+    /// on a blue rect writes blue to stop 0 of the selected red rect's gradient
+    /// and disarms; the selection is untouched. Unarmed, the same press is not
+    /// the pick's (the tool would see it). The point is mapped through the
+    /// tab's own view, as the canvas hands it over.
+    #[test]
+    fn a_web_eyedropper_press_writes_the_sampled_colour_to_the_selected_stop() {
+        use crate::geometry::element::{Color, CommonProps, Fill, RectElem};
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, None);
+        let blue = Element::Rect(RectElem {
+            x: 200.0, y: 0.0, width: 40.0, height: 40.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(0.0, 0.0, 1.0))), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        if let Some(Element::Layer(layer)) = doc.layers.get_mut(0) {
+            layer.children.push(std::rc::Rc::new(blue));
+        }
+        st.tabs[st.active_tab].model.with_txn(|m| m.set_document(doc));
+        let m = &st.tabs[st.active_tab].model;
+        let (x, y) = (220.0 * m.zoom_level + m.view_offset_x, 20.0 * m.zoom_level + m.view_offset_y);
+        assert!(!st.try_pick_gradient_stop(x, y), "unarmed, the press is the tool's");
+        st.gradient_panel.selected_stop_index = 0;
+        // The shipped button arms it, through the web's click route.
+        fn by_id<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) {
+                return Some(n);
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(|v| by_id(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| by_id(v, id)),
+                _ => None,
+            }
+        }
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        let button = by_id(ws.panel("gradient_panel_content").unwrap(), "grad_eyedropper_button").expect("the button");
+        let ctx = serde_json::json!({"panel": {}});
+        let _ = run_click_behaviors(&resolve_click_behaviors(button, &ctx, "click"), &ctx, &mut st);
+        assert!(st.gradient_panel.picking, "the eyedropper button arms the pick");
+        assert!(st.try_pick_gradient_stop(x, y), "armed, the press is the pick's");
+        assert!(!st.gradient_panel.picking, "one shot");
+        let doc = st.tabs[st.active_tab].model.document();
+        let g = doc.get_element(&vec![0usize, 0]).unwrap().fill_gradient().cloned().expect("a gradient on the red rect");
+        assert_eq!(g.stops.iter().map(|s| s.color.to_hex()).collect::<Vec<_>>(), vec!["0000ff", "ffffff"]);
+        assert_eq!(doc.selection.len(), 1, "the selection is untouched");
     }
 
     #[test]

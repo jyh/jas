@@ -291,6 +291,29 @@ private let gradient = "gradient_panel_content"
     #expect(stops.map { "\($0.location)/\($0.midpointToNext)" } == ["0.0/30.0", "100.0/50.0"])
 }
 
+/// Row 198, step 4: the eyedropper. The shipped button arms the pick; the
+/// canvas's press intercept then writes the colour under the point (the blue
+/// rect) to stop 0 of the selected red rect and disarms. Unarmed, the press is
+/// the tool's. Mirrors Rust `the_gradient_eyedropper_press_picks_…` and the
+/// web's `a_web_eyedropper_press_…`.
+@Test func theGradientEyedropperPicksTheStopColourFromTheCanvas() {
+    let model = Model()
+    let red = Element.rect(Rect(x: 0, y: 0, width: 100, height: 50, fill: Fill(color: Color(r: 1, g: 0, b: 0))))
+    let blue = Element.rect(Rect(x: 200, y: 0, width: 40, height: 40, fill: Fill(color: Color(r: 0, g: 0, b: 1))))
+    model.setDocumentForTest(Document(layers: [Layer(children: [red, blue])], selectedLayer: 0,
+                                      selection: [ElementSelection(path: [0, 0])]))
+    let store = model.stateStore
+    #expect(!gradientStopPickPressIntercept(model: model, store: store, docX: 220, docY: 20),
+            "unarmed, the press is the tool's")
+    let r = events(model, gradient).click(shipped(gradient, "grad_eyedropper_button"))
+    #expect(r.outcome != "refused", "\(r)")
+    #expect((store.get(gradientPickingKey) as? Bool) == true, "the button arms the pick")
+    #expect(gradientStopPickPressIntercept(model: model, store: store, docX: 220, docY: 20))
+    #expect((store.get(gradientPickingKey) as? Bool) == false, "one shot")
+    #expect(model.document.getElement([0, 0]).fillGradient?.stops.map(\.color) == ["#0000ff", "#ffffff"])
+    #expect(model.document.selection.map(\.path) == [[0, 0]], "the selection is untouched")
+}
+
 @Test func aGradientAngleCommitIsClampedToItsDeclaredBounds() {
     let model = Model()
     let r = events(model, gradient).commit(shipped(gradient, "grad_angle_combo"), text: "500")

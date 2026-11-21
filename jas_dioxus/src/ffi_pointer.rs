@@ -321,6 +321,19 @@ unsafe fn jas_pointer_event_inner(
     let alt = mods & MOD_ALT != 0;
     let dragging = mods & MOD_DRAGGING != 0;
 
+    // The Gradient panel's eyedropper (row 198, step 4): while its button's
+    // key is set, the next press samples a colour for the selected stop and
+    // the tool never sees it (`gradient_host::pick_stop_colour`). Before the
+    // Align intercept, so a pick is never read as a key-object designation.
+    if kind == KIND_PRESS {
+        let picked = engine.with_store_mut(|store| {
+            engine.with_model_mut(|m| crate::interpreter::gradient_host::pick_stop_colour(m, store, dx, dy))
+        });
+        if picked {
+            return JasStatus::Ok;
+        }
+    }
+
     // The Align panel's key-object intercept (ALIGN.md §Key-object
     // designation), in the web canvas's order (`workspace/app.rs`, mousedown):
     // while Align To is the key object, a plain press designates, re-designates
@@ -822,6 +835,53 @@ mod tests {
         }
         assert_eq!(selected_paths(e), vec![vec![0, 2, 0]],
                    "inside the isolated group, a click selects the child");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ROW 198, STEP 4: THE GRADIENT EYEDROPPER'S PRESS. With the button's key
+    /// set, a press on the blue rect writes blue to the selected stop of the
+    /// SELECTED (red) rect, clears the key, and the tool never sees it: the
+    /// red rect stays selected. The control is a press on empty canvas with
+    /// the key set: nothing is written, the key is cleared, the selection stays.
+    #[test]
+    fn the_gradient_eyedropper_press_picks_the_stop_colour_and_the_tool_never_sees_it() {
+        use crate::interpreter::gradient_host::{GRADIENT_PANEL, PICKING_KEY};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on_fixture("three_rects.svg");
+        // The panel is opened with stop 0 selected, as the dock opens it (a
+        // `set_panel` on a panel the store never opened writes nothing).
+        let arm = |e: *mut JasEngine| unsafe { &*e }.with_store_mut(|s| {
+            s.init_panel(GRADIENT_PANEL, [("selected_stop_index".to_string(), serde_json::json!(0))].into_iter().collect());
+            s.set(PICKING_KEY, serde_json::json!(true));
+        });
+        let fill_stops = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
+            d.get_element(&vec![0, 0].into()).and_then(|r| r.fill_gradient().cloned())
+                .map(|g| g.stops.iter().map(|s| s.color.to_hex()).collect::<Vec<_>>())
+        });
+        unsafe {
+            assert_eq!(jas_set_tool(e, 0), JasStatus::Ok);
+            assert_eq!(jas_pointer_event(e, KIND_PRESS, 20.0, 20.0, 0), JasStatus::Ok);
+            assert_eq!(jas_pointer_event(e, KIND_RELEASE, 20.0, 20.0, 0), JasStatus::Ok);
+        }
+        assert_eq!(selected_paths(e), vec![vec![0, 0]], "the red rect is selected");
+        // Control first: a pick on nothing writes nothing and ends the pick.
+        arm(e);
+        unsafe { assert_eq!(jas_pointer_event(e, KIND_PRESS, 155.0, 5.0, 0), JasStatus::Ok) };
+        assert_eq!(fill_stops(e), None, "a pick on nothing writes no gradient");
+        assert_eq!(unsafe { &*e }.with_store_mut(|s| s.get(PICKING_KEY).clone()), serde_json::json!(false));
+        assert_eq!(selected_paths(e), vec![vec![0, 0]], "and the tool did not deselect");
+        // The pick on the blue rect, at its centre as the document holds it
+        // (the import scales px to pt, so the SVG's numbers are not the point).
+        let (bx, by) = unsafe { &*e }.with_document(|d| match d.get_element(&vec![0, 2].into()) {
+            Some(Element::Rect(r)) => (r.x + r.width / 2.0, r.y + r.height / 2.0),
+            other => panic!("the fixture's [0, 2] is not a rect: {other:?}"),
+        });
+        arm(e);
+        unsafe { assert_eq!(jas_pointer_event(e, KIND_PRESS, bx, by, 0), JasStatus::Ok) };
+        assert_eq!(fill_stops(e), Some(vec!["0000ff".to_string(), "ffffff".to_string()]),
+                   "stop 0 of the red rect's seed takes the blue");
+        assert_eq!(selected_paths(e), vec![vec![0, 0]], "the tool never saw the press");
+        assert_eq!(unsafe { &*e }.with_store_mut(|s| s.get(PICKING_KEY).clone()), serde_json::json!(false));
         unsafe { jas_engine_free(e) };
     }
 

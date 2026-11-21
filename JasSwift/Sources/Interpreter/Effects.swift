@@ -3277,6 +3277,42 @@ public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
 ///
 /// Until 2026-10-18 the canvas intercepted Shift and Alt presses too, and no
 /// runner intercepted at all.
+/// The global key the Gradient panel's eyedropper button sets (row 198,
+/// step 4). Mirrors `gradient_host::PICKING_KEY`.
+public let gradientPickingKey = "gradient_stop_picking"
+
+/// The eyedropper's sample at DOCUMENT point (`docX`, `docY`): the colour, as
+/// `#rrggbb`, of the topmost element there through groups (`docHitTestDeep`)
+/// on the active attribute, its fill when `fillOnTop`, else its stroke. Nil
+/// when nothing is hit or that attribute has no solid colour (none, or a
+/// gradient over it). Mirrors `gradient_host::stop_colour_at`.
+public func gradientStopColourAt(_ doc: Document, docX: Double, docY: Double, fillOnTop: Bool) -> String? {
+    let registration = registerDocument(doc)
+    let hit = withExtendedLifetime(registration) { docHitTestDeep(docX, docY) }
+    guard case .path(let path) = hit, let e = doc.tryGetElement(path) else { return nil }
+    if (fillOnTop ? e.fillGradient : e.strokeGradient) != nil { return nil }
+    guard let c = fillOnTop ? e.fill?.color : e.stroke?.color else { return nil }
+    return "#" + c.toHex()
+}
+
+/// The eyedropper's press, before the Align intercept and the tool (the
+/// engine's and the web's order): when the pick is armed, disarm it and write
+/// the sample to the selected stop of the selection's gradient through the
+/// stop-colour key. True when the press was the pick's, hit or miss.
+/// Mirrors `gradient_host::pick_stop_colour`.
+public func gradientStopPickPressIntercept(model: Model, store: StateStore, docX: Double, docY: Double) -> Bool {
+    let armed = (store.get(gradientPickingKey) as? Bool) ?? (store.get(gradientPickingKey) as? NSNumber)?.boolValue ?? false
+    guard armed else { return false }
+    store.set(gradientPickingKey, false)
+    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+    guard let colour = gradientStopColourAt(model.document, docX: docX, docY: docY, fillOnTop: fillOnTop) else {
+        return true
+    }
+    store.set("gradient_stop_color", colour)
+    applyGradientPanelToSelection(store: store, controller: Controller(model: model), key: "gradient_stop_color")
+    return true
+}
+
 public func alignKeyObjectPressIntercept(model: Model, store: StateStore,
                                          docX: Double, docY: Double,
                                          shift: Bool, alt: Bool) -> Bool {
