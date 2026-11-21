@@ -1750,6 +1750,20 @@ actions:
     effects:
       - set_panel_state: { panel: opacity, key: new_masks_inverted, value: "not panel.new_masks_inverted" }
 
+  toggle_page_isolated_blending:
+    description: >
+      Turn Page Isolated Blending on or off (the Opacity panel menu). When it
+      is on, the document's top-level layers composite onto a transparent
+      backdrop first, and the result lands on the page once, so a layer with
+      a blending mode blends with the layers beneath it but never with the
+      artboard's fill. When it is off (the default, and every document saved
+      before the setting existed), the layers composite straight onto the
+      page. The setting is saved with the document, and changing it is one
+      undoable step.
+    category: appearance
+    effects:
+      - doc.set_document_setup_field: { field: "page_isolated_blending", value: "not active_document.document_setup.page_isolated_blending" }
+
   toggle_snap_to_glyph_visible:
     description: >
       Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.

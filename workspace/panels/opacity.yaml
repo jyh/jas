@@ -149,16 +149,20 @@ menu:
   - separator
   - label: "Page Isolated Blending"
     action: toggle_page_isolated_blending
-    enabled_when: "false"
+    checked_when: "active_document.document_setup.page_isolated_blending"
     description: >
-      status: pending_renderer. Enables once the renderer supports
-      isolated blending for the document root group.
+      Checked when the page is isolated: the document's top-level layers
+      composite onto a transparent backdrop first, and the result lands on
+      the page once, so a layer with a blending mode never blends with the
+      artboard's fill (it still blends with the layers beneath it).
   - label: "Page Knockout Group"
     action: toggle_page_knockout_group
     enabled_when: "false"
     description: >
-      status: pending_renderer. Enables once the renderer supports
-      knockout group compositing for the document root group.
+      status: pending_renderer. The document carries the field
+      (document_setup.page_knockout_group, default false), and no renderer
+      composites knockout yet: it needs a compositing operation the
+      renderers do not have. Enables once that is built.
 
   - separator
 

@@ -1826,6 +1826,18 @@
         }
       ]
     },
+    "toggle_page_isolated_blending": {
+      "description": "Turn Page Isolated Blending on or off (the Opacity panel menu). When it is on, the document's top-level layers composite onto a transparent backdrop first, and the result lands on the page once, so a layer with a blending mode blends with the layers beneath it but never with the artboard's fill. When it is off (the default, and every document saved before the setting existed), the layers composite straight onto the page. The setting is saved with the document, and changing it is one undoable step.\n",
+      "category": "appearance",
+      "effects": [
+        {
+          "doc.set_document_setup_field": {
+            "field": "page_isolated_blending",
+            "value": "not active_document.document_setup.page_isolated_blending"
+          }
+        }
+      ]
+    },
     "toggle_snap_to_glyph_visible": {
       "description": "Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.\n",
       "category": "panel",
@@ -18993,14 +19005,14 @@
         {
           "label": "Page Isolated Blending",
           "action": "toggle_page_isolated_blending",
-          "enabled_when": "false",
-          "description": "status: pending_renderer. Enables once the renderer supports isolated blending for the document root group.\n"
+          "checked_when": "active_document.document_setup.page_isolated_blending",
+          "description": "Checked when the page is isolated: the document's top-level layers composite onto a transparent backdrop first, and the result lands on the page once, so a layer with a blending mode never blends with the artboard's fill (it still blends with the layers beneath it).\n"
         },
         {
           "label": "Page Knockout Group",
           "action": "toggle_page_knockout_group",
           "enabled_when": "false",
-          "description": "status: pending_renderer. Enables once the renderer supports knockout group compositing for the document root group.\n"
+          "description": "status: pending_renderer. The document carries the field (document_setup.page_knockout_group, default false), and no renderer composites knockout yet: it needs a compositing operation the renderers do not have. Enables once that is built.\n"
         },
         "separator",
         {

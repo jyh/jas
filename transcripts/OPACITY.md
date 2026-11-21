@@ -77,8 +77,16 @@ the key `opacity_menu.<id>`.
 - `new_masks_clipping` and `new_masks_inverted` are document preferences that
   set the initial state of the **next** mask created; they do not affect
   existing masks. `new_masks_clipping` defaults to `true`.
-- `page_isolated_blending` and `page_knockout_group` apply to the document
-  root.
+- `page_isolated_blending` and `page_knockout_group` apply to the whole page:
+  they are two booleans on the document (`document_setup.page_isolated_blending`
+  and `document_setup.page_knockout_group`), both defaulting to `false`, so a
+  document saved before they existed reads as neither. There is no document
+  root group; the document's top-level layers are siblings. With
+  `page_isolated_blending` on, the top-level layers composite onto a
+  transparent backdrop first and the result lands on the page once, so a layer
+  with a blending mode blends with the layers beneath it and never with the
+  artboard's fill. `page_knockout_group` is stored and not yet composited (see
+  its status below).
 - Items carry a `status` field when they are not yet fully landed.
   `status: open_design` means the semantics are still being designed.
   `status: pending_model` means the semantics are settled but the document
@@ -99,8 +107,8 @@ PANEL_MENU:
       - {id: unlink_mask,            kind: action, enabled_when: "selection_has_mask",  status: pending_model}
     - - {id: new_masks_clipping,     kind: toggle, scope: document, default: true}
       - {id: new_masks_inverted,     kind: toggle, scope: document, default: false}
-    - - {id: page_isolated_blending, kind: toggle, scope: document, status: pending_renderer}
-      - {id: page_knockout_group,    kind: toggle, scope: document, status: pending_renderer}
+    - - {id: page_isolated_blending, kind: toggle, scope: document, default: false}
+      - {id: page_knockout_group,    kind: toggle, scope: document, default: false, status: pending_renderer}
 ```
 
 ## States
@@ -268,10 +276,13 @@ Every group element additionally carries:
 | `group.knockout_group`    | boolean | `false` |
 
 The group flags live on every group so that per-group isolation and knockout
-can be added later without a schema migration. The only UI hooks today are
-the `page_isolated_blending` and `page_knockout_group` menu items
-(`status: pending_renderer`), which, when the renderer is ready, will write
-to the document root group.
+can be added later without a schema migration; no renderer reads them yet.
+The only UI hooks today are the page-level menu items, which write the
+document's own `document_setup.page_isolated_blending` and
+`document_setup.page_knockout_group`, not a group's flags. Page Isolated
+Blending is built in every renderer. Page Knockout Group stays
+`status: pending_renderer`: knockout needs a compositing operation the
+renderers do not have yet.
 
 ## Multi-selection
 
