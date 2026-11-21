@@ -419,6 +419,17 @@ pub fn pick_stop_colour(model: &mut Model, store: &mut crate::interpreter::state
     true
 }
 
+/// The pick's Escape (row 198, GRADIENT.md EYEDROPPER_BUTTON): when
+/// [`PICKING_KEY`] is set, clear it. `true` when the Escape was the pick's, so
+/// nothing else sees it (the tool, the mask law); the next Escape is ordinary.
+pub fn cancel_pick(store: &mut crate::interpreter::state_store::StateStore) -> bool {
+    if store.get(PICKING_KEY).as_bool() != Some(true) {
+        return false;
+    }
+    store.set(PICKING_KEY, json!(false));
+    true
+}
+
 /// The global key the Location combo sets with a MIDPOINT selected (GRADIENT.md
 /// STOP_LOCATION_COMBO): the midpoint's absolute location, applied by
 /// [`drag_midpoint`] to the selected pair.

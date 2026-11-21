@@ -186,6 +186,18 @@ pub(crate) fn make_keydown_handler(
             evt.prevent_default();
         }
 
+        // The Gradient eyedropper's armed pick takes an Escape FIRST and
+        // nothing else sees it (row 198; the engine's key door and the Mac
+        // do the same). Not gated on the app surface: right after the click
+        // that armed it, focus is on the eyedropper button itself.
+        if matches!(key, Key::Escape) && app_for_keys.borrow().gradient_panel.picking {
+            evt.prevent_default();
+            (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                st.try_cancel_gradient_pick();
+            }));
+            return;
+        }
+
         // If the active tool is in a text-editing session, route the
         // event there first. The tool's `on_key_event` consumes printable
         // characters, navigation, deletion, and the in-session shortcuts
@@ -787,6 +799,27 @@ mod tests {
         escape_or_enter(&mut st, true);
         assert_eq!(read(&mut st), (None, EditingTarget::Mask(vec![0, 0])),
                    "the control: Escape exits isolation first");
+    }
+
+    /// Row 198 (GRADIENT.md EYEDROPPER_BUTTON): an Escape while the
+    /// eyedropper's pick is armed cancels the pick and nothing else sees it,
+    /// as the engine's key door does
+    /// (`escape_through_the_key_door_cancels_an_armed_eyedropper_pick_first`).
+    /// `keydown` asks `try_cancel_gradient_pick` before any other Escape path.
+    #[test]
+    fn an_armed_eyedropper_pick_takes_the_escape_and_isolation_stays() {
+        use crate::workspace::app_state::TabState;
+        let mut st = AppState::new();
+        st.tabs.push(TabState::new());
+        st.active_tab = st.tabs.len() - 1;
+        st.tab_mut().unwrap().model.mask_isolation_path = Some(vec![0, 0]);
+        assert!(!st.try_cancel_gradient_pick(), "unarmed, the Escape is not the pick's");
+        st.gradient_panel.picking = true;
+        assert!(st.try_cancel_gradient_pick(), "armed, the Escape is the pick's");
+        assert!(!st.gradient_panel.picking, "and it cancels the pick");
+        assert_eq!(st.tab_mut().unwrap().model.mask_isolation_path, Some(vec![0, 0]),
+                   "nothing else saw it: isolation stays");
+        assert!(!st.try_cancel_gradient_pick(), "the next Escape is ordinary");
     }
 
     // The allowlist's two members, and the reason each is on it.
