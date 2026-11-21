@@ -141,11 +141,12 @@ pub const CLICK_EVENTS: [&str; 3] = ["click", "mouse_down", "mouse_up"];
 /// The stops kind (WIDGET_EVENTS.md §The stops kind): a shell reports a
 /// slider gesture with its raw parameters, and the slider law applies it.
 pub const STOPS_KINDS: [&str; 1] = ["gradient_slider"];
-/// The one behavior event a stops kind declares: "a gesture finished".
-pub const STOPS_EVENTS: [&str; 1] = ["commit"];
+/// The behavior events a stops kind declares: `commit`, "a gesture finished",
+/// and `double_click`, "a stop was double-clicked" (row 198).
+pub const STOPS_EVENTS: [&str; 2] = ["commit", "double_click"];
 /// The gestures a shell reports on a stops kind, as the reference names them.
-pub const STOPS_GESTURES: [&str; 8] = ["press", "drag", "release", "press_midpoint",
-    "drag_midpoint", "release_midpoint", "add", "key"];
+pub const STOPS_GESTURES: [&str; 9] = ["press", "drag", "release", "press_midpoint",
+    "drag_midpoint", "release_midpoint", "add", "key", "double_press"];
 
 /// The events `kind` may declare, in the contract's order; empty for a kind
 /// outside the contract.

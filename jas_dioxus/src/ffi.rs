@@ -6632,6 +6632,44 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// ROW 198: A DOUBLE PRESS ON A STOP OPENS THE COLOUR PICKER SEEDED WITH
+    /// THAT STOP'S COLOUR, and OK writes it back (GRADIENT.md, "Double-click a
+    /// stop"). The rect's seed is blue to white; a double press on stop 1 (the
+    /// white) selects it, the picker opens with `#ffffff`, and OK after a
+    /// pick of red leaves the stops blue and red. The control: a double press
+    /// on a stop that does not exist opens nothing.
+    #[test]
+    fn a_double_press_on_a_stop_opens_the_picker_and_ok_writes_the_stop() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let (reply, err) = behave(e, "gradient_panel_content",
+            r#"{"widget":"grad_slider","event":"double_press","value":{"index":5}}"#);
+        assert!(reply.is_empty() && err.contains("LawRefused"), "no stop 5: {reply} {err}");
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), None, "a refused press opens nothing");
+        let (reply, err) = behave(e, "gradient_panel_content",
+            r#"{"widget":"grad_slider","event":"double_press","value":{"index":1}}"#);
+        assert!(!reply.is_empty(), "the double press ran: {err}");
+        {
+            let store = engine_of(e).store.borrow();
+            assert_eq!(store.dialog_id(), Some("color_picker"), "the picker opened: {reply}");
+            assert_eq!(store.get_dialog("color"), &serde_json::json!("#ffffff"), "seeded with stop 1's colour");
+            assert_eq!(store.get_panel("gradient_panel_content", "selected_stop_index"), &serde_json::json!(1));
+        }
+        let (_, err) = dialog_event(e, r##"{"widget":"cp_hex","event":"commit","value":"ff0000"}"##);
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err2) = dialog_event(e, &ev);
+            engine_of(e).store.borrow().get_panel("gradient_panel_content", "selected_stop_index"),
+            engine_of(e).model.borrow().document().selection.len());
+        let model = engine_of(e).model.borrow();
+        let g = model.document().layers[0].children().unwrap()[0].fill_gradient().cloned()
+            .unwrap_or_else(|| panic!("a gradient after OK: {reply} {err} {err2}"));
+        let hex: Vec<String> = g.stops.iter().map(|s| s.color.to_hex()).collect();
+        assert_eq!(hex, vec!["0000ff".to_string(), "ff0000".to_string()], "stop 1 takes the pick");
+        drop(model);
+        unsafe { jas_engine_free(e) };
+    }
+
     /// HYPHENATION'S OK WRITES THE DOCUMENT IN THE ENGINE, the same law: the
     /// master checkbox and a detail field reach the wrapper.
     #[test]

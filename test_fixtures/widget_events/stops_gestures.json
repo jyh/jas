@@ -2445,13 +2445,13 @@
       "steps": [
         {
           "expected": {
-            "behaviors_run": 0,
+            "behaviors_run": 1,
             "committed": null,
-            "midpoint": 0,
-            "outcome": "refused",
+            "midpoint": -1,
+            "outcome": "committed",
             "pressed": false,
-            "reason": "WrongEvent",
-            "stop": -1,
+            "reason": null,
+            "stop": 2,
             "stops": [
               {
                 "color": "#ff0000",
@@ -2513,7 +2513,7 @@
             "midpoint": -1,
             "outcome": "refused",
             "pressed": false,
-            "reason": "WrongEvent",
+            "reason": "LawRefused",
             "stop": 1,
             "stops": [
               {
@@ -2548,7 +2548,7 @@
             "midpoint": -1,
             "outcome": "refused",
             "pressed": false,
-            "reason": "WrongEvent",
+            "reason": "LawRefused",
             "stop": 1,
             "stops": [
               {
@@ -2583,7 +2583,7 @@
             "midpoint": -1,
             "outcome": "refused",
             "pressed": false,
-            "reason": "WrongEvent",
+            "reason": "LawRefused",
             "stop": 1,
             "stops": [
               {

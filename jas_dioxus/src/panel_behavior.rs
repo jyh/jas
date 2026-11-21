@@ -1332,14 +1332,26 @@ fn stops_gesture(
         store.set_panel(pid, &press_key, snap);
     }
     let wrote = Ran { doc_changed: false, state_changed: true };
-    if !step.commit {
-        return Ok(wrote);
-    }
-    let (batch, _) = value_behaviors(node, &STOPS_EVENTS);
+    // Which behaviors the step runs: a finished gesture's `commit` ones with
+    // the new stops, or a double press's `double_click` ones with the stop's
+    // colour (row 198). A release never runs a double_click behavior.
+    let (event, value) = match (step.commit, step.double_click) {
+        (true, _) => (STOPS_EVENTS[0], step.stops),
+        (false, Some(color)) => (STOPS_EVENTS[1], color),
+        (false, None) => return Ok(wrote),
+    };
+    let (batch, _) = value_behaviors(node, &[event]);
     if batch.is_empty() {
         return Ok(wrote);
     }
-    let ran = run_batch(Some(pid), &batch, value_event(ev, step.stops), scope, store, model,
+    // The behaviors read the selection the step just wrote (a double press
+    // selects the stop its params name), not the scope's from before it.
+    let mut scope = scope.clone();
+    if let Some(panel) = scope.get_mut("panel").and_then(Value::as_object_mut) {
+        panel.insert(stop_key.to_string(), json!(step.stop));
+        panel.insert(mid_key.to_string(), json!(step.midpoint));
+    }
+    let ran = run_batch(Some(pid), &batch, value_event(ev, value), &scope, store, model,
                         actions, dialogs, host)?;
     Ok(Ran { doc_changed: ran.doc_changed, state_changed: true })
 }
