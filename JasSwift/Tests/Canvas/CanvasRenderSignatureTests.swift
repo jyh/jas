@@ -32,6 +32,17 @@ private func sig(_ m: Model, tool: Tool = .selection, sel: [String] = []) -> Can
     #expect(sig(m) != before)
 }
 
+/// Row 207: `draw` paints live geometry at the store's `boolean_precision`
+/// (row 203), so the signature must carry it, or Boolean Options' OK changes
+/// the picture and the canvas does not repaint (the Mac twin of row 204,
+/// which flask measured on Windows, STATUS-flask §986).
+@Test func signatureChangesOnBooleanPrecision() {
+    let m = modelWithRect()
+    let before = sig(m)
+    m.stateStore.set("boolean_precision", 5.0)
+    #expect(sig(m) != before)
+}
+
 @Test func signatureChangesOnSelection() {
     let m = modelWithRect()
     let before = sig(m)
