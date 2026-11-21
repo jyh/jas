@@ -160,7 +160,8 @@ cannot refuse reports the answer its filter allows, and the number still looks
 like a measurement -- this seat shipped exactly that defect in a census three
 days ago. `evaluate_cfg` raises on any predicate outside the small grammar
 measured in this tree (`all`, `any`, `not`, `feature = "..."`, `target_os`,
-`target_arch`, `windows`, `unix`, `test`), and the raise becomes a FINDING.
+`target_arch`, `windows`, `unix`, `test`, `debug_assertions`), and the raise
+becomes a FINDING.
 """
 
 from __future__ import annotations
@@ -404,6 +405,10 @@ def evaluate_cfg(cond: str, cfg: dict) -> bool:
                 return cfg["target_os"] == "windows"
             if ident == "unix":
                 return cfg["target_os"] != "windows"
+            # A REQUIRED key, never a default: the profile decides it, and a
+            # cfg dict that does not state it raises KeyError (row 202).
+            if ident == "debug_assertions":
+                return bool(cfg["debug_assertions"])
             raise CfgUnknown(cond)
         raise CfgUnknown(cond)
 
@@ -1012,15 +1017,16 @@ def self_test() -> int:
         raised = False
         try:
             evaluate_cfg(form, {"features": {"a"}, "target_os": "macos",
-                                "target_arch": "x86_64"})
+                                "target_arch": "x86_64", "debug_assertions": True})
         except CfgUnknown:
             raised = True
         arm(f"the cfg {form!r} is REFUSED, not decided", raised)
 
     cfg_web = {"features": {"default", "web"}, "target_os": "macos",
-               "target_arch": "x86_64"}
+               "target_arch": "x86_64", "debug_assertions": True}
     cfg_win = {"features": {"default", "web", "d2d"}, "target_os": "windows",
-               "target_arch": "x86_64"}
+               "target_arch": "x86_64", "debug_assertions": True}
+    cfg_rel = dict(cfg_web, debug_assertions=False)
     for cond, under, want, why in [
         ("test", cfg_web, True, "a plain `test` cfg is always true here"),
         ('feature = "web"', cfg_web, True, "a feature that is on"),
@@ -1033,6 +1039,9 @@ def self_test() -> int:
         ("windows", cfg_win, True, "the bare `windows` ident on Windows"),
         ("unix", cfg_web, True, "the bare `unix` ident off Windows"),
         ('target_os = "macos"', cfg_web, True, "an explicit target_os"),
+        ("debug_assertions", cfg_web, True, "a debug profile's debug_assertions"),
+        ("debug_assertions", cfg_rel, False, "a release profile's debug_assertions"),
+        ("not(debug_assertions)", cfg_rel, True, "`not` of a release profile's"),
     ]:
         arm(f"cfg {cond!r}: {why}", evaluate_cfg(cond, under) is want)
 
@@ -1368,6 +1377,10 @@ def main() -> int:
         "features": features,
         "target_os": args.target_os or _host_target_os(),
         "target_arch": "unknown",
+        # Every `cargo test` lane in .github/workflows runs the default dev
+        # profile (measured 2026-11-21: 10 lanes, none `--release`, no profile
+        # override), so debug_assertions holds. A release lane must say so here.
+        "debug_assertions": True,
     }
 
     log = path.read_text(encoding="utf-8", errors="replace")

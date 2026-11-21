@@ -2089,6 +2089,11 @@ fn live_paint(
     v: &crate::geometry::live::LiveVariant,
 ) -> (crate::algorithms::boolean::PolygonSet, Option<Fill>, Option<Stroke>) {
     use crate::geometry::live::LiveVariant;
+    // Row 202: with nothing installed every reference dangles and this
+    // element paints as nothing, with no error. Loud in a debug build.
+    debug_assert!(crate::document::id_index::paint_context_installed(),
+        "emit_element: a live element painted with no paint context installed \
+         (use document::paint::emit_document, or install_paint_context)");
     let precision = crate::document::id_index::installed_precision();
     let resolver = crate::document::id_index::InstalledResolver;
     let mut visiting = crate::geometry::live::VisitSet::new();

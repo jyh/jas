@@ -269,6 +269,19 @@ impl Default for PaintContext {
 thread_local! {
     static CURRENT_PAINT_CONTEXT: std::cell::RefCell<PaintContext> =
         std::cell::RefCell::new(PaintContext::default());
+    /// How many installs are live (row 202). The uninstalled default and an
+    /// installed EMPTY index read the same to a resolver, so this is the one
+    /// way a paint can tell "nothing was installed" from "nothing resolves".
+    static INSTALL_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Whether a paint context is installed on this thread (row 202): the live
+/// arm of `emit_element` asserts it in a debug build, so a host that loops
+/// `emit_element` without [`crate::document::paint::emit_document`] or
+/// `canvas::render` fails loudly instead of painting its live elements as
+/// nothing.
+pub fn paint_context_installed() -> bool {
+    INSTALL_DEPTH.with(|d| d.get() > 0)
 }
 
 /// Restores the prior context on drop, so nested paints nest safely.
@@ -278,6 +291,7 @@ pub struct PaintContextGuard {
 
 impl Drop for PaintContextGuard {
     fn drop(&mut self) {
+        INSTALL_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
         let prior = std::mem::take(&mut self.prior.index);
         let precision = self.prior.precision;
         CURRENT_PAINT_CONTEXT.with(|c| {
@@ -291,6 +305,7 @@ pub fn install_paint_context(index: IdIndex, precision: f64) -> PaintContextGuar
     let prior = CURRENT_PAINT_CONTEXT.with(|c| {
         c.replace(PaintContext { index, precision })
     });
+    INSTALL_DEPTH.with(|d| d.set(d.get() + 1));
     PaintContextGuard { prior }
 }
 
