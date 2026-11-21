@@ -145,11 +145,6 @@
       "reason": "A CONSTRUCTOR: it builds a new element from a YAML tool spec. It emits leaves by construction and takes no element as input, so there is no container to mishandle. Groups are created by group_selection, never here.",
       "handled_at": "nothing to handle -- it consumes a spec, not an element"
     },
-    "rust:jas_dioxus/src/painter/element_render.rs::element_needs_legacy": {
-      "verdict": "leaf_only",
-      "reason": "A per-element PREDICATE asking whether this node needs the legacy paint path. It is called on every node of the tree during the render walk, containers included, and the walk descends into children on its own -- so a container's own answer is about the container's own paint, which is the right question.",
-      "handled_at": "the render walk descends into children independently"
-    },
     "rust:jas_dioxus/src/geometry/element.rs::promote_to_path_for_brush": {
       "verdict": "leaf_only",
       "reason": "Promotes a Line or open Polyline to a geometry-identical Path so it can carry a stroke brush. A container has no stroke geometry to promote; its members are promoted individually when the brush recurses to them.",
