@@ -1475,6 +1475,27 @@ static class Program
             GradientSliderWire.DoublePress(null, 0) is { } dblNone ? PanelWire.GestureRowValue(dblNone) : "(null)");
         Eq("gradient double: a stop with no index sends nothing", "(null)",
             GradientSliderWire.DoublePress("stop", -1) is { } dblIdx ? PanelWire.GestureRowValue(dblIdx) : "(null)");
+        // The double is the SECOND press on the same stop inside the system's
+        // double-click time and rectangle (WinUI raised no DoubleTapped on the
+        // slider on the box: its marker press is handled and captured). Times in
+        // microseconds (PointerPoint.Timestamp), positions and slop in DIPs.
+        var first = new GradientSliderWire.Press(1, 1_000_000, 200, 30);
+        Eq("gradient double: same stop, 300 ms later, same point", "True",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(1, 1_300_000, 200, 30), 500, 2, 2).ToString());
+        Eq("gradient double: at exactly the double-click time", "True",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(1, 1_500_000, 201, 31), 500, 2, 2).ToString());
+        Eq("gradient double: past the double-click time", "False",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(1, 1_500_001, 200, 30), 500, 2, 2).ToString());
+        Eq("gradient double: another stop", "False",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(0, 1_100_000, 200, 30), 500, 2, 2).ToString());
+        Eq("gradient double: outside the rectangle across", "False",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(1, 1_100_000, 202.5, 30), 500, 2, 2).ToString());
+        Eq("gradient double: outside the rectangle down", "False",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(1, 1_100_000, 200, 27.5), 500, 2, 2).ToString());
+        Eq("gradient double: no first press", "False",
+            GradientSliderWire.IsDouble(null, new GradientSliderWire.Press(1, 1_100_000, 200, 30), 500, 2, 2).ToString());
+        Eq("gradient double: a clock that ran backwards", "False",
+            GradientSliderWire.IsDouble(first, new GradientSliderWire.Press(1, 900_000, 200, 30), 500, 2, 2).ToString());
         Eq("gradient gesture: the row token is the compact object", "{\"location\":30.5,\"dy\":-2}",
             PanelWire.GestureRowValue(new Dictionary<string, object> { ["location"] = 30.5, ["dy"] = -2.0 }));
         // The shell's named keys, by the code `OnKeyDown` sends (`JasCore.Key*`).
