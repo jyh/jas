@@ -631,8 +631,11 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
         let isolation = engine.with_model(|m| m.mask_isolation_path.clone());
         // Row 203: live geometry at the store's `boolean_precision`, as the
         // web's `render::render` paints it (the Boolean Options precision).
-        crate::document::paint::emit_document_isolated(
-            p, doc, engine_paint_precision(engine), isolation.as_deref());
+        // Row 202: the Model's persistent index, an O(1) clone, as the web's
+        // `render()` installs it, instead of a rebuild per frame.
+        let index = engine.with_model(|m| m.id_index().clone());
+        crate::document::paint::emit_document_with_index(
+            p, doc, index, engine_paint_precision(engine), isolation.as_deref());
         let border = crate::painter::StrokeStyle {
             width: 1.0,
             cap: crate::geometry::element::LineCap::Butt,
@@ -1238,6 +1241,36 @@ mod tests {
     /// flattening depends on the precision; rects would not) paints a
     /// different display list at 0.5 than at the default, and setting the
     /// store back to the default paints the default frame again.
+    /// Row 202: the frame resolves a by-id reference through the Model's
+    /// persistent index (borrowed, not rebuilt per frame): a reference to a
+    /// sibling paints its target. A frame handed any other index reds here.
+    #[test]
+    fn a_frame_resolves_a_reference_through_the_models_index() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::geometry::element::{Color, CommonProps, Element, Fill, RectElem};
+        use crate::geometry::live::{ElementRef, LiveVariant, ReferenceElem};
+        use crate::painter::recording::{Command, RecordingPainter};
+        let white = || Some(Fill { color: Color::WHITE, opacity: 1.0 });
+        let mut doc = crate::document::document::Document::default();
+        let kids = doc.layers[0].children_mut().unwrap();
+        kids.push(std::rc::Rc::new(Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 30.0, height: 40.0, rx: 0.0, ry: 0.0, fill: white(), stroke: None,
+            common: CommonProps { id: Some("m1".into()), ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None })));
+        kids.push(std::rc::Rc::new(Element::Live(LiveVariant::Reference(ReferenceElem {
+            target: ElementRef("m1".into()), transform: None, fill: white(), stroke: None,
+            common: CommonProps::default() }))));
+        let e = jas_engine_new();
+        unsafe { &*e }.replace_document(doc);
+        let mut p = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut p);
+        let fills = p.commands().iter().filter(|c| matches!(c, Command::FillPath { .. })).count();
+        // The rect paints as a FillRect; the reference, resolved, as the one
+        // FillPath (its target's ring at 10,20).
+        assert_eq!(fills, 1, "the reference paints its target: {:?}", p.commands());
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_frame_paints_live_geometry_at_the_stores_boolean_precision() {
         let _counters = crate::ffi_instr::test_lock::lock();
