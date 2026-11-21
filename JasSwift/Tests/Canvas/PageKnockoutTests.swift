@@ -95,7 +95,7 @@ private func scene(iso: Bool, ko: Bool, edge: Bool) -> Document {
 
 /// Draw the real `CanvasNSView` into a raw sRGB RGBA8 bitmap and read straight
 /// RGB at row `Y` for each x.
-private func render(iso: Bool, ko: Bool, edge: Bool = false, _ xs: [Int]) -> [[Int]] {
+@MainActor private func render(iso: Bool, ko: Bool, edge: Bool = false, _ xs: [Int]) -> [[Int]] {
     let doc = scene(iso: iso, ko: ko, edge: edge)
     let view = CanvasNSView()
     view.frame = NSRect(x: 0, y: 0, width: W, height: H)
@@ -130,7 +130,7 @@ private let regimes: [(String, Bool, Bool)] = [
 
 /// Four regimes × three pixels (overlap, leaf over bare backdrop, outside
 /// every shape), each within ±3 of the law.
-@Test func thePageKnockoutGroupCompositesByTheLawOnTheMac() {
+@Test @MainActor func thePageKnockoutGroupCompositesByTheLawOnTheMac() {
     let xs = [overlapX, leafX, outsideX]
     var worst = 0
     var report: [String] = []
@@ -149,7 +149,7 @@ private let regimes: [(String, Bool, Bool)] = [
 /// THE EDGE ARM (mutant 5's): both layers opaque Normal, layer 2's edge on a
 /// half pixel, f = 0.5 there. `.plusLighter` gives the law's value; source-over
 /// in its place does not. The interior pixels equal ordinary compositing.
-@Test func theKnockoutEdgePixelIsTheAdditiveLawOnTheMac() {
+@Test @MainActor func theKnockoutEdgePixelIsTheAdditiveLawOnTheMac() {
     let got = render(iso: false, ko: true, edge: true, [edgeX, 5, 25])
     let ordinary = render(iso: false, ko: false, edge: true, [edgeX, 5, 25])
     let want = law(iso: false, ko: true, [(red, 1, .normal, 1), (blue, 1, .normal, 0.5)])

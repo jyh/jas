@@ -73,7 +73,7 @@ private func setField(_ model: Model, _ field: String, _ val: Value) -> Bool {
 /// blends with it when the page is not isolated (measured 11-21: (0,142,10)),
 /// and shows its own colour when it is (Multiply over a transparent backdrop
 /// is the source, which then lands Normal).
-private func canvasCentre(isolated: Bool, knockout: Bool = false) -> (Int, Int, Int) {
+@MainActor private func canvasCentre(isolated: Bool, knockout: Bool = false) -> (Int, Int, Int) {
     let doc = Document(
         layers: [Layer(name: "L", children: [
             .rect(Rect(x: 50, y: 50, width: 100, height: 100,
@@ -93,14 +93,14 @@ private func canvasCentre(isolated: Bool, knockout: Bool = false) -> (Int, Int, 
     return (Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
 }
 
-@Test func aPageThatIsNotIsolatedBlendsItsLayersWithTheArtboard() {
+@Test @MainActor func aPageThatIsNotIsolatedBlendsItsLayersWithTheArtboard() {
     for ko in [false, true] {
         let (r, g, b) = canvasCentre(isolated: false, knockout: ko)
         #expect(b < 40 && g > 90 && r < 40, "multiplied against the artboard (a ONE-layer knockout page is the same picture: its one child composites against B0 = the artboard; knockout \(ko)): \((r, g, b))")
     }
 }
 
-@Test func anIsolatedPageCompositesItsLayersOntoTheArtboardOnce() {
+@Test @MainActor func anIsolatedPageCompositesItsLayersOntoTheArtboardOnce() {
     let (r, g, b) = canvasCentre(isolated: true)
     #expect(b > 215 && r < 40, "the layer's own colour: \((r, g, b))")
 }
