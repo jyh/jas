@@ -147,9 +147,49 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
 @Test func aTraitLookupThatNeverFindsAFaceIsCounted() {
     let base = NSFont(name: "Helvetica", size: 13)!
     let before = faceLookupFailures()
-    let face = withFontLookup { faceWithTraits(base, [.italic], size: 13) { _, _ in nil } }
+    let face = withFontLookup { faceWithTraits(base, [.italic], size: 13, lookup: { _, _ in nil }, alternate: noAlternate) }
     #expect(face.fontName == base.fontName, "with no face the base is what is left")
     #expect(faceLookupFailures() >= before + 1, "the fallback is counted, not silent")
+}
+
+/// The arms above are about the path where NO mechanism finds a face, so they
+/// refuse the CoreText alternate as well.
+private let noAlternate: (NSFont, NSFontDescriptor.SymbolicTraits, CGFloat) -> NSFont? = { _, _, _ in nil }
+
+// Row 188, 11-21: CI (run 44884499909) saw the AppKit lookup return nil TWICE
+// for Georgia bold, a face macOS ships, and the width was Georgia's. A scratch
+// stress run did not reproduce it (0 nils of 418,141 locked lookups, with and
+// without unlocked CoreText traffic), so the cause is unknown. The answer is by
+// mechanism: a second API, CoreText's CTFontCreateCopyWithSymbolicTraits, is
+// asked before any fallback, and a face it finds is a RESCUE, counted apart
+// from a failure, so a CI log still says the AppKit lookup missed.
+@Test func aTraitLookupThatFailsIsRescuedByCoreText() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let (face, failed, rescued) = withFontLookup {
+        let (f0, r0) = (faceLookupFailuresHoldingLock(), faceLookupRescuesHoldingLock())
+        let face = faceWithTraits(base, [.italic], size: 13, lookup: { _, _ in nil })
+        return (face, faceLookupFailuresHoldingLock() - f0, faceLookupRescuesHoldingLock() - r0)
+    }
+    #expect(face.fontName == "Helvetica-Oblique", "CoreText finds the italic the lookup missed: \(face.fontName)")
+    #expect(failed == 0, "a rescued lookup is not a failure")
+    #expect(rescued == 1, "a rescue is counted")
+}
+
+/// CoreText's answer is taken only when it carries every trait asked for: a
+/// face it returns without them is no rescue. The FACE cannot tell (the
+/// alternate here returns the base, which the fallback also returns), so the
+/// counters do: a failure, not a rescue. A mutant without the traits check
+/// survived the face-only form of this arm (11-21).
+@Test func aCoreTextFaceWithoutTheTraitsIsNoRescue() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let (face, failed, rescued) = withFontLookup {
+        let (f0, r0) = (faceLookupFailuresHoldingLock(), faceLookupRescuesHoldingLock())
+        let face = faceWithTraits(base, [.italic], size: 13, lookup: { _, _ in nil }, alternate: { b, _, _ in b })
+        return (face, faceLookupFailuresHoldingLock() - f0, faceLookupRescuesHoldingLock() - r0)
+    }
+    #expect(face == base, "\(face.fontName)")
+    #expect(rescued == 0, "a face without the traits is no rescue")
+    #expect(failed == 1, "it is a failure, counted")
 }
 
 @Test func noTraitsIsTheBaseFaceWithNoLookup() {
@@ -184,7 +224,7 @@ private func lookupOnly(_ has: [NSFontDescriptor.SymbolicTraits], calls: LookupL
     let calls = LookupLog()
     let before = faceLookupFailures()
     let face = withFontLookup {
-        faceWithTraits(base, [.bold, .italic], size: 13, lookup: lookupOnly([[.bold], [.italic]], calls: calls))
+        faceWithTraits(base, [.bold, .italic], size: 13, lookup: lookupOnly([[.bold], [.italic]], calls: calls), alternate: noAlternate)
     }
     #expect(face.fontName == "Helvetica-Bold", "bold is tried before italic and before the base: \(face.fontName)")
     #expect(faceLookupFailures() >= before + 1, "a partial face is still counted")
@@ -194,7 +234,7 @@ private func lookupOnly(_ has: [NSFontDescriptor.SymbolicTraits], calls: LookupL
     let base = NSFont(name: "Helvetica", size: 13)!
     let calls = LookupLog()
     let face = withFontLookup {
-        faceWithTraits(base, [.bold, .italic], size: 13, lookup: lookupOnly([[.italic]], calls: calls))
+        faceWithTraits(base, [.bold, .italic], size: 13, lookup: lookupOnly([[.italic]], calls: calls), alternate: noAlternate)
     }
     #expect(face.fontName == "Helvetica-Oblique", "italic alone when the family has no bold: \(face.fontName)")
 }
@@ -203,7 +243,7 @@ private func lookupOnly(_ has: [NSFontDescriptor.SymbolicTraits], calls: LookupL
     let base = NSFont(name: "Helvetica", size: 13)!
     let calls = LookupLog()
     let face = withFontLookup {
-        faceWithTraits(base, [.italic], size: 13, lookup: lookupOnly([[.bold]], calls: calls))
+        faceWithTraits(base, [.italic], size: 13, lookup: lookupOnly([[.bold]], calls: calls), alternate: noAlternate)
     }
     #expect(face == base, "an italic job never measures a bold face: \(face.fontName)")
     #expect(!calls.traits.contains(NSFontDescriptor.SymbolicTraits.bold.rawValue), "bold was never asked for: \(calls.traits)")
