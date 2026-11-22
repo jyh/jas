@@ -73,6 +73,11 @@ pub(crate) fn drive(p: &mut dyn Painter, ops: &[Value]) -> DriveReport {
             "pop_isolated_layer" => { p.pop_isolated_layer(); true }
             "push_mask_layer" => d::mask(op).map(|m| p.push_mask_layer(m)).is_some(),
             "pop_mask_layer" => { p.pop_mask_layer(); true }
+            // A7 (2026-11-21): the knockout bracket carries no payload.
+            "push_knockout_layer" => { p.push_knockout_layer(); true }
+            "push_knockout_shape" => { p.push_knockout_shape(); true }
+            "pop_knockout_shape" => { p.pop_knockout_shape(); true }
+            "pop_knockout_layer" => { p.pop_knockout_layer(); true }
             "draw_text_run" => {
                 let run = op.get("run").unwrap_or(&Value::Null);
                 match run.get("mode").and_then(Value::as_str) {

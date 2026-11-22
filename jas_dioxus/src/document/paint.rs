@@ -36,7 +36,7 @@
 
 use crate::document::document::Document;
 use crate::document::id_index::{install_paint_context, rebuild_id_index};
-use crate::painter::element_render::emit_element;
+use crate::painter::element_render::{emit_element, OpaqueShape};
 use crate::painter::Painter;
 
 /// Paint every layer of `doc` through [`emit_element`], with this document's
@@ -67,19 +67,41 @@ pub fn emit_document(p: &mut dyn Painter, doc: &Document, precision: f64) {
 }
 
 /// The top-level layers, under the page's compositing (OPACITY.md §Page-level
-/// items, row 192 B1). With `page_isolated_blending` the layers composite into
-/// ONE fresh transparent layer (the A6 op `push_isolated_layer`, alpha 1 and
-/// Normal) that lands on the target once, so a blended layer blends with the
-/// layers beneath it but never with the page the host painted (the artboard
-/// fill). `page_knockout_group` is stored and NOT composited here: knockout
-/// needs an op the frozen contract does not have (the A7 amendment, row 192).
+/// items, rows 192 B1 and 209).
+///
+/// * `page_isolated_blending` — the layers composite into ONE fresh transparent
+///   layer (the A6 op `push_isolated_layer`, alpha 1 and Normal) that lands on
+///   the target once, so a blended layer blends with the layers beneath it but
+///   never with the page the host painted (the artboard fill).
+/// * `page_knockout_group` — the layers are the children of ONE knockout group
+///   (AMENDMENT A7): each top-level layer is a child, emitted twice — first as
+///   its SHAPE, through [`OpaqueShape`], inside `push_knockout_shape` /
+///   `pop_knockout_shape`, then as its body — so each layer composites against
+///   the page's initial backdrop `B0` (what the host painted), never against
+///   the layers beneath it.
+/// * both — the knockout bracket inside the isolated layer, where `B0` is
+///   transparent.
+///
+/// Per-group `knockout_group` stays storage-only: only the page is lowered.
 fn emit_layers(p: &mut dyn Painter, doc: &Document) {
     let isolated = doc.document_setup.page_isolated_blending;
+    let knockout = doc.document_setup.page_knockout_group;
     if isolated {
         p.push_isolated_layer(1.0, crate::painter::BlendMode::Normal);
     }
+    if knockout {
+        p.push_knockout_layer();
+    }
     for layer in &doc.layers {
+        if knockout {
+            p.push_knockout_shape();
+            emit_element(&mut OpaqueShape::new(p), layer, 1.0);
+            p.pop_knockout_shape();
+        }
         emit_element(p, layer, 1.0);
+    }
+    if knockout {
+        p.pop_knockout_layer();
     }
     if isolated {
         p.pop_isolated_layer();
@@ -130,6 +152,263 @@ pub fn emit_document_with_index(
         Some(path) => {
             if let Some(mask) = doc.get_element(&path.to_vec()).and_then(|e| e.common().mask.as_deref()) {
                 emit_element(p, &mask.subtree, 1.0);
+            }
+        }
+    }
+}
+
+/// THE `a7_knockout` SCENE (design block §5), shared by every Rust arm that
+/// renders it: the recorder golden here, the Canvas2D arms
+/// (`canvas::render`, `painter::canvas2d`) and the Direct2D arm.
+///
+/// Backdrop `B0 = (0.8, 0.8, 0.2)` opaque, painted by the HOST before the
+/// walk (not white, not saturated: over white "knockout" and "both" coincide,
+/// and a saturated channel hides mutant 6's brightening). Layer 1: an opaque
+/// red rect, x ∈ [0, 20). Layer 2: one leaf, colour (0, 0.5, 1), element
+/// opacity 0.5, blend Multiply, x ∈ [10, 30): half over layer 1, half over
+/// bare backdrop. The alpha and the blend sit on the LEAF (a container's own
+/// mode is inert, and C2 dies only if the alpha is inside the child).
+///
+/// ⛔ THE BLOCK'S §5 TABLE IS NEVER TYPED HERE. [`expect`] computes every
+/// expectation from these inputs by the law; see its doc comment.
+#[cfg(test)]
+pub(crate) mod a7_fixture {
+    use crate::document::document::Document;
+    use crate::geometry::element::{BlendMode, Color, CommonProps, Element, Fill, RectElem};
+    use std::rc::Rc;
+
+    pub const W: u32 = 40;
+    pub const H: u32 = 10;
+    pub const B0: [f64; 3] = [0.8, 0.8, 0.2];
+    pub const RED: [f64; 3] = [1.0, 0.0, 0.0];
+    pub const LEAF: [f64; 3] = [0.0, 0.5, 1.0];
+    pub const LEAF_OPACITY: f64 = 0.5;
+    /// Sample pixels (device x, at y = 5): over layer 1, over bare backdrop,
+    /// and outside every shape (mutant 6's pixel).
+    pub const OVERLAP_X: u32 = 15;
+    pub const LEAF_X: u32 = 25;
+    pub const OUTSIDE_X: u32 = 35;
+    pub const Y: u32 = 5;
+    /// The edge arms: layer 2 starting at x = 10.5, so pixel 10 is half
+    /// covered, over layer 1's opaque red.
+    pub const EDGE_X: u32 = 10;
+    pub const BLUE: [f64; 3] = [0.0, 0.0, 1.0];
+
+    /// Layer 2 of each edge arm (addendum A7.1 §4): (name, colour, element
+    /// opacity, blend). E1 separates A7.1 from the ratified child term but
+    /// EQUALS ordinary compositing, so a no-op bracket passes it; E2 and E3
+    /// separate all three (see [`assert_edge_arms_separate`]).
+    pub const EDGES: [(&str, [f64; 3], f64, BlendMode); 3] = [
+        ("E1 opaque Normal blue", BLUE, 1.0, BlendMode::Normal),
+        ("E2 Normal blue at 0.5", BLUE, 0.5, BlendMode::Normal),
+        ("E3 the Multiply leaf at 0.5", LEAF, LEAF_OPACITY, BlendMode::Multiply),
+    ];
+
+    fn rect(x: f64, w: f64, color: [f64; 3], opacity: f64, mode: BlendMode) -> Element {
+        Element::Rect(RectElem {
+            x, y: 0.0, width: w, height: H as f64, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::rgb(color[0], color[1], color[2]), opacity: 1.0 }),
+            stroke: None,
+            common: CommonProps { opacity, mode, ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    fn two_layers(l1: Element, l2: Element, isolated: bool, knockout: bool) -> Document {
+        let mut doc = Document::default();
+        let second = doc.layers[0].clone();
+        doc.layers.push(second);
+        doc.layers[0].children_mut().unwrap().push(Rc::new(l1));
+        doc.layers[1].children_mut().unwrap().push(Rc::new(l2));
+        doc.document_setup.page_isolated_blending = isolated;
+        doc.document_setup.page_knockout_group = knockout;
+        doc
+    }
+
+    /// The §5 scene under the page flags.
+    pub fn document(isolated: bool, knockout: bool) -> Document {
+        two_layers(
+            rect(0.0, 20.0, RED, 1.0, BlendMode::Normal),
+            rect(10.0, 20.0, LEAF, LEAF_OPACITY, BlendMode::Multiply),
+            isolated, knockout,
+        )
+    }
+
+    /// An edge arm's scene: layer 1 opaque red, layer 2 the arm's leaf
+    /// ([`EDGES`]) with its left edge on a half pixel.
+    pub fn edge_document(arm: usize, isolated: bool, knockout: bool) -> Document {
+        let (_, c, opacity, mode) = EDGES[arm];
+        two_layers(
+            rect(0.0, 20.0, RED, 1.0, BlendMode::Normal),
+            rect(10.5, 19.5, c, opacity, mode),
+            isolated, knockout,
+        )
+    }
+
+    /// The four regimes, in (isolated, knockout) order.
+    pub const REGIMES: [(&str, bool, bool); 4] = [
+        ("neither", false, false),
+        ("isolated", true, false),
+        ("knockout", false, true),
+        ("both", true, true),
+    ];
+
+    type P = [f64; 4];
+
+    /// Source `c` (straight colour) at alpha `a` composited onto premultiplied
+    /// `dst` under `blend` — the W3C compositing formula, premultiplied:
+    /// `co = cs·(1 − αb) + cb·(1 − αs) + αs·αb·B(Cb, Cs)`,
+    /// `αo = αs + αb·(1 − αs)`, with `B(Cb, Cs) = Cs` for Normal and
+    /// `Cb·Cs` for Multiply (`Cb` the backdrop's straight colour).
+    fn composite(dst: P, c: [f64; 3], a: f64, blend: BlendMode) -> P {
+        let ab = dst[3];
+        let cb = |i: usize| if ab > 0.0 { dst[i] / ab } else { 0.0 };
+        let mut out = [0.0; 4];
+        for i in 0..3 {
+            let mixed = match blend {
+                BlendMode::Multiply => cb(i) * c[i],
+                _ => c[i],
+            };
+            out[i] = a * c[i] * (1.0 - ab) + dst[i] * (1.0 - a) + a * ab * mixed;
+        }
+        out[3] = a + ab * (1.0 - a);
+        out
+    }
+
+    /// `src` (premultiplied) source-over `dst` (premultiplied).
+    fn over(src: P, dst: P) -> P {
+        let k = 1.0 - src[3];
+        [src[0] + k * dst[0], src[1] + k * dst[1], src[2] + k * dst[2], src[3] + k * dst[3]]
+    }
+
+    /// One child at one pixel: straight colour, element opacity, blend, and
+    /// geometric coverage of the pixel.
+    pub type Child = ([f64; 3], f64, BlendMode, f64);
+
+    /// The knockout child term: the law of record, or the superseded one.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum ChildTerm {
+        /// A7.1 (ratified 11-22): `S ← (1 − f)·S + [T − (1 − f)·B0]`.
+        A71,
+        /// A7 as first ratified: `S ← (1 − f)·S + f·T`. `T` already holds
+        /// the body at coverage `f`, so this counts `f` twice and leaves
+        /// `f·(1 − f)·B0` on every antialiased edge. Kept ONLY so the edge
+        /// arms can prove they separate it (mutant M8); nothing renders it.
+        Ratified,
+    }
+
+    /// ⭐ THE EXPECTATION, DERIVED BY THE LAW (never typed). Per pixel,
+    /// premultiplied, `B0` opaque:
+    ///
+    /// * NEITHER: every child composites onto the live surface, `S ← c(S, E_i)`
+    ///   (its effective alpha is opacity × coverage).
+    /// * ISOLATED (A6): the children composite onto a transparent `L`, then
+    ///   `L` source-over `B0`.
+    /// * KNOCKOUT (A7.1): `S ← B0`, then for each child
+    ///   `T_i = c(B0, E_i)` and `S ← (1 − f_i)·S + [T_i − (1 − f_i)·B0]`,
+    ///   `f_i` = coverage (a SHAPE, never the alpha). The bracket is `f·T*`,
+    ///   the body at alpha `α/f` weighted by its shape (addendum A7.1 §1):
+    ///   coverage counts ONCE. Interior pixels (`f ∈ {0, 1}`) equal A7's.
+    /// * BOTH: the knockout law with `B0` transparent, the result source-over
+    ///   the real `B0`.
+    ///
+    /// Returns 0–255 straight RGB, rounded, as a canvas read-back reports it
+    /// for an opaque pixel.
+    pub fn expect(isolated: bool, knockout: bool, children: &[Child]) -> [i32; 3] {
+        expect_by(isolated, knockout, children, ChildTerm::A71)
+    }
+
+    /// [`expect`] under a chosen child term.
+    pub fn expect_by(isolated: bool, knockout: bool, children: &[Child], term: ChildTerm) -> [i32; 3] {
+        let b0: P = [B0[0], B0[1], B0[2], 1.0];
+        let start: P = if isolated { [0.0; 4] } else { b0 };
+        let mut s = start;
+        for &(c, opacity, blend, cov) in children {
+            let a = opacity * cov;
+            if knockout {
+                let t = composite(start, c, a, blend);
+                for i in 0..4 {
+                    s[i] = match term {
+                        ChildTerm::A71 => (1.0 - cov) * s[i] + t[i] - (1.0 - cov) * start[i],
+                        ChildTerm::Ratified => (1.0 - cov) * s[i] + cov * t[i],
+                    };
+                }
+            } else {
+                s = composite(s, c, a, blend);
+            }
+        }
+        let out = if isolated { over(s, b0) } else { s };
+        let a = out[3];
+        [0, 1, 2].map(|i| ((out[i] / a).clamp(0.0, 1.0) * 255.0).round() as i32)
+    }
+
+    /// The children at each §5 sample pixel.
+    pub fn children_at(x: u32) -> Vec<Child> {
+        let mut v = Vec::new();
+        let cx = x as f64 + 0.5;
+        if (0.0..20.0).contains(&cx) {
+            v.push((RED, 1.0, BlendMode::Normal, 1.0));
+        } else {
+            // Layer 1 does not cover the pixel: a child with an EMPTY shape,
+            // which under knockout leaves S unchanged (f = 0).
+            v.push((RED, 1.0, BlendMode::Normal, 0.0));
+        }
+        let cov = if (10.0..30.0).contains(&cx) { 1.0 } else { 0.0 };
+        v.push((LEAF, LEAF_OPACITY, BlendMode::Multiply, cov));
+        v
+    }
+
+    /// The children at an edge arm's pixel: layer 1 covers it, layer 2 (the
+    /// arm's leaf) covers HALF of it.
+    pub fn edge_children(arm: usize) -> Vec<Child> {
+        let (_, c, opacity, mode) = EDGES[arm];
+        vec![(RED, 1.0, BlendMode::Normal, 1.0), (c, opacity, mode, 0.5)]
+    }
+
+    /// ⭐ THE EDGE ARMS' POWER, asserted rather than inferred (addendum A7.1
+    /// §4): at EDGE_X, under the knockout regime, E1 separates A7.1 from the
+    /// ratified child term, and E2 and E3 each separate all three of
+    /// ordinary, A7.1 and ratified pairwise, by more than twice the arm's
+    /// tolerance, so a read-back within TOL of one cannot be within TOL of
+    /// another. Run natively by `a7_the_derivation_separates_the_regimes`.
+    pub fn assert_edge_arms_separate() {
+        for (arm, &(name, ..)) in EDGES.iter().enumerate() {
+            let ch = edge_children(arm);
+            let ordinary = expect(false, false, &ch);
+            let a71 = expect(false, true, &ch);
+            let ratified = expect_by(false, true, &ch, ChildTerm::Ratified);
+            assert!(off(a71, ratified) > 2 * TOL,
+                    "{name}: A7.1 {a71:?} and the ratified term {ratified:?} are not separable");
+            if arm > 0 {
+                assert!(off(a71, ordinary) > 2 * TOL && off(ordinary, ratified) > 2 * TOL,
+                        "{name}: ordinary {ordinary:?}, A7.1 {a71:?}, ratified {ratified:?} \
+                         are not pairwise separable");
+            }
+        }
+    }
+
+    /// Largest per-channel distance between a read-back and an expectation.
+    pub fn off(got: [i32; 3], want: [i32; 3]) -> i32 {
+        (0..3).map(|i| (got[i] - want[i]).abs()).max().unwrap()
+    }
+
+    /// The tolerance every pixel arm uses: 8-bit stores round at each of the
+    /// bracket's passes (design block §2).
+    pub const TOL: i32 = 3;
+
+    /// ⭐ THE SELF-TEST OF THE DERIVATION: the four regimes are pairwise
+    /// distinct at the overlap pixel and the leaf pixel taken together, and
+    /// "knockout" differs from "both" (which a white backdrop would
+    /// collapse). Run natively by `a7_the_derivation_separates_the_regimes`.
+    pub fn assert_regimes_distinct() {
+        let rows: Vec<(&str, [i32; 3], [i32; 3])> = REGIMES.iter()
+            .map(|&(n, i, k)| (n, expect(i, k, &children_at(OVERLAP_X)), expect(i, k, &children_at(LEAF_X))))
+            .collect();
+        for a in 0..rows.len() {
+            for b in a + 1..rows.len() {
+                let d = off(rows[a].1, rows[b].1).max(off(rows[a].2, rows[b].2));
+                assert!(d > 2 * TOL, "{} and {} are not separable by the arm ({d}): {rows:?}",
+                        rows[a].0, rows[b].0);
             }
         }
     }
@@ -443,5 +722,186 @@ mod tests {
         let mut rec = RecordingPainter::new();
         emit_document(&mut rec, &Document::default(), DEFAULT_PRECISION);
         assert!(rec.commands().is_empty(), "{:?}", rec.commands());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // A7 — THE PAGE KNOCKOUT GROUP (row 209). The recorder arms: bracket
+    // order and opaque shape artwork. They see no pixels, so they are never
+    // the only arm (the pixel arms are in canvas::render, painter::canvas2d,
+    // painter::direct2d and JasSwift's PageKnockoutTests).
+    // ═══════════════════════════════════════════════════════════════════════
+
+    use super::a7_fixture;
+
+    /// The A6/A7 bracket ops in a command list, in order.
+    fn brackets(cmds: &[Command]) -> Vec<&'static str> {
+        cmds.iter().filter_map(|c| Some(match c {
+            Command::PushIsolatedLayer { .. } => "push_isolated",
+            Command::PopIsolatedLayer => "pop_isolated",
+            Command::PushKnockoutLayer => "push_knockout",
+            Command::PushKnockoutShape => "push_shape",
+            Command::PopKnockoutShape => "pop_shape",
+            Command::PopKnockoutLayer => "pop_knockout",
+            _ => return None,
+        })).collect()
+    }
+
+    /// Every paint op's (brush alpha, paint alpha) and every group's
+    /// (alpha, blend), so a span can be asserted opaque or not.
+    fn alphas(cmds: &[Command]) -> Vec<String> {
+        let brush_a = |b: &crate::painter::Brush| match b {
+            crate::painter::Brush::Solid(c) => c.to_rgba().3,
+            _ => -1.0,
+        };
+        cmds.iter().filter_map(|c| match c {
+            Command::FillRect { brush, paint_alpha, .. }
+            | Command::FillPath { brush, paint_alpha, .. } => Some(format!("paint({},{})", brush_a(brush), paint_alpha)),
+            Command::PushGroup { alpha, blend } => Some(format!("group({alpha},{blend:?})")),
+            _ => None,
+        }).collect()
+    }
+
+    /// The spans between `push_knockout_shape` and `pop_knockout_shape` (the
+    /// shapes) and between `pop_knockout_shape` and the next shape push or the
+    /// layer's pop (the bodies).
+    fn spans(cmds: &[Command]) -> (Vec<Vec<Command>>, Vec<Vec<Command>>) {
+        let (mut shapes, mut bodies) = (Vec::new(), Vec::new());
+        let mut cur: Option<(bool, Vec<Command>)> = None;
+        for c in cmds {
+            match c {
+                Command::PushKnockoutShape | Command::PopKnockoutLayer => {
+                    if let Some((false, b)) = cur.take() { bodies.push(b); }
+                    if matches!(c, Command::PushKnockoutShape) { cur = Some((true, Vec::new())); }
+                }
+                Command::PopKnockoutShape => {
+                    if let Some((true, sh)) = cur.take() { shapes.push(sh); }
+                    cur = Some((false, Vec::new()));
+                }
+                other => if let Some((_, v)) = cur.as_mut() { v.push(other.clone()); },
+            }
+        }
+        (shapes, bodies)
+    }
+
+    /// ⭐ THE DERIVATION SEPARATES THE FOUR REGIMES (design block §5: "the four
+    /// rows differ as pairs"). Computed from the scene's inputs by the law in
+    /// `a7_fixture::expect`, never typed; printed so a reader can hold it
+    /// against the block's own arithmetic.
+    #[test]
+    fn a7_the_derivation_separates_the_regimes() {
+        for (name, iso, ko) in a7_fixture::REGIMES {
+            eprintln!("a7 {name}: overlap {:?} leaf {:?} outside {:?} edge {:?}",
+                a7_fixture::expect(iso, ko, &a7_fixture::children_at(a7_fixture::OVERLAP_X)),
+                a7_fixture::expect(iso, ko, &a7_fixture::children_at(a7_fixture::LEAF_X)),
+                a7_fixture::expect(iso, ko, &a7_fixture::children_at(a7_fixture::OUTSIDE_X)),
+                a7_fixture::expect(iso, ko, &a7_fixture::edge_children(0)));
+        }
+        for (arm, &(name, ..)) in a7_fixture::EDGES.iter().enumerate() {
+            let ch = a7_fixture::edge_children(arm);
+            eprintln!("a7.1 {name}: ordinary {:?} A7.1 {:?} ratified {:?} both {:?}",
+                a7_fixture::expect(false, false, &ch),
+                a7_fixture::expect(false, true, &ch),
+                a7_fixture::expect_by(false, true, &ch, a7_fixture::ChildTerm::Ratified),
+                a7_fixture::expect(true, true, &ch));
+        }
+        a7_fixture::assert_regimes_distinct();
+        a7_fixture::assert_edge_arms_separate();
+        // The knockout overlap is the leaf over B0, which is the NEITHER row's
+        // leaf pixel: the arm's whole claim (nothing of layer 1 survives).
+        assert_eq!(a7_fixture::expect(false, true, &a7_fixture::children_at(a7_fixture::OVERLAP_X)),
+                   a7_fixture::expect(false, false, &a7_fixture::children_at(a7_fixture::LEAF_X)));
+    }
+
+    /// The page knockout group: ONE bracket around the layer loop, one child
+    /// per top-level layer (shape, then body), A7 INSIDE A6 when both flags
+    /// are set, and nothing at all when the flag is false.
+    #[test]
+    fn page_knockout_brackets_one_child_per_layer_inside_the_isolated_layer() {
+        let child = ["push_shape", "pop_shape"];
+        let ko: Vec<&str> = std::iter::once("push_knockout")
+            .chain(child).chain(child).chain(std::iter::once("pop_knockout")).collect();
+        for (name, iso, knock) in a7_fixture::REGIMES {
+            let mut rec = RecordingPainter::new();
+            emit_document(&mut rec, &a7_fixture::document(iso, knock), DEFAULT_PRECISION);
+            let mut want: Vec<&str> = Vec::new();
+            if iso { want.push("push_isolated"); }
+            if knock { want.extend(ko.iter().copied()); }
+            if iso { want.push("pop_isolated"); }
+            assert_eq!(brackets(rec.commands()), want, "{name}: {:?}", rec.commands());
+            if knock {
+                assert!(matches!(rec.commands().last(),
+                                 Some(Command::PopKnockoutLayer | Command::PopIsolatedLayer)),
+                        "{name}: the bracket closes last");
+            }
+        }
+    }
+
+    /// ⛔ THE SHAPE IS THE CALLER'S, AND IT IS OPAQUE: every paint inside a
+    /// shape span carries brush alpha 1 and paint alpha 1 and no group blend,
+    /// while the body after it is the layer's ordinary emission (the 0.5 and
+    /// the Multiply). The shape must also be the SAME GEOMETRY as the body.
+    #[test]
+    fn each_knockout_shape_is_its_bodys_geometry_forced_opaque() {
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &a7_fixture::document(false, true), DEFAULT_PRECISION);
+        let (shapes, bodies) = spans(rec.commands());
+        assert_eq!((shapes.len(), bodies.len()), (2, 2), "{:?}", rec.commands());
+        for (i, (sh, body)) in shapes.iter().zip(&bodies).enumerate() {
+            for a in alphas(sh) {
+                assert!(a == "paint(1,1)" || a == "group(1,Normal)",
+                        "child {i}: a shape op is not opaque: {a} in {sh:?}");
+            }
+            let geo = |v: &[Command]| v.iter().filter_map(|c| match c {
+                Command::FillRect { rect, .. } => Some(format!("{rect:?}")),
+                Command::FillPath { path, .. } => Some(format!("{path:?}")),
+                _ => None,
+            }).collect::<Vec<_>>();
+            assert!(!geo(sh).is_empty(), "child {i}: the shape paints nothing");
+            assert_eq!(geo(sh), geo(body), "child {i}: the shape is not the body's geometry");
+        }
+        // CONTROL: the body of layer 2 is NOT opaque, so the check above can fail.
+        let body2 = alphas(&bodies[1]);
+        assert!(body2.iter().any(|a| a.contains("0.5") || a.contains("Multiply")),
+                "CONTROL: layer 2's body carries its 0.5 and its Multiply: {body2:?}");
+    }
+
+    /// ⚖️ A MASK DOES NOT REDUCE SHAPE (ratified with A7): a masked element's
+    /// shape is its own geometry, the mask bracket and artwork dropped, while
+    /// the body keeps the mask.
+    #[test]
+    fn a_masked_layers_shape_drops_the_mask() {
+        let (mut doc, _) = masked_document();
+        doc.document_setup.page_knockout_group = true;
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &doc, DEFAULT_PRECISION);
+        let (shapes, bodies) = spans(rec.commands());
+        let masks = |v: &[Command]| v.iter().filter(|c| matches!(c, Command::PushMaskLayer { .. })).count();
+        assert_eq!(masks(&bodies[0]), 1, "CONTROL: the body keeps its mask: {:?}", bodies[0]);
+        assert_eq!(masks(&shapes[0]), 0, "the shape carries no mask: {:?}", shapes[0]);
+        assert_eq!(fills(&shapes[0]), 2, "the shape is both rects' geometry, the mask's not: {:?}", shapes[0]);
+    }
+
+    const A7_KNOCKOUT: &str = include_str!("../painter/testdata/a7_knockout.json");
+
+    /// THE CORPUS SCENE IS THE WALK'S OUTPUT: `a7_knockout.json` is the page
+    /// knockout walk of the §5 scene, recorded, so every backend's corpus lane
+    /// replays exactly what the native walk emits (the host's backdrop is not
+    /// in it: `B0` is what the target holds when the bracket opens).
+    #[test]
+    fn the_a7_corpus_scene_is_the_page_knockout_walk() {
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &a7_fixture::document(false, true), DEFAULT_PRECISION);
+        assert_eq!(rec.to_canonical_json().trim(), A7_KNOCKOUT.trim());
+    }
+
+    #[test]
+    #[ignore = "regeneration tool, not a gate"]
+    fn regenerate_a7_corpus_scene() {
+        let mut rec = RecordingPainter::new();
+        emit_document(&mut rec, &a7_fixture::document(false, true), DEFAULT_PRECISION);
+        let mut json = rec.to_canonical_json();
+        json.push('\n');
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/painter/testdata/a7_knockout.json"), json)
+            .expect("write the A7 corpus scene");
     }
 }

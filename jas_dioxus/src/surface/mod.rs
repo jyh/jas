@@ -11,6 +11,10 @@
 //! foreign surfaces would stop being a command list, and display-list
 //! equivalence is what the cross-backend corpus rests on. So the sites LEAVE
 //! `canvas/` as caller-owned services, and this is where they live.
+//! ⚖️ ITS SCOPE, RULED WITH AMENDMENT A7 (the Captain, 2026-11-21): r.6c
+//! governs queries, readback and foreign surfaces; a write-only compositing
+//! bracket grows the trait by amendment (A7's knockout bracket,
+//! `painter/mod.rs`).
 //!
 //! What is here is painter-generic: a [`PixelSurface`] is any RGBA8 raster
 //! the caller owns, the luminance law is a pure byte transform, and

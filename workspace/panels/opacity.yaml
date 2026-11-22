@@ -16,10 +16,11 @@ description: >
       boxes.
     - MAKE_MASK_BUTTON, CLIP_CHECKBOX, INVERT_MASK_CHECKBOX are present but
       disabled until the document model carries element.mask.
-    - Mask-lifecycle and page-level menu items use enabled_when: "false"
-      until their respective phases land (pending_model for disable_mask /
-      unlink_mask; pending_renderer for page_isolated_blending /
-      page_knockout_group).
+    - Mask-lifecycle menu items use enabled_when: "false" until their
+      phase lands (pending_model for disable_mask / unlink_mask). The two
+      page-level items, page_isolated_blending and page_knockout_group, are
+      built in every active renderer and carry a check mark read from the
+      document.
 
   === Layout ===
 
@@ -157,12 +158,16 @@ menu:
       artboard's fill (it still blends with the layers beneath it).
   - label: "Page Knockout Group"
     action: toggle_page_knockout_group
-    enabled_when: "false"
+    checked_when: "active_document.document_setup.page_knockout_group"
     description: >
-      status: pending_renderer. The document carries the field
-      (document_setup.page_knockout_group, default false), and no renderer
-      composites knockout yet: it needs a compositing operation the
-      renderers do not have. Enables once that is built.
+      Checked when the page is a knockout group: each of the document's
+      top-level layers composites against what was on the page before any
+      layer was drawn (the artboard's fill), never against the layers
+      beneath it, so where a layer paints, the layers beneath it do not show
+      through, however transparent the layer is or whatever its blending
+      mode. Where a layer paints nothing, the layers beneath it show as
+      usual. With Page Isolated Blending also checked, the layers knock out
+      against a transparent backdrop and the result lands on the page once.
 
   - separator
 

@@ -58,6 +58,13 @@ pub enum Command {
     PopMaskLayer,
     PushIsolatedLayer { alpha: f64, blend: BlendMode },
     PopIsolatedLayer,
+    /// A7 (2026-11-21): the knockout bracket. No payload on any of the four:
+    /// `B0` is the parent as it stands, and the shape is the artwork between
+    /// the shape push and pop.
+    PushKnockoutLayer,
+    PushKnockoutShape,
+    PopKnockoutShape,
+    PopKnockoutLayer,
     DrawTextRun { run: TextRun, brush: Brush, paint_alpha: f64 },
 }
 
@@ -156,6 +163,18 @@ impl Painter for RecordingPainter {
 
     fn pop_isolated_layer(&mut self) {
         self.commands.push(Command::PopIsolatedLayer);
+    }
+    fn push_knockout_layer(&mut self) {
+        self.commands.push(Command::PushKnockoutLayer);
+    }
+    fn push_knockout_shape(&mut self) {
+        self.commands.push(Command::PushKnockoutShape);
+    }
+    fn pop_knockout_shape(&mut self) {
+        self.commands.push(Command::PopKnockoutShape);
+    }
+    fn pop_knockout_layer(&mut self) {
+        self.commands.push(Command::PopKnockoutLayer);
     }
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
         self.commands.push(Command::DrawTextRun { run: run.clone(), brush: brush.clone(), paint_alpha });
@@ -500,6 +519,11 @@ fn command_to_json(cmd: &Command) -> J {
             ("cmd", J::Str("push_isolated_layer".into())), ("alpha", J::F(*alpha)), ("blend", J::Str(blend_str(*blend).into())),
         ]),
         Command::PopIsolatedLayer => J::Obj(vec![("cmd", J::Str("pop_isolated_layer".into()))]),
+        // A7 (2026-11-21). The four knockout ops carry no payload.
+        Command::PushKnockoutLayer => J::Obj(vec![("cmd", J::Str("push_knockout_layer".into()))]),
+        Command::PushKnockoutShape => J::Obj(vec![("cmd", J::Str("push_knockout_shape".into()))]),
+        Command::PopKnockoutShape => J::Obj(vec![("cmd", J::Str("pop_knockout_shape".into()))]),
+        Command::PopKnockoutLayer => J::Obj(vec![("cmd", J::Str("pop_knockout_layer".into()))]),
         Command::PushMaskLayer { mask } => J::Obj(vec![
             ("cmd", J::Str("push_mask_layer".into())), ("mask", mask_json(mask)),
         ]),

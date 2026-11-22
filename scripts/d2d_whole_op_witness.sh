@@ -24,7 +24,8 @@ ONLY="${1:-}"
 
 OPS="fill_rect stroke_rect push_state pop_state push_group pop_group fill_path
      stroke_path fill_ellipse_arc stroke_ellipse_arc clip draw_text_run
-     push_mask_layer pop_mask_layer push_isolated_layer pop_isolated_layer"
+     push_mask_layer pop_mask_layer push_isolated_layer pop_isolated_layer
+     push_knockout_layer push_knockout_shape pop_knockout_shape pop_knockout_layer"
 
 verdict() {
   out=$(cd jas_dioxus && cargo test --no-default-features --features d2d,ffi 2>&1)

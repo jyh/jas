@@ -21,6 +21,10 @@ pub const SCENES: &[(&str, &str)] = &[
     ("a6_law_variants.json", include_str!("testdata/a6_law_variants.json")),
     ("a6_layer_no_mask.json", include_str!("testdata/a6_layer_no_mask.json")),
     ("a6_nested_layers.json", include_str!("testdata/a6_nested_layers.json")),
+    // A7 (2026-11-21): the page knockout walk of the design block's §5 scene,
+    // recorded from `document::paint::emit_document` -- the only scene that
+    // drives `Capability::KnockoutLayers`.
+    ("a7_knockout.json", include_str!("testdata/a7_knockout.json")),
     ("group_blend.json", include_str!("testdata/group_blend.json")),
     ("ref_circle_convert.json", include_str!("testdata/ref_circle_convert.json")),
     ("ref_ellipse_convert.json", include_str!("testdata/ref_ellipse_convert.json")),

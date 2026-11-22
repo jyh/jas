@@ -1764,6 +1764,24 @@ actions:
     effects:
       - doc.set_document_setup_field: { field: "page_isolated_blending", value: "not active_document.document_setup.page_isolated_blending" }
 
+  toggle_page_knockout_group:
+    description: >
+      Turn Page Knockout Group on or off (the Opacity panel menu). When it is
+      on, each of the document's top-level layers composites against what
+      was on the page before any layer was drawn (the artboard's fill) rather
+      than against the layers beneath it: where a layer paints, nothing of
+      the layers beneath it shows through, however transparent the layer is
+      or whatever its blending mode, and where it paints nothing they show as
+      usual. With Page Isolated Blending also on, the layers knock out
+      against a transparent backdrop and the result lands on the page once.
+      When it is off (the default, and every document saved before the
+      setting existed), the layers composite onto each other as usual. The
+      setting is saved with the document, and changing it is one undoable
+      step.
+    category: appearance
+    effects:
+      - doc.set_document_setup_field: { field: "page_knockout_group", value: "not active_document.document_setup.page_knockout_group" }
+
   toggle_snap_to_glyph_visible:
     description: >
       Show or hide the Character panel's Snap to Glyph options (the panel menu's Show Snap to Glyph Options). Panel display only: the document is unchanged.

@@ -2334,11 +2334,147 @@ impl Painter for MappedGeometry<'_> {
     fn pop_isolated_layer(&mut self) {
         self.inner.pop_isolated_layer();
     }
+    fn push_knockout_layer(&mut self) {
+        self.inner.push_knockout_layer();
+    }
+    fn push_knockout_shape(&mut self) {
+        self.inner.push_knockout_shape();
+    }
+    fn pop_knockout_shape(&mut self) {
+        self.inner.pop_knockout_shape();
+    }
+    fn pop_knockout_layer(&mut self) {
+        self.inner.pop_knockout_layer();
+    }
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
         let m = self.top();
         self.inner.push_state(m);
         self.inner.draw_text_run(run, brush, paint_alpha);
         self.inner.pop_state();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A7 — the knockout SHAPE, emitted by the caller (THE SHAPE IS THE CALLER'S)
+// ---------------------------------------------------------------------------
+
+/// The decorator a walk emits a knockout child through, between
+/// `push_knockout_shape` and `pop_knockout_shape`: the same ops as the child's
+/// body, with every brush forced opaque and every alpha forced to 1, so the
+/// artwork's raw `A` is the child's SHAPE (A7: "shape = the union of the
+/// child's painted geometry under its clips; opacity, brush and stop alpha,
+/// and blend do not reduce it").
+///
+/// * Solid colours and gradient stops keep their RGB and take alpha 1.
+/// * `paint_alpha`, group alpha and isolated-layer alpha become 1; every blend
+///   becomes Normal (a Multiply leaf's footprint is its geometry, not its
+///   colour product).
+/// * ⚖️ A MASK DOES NOT REDUCE SHAPE (ratified with A7): a mask bracket and its
+///   artwork are dropped, so the masked element's own geometry is its shape.
+/// * Clips and transforms pass through unchanged: shape is geometry UNDER its
+///   clips.
+///
+/// One copy, shared by every Painter backend, and visible in every golden: a
+/// recording of a knockout walk shows the opaque artwork in full.
+pub struct OpaqueShape<'a> {
+    inner: &'a mut dyn Painter,
+    /// Depth of dropped mask brackets. While > 0, every op is mask artwork and
+    /// is swallowed.
+    in_mask: usize,
+}
+
+impl<'a> OpaqueShape<'a> {
+    pub fn new(inner: &'a mut dyn Painter) -> Self {
+        Self { inner, in_mask: 0 }
+    }
+
+    fn color(c: &Color) -> Color {
+        let (r, g, b, _) = c.to_rgba();
+        Color::new(r, g, b, 1.0)
+    }
+
+    fn stops(stops: &[ColorStop]) -> Vec<ColorStop> {
+        stops.iter().map(|s| ColorStop { offset: s.offset, color: Self::color(&s.color) }).collect()
+    }
+
+    /// The brush with every alpha it carries forced to 1.
+    pub fn brush(b: &Brush) -> Brush {
+        match b {
+            Brush::Solid(c) => Brush::Solid(Self::color(c)),
+            Brush::Linear(g) => Brush::Linear(LinearGradient { stops: Self::stops(&g.stops), ..g.clone() }),
+            Brush::Radial(g) => Brush::Radial(RadialGradient { stops: Self::stops(&g.stops), ..g.clone() }),
+        }
+    }
+
+    fn live(&self) -> bool {
+        self.in_mask == 0
+    }
+}
+
+impl Painter for OpaqueShape<'_> {
+    fn supports(&self, cap: Capability) -> bool {
+        self.inner.supports(cap)
+    }
+    fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, _a: f64) {
+        if self.live() { self.inner.fill_path(path, winding, &Self::brush(brush), 1.0) }
+    }
+    fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, _a: f64) {
+        if self.live() { self.inner.stroke_path(path, &Self::brush(brush), stroke, 1.0) }
+    }
+    fn fill_rect(&mut self, rect: Rect, brush: &Brush, _a: f64) {
+        if self.live() { self.inner.fill_rect(rect, &Self::brush(brush), 1.0) }
+    }
+    fn stroke_rect(&mut self, rect: Rect, brush: &Brush, stroke: &StrokeStyle, _a: f64) {
+        if self.live() { self.inner.stroke_rect(rect, &Self::brush(brush), stroke, 1.0) }
+    }
+    fn fill_ellipse_arc(&mut self, arc: &EllipseArc, winding: FillRule, brush: &Brush, _a: f64) {
+        if self.live() { self.inner.fill_ellipse_arc(arc, winding, &Self::brush(brush), 1.0) }
+    }
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, align: StrokeAlign, _a: f64) {
+        if self.live() { self.inner.stroke_ellipse_arc(arc, &Self::brush(brush), stroke, align, 1.0) }
+    }
+    fn clip(&mut self, path: &[PathCommand], winding: FillRule) {
+        if self.live() { self.inner.clip(path, winding) }
+    }
+    fn push_state(&mut self, transform: super::Transform) {
+        if self.live() { self.inner.push_state(transform) }
+    }
+    fn pop_state(&mut self) {
+        if self.live() { self.inner.pop_state() }
+    }
+    fn push_group(&mut self, _alpha: f64, _blend: BlendMode) {
+        if self.live() { self.inner.push_group(1.0, BlendMode::Normal) }
+    }
+    fn pop_group(&mut self) {
+        if self.live() { self.inner.pop_group() }
+    }
+    /// ⚖️ A mask does not reduce shape: the bracket and its artwork are dropped.
+    fn push_mask_layer(&mut self, _mask: Mask) {
+        self.in_mask += 1;
+    }
+    fn pop_mask_layer(&mut self) {
+        self.in_mask = self.in_mask.saturating_sub(1);
+    }
+    fn push_isolated_layer(&mut self, _alpha: f64, _blend: BlendMode) {
+        if self.live() { self.inner.push_isolated_layer(1.0, BlendMode::Normal) }
+    }
+    fn pop_isolated_layer(&mut self) {
+        if self.live() { self.inner.pop_isolated_layer() }
+    }
+    fn push_knockout_layer(&mut self) {
+        if self.live() { self.inner.push_knockout_layer() }
+    }
+    fn push_knockout_shape(&mut self) {
+        if self.live() { self.inner.push_knockout_shape() }
+    }
+    fn pop_knockout_shape(&mut self) {
+        if self.live() { self.inner.pop_knockout_shape() }
+    }
+    fn pop_knockout_layer(&mut self) {
+        if self.live() { self.inner.pop_knockout_layer() }
+    }
+    fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, _a: f64) {
+        if self.live() { self.inner.draw_text_run(run, &Self::brush(brush), 1.0) }
     }
 }
 

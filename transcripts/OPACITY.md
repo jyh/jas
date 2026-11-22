@@ -85,8 +85,21 @@ the key `opacity_menu.<id>`.
   `page_isolated_blending` on, the top-level layers composite onto a
   transparent backdrop first and the result lands on the page once, so a layer
   with a blending mode blends with the layers beneath it and never with the
-  artboard's fill. `page_knockout_group` is stored and not yet composited (see
-  its status below).
+  artboard's fill. With `page_knockout_group` on, each top-level layer
+  composites against the page as it was before any layer was drawn (the
+  artboard's fill), never against the layers beneath it: where a layer paints,
+  the layers beneath it are knocked out, however transparent the layer is or
+  whatever its blending mode. Per pixel, premultiplied, with `B0` that initial
+  backdrop, `f` the layer's shape (its painted geometry under its clips; its
+  opacity, blending mode and mask do not reduce it) and `T` the layer drawn
+  onto `B0` by the ordinary rules, the page becomes
+  `(1 − f)·page + [T − (1 − f)·B0]`, layer by layer (the Painter contract's
+  AMENDMENT A7, child term corrected by A7.1): coverage counts once, so at a
+  layer's antialiased edge the layers beneath show through in proportion to
+  the part of the pixel the layer leaves uncovered. With both on, the knockout
+  happens against a transparent backdrop and the result lands on the page once.
+  ⚠️ On the web, a page with a top-level layer the shared lowering cannot
+  shape (rich text, a freeform gradient) draws without knockout.
 - Items carry a `status` field when they are not yet fully landed.
   `status: open_design` means the semantics are still being designed.
   `status: pending_model` means the semantics are settled but the document
@@ -108,7 +121,7 @@ PANEL_MENU:
     - - {id: new_masks_clipping,     kind: toggle, scope: document, default: true}
       - {id: new_masks_inverted,     kind: toggle, scope: document, default: false}
     - - {id: page_isolated_blending, kind: toggle, scope: document, default: false}
-      - {id: page_knockout_group,    kind: toggle, scope: document, default: false, status: pending_renderer}
+      - {id: page_knockout_group,    kind: toggle, scope: document, default: false}
 ```
 
 ## States
@@ -280,9 +293,9 @@ can be added later without a schema migration; no renderer reads them yet.
 The only UI hooks today are the page-level menu items, which write the
 document's own `document_setup.page_isolated_blending` and
 `document_setup.page_knockout_group`, not a group's flags. Page Isolated
-Blending is built in every renderer. Page Knockout Group stays
-`status: pending_renderer`: knockout needs a compositing operation the
-renderers do not have yet.
+Blending and Page Knockout Group are built in every active renderer (the
+knockout bracket is the Painter contract's AMENDMENT A7); the per-group
+flags stay storage-only.
 
 ## Multi-selection
 

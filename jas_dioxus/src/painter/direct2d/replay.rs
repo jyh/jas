@@ -332,6 +332,12 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                 }
             }
             "pop_isolated_layer" => { p.pop_isolated_layer(); r.drawn += 1; }
+            // A7 (2026-11-21): the knockout bracket. No payload; the backend
+            // reads `B0` off its own target (see `painter::push_knockout_layer`).
+            "push_knockout_layer" => { p.push_knockout_layer(); r.drawn += 1; }
+            "push_knockout_shape" => { p.push_knockout_shape(); r.drawn += 1; }
+            "pop_knockout_shape" => { p.pop_knockout_shape(); r.drawn += 1; }
+            "pop_knockout_layer" => { p.pop_knockout_layer(); r.drawn += 1; }
             _ => r.unsupported.push((cmd.into(), "unknown command")),
         }
     }

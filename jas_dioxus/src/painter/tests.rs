@@ -292,3 +292,27 @@ fn a6_scenes_obey_the_bracket_grammar() {
         assert_eq!(mask, 0, "{name}: unbalanced mask bracket");
     }
 }
+
+/// ⚖️ THE r.6c LINE IS HOMED IN THREE PLACES AND THEY CANNOT DISAGREE: the
+/// amendment (`painter/mod.rs`), the ruling's own statement (`surface/mod.rs`)
+/// and the portability gate's copy (`scripts/check_canvas_portability.py`).
+/// Ratified with A7 (the Captain, 2026-11-21). Each file is flattened (comment
+/// markers and line breaks removed) before the search, so a re-wrap is not a
+/// disagreement and a reworded copy is.
+#[test]
+fn the_r6c_scope_line_is_the_same_in_the_amendment_the_ruling_and_the_gate() {
+    const LINE: &str = "r.6c governs queries, readback and foreign surfaces; a write-only \
+                        compositing bracket grows the trait by amendment";
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/");
+    for rel in ["src/painter/mod.rs", "src/surface/mod.rs", "../scripts/check_canvas_portability.py"] {
+        let text = std::fs::read_to_string(format!("{root}{rel}")).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let flat: String = text
+            .lines()
+            .map(|l| l.trim_start().trim_start_matches("//!").trim_start_matches("//").trim())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace("**", "");
+        let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains(LINE), "{rel} does not carry the ratified r.6c line: {LINE:?}");
+    }
+}

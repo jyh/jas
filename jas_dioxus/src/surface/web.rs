@@ -26,6 +26,13 @@ pub enum CompositeOp {
     /// Draw the source's pixels over the destination under a blend mode
     /// (`source-over` for `Normal`).
     Blend(BlendMode),
+    /// Replace the destination with the source (`copy`): A7's `B0` snapshot
+    /// and its seeding of the child surface.
+    Copy,
+    /// The ADDITIVE composite `S + T`, premultiplied (`lighter`): A7's
+    /// knockout close. Measured exact (±3) against the law by
+    /// `canvas::render`'s `a7_plus_pixel_tests`.
+    Plus,
 }
 
 impl CompositeOp {
@@ -35,6 +42,8 @@ impl CompositeOp {
             CompositeOp::DestinationIn => "destination-in",
             CompositeOp::DestinationOut => "destination-out",
             CompositeOp::Blend(mode) => blend_mode_css(mode),
+            CompositeOp::Copy => "copy",
+            CompositeOp::Plus => "lighter",
         }
     }
 }
