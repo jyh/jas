@@ -256,3 +256,20 @@ private func lookupOnly(_ has: [NSFontDescriptor.SymbolicTraits], calls: LookupL
     let face = withFontLookup { faceWithTraits(base, [.bold, .italic], size: 13) }
     #expect(face.fontName == "Futura-Bold", "the bold is kept when the italic is absent: \(face.fontName)")
 }
+
+// Row 188, 11-22: every main Swift run printed the same four row-188 lines,
+// and all four were PROVOKED by the arms above (a stubbed lookup or
+// alternate). The log dedupes per face and traits per process, so once a test
+// had logged "Helvetica/1", a REAL miss of Helvetica italic in the same run
+// printed nothing: the watch could not see the recurrence it exists for. A
+// line from an injected lookup is now filed apart and labelled.
+@Test func anInjectedLookupsLineDoesNotSwallowARealMissOfTheSameFace() {
+    let base = NSFont(name: "Helvetica", size: 13)!
+    let keys = withFontLookup { () -> (Bool, Bool) in
+        _ = faceWithTraits(base, [.italic], size: 13, lookup: { _, _ in nil }, alternate: noAlternate)
+        return (faceLookupWasLoggedHoldingLock("injected/Helvetica/\(NSFontDescriptor.SymbolicTraits.italic.rawValue)"),
+                faceLookupWasLoggedHoldingLock("Helvetica/\(NSFontDescriptor.SymbolicTraits.italic.rawValue)"))
+    }
+    #expect(keys.0, "the injected miss is logged under its own key")
+    #expect(!keys.1, "the REAL key stays free, so a production miss of this face still prints")
+}
