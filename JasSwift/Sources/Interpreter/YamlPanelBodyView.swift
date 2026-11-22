@@ -214,10 +214,26 @@ struct YamlElementView: View {
             bodyContent
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier((element["id"] as? String) ?? "")
+                .fifoTarget((element["id"] as? String) ?? "")
         } else {
             bodyContent
                 .accessibilityIdentifier((element["id"] as? String) ?? "")
+                .fifoTarget((element["id"] as? String) ?? "")
         }
+    }
+
+    /// Whether this node renders by expanding its `foreach` + `do`.
+    ///
+    /// NOT a `tree_view`: the Mac's Layers tree is `TreeViewContent`, which
+    /// builds its rows from the live document and carries the tree's own law
+    /// (the row context menu, the right-click that selects its row, the Delete
+    /// orphan gate, keyboard rows, drag-and-drop). `lp_tree` gained `foreach` +
+    /// `do` on 10-27 (567b4031) for the PLAN a native shell expands, and this
+    /// branch, which runs before the type dispatch, then took it first, so
+    /// none of that ran on the live Mac panel (row 117 (Mac), measured 11-22).
+    /// The web's twin is `expands_as_foreach` (renderer.rs, #923).
+    static func expandsAsForeach(_ el: [String: Any]) -> Bool {
+        el["foreach"] != nil && el["do"] != nil && el["type"] as? String != "tree_view"
     }
 
     @ViewBuilder
@@ -225,7 +241,7 @@ struct YamlElementView: View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
         if !isVisible() {
             EmptyView()
-        } else if element["foreach"] != nil && element["do"] != nil {
+        } else if Self.expandsAsForeach(element) {
             // Repeat directive: expand template for each item in source list.
             renderRepeat()
         } else if let tmpl = element["_template"] as? String,
@@ -4155,10 +4171,11 @@ struct TreeViewContent: View {
             // artist saw the search box twice and two filter controls, one of
             // them the inert grey placeholder the YAML widget rendered as.
             // Council Q3.2: the declared widgets are the only ones now.
-
-            if !isolationStack.isEmpty {
-                breadcrumbBar
-            }
+            //
+            // NO BREADCRUMB HERE either (row 210): `lp_breadcrumb` is declared
+            // above this tree, and with the native tree running again (#1056)
+            // both drew. Its chevron's exit reaches the model-held stack since
+            // row 210's dispatch fix (formsTheDeclaredBreadcrumbChevronExitsIsolation).
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -4290,41 +4307,6 @@ struct TreeViewContent: View {
         LayersPanel.keyboardDelete(model: model, onDialogOpened: { onStoreDialogOpened?(nil) })
     }
 
-    /// Run `exit_isolation_to_level`, which keeps `level` levels of the
-    /// model's stack (the action's pop handler writes `isolationStack`'s home).
-    private func exitIsolation(toLevel level: Int) {
-        LayersPanel.dispatchYamlAction("exit_isolation_to_level", model: model,
-                                       params: ["level_index": level])
-    }
-
-    @ViewBuilder
-    private var breadcrumbBar: some View {
-        HStack(spacing: 4) {
-            SwiftUI.Text("⌂")
-                .font(.system(size: 11))
-                // The breadcrumb's declared action (layers.yaml lp_breadcrumb):
-                // the chevron passes 0, which exits isolation.
-                .onTapGesture { exitIsolation(toLevel: 0) }
-            ForEach(Array(isolationStack.enumerated()), id: \.offset) { idx, p in
-                SwiftUI.Text(">")
-                    .font(.system(size: 9))
-                    .foregroundColor(.gray)
-                let label: String = {
-                    let e = model.document.getElement(p)
-                    let (n, _) = elementDisplayName(e)
-                    return n
-                }()
-                SwiftUI.Text(label)
-                    .font(.system(size: 11))
-                    .onTapGesture { exitIsolation(toLevel: idx + 1) }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(SwiftUI.Color(white: 0.16))
-    }
-
     @ViewBuilder
     private func rowView(row: FlatRow, selectedPaths: Set<ElementPath>) -> some View {
         let elem = row.elem
@@ -4348,6 +4330,7 @@ struct TreeViewContent: View {
             SwiftUI.Text(visIcon(vis))
                 .frame(width: 16, height: 16)
                 .onTapGesture { handleEyeTap(path: path) }
+                .fifoTarget("layers_eye_" + path.map(String.init).joined(separator: "_"))
             // Lock
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
                 .frame(width: 16, height: 16)
@@ -4456,11 +4439,15 @@ struct TreeViewContent: View {
                 : nil
         )
         .contentShape(Rectangle())
+        // A harness finds a row by this (row 208: the FIFO's `events` posts a
+        // right-click at its centre). Inert without `--test-fifo`.
+        .fifoTarget("layers_row_" + path.map(String.init).joined(separator: "_"))
         .onTapGesture {
             handleRowTap(path: path)
         }
         .onHover { inside in
             if inside { hoveredRow = path } else if hoveredRow == path { hoveredRow = nil }
+            FifoLive.layersHoveredRow = hoveredRow  // the FIFO's `hover` (row 208)
         }
         .contextMenu {
             // Row 141 part 3: layers.yaml's `context_menu:`, drawn in this
