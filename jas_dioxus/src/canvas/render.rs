@@ -5654,6 +5654,72 @@ mod a7_plus_pixel_tests {
         assert!(best_control > 3, "CONTROL: source-over met the law: {report}");
         assert!(worst_plus <= 3, "A7 (f) NOT EXACT on Canvas2D (worst {worst_plus}): STOP, bring this to him: {report}");
     }
+
+    // ─── A7.1, MEASURE-FIRST (council 11-22): the two platform behaviours
+    // Route D rests on, measured BEFORE it is built (addendum A7.1 §5, first
+    // bullet). (1) `difference` of two OPAQUE pixels is |T − Q| with alpha 1;
+    // (2) `lighter` whose alpha sum exceeds 1 SATURATES alpha at 1 and keeps
+    // the premultiplied colour sum. Pairs are the addendum's: B0 = opaque red,
+    // f = 0.5, so Q' = (1−f)·B0 = (0.5, 0, 0); T for E1 and E2; a generic pair;
+    // and a pair with Q > T on two channels, to see the absolute value.
+
+    /// (name, T = the destination, Q' = the source), straight RGB, both opaque.
+    const DIFF_CASES: [(&str, [f64; 4], [f64; 4]); 4] = [
+        ("E1 bracket", [0.5, 0.0, 0.5, 1.0], [0.5, 0.0, 0.0, 1.0]),
+        ("E2 bracket", [0.75, 0.0, 0.25, 1.0], [0.5, 0.0, 0.0, 1.0]),
+        ("generic", [0.8, 0.6, 0.2, 1.0], [0.3, 0.1, 0.2, 1.0]),
+        ("Q > T", [0.2, 0.6, 0.1, 1.0], [0.5, 0.1, 0.3, 1.0]),
+    ];
+
+    /// (name, S = (1−f)·S erased, premultiplied; T = the opaque bracket), the
+    /// alpha sum > 1 in every row and every colour sum <= 1 (the law's domain).
+    const SAT_CASES: [(&str, [f64; 4], [f64; 4]); 3] = [
+        ("E1 f=0.5", [0.5, 0.0, 0.0, 0.5], [0.0, 0.0, 0.5, 1.0]),
+        ("generic f=0.5", [0.3, 0.2, 0.1, 0.5], [0.25, 0.4, 0.3, 1.0]),
+        ("f=0.25", [0.3, 0.45, 0.15, 0.75], [0.2, 0.1, 0.5, 1.0]),
+    ];
+
+    fn bytes(p: [f64; 4]) -> [i32; 4] {
+        p.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as i32)
+    }
+
+    #[wasm_bindgen_test]
+    fn a71_difference_of_two_opaque_pixels_is_the_absolute_difference() {
+        let mut report = Vec::new();
+        let (mut worst, mut best_control) = (0, i32::MAX);
+        for (name, t, q) in DIFF_CASES {
+            let want = bytes([(t[0] - q[0]).abs(), (t[1] - q[1]).abs(), (t[2] - q[2]).abs(), 1.0]);
+            let off = |g: [i32; 4]| (0..4).map(|i| (g[i] - want[i]).abs()).max().unwrap();
+            let diff = composite(t, q, "difference");
+            let over = composite(t, q, "source-over");
+            worst = worst.max(off(diff));
+            best_control = best_control.min(off(over));
+            report.push(format!("{name}: difference {diff:?} source-over {over:?} law {want:?}"));
+        }
+        let report = report.join("; ");
+        console_log!("A7.1 Canvas2D difference worst {worst}: {report}");
+        assert!(best_control > 3, "CONTROL: source-over met |T−Q|: {report}");
+        assert!(worst <= 3, "A7.1 (1) NOT EXACT on Canvas2D (worst {worst}): STOP, bring this to him: {report}");
+    }
+
+    #[wasm_bindgen_test]
+    fn a71_lighter_saturates_alpha_at_one_with_the_colour_sum_intact() {
+        let mut report = Vec::new();
+        let (mut worst, mut best_control) = (0, i32::MAX);
+        for (name, s, t) in SAT_CASES {
+            let want = law(s, t);
+            let off = |g: [i32; 4]| (0..4).map(|i| (g[i] - want[i]).abs()).max().unwrap();
+            let plus = composite(s, t, "lighter");
+            let over = composite(s, t, "source-over");
+            worst = worst.max(off(plus));
+            best_control = best_control.min(off(over));
+            report.push(format!("{name}: lighter {plus:?} source-over {over:?} law {want:?}"));
+        }
+        let report = report.join("; ");
+        console_log!("A7.1 Canvas2D lighter-saturation worst {worst}: {report}");
+        assert!(best_control > 3, "CONTROL: source-over met S + T: {report}");
+        assert!(worst <= 3, "A7.1 (2) NOT EXACT on Canvas2D (worst {worst}): STOP, bring this to him: {report}");
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
