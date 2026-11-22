@@ -1,5 +1,6 @@
 import Testing
 import CoreGraphics
+@testable import JasLib
 
 // A7.1 (the knockout edge law), ratified 11-22 MEASURE-FIRST: before Route D
 // is built, measure on every backend the two platform behaviours it rests on
@@ -108,4 +109,30 @@ private func differenceArm(viaLayer: Bool) {
     print("A7.1 CG plusLighter-saturation worst \(worst) control-best \(bestControl)")
     #expect(bestControl > 3, "CONTROL: source-over met S + T")
     #expect(worst <= 3, "A7.1 (2) NOT EXACT on CoreGraphics (worst \(worst)): STOP, bring this to him")
+}
+
+// Row 216, A7.1's declared limit as a GUARD: `knockoutBackdropRefusal` renders
+// the knockout backdrop into a probe bitmap and names the limit when any pixel
+// is partially transparent; `drawKnockoutLayers` hands a refusal to
+// `assertionFailure` in DEBUG. Planted (alpha 0.5) must refuse; opaque and
+// absent (the isolated page) must not.
+private func probeContext() -> CGContext {
+    CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32,
+              space: CGColorSpaceCreateDeviceRGB(),
+              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+}
+
+@Test func a71AKnockoutOverAPartiallyTransparentBackdropIsRefusedOnTheMac() {
+    let partial: (CGContext) -> Void = { c in
+        c.setFillColor(CGColor(red: 0.8, green: 0.8, blue: 0.2, alpha: 0.5))
+        c.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+    let opaque: (CGContext) -> Void = { c in
+        c.setFillColor(CGColor(red: 0.8, green: 0.8, blue: 0.2, alpha: 1))
+        c.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+    }
+    let refused = knockoutBackdropRefusal(probeContext(), partial)
+    #expect(refused?.contains("A7.1") == true, "planted partial backdrop: \(String(describing: refused))")
+    #expect(knockoutBackdropRefusal(probeContext(), opaque) == nil, "CONTROL: an opaque backdrop")
+    #expect(knockoutBackdropRefusal(probeContext(), nil) == nil, "CONTROL: the isolated page's empty backdrop")
 }
