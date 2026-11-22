@@ -70,8 +70,17 @@ private let satCases: [(String, Px, Px)] = [
 
 private func off(_ a: [Int], _ b: [Int]) -> Int { zip(a, b).map { abs($0 - $1) }.max()! }
 
-@Test(arguments: [false, true])
-func a71TheMacDifferenceOfTwoOpaquePixelsIsTheAbsoluteDifference(viaLayer: Bool) {
+// Two plain tests, not one parameterized test: the Swift execution gate reads
+// every declared case back by name and does not model parameterized cases.
+@Test func a71TheMacDifferenceOfTwoOpaquePixelsIsTheAbsoluteDifference() {
+    differenceArm(viaLayer: false)
+}
+
+@Test func a71TheMacDifferenceThroughATransparencyLayerIsTheAbsoluteDifference() {
+    differenceArm(viaLayer: true)
+}
+
+private func differenceArm(viaLayer: Bool) {
     var worst = 0, bestControl = Int.max
     for (name, t, q) in diffCases {
         let want = bytes([abs(t.0 - q.0), abs(t.1 - q.1), abs(t.2 - q.2), 1])
