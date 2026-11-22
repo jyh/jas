@@ -63,6 +63,25 @@ struct KnockoutGroup {
     depth: usize,
 }
 
+/// Row 216, A7.1's declared limit as a GUARD (debug builds only: a readback of
+/// the whole backdrop is too costly per frame in release). Route D is exact
+/// only where `B0` is opaque or empty per pixel (addendum A7.1 §2); over a
+/// partially transparent backdrop it errs by up to 124/255 (row 213). Every
+/// walk today paints `B0` opaque (the pasteboard) or empty (the isolated
+/// page), so this fires only for a NEW caller, an export onto a transparent
+/// target, say, and names the limit it reached.
+#[cfg(debug_assertions)]
+fn refuse_partial_backdrop(b0: &WebSurface) {
+    let (w, h) = b0.size();
+    let Some(px) = b0.read_rgba(0, 0, w, h) else { return };
+    if let Some(i) = px.chunks_exact(4).position(|p| p[3] != 0 && p[3] != 255) {
+        panic!("A7.1 §2: a knockout group opened over a partially transparent backdrop \
+                (pixel {} of {w}x{h}, alpha {}); Route D is exact only where B0 is opaque \
+                or empty. Paint B0 opaque or empty first, or bring the limit to a ruling.",
+               i, px[i * 4 + 3]);
+    }
+}
+
 struct LayerTarget {
     /// The layer's offscreen surface — a caller-owned `WebSurface`, so the
     /// luminance law reaches it through the surface service and not through
@@ -680,6 +699,10 @@ impl Painter for Canvas2dPainter<'_> {
     /// composites nothing of its own.
     fn push_knockout_layer(&mut self) {
         let group = self.copy_target().map(|b0| KnockoutGroup { b0, shape: None, depth: self.layers.len() });
+        #[cfg(debug_assertions)]
+        if let Some(g) = &group {
+            refuse_partial_backdrop(&g.b0);
+        }
         self.knockouts.push(group);
     }
 
@@ -2254,6 +2277,23 @@ mod a7_knockout_bracket_tests {
             let (r, g, b, _) = rgba_at(&ctx, x as f64, fx::Y as f64);
             [r as i32, g as i32, b as i32]
         }).collect()
+    }
+
+    /// Row 216, A7.1's declared limit as a GUARD: a knockout group opened over
+    /// a backdrop that is partially transparent (0 < α_B0 < 1) is where Route
+    /// D is not exact (up to 124/255, row 213), so a debug build refuses it by
+    /// name instead of fringing in silence. Planted: the whole target at α 0.5.
+    /// The opaque backdrop of every other arm here is the control (no panic),
+    /// and the "both" regime's empty B0 (inside the isolated page) the other.
+    #[wasm_bindgen_test]
+    #[should_panic(expected = "A7.1")]
+    fn a71_a_knockout_over_a_partially_transparent_backdrop_is_refused() {
+        let (_c, ctx) = surface(fx::W, fx::H);
+        ctx.set_fill_style_str("rgba(204,204,51,0.5)");
+        ctx.fill_rect(0.0, 0.0, fx::W as f64, fx::H as f64);
+        let mut p = Canvas2dPainter::new(&ctx);
+        crate::document::paint::emit_document(&mut p, &fx::document(false, true),
+                                              crate::geometry::live::DEFAULT_PRECISION);
     }
 
     #[wasm_bindgen_test]
