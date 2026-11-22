@@ -16565,6 +16565,93 @@ mod layers_tree_key_tests {
         assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
         assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
     }
+    /// Row 214: every drivable `set_panel_state` writer (its value a `param.`
+    /// or a `not panel.` flip), dispatched on the web, is visible in the panel
+    /// body's render scope, or else in the panel-menu scope with no body reader.
+    /// The case list is CHECKED against actions.yaml: a new drivable writer reds
+    /// this test until it is added (construction, not memory). Two writers are
+    /// body-UNCHANGED by design, each named with its reason: `set_layers_search`
+    /// (the web draws the search field natively from `AppState`; measured live,
+    /// its text holds) and `toggle_snap_to_glyph_visible` (no body element reads
+    /// the key; row 215). Both are asserted visible in the menu scope instead.
+    #[test]
+    fn every_drivable_panel_state_writer_is_visible_where_it_is_read() {
+        use serde_json::json;
+        let cases: Vec<(&str, serde_json::Value, &str, &str)> = vec![
+            ("set_color_panel_mode", json!({"mode": "cmyk"}), "color", "mode"),
+            ("set_swatch_thumbnail_size", json!({"size": "large"}), "swatches", "thumbnail_size"),
+            ("set_stroke_cap", json!({"cap": "round"}), "stroke", "cap"),
+            ("set_stroke_join", json!({"join": "bevel"}), "stroke", "join"),
+            ("set_stroke_align", json!({"align": "outside"}), "stroke", "align_stroke"),
+            ("set_arrow_align", json!({"align": "center_at_end"}), "stroke", "arrow_align"),
+            ("set_stroke_profile", json!({"profile": "taper_both"}), "stroke", "profile"),
+            ("set_layers_search", json!({"query": "fore"}), "layers", "search_query"),
+            ("set_align_to", json!({"target": "artboard"}), "align", "align_to"),
+            ("rename_artboard", json!({"artboard_id": "ab_x"}), "artboards", "renaming_artboard"),
+            ("set_artboard_reference_point", json!({"anchor": "top_left"}), "artboards", "reference_point"),
+            ("set_brush_view_mode", json!({"view_mode": "list"}), "brushes", "view_mode"),
+            ("set_brush_thumbnail_size", json!({"size": "large"}), "brushes", "thumbnail_size"),
+            ("symbols_panel_select", json!({"symbol_id": "sym_x"}), "symbols", "selected_symbol"),
+            ("concepts_panel_select", json!({"concept_id": "con_x"}), "concepts", "selected_concept"),
+            ("toggle_opacity_thumbnails", json!({}), "opacity", "thumbnails_hidden"),
+            ("toggle_opacity_slider", json!({}), "opacity", "slider_shown"),
+            ("toggle_opacity_options", json!({}), "opacity", "options_shown"),
+            ("toggle_new_masks_clipping", json!({}), "opacity", "new_masks_clipping"),
+            ("toggle_new_masks_inverted", json!({}), "opacity", "new_masks_inverted"),
+            ("toggle_all_caps", json!({}), "character", "all_caps"),
+            ("toggle_small_caps", json!({}), "character", "small_caps"),
+            ("toggle_superscript", json!({}), "character", "superscript"),
+            ("toggle_subscript", json!({}), "character", "subscript"),
+            ("toggle_snap_to_glyph_visible", json!({}), "character", "snap_to_glyph_visible"),
+            ("toggle_dashed_line", json!({}), "stroke", "dashed"),
+            ("toggle_link_arrowhead_scale", json!({}), "stroke", "link_arrowhead_scale"),
+            ("flip_stroke_profile", json!({}), "stroke", "profile_flipped"),
+            ("toggle_use_preview_bounds", json!({}), "align", "use_preview_bounds"),
+        ];
+        // The population, from the bundle: every action with a set_panel_state
+        // effect whose value is `param.<p>` or `not panel.<k>`.
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the bundle");
+        let mut drivable: Vec<String> = Vec::new();
+        for (name, a) in ws.actions().as_object().expect("actions") {
+            for e in a["effects"].as_array().into_iter().flatten() {
+                let v = e["set_panel_state"]["value"].as_str().unwrap_or("");
+                if v.starts_with("param.") || v.starts_with("not panel.") {
+                    drivable.push(name.clone());
+                }
+            }
+        }
+        drivable.sort();
+        drivable.dedup();
+        let listed: std::collections::BTreeSet<&str> = cases.iter().map(|c| c.0).collect();
+        // Writers whose `param.` value cannot be driven by a literal: the
+        // gradient library id needs a loaded library (read by its own arms).
+        let excused = ["set_gradient_active_library"];
+        let missing: Vec<&String> = drivable.iter()
+            .filter(|n| !listed.contains(n.as_str()) && !excused.contains(&n.as_str())).collect();
+        assert!(missing.is_empty(), "drivable writers not in this census: {missing:?}");
+        assert!(drivable.len() >= cases.len(), "CONTROL: the bundle census found {} writers", drivable.len());
+        let menu_only = ["set_layers_search", "toggle_snap_to_glyph_visible"];
+        let mut report = Vec::new();
+        let mut bad = Vec::new();
+        for (action, params, panel, key) in cases {
+            let mut st = two_layers();
+            let cid = format!("{panel}_panel_content");
+            let before = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, &cid).unwrap()["panel"][key].clone();
+            let p = params.as_object().unwrap().clone();
+            let _ = super::dispatch_action(action, &p, &mut st);
+            let after = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, &cid).unwrap()["panel"][key].clone();
+            let want = params.as_object().unwrap().values().next().cloned()
+                .unwrap_or_else(|| json!(!before.as_bool().unwrap_or(false)));
+            let verdict = if after == want { "CARRIED" } else if after == before { "UNCHANGED" } else { "OTHER" };
+            let menu = crate::panels::panel_menu::panel_menu_ctx(&cid, &st)["panel"][key].clone();
+            report.push(format!("{verdict} {action}: body {before}->{after}, menu {menu}, want {want}"));
+            let ok = if menu_only.contains(&action) { verdict == "UNCHANGED" && menu == want }
+                     else { verdict == "CARRIED" };
+            if !ok { bad.push(action); }
+        }
+        assert!(bad.is_empty(), "not visible where read: {bad:?}\n{}", report.join("\n"));
+    }
+
     /// Row 212: the Concepts panel body's render scope carries the
     /// panel-selected concept, which is APP-held (`AppState::concepts_selected`,
     /// written by the select action), never the panel table. Without it the
