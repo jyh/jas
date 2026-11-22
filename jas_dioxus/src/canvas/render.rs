@@ -5659,22 +5659,24 @@ mod a7_plus_pixel_tests {
     // Route D rests on, measured BEFORE it is built (addendum A7.1 §5, first
     // bullet). (1) `difference` of two OPAQUE pixels is |T − Q| with alpha 1;
     // (2) `lighter` whose alpha sum exceeds 1 SATURATES alpha at 1 and keeps
-    // the premultiplied colour sum. Pairs are the addendum's: B0 = opaque red,
-    // f = 0.5, so Q' = (1−f)·B0 = (0.5, 0, 0); T for E1 and E2; a generic pair;
-    // and a pair with Q > T on two channels, to see the absolute value.
+    // the premultiplied colour sum. E1 and E2 are the fixture's own edge pixel
+    // (`a7_fixture`: B0 = (0.8, 0.8, 0.2), f = 0.5, so Q' = (1−f)·B0 =
+    // (0.4, 0.4, 0.1); S = (1−f)·RED), so the saturation rows ARE the addendum's
+    // A7.1 column (128, 0, 128 and 179, 51, 77); plus a generic pair and Q > T.
 
     /// (name, T = the destination, Q' = the source), straight RGB, both opaque.
     const DIFF_CASES: [(&str, [f64; 4], [f64; 4]); 4] = [
-        ("E1 bracket", [0.5, 0.0, 0.5, 1.0], [0.5, 0.0, 0.0, 1.0]),
-        ("E2 bracket", [0.75, 0.0, 0.25, 1.0], [0.5, 0.0, 0.0, 1.0]),
+        ("E1 bracket", [0.4, 0.4, 0.6, 1.0], [0.4, 0.4, 0.1, 1.0]),
+        ("E2 bracket", [0.6, 0.6, 0.4, 1.0], [0.4, 0.4, 0.1, 1.0]),
         ("generic", [0.8, 0.6, 0.2, 1.0], [0.3, 0.1, 0.2, 1.0]),
         ("Q > T", [0.2, 0.6, 0.1, 1.0], [0.5, 0.1, 0.3, 1.0]),
     ];
 
     /// (name, S = (1−f)·S erased, premultiplied; T = the opaque bracket), the
     /// alpha sum > 1 in every row and every colour sum <= 1 (the law's domain).
-    const SAT_CASES: [(&str, [f64; 4], [f64; 4]); 3] = [
+    const SAT_CASES: [(&str, [f64; 4], [f64; 4]); 4] = [
         ("E1 f=0.5", [0.5, 0.0, 0.0, 0.5], [0.0, 0.0, 0.5, 1.0]),
+        ("E2 f=0.5", [0.5, 0.0, 0.0, 0.5], [0.2, 0.2, 0.3, 1.0]),
         ("generic f=0.5", [0.3, 0.2, 0.1, 0.5], [0.25, 0.4, 0.3, 1.0]),
         ("f=0.25", [0.3, 0.45, 0.15, 0.75], [0.2, 0.1, 0.5, 1.0]),
     ];

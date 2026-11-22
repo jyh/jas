@@ -48,19 +48,22 @@ private func pixel(dst: Px, src: Px, mode: CGBlendMode, viaLayer: Bool = false) 
 private func bytes(_ v: [Double]) -> [Int] { v.map { Int((min(max($0, 0), 1) * 255).rounded()) } }
 
 /// (name, T = destination, Q' = source), premultiplied = straight, both opaque.
-/// B0 = opaque red and f = 0.5 give Q' = (0.5, 0, 0); T for E1 and E2; a
-/// generic pair; and Q > T on two channels, to see the absolute value.
+/// E1 and E2 are the fixture's edge pixel (`a7_fixture`: B0 = (0.8, 0.8, 0.2),
+/// f = 0.5, so Q' = (0.4, 0.4, 0.1)); a generic pair; and Q > T on two
+/// channels, to see the absolute value.
 private let diffCases: [(String, Px, Px)] = [
-    ("E1 bracket", (0.5, 0, 0.5, 1), (0.5, 0, 0, 1)),
-    ("E2 bracket", (0.75, 0, 0.25, 1), (0.5, 0, 0, 1)),
+    ("E1 bracket", (0.4, 0.4, 0.6, 1), (0.4, 0.4, 0.1, 1)),
+    ("E2 bracket", (0.6, 0.6, 0.4, 1), (0.4, 0.4, 0.1, 1)),
     ("generic", (0.8, 0.6, 0.2, 1), (0.3, 0.1, 0.2, 1)),
     ("Q > T", (0.2, 0.6, 0.1, 1), (0.5, 0.1, 0.3, 1)),
 ]
 
 /// (name, S = (1−f)·S, premultiplied; T = the opaque bracket): alpha sum > 1 in
-/// every row, every colour sum <= 1 (the law's domain).
+/// every row, every colour sum <= 1 (the law's domain). E1 and E2 (S = (1−f)·RED)
+/// are the addendum's A7.1 column: 128, 0, 128 and 179, 51, 77.
 private let satCases: [(String, Px, Px)] = [
     ("E1 f=0.5", (0.5, 0, 0, 0.5), (0, 0, 0.5, 1)),
+    ("E2 f=0.5", (0.5, 0, 0, 0.5), (0.2, 0.2, 0.3, 1)),
     ("generic f=0.5", (0.3, 0.2, 0.1, 0.5), (0.25, 0.4, 0.3, 1)),
     ("f=0.25", (0.3, 0.45, 0.15, 0.75), (0.2, 0.1, 0.5, 1)),
 ]

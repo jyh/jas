@@ -1463,15 +1463,16 @@ mod tests {
     /// `composite_blended` draws a blend: a `CLSID_D2D1Blend` graph with INPUT 0
     /// the destination `T` and INPUT 1 the source `Q'`, its output drawn
     /// SOURCE_OVER onto a cleared surface, premultiplied bytes read back. The
-    /// pairs are the addendum's (B0 = opaque red, f = 0.5, so Q' = (0.5, 0, 0);
-    /// T for E1 and E2), a generic pair, and Q > T on two channels. The CONTROL
+    /// pairs: E1 and E2 are the fixture's edge pixel (`a7_fixture`: B0 =
+    /// (0.8, 0.8, 0.2), f = 0.5, so Q' = (0.4, 0.4, 0.1)), a generic pair, and
+    /// Q > T on two channels. The CONTROL
     /// draws Q' SOURCE_OVER T (it reads Q') and must MISS the law.
     #[test]
     fn a71_difference_of_two_opaque_pixels_is_the_absolute_difference() {
         use windows::core::Interface;
         let cases: [(&str, [f32; 4], [f32; 4]); 4] = [
-            ("E1 bracket", [0.5, 0.0, 0.5, 1.0], [0.5, 0.0, 0.0, 1.0]),
-            ("E2 bracket", [0.75, 0.0, 0.25, 1.0], [0.5, 0.0, 0.0, 1.0]),
+            ("E1 bracket", [0.4, 0.4, 0.6, 1.0], [0.4, 0.4, 0.1, 1.0]),
+            ("E2 bracket", [0.6, 0.6, 0.4, 1.0], [0.4, 0.4, 0.1, 1.0]),
             ("generic", [0.8, 0.6, 0.2, 1.0], [0.3, 0.1, 0.2, 1.0]),
             ("Q > T", [0.2, 0.6, 0.1, 1.0], [0.5, 0.1, 0.3, 1.0]),
         ];
@@ -1538,8 +1539,9 @@ mod tests {
     fn a71_plus_saturates_alpha_at_one_with_the_colour_sum_intact() {
         use windows::core::Interface;
         use windows::Win32::Graphics::Direct2D::Common::D2D1_COMPOSITE_MODE;
-        let cases: [(&str, [f32; 4], [f32; 4]); 3] = [
+        let cases: [(&str, [f32; 4], [f32; 4]); 4] = [
             ("E1 f=0.5", [0.5, 0.0, 0.0, 0.5], [0.0, 0.0, 0.5, 1.0]),
+            ("E2 f=0.5", [0.5, 0.0, 0.0, 0.5], [0.2, 0.2, 0.3, 1.0]),
             ("generic f=0.5", [0.3, 0.2, 0.1, 0.5], [0.25, 0.4, 0.3, 1.0]),
             ("f=0.25", [0.3, 0.45, 0.15, 0.75], [0.2, 0.1, 0.5, 1.0]),
         ];
