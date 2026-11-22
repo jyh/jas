@@ -4362,6 +4362,7 @@ struct TreeViewContent: View {
             SwiftUI.Text(visIcon(vis))
                 .frame(width: 16, height: 16)
                 .onTapGesture { handleEyeTap(path: path) }
+                .fifoTarget("layers_eye_" + path.map(String.init).joined(separator: "_"))
             // Lock
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
                 .frame(width: 16, height: 16)

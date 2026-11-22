@@ -225,6 +225,11 @@ public enum FifoEvents {
         return out
     }
 
+    /// Whether a key step can land: keys go to the key window of an active app.
+    public static func keyState(active: Bool, targetIsKey: Bool) -> String {
+        "active=\(active ? 1 : 0) key=\(targetIsKey ? 1 : 0)"
+    }
+
     /// One token per event, so the log says where each press went:
     /// `rightMouseDown@(70,50)`, `keyDown:51+cmd`.
     public static func receipt(_ events: [NSEvent]) -> String {

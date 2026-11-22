@@ -259,3 +259,15 @@ import AppKit
     let ws = try FifoEvents.warps(specs, window: w)
     #expect(ws.count == 1 && abs(ws[0].x - g.x) < 0.5 && abs(ws[0].y - g.y) < 0.5)
 }
+
+// MARK: key delivery state
+
+/// A posted key reached nothing (⌘A, ⌘Z and the tree's Delete, measured live
+/// 11-22) while the same acts by `action` worked. Keys go to the KEY window,
+/// so the `events` receipt states whether the app is active and the target
+/// window is key: a key step posted to a non-key window is not a reading.
+@Test func eventsKeyStateNamesActiveAndKey() {
+    #expect(FifoEvents.keyState(active: true, targetIsKey: true) == "active=1 key=1")
+    #expect(FifoEvents.keyState(active: false, targetIsKey: false) == "active=0 key=0")
+    #expect(FifoEvents.keyState(active: true, targetIsKey: false) == "active=1 key=0")
+}
