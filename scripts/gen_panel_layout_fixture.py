@@ -156,6 +156,10 @@ _CTX = {
     "gradient": _GRADIENT_CTX,
     "brushes": _BRUSHES_CTX,
     "swatches": _SWATCHES_CTX,
+    # Row 215: the Snap to Glyph section binds `visible` to this flag, so the
+    # canonical case seeds its declared default (shown) to keep the section's
+    # layout covered; `character@snap_hidden` below witnesses the hide.
+    "character": {"panel": {"snap_to_glyph_visible": True}},
 }
 _AVAIL_H = 600
 
@@ -166,6 +170,9 @@ DIALOG_LAYOUT_SEED = ["color_picker", "layer_options"]
 SEED = [
     (f"{name}@228", f"{name}_panel_content", 228, _AVAIL_H, _CTX.get(name, {}))
     for name in _PANELS
+] + [
+    ("character@snap_hidden", "character_panel_content", 228, _AVAIL_H,
+     {"panel": {"snap_to_glyph_visible": False}}),
 ]
 
 # Layout panes, at the size the layout declares (`default_position`). The

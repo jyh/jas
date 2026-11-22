@@ -16569,11 +16569,12 @@ mod layers_tree_key_tests {
     /// or a `not panel.` flip), dispatched on the web, is visible in the panel
     /// body's render scope, or else in the panel-menu scope with no body reader.
     /// The case list is CHECKED against actions.yaml: a new drivable writer reds
-    /// this test until it is added (construction, not memory). Two writers are
-    /// body-UNCHANGED by design, each named with its reason: `set_layers_search`
+    /// this test until it is added (construction, not memory). One writer is
+    /// body-UNCHANGED by design, named with its reason: `set_layers_search`
     /// (the web draws the search field natively from `AppState`; measured live,
-    /// its text holds) and `toggle_snap_to_glyph_visible` (no body element reads
-    /// the key; row 215). Both are asserted visible in the menu scope instead.
+    /// its text holds). It is asserted visible in the menu scope instead.
+    /// (`toggle_snap_to_glyph_visible` was the second until row 215 gave the
+    /// key a body reader, the Snap to Glyph section's `visible`.)
     #[test]
     fn every_drivable_panel_state_writer_is_visible_where_it_is_read() {
         use serde_json::json;
@@ -16630,7 +16631,7 @@ mod layers_tree_key_tests {
             .filter(|n| !listed.contains(n.as_str()) && !excused.contains(&n.as_str())).collect();
         assert!(missing.is_empty(), "drivable writers not in this census: {missing:?}");
         assert!(drivable.len() >= cases.len(), "CONTROL: the bundle census found {} writers", drivable.len());
-        let menu_only = ["set_layers_search", "toggle_snap_to_glyph_visible"];
+        let menu_only = ["set_layers_search"];
         let mut report = Vec::new();
         let mut bad = Vec::new();
         for (action, params, panel, key) in cases {
