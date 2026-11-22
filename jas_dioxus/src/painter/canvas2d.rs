@@ -156,11 +156,25 @@ impl<'a> Canvas2dPainter<'a> {
         Some(copy)
     }
 
-    /// A7: close the innermost group's open child, if one is open:
-    /// `T ← T·f` (destination-in), `S ← S·(1−f)` (destination-out), then
-    /// `S ← S + T` (`lighter`, the ADDITIVE composite measured exact against
-    /// `S + T` by `a7_plus_pixel_tests`). Source-over in place of the last is
-    /// a contract violation: it gives `T + (1−α_T)·S`, not `S + T`.
+    /// A7.1: close the innermost group's open child, if one is open:
+    /// `S ← (1−f)·S + [T − (1−f)·B0]` (coverage counts once), by Route D:
+    ///
+    /// 1. `Q'` = `B0` erased by `f` (destination-out), source-over an opaque
+    ///    black kept inside `B0` (destination-in): colour `(1−f)·B0`, alpha
+    ///    `α_B0`;
+    /// 2. `T ← T` with `Q'` drawn under `difference`: for opaque operands
+    ///    `|T − Q'| = T − Q'`, since `T ≥ (1−f)·B0`; where `B0` is empty,
+    ///    `Q'` is empty and `T` is unchanged;
+    /// 3. `S ← S·(1−f)` (destination-out), then `S ← S + T` (`lighter`).
+    ///
+    /// The bracket is already zero outside the shape, so A7's keep-inside-`f`
+    /// pass is gone. Both platform behaviours this rests on (`difference` of
+    /// two opaque pixels, and `lighter` saturating alpha at 1 with the colour
+    /// sum intact) are measured exact within 1 by `canvas::render`'s
+    /// `a7_plus_pixel_tests`. Source-over in place of `lighter` is a contract
+    /// violation. ⚠️ Exact only where `B0` is opaque or empty per pixel
+    /// (addendum A7.1 §2); a partially transparent `B0` is Route D's declared
+    /// limit, not priced.
     fn close_knockout_child(&mut self) {
         let Some(Some(g)) = self.knockouts.last() else { return };
         let depth = g.depth;
@@ -173,10 +187,27 @@ impl<'a> Canvas2dPainter<'a> {
         self.group_alpha_stack = child.saved_group_alphas;
         let Some(Some(g)) = self.knockouts.last_mut() else { return };
         let Some(shape) = g.shape.take() else { return };
-        shape.composite_onto(child.surface.ctx(), CompositeOp::DestinationIn, 1.0);
+        if let Some(q) = Self::backdrop_share(&g.b0, &shape) {
+            q.composite_onto(child.surface.ctx(), CompositeOp::Blend(BlendMode::Difference), 1.0);
+        }
         let parent = self.target();
         shape.composite_onto(parent, CompositeOp::DestinationOut, 1.0);
         child.surface.composite_onto(parent, CompositeOp::Plus, 1.0);
+    }
+
+    /// A7.1, Route D's `Q'`: `(1−f)·B0` in colour, alpha `α_B0` (black fills
+    /// the share of `B0` that `f` erased). `None` when no surface can be made.
+    fn backdrop_share(b0: &WebSurface, shape: &WebSurface) -> Option<WebSurface> {
+        let (w, h) = b0.size();
+        let q = WebSurface::offscreen(w, h)?;
+        q.ctx().set_fill_style_str("#000");
+        q.ctx().fill_rect(0.0, 0.0, w as f64, h as f64);
+        b0.composite_onto(q.ctx(), CompositeOp::DestinationIn, 1.0);
+        let erased = WebSurface::offscreen(w, h)?;
+        b0.composite_onto(erased.ctx(), CompositeOp::Copy, 1.0);
+        shape.composite_onto(erased.ctx(), CompositeOp::DestinationOut, 1.0);
+        erased.composite_onto(q.ctx(), CompositeOp::Blend(BlendMode::Normal), 1.0);
+        Some(q)
     }
 
     /// As [`Self::new`], but told the world transform `ctx` is ALREADY in.
