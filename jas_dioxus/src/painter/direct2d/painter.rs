@@ -1438,6 +1438,150 @@ mod tests {
             "A7 (f) NOT EXACT on Direct2D (worst {worst_plus} > 3): STOP, bring this to him: {report}");
     }
 
+    /// One opaque-or-partial premultiplied pixel as a device-space bitmap.
+    fn a71_bitmap(dc: &ID2D1DeviceContext, p: [f32; 4]) -> ID2D1Bitmap {
+        use windows::core::Interface;
+        let straight = if p[3] == 0.0 {
+            D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+        } else {
+            D2D1_COLOR_F { r: p[0] / p[3], g: p[1] / p[3], b: p[2] / p[3], a: p[3] }
+        };
+        unsafe {
+            let brt = dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+                .expect("a pixel surface");
+            let rt: ID2D1RenderTarget = brt.cast().expect("its render target");
+            rt.BeginDraw();
+            rt.Clear(Some(&straight));
+            rt.EndDraw(None, None).expect("pixel EndDraw");
+            brt.GetBitmap().expect("the pixel bitmap")
+        }
+    }
+
+    /// ⭐ A7.1, MEASURE-FIRST (council 11-22), THIS BACKEND, behaviour (1):
+    /// Route D's subtraction is `D2D1_BLEND_MODE_DIFFERENCE` of two OPAQUE
+    /// pixels, so it must read |T − Q| with alpha 1. Measured the way
+    /// `composite_blended` draws a blend: a `CLSID_D2D1Blend` graph with INPUT 0
+    /// the destination `T` and INPUT 1 the source `Q'`, its output drawn
+    /// SOURCE_OVER onto a cleared surface, premultiplied bytes read back. The
+    /// pairs are the addendum's (B0 = opaque red, f = 0.5, so Q' = (0.5, 0, 0);
+    /// T for E1 and E2), a generic pair, and Q > T on two channels. The CONTROL
+    /// draws Q' SOURCE_OVER T (it reads Q') and must MISS the law.
+    #[test]
+    fn a71_difference_of_two_opaque_pixels_is_the_absolute_difference() {
+        use windows::core::Interface;
+        let cases: [(&str, [f32; 4], [f32; 4]); 4] = [
+            ("E1 bracket", [0.5, 0.0, 0.5, 1.0], [0.5, 0.0, 0.0, 1.0]),
+            ("E2 bracket", [0.75, 0.0, 0.25, 1.0], [0.5, 0.0, 0.0, 1.0]),
+            ("generic", [0.8, 0.6, 0.2, 1.0], [0.3, 0.1, 0.2, 1.0]),
+            ("Q > T", [0.2, 0.6, 0.1, 1.0], [0.5, 0.1, 0.3, 1.0]),
+        ];
+        let run = |t: [f32; 4], q: [f32; 4], blend: bool| -> [i32; 4] {
+            let target = HeadlessTarget::new(1, 1).expect("target");
+            let dc: ID2D1DeviceContext = target.target().cast().expect("device context");
+            let tb = a71_bitmap(&dc, t);
+            let qb = a71_bitmap(&dc, q);
+            unsafe {
+                target.target().BeginDraw();
+                target.target().Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+                if blend {
+                    let fx = dc.CreateEffect(&CLSID_D2D1Blend).expect("the blend effect");
+                    fx.SetInput(0, &tb, true);
+                    fx.SetInput(1, &qb, true);
+                    fx.SetValue(
+                        D2D1_BLEND_PROP_MODE.0 as u32,
+                        D2D1_PROPERTY_TYPE_ENUM,
+                        &D2D1_BLEND_MODE_DIFFERENCE.0.to_le_bytes(),
+                    ).expect("the blend mode");
+                    let out = fx.GetOutput().expect("the effect output");
+                    dc.DrawImage(&out, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                                 D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                } else {
+                    dc.DrawImage(&tb, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                                 D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                    dc.DrawImage(&qb, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                                 D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                }
+                target.target().EndDraw(None, None).expect("EndDraw");
+            }
+            let buf = target.read_bgra().expect("readback");
+            [buf[2] as i32, buf[1] as i32, buf[0] as i32, buf[3] as i32]
+        };
+        let mut report = Vec::new();
+        let (mut worst, mut best_control) = (0, i32::MAX);
+        for (name, t, q) in cases {
+            let want: Vec<i32> = (0..4)
+                .map(|i| if i == 3 { 255 } else { ((t[i] - q[i]).abs() * 255.0).round() as i32 })
+                .collect();
+            let off = |got: [i32; 4]| (0..4).map(|i| (got[i] - want[i]).abs()).max().unwrap();
+            let diff = run(t, q, true);
+            let over = run(t, q, false);
+            worst = worst.max(off(diff));
+            best_control = best_control.min(off(over));
+            report.push(format!("{name}: DIFFERENCE {diff:?} SOURCE_OVER {over:?} law {want:?}"));
+        }
+        let report = report.join("; ");
+        // Straight to the stream, past the harness's capture (which takes only
+        // the print macros), so a GREEN run still publishes its numbers.
+        { use std::io::Write; let _ = writeln!(std::io::stderr(), "A7.1 D2D difference worst {worst} control-best {best_control}: {report}"); }
+        assert!(best_control > 3,
+            "CONTROL: SOURCE_OVER met |T−Q|, so this instrument cannot tell the modes apart: {report}");
+        assert!(worst <= 3,
+            "A7.1 (1) NOT EXACT on Direct2D (worst {worst} > 3): STOP, bring this to him: {report}");
+    }
+
+    /// ⭐ A7.1, MEASURE-FIRST, THIS BACKEND, behaviour (2): Route D's last step
+    /// `S ← S + T` with T OPAQUE, so the alpha sum `(1−f) + 1` exceeds 1: PLUS
+    /// must SATURATE alpha at 1 and keep the premultiplied colour sum (every
+    /// colour sum here is <= 1, the law's domain). Drawn as A7 (f) draws it,
+    /// `DrawImage(..., D2D1_COMPOSITE_MODE_PLUS)`. CONTROL: SOURCE_OVER must miss.
+    #[test]
+    fn a71_plus_saturates_alpha_at_one_with_the_colour_sum_intact() {
+        use windows::core::Interface;
+        use windows::Win32::Graphics::Direct2D::Common::D2D1_COMPOSITE_MODE;
+        let cases: [(&str, [f32; 4], [f32; 4]); 3] = [
+            ("E1 f=0.5", [0.5, 0.0, 0.0, 0.5], [0.0, 0.0, 0.5, 1.0]),
+            ("generic f=0.5", [0.3, 0.2, 0.1, 0.5], [0.25, 0.4, 0.3, 1.0]),
+            ("f=0.25", [0.3, 0.45, 0.15, 0.75], [0.2, 0.1, 0.5, 1.0]),
+        ];
+        let run = |s: [f32; 4], t: [f32; 4], mode: D2D1_COMPOSITE_MODE| -> [i32; 4] {
+            let target = HeadlessTarget::new(1, 1).expect("target");
+            let dc: ID2D1DeviceContext = target.target().cast().expect("device context");
+            let sb = a71_bitmap(&dc, s);
+            let tb = a71_bitmap(&dc, t);
+            unsafe {
+                target.target().BeginDraw();
+                target.target().Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+                dc.DrawImage(&sb, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                             D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                dc.DrawImage(&tb, None, None, D2D1_INTERPOLATION_MODE_LINEAR, mode);
+                target.target().EndDraw(None, None).expect("EndDraw");
+            }
+            let buf = target.read_bgra().expect("readback");
+            [buf[2] as i32, buf[1] as i32, buf[0] as i32, buf[3] as i32]
+        };
+        let mut report = Vec::new();
+        let (mut worst, mut best_control) = (0, i32::MAX);
+        for (name, s, t) in cases {
+            let want: Vec<i32> = (0..4)
+                .map(|i| ((s[i] + t[i]).min(1.0) * 255.0).round() as i32)
+                .collect();
+            let off = |got: [i32; 4]| (0..4).map(|i| (got[i] - want[i]).abs()).max().unwrap();
+            let plus = run(s, t, D2D1_COMPOSITE_MODE_PLUS);
+            let over = run(s, t, D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            worst = worst.max(off(plus));
+            best_control = best_control.min(off(over));
+            report.push(format!("{name}: PLUS {plus:?} SOURCE_OVER {over:?} law {want:?}"));
+        }
+        let report = report.join("; ");
+        // Straight to the stream, past the harness's capture (which takes only
+        // the print macros), so a GREEN run still publishes its numbers.
+        { use std::io::Write; let _ = writeln!(std::io::stderr(), "A7.1 D2D plus-saturation worst {worst} control-best {best_control}: {report}"); }
+        assert!(best_control > 3,
+            "CONTROL: SOURCE_OVER met S + T, so this instrument cannot tell the modes apart: {report}");
+        assert!(worst <= 3,
+            "A7.1 (2) NOT EXACT on Direct2D (worst {worst} > 3): STOP, bring this to him: {report}");
+    }
+
 
     /// Read one pixel as (b, g, r, a).
     fn px(buf: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
