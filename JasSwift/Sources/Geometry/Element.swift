@@ -52,6 +52,9 @@ nonisolated(unsafe) private var faceLookupFailureCount = 0
 /// The face/traits pairs already logged by ``faceWithTraits``, under the lock.
 nonisolated(unsafe) private var faceLookupLogged: Set<String> = []
 
+/// Whether ``faceWithTraits`` has logged `key`, for a caller holding the lock.
+func faceLookupWasLoggedHoldingLock(_ key: String) -> Bool { faceLookupLogged.contains(key) }
+
 /// ``faceLookupFailureCount``, read under the lock.
 func faceLookupFailures() -> Int { withFontLookup { faceLookupFailureCount } }
 
@@ -79,10 +82,20 @@ func coreTextFace(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, _ s
 /// `base` with the symbolic `traits` applied (STATUS-jas row 188). The caller
 /// holds `withFontLookup`. `lookup` is the AppKit lookup and `alternate` the
 /// CoreText one, parameters so a test can make either fail.
+///
+/// `nil` for either means the REAL mechanism. A line from an injected one is
+/// filed under its own dedupe key and labelled `(injected)`: until 11-22 a test's
+/// provoked miss took the real key, so a production miss of the same face in
+/// the same run printed nothing, and CI's log could not show a recurrence.
 func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, size: CGFloat,
-                    lookup: (NSFontDescriptor, CGFloat) -> NSFont? = { NSFont(descriptor: $0, size: $1) },
-                    alternate: (NSFont, NSFontDescriptor.SymbolicTraits, CGFloat) -> NSFont? = coreTextFace) -> NSFont {
+                    lookup injectedLookup: ((NSFontDescriptor, CGFloat) -> NSFont?)? = nil,
+                    alternate injectedAlternate: ((NSFont, NSFontDescriptor.SymbolicTraits, CGFloat) -> NSFont?)? = nil) -> NSFont {
     if traits.isEmpty { return base }
+    let lookup = injectedLookup ?? { NSFont(descriptor: $0, size: $1) }
+    let alternate = injectedAlternate ?? coreTextFace
+    let injected = injectedLookup != nil || injectedAlternate != nil
+    let keyPrefix = injected ? "injected/" : ""
+    let label = injected ? "jas (injected)" : "jas"
     let desc = base.fontDescriptor.withSymbolicTraits(traits)
     // CI has seen this lookup return nil intermittently, and the width was then
     // the base face's (row 188). Try once more; then SAY so before falling back.
@@ -94,9 +107,9 @@ func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, s
     if let face = alternate(base, traits, size),
        face.fontDescriptor.symbolicTraits.isSuperset(of: traits) {
         faceLookupRescueCount += 1
-        if faceLookupLogged.insert("rescue/\(base.fontName)/\(traits.rawValue)").inserted {
-            NSLog("jas: the AppKit lookup missed %@ with traits 0x%x at %.3f pt; CoreText found %@ (row 188)",
-                  base.fontName, traits.rawValue, Double(size), face.fontName)
+        if faceLookupLogged.insert("\(keyPrefix)rescue/\(base.fontName)/\(traits.rawValue)").inserted {
+            NSLog("%@: the AppKit lookup missed %@ with traits 0x%x at %.3f pt; CoreText found %@ (row 188)",
+                  label, base.fontName, traits.rawValue, Double(size), face.fontName)
         }
         return face
     }
@@ -114,9 +127,9 @@ func faceWithTraits(_ base: NSFont, _ traits: NSFontDescriptor.SymbolicTraits, s
     }
     // Logged ONCE per face and traits: a family with no such face fails on
     // every measure, and CI's first run of this read 18 lines for it in one suite.
-    if faceLookupLogged.insert("\(base.fontName)/\(traits.rawValue)").inserted {
-        NSLog("jas: no face for %@ with traits 0x%x at %.3f pt; measuring %@ (row 188)",
-              base.fontName, traits.rawValue, Double(size), face.fontName)
+    if faceLookupLogged.insert("\(keyPrefix)\(base.fontName)/\(traits.rawValue)").inserted {
+        NSLog("%@: no face for %@ with traits 0x%x at %.3f pt; measuring %@ (row 188)",
+              label, base.fontName, traits.rawValue, Double(size), face.fontName)
     }
     return face
 }
