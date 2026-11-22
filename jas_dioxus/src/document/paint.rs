@@ -189,10 +189,20 @@ pub(crate) mod a7_fixture {
     pub const LEAF_X: u32 = 25;
     pub const OUTSIDE_X: u32 = 35;
     pub const Y: u32 = 5;
-    /// The edge arm: layer 2 opaque Normal blue starting at x = 10.5, so
-    /// pixel 10 is half covered, over layer 1's opaque red.
+    /// The edge arms: layer 2 starting at x = 10.5, so pixel 10 is half
+    /// covered, over layer 1's opaque red.
     pub const EDGE_X: u32 = 10;
     pub const BLUE: [f64; 3] = [0.0, 0.0, 1.0];
+
+    /// Layer 2 of each edge arm (addendum A7.1 §4): (name, colour, element
+    /// opacity, blend). E1 separates A7.1 from the ratified child term but
+    /// EQUALS ordinary compositing, so a no-op bracket passes it; E2 and E3
+    /// separate all three (see [`assert_edge_arms_separate`]).
+    pub const EDGES: [(&str, [f64; 3], f64, BlendMode); 3] = [
+        ("E1 opaque Normal blue", BLUE, 1.0, BlendMode::Normal),
+        ("E2 Normal blue at 0.5", BLUE, 0.5, BlendMode::Normal),
+        ("E3 the Multiply leaf at 0.5", LEAF, LEAF_OPACITY, BlendMode::Multiply),
+    ];
 
     fn rect(x: f64, w: f64, color: [f64; 3], opacity: f64, mode: BlendMode) -> Element {
         Element::Rect(RectElem {
@@ -224,12 +234,13 @@ pub(crate) mod a7_fixture {
         )
     }
 
-    /// The edge arm's scene: both layers opaque and Normal, layer 2's left
-    /// edge on a half pixel.
-    pub fn edge_document(isolated: bool, knockout: bool) -> Document {
+    /// An edge arm's scene: layer 1 opaque red, layer 2 the arm's leaf
+    /// ([`EDGES`]) with its left edge on a half pixel.
+    pub fn edge_document(arm: usize, isolated: bool, knockout: bool) -> Document {
+        let (_, c, opacity, mode) = EDGES[arm];
         two_layers(
             rect(0.0, 20.0, RED, 1.0, BlendMode::Normal),
-            rect(10.5, 19.5, BLUE, 1.0, BlendMode::Normal),
+            rect(10.5, 19.5, c, opacity, mode),
             isolated, knockout,
         )
     }
@@ -274,6 +285,18 @@ pub(crate) mod a7_fixture {
     /// geometric coverage of the pixel.
     pub type Child = ([f64; 3], f64, BlendMode, f64);
 
+    /// The knockout child term: the law of record, or the superseded one.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub enum ChildTerm {
+        /// A7.1 (ratified 11-22): `S ← (1 − f)·S + [T − (1 − f)·B0]`.
+        A71,
+        /// A7 as first ratified: `S ← (1 − f)·S + f·T`. `T` already holds
+        /// the body at coverage `f`, so this counts `f` twice and leaves
+        /// `f·(1 − f)·B0` on every antialiased edge. Kept ONLY so the edge
+        /// arms can prove they separate it (mutant M8); nothing renders it.
+        Ratified,
+    }
+
     /// ⭐ THE EXPECTATION, DERIVED BY THE LAW (never typed). Per pixel,
     /// premultiplied, `B0` opaque:
     ///
@@ -281,15 +304,22 @@ pub(crate) mod a7_fixture {
     ///   (its effective alpha is opacity × coverage).
     /// * ISOLATED (A6): the children composite onto a transparent `L`, then
     ///   `L` source-over `B0`.
-    /// * KNOCKOUT (A7): `S ← B0`, then for each child
-    ///   `T_i = c(B0, E_i)` and `S ← (1 − f_i)·S + f_i·T_i`, `f_i` = coverage
-    ///   (a SHAPE, never the alpha).
+    /// * KNOCKOUT (A7.1): `S ← B0`, then for each child
+    ///   `T_i = c(B0, E_i)` and `S ← (1 − f_i)·S + [T_i − (1 − f_i)·B0]`,
+    ///   `f_i` = coverage (a SHAPE, never the alpha). The bracket is `f·T*`,
+    ///   the body at alpha `α/f` weighted by its shape (addendum A7.1 §1):
+    ///   coverage counts ONCE. Interior pixels (`f ∈ {0, 1}`) equal A7's.
     /// * BOTH: the knockout law with `B0` transparent, the result source-over
     ///   the real `B0`.
     ///
     /// Returns 0–255 straight RGB, rounded, as a canvas read-back reports it
     /// for an opaque pixel.
     pub fn expect(isolated: bool, knockout: bool, children: &[Child]) -> [i32; 3] {
+        expect_by(isolated, knockout, children, ChildTerm::A71)
+    }
+
+    /// [`expect`] under a chosen child term.
+    pub fn expect_by(isolated: bool, knockout: bool, children: &[Child], term: ChildTerm) -> [i32; 3] {
         let b0: P = [B0[0], B0[1], B0[2], 1.0];
         let start: P = if isolated { [0.0; 4] } else { b0 };
         let mut s = start;
@@ -298,7 +328,10 @@ pub(crate) mod a7_fixture {
             if knockout {
                 let t = composite(start, c, a, blend);
                 for i in 0..4 {
-                    s[i] = (1.0 - cov) * s[i] + cov * t[i];
+                    s[i] = match term {
+                        ChildTerm::A71 => (1.0 - cov) * s[i] + t[i] - (1.0 - cov) * start[i],
+                        ChildTerm::Ratified => (1.0 - cov) * s[i] + cov * t[i],
+                    };
                 }
             } else {
                 s = composite(s, c, a, blend);
@@ -325,10 +358,33 @@ pub(crate) mod a7_fixture {
         v
     }
 
-    /// The children at the edge arm's pixel: layer 1 covers it, layer 2
-    /// covers HALF of it.
-    pub fn edge_children() -> Vec<Child> {
-        vec![(RED, 1.0, BlendMode::Normal, 1.0), (BLUE, 1.0, BlendMode::Normal, 0.5)]
+    /// The children at an edge arm's pixel: layer 1 covers it, layer 2 (the
+    /// arm's leaf) covers HALF of it.
+    pub fn edge_children(arm: usize) -> Vec<Child> {
+        let (_, c, opacity, mode) = EDGES[arm];
+        vec![(RED, 1.0, BlendMode::Normal, 1.0), (c, opacity, mode, 0.5)]
+    }
+
+    /// ⭐ THE EDGE ARMS' POWER, asserted rather than inferred (addendum A7.1
+    /// §4): at EDGE_X, under the knockout regime, E1 separates A7.1 from the
+    /// ratified child term, and E2 and E3 each separate all three of
+    /// ordinary, A7.1 and ratified pairwise, by more than twice the arm's
+    /// tolerance, so a read-back within TOL of one cannot be within TOL of
+    /// another. Run natively by `a7_the_derivation_separates_the_regimes`.
+    pub fn assert_edge_arms_separate() {
+        for (arm, &(name, ..)) in EDGES.iter().enumerate() {
+            let ch = edge_children(arm);
+            let ordinary = expect(false, false, &ch);
+            let a71 = expect(false, true, &ch);
+            let ratified = expect_by(false, true, &ch, ChildTerm::Ratified);
+            assert!(off(a71, ratified) > 2 * TOL,
+                    "{name}: A7.1 {a71:?} and the ratified term {ratified:?} are not separable");
+            if arm > 0 {
+                assert!(off(a71, ordinary) > 2 * TOL && off(ordinary, ratified) > 2 * TOL,
+                        "{name}: ordinary {ordinary:?}, A7.1 {a71:?}, ratified {ratified:?} \
+                         are not pairwise separable");
+            }
+        }
     }
 
     /// Largest per-channel distance between a read-back and an expectation.
@@ -738,9 +794,18 @@ mod tests {
                 a7_fixture::expect(iso, ko, &a7_fixture::children_at(a7_fixture::OVERLAP_X)),
                 a7_fixture::expect(iso, ko, &a7_fixture::children_at(a7_fixture::LEAF_X)),
                 a7_fixture::expect(iso, ko, &a7_fixture::children_at(a7_fixture::OUTSIDE_X)),
-                a7_fixture::expect(iso, ko, &a7_fixture::edge_children()));
+                a7_fixture::expect(iso, ko, &a7_fixture::edge_children(0)));
+        }
+        for (arm, &(name, ..)) in a7_fixture::EDGES.iter().enumerate() {
+            let ch = a7_fixture::edge_children(arm);
+            eprintln!("a7.1 {name}: ordinary {:?} A7.1 {:?} ratified {:?} both {:?}",
+                a7_fixture::expect(false, false, &ch),
+                a7_fixture::expect(false, true, &ch),
+                a7_fixture::expect_by(false, true, &ch, a7_fixture::ChildTerm::Ratified),
+                a7_fixture::expect(true, true, &ch));
         }
         a7_fixture::assert_regimes_distinct();
+        a7_fixture::assert_edge_arms_separate();
         // The knockout overlap is the leaf over B0, which is the NEITHER row's
         // leaf pixel: the arm's whole claim (nothing of layer 1 survives).
         assert_eq!(a7_fixture::expect(false, true, &a7_fixture::children_at(a7_fixture::OVERLAP_X)),
