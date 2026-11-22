@@ -123,6 +123,49 @@ struct KnockoutGroup {
     depth: usize,
 }
 
+/// Row 216, A7.1's declared limit as a GUARD (debug builds only: a CPU
+/// readback of the backdrop is too costly per frame in release). Route D is
+/// exact only where `B0` is opaque or empty per pixel (addendum A7.1 §2) and
+/// errs by up to 124/255 in between (row 213). Every walk today paints `B0`
+/// opaque or empty, so this fires only for a new caller, and names the limit.
+/// A readback that cannot be made is not a refusal (it returns quietly).
+#[cfg(debug_assertions)]
+fn refuse_partial_backdrop(dc: &ID2D1DeviceContext, b0: &ID2D1Bitmap) {
+    use windows::Win32::Graphics::Direct2D::{
+        D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_CPU_READ, D2D1_BITMAP_PROPERTIES1,
+        D2D1_MAP_OPTIONS_READ,
+    };
+    unsafe {
+        let size = b0.GetPixelSize();
+        if size.width == 0 || size.height == 0 { return; }
+        let (mut dx, mut dy) = (0f32, 0f32);
+        b0.GetDpi(&mut dx, &mut dy);
+        let props = D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: b0.GetPixelFormat(),
+            dpiX: dx, dpiY: dy,
+            bitmapOptions: D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            colorContext: std::mem::ManuallyDrop::new(None),
+        };
+        let Ok(cpu) = dc.CreateBitmap(size, None, 0, &props) else { return };
+        if cpu.CopyFromBitmap(None, b0, None).is_err() { return; }
+        let Ok(map) = cpu.Map(D2D1_MAP_OPTIONS_READ) else { return };
+        let mut bad = None;
+        'rows: for y in 0..size.height as usize {
+            let row = std::slice::from_raw_parts(map.bits.add(y * map.pitch as usize), size.width as usize * 4);
+            for (x, p) in row.chunks_exact(4).enumerate() {
+                if p[3] != 0 && p[3] != 255 { bad = Some((x, y, p[3])); break 'rows; }
+            }
+        }
+        let _ = cpu.Unmap();
+        if let Some((x, y, a)) = bad {
+            panic!("A7.1 §2: a knockout group opened over a partially transparent backdrop \
+                    (pixel {x},{y} of {}x{}, alpha {a}); Route D is exact only where B0 is opaque \
+                    or empty. Paint B0 opaque or empty first, or bring the limit to a ruling.",
+                   size.width, size.height);
+        }
+    }
+}
+
 /// One open mask bracket: its own surface, and the law to apply on close.
 struct MaskTarget {
     brt: ID2D1BitmapRenderTarget,
@@ -1283,6 +1326,10 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let parent = self.rt();
         let group = self.snapshot(&parent)
             .map(|b0| KnockoutGroup { b0, shape: None, depth: self.layers.len() });
+        #[cfg(debug_assertions)]
+        if let (Some(g), Ok(dc)) = (&group, parent.cast::<ID2D1DeviceContext>()) {
+            refuse_partial_backdrop(&dc, &g.b0);
+        }
         self.knockouts.push(group);
     }
 
@@ -1712,6 +1759,27 @@ mod tests {
             let q = px(&buf, fx::W, x, fx::Y);
             [q[2] as i32, q[1] as i32, q[0] as i32]
         }).collect()
+    }
+
+    /// Row 216, A7.1's declared limit as a GUARD: a knockout group opened over
+    /// a partially transparent backdrop panics in a debug build, naming the
+    /// limit. Planted: the target cleared at alpha 0.5. The opaque backdrop of
+    /// every other A7 arm here is the control, and the "both" regime's empty B0
+    /// the other. A readback the guard could not make would leave this GREEN
+    /// test red (should_panic with no panic), so a silent guard is loud here.
+    #[test]
+    #[should_panic(expected = "A7.1")]
+    fn a71_a_knockout_over_a_partially_transparent_backdrop_is_refused() {
+        use crate::document::paint::a7_fixture as fx;
+        let t = HeadlessTarget::new(fx::W, fx::H).expect("target");
+        unsafe {
+            t.target().BeginDraw();
+            t.target().Clear(Some(&D2D1_COLOR_F { r: 0.8, g: 0.8, b: 0.2, a: 0.5 }));
+            let mut p = Direct2DPainter::new(t.target());
+            crate::document::paint::emit_document(&mut p, &fx::document(false, true),
+                                                  crate::geometry::live::DEFAULT_PRECISION);
+            let _ = t.target().EndDraw(None, None);
+        }
     }
 
     /// ⭐ A7 ON DIRECT2D: the §5 scene, four regimes × three pixels (overlap,

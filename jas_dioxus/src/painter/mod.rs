@@ -165,7 +165,11 @@
 //!   additive composite is a contract violation, not an approximation.
 //!   PRECONDITION: `B0` is opaque or empty per pixel. Where it is partially
 //!   transparent (an artboard edge off the pixel grid, a translucent
-//!   backdrop) Route D is not exact, and that limit is declared, not priced.
+//!   backdrop) Route D is not exact: it errs by up to 124/255 (priced in real
+//!   arithmetic, STATUS-jas row 213). Every walk today paints `B0` opaque (the
+//!   pasteboard) or empty (the isolated page), and a DEBUG build of each
+//!   backend refuses any other `B0` by name (row 216: Canvas2D and Direct2D
+//!   read `B0` back when the group opens; the Mac probes its backdrop closure).
 //! - A paint op at the layer's own level before the first shape bracket is a
 //!   contract violation. All brackets strictly nest.
 //! - ⛔ THE SHAPE IS THE CALLER'S. A backend never derives it from the body.
