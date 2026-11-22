@@ -214,9 +214,11 @@ struct YamlElementView: View {
             bodyContent
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier((element["id"] as? String) ?? "")
+                .fifoTarget((element["id"] as? String) ?? "")
         } else {
             bodyContent
                 .accessibilityIdentifier((element["id"] as? String) ?? "")
+                .fifoTarget((element["id"] as? String) ?? "")
         }
     }
 
@@ -4169,10 +4171,11 @@ struct TreeViewContent: View {
             // artist saw the search box twice and two filter controls, one of
             // them the inert grey placeholder the YAML widget rendered as.
             // Council Q3.2: the declared widgets are the only ones now.
-
-            if !isolationStack.isEmpty {
-                breadcrumbBar
-            }
+            //
+            // NO BREADCRUMB HERE either (row 210): `lp_breadcrumb` is declared
+            // above this tree, and with the native tree running again (#1056)
+            // both drew. Its chevron's exit reaches the model-held stack since
+            // row 210's dispatch fix (formsTheDeclaredBreadcrumbChevronExitsIsolation).
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -4304,41 +4307,6 @@ struct TreeViewContent: View {
         LayersPanel.keyboardDelete(model: model, onDialogOpened: { onStoreDialogOpened?(nil) })
     }
 
-    /// Run `exit_isolation_to_level`, which keeps `level` levels of the
-    /// model's stack (the action's pop handler writes `isolationStack`'s home).
-    private func exitIsolation(toLevel level: Int) {
-        LayersPanel.dispatchYamlAction("exit_isolation_to_level", model: model,
-                                       params: ["level_index": level])
-    }
-
-    @ViewBuilder
-    private var breadcrumbBar: some View {
-        HStack(spacing: 4) {
-            SwiftUI.Text("⌂")
-                .font(.system(size: 11))
-                // The breadcrumb's declared action (layers.yaml lp_breadcrumb):
-                // the chevron passes 0, which exits isolation.
-                .onTapGesture { exitIsolation(toLevel: 0) }
-            ForEach(Array(isolationStack.enumerated()), id: \.offset) { idx, p in
-                SwiftUI.Text(">")
-                    .font(.system(size: 9))
-                    .foregroundColor(.gray)
-                let label: String = {
-                    let e = model.document.getElement(p)
-                    let (n, _) = elementDisplayName(e)
-                    return n
-                }()
-                SwiftUI.Text(label)
-                    .font(.system(size: 11))
-                    .onTapGesture { exitIsolation(toLevel: idx + 1) }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(SwiftUI.Color(white: 0.16))
-    }
-
     @ViewBuilder
     private func rowView(row: FlatRow, selectedPaths: Set<ElementPath>) -> some View {
         let elem = row.elem
@@ -4362,6 +4330,7 @@ struct TreeViewContent: View {
             SwiftUI.Text(visIcon(vis))
                 .frame(width: 16, height: 16)
                 .onTapGesture { handleEyeTap(path: path) }
+                .fifoTarget("layers_eye_" + path.map(String.init).joined(separator: "_"))
             // Lock
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
                 .frame(width: 16, height: 16)

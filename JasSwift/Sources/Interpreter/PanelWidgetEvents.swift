@@ -477,6 +477,21 @@ func dispatchPanelAction(
         return
     }
     var ctxWithParams = ctx
+    // Row 210: the `panel.*` keys this app holds on the MODEL (the Layers
+    // `isolation_stack`, ``modelHeldPanelState``). A behavior's ctx comes from
+    // ``WidgetEvent/scopeLocals``, which drops the render scope's `panel` in
+    // favour of the store's, so the action read the store's `[]` and the
+    // declared breadcrumb's `exit_isolation_to_level` popped nothing while
+    // reporting committed. Overlay them on the active panel, as
+    // ``LayersPanel/dispatchYamlAction`` builds its own `panel`.
+    if let pid = store.getActivePanelId() {
+        let held = modelHeldPanelState(pid, model: model)
+        if !held.isEmpty {
+            var panel = (ctx["panel"] as? [String: Any]) ?? store.getActivePanelState()
+            for (k, v) in held { panel[k] = v }
+            ctxWithParams["panel"] = panel
+        }
+    }
     // Declared param defaults under the caller's params, same law as the
     // other two generic dispatchers (``LayersPanel/dispatchYamlAction``,
     // ``runYamlActionByName``) and as Rust's `dispatch_action`. Stated once

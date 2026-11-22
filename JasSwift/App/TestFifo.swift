@@ -27,6 +27,7 @@ import JasLib
 //     events <json>             -> an input SEQUENCE posted into the app's own
 //                                  event queue (FifoEvents), routed by AppKit
 //                                  as a person's input is
+//     activate                  -> the app active and its window key, for keys
 //     hover <path>              -> the Layers row onHover last marked
 //     menu <path>               -> the titles of the last menu that began
 //                                  tracking (FifoMenuWatch)
@@ -314,12 +315,20 @@ extension JasAppDelegate {
                     let evs = try FifoEvents.build(specs, window: window)
                     let warps = try FifoEvents.warps(specs, window: window)
                     FifoEvents.post(evs, warps: warps)
-                    NSLog("test-fifo: events posted %ld (warps %ld): %@", evs.count, warps.count,
+                    NSLog("test-fifo: events posted %ld (warps %ld, %@): %@", evs.count, warps.count,
+                          FifoEvents.keyState(active: NSApp.isActive, targetIsKey: window.isKeyWindow),
                           FifoEvents.receipt(evs))
                 } catch {
                     NSLog("test-fifo: %@", "\(error)")
                 }
             }
+        case "activate":
+            // activate: make the app active and its main window key, so a
+            // posted key has a key window to go to (row 208).
+            NSApp.activate(ignoringOtherApps: true)
+            (NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }))?.makeKeyAndOrderFront(nil)
+            NSLog("test-fifo: activate %@", FifoEvents.keyState(
+                active: NSApp.isActive, targetIsKey: NSApp.keyWindow != nil))
         case "hover":
             // hover <path>: the Layers row onHover last marked (FifoHover).
             do {
