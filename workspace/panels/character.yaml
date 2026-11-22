@@ -529,9 +529,15 @@ content:
                 value: "panel.anti_aliasing"
 
     - type: separator
+      # Row 215: the section shows only while "Show Snap to Glyph Options"
+      # is checked (panel.snap_to_glyph_visible, declared in state above).
+      bind: { visible: "panel.snap_to_glyph_visible" }
 
     # ── Snap to Glyph header (col-6 label + col-2 indicator + col-1 info; 3-col right pad intentional) ──
     - type: row
+      # Row 215: the section shows only while "Show Snap to Glyph Options"
+      # is checked (panel.snap_to_glyph_visible, declared in state above).
+      bind: { visible: "panel.snap_to_glyph_visible" }
       children:
         - type: container
           col: 6
@@ -557,6 +563,9 @@ content:
 
     # ── 6 Snap-to-Glyph category toggles (each col-2) ─────────
     - type: row
+      # Row 215: the section shows only while "Show Snap to Glyph Options"
+      # is checked (panel.snap_to_glyph_visible, declared in state above).
+      bind: { visible: "panel.snap_to_glyph_visible" }
       children:
         - type: container
           col: 2

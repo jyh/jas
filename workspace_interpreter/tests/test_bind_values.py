@@ -339,3 +339,20 @@ def test_an_object_in_a_list_is_its_sorted_compact_json():
     from workspace_interpreter.expr_types import Value
     v = Value.from_python([{"b": 1, "a": "x/y", "c": [True, None]}])
     assert canon_value(v) == ("list", '[{"a":"x/y","b":1,"c":[true,null]}]')
+
+
+def test_the_snap_to_glyph_section_follows_its_toggle():
+    """Row 215: `snap_to_glyph_visible` is declared as "whether the Snap to
+    Glyph section is visible in the panel", and the panel menu's "Show Snap
+    to Glyph Options" toggles it. So the section's three nodes (its
+    separator, the header row and the six-toggle row) bind `visible` to it,
+    and nothing else in the panel does. Without the binds the section never
+    hides on any port."""
+    panel = _bundle_panels()["character_panel_content"]
+    def visible_rows(on: bool) -> dict:
+        rows = bind_values(panel, {"panel": {"snap_to_glyph_visible": on}})
+        return {tuple(r["path"]): r["value"] for r in rows if r["key"] in ("visible", "bind.visible")}
+    shown, hidden = visible_rows(True), visible_rows(False)
+    flipped = sorted(p for p in shown if shown[p] != hidden.get(p))
+    assert len(flipped) == 3, f"nodes that follow the toggle: {flipped}"
+    assert all(hidden[p] in ("false", False) for p in flipped), hidden
