@@ -92,8 +92,11 @@ the key `opacity_menu.<id>`.
   whatever its blending mode. Per pixel, premultiplied, with `B0` that initial
   backdrop, `f` the layer's shape (its painted geometry under its clips; its
   opacity, blending mode and mask do not reduce it) and `T` the layer drawn
-  onto `B0` by the ordinary rules, the page becomes `(1 − f)·page + f·T`, layer
-  by layer (the Painter contract's AMENDMENT A7). With both on, the knockout
+  onto `B0` by the ordinary rules, the page becomes
+  `(1 − f)·page + [T − (1 − f)·B0]`, layer by layer (the Painter contract's
+  AMENDMENT A7, child term corrected by A7.1): coverage counts once, so at a
+  layer's antialiased edge the layers beneath show through in proportion to
+  the part of the pixel the layer leaves uncovered. With both on, the knockout
   happens against a transparent backdrop and the result lands on the page once.
   ⚠️ On the web, a page with a top-level layer the shared lowering cannot
   shape (rich text, a freeform gradient) draws without knockout.

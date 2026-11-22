@@ -2736,7 +2736,7 @@ internal func drawKnockoutLayers(_ ctx: CGContext, _ layers: [Layer],
         ctx.setBlendMode(.destinationOut)
         shape(layer)
         ctx.restoreGState()
-        // 2. S ← S + f·T
+        // 2. S ← S + [T − (1 − f)·B0]
         ctx.saveGState()
         ctx.setBlendMode(.plusLighter)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)

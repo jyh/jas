@@ -117,7 +117,7 @@
 //! and lowers at BUILD time to `Mask::AlphaClipOut`. A fourth law was transcript
 //! overreach; ratified as such, zero further contract change.
 //!
-//! ## AMENDMENT A7 — THE KNOCKOUT BRACKET (ratified 2026-11-21, Captain)
+//! ## AMENDMENT A7 — THE KNOCKOUT BRACKET (ratified 2026-11-21, Captain; child term corrected by A7.1, ratified 2026-11-22)
 //!
 //! Four ops added (16 → 20), candidate C4 of the design block.
 //!
@@ -134,9 +134,14 @@
 //! children `E_1..E_n`, bottom to top, and an INITIAL BACKDROP `B0`: what the
 //! parent surface holds when the group opens. Child `i` has a SHAPE `f_i` and a
 //! result `T_i` = `B0` with the child's body composited onto it by the ordinary
-//! rules. The group surface `S` starts as `B0`, and
-//! `S ← (1 − f_i)·S + f_i·T_i`. Where `f_i = 1` nothing of `E_1..E_{i-1}`
-//! survives, however transparent child `i` is. ⛔ SHAPE IS NOT ALPHA: with
+//! rules. The group surface `S` starts as `B0`, and (A7.1)
+//! `S ← (1 − f_i)·S + [T_i − (1 − f_i)·B0]`. `T_i` already holds the body at
+//! coverage `f_i`, so the bracket is the body at alpha `α/f` weighted by its
+//! shape: COVERAGE COUNTS ONCE. (A7's first child term `f_i·T_i` counted it
+//! twice and left `f·(1 − f)·B0` on every antialiased edge.) For an opaque
+//! Normal child the law is source-over at alpha `f`; where `f_i = 1` it is
+//! `S ← T_i` and nothing of `E_1..E_{i-1}` survives, however transparent
+//! child `i` is. ⛔ SHAPE IS NOT ALPHA: with
 //! `f := α` the law is source-over, so knockout exists only for partial alpha
 //! and non-Normal blends. Shape is the union of the child's painted geometry
 //! under its clips; opacity, brush and stop alpha, blend and MASKS do not
@@ -152,8 +157,15 @@
 //!   then draws on `T` NON-isolated; the open-group product is unchanged
 //!   inside it.
 //! - The next `push_knockout_shape`, or `pop_knockout_layer`, closes the child:
-//!   `S ← (1−f)·S + f·T`, exactly, as an erase and an ADDITIVE composite.
-//!   Source-over in its place is a contract violation, not an approximation.
+//!   `S ← (1−f)·S + [T − (1−f)·B0]`, as an erase, a SUBTRACTION and an
+//!   ADDITIVE composite. Every backend subtracts by Route D (addendum A7.1
+//!   §2): `Q'` = `B0` erased by `f` over an opaque black kept inside `B0`,
+//!   and `T ← |T − Q'|` under the Difference blend, which equals
+//!   `T − (1−f)·B0` for opaque operands. Source-over in place of the
+//!   additive composite is a contract violation, not an approximation.
+//!   PRECONDITION: `B0` is opaque or empty per pixel. Where it is partially
+//!   transparent (an artboard edge off the pixel grid, a translucent
+//!   backdrop) Route D is not exact, and that limit is declared, not priced.
 //! - A paint op at the layer's own level before the first shape bracket is a
 //!   contract violation. All brackets strictly nest.
 //! - ⛔ THE SHAPE IS THE CALLER'S. A backend never derives it from the body.
@@ -616,9 +628,9 @@ pub trait Painter {
     /// the open-group product unchanged.
     fn pop_knockout_shape(&mut self);
 
-    /// Close the last child, `S ← (1−f)·S + f·T` — an erase and an ADDITIVE
-    /// composite, exactly; source-over in its place is a contract violation —
-    /// and close the group.
+    /// Close the last child, `S ← (1−f)·S + [T − (1−f)·B0]` (A7.1) — an erase,
+    /// a subtraction and an ADDITIVE composite; source-over in place of the
+    /// last is a contract violation — and close the group.
     fn pop_knockout_layer(&mut self);
 
     /// Draw a text run (see [`TextRun`]). Interleaves in z-order with the other

@@ -48,7 +48,8 @@ enum LayerKind {
     /// Never lands: at `pop_knockout_shape` it becomes that group's `f`.
     KnockoutShape,
     /// A7 — the child surface `T`, seeded from the group's `B0`. Closed by
-    /// the next shape push or the group's pop: `S ← (1−f)·S + f·T`.
+    /// the next shape push or the group's pop: `S ← (1−f)·S + [T − (1−f)·B0]`
+    /// (A7.1).
     KnockoutChild,
 }
 

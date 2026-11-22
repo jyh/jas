@@ -1452,8 +1452,10 @@ mod tests {
         Brush::Solid(Color::new(1.0, 0.0, 0.0, 1.0))
     }
 
-    /// ⭐ A7 (f), THIS BACKEND: the ADDITIVE composite the ratified knockout
-    /// bracket needs (S ← (1−f)·S + f·T is an erase, a keep and S + T), measured
+    /// ⭐ A7 (f), THIS BACKEND: the ADDITIVE composite the knockout bracket
+    /// needs (A7's first law, S ← (1−f)·S + f·T, was an erase, a keep and
+    /// S + T; A7.1 keeps the erase and the S + T and replaces the keep, see
+    /// `a71_plus_saturates_alpha_at_one_with_the_colour_sum_intact`), measured
     /// BEFORE anything is built on it (his 11-21 condition; design block §6: a
     /// platform's additive composite may clamp or un-premultiply differently
     /// from S + T). One premultiplied pixel `s` is put in place by `Clear`, a
