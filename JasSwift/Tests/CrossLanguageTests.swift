@@ -8748,6 +8748,31 @@ private func formsLayersMenuActions() -> [String] {
     #expect(stack == [[0, 2]], "\(out)")
 }
 
+/// Row 210: the DECLARED breadcrumb (layers.yaml `lp_breadcrumb`) must act on
+/// the Mac before the native tree's own copy can go (Council Q3.2: the
+/// declared widgets are the only ones). Enter isolation by a row double-click,
+/// then click the declared chevron.
+///
+/// KNOWN ISSUE, measured 11-22: the chevron's click COMMITS (no refusal) and
+/// the model-held stack stays `[[0, 2]]`. The native breadcrumb's exit
+/// (`exitIsolation`, through `LayersPanel.dispatchYamlAction`) works, so it
+/// stays until this one does. When the declared route is fixed this test
+/// REDS ("known issue was not recorded"): remove the wrapper, then the
+/// native `breadcrumbBar`.
+@Test func formsTheDeclaredBreadcrumbChevronExitsIsolation() {
+    let out = formsRun(formsLayersScript([
+        ["panel": formsLayers, "widget": "lp_name", "row": [0, 2], "event": "click"],
+        ["panel": formsLayers, "widget": "lp_preview", "row": [0, 2], "event": "double_click"], formsReadLayers,
+        ["panel": formsLayers, "widget": "lp_breadcrumb_exit_all", "event": "click"], formsReadLayers,
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let stacks = formsPanelReads(out).map { (($0["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath) }
+    #expect(stacks.first == [[0, 2]], "the double-click entered isolation: \(out)")
+    withKnownIssue("row 210: the declared lp_breadcrumb chevron commits and does not pop the model-held stack") {
+        #expect(stacks.last == [], "exited by the declared chevron: \(out)")
+    }
+}
+
 /// `app_state` seeds a declared key where the app HOLDS it, as `read: panel`
 /// reads it there: a seeded Layers `isolation_stack` reaches the Model (spec,
 /// 11-15: S3 run 2 read `[]` from a seed of `[[0,2]]`).
