@@ -2693,24 +2693,30 @@ private func cgColorFromHex(_ hex: String) -> CGColor? {
     )
 }
 
-/// AMENDMENT A7 (row 209) on the Mac: the top-level `layers` are the children
-/// of one knockout group whose initial backdrop `B0` is what `backdrop` paints
-/// (nil: transparent, the isolated page). Per child, premultiplied,
-/// `S ← (1 − f)·S + f·T` with `T = B0` + the child's body and `f` its SHAPE:
+/// AMENDMENT A7.1 (row 209, ratified 11-22) on the Mac: the top-level
+/// `layers` are the children of one knockout group whose initial backdrop
+/// `B0` is what `backdrop` paints (nil: transparent, the isolated page). Per
+/// child, premultiplied, `S ← (1 − f)·S + [T − (1 − f)·B0]` (coverage counts
+/// once) with `T = B0` + the child's body and `f` its SHAPE, by Route D:
 ///
 /// 1. erase — a `.destinationOut` transparency layer of the shape artwork:
 ///    `S ← S·(1 − f)`;
-/// 2. add — a `.plusLighter` transparency layer holding `T`: `B0`, then the
-///    body NON-isolated against it, then a `.destinationIn` transparency
-///    layer of the shape artwork, so the layer holds `f·T`; it lands as
-///    `S + f·T` (the ADDITIVE composite, measured exact against `S + T` by
-///    `A7PlusCompositeTests`). ⛔ `.normal` in its place is source-over, a
-///    contract violation.
+/// 2. add — a `.plusLighter` transparency layer holding the bracket: `B0`,
+///    then the body NON-isolated against it (`T`), then a `.difference`
+///    transparency layer holding `Q'` = `B0` erased by the shape, over an
+///    opaque black kept inside `B0` (colour `(1 − f)·B0`, alpha `α_B0`). For
+///    opaque operands `|T − Q'| = T − Q'`, since `T ≥ (1 − f)·B0`. It lands
+///    as `S + [T − (1 − f)·B0]`. The bracket is already zero outside the
+///    shape, so A7's `.destinationIn` keep is gone. With `backdrop == nil`
+///    `Q'` is empty and is not drawn. ⛔ `.normal` in place of `.plusLighter`
+///    is source-over, a contract violation.
 ///
-/// A transparency layer composites back over the whole clip region, so the
-/// `.destinationIn` erases `T` everywhere outside the shape, not only where
-/// the artwork drew (the same property `compositeMaskArtwork` rests on).
-/// The shape artwork is the child drawn a second time with
+/// Both platform behaviours this rests on (`.difference` of two opaque
+/// pixels, plain and through a transparency layer, and `.plusLighter`
+/// saturating alpha at 1 with the colour sum intact) are measured exact
+/// within 1 by `A71MeasureTests`. ⚠️ Exact only where `B0` is opaque or empty
+/// per pixel (addendum A7.1 §2); a partially transparent `B0` is the declared
+/// limit, not priced. The shape artwork is the child drawn a second time with
 /// `_knockoutShapeOpaque` set (THE SHAPE IS THE CALLER'S).
 internal func drawKnockoutLayers(_ ctx: CGContext, _ layers: [Layer],
                                  backdrop: ((CGContext) -> Void)?) {
@@ -2738,10 +2744,35 @@ internal func drawKnockoutLayers(_ ctx: CGContext, _ layers: [Layer],
         ctx.setAlpha(1.0)
         backdrop?(ctx)
         drawElement(ctx, .layer(layer))
-        ctx.saveGState()
-        ctx.setBlendMode(.destinationIn)
-        shape(layer)
+        if let backdrop {
+            // T ← |T − Q'|, Q' = (1 − f)·B0 over black inside B0.
+            layered(.difference) {
+                layered(.normal) {
+                    ctx.setFillColor(CGColor(gray: 0, alpha: 1))
+                    ctx.fill(ctx.boundingBoxOfClipPath)
+                    layered(.destinationIn) { backdrop(ctx) }
+                }
+                layered(.normal) {
+                    backdrop(ctx)
+                    ctx.saveGState()
+                    ctx.setBlendMode(.destinationOut)
+                    shape(layer)
+                    ctx.restoreGState()
+                }
+            }
+        }
+        ctx.endTransparencyLayer()
         ctx.restoreGState()
+    }
+
+    /// `body` drawn into a transparency layer that composites back under `mode`.
+    func layered(_ mode: CGBlendMode, _ body: () -> Void) {
+        ctx.saveGState()
+        ctx.setBlendMode(mode)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        ctx.setBlendMode(.normal)
+        ctx.setAlpha(1.0)
+        body()
         ctx.endTransparencyLayer()
         ctx.restoreGState()
     }
