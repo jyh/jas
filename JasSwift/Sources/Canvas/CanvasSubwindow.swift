@@ -2718,6 +2718,32 @@ private func cgColorFromHex(_ hex: String) -> CGColor? {
 /// per pixel (addendum A7.1 §2); a partially transparent `B0` is the declared
 /// limit, not priced. The shape artwork is the child drawn a second time with
 /// `_knockoutShapeOpaque` set (THE SHAPE IS THE CALLER'S).
+/// Row 216, A7.1's declared limit as a GUARD: Route D is exact only where B0
+/// is opaque or empty per pixel (addendum A7.1 §2) and errs by up to 124/255
+/// in between (row 213). Renders `backdrop` into a probe bitmap covering
+/// `ctx`'s device clip, under `ctx`'s transform, and returns a refusal naming
+/// the limit when any pixel is partially transparent; nil for an opaque
+/// backdrop or none (the isolated page). `drawKnockoutLayers` hands a refusal
+/// to `assertionFailure`, so it costs nothing in a release build.
+internal func knockoutBackdropRefusal(_ ctx: CGContext, _ backdrop: ((CGContext) -> Void)?) -> String? {
+    guard let backdrop else { return nil }
+    let device = ctx.boundingBoxOfClipPath.applying(ctx.ctm).integral
+    let w = Int(device.width), h = Int(device.height)
+    guard w > 0, h > 0, w * h <= 64_000_000,
+          let probe = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    probe.translateBy(x: -device.minX, y: -device.minY)
+    probe.concatenate(ctx.ctm)
+    backdrop(probe)
+    guard let data = probe.data else { return nil }
+    let px = data.assumingMemoryBound(to: UInt8.self)
+    for i in stride(from: 3, to: w * h * 4, by: 4) where px[i] != 0 && px[i] != 255 {
+        return "A7.1 §2: a knockout group opened over a partially transparent backdrop (pixel \(i / 4) of \(w)x\(h), alpha \(px[i])); Route D is exact only where B0 is opaque or empty. Paint B0 opaque or empty first, or bring the limit to a ruling."
+    }
+    return nil
+}
+
 internal func drawKnockoutLayers(_ ctx: CGContext, _ layers: [Layer],
                                  backdrop: ((CGContext) -> Void)?) {
     func shape(_ layer: Layer) {
@@ -2730,6 +2756,9 @@ internal func drawKnockoutLayers(_ ctx: CGContext, _ layers: [Layer],
         _knockoutShapeOpaque = prior
         ctx.endTransparencyLayer()
     }
+    #if DEBUG
+    if let refusal = knockoutBackdropRefusal(ctx, backdrop) { assertionFailure(refusal) }
+    #endif
     for layer in layers {
         // 1. S ← S·(1 − f)
         ctx.saveGState()
