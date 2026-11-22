@@ -952,8 +952,22 @@ pub(crate) fn live_panel_state_table(st: &AppState)
     if !gp.press.is_null() {
         entry.insert("stops".into(), gradient_host::stops_to_json(&gp.stops));
     }
+    // Row 210 (the web twin of the Mac's `modelHeldPanelState`): the Layers
+    // isolation stack is MODEL-held (each tab's `Model::isolation_stack`, the
+    // store every pusher and popper writes), never this table. Without this
+    // the body's render scope read the declared default `[]` in isolation, so
+    // `lp_breadcrumb`'s `visible` was false and the declared breadcrumb never
+    // drew. Path markers, the form `build_appstate_ctx` gives an action.
+    let isolation: Vec<serde_json::Value> = st.isolation_stack().iter()
+        .map(|p| serde_json::json!({ "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>() }))
+        .collect();
+    table.entry(LAYERS_PANEL.to_string()).or_default()
+        .insert("isolation_stack".into(), serde_json::Value::Array(isolation));
     table
 }
+
+/// The Layers panel's content id.
+const LAYERS_PANEL: &str = "layers_panel_content";
 
 /// [`panel_body_eval_ctx`] with its inputs read from `st`, as the dock reads
 /// them before rendering.

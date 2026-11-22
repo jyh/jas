@@ -16609,6 +16609,30 @@ mod layers_tree_key_tests {
         assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
         assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
     }
+    /// Row 210, the web twin: the Layers panel BODY's render scope (the one
+    /// the dock evaluates `lp_breadcrumb`'s `visible` in) must carry the
+    /// model-held isolation stack, or the declared breadcrumb never shows.
+    #[test]
+    fn the_layers_render_scope_carries_the_model_held_isolation_stack() {
+        let mut st = two_layers();
+        let ctl = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "layers_panel_content")
+            .expect("the workspace loads");
+        assert_eq!(ctl["panel"]["isolation_stack"], serde_json::json!([]), "CONTROL: not isolated");
+        assert!(!crate::interpreter::menu_state::eval_bool("panel.isolation_stack.length > 0", &ctl));
+        st.isolation_stack_mut().expect("a tab").push(vec![1]);
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "layers_panel_content")
+            .expect("the workspace loads");
+        eprintln!("row210 web render scope: panel.isolation_stack = {}", ctx["panel"]["isolation_stack"]);
+        assert_eq!(ctx["panel"]["isolation_stack"], serde_json::json!([{"__path__": [1]}]),
+                   "the render scope does not see the model's stack");
+        assert!(crate::interpreter::menu_state::eval_bool("panel.isolation_stack.length > 0", &ctx),
+                "lp_breadcrumb's visible reads false in isolation");
+        // Its segments: one row per level, resolved in the same scope.
+        let seg = "tree_rows_at(active_document.element_tree, panel.isolation_stack).length";
+        assert!(crate::interpreter::menu_state::eval_bool(&format!("{seg} == 1"), &ctx),
+                "the breadcrumb's segment source does not resolve one row for one level");
+        assert!(crate::interpreter::menu_state::eval_bool(&format!("{seg} == 0"), &ctl), "CONTROL");
+    }
 }
 
 
