@@ -4464,6 +4464,7 @@ struct TreeViewContent: View {
         }
         .onHover { inside in
             if inside { hoveredRow = path } else if hoveredRow == path { hoveredRow = nil }
+            FifoLive.layersHoveredRow = hoveredRow  // the FIFO's `hover` (row 208)
         }
         .contextMenu {
             // Row 141 part 3: layers.yaml's `context_menu:`, drawn in this

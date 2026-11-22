@@ -24,7 +24,7 @@ import AppKit
 /// control.
 public enum FifoEvents {
     public enum Kind: String, CaseIterable, Equatable {
-        case move, key
+        case move, key, enter, warp
         case leftDown = "left_down", leftUp = "left_up"
         case rightDown = "right_down", rightUp = "right_up"
     }
@@ -185,8 +185,27 @@ public enum FifoEvents {
             case .point(let x, let y): p = NSPoint(x: x, y: y)
             case nil: throw refuse("step \(i): a pointer step has no target")
             }
+            if s.kind == .warp { continue }  // `warps`: done by `post`, never here
+            if s.kind == .enter {
+                let areas = trackingAreas(containing: p, in: window)
+                guard !areas.isEmpty else {
+                    throw refuse("step \(i): no tracking area contains (\(Int(p.x)), \(Int(p.y)))")
+                }
+                for a in areas {
+                    guard let e = NSEvent.enterExitEvent(
+                        with: .mouseEntered, location: p, modifierFlags: mods, timestamp: t,
+                        windowNumber: window.windowNumber, context: nil, eventNumber: i,
+                        trackingNumber: Int(bitPattern: Unmanaged.passUnretained(a).toOpaque()),
+                        userData: nil) else {
+                        throw refuse("step \(i): AppKit built no mouseEntered")
+                    }
+                    out.append(e)
+                }
+                continue
+            }
             let type: NSEvent.EventType
             switch s.kind {
+            case .enter, .warp: throw refuse("step \(i): unreachable")
             case .move: type = .mouseMoved
             case .leftDown: type = .leftMouseDown
             case .leftUp: type = .leftMouseUp
@@ -206,9 +225,89 @@ public enum FifoEvents {
         return out
     }
 
-    /// Post the built events at the BACK of the queue, in order.
+    /// One token per event, so the log says where each press went:
+    /// `rightMouseDown@(70,50)`, `keyDown:51+cmd`.
+    public static func receipt(_ events: [NSEvent]) -> String {
+        events.map { e in
+            var flags: [String] = []
+            for (n, f) in [("cmd", NSEvent.ModifierFlags.command), ("shift", .shift),
+                           ("option", .option), ("control", .control)] where e.modifierFlags.contains(f) {
+                flags.append(n)
+            }
+            let suffix = flags.isEmpty ? "" : "+" + flags.joined(separator: "+")
+            switch e.type {
+            case .keyDown, .keyUp:
+                return "\(e.type == .keyDown ? "keyDown" : "keyUp"):\(e.keyCode)\(suffix)"
+            default:
+                let p = e.locationInWindow
+                let name: String
+                switch e.type {
+                case .mouseMoved: name = "move"
+                case .mouseEntered: name = "enter"
+                case .leftMouseDown: name = "leftDown"
+                case .leftMouseUp: name = "leftUp"
+                case .rightMouseDown: name = "rightDown"
+                case .rightMouseUp: name = "rightUp"
+                default: name = "type\(e.type.rawValue)"
+                }
+                return "\(name)@(\(Int(p.x.rounded())),\(Int(p.y.rounded())))\(suffix)"
+            }
+        }.joined(separator: " ")
+    }
+
+    /// `p` (window points) in Quartz global display space: origin at the TOP
+    /// left of the primary display, y down.
     @MainActor
-    public static func post(_ events: [NSEvent]) {
+    public static func globalPoint(_ p: NSPoint, in window: NSWindow) -> CGPoint? {
+        guard let primary = NSScreen.screens.first else { return nil }
+        let s = window.convertPoint(toScreen: p)
+        return CGPoint(x: s.x, y: primary.frame.height - s.y)
+    }
+
+    /// The tracking areas that would report the pointer entering at `p`
+    /// (window points): those of the view under `p` and its ancestors whose
+    /// rect contains it, innermost first. Hover comes from these, not from
+    /// `mouseMoved` (measured).
+    @MainActor
+    static func trackingAreas(containing p: NSPoint, in window: NSWindow) -> [NSTrackingArea] {
+        guard let root = window.contentView,
+              var v = root.hitTest(root.convert(p, from: nil)) ?? Optional(root) else { return [] }
+        var out: [NSTrackingArea] = []
+        while true {
+            let local = v.convert(p, from: nil)
+            for a in v.trackingAreas where a.options.contains(.mouseEnteredAndExited) {
+                let r = a.options.contains(.inVisibleRect) ? v.visibleRect : a.rect
+                if r.contains(local) { out.append(a) }
+            }
+            guard v !== root, let up = v.superview else { break }
+            v = up
+        }
+        return out
+    }
+
+    /// The global display points of the sequence's `warp` steps, in order.
+    /// Resolved like any target, so a refused one posts nothing.
+    @MainActor
+    public static func warps(_ specs: [Spec], window: NSWindow) throws -> [CGPoint] {
+        try specs.enumerated().filter { $0.element.kind == .warp }.map { i, s in
+            let p: NSPoint
+            switch s.target {
+            case .id(let id): p = try locate(id, in: window)
+            case .point(let x, let y): p = NSPoint(x: x, y: y)
+            case nil: throw refuse("step \(i): a warp has no target")
+            }
+            guard let g = globalPoint(p, in: window) else { throw refuse("step \(i): no screen to warp on") }
+            return g
+        }
+    }
+
+    /// Move the REAL cursor to each warp point (it is this Mac's pointer: the
+    /// test channel only), then post the built events at the BACK of the
+    /// queue, in order. A warp therefore acts before ANY posted event,
+    /// wherever it sits in the sequence.
+    @MainActor
+    public static func post(_ events: [NSEvent], warps: [CGPoint] = []) {
+        for g in warps { CGWarpMouseCursorPosition(g) }
         for e in events { NSApp.postEvent(e, atStart: false) }
     }
 }
@@ -220,14 +319,38 @@ public enum FifoEvents {
 /// only under `--test-fifo` (`enabled`); a normal launch records nothing.
 public enum FifoTargets {
     @MainActor public static var enabled = false
-    @MainActor private static var frames: [String: CGRect] = [:]
+    @MainActor private static var frames: [String: (frame: CGRect, token: UUID)] = [:]
 
-    @MainActor public static func record(_ id: String, frame: CGRect) { frames[id] = frame }
-    @MainActor public static func remove(_ id: String) { frames[id] = nil }
-    @MainActor public static func frame(_ id: String) -> CGRect? { frames[id] }
+    /// Record `id`'s frame for the view instance `token`.
+    @MainActor public static func record(_ id: String, frame: CGRect, token: UUID) {
+        frames[id] = (frame, token)
+    }
+    /// Remove `id` only if instance `token` recorded it: a re-created row
+    /// records its new frame BEFORE the old instance's `onDisappear` runs
+    /// (measured live), so an unconditional removal erased every row.
+    @MainActor public static func remove(_ id: String, token: UUID) {
+        if frames[id]?.token == token { frames[id] = nil }
+    }
+    @MainActor public static func frame(_ id: String) -> CGRect? { frames[id]?.frame }
 }
 
 import SwiftUI
+
+/// Records its view's window frame under `id` (FifoTargets), per instance.
+private struct FifoTargetModifier: ViewModifier {
+    let id: String
+    @State private var token = UUID()
+
+    func body(content: Content) -> some View {
+        content.background(GeometryReader { g in
+            let f = g.frame(in: .global)
+            SwiftUI.Color.clear
+                .onAppear { FifoTargets.record(id, frame: f, token: token) }
+                .onChange(of: f) { FifoTargets.record(id, frame: $0, token: token) }
+                .onDisappear { FifoTargets.remove(id, token: token) }
+        })
+    }
+}
 
 extension View {
     /// Record this view's window frame under `id` for the FIFO's `events`
@@ -235,13 +358,7 @@ extension View {
     @MainActor @ViewBuilder
     public func fifoTarget(_ id: String) -> some View {
         if FifoTargets.enabled {
-            self.background(GeometryReader { g in
-                let f = g.frame(in: .global)
-                SwiftUI.Color.clear
-                    .onAppear { FifoTargets.record(id, frame: f) }
-                    .onChange(of: f) { FifoTargets.record(id, frame: $0) }
-                    .onDisappear { FifoTargets.remove(id) }
-            })
+            self.modifier(FifoTargetModifier(id: id))
         } else {
             self
         }
@@ -252,29 +369,39 @@ extension View {
 /// harness reads what a context menu offered while it is open (row 208, sheet
 /// 3 reading 3). Recorded at `didBeginTracking`, the moment it is shown.
 public enum FifoMenuWatch {
-    @MainActor private static var token: NSObjectProtocol?
+    @MainActor private static var tokens: [NSObjectProtocol] = []
     @MainActor private static var last: [(title: String, enabled: Bool)]?
+    /// How many menus are tracking now (a submenu nests inside its parent).
+    @MainActor private static var tracking = 0
 
     /// Start observing; idempotent.
     @MainActor
     public static func start() {
-        guard token == nil else { return }
-        token = NotificationCenter.default.addObserver(
+        guard tokens.isEmpty else { return }
+        let nc = NotificationCenter.default
+        tokens.append(nc.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
         ) { note in
             guard let m = note.object as? NSMenu else { return }
             let items = m.items.map { ($0.isSeparatorItem ? "-" : $0.title,
                                        !$0.isSeparatorItem && $0.isEnabled) }
-            MainActor.assumeIsolated { last = items }
-        }
+            MainActor.assumeIsolated { last = items; tracking += 1 }
+        })
+        tokens.append(nc.addObserver(
+            forName: NSMenu.didEndTrackingNotification, object: nil, queue: nil
+        ) { _ in
+            MainActor.assumeIsolated { tracking = max(0, tracking - 1) }
+        })
     }
 
-    /// Write `{"menu": [{"title", "enabled"}...]}`, or `{"menu": null}` when no
-    /// menu has begun tracking since `start`.
+    /// Write `{"menu": [{"title", "enabled"}...], "open": Bool}`: the last menu
+    /// that began tracking (`null` when none has since `start`), and whether a
+    /// menu is tracking NOW, so a harness knows a pick or an Escape closed it.
     @MainActor
     public static func write(to path: String) throws {
         let menu: Any = last.map { $0.map { ["title": $0.title, "enabled": $0.enabled] } } ?? NSNull()
-        let data = try JSONSerialization.data(withJSONObject: ["menu": menu], options: [.sortedKeys])
+        let data = try JSONSerialization.data(withJSONObject: ["menu": menu, "open": tracking > 0],
+                                              options: [.sortedKeys])
         try data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 }

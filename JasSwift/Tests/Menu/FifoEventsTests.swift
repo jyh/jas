@@ -123,6 +123,10 @@ import AppKit
     #expect(evs[3].modifierFlags.contains(.command))
     #expect(!evs[1].modifierFlags.contains(.command))
     #expect(evs[4].keyCode == 51 && evs[5].keyCode == 51)
+    let r = FifoEvents.receipt(evs).split(separator: " ").map(String.init)
+    #expect(r.count == 6)
+    #expect(r[1].hasSuffix("@(70,50)") && r[2].hasSuffix("@(5,6)"), "\(r)")
+    #expect(r[3].hasSuffix("+cmd") && r[4] == "keyDown:51", "\(r)")
 }
 
 // MARK: menu watch
@@ -143,6 +147,12 @@ import AppKit
     let items = try #require((obj as? [String: Any])?["menu"] as? [[String: Any]])
     #expect(items.map { $0["title"] as? String } == ["Duplicate", "-", "Exit Isolation Mode"])
     #expect(items.map { $0["enabled"] as? Bool } == [true, false, false])
+    #expect((obj as? [String: Any])?["open"] as? Bool == true, "began, not yet ended")
+    NotificationCenter.default.post(name: NSMenu.didEndTrackingNotification, object: m)
+    try FifoMenuWatch.write(to: path)
+    let after = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path)))
+    #expect((after as? [String: Any])?["open"] as? Bool == false, "ended")
+    #expect(((after as? [String: Any])?["menu"] as? [Any])?.count == 3, "the titles survive the close")
 }
 
 // MARK: the SwiftUI frame registry
@@ -154,8 +164,9 @@ import AppKit
 @Test @MainActor func eventsLocatePrefersARecordedFrameFlippedToWindowPoints() throws {
     let w = window(with: [])
     let h = try #require(w.contentView).bounds.height
-    FifoTargets.record("swiftui_row", frame: CGRect(x: 10, y: 30, width: 100, height: 24))
-    defer { FifoTargets.remove("swiftui_row") }
+    let t = UUID()
+    FifoTargets.record("swiftui_row", frame: CGRect(x: 10, y: 30, width: 100, height: 24), token: t)
+    defer { FifoTargets.remove("swiftui_row", token: t) }
     let p = try FifoEvents.locate("swiftui_row", in: w)
     #expect(abs(p.x - 60) < 0.5, "x \(p.x)")
     #expect(abs(p.y - (h - 42)) < 0.5, "y \(p.y), want \(h - 42)")
@@ -163,7 +174,88 @@ import AppKit
 
 @Test @MainActor func eventsLocateRefusesARemovedTarget() {
     let w = window(with: [])
-    FifoTargets.record("gone_row", frame: CGRect(x: 0, y: 0, width: 10, height: 10))
-    FifoTargets.remove("gone_row")
+    let t = UUID()
+    FifoTargets.record("gone_row", frame: CGRect(x: 0, y: 0, width: 10, height: 10), token: t)
+    FifoTargets.remove("gone_row", token: t)
     #expect(throws: FifoReadError.self) { try FifoEvents.locate("gone_row", in: w) }
+}
+
+/// A re-created SwiftUI row records its new frame BEFORE the old instance's
+/// `onDisappear` runs (measured live: four rows recorded, then none found), so
+/// a removal only removes the frame its own instance recorded.
+@Test @MainActor func eventsTargetRemovalByAStaleInstanceKeepsTheNewFrame() throws {
+    let w = window(with: [])
+    let old = UUID(), new = UUID()
+    FifoTargets.record("rebuilt_row", frame: CGRect(x: 0, y: 0, width: 10, height: 10), token: old)
+    FifoTargets.record("rebuilt_row", frame: CGRect(x: 40, y: 0, width: 10, height: 10), token: new)
+    FifoTargets.remove("rebuilt_row", token: old)
+    defer { FifoTargets.remove("rebuilt_row", token: new) }
+    let p = try FifoEvents.locate("rebuilt_row", in: w)
+    #expect(abs(p.x - 45) < 0.5, "the new instance's frame, at \(p.x)")
+}
+
+// MARK: hover
+
+/// `hover <path>`: the Layers row the tree believes the pointer is over, as
+/// its `onHover` last set it. Row 142's monitor selects THAT row on a
+/// right-click, so a harness that posts a right-click must know whether its
+/// posted move set it, or a (B) reading cannot tell the app from the
+/// instrument.
+@Test func hoverJsonNamesTheRowOrNull() {
+    #expect(FifoHover.json(row: [0, 0]) == #"{"layers_hovered_row":[0,0]}"#)
+    #expect(FifoHover.json(row: nil) == #"{"layers_hovered_row":null}"#)
+}
+
+// MARK: enter (tracking areas)
+
+/// A posted `mouseMoved` does not trip SwiftUI's `onHover` (measured live 11-22:
+/// the hovered row stayed null after three move sequences): hover comes from
+/// TRACKING AREAS, which the window server drives from the real cursor. An
+/// `enter` step posts `mouseEntered` addressed to each tracking area, on the
+/// view under the point and its ancestors, whose rect contains the point.
+@Test @MainActor func eventsEnterAddressesEachTrackingAreaContainingThePoint() throws {
+    let w = window(with: [])
+    let root = try #require(w.contentView)
+    let child = NSView(frame: NSRect(x: 20, y: 40, width: 100, height: 20))
+    root.addSubview(child)
+    let inner = NSTrackingArea(rect: child.bounds, options: [.mouseEnteredAndExited, .activeAlways],
+                               owner: child, userInfo: nil)
+    let elsewhere = NSTrackingArea(rect: NSRect(x: 0, y: 0, width: 5, height: 5),
+                                   options: [.mouseEnteredAndExited, .activeAlways], owner: root, userInfo: nil)
+    let outer = NSTrackingArea(rect: root.bounds, options: [.mouseEnteredAndExited, .activeAlways],
+                               owner: root, userInfo: nil)
+    child.addTrackingArea(inner); root.addTrackingArea(elsewhere); root.addTrackingArea(outer)
+    let specs = try FifoEvents.parse(#"[{"kind":"enter","at":[70,50]}]"#)
+    let evs = try FifoEvents.build(specs, window: w)
+    #expect(evs.allSatisfy { $0.type == .mouseEntered })
+    let areas = evs.compactMap(\.trackingArea).map(ObjectIdentifier.init)
+    #expect(Set(areas) == Set([ObjectIdentifier(inner), ObjectIdentifier(outer)]), "\(evs)")
+}
+
+@Test @MainActor func eventsEnterOverNoTrackingAreaIsRefused() {
+    let w = window(with: [])
+    #expect(throws: FifoReadError.self) {
+        try FifoEvents.build(try FifoEvents.parse(#"[{"kind":"enter","at":[70,50]}]"#), window: w)
+    }
+}
+
+// MARK: warp
+
+/// A posted `mouseEntered` + `mouseMoved` still left the hovered row null
+/// (measured live 11-22), so SwiftUI's hover reads the REAL cursor. A `warp`
+/// step moves it there (CGWarpMouseCursorPosition, global display space,
+/// origin TOP left of the primary display) and posts nothing itself.
+@Test @MainActor func eventsWarpConvertsAWindowPointToGlobalDisplaySpace() throws {
+    let w = window(with: [])
+    let p = NSPoint(x: 70, y: 50)
+    let g = try #require(FifoEvents.globalPoint(p, in: w))
+    let screen = w.convertPoint(toScreen: p)
+    let primaryH = try #require(NSScreen.screens.first).frame.height
+    #expect(abs(g.x - screen.x) < 0.5)
+    #expect(abs(g.y - (primaryH - screen.y)) < 0.5)
+    let specs = try FifoEvents.parse(#"[{"kind":"warp","at":[70,50]}]"#)
+    #expect(specs.first?.kind == .warp)
+    #expect(try FifoEvents.build(specs, window: w).isEmpty, "a warp builds no event (and does not move the cursor)")
+    let ws = try FifoEvents.warps(specs, window: w)
+    #expect(ws.count == 1 && abs(ws[0].x - g.x) < 0.5 && abs(ws[0].y - g.y) < 0.5)
 }

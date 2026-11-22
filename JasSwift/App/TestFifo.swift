@@ -27,6 +27,7 @@ import JasLib
 //     events <json>             -> an input SEQUENCE posted into the app's own
 //                                  event queue (FifoEvents), routed by AppKit
 //                                  as a person's input is
+//     hover <path>              -> the Layers row onHover last marked
 //     menu <path>               -> the titles of the last menu that began
 //                                  tracking (FifoMenuWatch)
 //     action <name> [json]      -> <name> with optional JSON params, run
@@ -309,12 +310,23 @@ extension JasAppDelegate {
             }
             MainActor.assumeIsolated {
                 do {
-                    let evs = try FifoEvents.build(FifoEvents.parse(rest), window: window)
-                    FifoEvents.post(evs)
-                    NSLog("test-fifo: events posted %ld", evs.count)
+                    let specs = try FifoEvents.parse(rest)
+                    let evs = try FifoEvents.build(specs, window: window)
+                    let warps = try FifoEvents.warps(specs, window: window)
+                    FifoEvents.post(evs, warps: warps)
+                    NSLog("test-fifo: events posted %ld (warps %ld): %@", evs.count, warps.count,
+                          FifoEvents.receipt(evs))
                 } catch {
                     NSLog("test-fifo: %@", "\(error)")
                 }
+            }
+        case "hover":
+            // hover <path>: the Layers row onHover last marked (FifoHover).
+            do {
+                try FifoHover.write(row: FifoLive.layersHoveredRow, to: rest)
+                NSLog("test-fifo: hover wrote %@", rest)
+            } catch {
+                NSLog("test-fifo: hover REFUSED %@ (%@)", rest, "\(error)")
             }
         case "menu":
             // menu <path>: the last menu that began tracking (FifoMenuWatch).
