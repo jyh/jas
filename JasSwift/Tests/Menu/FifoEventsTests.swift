@@ -262,12 +262,31 @@ import AppKit
 
 // MARK: key delivery state
 
-/// A posted key reached nothing (⌘A, ⌘Z and the tree's Delete, measured live
-/// 11-22) while the same acts by `action` worked. Keys go to the KEY window,
-/// so the `events` receipt states whether the app is active and the target
-/// window is key: a key step posted to a non-key window is not a reading.
+/// A posted ⌘A, ⌘Z and the tree's Delete reached nothing (measured live
+/// 11-22) while the same acts by `action` worked, and the receipt read
+/// `active=0 key=0`. Keys that need the KEY window (menu key equivalents, a
+/// responder's keyDown) cannot land then. Keys into an OPEN context menu DO:
+/// its tracking loop took Down and Return at `key=0` in every sheet-3 pick.
+/// So the receipt names the state, and the reader decides which keys it voids.
 @Test func eventsKeyStateNamesActiveAndKey() {
     #expect(FifoEvents.keyState(active: true, targetIsKey: true) == "active=1 key=1")
     #expect(FifoEvents.keyState(active: false, targetIsKey: false) == "active=0 key=0")
     #expect(FifoEvents.keyState(active: true, targetIsKey: false) == "active=1 key=0")
+}
+
+/// A foreach-expanded YAML widget repeats its id (one per row), so two LIVE
+/// instances can record one id. `locate` refuses it by count rather than
+/// pressing whichever twin recorded last.
+@Test @MainActor func eventsLocateRefusesAnIdTwoLiveTargetsRecorded() {
+    let w = window(with: [])
+    let a = UUID(), b = UUID()
+    FifoTargets.record("twin_seg", frame: CGRect(x: 0, y: 0, width: 10, height: 10), token: a)
+    FifoTargets.record("twin_seg", frame: CGRect(x: 40, y: 0, width: 10, height: 10), token: b)
+    defer { FifoTargets.remove("twin_seg", token: a); FifoTargets.remove("twin_seg", token: b) }
+    do {
+        _ = try FifoEvents.locate("twin_seg", in: w)
+        Issue.record("an id two live targets recorded must be refused")
+    } catch {
+        #expect("\(error)".contains("2 live targets"), "\(error)")
+    }
 }

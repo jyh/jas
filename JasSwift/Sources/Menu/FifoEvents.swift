@@ -118,6 +118,8 @@ public enum FifoEvents {
     public static func locate(_ id: String, in window: NSWindow) throws -> NSPoint {
         guard let root = window.contentView else { throw refuse("the window has no content view") }
         // A SwiftUI target's own recorded frame first (FifoTargets).
+        let live = FifoTargets.count(id)
+        if live > 1 { throw refuse("'\(id)' is recorded by \(live) live targets") }
         if let f = FifoTargets.frame(id) {
             return NSPoint(x: f.midX, y: root.bounds.height - f.midY)
         }
@@ -324,19 +326,26 @@ public enum FifoEvents {
 /// only under `--test-fifo` (`enabled`); a normal launch records nothing.
 public enum FifoTargets {
     @MainActor public static var enabled = false
-    @MainActor private static var frames: [String: (frame: CGRect, token: UUID)] = [:]
+    @MainActor private static var frames: [String: [UUID: CGRect]] = [:]
 
     /// Record `id`'s frame for the view instance `token`.
     @MainActor public static func record(_ id: String, frame: CGRect, token: UUID) {
-        frames[id] = (frame, token)
+        frames[id, default: [:]][token] = frame
     }
-    /// Remove `id` only if instance `token` recorded it: a re-created row
-    /// records its new frame BEFORE the old instance's `onDisappear` runs
-    /// (measured live), so an unconditional removal erased every row.
+    /// Remove instance `token`'s frame only: a re-created row records its new
+    /// frame BEFORE the old instance's `onDisappear` runs (measured live), so
+    /// removing by id alone erased every row.
     @MainActor public static func remove(_ id: String, token: UUID) {
-        if frames[id]?.token == token { frames[id] = nil }
+        frames[id]?[token] = nil
+        if frames[id]?.isEmpty == true { frames[id] = nil }
     }
-    @MainActor public static func frame(_ id: String) -> CGRect? { frames[id]?.frame }
+    /// How many live instances recorded `id` (a foreach repeats an id).
+    @MainActor public static func count(_ id: String) -> Int { frames[id]?.count ?? 0 }
+    /// The frame of the ONE live instance that recorded `id`, else nil.
+    @MainActor public static func frame(_ id: String) -> CGRect? {
+        guard let f = frames[id], f.count == 1 else { return nil }
+        return f.first?.value
+    }
 }
 
 import SwiftUI
@@ -362,7 +371,7 @@ extension View {
     /// (FifoTargets). Inert on a normal launch.
     @MainActor @ViewBuilder
     public func fifoTarget(_ id: String) -> some View {
-        if FifoTargets.enabled {
+        if FifoTargets.enabled && !id.isEmpty {
             self.modifier(FifoTargetModifier(id: id))
         } else {
             self

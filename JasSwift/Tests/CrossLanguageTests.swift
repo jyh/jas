@@ -8753,12 +8753,9 @@ private func formsLayersMenuActions() -> [String] {
 /// declared widgets are the only ones). Enter isolation by a row double-click,
 /// then click the declared chevron.
 ///
-/// KNOWN ISSUE, measured 11-22: the chevron's click COMMITS (no refusal) and
-/// the model-held stack stays `[[0, 2]]`. The native breadcrumb's exit
-/// (`exitIsolation`, through `LayersPanel.dispatchYamlAction`) works, so it
-/// stays until this one does. When the declared route is fixed this test
-/// REDS ("known issue was not recorded"): remove the wrapper, then the
-/// native `breadcrumbBar`.
+/// It committed and popped nothing until 11-22 (#1057 pinned it as a known
+/// issue): `WidgetEvent.scopeLocals` drops the render scope's `panel`, so the
+/// action read the STORE's `isolation_stack` (`[]`), never the model's.
 @Test func formsTheDeclaredBreadcrumbChevronExitsIsolation() {
     let out = formsRun(formsLayersScript([
         ["panel": formsLayers, "widget": "lp_name", "row": [0, 2], "event": "click"],
@@ -8768,9 +8765,7 @@ private func formsLayersMenuActions() -> [String] {
     #expect(formsRefusal(out) == nil, "\(out)")
     let stacks = formsPanelReads(out).map { (($0["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath) }
     #expect(stacks.first == [[0, 2]], "the double-click entered isolation: \(out)")
-    withKnownIssue("row 210: the declared lp_breadcrumb chevron commits and does not pop the model-held stack") {
-        #expect(stacks.last == [], "exited by the declared chevron: \(out)")
-    }
+    #expect(stacks.last == [], "exited by the declared chevron: \(out)")
 }
 
 /// `app_state` seeds a declared key where the app HOLDS it, as `read: panel`
