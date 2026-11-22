@@ -16565,6 +16565,28 @@ mod layers_tree_key_tests {
         assert!(layers_tree_key(&mut st, &ctrl_a).is_some());
         assert_eq!(st.layers_panel_selection, vec![vec![1, 0]]);
     }
+    /// Row 212: the Concepts panel body's render scope carries the
+    /// panel-selected concept, which is APP-held (`AppState::concepts_selected`,
+    /// written by the select action), never the panel table. Without it the
+    /// row highlight and the Place Instance button's `disabled` read the
+    /// declared default `null` on the web. The census that found it
+    /// (11-22) drove each app-held key a panel YAML reads, at a non-default
+    /// value: Symbols, Artboards and Swatches already carried theirs; Layers'
+    /// keys read defaults but the web draws those widgets natively from
+    /// `AppState` (measured live: the filter's checks and the search text hold).
+    #[test]
+    fn the_concepts_render_scope_carries_the_panel_selected_concept() {
+        let mut st = two_layers();
+        let ctl = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "concepts_panel_content").unwrap();
+        assert_eq!(ctl["panel"]["selected_concept"], serde_json::Value::Null, "CONTROL: nothing selected");
+        st.concepts_selected = Some("con_x".into());
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "concepts_panel_content").unwrap();
+        assert_eq!(ctx["panel"]["selected_concept"], serde_json::json!("con_x"),
+                   "the render scope does not see the app-held selection");
+        assert!(crate::interpreter::menu_state::eval_bool("panel.selected_concept != null", &ctx),
+                "Place Instance's enabled_when reads false with a concept selected");
+    }
+
     /// Row 210, the web twin: the Layers panel BODY's render scope (the one
     /// the dock evaluates `lp_breadcrumb`'s `visible` in) must carry the
     /// model-held isolation stack, or the declared breadcrumb never shows.
