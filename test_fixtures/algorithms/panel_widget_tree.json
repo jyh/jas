@@ -2440,7 +2440,11 @@
     "function": "widget_tree",
     "args": {
       "panel": "character_panel_content",
-      "ctx": {}
+      "ctx": {
+        "panel": {
+          "snap_to_glyph_visible": true
+        }
+      }
     },
     "expected": [
       {
@@ -3467,8 +3471,10 @@
         "kind": "separator",
         "col": 0,
         "visible": true,
-        "dyn_visible": false,
-        "bind": [],
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
         "style": []
       },
       {
@@ -3480,8 +3486,10 @@
         "kind": "row",
         "col": 0,
         "visible": true,
-        "dyn_visible": false,
-        "bind": [],
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
         "style": []
       },
       {
@@ -3596,8 +3604,10 @@
         "kind": "row",
         "col": 0,
         "visible": true,
-        "dyn_visible": false,
-        "bind": [],
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
         "style": []
       },
       {
@@ -12515,6 +12525,1399 @@
         "bind": [
           "background",
           "border"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "character_panel_content",
+    "function": "widget_tree",
+    "args": {
+      "panel": "character_panel_content",
+      "ctx": {
+        "panel": {
+          "snap_to_glyph_visible": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [],
+        "type": "container",
+        "id": "ch_content",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "gap",
+          "padding"
+        ]
+      },
+      {
+        "path": [
+          0
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          0,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 12,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "type": "select",
+        "id": "ch_font_family",
+        "kind": "select",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          1
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          1,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 12,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          1,
+          0,
+          0
+        ],
+        "type": "select",
+        "id": "ch_style_name",
+        "kind": "select",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          2
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          2,
+          0,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          2,
+          1,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_font_size",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          2,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          2,
+          2,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          2,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          2,
+          3,
+          0
+        ],
+        "type": "length_input",
+        "id": "ch_leading",
+        "kind": "length_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          3,
+          1,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_kerning",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          3,
+          2,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          3,
+          3,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_tracking",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          4
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          4,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          4,
+          0,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          4,
+          1,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_vertical_scale",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          4,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          4,
+          2,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          4,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          4,
+          3,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_horizontal_scale",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          5
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          5,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          5,
+          0,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          5,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          5,
+          1,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_baseline_shift",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          5,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          5,
+          2,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          5,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 4,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          5,
+          3,
+          0
+        ],
+        "type": "number_input",
+        "id": "ch_character_rotation",
+        "kind": "number_input",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          6
+        ],
+        "type": "separator",
+        "id": "",
+        "kind": "separator",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          7
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          7,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          7,
+          0,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_all_caps",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          7,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          7,
+          1,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_small_caps",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          7,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          7,
+          2,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_superscript",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          7,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          7,
+          3,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_subscript",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          7,
+          4
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          7,
+          4,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_underline",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          7,
+          5
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          7,
+          5,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_strikethrough",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          8
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          8,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 6,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          8,
+          0,
+          0
+        ],
+        "type": "select",
+        "id": "ch_language",
+        "kind": "select",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          8,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 6,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": []
+      },
+      {
+        "path": [
+          8,
+          1,
+          0
+        ],
+        "type": "select",
+        "id": "ch_anti_aliasing",
+        "kind": "select",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "value"
+        ],
+        "style": [
+          "width"
+        ]
+      },
+      {
+        "path": [
+          9
+        ],
+        "type": "separator",
+        "id": "",
+        "kind": "separator",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          10
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          10,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 6,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          10,
+          0,
+          0
+        ],
+        "type": "text",
+        "id": "",
+        "kind": "text",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "color",
+          "font_size"
+        ]
+      },
+      {
+        "path": [
+          10,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          10,
+          1,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          10,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 1,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          10,
+          2,
+          0
+        ],
+        "type": "icon",
+        "id": "",
+        "kind": "icon",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "height",
+          "opacity",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          11
+        ],
+        "type": "row",
+        "id": "",
+        "kind": "row",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": true,
+        "bind": [
+          "visible"
+        ],
+        "style": []
+      },
+      {
+        "path": [
+          11,
+          0
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          11,
+          0,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_snap_baseline",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          11,
+          1
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          11,
+          1,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_snap_x_height",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          11,
+          2
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          11,
+          2,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_snap_glyph_bounds",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          11,
+          3
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          11,
+          3,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_snap_proximity_guides",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          11,
+          4
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          11,
+          4,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_snap_angular_guides",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
+        ],
+        "style": [
+          "height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          11,
+          5
+        ],
+        "type": "container",
+        "id": "",
+        "kind": "container",
+        "col": 2,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "alignment"
+        ]
+      },
+      {
+        "path": [
+          11,
+          5,
+          0
+        ],
+        "type": "checkbox",
+        "id": "ch_snap_anchor_point",
+        "kind": "checkbox",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "checked"
         ],
         "style": [
           "height",

@@ -14643,10 +14643,16 @@
             ]
           },
           {
-            "type": "separator"
+            "type": "separator",
+            "bind": {
+              "visible": "panel.snap_to_glyph_visible"
+            }
           },
           {
             "type": "row",
+            "bind": {
+              "visible": "panel.snap_to_glyph_visible"
+            },
             "children": [
               {
                 "type": "container",
@@ -14704,6 +14710,9 @@
           },
           {
             "type": "row",
+            "bind": {
+              "visible": "panel.snap_to_glyph_visible"
+            },
             "children": [
               {
                 "type": "container",

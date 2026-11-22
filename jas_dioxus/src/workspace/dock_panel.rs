@@ -243,6 +243,9 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     // The law is the shared host's (`character_host::live_values`), so the
     // panel body, the menu and the engine read one derivation.
     let cp = &st.character_panel;
+    // A panel-local UI flag, not a text attribute, so it stands whatever is
+    // selected: the Snap to Glyph section's `visible` reads it (row 215).
+    m.insert("snap_to_glyph_visible".into(), J::Bool(cp.snap_to_glyph_visible));
     let live = st.tab()
         .map(|tab| crate::interpreter::character_host::live_values(tab.model.document()))
         .unwrap_or_default();
