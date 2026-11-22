@@ -505,6 +505,18 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
         },
     );
 
+    // Concepts panel: the panel-selected concept id (or null), APP-held like
+    // the Symbols one. Drives the row highlight and Place Instance's
+    // bind.disabled. Absent until row 212 (11-22): on the web a selected
+    // concept never highlighted and Place stayed disabled.
+    m.insert(
+        "selected_concept".into(),
+        match &st.concepts_selected {
+            Some(id) => J::String(id.clone()),
+            None => J::Null,
+        },
+    );
+
     // Properties panel: the selection's EVALUATED bounding box (document
     // space, post-transform) in points — decision-5 Part B.1. The keys are
     // prop_-prefixed so they never collide with the Color panel's short y / h
