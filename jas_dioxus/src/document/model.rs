@@ -541,6 +541,21 @@ impl Model {
 
     /// Borrow the current document. The returned reference is invalidated
     /// by any subsequent mutating call on this model.
+    /// Push one isolation level, if `path` names a CONTAINER (a layer or a
+    /// group) in the document; returns whether it did (row 211). An empty
+    /// `container_id` resolves to the root path and an out-of-range one to
+    /// no element; both used to be pushed. The one home for both pushers
+    /// (the engine's `list_push` and the web renderer's).
+    pub fn push_isolation_level(&mut self, path: Vec<usize>) -> bool {
+        let is_container = matches!(self.document().get_element(&path),
+            Some(crate::geometry::element::Element::Layer(_))
+                | Some(crate::geometry::element::Element::Group(_)));
+        if is_container {
+            self.isolation_stack.push(path);
+        }
+        is_container
+    }
+
     pub fn document(&self) -> &Document {
         &self.document
     }

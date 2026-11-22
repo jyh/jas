@@ -2900,7 +2900,8 @@ fn run_yaml_effect(
             let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
             let val = super::expr::eval(value_expr, eval_ctx);
             if let super::expr_types::Value::Path(indices) = val {
-                if let Some(s) = st.isolation_stack_mut() { s.push(indices); }
+                // Row 211: only a container (`Model::push_isolation_level`).
+                if let Some(tab) = st.tabs.get_mut(st.active_tab) { tab.model.push_isolation_level(indices); }
             }
         }
         return deferred;
@@ -12246,6 +12247,32 @@ mod tests {
         dispatch_action("enter_isolation_mode", &params, &mut st);
         assert_eq!(st.isolation_stack().len(), 1);
         assert_eq!(st.isolation_stack()[0], vec![0]);
+    }
+
+    /// Row 211: an isolation level must be a CONTAINER in the document. An
+    /// empty `container_id` resolves to the root path and an out-of-range one
+    /// to no element; both were pushed (the Mac app then trapped). Swift's twin
+    /// is `enterIsolationModePushesOnlyAContainerPath`.
+    #[test]
+    fn enter_isolation_mode_pushes_only_a_container_path() {
+        for bad in ["", "9", "0.5"] {
+            let mut st = make_state_with_layers(vec![
+                ("A".into(), Visibility::Preview, false),
+                ("B".into(), Visibility::Preview, false),
+            ]);
+            let mut params = serde_json::Map::new();
+            params.insert("container_id".into(), serde_json::Value::String(bad.into()));
+            dispatch_action("enter_isolation_mode", &params, &mut st);
+            assert!(st.isolation_stack().is_empty(), "container_id {bad:?} pushed {:?}", st.isolation_stack());
+        }
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+            ("B".into(), Visibility::Preview, false),
+        ]);
+        let mut params = serde_json::Map::new();
+        params.insert("container_id".into(), serde_json::Value::String("1".into()));
+        dispatch_action("enter_isolation_mode", &params, &mut st);
+        assert_eq!(st.isolation_stack(), &[vec![1]], "a real layer is pushed");
     }
 
     /// Isolation belongs to the DOCUMENT, so it lives on each tab's `Model`
