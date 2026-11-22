@@ -375,6 +375,25 @@ private func runLayersEffects(_ effects: [Any], model: Model) {
     #expect(model.layersIsolationStack[0] == [1])
 }
 
+/// Row 211: an isolation level must be a CONTAINER in the document. An empty
+/// `container_id` resolves to the ROOT path `[]` (`path_from_id("")`), and an
+/// out-of-range one to a path with no element; both were pushed, and the
+/// Mac app then trapped (`Document.swift`: "Path must be non-empty", measured
+/// 11-22 through the FIFO's `action`). Neither is pushed now; a real layer is.
+@Test func enterIsolationModePushesOnlyAContainerPath() {
+    func model() -> Model {
+        Model(document: Document(layers: [Layer(name: "A", children: []), Layer(name: "B", children: [])]))
+    }
+    for bad in ["", "9", "0.5"] {
+        let m = model()
+        LayersPanel.dispatchYamlAction("enter_isolation_mode", model: m, params: ["container_id": bad])
+        #expect(m.layersIsolationStack.isEmpty, "container_id \"\(bad)\" pushed \(m.layersIsolationStack)")
+    }
+    let m = model()
+    LayersPanel.dispatchYamlAction("enter_isolation_mode", model: m, params: ["container_id": "1"])
+    #expect(m.layersIsolationStack == [[1]], "a real layer is pushed: \(m.layersIsolationStack)")
+}
+
 @Test func listPushInsideIfThen() {
     // list_push nested inside if-then. Tests that runOne's if handler
     // propagates threadedCtx into the nested runEffects invocation.

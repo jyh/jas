@@ -962,8 +962,11 @@ fn run_one<'h>(
             // saw it, and a TOOL's dispatch (no active panel) reached nothing.
             // The bucket below is still written, as a mirror kept by this one
             // writer, for the readers that evaluate against the store.
+            // Row 211: a level must be a CONTAINER in the document. An empty
+            // `container_id` resolves to the root path and an out-of-range one
+            // to no element; both were pushed. Swift's twin guards its push.
             if let (Some(m), Some(p)) = (model.as_deref_mut(), index_path(&value)) {
-                m.isolation_stack.push(p);
+                m.push_isolation_level(p);
             }
         }
         if parts.len() == 2 && parts[0] == "panel" {

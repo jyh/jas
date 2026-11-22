@@ -4163,7 +4163,9 @@ mod tests {
     fn a_tool_dispatched_isolation_action_reaches_the_models_stack() {
         let tool_with = |effect: serde_json::Value| YamlTool::from_workspace_tool(&serde_json::json!({
             "id": "g11_probe", "handlers": {"on_dblclick": [effect]}})).expect("probe spec");
-        let mut model = empty_layer_model();
+        // `[0, 0]` must be a CONTAINER (row 211), so the fixture is Swift's
+        // twin's shape: a layer holding a group holding a rect.
+        let mut model = model_with_rect_inside_group();
         let before = model.zoom_level;
         tool_with(serde_json::json!({"dispatch": {"action": "zoom_in",
             "params": {"anchor_x": "event.x", "anchor_y": "event.y"}}}))

@@ -23,7 +23,14 @@ func layersStackEffects(model: Model) -> [String: PlatformEffect] {
         guard let valueExpr = spec["value"] as? String else { return nil }
         if target == "panel.isolation_stack" {
             guard case .path(let indices) = evaluate(valueExpr, context: callCtx) else { return nil }
-            model.layersIsolationStack.append(indices)
+            // Row 211: a level must be a CONTAINER in the document. An empty
+            // `container_id` resolves to the root `[]` and an out-of-range one
+            // to no element; pushed, the app trapped on the next read.
+            guard pathIsValid(model.document, indices) else { return nil }
+            switch model.document.getElement(indices) {
+            case .layer, .group: model.layersIsolationStack.append(indices)
+            default: return nil
+            }
         } else if target == "active_document.recent_colors" {
             let hex: String?
             switch evaluate(valueExpr, context: callCtx) {
