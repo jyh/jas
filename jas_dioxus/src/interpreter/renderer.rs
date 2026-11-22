@@ -7849,17 +7849,6 @@ fn tree_elem_display_name(elem: &GeoElement) -> (String, bool) {
     (format!("<{}>", tree_type_label(elem)), false)
 }
 
-/// The isolation breadcrumb's segments: one per isolation-stack path that
-/// resolves, labelled as its tree row is (`tree_elem_display_name`: the
-/// element's own name, else `<Type>`). A NAMED group showed `<Group>` here
-/// while its row, Swift's native bar and the YAML segment (#827) showed its
-/// name (STATUS-jas row 74).
-fn tree_breadcrumb(doc: &crate::document::document::Document, stack: &[Vec<usize>]) -> Vec<(Vec<usize>, String)> {
-    stack.iter()
-        .filter_map(|p| doc.get_element(p).map(|elem| (p.clone(), tree_elem_display_name(elem).0)))
-        .collect()
-}
-
 fn tree_flatten_rc_children(
     children: &[std::rc::Rc<GeoElement>],
     depth: usize,
@@ -8205,14 +8194,6 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     let isolation_root: Option<Vec<usize>> = rctx.app.borrow()
         .isolation_stack().last().cloned();
 
-    // Build breadcrumb data for the isolation header
-    let breadcrumb: Vec<(Vec<usize>, String)> = {
-        let st = rctx.app.borrow();
-        let stack = st.isolation_stack().to_vec();
-        let doc = st.tab().map(|t| t.model.document().clone());
-        doc.map(|d| tree_breadcrumb(&d, &stack)).unwrap_or_default()
-    };
-
     // Auto-expand ancestors of element-selected paths so selected elements
     // are always visible in the tree (without this, selecting an element
     // on the canvas inside a collapsed group would hide it).
@@ -8436,67 +8417,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             tabindex: 0,
             onkeydown: on_keydown,
 
-            // Breadcrumb bar (isolation mode only)
-            if !breadcrumb.is_empty() {
-                {
-                    let home_app = app.clone();
-                    let mut home_rev = revision;
-                    rsx! {
-                        div {
-                            style: "display:flex;align-items:center;gap:4px;padding:2px 6px;background-color:var(--jas-pane-bg-dark,#2a2a2a);border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:var(--jas-border,#555);font-size:10px;color:var(--jas-text-dim,#999);flex-shrink:0;",
-                            span {
-                                style: "cursor:pointer;color:var(--jas-text,#ccc);",
-                                onclick: move |_: Event<MouseData>| {
-                                    let a = home_app.clone();
-                                    spawn(async move {
-                                        // The chevron's declared action (layers.yaml
-                                        // lp_breadcrumb): level 0 exits isolation. The
-                                        // borrow ends with its block, before the bump.
-                                        {
-                                            let mut params = serde_json::Map::new();
-                                            params.insert("level_index".into(), serde_json::json!(0));
-                                            let _ = dispatch_action("exit_isolation_to_level", &params, &mut a.borrow_mut());
-                                        }
-                                        home_rev += 1;
-                                    });
-                                },
-                                "⌂"
-                            }
-                            for (idx, (bp, bl)) in breadcrumb.iter().enumerate() {
-                                {
-                                    let bp = bp.clone();
-                                    let bl = bl.clone();
-                                    let exit_to = idx + 1;
-                                    let b_app = app.clone();
-                                    let mut b_rev = revision;
-                                    rsx! {
-                                        span { "> " }
-                                        span {
-                                            key: "{bp:?}",
-                                            style: "cursor:pointer;color:var(--jas-text,#ccc);",
-                                            onclick: move |_: Event<MouseData>| {
-                                                let a = b_app.clone();
-                                                let target = exit_to;
-                                                spawn(async move {
-                                                    // The crumb's declared action: keep
-                                                    // `level._index + 1` levels.
-                                                    {
-                                                        let mut params = serde_json::Map::new();
-                                                        params.insert("level_index".into(), serde_json::json!(target));
-                                                        let _ = dispatch_action("exit_isolation_to_level", &params, &mut a.borrow_mut());
-                                                    }
-                                                    b_rev += 1;
-                                                });
-                                            },
-                                            "{bl}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Row 210: no breadcrumb of its own. The declared `lp_breadcrumb`
+            // (layers.yaml) draws above the tree in isolation, now that the
+            // body's render scope carries the model-held stack
+            // (`dock_panel::live_panel_state_table`), as on the Mac.
 
             div {
                 style: "overflow-y:auto;flex:1;min-height:0;",
@@ -8737,8 +8661,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                             // (events.rs:665, where it borrows the callback to
                             // invoke it). One cause, two symptoms.
                             //
-                            // The breadcrumb handler a few lines up has always
-                            // been correct by accident of style -- it writes
+                            // The breadcrumb handler that sat a few lines up
+                            // (removed by row 210) was correct by accident of style -- it writes
                             // `a.borrow_mut().field = x;`, whose temporary drops
                             // at the semicolon, and only then bumps its signal.
                             //
@@ -15788,9 +15712,12 @@ mod tests {
         assert!(st.layers_collapsed.contains(&vec![1]));
     }
 
-    /// Row 74: a breadcrumb segment is labelled as its tree row: a named
-    /// group shows its name (it showed `<Group>`), an unnamed one `<Group>`,
-    /// a named layer its name; a path with no element has no segment.
+    /// Row 74, on the declared breadcrumb (row 210 removed the web's own bar,
+    /// whose `tree_breadcrumb` this used to pin): a segment is labelled as its
+    /// tree row, by `lp_breadcrumb_segment`'s own expression (read from
+    /// layers.yaml's bytes, never retyped), in the Layers body's real render
+    /// scope. A named layer shows its name, a named group its name, an
+    /// unnamed one `<Group>`, and a path with no element has no segment.
     #[test]
     fn the_isolation_breadcrumb_names_a_named_group() {
         use crate::document::document::Document;
@@ -15805,11 +15732,40 @@ mod tests {
             isolated_blending: false, knockout_group: false, common: named("Car"),
             color: None,
         });
-        let doc = Document { layers: vec![layer], ..Document::default() };
-        let got = tree_breadcrumb(&doc, &[vec![0], vec![0, 0], vec![0, 1], vec![0, 9]]);
-        let labels: Vec<&str> = got.iter().map(|(_, l)| l.as_str()).collect();
-        assert_eq!(labels, vec!["Car", "Wheels", "<Group>"]);
-        assert_eq!(got[1].0, vec![0, 0]);
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        st.tabs[st.active_tab].model.set_document_for_test(Document { layers: vec![layer], ..Document::default() });
+        for p in [vec![0], vec![0, 0], vec![0, 1], vec![0, 9]] {
+            st.isolation_stack_mut().expect("a tab").push(p);
+        }
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "layers_panel_content")
+            .expect("the workspace loads");
+        let yaml = std::fs::read_to_string("../workspace/panels/layers.yaml").expect("layers.yaml");
+        let seg = &yaml[yaml.find("id: lp_breadcrumb_segment").expect("the declared segment")..];
+        let open = seg.find("content: \"{{").expect("the segment's content") + "content: \"{{".len();
+        let expr = &seg[open..open + seg[open..].find("}}").expect("its close")];
+        let rows = ctx["active_document"]["element_tree"].as_array().expect("element_tree").clone();
+        let mut got = Vec::new();
+        for path in [&[0u64][..], &[0, 0], &[0, 1], &[0, 9]] {
+            let want = serde_json::json!(path);
+            let row = rows.iter().find(|r| {
+                r.get("path").map(|v| v.get("__path__").unwrap_or(v).clone()) == Some(want.clone())
+            });
+            if let Some(r) = row {
+                let mut c = ctx.clone();
+                c["level"] = r.clone();
+                got.push(format!("{:?}", crate::interpreter::expr::eval(expr, &c)));
+            }
+        }
+        assert!(crate::interpreter::menu_state::eval_bool(
+            "tree_rows_at(active_document.element_tree, panel.isolation_stack).length == 3", &ctx),
+            "three of the four paths have a row; the fourth draws no segment");
+        assert_eq!(got.len(), 3, "rows: {got:?}");
+        assert!(got[0].contains("Car") && got[1].contains("Wheels") && got[2].contains("<Group>"),
+                "segment labels {got:?} from expression {expr:?}");
     }
 
     #[test]
