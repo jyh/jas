@@ -5771,18 +5771,28 @@ mod a7_knockout_pixel_tests {
         assert!(worst <= fx::TOL, "A7 on the web walk off the law by {worst}: {report}");
     }
 
-    /// THE EDGE ARM (mutant 5's): `f = 0.5` at layer 2's half-pixel edge; the
-    /// ADDITIVE close gives the law's value there, source-over does not. The
-    /// interior pixels of the same scene equal ordinary compositing.
+    /// THE EDGE ARMS (A7.1 §4): `f = 0.5` at layer 2's half-pixel edge, for
+    /// each of `fx::EDGES`. A7.1 counts coverage once; the ratified child term
+    /// (`f·T`, mutant M8) reads `expect_by(.., Ratified)` there, which
+    /// `assert_edge_arms_separate` proves is more than 2·TOL away. The
+    /// interior pixels of each scene equal what the law gives there.
     #[wasm_bindgen_test]
-    fn a7_the_web_knockout_edge_pixel_is_the_additive_law() {
-        let got = render_at(&fx::edge_document(false, true), &[fx::EDGE_X, 5, 25]);
-        let ordinary = render_at(&fx::edge_document(false, false), &[fx::EDGE_X, 5, 25]);
-        let want = fx::expect(false, true, &fx::edge_children());
-        assert!(fx::off(got[0], want) <= fx::TOL,
-                "edge pixel: got {:?}, the law gives {want:?} (ordinary compositing reads {:?})",
-                got[0], ordinary[0]);
-        for i in 1..3 {
+    fn a7_the_web_knockout_edge_pixels_count_coverage_once() {
+        let mut report = Vec::new();
+        let mut worst = 0;
+        for (arm, &(name, ..)) in fx::EDGES.iter().enumerate() {
+            let got = render_at(&fx::edge_document(arm, false, true), &[fx::EDGE_X]);
+            let want = fx::expect(false, true, &fx::edge_children(arm));
+            let ratified = fx::expect_by(false, true, &fx::edge_children(arm), fx::ChildTerm::Ratified);
+            worst = worst.max(fx::off(got[0], want));
+            report.push(format!("{name}: got {:?} A7.1 {want:?} ratified {ratified:?}", got[0]));
+        }
+        let report = report.join("; ");
+        console_log!("A7.1 web walk edge arms worst {worst}: {report}");
+        assert!(worst <= fx::TOL, "A7.1 edge arms on the web walk off the law by {worst}: {report}");
+        let got = render_at(&fx::edge_document(0, false, true), &[5, 25]);
+        let ordinary = render_at(&fx::edge_document(0, false, false), &[5, 25]);
+        for i in 0..2 {
             assert!(fx::off(got[i], ordinary[i]) <= fx::TOL,
                     "interior pixel {i}: knockout {:?} != ordinary {:?}", got[i], ordinary[i]);
         }

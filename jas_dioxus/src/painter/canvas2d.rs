@@ -2237,14 +2237,20 @@ mod a7_knockout_bracket_tests {
         assert!(worst <= fx::TOL, "A7 on Canvas2dPainter off the law by {worst}: {report}");
     }
 
-    /// The edge arm through the seam (mutant 5's).
+    /// The edge arms through the seam (A7.1 §4; mutants M8 and M11 red E1).
     #[wasm_bindgen_test]
-    fn a7_the_bracket_edge_pixel_is_the_additive_law() {
-        let got = render_at(&fx::edge_document(false, true), &[fx::EDGE_X]);
-        let ordinary = render_at(&fx::edge_document(false, false), &[fx::EDGE_X]);
-        let want = fx::expect(false, true, &fx::edge_children());
-        assert!(fx::off(got[0], want) <= fx::TOL,
-                "edge pixel: got {:?}, the law gives {want:?} (ordinary compositing reads {:?})",
-                got[0], ordinary[0]);
+    fn a7_the_bracket_edge_pixels_count_coverage_once() {
+        let mut report = Vec::new();
+        let mut worst = 0;
+        for (arm, &(name, ..)) in fx::EDGES.iter().enumerate() {
+            let got = render_at(&fx::edge_document(arm, false, true), &[fx::EDGE_X]);
+            let want = fx::expect(false, true, &fx::edge_children(arm));
+            let ratified = fx::expect_by(false, true, &fx::edge_children(arm), fx::ChildTerm::Ratified);
+            worst = worst.max(fx::off(got[0], want));
+            report.push(format!("{name}: got {:?} A7.1 {want:?} ratified {ratified:?}", got[0]));
+        }
+        let report = report.join("; ");
+        console_log!("A7.1 Canvas2dPainter edge arms worst {worst}: {report}");
+        assert!(worst <= fx::TOL, "A7.1 edge arms on Canvas2dPainter off the law by {worst}: {report}");
     }
 }
