@@ -49,18 +49,26 @@ private func composite(_ dst: [Double], _ c: [Double], _ a: Double, _ blend: Ble
     return out
 }
 
+/// The knockout child term: A7.1's (the law of record, ratified 11-22), or
+/// A7's first ratified `f·T`, kept ONLY so the edge arms can show they
+/// separate it (mutant M8). Nothing renders the second.
+private enum ChildTerm { case a71, ratified }
+
 /// ⭐ THE EXPECTATION, BY THE LAW. NEITHER: `S ← c(S, E_i)`. ISOLATED: onto a
-/// transparent L, then L over B0. KNOCKOUT: `S ← B0`; `T_i = c(B0, E_i)`;
-/// `S ← (1 − f_i)·S + f_i·T_i`, f = coverage. BOTH: knockout with B0
-/// transparent, then over the real B0. Returns 0–255 straight RGB.
-private func law(iso: Bool, ko: Bool, _ children: [Child]) -> [Int] {
+/// transparent L, then L over B0. KNOCKOUT (A7.1): `S ← B0`;
+/// `T_i = c(B0, E_i)`; `S ← (1 − f_i)·S + [T_i − (1 − f_i)·B0]`, f = coverage
+/// (coverage counts once). BOTH: knockout with B0 transparent, then over the
+/// real B0. Returns 0–255 straight RGB.
+private func law(iso: Bool, ko: Bool, _ children: [Child], term: ChildTerm = .a71) -> [Int] {
     let opaqueB0 = b0 + [1]
     let start = iso ? [0.0, 0, 0, 0] : opaqueB0
     var s = start
     for (c, op, blend, cov) in children {
         if ko {
             let t = composite(start, c, op * cov, blend)
-            s = (0..<4).map { (1 - cov) * s[$0] + cov * t[$0] }
+            s = (0..<4).map { term == .a71
+                ? (1 - cov) * s[$0] + t[$0] - (1 - cov) * start[$0]
+                : (1 - cov) * s[$0] + cov * t[$0] }
         } else {
             s = composite(s, c, op * cov, blend)
         }
@@ -80,11 +88,26 @@ private func children(at x: Int) -> [Child] {
             (leaf, 0.5, .multiply, (10..<30).contains(cx) ? 1 : 0)]
 }
 
-private func scene(iso: Bool, ko: Bool, edge: Bool) -> Document {
-    let l2: Element = edge
-        ? .rect(Rect(x: 10.5, y: 0, width: 19.5, height: 10, fill: Fill(color: Color(r: 0, g: 0, b: 1))))
-        : .rect(Rect(x: 10, y: 0, width: 20, height: 10, fill: Fill(color: Color(r: 0, g: 0.5, b: 1)),
-                     opacity: 0.5, blendMode: .multiply))
+/// The edge arms (addendum A7.1 §4, the twin of `a7_fixture::EDGES`): layer
+/// 2's leaf, its left edge on a half pixel. (name, document colour, landed
+/// colour, element opacity, blend.) E1 separates A7.1 from the ratified term
+/// but equals ordinary compositing; E2 and E3 separate all three.
+private let edges: [(String, Color, [Double], Double, Blend)] = [
+    ("E1 opaque Normal blue", Color(r: 0, g: 0, b: 1), blue, 1, .normal),
+    ("E2 Normal blue at 0.5", Color(r: 0, g: 0, b: 1), blue, 0.5, .normal),
+    ("E3 the Multiply leaf at 0.5", Color(r: 0, g: 0.5, b: 1), leaf, 0.5, .multiply),
+]
+
+private func scene(iso: Bool, ko: Bool, edge: Int? = nil) -> Document {
+    let l2: Element
+    if let e = edge {
+        let (_, c, _, op, blend) = edges[e]
+        l2 = .rect(Rect(x: 10.5, y: 0, width: 19.5, height: 10, fill: Fill(color: c),
+                        opacity: op, blendMode: blend == .multiply ? .multiply : .normal))
+    } else {
+        l2 = .rect(Rect(x: 10, y: 0, width: 20, height: 10, fill: Fill(color: Color(r: 0, g: 0.5, b: 1)),
+                        opacity: 0.5, blendMode: .multiply))
+    }
     return Document(
         layers: [Layer(name: "L1", children: [.rect(Rect(x: 0, y: 0, width: 20, height: 10,
                                                           fill: Fill(color: Color(r: 1, g: 0, b: 0))))]),
@@ -95,7 +118,7 @@ private func scene(iso: Bool, ko: Bool, edge: Bool) -> Document {
 
 /// Draw the real `CanvasNSView` into a raw sRGB RGBA8 bitmap and read straight
 /// RGB at row `Y` for each x.
-@MainActor private func render(iso: Bool, ko: Bool, edge: Bool = false, _ xs: [Int]) -> [[Int]] {
+@MainActor private func render(iso: Bool, ko: Bool, edge: Int? = nil, _ xs: [Int]) -> [[Int]] {
     let doc = scene(iso: iso, ko: ko, edge: edge)
     let view = CanvasNSView()
     view.frame = NSRect(x: 0, y: 0, width: W, height: H)
@@ -146,17 +169,35 @@ private let regimes: [(String, Bool, Bool)] = [
     #expect(worst <= 3, "A7 on the Mac off the law by \(worst): \(report.joined(separator: "; "))")
 }
 
-/// THE EDGE ARM (mutant 5's): both layers opaque Normal, layer 2's edge on a
-/// half pixel, f = 0.5 there. `.plusLighter` gives the law's value; source-over
-/// in its place does not. The interior pixels equal ordinary compositing.
-@Test @MainActor func theKnockoutEdgePixelIsTheAdditiveLawOnTheMac() {
-    let got = render(iso: false, ko: true, edge: true, [edgeX, 5, 25])
-    let ordinary = render(iso: false, ko: false, edge: true, [edgeX, 5, 25])
-    let want = law(iso: false, ko: true, [(red, 1, .normal, 1), (blue, 1, .normal, 0.5)])
-    print("A7 Mac edge: got \(got[0]) law \(want) ordinary \(ordinary[0])")
-    #expect(off(got[0], want) <= 3, "edge: got \(got[0]), the law gives \(want) (ordinary \(ordinary[0]))")
-    #expect(off(got[1], ordinary[1]) <= 3 && off(got[2], ordinary[2]) <= 3,
-            "interior: knockout \(got[1...]) vs ordinary \(ordinary[1...])")
+/// THE EDGE ARMS (A7.1 §4): layer 2's edge on a half pixel, f = 0.5 there,
+/// for each of `edges`. A7.1 counts coverage once; the ratified child term
+/// (mutant M8) reads `law(.., term: .ratified)`. The arm's power is asserted,
+/// not inferred: every arm separates A7.1 from the ratified term, and E2 and
+/// E3 separate ordinary, A7.1 and ratified pairwise, by more than 2·3. The
+/// interior pixels of E1's scene equal ordinary compositing.
+@Test @MainActor func theKnockoutEdgePixelsCountCoverageOnceOnTheMac() {
+    var worst = 0
+    var report: [String] = []
+    for (e, (name, _, landedColour, op, blend)) in edges.enumerated() {
+        let ch: [Child] = [(red, 1, .normal, 1), (landedColour, op, blend, 0.5)]
+        let want = law(iso: false, ko: true, ch)
+        let ratified = law(iso: false, ko: true, ch, term: .ratified)
+        let ordinary = law(iso: false, ko: false, ch)
+        #expect(off(want, ratified) > 6, "\(name): A7.1 \(want) and ratified \(ratified) not separable")
+        if e > 0 {
+            #expect(off(want, ordinary) > 6 && off(ordinary, ratified) > 6,
+                    "\(name): ordinary \(ordinary), A7.1 \(want), ratified \(ratified) not pairwise separable")
+        }
+        let got = render(iso: false, ko: true, edge: e, [edgeX])[0]
+        worst = max(worst, off(got, want))
+        report.append("\(name): got \(got) A7.1 \(want) ratified \(ratified) ordinary \(ordinary)")
+    }
+    print("A7.1 Mac edge arms worst \(worst): " + report.joined(separator: "; "))
+    #expect(worst <= 3, "A7.1 edge arms on the Mac off the law by \(worst): \(report.joined(separator: "; "))")
+    let got = render(iso: false, ko: true, edge: 0, [5, 25])
+    let ordinary = render(iso: false, ko: false, edge: 0, [5, 25])
+    #expect(off(got[0], ordinary[0]) <= 3 && off(got[1], ordinary[1]) <= 3,
+            "interior: knockout \(got) vs ordinary \(ordinary)")
 }
 
 private extension Array {
