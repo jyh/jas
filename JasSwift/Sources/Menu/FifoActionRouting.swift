@@ -167,6 +167,9 @@ public enum FifoLive {
     /// (`CanvasNSView.repaintIfRenderStateChanged` returned true). The FIFO's
     /// `repaints` reads it; `shot` cannot, because it draws on demand.
     nonisolated(unsafe) public static var canvasRepaints: Int = 0
+    /// The Layers row the tree's `onHover` last marked as under the pointer,
+    /// or nil (row 208). Row 142's right-click selects that row first.
+    nonisolated(unsafe) public static var layersHoveredRow: [Int]? = nil
     /// ContentView's own dialog opener (the menu's `openYamlDialogFromMenu`),
     /// published so the FIFO's `dialog_open` opens a real SwiftUI dialog.
     nonisolated(unsafe) public static var openDialog: ((String) -> Void)? = nil
@@ -207,6 +210,20 @@ public enum FifoRepaints {
     public static func write(count: Int, to path: String) throws {
         try Data(json(count: count).utf8)
             .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+}
+
+/// `hover <path>`: `{"layers_hovered_row": [..] | null}` (FifoLive).
+public enum FifoHover {
+    public static func json(row: [Int]?) -> String {
+        let v: Any = row ?? NSNull()
+        let data = try! JSONSerialization.data(
+            withJSONObject: ["layers_hovered_row": v], options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public static func write(row: [Int]?, to path: String) throws {
+        try Data(json(row: row).utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 }
 

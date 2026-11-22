@@ -24,6 +24,12 @@ import JasLib
 //                                  repaint gate fired (shot cannot see that)
 //     shot <path>               -> the main window's content as a PNG, drawn
 //                                  in-process (works with the console locked)
+//     events <json>             -> an input SEQUENCE posted into the app's own
+//                                  event queue (FifoEvents), routed by AppKit
+//                                  as a person's input is
+//     hover <path>              -> the Layers row onHover last marked
+//     menu <path>               -> the titles of the last menu that began
+//                                  tracking (FifoMenuWatch)
 //     action <name> [json]      -> <name> with optional JSON params, run
 //                                  through the shared YAML effects pipeline
 //                                  (LayersPanel.dispatchYamlAction — the same
@@ -67,6 +73,11 @@ extension JasAppDelegate {
         testFifoFd = fd
         // A harness reads the canvas's view back through accessibility.
         FifoView.reportsToAccessibility = true
+        // `menu <path>` reads what the last menu offered (row 208).
+        MainActor.assumeIsolated {
+            FifoMenuWatch.start()
+            FifoTargets.enabled = true  // SwiftUI targets record their frames
+        }
         testFifoBuffer = Data()
         // Read on the app's MAIN run loop: every command mutates the
         // tool / document, which must happen on the main thread.
@@ -287,6 +298,44 @@ extension JasAppDelegate {
                     NSLog("test-fifo: shot wrote %@ %.0fx%.0f", rest, size.width, size.height)
                 } catch {
                     NSLog("test-fifo: %@", "\(error)")
+                }
+            }
+        case "events":
+            // events <json>: a whole input sequence, posted at once into the
+            // app's own queue (FifoEvents; row 208). Every identifier is
+            // resolved before anything is posted, so a refusal posts nothing.
+            guard let window = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) else {
+                NSLog("test-fifo: events REFUSED (no visible window)")
+                return
+            }
+            MainActor.assumeIsolated {
+                do {
+                    let specs = try FifoEvents.parse(rest)
+                    let evs = try FifoEvents.build(specs, window: window)
+                    let warps = try FifoEvents.warps(specs, window: window)
+                    FifoEvents.post(evs, warps: warps)
+                    NSLog("test-fifo: events posted %ld (warps %ld): %@", evs.count, warps.count,
+                          FifoEvents.receipt(evs))
+                } catch {
+                    NSLog("test-fifo: %@", "\(error)")
+                }
+            }
+        case "hover":
+            // hover <path>: the Layers row onHover last marked (FifoHover).
+            do {
+                try FifoHover.write(row: FifoLive.layersHoveredRow, to: rest)
+                NSLog("test-fifo: hover wrote %@", rest)
+            } catch {
+                NSLog("test-fifo: hover REFUSED %@ (%@)", rest, "\(error)")
+            }
+        case "menu":
+            // menu <path>: the last menu that began tracking (FifoMenuWatch).
+            MainActor.assumeIsolated {
+                do {
+                    try FifoMenuWatch.write(to: rest)
+                    NSLog("test-fifo: menu wrote %@", rest)
+                } catch {
+                    NSLog("test-fifo: menu REFUSED %@ (%@)", rest, "\(error)")
                 }
             }
         default:

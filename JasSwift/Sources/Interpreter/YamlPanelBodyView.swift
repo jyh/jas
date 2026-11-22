@@ -220,12 +220,26 @@ struct YamlElementView: View {
         }
     }
 
+    /// Whether this node renders by expanding its `foreach` + `do`.
+    ///
+    /// NOT a `tree_view`: the Mac's Layers tree is `TreeViewContent`, which
+    /// builds its rows from the live document and carries the tree's own law
+    /// (the row context menu, the right-click that selects its row, the Delete
+    /// orphan gate, keyboard rows, drag-and-drop). `lp_tree` gained `foreach` +
+    /// `do` on 10-27 (567b4031) for the PLAN a native shell expands, and this
+    /// branch, which runs before the type dispatch, then took it first, so
+    /// none of that ran on the live Mac panel (row 117 (Mac), measured 11-22).
+    /// The web's twin is `expands_as_foreach` (renderer.rs, #923).
+    static func expandsAsForeach(_ el: [String: Any]) -> Bool {
+        el["foreach"] != nil && el["do"] != nil && el["type"] as? String != "tree_view"
+    }
+
     @ViewBuilder
     private var bodyContent: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
         if !isVisible() {
             EmptyView()
-        } else if element["foreach"] != nil && element["do"] != nil {
+        } else if Self.expandsAsForeach(element) {
             // Repeat directive: expand template for each item in source list.
             renderRepeat()
         } else if let tmpl = element["_template"] as? String,
@@ -4456,11 +4470,15 @@ struct TreeViewContent: View {
                 : nil
         )
         .contentShape(Rectangle())
+        // A harness finds a row by this (row 208: the FIFO's `events` posts a
+        // right-click at its centre). Inert without `--test-fifo`.
+        .fifoTarget("layers_row_" + path.map(String.init).joined(separator: "_"))
         .onTapGesture {
             handleRowTap(path: path)
         }
         .onHover { inside in
             if inside { hoveredRow = path } else if hoveredRow == path { hoveredRow = nil }
+            FifoLive.layersHoveredRow = hoveredRow  // the FIFO's `hover` (row 208)
         }
         .contextMenu {
             // Row 141 part 3: layers.yaml's `context_menu:`, drawn in this
