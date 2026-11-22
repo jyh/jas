@@ -4456,6 +4456,9 @@ struct TreeViewContent: View {
                 : nil
         )
         .contentShape(Rectangle())
+        // A harness finds a row by this (row 208: the FIFO's `events` posts a
+        // right-click at its centre). Inert without `--test-fifo`.
+        .fifoTarget("layers_row_" + path.map(String.init).joined(separator: "_"))
         .onTapGesture {
             handleRowTap(path: path)
         }
