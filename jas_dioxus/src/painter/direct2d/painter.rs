@@ -513,12 +513,21 @@ impl<'a> Direct2DPainter<'a> {
         Some((brt, rt))
     }
 
-    /// A7: close the innermost knockout group's open child, if one is open:
-    /// `T ← T·f` (DESTINATION_IN on the child), then on the parent
-    /// `S ← S·(1−f)` (DESTINATION_OUT) and `S ← S + T` (PLUS) — the law
-    /// `S ← (1−f)·S + f·T` exactly. All at identity: every surface here is a
-    /// device-space bitmap. ⛔ SOURCE_OVER in place of PLUS gives
-    /// `T + (1−α_T)·S`, a contract violation, not an approximation.
+    /// A7.1: close the innermost knockout group's open child, if one is
+    /// open: `S ← (1−f)·S + [T − (1−f)·B0]` (coverage counts once), by Route
+    /// D. `Q'` = `B0` erased by `f` (DESTINATION_OUT) over an opaque black kept
+    /// inside `B0` (DESTINATION_IN); the bracket `R` = a `CLSID_D2D1Blend`
+    /// DIFFERENCE graph, INPUT 0 `T` and INPUT 1 `Q'` (for opaque operands
+    /// `|T − Q'| = T − Q'`, since `T ≥ (1−f)·B0`); then on the parent
+    /// `S ← S·(1−f)` (DESTINATION_OUT) and `S ← S + R` (PLUS). All at
+    /// identity: every surface here is a device-space bitmap. A7's
+    /// DESTINATION_IN keep is gone (the bracket is zero outside the shape).
+    /// Both platform behaviours are measured exact within 1 by
+    /// `a71_difference_of_two_opaque_pixels_is_the_absolute_difference` and
+    /// `a71_plus_saturates_alpha_at_one_with_the_colour_sum_intact`. ⛔
+    /// SOURCE_OVER in place of PLUS gives `T + (1−α_T)·S`, a contract
+    /// violation. ⚠️ Exact only where `B0` is opaque or empty per pixel
+    /// (addendum A7.1 §2), the declared limit.
     fn close_knockout_child(&mut self) {
         let Some(Some(g)) = self.knockouts.last() else { return };
         if self.layers.len() != g.depth + 1
@@ -533,25 +542,102 @@ impl<'a> Direct2DPainter<'a> {
             unsafe { let _ = child.rt.EndDraw(None, None); }
             return;
         };
+        let b0 = g.b0.clone();
         let Ok(cdc) = child.rt.cast::<ID2D1DeviceContext>() else { return };
-        unsafe {
-            child.rt.SetTransform(&Matrix3x2::identity());
-            cdc.DrawImage(&f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
-                          D2D1_COMPOSITE_MODE_DESTINATION_IN);
-            let _ = child.rt.EndDraw(None, None);
-        }
-        let Ok(t) = (unsafe { child.brt.GetBitmap() }) else { return };
         let parent = self.rt();
         let Ok(pdc) = parent.cast::<ID2D1DeviceContext>() else { return };
+        let Some(bracket) = Self::knockout_bracket(&pdc, &child.brt, &b0, &f) else {
+            // No scratch surface: keep T inside f, A7's first child term. Off
+            // by f·(1−f)·B0 on antialiased edges only, where adding T
+            // unsubtracted would add B0 everywhere outside the shape.
+            unsafe {
+                child.rt.SetTransform(&Matrix3x2::identity());
+                cdc.DrawImage(&f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                              D2D1_COMPOSITE_MODE_DESTINATION_IN);
+                let _ = child.rt.EndDraw(None, None);
+            }
+            let Ok(t) = (unsafe { child.brt.GetBitmap() }) else { return };
+            Self::erase_and_add(&parent, &pdc, &f, &t);
+            return;
+        };
+        Self::erase_and_add(&parent, &pdc, &f, &bracket);
+    }
+
+    /// `S ← S·(1−f)` (DESTINATION_OUT), then `S ← S + r` (PLUS), at identity.
+    fn erase_and_add(parent: &ID2D1RenderTarget, pdc: &ID2D1DeviceContext,
+                     f: &ID2D1Bitmap, r: &ID2D1Bitmap) {
         let mut saved = Matrix3x2::identity();
         unsafe {
             parent.GetTransform(&mut saved);
             parent.SetTransform(&Matrix3x2::identity());
-            pdc.DrawImage(&f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+            pdc.DrawImage(f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
                           D2D1_COMPOSITE_MODE_DESTINATION_OUT);
-            pdc.DrawImage(&t, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+            pdc.DrawImage(r, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
                           D2D1_COMPOSITE_MODE_PLUS);
             parent.SetTransform(&saved);
+        }
+    }
+
+    /// A7.1, Route D: end the child `T` (still drawing on `child`) and return
+    /// the bracket `T − (1−f)·B0` as a device-space bitmap.
+    ///
+    /// Everything that can fail short of a device loss (the three scratch
+    /// surfaces, the blend graph and its mode, `Q'`) is made FIRST, while `T`
+    /// is still open: on `None` from that phase `T` is untouched and the
+    /// caller's fallback draws on it. After `T` is ended only object reads
+    /// remain; if one fails the child's bracket is dropped (S is erased by f
+    /// and nothing is added), which a live device does not produce.
+    fn knockout_bracket(pdc: &ID2D1DeviceContext, child: &ID2D1BitmapRenderTarget,
+                        b0: &ID2D1Bitmap, f: &ID2D1Bitmap) -> Option<ID2D1Bitmap> {
+        let clear = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+        let black = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+        let scratch = || -> Option<(ID2D1BitmapRenderTarget, ID2D1RenderTarget, ID2D1DeviceContext)> {
+            let brt = unsafe { pdc.CreateCompatibleRenderTarget(None, None, None, Default::default()) }.ok()?;
+            let rt: ID2D1RenderTarget = brt.cast().ok()?;
+            let dc: ID2D1DeviceContext = rt.cast().ok()?;
+            Some((brt, rt, dc))
+        };
+        let (ebrt, ert, edc) = scratch()?;
+        let (qbrt, qrt, qdc) = scratch()?;
+        let (rbrt, rrt, rdc) = scratch()?;
+        let fx = unsafe { rdc.CreateEffect(&CLSID_D2D1Blend) }.ok()?;
+        unsafe {
+            fx.SetValue(D2D1_BLEND_PROP_MODE.0 as u32, D2D1_PROPERTY_TYPE_ENUM,
+                        &D2D1_BLEND_MODE_DIFFERENCE.0.to_le_bytes()).ok()?;
+            // B0 erased by f.
+            ert.BeginDraw();
+            ert.SetTransform(&Matrix3x2::identity());
+            ert.Clear(Some(&clear));
+            edc.DrawImage(b0, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            edc.DrawImage(f, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+            ert.EndDraw(None, None).ok()?;
+            let erased = ebrt.GetBitmap().ok()?;
+            // Q' = erased over black-inside-B0: colour (1−f)·B0, alpha α_B0.
+            qrt.BeginDraw();
+            qrt.SetTransform(&Matrix3x2::identity());
+            qrt.Clear(Some(&black));
+            qdc.DrawImage(b0, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_DESTINATION_IN);
+            qdc.DrawImage(&erased, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            qrt.EndDraw(None, None).ok()?;
+            let q = qbrt.GetBitmap().ok()?;
+            // T is ended only now.
+            let _ = child.EndDraw(None, None);
+            let t = child.GetBitmap().ok()?;
+            rrt.BeginDraw();
+            rrt.SetTransform(&Matrix3x2::identity());
+            rrt.Clear(Some(&clear));
+            // ⛔ INPUT 0 IS THE DESTINATION (T), INPUT 1 THE SOURCE (Q').
+            fx.SetInput(0, &t, true);
+            fx.SetInput(1, &q, true);
+            let out = fx.GetOutput().ok()?;
+            rdc.DrawImage(&out, None, None, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            rrt.EndDraw(None, None).ok()?;
+            rbrt.GetBitmap().ok()
         }
     }
 

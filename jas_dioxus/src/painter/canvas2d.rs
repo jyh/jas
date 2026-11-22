@@ -187,8 +187,12 @@ impl<'a> Canvas2dPainter<'a> {
         self.group_alpha_stack = child.saved_group_alphas;
         let Some(Some(g)) = self.knockouts.last_mut() else { return };
         let Some(shape) = g.shape.take() else { return };
-        if let Some(q) = Self::backdrop_share(&g.b0, &shape) {
-            q.composite_onto(child.surface.ctx(), CompositeOp::Blend(BlendMode::Difference), 1.0);
+        match Self::backdrop_share(&g.b0, &shape) {
+            Some(q) => q.composite_onto(child.surface.ctx(), CompositeOp::Blend(BlendMode::Difference), 1.0),
+            // No scratch surface: keep T inside f, A7's first child term. Off
+            // by f·(1−f)·B0 on antialiased edges only, where adding T
+            // unsubtracted would add B0 everywhere outside the shape.
+            None => shape.composite_onto(child.surface.ctx(), CompositeOp::DestinationIn, 1.0),
         }
         let parent = self.target();
         shape.composite_onto(parent, CompositeOp::DestinationOut, 1.0);
