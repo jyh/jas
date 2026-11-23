@@ -61,6 +61,7 @@ private func fifoTwoRectModel(selected: Bool) -> Model {
     // analog of Python monkeypatching dock_panel._dispatch_yaml_action).
     FifoActionRouting.dispatch(
         "some_panel_action", model: model, params: ["k": 1],
+        knows: { _ in true },
         fallthrough: { name, _, params in calls.append((name, params)) })
     // Not a native action -> routed to the generic panel dispatcher.
     #expect(calls.count == 1)
@@ -84,6 +85,7 @@ private func fifoTwoRectModel(selected: Bool) -> Model {
     var versionDuringWrite: Int?
     FifoActionRouting.dispatch(
         "some_panel_action", model: model,
+        knows: { _ in true },
         fallthrough: { _, m, _ in versionDuringWrite = m.panelStateVersion })
     // The bump comes AFTER the write: a bump before it would announce the
     // old state, and the view would read it before the write landed.
@@ -108,4 +110,32 @@ private func fifoTwoRectModel(selected: Bool) -> Model {
     FifoActionRouting.dispatch("toggle_snap_to_glyph_visible", model: model)
     #expect(store.getPanel(pid, "snap_to_glyph_visible") as? Bool == true)
     #expect(model.panelStateVersion != v1)
+}
+
+// ── Row 226: a FIFO `action` naming no workspace action is refused by name ──
+// `dispatchYamlAction` returns silently when the name is not in the workspace,
+// so a harness typo (`toggle_snap_to_glyf_visible`, measured live 11-23) did
+// nothing and logged nothing but its own echo: a script reading the next shot
+// would see "the toggle did nothing", which reads like an app defect.
+
+@Test func fifoActionRefusesAnUnknownActionByNameAndDispatchesNothing() {
+    let model = fifoTwoRectModel(selected: false)
+    var calls = 0
+    let refusal = FifoActionRouting.dispatch(
+        "toggle_snap_to_glyf_visible", model: model,
+        fallthrough: { _, _, _ in calls += 1 })
+    #expect(calls == 0)
+    #expect(refusal?.contains("toggle_snap_to_glyf_visible") == true, "\(refusal ?? "nil")")
+    #expect(refusal?.contains("REFUSED") == true, "\(refusal ?? "nil")")
+}
+
+@Test func fifoActionDispatchesAKnownWorkspaceActionWithNoRefusal() {
+    // The control: the same door with the real spelling dispatches.
+    let model = fifoTwoRectModel(selected: false)
+    var calls = 0
+    let refusal = FifoActionRouting.dispatch(
+        "toggle_snap_to_glyph_visible", model: model,
+        fallthrough: { _, _, _ in calls += 1 })
+    #expect(refusal == nil)
+    #expect(calls == 1)
 }
