@@ -226,7 +226,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             page.wait_for_timeout(100)
         elif k == "panel":
             release_mods()
-            _, pid, tab, wpath, widget, event, value, _label = act
+            _, pid, tab, wpath, widget, event, value, _label, _wtype = act
             if page.locator(f"#{pid}").count() == 0:
                 # Show it as a person does: its dock tab, or, for a panel in no
                 # dock group, its Window menu item.
