@@ -3517,17 +3517,27 @@ actions:
       Flask computes an empty list — element bounds are not available
       server-side — so it deletes nothing, which is the same behaviour it had
       as a stub and is a correct degradation rather than a divergence.
+
+      When nothing is deletable (every artboard holds artwork, or the only
+      empty one is the preserved artboard at position 1) the command does
+      nothing at all: no undo step is recorded, the Artboards panel selection
+      and its anchor are kept, and the Rearrange badge (rearrange_dirty, "the
+      artboards list has changed") is not set, because the list did not change.
+      The row stays enabled so a person can ask; it simply finds nothing.
     category: artboards
     effects:
-      - snapshot
-      - foreach:
-          source: active_document.deletable_empty_artboard_ids
-          as: ab_id
-        do:
-          - doc.delete_artboard_by_id: ab_id
-      - set_panel_state: { panel: artboards, key: artboards_panel_selection, value: "[]" }
-      - set_panel_state: { panel: artboards, key: panel_selection_anchor, value: "null" }
-      - set_panel_state: { panel: artboards, key: rearrange_dirty, value: "true" }
+      - if:
+          condition: "active_document.deletable_empty_artboard_ids.length > 0"
+          then:
+            - snapshot
+            - foreach:
+                source: active_document.deletable_empty_artboard_ids
+                as: ab_id
+              do:
+                - doc.delete_artboard_by_id: ab_id
+            - set_panel_state: { panel: artboards, key: artboards_panel_selection, value: "[]" }
+            - set_panel_state: { panel: artboards, key: panel_selection_anchor, value: "null" }
+            - set_panel_state: { panel: artboards, key: rearrange_dirty, value: "true" }
 
   artboards_panel_select:
     description: >

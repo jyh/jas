@@ -4119,40 +4119,47 @@
       ]
     },
     "delete_empty_artboards": {
-      "description": "Delete every artboard that no artwork intersects, preserving the artboard at position 1 when all of them are empty (a document must always keep one). One undo step.\nThe membership question is answered by the derived read `active_document.deletable_empty_artboard_ids`, which each native port computes from its own element tree using EVALUATED bounds \u2014 so a shape that was authored at the origin and transformed onto an artboard occupies the artboard it is DRAWN on, not the one it was typed at. The preserve-position-1 rule is applied inside that derivation, because a `foreach` deleting by id has no way to say \"unless this is the last one\"; that keeps these effects a plain mirror of `delete_artboards`.\nFlask computes an empty list \u2014 element bounds are not available server-side \u2014 so it deletes nothing, which is the same behaviour it had as a stub and is a correct degradation rather than a divergence.\n",
+      "description": "Delete every artboard that no artwork intersects, preserving the artboard at position 1 when all of them are empty (a document must always keep one). One undo step.\nThe membership question is answered by the derived read `active_document.deletable_empty_artboard_ids`, which each native port computes from its own element tree using EVALUATED bounds \u2014 so a shape that was authored at the origin and transformed onto an artboard occupies the artboard it is DRAWN on, not the one it was typed at. The preserve-position-1 rule is applied inside that derivation, because a `foreach` deleting by id has no way to say \"unless this is the last one\"; that keeps these effects a plain mirror of `delete_artboards`.\nFlask computes an empty list \u2014 element bounds are not available server-side \u2014 so it deletes nothing, which is the same behaviour it had as a stub and is a correct degradation rather than a divergence.\nWhen nothing is deletable (every artboard holds artwork, or the only empty one is the preserved artboard at position 1) the command does nothing at all: no undo step is recorded, the Artboards panel selection and its anchor are kept, and the Rearrange badge (rearrange_dirty, \"the artboards list has changed\") is not set, because the list did not change. The row stays enabled so a person can ask; it simply finds nothing.\n",
       "category": "artboards",
       "effects": [
-        "snapshot",
         {
-          "foreach": {
-            "source": "active_document.deletable_empty_artboard_ids",
-            "as": "ab_id"
-          },
-          "do": [
-            {
-              "doc.delete_artboard_by_id": "ab_id"
-            }
-          ]
-        },
-        {
-          "set_panel_state": {
-            "panel": "artboards",
-            "key": "artboards_panel_selection",
-            "value": "[]"
-          }
-        },
-        {
-          "set_panel_state": {
-            "panel": "artboards",
-            "key": "panel_selection_anchor",
-            "value": "null"
-          }
-        },
-        {
-          "set_panel_state": {
-            "panel": "artboards",
-            "key": "rearrange_dirty",
-            "value": "true"
+          "if": {
+            "condition": "active_document.deletable_empty_artboard_ids.length > 0",
+            "then": [
+              "snapshot",
+              {
+                "foreach": {
+                  "source": "active_document.deletable_empty_artboard_ids",
+                  "as": "ab_id"
+                },
+                "do": [
+                  {
+                    "doc.delete_artboard_by_id": "ab_id"
+                  }
+                ]
+              },
+              {
+                "set_panel_state": {
+                  "panel": "artboards",
+                  "key": "artboards_panel_selection",
+                  "value": "[]"
+                }
+              },
+              {
+                "set_panel_state": {
+                  "panel": "artboards",
+                  "key": "panel_selection_anchor",
+                  "value": "null"
+                }
+              },
+              {
+                "set_panel_state": {
+                  "panel": "artboards",
+                  "key": "rearrange_dirty",
+                  "value": "true"
+                }
+              }
+            ]
           }
         }
       ]

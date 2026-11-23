@@ -1092,5 +1092,18 @@
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
     }
+  },
+  {
+    "_doc": "Delete Empty Artboards with nothing deletable (the one artboard is empty, and position 1 is always kept) deletes nothing, so it leaves the Artboards panel selection and the Rearrange badge (rearrange_dirty, true when the artboards list has changed) as they were. Row 221.",
+    "name": "delete_empty_artboards_nothing_deletable_keeps_selection_and_badge",
+    "setup_svg": "recorded_rect_1_setup.svg",
+    "actions": [
+      {"action": "artboards_panel_select", "params": {"artboard_id": "i1c7xnhr", "modifier": "none"}},
+      {"action": "delete_empty_artboards", "params": {}}
+    ],
+    "expected_json": "delete_empty_artboards_nothing_deletable_expected.json",
+    "expected_panel_scope": {
+      "artboards_panel_content": {"artboards_panel_selection": ["i1c7xnhr"], "rearrange_dirty": false}
+    }
   }
 ]
