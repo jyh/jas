@@ -1104,6 +1104,7 @@
     "expected_json": "delete_empty_artboards_nothing_deletable_expected.json",
     "expected_panel_scope": {
       "artboards_panel_content": {"artboards_panel_selection": ["i1c7xnhr"], "rearrange_dirty": false}
-    }
+    },
+    "expected_can_undo": false
   }
 ]
