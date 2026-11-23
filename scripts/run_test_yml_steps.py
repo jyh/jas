@@ -44,6 +44,9 @@ WHAT IT DOES NOT DO, SAID HERE SO A GREEN IS NOT READ AS CI's
   as BOTH. A stale copy of the file left on disk makes the step run against it.
 * It cannot see platform behaviour (the Windows console, a case-insensitive
   file system).
+* It sets GITHUB_REPOSITORY from `origin`'s URL (owner/repo only) when the
+  environment has none, as CI does, so `check_pr_descriptions.py --open` runs
+  rather than refusing for a missing variable (row 245).
 """
 
 from __future__ import annotations
@@ -160,6 +163,17 @@ def ci_only_inputs(cmd: str, produced: set[str], exists) -> list[str]:
     return hits
 
 
+_GITHUB_REMOTE = re.compile(r"github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def repo_slug(url: str) -> str | None:
+    """The `owner/repo` of a GitHub remote URL, or None. Only the two path
+    segments after the host are kept, so a credential in the URL's userinfo
+    never reaches the slug (row 245)."""
+    m = _GITHUB_REMOTE.search(url.strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
 def classify(rc_here, rc_ref) -> str:
     """One failure's kind: `rc_ref` None means the ref was not run."""
     if rc_here == 0:
@@ -262,6 +276,15 @@ def self_test() -> int:
     check(live_env == want_env, f"the live CI-only consumers are row 228's four scripts: {live_env}")
     check(not any(ci_only_inputs(c, live_prod, none) for c in live if "check_cbindgen_freshness" in c),
           "control: a step with no CI-only input is not ENV")
+    # Row 245: GITHUB_REPOSITORY from origin, the owner/repo slug only.
+    for url, want in [("https://github.com/jyh/jas.git", "jyh/jas"), ("https://github.com/jyh/jas", "jyh/jas"),
+                      ("git@github.com:jyh/jas.git", "jyh/jas"), ("ssh://git@github.com/jyh/jas.git", "jyh/jas"),
+                      ("https://x-access-token:SECRET@github.com/jyh/jas.git", "jyh/jas"),
+                      ("/Volumes/backup/jas.git", None), ("https://gitlab.com/jyh/jas.git", None), ("", None)]:
+        got = repo_slug(url)
+        check(got == want, f"repo_slug({url.replace('SECRET', '***')!r}) is {got!r}, want {want!r}")
+    check("SECRET" not in str(repo_slug("https://x-access-token:SECRET@github.com/jyh/jas.git")),
+          "a credential in the URL never reaches the slug")
     arms = len(ran)  # counted as they run, never typed
     for f in failures:
         print(f"  FAIL: {f}")
@@ -302,6 +325,15 @@ def main() -> int:
     env = dict(os.environ)
     ref = args.compare_ref
     env.setdefault("RANGE", f"{ref}..HEAD" if ref else "origin/main..HEAD")
+    # `check_pr_descriptions.py --open` reads GITHUB_REPOSITORY, which CI sets;
+    # derive it from origin (the slug only) so a local run reads that step as
+    # CI runs it, not as a missing variable (row 245).
+    if "GITHUB_REPOSITORY" not in env:
+        origin = subprocess.run(["git", "remote", "get-url", "origin"], cwd=ROOT,
+                                capture_output=True, text=True, encoding="utf-8").stdout
+        slug = repo_slug(origin)
+        if slug:
+            env["GITHUB_REPOSITORY"] = slug
     print(f"run_test_yml_steps: {len(cmds)} distinct invocations; running {len(todo)}; "
           + (f"bare-cargo scripts INCLUDED (CARGO_TARGET_DIR={os.environ['CARGO_TARGET_DIR']})" if args.cargo else
              f"skipped {len(skipped)} that call a bare cargo: {', '.join(sorted({script_of(c) for c in skipped})) or 'none'}"))
