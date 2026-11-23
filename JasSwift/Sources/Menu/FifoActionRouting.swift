@@ -46,6 +46,12 @@ public enum FifoActionRouting {
             }
     ) {
         fallthroughDispatch(name, model, params)
+        // The dock's panel bodies redraw on `panelStateVersion`, and the
+        // store publishes nothing; every person's route that runs a panel
+        // action bumps it after the write (the panel menu, the Layers keys).
+        // Without this a FIFO `action` wrote the store and the Mac kept
+        // drawing the old panel, so a shot read a stale view (row 217).
+        model.panelStateVersion &+= 1
     }
 }
 
