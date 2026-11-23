@@ -403,6 +403,10 @@ def _run_script(path, menubar, locked=False, pid=None):
         nonlocal app
         view, origin = st["view"], st["origin"]
         k = act[0]
+        if k == "open" and act[2]:
+            # The app persists its dock layout, so a fresh process starts where
+            # the last script left it; level 1 starts from a fresh store (row 254).
+            _fifo("action reset_workspace"); time.sleep(0.8)
         if k == "open" and locked:
             # Document units go straight to the canvas view: no screen mapping.
             _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
