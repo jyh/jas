@@ -220,7 +220,8 @@ extension JasAppDelegate {
         case "state":
             // state <path> <key>...: the named state keys as the app holds
             // them; active_tool is the live tool ContentView published
-            // (FifoLive), never the store's mirror (TESTING.md, row 50).
+            // (FifoLive), never the store's mirror (TESTING.md, row 50);
+            // `panel.<id>.<key>` reads a panel scope (row 219).
             guard let req = FifoState.parse(rest) else {
                 NSLog("test-fifo: state REFUSED %@ (want a path and distinct keys)", rest)
                 return

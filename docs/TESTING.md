@@ -227,7 +227,9 @@ marked PROPOSED and never gates.
   not declare is refused by name. The Mac reads them through a test FIFO command, `state <path> <key>…`, which writes
   the keys as the app holds them; the toolbar's checked highlight is a rendering of the key, not the key. On the Mac
   `active_tool` is the live tool ContentView publishes, never the store's mirror of it, and the read is refused when
-  none has been published.
+  none has been published. The FIFO command alone also takes `panel.<id>.<key>`, a panel scope's value (a scope never
+  initialised, a key it does not hold and a malformed name are each refused by name); a script's `read: state` still
+  names only `state.yaml` keys.
 * **`{"read": "dialog"}`** reads the id of the open dialog, or `null` when none is open (a slot's alternates flyout is
   the dialog its timer opens, `arrow_alternates`), against the script's `expected_dialog` (an id or `null`). The Mac
   reads it through the same FIFO: `dialog <path>` writes `{"dialog": <id or null>}`.

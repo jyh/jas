@@ -242,8 +242,10 @@ public struct FifoReadError: Error, CustomStringConvertible {
 /// `state <path> <key> [<key>…]`: the named state keys as the app holds them,
 /// as one JSON object with sorted keys, written to `path` (atomically,
 /// replacing). `active_tool` is the live tool ContentView published, never the
-/// store's mirror, and is refused if nothing was published. Every other key is
-/// the store's value, and a key the store does not hold is refused by name.
+/// store's mirror, and is refused if nothing was published. A key
+/// `panel.<id>.<key>` is the named panel scope's value (``panelValue``, row
+/// 219). Every other key is the store's global value, and a key the store does
+/// not hold is refused by name.
 public enum FifoState {
     public static func parse(_ rest: String) -> (path: String, keys: [String])? {
         let f = rest.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
@@ -263,6 +265,8 @@ public enum FifoState {
                         "state REFUSED active_tool (ContentView has published no live tool)")
                 }
                 out[key] = tool
+            } else if key.hasPrefix("panel.") {
+                out[key] = try panelValue(key, store: store)
             } else {
                 guard let v = store.get(key) else {
                     throw FifoReadError(description: "state REFUSED \(key) (the store holds no such key)")
@@ -273,6 +277,28 @@ public enum FifoState {
         let data = try JSONSerialization.data(
             withJSONObject: out, options: [.sortedKeys, .withoutEscapingSlashes])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// `panel.<id>.<key>`: the named panel scope's value (row 219). `<id>` is
+    /// the short kind or the content id; the store makes them one scope. A
+    /// scope never initialised, a key the scope does not hold and a malformed
+    /// name are each refused by name: a missing value must never read as a
+    /// measured one (the store keeps a nil as `NSNull`, a present key).
+    static func panelValue(_ key: String, store: StateStore) throws -> Any {
+        let rest = key.dropFirst("panel.".count)
+        guard let dot = rest.firstIndex(of: "."),
+              !rest[..<dot].isEmpty, !rest[rest.index(after: dot)...].isEmpty else {
+            throw FifoReadError(description: "state REFUSED \(key) (want panel.<id>.<key>)")
+        }
+        let pid = StateStore.panelContentId(String(rest[..<dot]))
+        let field = String(rest[rest.index(after: dot)...])
+        guard store.hasPanel(pid) else {
+            throw FifoReadError(description: "state REFUSED \(key) (no panel scope \(pid))")
+        }
+        guard let v = store.getPanel(pid, field) else {
+            throw FifoReadError(description: "state REFUSED \(key) (panel scope \(pid) holds no \(field))")
+        }
+        return v
     }
 
     public static func write(keys: [String], store: StateStore,
