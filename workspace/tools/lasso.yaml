@@ -56,7 +56,9 @@ handlers:
       then:
         - if: "buffer_length('lasso') >= 3"
           then:
-            - "doc.snapshot": {}
+            # No doc.snapshot: a selection is not an undo step (OP_LOG.md
+            # section 4; selection.yaml defers its snapshot for the same
+            # reason). Row 243.
             - "doc.select_polygon_from_buffer":
                 buffer: "lasso"
                 additive: "tool.lasso.shift_held"

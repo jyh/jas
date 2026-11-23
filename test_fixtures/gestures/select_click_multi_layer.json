@@ -20,6 +20,7 @@
       {"kind": "press", "x": 36, "y": 36},
       {"kind": "release", "x": 36, "y": 36}
     ],
-    "expected_json": "select_click_multi_layer_expected.json"
+    "expected_json": "select_click_multi_layer_expected.json",
+    "expected_can_undo": false
   }
 ]
