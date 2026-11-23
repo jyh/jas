@@ -336,6 +336,20 @@ def locked_acts(acts, item="?"):
     return out
 
 
+def gesture_log_verdict(text):
+    """The app's own receipt for a gesture, from its log since the command was
+    sent: "delivered", the refusal's text, or None while nothing is there yet.
+    The FIFO is one-way, so this is the only way a refused or unknown gesture
+    is not read as a FAIL of the script (row 250)."""
+    for line in text.splitlines():
+        if "test-fifo: gesture delivered" in line:
+            return "delivered"
+        for tell in ("gesture REFUSED", "unknown command gesture"):
+            if tell in line:
+                return line[line.index(tell):].strip()
+    return None
+
+
 def gesture_command(act):
     """The FIFO line for a ("gesture", steps) act."""
     return "gesture " + json.dumps(act[1], separators=(",", ":"))
@@ -1125,6 +1139,16 @@ def self_test():
           la is not None and gesture_command(la[2]) ==
           'gesture [{"kind":"press","x":36,"y":18},{"kind":"move","x":48,"y":24,"dragging":true},'
           '{"kind":"release","x":36,"y":18}]')
+    check("a delivered gesture reads delivered",
+          gesture_log_verdict("x Jas[1:2] test-fifo: gesture [..]\ny test-fifo: gesture delivered 3: press@(1,2)")
+          == "delivered")
+    check("an app without the verb reads as its refusal",
+          (gesture_log_verdict("t test-fifo: unknown command gesture [{}]") or "").startswith("unknown command gesture"))
+    check("a refused gesture reads as its refusal",
+          (gesture_log_verdict("t test-fifo: gesture REFUSED (step 0: unknown kind 'x')") or "")
+          .startswith("gesture REFUSED (step 0"))
+    check("an empty log is not yet a verdict", gesture_log_verdict("") is None
+          and gesture_log_verdict("t test-fifo: gesture [{}]") is None)
     # The shipped corpus: which scripts the locked route drives whole (no
     # panel act left for the accessibility walk). Counted and printed, not pinned.
     locked_whole = 0
