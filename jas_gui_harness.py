@@ -35,6 +35,8 @@ Verbs:
   script FILE...   (level 2: an input script through the live app; see below)
   script --locked FILE...  (the same with the console locked: pointer runs through
                    the FIFO's `gesture`, keys and menus refused by name; row 250)
+  script --locked --receipt FILE...  (the board's mac.locked suite: non-members
+                   refused by name and left out; the line is scope=partial; row 252)
   dock             (the dock check: three tab drags, one DOCK line; needs JAS_APP)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
@@ -574,7 +576,7 @@ def _front_is_jas():
     app = NSWorkspace.sharedWorkspace().frontmostApplication()
     return app is not None and app.localizedName() == PROC
 
-def _write_receipt(path, outcomes, not_run=None):
+def _write_receipt(path, outcomes, not_run=None, suite="mac.live"):
     """`--receipt FILE`: the run's UI-NIGHTLY v1 line (O100), written whole or
     not at all. The corpus is `test_fixtures/input_scripts`; `head` is this
     tree's HEAD (JAS_HEAD overrides it, for an app built from another sha)."""
@@ -587,7 +589,7 @@ def _write_receipt(path, outcomes, not_run=None):
         encoding="utf-8").stdout.strip()
     date = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     try:
-        line = _plan.receipt_line(outcomes, corpus, head or "unknown", date, not_run=not_run)
+        line = _plan.receipt_line(outcomes, corpus, head or "unknown", date, not_run=not_run, suite=suite)
     except ValueError as e:
         print(f"RECEIPT NOT WRITTEN: {e}")
         return False
@@ -664,17 +666,33 @@ def _do_script_locked(paths, receipt):
     pointer runs through the FIFO's `gesture`, its reads through `read`. Runs
     whether or not the console is locked, because nothing on this route
     reaches the window server; so there is no person check and no modifier
-    reset. NOT witnessed: the window's first-mouse and key routing. Writes no
-    receipt: a locked run is not the board's mac.live suite, and no other
-    token is declared for it."""
-    if receipt:
-        print("REFUSED: --locked writes no receipt (the board declares no token for a locked run)")
-        return 3
+    reset. NOT witnessed: the window's first-mouse and key routing.
+
+    With `--receipt FILE` (row 252) the run is the board's `mac.locked` suite:
+    a given script that is not a member (a key, menu, toolbar or panel step;
+    mac_l2_plan.locked_suite_split) is REFUSED by name before any app launch
+    and left out of the receipt, and the line counts the members only, with
+    scope=partial while any corpus script is not a member. A run refused
+    before any script writes NOT RUN, so a refused night is a row."""
+    suite = _plan.LOCKED_SUITE
     if not os.environ.get("JAS_APP") or not os.environ.get("JAS_FIFO"):
-        print("REFUSED: --locked needs JAS_APP (a fresh app per script, by pid) and JAS_FIFO")
+        why = "--locked needs JAS_APP, a fresh app per script by pid, and JAS_FIFO"
+        print("REFUSED: " + why)
+        if receipt:
+            _write_receipt(receipt, {}, not_run=why, suite=suite)
         return 3
     menubar = _plan.load_menubar()
+    if receipt:
+        scripts = {}
+        for p in paths:
+            with open(p, encoding="utf-8") as f:
+                scripts[os.path.basename(p)] = _json.load(f)
+        members, refused = _plan.locked_suite_split(scripts, menubar)
+        for name in sorted(refused):
+            print(f"REFUSED {name}: not in {suite}: {refused[name]}")
+        paths = [p for p in paths if os.path.basename(p) in members]
     bad = 0
+    outcomes = {}
     for p in paths:
         name = os.path.basename(p)
         proc = None
@@ -682,11 +700,13 @@ def _do_script_locked(paths, receipt):
             proc = _launch(locked=True)
             ok, got, want = _run_script(p, menubar, locked=True, pid=proc.pid)
             print(("PASS " if ok else "FAIL ") + name)
+            outcomes[name] = "PASS" if ok else "FAIL"
             if not ok:
                 bad += 1
                 print("  got  ", got); print("  want ", want)
         except _plan.Refused as e:
             bad += 1
+            outcomes[name] = "REFUSED"
             print("REFUSED " + name + ": " + str(e))
         finally:
             if proc is not None:
@@ -697,6 +717,8 @@ def _do_script_locked(paths, receipt):
                     proc.kill()
                 time.sleep(0.3)
     print(f"{len(paths) - bad} of {len(paths)} scripts passed (locked route: first-mouse and key routing not witnessed)")
+    if receipt and not _write_receipt(receipt, outcomes, suite=suite):
+        return 4
     return 1 if bad else 0
 
 # ── `dock`: the dock check on the Mac (row 89; the web channel's is
