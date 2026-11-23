@@ -36,8 +36,12 @@ WHAT IT DOES NOT DO, SAID HERE SO A GREEN IS NOT READ AS CI's
   steps are not among them.
 * It runs nothing that is not a scripts/ invocation: no `cargo`, `swift`,
   `pytest`, `dotnet` or `wasm-pack` line, and no other workflow file.
-* A step that reads a log or artifact an earlier CI step writes fails on both
-  sides, so it reads as ENVIRONMENT: that is the limit of a local run, not a pass.
+* A step that reads a log an earlier CI step writes (`--log`/`--xunit` naming a
+  file a `tee` or `>` line produces) is ENV when that file is absent here: it is
+  listed with the file it lacks and NOT RUN, so it is neither a pass nor YOURS
+  (row 230). The producers are derived from the workflow at run time. A
+  consumer reading CI output some other way still fails on both sides and reads
+  as BOTH. A stale copy of the file left on disk makes the step run against it.
 * It cannot see platform behaviour (the Windows console, a case-insensitive
   file system).
 """
@@ -115,6 +119,47 @@ def footer(with_cargo: bool, target: str = "") -> str:
     return "  (scripts/ steps only, bare-cargo scripts skipped: not CI's green; see this file's docstring)"
 
 
+# A file a NON-scripts CI line writes: `... | tee FILE` or `... > FILE`. A digit or
+# `&` before the `>` is a descriptor redirect (`2>&1`), never a file.
+_PRODUCER = re.compile(r"\btee(?:\s+-a)?\s+([^\s|;&)]+)|(?<![0-9&>])>>?\s*([^\s|;&)]+)")
+_INPUT_FLAGS = ("--log", "--xunit")
+
+
+def produced_files(workflow_text: str) -> set[str]:
+    """Every file a CI `run:` line writes by `tee` or `>`, outside scripts/ lines.
+    A step that reads one of these reads CI's output, which a local run lacks."""
+    import yaml
+    doc = yaml.safe_load(workflow_text) or {}
+    out: set[str] = set()
+    for job in (doc.get("jobs") or {}).values():
+        for step in (job or {}).get("steps") or []:
+            for line in str((step or {}).get("run", "")).splitlines():
+                s = line.strip()
+                if _INVOCATION.match(s):
+                    continue
+                for m in _PRODUCER.finditer(s):
+                    f = (m.group(1) or m.group(2)).strip("'\"")
+                    if f and f != "/dev/null" and not f.startswith("$"):
+                        out.add(f)
+    return out
+
+
+def ci_only_inputs(cmd: str, produced: set[str], exists) -> list[str]:
+    """The `--log`/`--xunit` inputs of `cmd` that only a CI step writes and that
+    are ABSENT here. Non-empty means the step is ENV locally: it is listed, not
+    run, and never counted as YOURS. A present file means the step runs."""
+    import shlex
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return []
+    hits = []
+    for flag, val in zip(argv, argv[1:]):
+        if flag in _INPUT_FLAGS and val in produced and not exists(val):
+            hits.append(val)
+    return hits
+
+
 def classify(rc_here, rc_ref) -> str:
     """One failure's kind: `rc_ref` None means the ref was not run."""
     if rc_here == 0:
@@ -188,6 +233,35 @@ def self_test() -> int:
     check(cargo_refusal({}, False) is None, "no --cargo: nothing to refuse")
     check("skipped" in footer(False) and "skipped" not in footer(True) and "/v/t" in footer(True, "/v/t"),
           f"the footer names the mode: {footer(False)!r} / {footer(True, '/v/t')!r}")
+    # Row 230: a step that reads a file only a CI step writes is ENV here, never YOURS.
+    wf2 = (
+        "jobs:\n"
+        "  a:\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          (cd x && cargo test) 2>&1 | tee rust-test.log\n"
+        "          python scripts/reads.py --log rust-test.log\n"
+        "          swift test > swift-test.log 2>&1 || rc=$?\n"
+        "          python3 scripts/reads2.py --log swift-test.log --xunit out.xml\n"
+        "          python scripts/plain.py --log mine.log\n"
+    )
+    prod = produced_files(wf2)
+    check(prod == {"rust-test.log", "swift-test.log"}, f"producers are tee and > lines, not scripts/ lines: {sorted(prod)}")
+    none = lambda p: False
+    check(ci_only_inputs("python scripts/reads.py --log rust-test.log", prod, none) == ["rust-test.log"],
+          "a step reading a tee'd log that is absent here is ENV")
+    check(ci_only_inputs("python3 scripts/reads2.py --log swift-test.log --xunit out.xml", prod, none) == ["swift-test.log"],
+          "a > log is a producer too; an --xunit no line writes is not one")
+    check(ci_only_inputs("python scripts/plain.py --log mine.log", prod, none) == [],
+          "a log no CI line writes is not ENV: the step runs and can red")
+    check(ci_only_inputs("python scripts/reads.py --log rust-test.log", prod, lambda p: True) == [],
+          "the same log PRESENT here: the step runs, never skipped")
+    live_prod = produced_files(WORKFLOW.read_text(encoding="utf-8"))
+    live_env = sorted({script_of(c) for c in live if ci_only_inputs(c, live_prod, none)})
+    want_env = ["check_rust_suite_ran.py", "check_swift_suite_ran.py", "check_title_oracle_ran.py", "check_wasm_canvas_count.py"]
+    check(live_env == want_env, f"the live CI-only consumers are row 228's four scripts: {live_env}")
+    check(not any(ci_only_inputs(c, live_prod, none) for c in live if "check_cbindgen_freshness" in c),
+          "control: a step with no CI-only input is not ENV")
     arms = len(ran)  # counted as they run, never typed
     for f in failures:
         print(f"  FAIL: {f}")
@@ -219,6 +293,10 @@ def main() -> int:
         return 2
     timeout = args.timeout if args.timeout is not None else (1800 if args.cargo else 300)
     todo, skipped = partition(cmds, lambda c: calls_cargo(ROOT / "scripts" / script_of(c)), args.cargo)
+    produced = produced_files(WORKFLOW.read_text(encoding="utf-8"))
+    env_only = [(c, ci_only_inputs(c, produced, lambda f: (ROOT / f).exists())) for c in todo]
+    env_only = [(c, fs) for c, fs in env_only if fs]
+    todo = [c for c in todo if c not in {c for c, _ in env_only}]
     logs = args.logs or Path(tempfile.mkdtemp(prefix="test-yml-steps-"))
     logs.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
@@ -248,9 +326,11 @@ def main() -> int:
             subprocess.run(["git", "worktree", "remove", "--force", wt], cwd=ROOT)
             shutil.rmtree(wt.parent, ignore_errors=True)
     mine = [r for r in results if r[0] in ("MINE", "FAIL")]
+    for cmd, fs in env_only:
+        print(f"  ENV  not run: reads {', '.join(fs)}, which only a CI step writes  {cmd}")
     for kind, cmd, rc, rc_ref, i in results:
         print(f"  {kind:4} rc={rc}/{rc_ref if rc_ref is not None else '-'}  {cmd}  [log here-{i:03d}.log]")
-    print(f"run_test_yml_steps: ran {len(todo)}, failed here {len(failed)}, "
+    print(f"run_test_yml_steps: ran {len(todo)}, ENV {len(env_only)} (not run), failed here {len(failed)}, "
           f"{'on both sides ' + str(len(results) - len(mine)) + ', ' if ref else ''}YOURS {len(mine)}; logs {logs}")
     print(footer(args.cargo, os.environ.get("CARGO_TARGET_DIR", "")))
     return 1 if mine else 0
