@@ -3352,6 +3352,32 @@ pub(crate) mod tests {
         assert_action_view(tc, &st);
         assert_action_dialog(tc, &st, &deferred);
         assert_action_layout(tc, &st);
+        assert_action_can_undo(tc, &st);
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL assertion: `expected_can_undo` (a bool), whether the active
+    /// tab's model has an undo step after the case's actions. The document
+    /// and the panel scope cannot see the undo stack, so a no-op that left an
+    /// undo step (Undo then consumes a keystroke and changes nothing) would
+    /// pass every other block (row 223). No port does today: two guards each
+    /// prevent it (the action's `if` never opens a transaction, and a
+    /// transaction with no net change is dropped, OP_LOG.md §5). Either alone
+    /// hides the other, so the key reds only when both are removed (driven on
+    /// Swift 11-23). Mirrors Swift's `assertActionCanUndo`.
+    fn assert_action_can_undo(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(want) = tc.get("expected_can_undo") else { return };
+        let name = tc["name"].as_str().unwrap();
+        let want = want.as_bool().unwrap_or_else(|| {
+            panic!("Action test '{name}': expected_can_undo is not a bool: {want}")
+        });
+        let got = st.tabs[st.active_tab].model.can_undo();
+        assert_eq!(
+            got, want,
+            "Action test '{name}': can_undo is {got} but the corpus pins {want}"
+        );
     }
 
     /// JSON equality with ONE number type, as JSON and the reference have it:

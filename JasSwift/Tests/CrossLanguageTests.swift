@@ -6483,6 +6483,25 @@ private func assertActionTest(_ tc: [String: Any]) {
     assertActionView(tc, model)
     assertActionDialog(tc, model)
     assertActionLayout(tc, layout)
+    assertActionCanUndo(tc, model)
+}
+
+/// OPTIONAL assertion: `expected_can_undo` (a bool), whether the model has an
+/// undo step after the case's actions. The document and the panel scope cannot
+/// see the undo stack, so a no-op that left an undo step would pass every other
+/// block (row 223). Two guards each prevent it today (the action's `if` opens no
+/// transaction; a transaction with no net change is dropped, OP_LOG.md §5), and
+/// either alone hides the other: the key reds only with both removed (driven
+/// 11-23). Mirrors Rust's `assert_action_can_undo`.
+private func assertActionCanUndo(_ tc: [String: Any], _ model: Model) {
+    guard let raw = tc["expected_can_undo"] else { return }
+    let name = tc["name"] as? String ?? "?"
+    guard let want = raw as? Bool else {
+        Issue.record("Action test '\(name)': expected_can_undo is not a bool: \(raw)")
+        return
+    }
+    #expect(model.canUndo == want,
+            "Action test '\(name)': canUndo is \(model.canUndo) but the corpus pins \(want)")
 }
 
 /// OPTIONAL assertion: `expected_dialog`, `{"id", "params": {..}, "state":
