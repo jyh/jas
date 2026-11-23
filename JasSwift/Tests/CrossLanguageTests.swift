@@ -1430,7 +1430,7 @@ private func preservationVectors(_ raw: String) throws -> [[String: Any]] {
             """)
         return []
     }
-    guard let min = obj["min_vectors"] as? Int, min >= 1 else {
+    guard let min = corpusInt(obj["min_vectors"]), min >= 1 else {
         Issue.record("the preservation corpus must declare an integer 'min_vectors' >= 1 — a floor of zero is not a floor")
         return []
     }
@@ -3085,7 +3085,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         let name = tc["name"] as! String
         let function = tc["function"] as! String
         let args = tc["args"] as! [String: Any]
-        let expected = tc["expected"] as! Double
+        let expected = corpusNumber(tc["expected"])!
 
         let actual: Double
         switch function {
@@ -3094,10 +3094,10 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
                 id: PaneId(0),
                 kind: .canvas,
                 config: .forKind(.canvas),
-                x: args["x"] as! Double,
-                y: args["y"] as! Double,
-                width: args["width"] as! Double,
-                height: args["height"] as! Double
+                x: corpusNumber(args["x"])!,
+                y: corpusNumber(args["y"])!,
+                width: corpusNumber(args["width"])!,
+                height: corpusNumber(args["height"])!
             )
             let edge = parseEdgeSideOp(args["edge"] as! String)
             actual = PaneLayout.paneEdgeCoord(pane, edge)
@@ -4255,12 +4255,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// asserts the resulting [x,y] points match the expected geometry (1e-9). A
 /// generator is just an expression, so this reuses the evaluator. See CONCEPTS.md.
 @Test func conceptConformance() throws {
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     let raw = readFixture("concepts/conformance.json")
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4315,12 +4311,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// The production promote handler runs exactly this and bakes the recovered
 /// values into the op. Mirrors Rust `fitters_conformance`.
 @Test func fittersConformance() throws {
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     let raw = readFixture("concept_fitters/conformance.json")
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4380,12 +4372,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// expressions are read from the compiled registry, so this pins that a concept's
 /// two halves agree. Mirrors Rust `generator_fitter_round_trip`.
 @Test func generatorFitterRoundTrip() throws {
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     let ws = WorkspaceData.load()
     let concept = ws?.concept("regular_polygon")
@@ -4437,12 +4425,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     let data = raw.data(using: .utf8)!
     let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
 
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     var failures: [String] = []
     for tc in cases {
@@ -5743,8 +5727,9 @@ private func signedMagnitude(_ u: Double, _ lo: Double, _ hi: Double) -> Double 
 /// `shift_draw_sample`.
 private func shiftDrawSample(_ st: inout PropertyStream, _ cfg: [String: Any]) -> ShiftDraw {
     func n(_ k: String) -> Double {
-        guard let v = cfg[k] as? NSNumber else { fatalError("generative.\(k) must be a number") }
-        return v.doubleValue
+        // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+        guard let v = corpusNumber(cfg[k]) else { fatalError("generative.\(k) must be a number") }
+        return v
     }
     let zoom = lerp(n("zoom_min"), n("zoom_max"), st.u())
     let offsetX = lerp(n("offset_min"), n("offset_max"), st.u())
@@ -5826,7 +5811,9 @@ private func pinnedF64(_ v: Any?) -> Double {
 /// `assert_stream_pin`.
 private func assertStreamPin(_ fx: [String: Any]) {
     let pin = fx["stream_pin"] as! [String: Any]
-    let seed = (pin["seed"] as! NSNumber).uint64Value
+    // An integer, never a bool or a float, as Rust's `as_u64()` reads (row 251).
+    guard let seedInt = corpusInt(pin["seed"]), seedInt >= 0 else { fatalError("stream_pin.seed must be a non-negative integer") }
+    let seed = UInt64(seedInt)
     let cfg = fx["generative"] as! [String: Any]
     var st = PropertyStream(seed: seed)
     for (i, want) in (pin["cases"] as! [[String: Any]]).enumerated() {
@@ -6523,7 +6510,7 @@ func corpusFlag(_ v: Any?) -> Bool { corpusBool(v) ?? false }
 
 /// A corpus value read as a JSON NUMBER, or nil. `JSONSerialization` hands a
 /// boolean as an `NSNumber` too, and `true as? Double` is `1.0`, so a reader
-/// written as `as? Double` or `corpusNumber(x)!` reads a JSON
+/// written as `as? Double` or `(x as! NSNumber).doubleValue` reads a JSON
 /// `true` where Rust's `as_f64()` refuses it. Told apart by CF type (row 237).
 func corpusNumber(_ v: Any?) -> Double? {
     guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
@@ -6557,6 +6544,12 @@ func corpusInt(_ v: Any?) -> Int? {
     #expect(corpusInt(d["half"]) == nil, "a JSON 2.5 is not an integer")
     #expect(corpusInt(d["t"]) == nil, "a JSON true is not an integer (Swift's as? Int reads 1)")
     #expect(corpusInt(d["s"]) == nil && corpusInt(nil) == nil, "a string or an absent key is not an integer")
+    // An evaluator's output arrives as a native Swift value, not a decoded
+    // NSNumber; it bridges to the same CF types, so the same reader serves
+    // both (row 251, the value coercers that read both).
+    let nativeTrue: Any = true, nativeHalf: Any = 2.5, nativeThree: Any = 3
+    #expect(corpusNumber(nativeTrue) == nil, "a native Swift true is not a number")
+    #expect(corpusNumber(nativeHalf) == 2.5 && corpusNumber(nativeThree) == 3.0, "native numbers read as numbers")
 }
 
 /// OPTIONAL assertion: `expected_can_redo` (a bool), whether the model has a
@@ -7635,7 +7628,7 @@ private func wireUnhex(_ s: String) -> Data {
     let root = try JSONSerialization.jsonObject(
         with: Data(raw.utf8)) as! [String: Any]
     let vectors = root["vectors"] as! [[String: Any]]
-    let minVectors = root["min_vectors"] as! Int
+    let minVectors = corpusInt(root["min_vectors"])!
 
     // Anti-vacuity, EXACT rather than slack: a reader that walked zero vectors
     // asserts nothing and is indistinguishable from a clean run. The floor is
@@ -7699,7 +7692,7 @@ private func wireUnhex(_ s: String) -> Data {
 
     let items = menu["items"] as! [[String: Any]]
     // Anti-vacuity declared BY THE DATA, exact rather than slack.
-    #expect(items.count == menu["min_items"] as! Int,
+    #expect(items.count == corpusInt(menu["min_items"])!,
             "walked \(items.count) menu item(s) against the declared floor")
 
     let rows = layersFilterMenuRows(items)
@@ -7730,7 +7723,7 @@ private func wireUnhex(_ s: String) -> Data {
 
     // (2) INVOKING THE ACTION yields the everything-visible state.
     let vectors = menu["action_vectors"] as! [[String: Any]]
-    #expect(vectors.count == menu["min_action_vectors"] as! Int,
+    #expect(vectors.count == corpusInt(menu["min_action_vectors"])!,
             "walked \(vectors.count) action vector(s) against the declared floor")
     for v in vectors {
         let name = v["name"] as? String ?? "<unnamed>"
@@ -7759,7 +7752,7 @@ private func wireUnhex(_ s: String) -> Data {
     // (3) THE REGRESSION ITSELF, as the blank tree it produced in the other port.
     let d = menu["defect_if_the_action_row_were_a_toggle"] as! [String: Any]
     let hidden = layersHiddenFromChecked(Set(d["checked"] as! [String]))
-    #expect(hidden.count == d["expected_hidden_count"] as! Int,
+    #expect(hidden.count == corpusInt(d["expected_hidden_count"])!,
             "checking a token no element answers must hide the WHOLE vocabulary")
     #expect(keepOf(hidden) == Set(d["expected_keep"] as! [[Int]]),
             "the defect's blank tree is not what the fixture records")
