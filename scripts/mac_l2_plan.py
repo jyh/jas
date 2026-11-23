@@ -336,6 +336,45 @@ def locked_acts(acts, item="?"):
     return out
 
 
+# The locked suite (row 252, desk AHJ option A): the board token a locked run's
+# receipt carries. Its members are the corpus scripts this route delivers
+# WHOLE: every act a gesture, an open, a tool or a read. A script with a key,
+# menu or toolbar step is refused by the route's own reason, and one with a
+# panel step is refused too, because a panel act needs the accessibility walk
+# and the locked route does not measure that. A member's receipt is always
+# scope=partial while any corpus script is not a member, so a locked GREEN
+# can never read like mac.live's full one.
+LOCKED_SUITE = "mac.locked"
+
+
+def locked_suite_refusal(script, menubar, spec=None):
+    """None when `script` is a member of the locked suite, else the reason it
+    is not, by name."""
+    item = script.get("item", "?")
+    try:
+        acts = locked_acts(plan(script, menubar, spec), item)
+    except Refused as e:
+        return str(e)
+    if any(a[0] == "panel" for a in acts):
+        return f"{item}: a panel step needs the accessibility walk, which the locked suite does not measure"
+    return None
+
+
+def locked_suite_split(scripts, menubar):
+    """`scripts` maps a file name to its script. Returns (the member names,
+    sorted; {name: reason} for every script refused)."""
+    members, refused = [], {}
+    for name in sorted(scripts):
+        scr = scripts[name]
+        spec = load_spec(scr) if scr.get("spec") else None
+        why = locked_suite_refusal(scr, menubar, spec)
+        if why is None:
+            members.append(name)
+        else:
+            refused[name] = why
+    return members, refused
+
+
 def gesture_log_verdict(text):
     """The app's own receipt for a gesture, from its log since the command was
     sent: "delivered", the refusal's text, or None while nothing is there yet.
@@ -556,7 +595,9 @@ def receipt_line(outcomes, corpus, head, date, not_run=None, suite="mac.live"):
         raise ValueError("an outcome is not PASS, FAIL or REFUSED: " + ", ".join(bad))
     if not_run is not None:
         verdict, items = "NOT RUN(%s)" % str(not_run).replace(")", "]"), "0/%d" % len(corpus)
-        scope = "full"
+        # A refused night is over the whole corpus, except for the locked
+        # suite, which never covers it whole, so its NOT RUN is partial too.
+        scope = "partial" if suite == LOCKED_SUITE else "full"
     else:
         if not outcomes:
             raise ValueError("no script ran and no refusal was given")
@@ -1149,20 +1190,39 @@ def self_test():
           .startswith("gesture REFUSED (step 0"))
     check("an empty log is not yet a verdict", gesture_log_verdict("") is None
           and gesture_log_verdict("t test-fifo: gesture [{}]") is None)
+    # ── the locked suite's receipt (row 252, desk AHJ option A) ──
+    whole = dict(base, steps=[press, mv, rel, read])
+    check("locked suite: a script whose every act the route delivers is a member",
+          locked_suite_refusal(whole, mb) is None)
+    check("locked suite: a script with a panel step is refused by name",
+          "panel" in (locked_suite_refusal(dict(base, steps=[pan, read]), mb) or ""))
+    check("locked suite: a script with a key step is refused by the route's own reason",
+          "key window" in (locked_suite_refusal(dict(base, steps=[{"key": "Z", "ctrl": True}, read]), mb) or ""))
+    check("locked suite: a script with a menu step is refused by the route's own reason",
+          "menu" in (locked_suite_refusal(dict(base, steps=[{"menu": "menu_group"}, read]), mb) or ""))
+    mem, out = locked_suite_split({"w.json": whole, "p.json": dict(base, steps=[pan, read])}, mb)
+    check("locked suite: the split keeps members and names every refusal",
+          mem == ["w.json"] and sorted(out) == ["p.json"] and "panel" in out["p.json"])
+    check("locked suite: the token is the board's declared one", LOCKED_SUITE == "mac.locked")
+    check("locked receipt: a run refused before any script is NOT RUN, and still scope=partial",
+          receipt_line({}, corpus, H, D, not_run="x", suite=LOCKED_SUITE)
+          == "UI-NIGHTLY v1 suite=mac.locked verdict=NOT RUN(x) items=0/3 panels=- head=0123abcd scope=partial date=" + D)
+    lr = receipt_line({"a.json": "PASS", "b.json": "PASS"}, corpus, H, D, suite=LOCKED_SUITE)
+    check("locked receipt: a GREEN over the members reads scope=partial, never full",
+          lr == "UI-NIGHTLY v1 suite=mac.locked verdict=GREEN items=2/2 panels=- head=0123abcd scope=partial date=" + D)
+
     # The shipped corpus: which scripts the locked route drives whole (no
     # panel act left for the accessibility walk). Counted and printed, not pinned.
-    locked_whole = 0
+    shipped = {}
     for f in sorted(os.listdir(os.path.join(REPO, "test_fixtures", "input_scripts"))):
         if not f.endswith(".json") or f.endswith(".expected.json"):
             continue
-        scr = json.load(open(os.path.join(REPO, "test_fixtures", "input_scripts", f), encoding="utf-8"))
-        try:
-            got = locked_acts(plan(scr, load_menubar(), load_spec(scr)), scr.get("item", f))
-        except Refused:
-            continue
-        if not any(a[0] == "panel" for a in got):
-            locked_whole += 1
+        shipped[f] = json.load(open(os.path.join(REPO, "test_fixtures", "input_scripts", f), encoding="utf-8"))
+    members, refusals = locked_suite_split(shipped, load_menubar())
+    locked_whole = len(members)
     check("some shipped script is drivable whole on the locked route", locked_whole > 0)
+    check("the locked suite is a STRICT subset of the shipped corpus, so its receipt is scope=partial",
+          0 < locked_whole < len(shipped) and len(members) + len(refusals) == len(shipped))
 
     total = ran[0]
     print(f"mac_l2_plan self-test: {total - len(fails)} of {total} checks passed, {planned} shipped scripts planned, {locked_whole} drivable whole with the console locked")
