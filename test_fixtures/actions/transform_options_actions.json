@@ -50,7 +50,8 @@
         }
       }
     ],
-    "expected_json": "scale_options_confirm_uniform_150_strokes_off_expected.json"
+    "expected_json": "scale_options_confirm_uniform_150_strokes_off_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "scale_options_confirm_uniform_150_corners_off_named",
@@ -76,7 +77,8 @@
         }
       }
     ],
-    "expected_json": "scale_options_confirm_uniform_150_corners_off_named_expected.json"
+    "expected_json": "scale_options_confirm_uniform_150_corners_off_named_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "scale_options_confirm_copy_nonuniform",
@@ -102,7 +104,8 @@
         }
       }
     ],
-    "expected_json": "scale_options_confirm_copy_nonuniform_expected.json"
+    "expected_json": "scale_options_confirm_copy_nonuniform_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "rotate_options_confirm_45",
@@ -123,7 +126,8 @@
         }
       }
     ],
-    "expected_json": "rotate_options_confirm_45_expected.json"
+    "expected_json": "rotate_options_confirm_45_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "shear_options_confirm_30_horizontal",
@@ -146,6 +150,7 @@
         }
       }
     ],
-    "expected_json": "shear_options_confirm_30_horizontal_expected.json"
+    "expected_json": "shear_options_confirm_30_horizontal_expected.json",
+    "expected_can_undo": true
   }
 ]

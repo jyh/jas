@@ -59,7 +59,8 @@
         "params": {}
       }
     ],
-    "expected_json": "release_compound_shape_inside_a_group_expected.json"
+    "expected_json": "release_compound_shape_inside_a_group_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "release_compound_shape_reaches_a_compound_inside_a_selected_group",
@@ -76,7 +77,8 @@
         "params": {}
       }
     ],
-    "expected_json": "release_compound_shape_through_a_group_expected.json"
+    "expected_json": "release_compound_shape_through_a_group_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "expand_compound_shape_bakes_a_made_union_in_its_paint",
@@ -101,7 +103,8 @@
         "params": {}
       }
     ],
-    "expected_json": "expand_compound_shape_after_make_expected.json"
+    "expected_json": "expand_compound_shape_after_make_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "repeat_boolean_operation_unions_again_after_select_all",
@@ -130,7 +133,8 @@
         "params": {}
       }
     ],
-    "expected_json": "repeat_boolean_operation_three_rects_expected.json"
+    "expected_json": "repeat_boolean_operation_three_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "collect_in_new_layer_moves_the_panel_selection_up",
@@ -147,7 +151,8 @@
         "params": {}
       }
     ],
-    "expected_json": "collect_in_new_layer_multi_layer_expected.json"
+    "expected_json": "collect_in_new_layer_multi_layer_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "flatten_artwork_dissolves_the_selected_group",
@@ -164,7 +169,8 @@
         "params": {}
       }
     ],
-    "expected_json": "flatten_artwork_group_nested_expected.json"
+    "expected_json": "flatten_artwork_group_nested_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "release_transform_replaces_the_wrapper_by_its_released_child",
@@ -181,6 +187,7 @@
         "params": {}
       }
     ],
-    "expected_json": "release_transform_transformed_wrapper_expected.json"
+    "expected_json": "release_transform_transformed_wrapper_expected.json",
+    "expected_can_undo": true
   }
 ]
