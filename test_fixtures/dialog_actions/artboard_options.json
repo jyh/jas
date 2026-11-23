@@ -27,7 +27,8 @@
         "height": 841.89
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_landscape_swaps_the_sides",
@@ -57,7 +58,8 @@
         "height": 612
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_the_shown_orientation_changes_nothing",
@@ -87,7 +89,8 @@
         "height": 792
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_an_engaged_link_rescales_the_height",
@@ -126,7 +129,8 @@
         "height": 396
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_an_engaged_link_rescales_the_width",
@@ -165,7 +169,8 @@
         "height": 396
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_an_open_link_leaves_the_other_side",
@@ -196,7 +201,8 @@
         "height": 792
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_a_second_click_opens_the_link",
@@ -243,7 +249,8 @@
         "height": 792
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_fill_white_sets_white",
@@ -272,7 +279,8 @@
       "state": {
         "fill": "#ffffff"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_fill_black_sets_black",
@@ -301,7 +309,8 @@
       "state": {
         "fill": "#000000"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_fill_transparent_drops_the_fill",
@@ -339,7 +348,8 @@
       "state": {
         "fill": "transparent"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "artboard_options_fill_custom_opens_the_color_picker",
@@ -365,7 +375,8 @@
     "expected_document": "unchanged",
     "expected_dialog": {
       "id": "color_picker"
-    }
+    },
+    "expected_can_undo": false
   },
  {
   "name": "artboard_options_delete_removes_the_board_it_opened_on",
@@ -373,6 +384,7 @@
   "note": "artboard_options.yaml Delete (ao_delete, enabled while more than one board exists) runs delete_artboard_from_dialog on the board the dialog opened on: ab2 goes, ab1 and ab3 stay, and the dialog closes.",
   "actions": [{"action": "open_artboard_options", "params": {"artboard_id": "ab2"}}, {"dialog_event": {"address": {"id": "ao_delete"}, "event": "click"}}],
   "expected_dialog": null,
-  "expected_json": "artboard_options_delete_removes_the_board_it_opened_on_expected.json"
+  "expected_json": "artboard_options_delete_removes_the_board_it_opened_on_expected.json",
+  "expected_can_undo": true
  }
 ]

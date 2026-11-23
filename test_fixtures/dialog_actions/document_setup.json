@@ -27,7 +27,8 @@
         "bleed_right": 9
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "document_setup_an_open_bleed_link_edits_one_side",
@@ -65,7 +66,8 @@
         "bleed_right": 0
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "document_setup_a_second_click_engages_the_bleed_link",
@@ -111,6 +113,7 @@
         "bleed_right": 4
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   }
 ]

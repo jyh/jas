@@ -5817,6 +5817,22 @@ mod tests {
                 Some("unchanged") | Some("changed") | None => {}
                 Some(other) => failures.push(format!("{name}: expected_document {other:?} is neither unchanged nor changed")),
             }
+            // `expected_can_undo`: whether the model holds an undo step after the
+            // last step. A confirm that changed nothing, and a live PREVIEW (the
+            // dialog still open: a NonUndoableIntent::PreviewReapply write,
+            // OP_LOG.md section 4), must leave none; a confirmed change one
+            // (row 239). Swift's runner the same.
+            if let Some(want) = tc.get("expected_can_undo") {
+                match want.as_bool() {
+                    None => failures.push(format!("{name}: expected_can_undo is not a bool: {want}")),
+                    Some(want) => {
+                        let got = en.model.borrow().can_undo();
+                        if got != want {
+                            failures.push(format!("{name}: can_undo is {got} but the corpus pins {want}"));
+                        }
+                    }
+                }
+            }
             if let Some(file) = tc.get("expected_json").and_then(|v| v.as_str()) {
                 match std::fs::read_to_string(format!("{root}/{file}")) {
                     Ok(want) if want.trim() == after => {}

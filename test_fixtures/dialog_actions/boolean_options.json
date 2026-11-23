@@ -18,7 +18,8 @@
         "simplify_precision": 0.5
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "boolean_options_ok_stores_what_was_edited",
@@ -71,7 +72,8 @@
       "boolean_apply_simplify_after_op": false,
       "boolean_simplify_precision": 1.5
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "boolean_options_cancel_stores_nothing",
@@ -124,6 +126,7 @@
       "boolean_apply_simplify_after_op": false,
       "boolean_simplify_precision": 0.5
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   }
 ]

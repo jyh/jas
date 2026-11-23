@@ -51,7 +51,8 @@
           "mode": "fixed"
         }
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "brush_options_library_edit_ok_renames_in_place",
@@ -91,7 +92,8 @@
       "brush_libraries.default_brushes.brushes.1.name": "Round Three",
       "brush_libraries.default_brushes.brushes.1.slug": "round_3pt",
       "brush_libraries.default_brushes.brushes.-1.slug": "bristle_round"
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "brush_options_cancel_appends_nothing",
@@ -127,6 +129,7 @@
     "expected_document": "unchanged",
     "expected_data": {
       "brush_libraries.default_brushes.brushes.-1.slug": "bristle_round"
-    }
+    },
+    "expected_can_undo": false
   }
 ]
