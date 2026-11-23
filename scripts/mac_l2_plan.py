@@ -748,6 +748,77 @@ def dock_line(cases):
     return f"DOCK RED {ok}/{len(cases)} ({bad})"
 
 
+# ── sheet 2's dock drops (rows 129/132/133, row 255) ─────────────────────
+# Three drops inside the right dock, each read by the engine layout before and
+# after. The targets come from the dock TAB frames only: a panel body's content
+# id is not reachable from outside the app (measured 11-23), so a group's body
+# is the band between its tab bar and the next group's.
+GROUP_CASES = ("tab_before", "body_new_group", "grip_move")
+GRIP_OFFSET = 10.0   # points left of a group's first tab: its grip (the dotted handle)
+BODY_DEPTH = 0.85    # how far down the band a "lower body" drop lands
+
+
+def _tab(frames, kind):
+    f = frames.get(kind + PANEL_SUFFIX + TAB_SUFFIX)
+    if f is None:
+        raise Refused(f"no frame for the {kind} tab")
+    return f
+
+
+def _below(top, nxt):
+    """A point BODY_DEPTH of the way down the band from `top`'s tab bar to `nxt`'s."""
+    bottom = top[1] + top[3]
+    return top[0] + 60, bottom + (nxt[1] - bottom) * BODY_DEPTH
+
+
+def group_case_targets(case, frames):
+    """(press, release) screen points for a case, from the dock tabs' AX frames
+    {tab id: (x, y, w, h)}. Refuses by name when a frame it needs is missing."""
+    if case == "tab_before":
+        a, sw = _tab(frames, "align"), _tab(frames, "swatches")
+        return (a[0] + a[2] / 2, a[1] + a[3] / 2), (sw[0] + sw[2] * 0.25, sw[1] + sw[3] / 2)
+    if case == "body_new_group":
+        a, c = _tab(frames, "align"), _tab(frames, "color")
+        return (a[0] + a[2] / 2, a[1] + a[3] / 2), _below(c, a)
+    if case == "grip_move":
+        c, ch, st = _tab(frames, "color"), _tab(frames, "character"), _tab(frames, "stroke")
+        return (c[0] - GRIP_OFFSET, c[1] + c[3] / 2), _below(ch, st)
+    raise Refused(f"no sheet-2 case {case!r}")
+
+
+def group_case_verdict(case, before, after):
+    """-> (status, detail). `before`/`after` are the right dock's groups as
+    panel-name lists. The expected layout is derived from `before`."""
+    if case == "tab_before":
+        top = before[0]
+        if "swatches" not in top or "align" in top:
+            raise Refused(f"the tab case needs a top group with swatches and without align; it reads {top}")
+        rest = [[p for p in g if p != "align"] for g in before[1:]]
+        i = top.index("swatches")
+        want = [top[:i] + ["align"] + top[i:]] + [g for g in rest if g]
+    elif case == "body_new_group":
+        rest = [[p for p in g if p != "align"] for g in before[1:]]
+        want = [before[0], ["align"]] + [g for g in rest if g]
+    elif case == "grip_move":
+        want = before[1:3] + [before[0]] + before[3:]
+    else:
+        raise Refused(f"no sheet-2 case {case!r}")
+    if after == before:
+        return "FAIL", "the layout did not change (did the drag reach its drop?)"
+    return ("PASS", "") if after == want else ("FAIL", f"want {want}, read {after}")
+
+
+def group_line(cases):
+    """cases: [(case, status, detail)] -> one line, the dock line's form."""
+    if not cases:
+        return "DOCKGROUPS NOT RUN"
+    ok = sum(1 for c in cases if c[1] == "PASS")
+    if ok == len(cases):
+        return f"DOCKGROUPS {ok}/{len(cases)}"
+    bad = "; ".join(f"{st} {c}: {d}" for c, st, d in cases if st != "PASS")
+    return f"DOCKGROUPS RED {ok}/{len(cases)} ({bad})"
+
+
 TITLE_BAR_MAX = 64.0  # points; a Mac title bar (with or without a toolbar strip) is under this
 
 
@@ -814,6 +885,48 @@ def self_test():
     check("plan opens, picks the tool, then the steps in order",
           [a[0] for a in acts] == ["open", "tool", "pointer", "pointer", "panel", "menu", "read"])
     check("a panel act carries its dock tab's id", acts[4][2] == "stroke_panel_content_tab")
+
+    # ── sheet 2's dock drops (rows 129/132/133; row 255): the expectation is
+    # DERIVED from each case's own before-read, so a non-default start still
+    # reads. The PASS fixtures are the layouts read on the Mac test box 11-23.
+    m129b = [["color", "swatches"], ["align", "boolean"], ["character", "paragraph"]]
+    m129a = [["color", "align", "swatches"], ["boolean"], ["character", "paragraph"]]
+    m132b = [["color", "swatches", "brushes"], ["align", "boolean"], ["character", "paragraph"]]
+    m132a = [["color", "swatches", "brushes"], ["align"], ["boolean"], ["character", "paragraph"]]
+    m133b = [["color", "align", "swatches"], ["boolean"], ["character", "paragraph"], ["stroke", "properties"]]
+    m133a = [["boolean"], ["character", "paragraph"], ["color", "align", "swatches"], ["stroke", "properties"]]
+    check("sheet 2: the 11-23 tab drop reads PASS", group_case_verdict("tab_before", m129b, m129a)[0] == "PASS")
+    check("sheet 2: the 11-23 body drop reads PASS", group_case_verdict("body_new_group", m132b, m132a)[0] == "PASS")
+    check("sheet 2: the 11-23 grip move reads PASS", group_case_verdict("grip_move", m133b, m133a)[0] == "PASS")
+    check("sheet 2: a tab appended at the end (the sheet's B) is a FAIL",
+          group_case_verdict("tab_before", m129b, [["color", "swatches", "align"], ["boolean"], ["character", "paragraph"]])[0] == "FAIL")
+    check("sheet 2: a body drop that joins the group (B) is a FAIL",
+          group_case_verdict("body_new_group", m132b, [["color", "swatches", "brushes", "align"], ["boolean"], ["character", "paragraph"]])[0] == "FAIL")
+    check("sheet 2: a group moved one place short is a FAIL",
+          group_case_verdict("grip_move", m133b, [["boolean"], ["color", "align", "swatches"], ["character", "paragraph"], ["stroke", "properties"]])[0] == "FAIL")
+    for case, b in (("tab_before", m129b), ("body_new_group", m132b), ("grip_move", m133b)):
+        st, why = group_case_verdict(case, b, b)
+        check(f"sheet 2: an unchanged layout is a FAIL that says so ({case})", st == "FAIL" and "did not change" in why)
+    check("sheet 2: a start without Align beside Swatches refuses the tab case",
+          refused(lambda: group_case_verdict("tab_before", [["color"], ["align"]], [["align", "color"]]), "swatches"))
+    check("sheet 2: an unknown case refuses", refused(lambda: group_case_verdict("wiggle", m129b, m129a), "wiggle"))
+    fr = {"align_panel_content_tab": (1300, 390, 44, 20), "swatches_panel_content_tab": (1340, 157, 60, 20),
+          "color_panel_content_tab": (1280, 157, 50, 20), "character_panel_content_tab": (1280, 470, 70, 20),
+          "stroke_panel_content_tab": (1280, 780, 50, 20)}
+    (px, py), (rx, ry) = group_case_targets("tab_before", fr)
+    check("sheet 2: the tab drop presses Align's centre", (px, py) == (1322, 400))
+    check("sheet 2: the tab drop releases on the LEFT half of Swatches", 1340 < rx < 1370 and 157 < ry < 177)
+    (px, py), (rx, ry) = group_case_targets("body_new_group", fr)
+    check("sheet 2: the body drop releases below the top tab bar and above Align's", 177 < ry < 390 and ry > (177 + 390) / 2)
+    (px, py), (rx, ry) = group_case_targets("grip_move", fr)
+    check("sheet 2: the grip press is LEFT of the first tab, on its row", px < 1280 and 157 < py < 177)
+    check("sheet 2: the grip move releases in the third group's lower body", 490 < ry < 780 and ry > (490 + 780) / 2)
+    check("sheet 2: the line counts PASSes", group_line([("tab_before", "PASS", ""), ("grip_move", "PASS", "")]) == "DOCKGROUPS 2/2")
+    check("sheet 2: a FAIL reddens the line and names the case",
+          group_line([("tab_before", "PASS", ""), ("grip_move", "FAIL", "x")]) == "DOCKGROUPS RED 1/2 (FAIL grip_move: x)")
+    check("sheet 2: no cases is NOT RUN, never a pass", group_line([]) == "DOCKGROUPS NOT RUN")
+    check("sheet 2: a missing tab frame refuses by name",
+          refused(lambda: group_case_targets("grip_move", {k: v for k, v in fr.items() if not k.startswith("stroke")}), "stroke"))
     # The app persists its dock layout (UserDefaults `jas_layout:Workspace`), so a
     # fresh PROCESS is not a fresh STATE: the 11-23 nightly left gradient and
     # opacity appended to the dock, and the next script started from that.

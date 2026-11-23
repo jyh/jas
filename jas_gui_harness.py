@@ -38,6 +38,7 @@ Verbs:
   script --locked --receipt FILE...  (the board's mac.locked suite: non-members
                    refused by name and left out; the line is scope=partial; row 252)
   dock             (the dock check: three tab drags, one DOCK line; needs JAS_APP)
+  dock --groups    (sheet 2's three drops inside the right dock, one DOCKGROUPS line; row 255)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
@@ -863,8 +864,85 @@ def do_dock():
     print(line)
     return 0 if line.startswith("DOCK ") and not line.startswith(("DOCK RED", "DOCK NOT")) else 1
 
+# ── `dock --groups`: sheet 2's three drops inside the right dock (row 255). The
+# targets and verdicts are mac_l2_plan's (group_case_targets/_verdict), measured
+# on the Mac test box 11-23 (all three read A). Each case gets a fresh app AND a
+# reset workspace: the app persists its dock layout, so a fresh process alone
+# starts where the last case left it (row 254).
+GROUP_TABS = ("align", "swatches", "color", "character", "stroke")
+
+def _right_groups(layout_text):
+    lay = _json.loads(layout_text)
+    right = [a for a in lay.get("anchored", []) if a.get("edge") == "right"]
+    if len(right) != 1:
+        raise _plan.Refused(f"{len(right)} right docks in the layout; the group cases need one")
+    return [list(p if isinstance(p, str) else next(iter(p)) for p in g["panels"]) for g in right[0]["dock"]["groups"]]
+
+def _group_case(case):
+    global WIN
+    _fifo("action reset_workspace"); time.sleep(1.0)
+    WIN = find_window()
+    if not WIN:
+        raise _plan.Refused(f"no window titled {TITLE!r}")
+    before = _right_groups(_layout_read())
+    app = _app_element()
+    frames = {}
+    for kind in GROUP_TABS:
+        tid = kind + _plan.PANEL_SUFFIX + _plan.TAB_SUFFIX
+        hits = _by_id(app, tid)
+        if len(hits) == 1:
+            frames[tid] = _frame(hits[0])
+    (x1, y1), (x2, y2) = _plan.group_case_targets(case, frames)
+    if not (WIN["y"] <= y2 < WIN["y"] + WIN["h"] and WIN["y"] <= y1 < WIN["y"] + WIN["h"]):
+        raise _plan.Refused(f"a {case} target lies outside the window (AX reports clipped frames)")
+    _session_drag(x1, y1, [(x2, y2)])
+    return _plan.group_case_verdict(case, before, _right_groups(_layout_read()))
+
+def do_dock_groups():
+    """One DOCKGROUPS line. Refuses, as `dock` does, on a locked or busy console."""
+    global _plan
+    import mac_l2_plan as _plan
+    problem = _plan.launch_env_problem(os.environ)
+    if problem or not os.environ.get("JAS_APP"):
+        print("REFUSED: " + (problem or "the group cases need JAS_APP: each starts from a fresh app"))
+        print("DOCKGROUPS NOT RUN"); return 3
+    if _screen_locked():
+        print("REFUSED: the screen is locked"); print("DOCKGROUPS NOT RUN"); return 3
+    busy, idle = _console_in_use()
+    if busy:
+        print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s)"); print("DOCKGROUPS NOT RUN")
+        return 3
+    cases = []
+    for case in _plan.GROUP_CASES:
+        proc = None
+        try:
+            clear_mods()
+            proc = _launch()
+            status, detail = _group_case(case)
+        except _plan.Refused as e:
+            status, detail = "REFUSED", str(e)
+        except Exception as e:
+            status, detail = "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+        finally:
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                time.sleep(0.3)
+        cases.append((case, status, detail))
+        print(f"{status} {case}" + (f" -- {detail}" if detail else ""))
+    with open(_lastpost_file(), "w", encoding="utf-8", newline="") as f:
+        f.write(str(time.time()))
+    line = _plan.group_line(cases)
+    print(line)
+    return 0 if line.startswith("DOCKGROUPS ") and not line.startswith(("DOCKGROUPS RED", "DOCKGROUPS NOT")) else 1
+
 if __name__=="__main__":
     v=sys.argv[1]
+    if v=="dock" and sys.argv[2:3]==["--groups"]:
+        sys.exit(do_dock_groups())
     if v=="dock":
         sys.exit(do_dock())
     if v=="activate":
