@@ -6,6 +6,7 @@
     "actions": [
       {"action": "make_compound_shape", "params": {}}
     ],
-    "expected_json": "make_compound_shape_two_rects_expected.json"
+    "expected_json": "make_compound_shape_two_rects_expected.json",
+    "expected_can_undo": true
   }
 ]

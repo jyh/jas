@@ -22,7 +22,8 @@
     }
    }
   ],
-  "expected_json": "set_concept_param_sets_sides_expected.json"
+  "expected_json": "set_concept_param_sets_sides_expected.json",
+  "expected_can_undo": true
  },
  {
   "_doc": "apply_concept_operation remove_side on the placed hexagon: regular_polygon.yaml's `set: {sides: max(param.sides - 1, 3)}` gives 5, the same document as set_concept_param_sets_sides.",

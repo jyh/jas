@@ -4,7 +4,8 @@
     "setup_svg": "multi_layer.svg",
     "selection": [[0, 0], [1, 0]],
     "actions": [{ "action": "group", "params": {} }],
-    "expected_json": "group_flatten_two_layers_expected.json"
+    "expected_json": "group_flatten_two_layers_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "group_flatten_two_groups",

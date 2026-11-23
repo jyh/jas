@@ -6,6 +6,7 @@
       {"action": "toggle_all_layers_lock", "params": {}},
       {"action": "toggle_all_layers_lock", "params": {}}
     ],
-    "expected_json": "toggle_all_layers_lock_all_locked_expected.json"
+    "expected_json": "toggle_all_layers_lock_all_locked_expected.json",
+    "expected_can_undo": true
   }
 ]

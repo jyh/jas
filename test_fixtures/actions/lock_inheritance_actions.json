@@ -38,7 +38,8 @@
         "params": {}
       }
     ],
-    "expected_json": "select_all_skips_a_locked_layers_whole_subtree_expected.json"
+    "expected_json": "select_all_skips_a_locked_layers_whole_subtree_expected.json",
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -70,7 +71,8 @@
         "params": {}
       }
     ],
-    "expected_json": "ungroup_all_leaves_a_locked_layers_groups_alone_expected.json"
+    "expected_json": "ungroup_all_leaves_a_locked_layers_groups_alone_expected.json",
+    "expected_can_undo": true
   },
   {
     "_doc": [
@@ -96,6 +98,7 @@
         "params": {}
       }
     ],
-    "expected_json": "select_all_action_counts_a_group_as_one_object_expected.json"
+    "expected_json": "select_all_action_counts_a_group_as_one_object_expected.json",
+    "expected_can_undo": false
   }
 ]

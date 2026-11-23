@@ -17,7 +17,8 @@
         }
       }
     ],
-    "expected_json": "nudge_right_moves_only_the_selected_rect_expected.json"
+    "expected_json": "nudge_right_moves_only_the_selected_rect_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "nudge_down_large_moves_both_rects",
@@ -96,6 +97,7 @@
         }
       }
     ],
-    "expected_json": "nudge_with_nothing_selected_changes_nothing_expected.json"
+    "expected_json": "nudge_with_nothing_selected_changes_nothing_expected.json",
+    "expected_can_undo": false
   }
 ]

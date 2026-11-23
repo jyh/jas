@@ -6,7 +6,8 @@
     "actions": [
       {"action": "align_left", "params": {}}
     ],
-    "expected_json": "align_left_two_rects_expected.json"
+    "expected_json": "align_left_two_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "align_right_two_rects",

@@ -14,7 +14,8 @@
         }
       }
     ],
-    "expected_json": "layer_options_confirm_creates_a_hidden_locked_layer_expected.json"
+    "expected_json": "layer_options_confirm_creates_a_hidden_locked_layer_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "layer_options_confirm_creates_an_outline_layer",

@@ -18,7 +18,8 @@
       "layers_panel_content": {
         "layers_panel_selection": []
       }
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "delete_layer_orphan_confirm_ok (the orphan dialog's Delete): the spec says its effects are delete_layer_selection's plus close_dialog, so it is held to delete_layer_selection_foreground's own setup and golden.",
@@ -109,7 +110,8 @@
         "dim_images": false,
         "dim_percentage": 50
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_layer_options_create_opens_on_the_defaults",
@@ -145,7 +147,8 @@
         "dim_images": false,
         "dim_percentage": 50
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_layer_options_edit_reads_a_stored_colour",
@@ -181,6 +184,7 @@
         "dim_images": false,
         "dim_percentage": 50
       }
-    }
+    },
+    "expected_can_undo": false
   }
 ]
