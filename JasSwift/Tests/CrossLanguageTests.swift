@@ -6526,14 +6526,17 @@ func corpusFlag(_ v: Any?) -> Bool { corpusBool(v) ?? false }
 /// written as `as? Double` or `(x as! NSNumber).doubleValue` reads a JSON
 /// `true` where Rust's `as_f64()` refuses it. Told apart by CF type (row 237).
 func corpusNumber(_ v: Any?) -> Double? {
-    return nil  // STUB, red first (row 237)
+    guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+    return n.doubleValue
 }
 
 /// A corpus value read as a JSON INTEGER, or nil: a number that is neither a
 /// boolean nor float-typed, as Rust's `as_i64()` reads (`2.0` and `2.5` are
 /// floats there, and so refused). Told apart by CF type (row 237).
 func corpusInt(_ v: Any?) -> Int? {
-    return nil  // STUB, red first (row 237)
+    guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+          !CFNumberIsFloatType(n) else { return nil }
+    return n.intValue
 }
 
 @Test func aCorpusNumberRefusesABoolean() throws {
