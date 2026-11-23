@@ -53,6 +53,10 @@ pub mod tile_selection;
 // the corpus runner read it. NOT gated.
 pub mod user_libraries;
 
+// A panel row's `context_menu:` as a shell draws it: the web's renderer and
+// the engine's FFI read it (row 257). NOT gated.
+pub mod row_menu;
+
 #[cfg(feature = "web")]
 pub mod renderer;
 #[cfg(feature = "web")]

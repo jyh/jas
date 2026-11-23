@@ -9286,35 +9286,19 @@ pub(crate) enum RowMenuEntry {
     Item { label: String, enabled: bool, action: String, params: serde_json::Map<String, serde_json::Value> },
 }
 
-/// The `context_menu:` of `holder` (`lp_tree`) for row `path`, read in that
-/// row's scope: `node` is bound by the holder's own foreach, the expansion the
-/// tree draws. Labels and actions are interpolated, `enabled_when` is evaluated
-/// (an item without one is enabled), and params are resolved as a behaviour's
-/// are (`resolve_behavior_params`). Returns the entries and the row's scope, or
-/// `None` when the holder declares no menu or the row is not one of its rows.
+/// The `context_menu:` of `holder` (`lp_tree`) for row `path`, as the web draws
+/// it: the shared resolver (`interpreter::row_menu`, which the engine's FFI also
+/// exports to native shells, row 257) with each item's params resolved as a
+/// behaviour's are (`resolve_behavior_params`), because the web dispatches the
+/// pick itself. Returns the entries and the row's scope, or `None` when the
+/// holder declares no menu or the row is not one of its rows.
 pub(crate) fn layers_row_menu(holder: &serde_json::Value, ctx: &serde_json::Value, path: &[usize])
     -> Option<(Vec<RowMenuEntry>, serde_json::Value)> {
-    let items = holder.get("context_menu")?.as_array()?;
-    let var = holder.get("foreach").and_then(|f| f.get("as")).and_then(|v| v.as_str()).unwrap_or("item");
-    let want: Vec<serde_json::Value> = path.iter().map(|&i| serde_json::json!(i)).collect();
-    let scope = crate::interpreter::foreach::row_scopes(holder, ctx)?.into_iter().find(|r| {
-        let p = &r[var]["path"];
-        let p = p.get("__path__").unwrap_or(p);
-        p.as_array().is_some_and(|a| a.as_slice() == want.as_slice())
-    })?;
-    let empty = serde_json::Map::new();
-    let entries = items.iter().filter_map(|raw| {
-        if raw.as_str() == Some("separator") {
-            return Some(RowMenuEntry::Separator);
-        }
-        let item = raw.as_object()?;
-        let text = |k: &str| item.get(k).and_then(|v| v.as_str())
-            .map(|t| crate::interpreter::expr::eval_text(t, &scope)).unwrap_or_default();
-        let enabled = item.get("enabled_when").and_then(|v| v.as_str())
-            .map_or(true, |c| crate::interpreter::expr::eval(c, &scope).to_bool());
-        let decl = item.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
-        Some(RowMenuEntry::Item { label: text("label"), enabled, action: text("action"),
-                                  params: resolve_behavior_params(decl, &scope) })
+    let (shared, scope) = crate::interpreter::row_menu::row_menu(holder, ctx, path)?;
+    let entries = shared.into_iter().map(|e| match e {
+        crate::interpreter::row_menu::RowMenuEntry::Separator { .. } => RowMenuEntry::Separator,
+        crate::interpreter::row_menu::RowMenuEntry::Item { label, enabled, action, params, .. } =>
+            RowMenuEntry::Item { label, enabled, action, params: resolve_behavior_params(&params, &scope) },
     }).collect();
     Some((entries, scope))
 }
