@@ -82,7 +82,8 @@
       }
     ],
     "expected_json": "delete_empty_artboards_all_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "open_document_setup_reads_back_what_confirm_wrote",

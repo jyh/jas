@@ -6484,6 +6484,23 @@ private func assertActionTest(_ tc: [String: Any]) {
     assertActionDialog(tc, model)
     assertActionLayout(tc, layout)
     assertActionCanUndo(tc, model)
+    assertActionCanRedo(tc, model)
+}
+
+/// OPTIONAL assertion: `expected_can_redo` (a bool), whether the model has a
+/// redo step after the case's actions. An undo returns the document to a golden
+/// a no-op would also match, so without this key an undo that dropped its step
+/// instead of moving it to the redo stack passes (row 229). Mirrors Rust's
+/// `assert_action_can_redo`.
+private func assertActionCanRedo(_ tc: [String: Any], _ model: Model) {
+    guard let raw = tc["expected_can_redo"] else { return }
+    let name = tc["name"] as? String ?? "?"
+    guard let want = raw as? Bool else {
+        Issue.record("Action test '\(name)': expected_can_redo is not a bool: \(raw)")
+        return
+    }
+    #expect(model.canRedo == want,
+            "Action test '\(name)': canRedo is \(model.canRedo) but the corpus pins \(want)")
 }
 
 /// OPTIONAL assertion: `expected_can_undo` (a bool), whether the model has an
