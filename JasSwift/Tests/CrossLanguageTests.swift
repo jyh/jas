@@ -780,7 +780,7 @@ private func applyOp(_ model: Model, _ controller: Controller, _ op: [String: An
             y: op["y"]!.value as! Double,
             width: op["width"]!.value as! Double,
             height: op["height"]!.value as! Double,
-            extend: op["extend"]?.value as? Bool ?? false)
+            extend: corpusFlag(op["extend"]?.value))
     case "move_selection":
         controller.moveSelection(
             dx: op["dx"]!.value as! Double,
@@ -3813,7 +3813,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         let function = tc["function"] as! String
         let args = tc["args"] as! [Double]
         let expected = tc["expected"] as! Bool
-        let filled = tc["filled"] as? Bool ?? false
+        let filled = corpusFlag(tc["filled"])
 
         let actual: Bool
         switch function {
@@ -4923,13 +4923,13 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false,
             continue
         }
         // shift/alt default false; dragging defaults false on move.
-        let shift = (ev["shift"] as? Bool) ?? false
-        let alt = (ev["alt"] as? Bool) ?? false
+        let shift = corpusFlag(ev["shift"])
+        let alt = corpusFlag(ev["alt"])
         if ev["kind"] as? String == "key" {
             // A KEY event: an input script's key step at level 1, in the
             // engine's key order (`routeKey`). Mirrors Rust `replay_key`.
             let name = ev["key"] as! String
-            let km = KeyMods(shift: shift, ctrl: (ev["ctrl"] as? Bool) ?? false, alt: alt)
+            let km = KeyMods(shift: shift, ctrl: corpusFlag(ev["ctrl"]), alt: alt)
             switch routeKey(name, km, toolTakes: { tool.capturesKeyboard() || tool.claimsKey($0) }) {
             case .deleteSelection:
                 // The engine's Delete key: nothing selected, or a delete that
@@ -4991,7 +4991,7 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false,
             tool.onPress(ctx, x: x, y: y, shift: shift, alt: alt)
             syncAlignKeyObjectFromSelection(model: model, store: model.stateStore)
         case "move":
-            let dragging = (ev["dragging"] as? Bool) ?? false
+            let dragging = corpusFlag(ev["dragging"])
             tool.onMove(ctx, x: x, y: y, shift: shift, alt: alt, dragging: dragging)
         case "release":
             tool.onRelease(ctx, x: x, y: y, shift: shift, alt: alt)
@@ -5393,7 +5393,7 @@ private struct MintRefusal: Error, Equatable {
             } else if st["kind"] == nil, let key = st["key"] as? String {
                 // A KEY step (the key corpus's chord form). Mirrors Rust
                 // `script_as_gesture_case`; the engine takes no `meta`.
-                if (st["meta"] as? Bool) ?? false {
+                if corpusFlag(st["meta"]) {
                     Issue.record("script \(item): step \(i) carries meta, which the engine's key route does not take")
                     continue
                 }
@@ -6497,6 +6497,13 @@ func corpusBool(_ v: Any?) -> Bool? {
     return n.boolValue
 }
 
+/// A corpus FLAG: a JSON boolean, or `false` when the key is absent or holds
+/// anything else (a number included). Rust's readers of the same keys default
+/// the same way (`as_bool().unwrap_or(false)`), so the two ports read a
+/// malformed fixture alike; `as? Bool ?? false` read a JSON `1` as `true`
+/// (row 233).
+func corpusFlag(_ v: Any?) -> Bool { corpusBool(v) ?? false }
+
 @Test func aCorpusBoolRefusesANumber() throws {
     let d = try JSONSerialization.jsonObject(
         with: Data(#"{"t": true, "f": false, "one": 1, "zero": 0, "s": "true"}"#.utf8)) as! [String: Any]
@@ -6506,6 +6513,8 @@ func corpusBool(_ v: Any?) -> Bool? {
     #expect(corpusBool(d["zero"]) == nil, "a JSON 0 is not a boolean")
     #expect(corpusBool(d["s"]) == nil, "a string is not a boolean")
     #expect(corpusBool(nil) == nil, "an absent key is not a boolean")
+    #expect(corpusFlag(d["one"]) == false && corpusFlag(d["t"]) == true && corpusFlag(nil) == false,
+            "a flag defaults a number and an absent key to false, as Rust's readers do")
 }
 
 /// OPTIONAL assertion: `expected_can_redo` (a bool), whether the model has a
@@ -6987,7 +6996,7 @@ private func runKeyTest(_ group: [String: Any]) -> String {
     for case let c as [String: Any] in group["cases"] as! [Any] {
         let name = c["name"] as! String
         let ch = c["chord"] as! [String: Any]
-        let bool = { (k: String) in (ch[k] as? Bool) ?? false }
+        let bool = { (k: String) in corpusFlag(ch[k]) }
         let chord = KeyChord(
             key: ch["key"] as! String,
             ctrl: bool("ctrl"),
@@ -7798,7 +7807,7 @@ private func wireUnhex(_ s: String) -> Data {
         let name = c["name"] as? String ?? "?"
         let panel: Any = c["panel_spec"] ?? panels[c["panel"] as? String ?? ""] ?? [String: Any]()
         let ch = c["chord"] as? [String: Any] ?? [:]
-        let flag = { (k: String) in ch[k] as? Bool ?? false }
+        let flag = { (k: String) in corpusFlag(ch[k]) }
         let chord = KeyChord(key: ch["key"] as? String ?? "", ctrl: flag("ctrl"), shift: flag("shift"),
                              alt: flag("alt"), meta: flag("meta"))
         let got: Any = resolvePanelKey(panel, chord: chord, context: c["ctx"] as? [String: Any] ?? [:])
@@ -8057,7 +8066,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             events.append(["kind": "script_step", "index": i, "step": ["__pointer": true]])
             events.append(st)
         } else if st["key"] != nil, !focused {
-            if (st["meta"] as? Bool) ?? false {
+            if corpusFlag(st["meta"]) {
                 events.append(["kind": "script_step", "index": i, "step": ["__refuse": "meta on a key the canvas route does not take"]])
                 continue
             }
@@ -8096,7 +8105,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
         menuOpen = nil
         if st["__pointer"] != nil { focus = nil; field = nil; return }
         if let why = st["__refuse"] as? String { return refuse(why) }
-        let flag = { (k: String) in (st[k] as? Bool) ?? false }
+        let flag = { (k: String) in corpusFlag(st[k]) }
         let mods: [String: Any] = ["shift": flag("shift"), "alt": flag("alt"), "ctrl": flag("ctrl"), "meta": false]
         // A widget by id, or by `row` with no bubbling, in the scope the dock
         // renders the panel with.
