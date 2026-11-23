@@ -1278,6 +1278,13 @@ jobs:
           python scripts/check_rust_suite_ran.py --self-test
           (cd jas_dioxus && cargo test) 2>&1 | tee rust-test.log
           python scripts/check_rust_suite_ran.py --log rust-test.log
+      # The golden-generator gate's self-test on the second platform family:
+      # its source scan and its dirty-state comparison are path and text
+      # handling, which is what differs here. The full regeneration runs in
+      # the rust job, where the goldens were written.
+      - name: The golden-generator gate's self-test, on the second platform family
+        if: ${{ !cancelled() }}
+        run: python scripts/check_generators_reproduce_goldens.py --self-test
 
       # The Swift execution gate's READER, on Windows. There is no Swift
       # toolchain on this runner and no log to read, so only the self-test runs

@@ -123,7 +123,7 @@ def self_test() -> int:
           "a file dirty before AND rewritten by a generator is a finding (its hash moved)")
     check(changed(b, {"x.json": "h1"}) == ["y.json"], "a file a generator restored or removed is a finding too")
     # The live source: the population is real, and holds the two generators rows 222/234 were about.
-    live = generator_names({str(p): p.read_text(encoding="utf-8", errors="replace")
+    live = generator_names({p.as_posix(): p.read_text(encoding="utf-8", errors="replace")
                             for p in (CRATE / "src").rglob("*.rs")})
     check(len(live) >= 15, f"live generators found: {len(live)} (a floor, never a target)")
     check({"generate_operation_expected", "generate_action_expected"} <= live,
@@ -142,14 +142,15 @@ def main() -> int:
     args = ap.parse_args()
     if args.self_test:
         return self_test()
-    names = generator_names({str(p): p.read_text(encoding="utf-8", errors="replace")
+    names = generator_names({p.as_posix(): p.read_text(encoding="utf-8", errors="replace")
                              for p in (CRATE / "src").rglob("*.rs")})
     if not names:
         print("check_generators_reproduce_goldens: REFUSED: derived no generators from jas_dioxus/src", file=sys.stderr)
         return 2
     before = dirty_hashes()
     proc = subprocess.run(["cargo", "test", "--lib", "generate", "--", "--ignored"],
-                          cwd=CRATE, capture_output=True, text=True, env=dict(os.environ))
+                          cwd=CRATE, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          env=dict(os.environ))
     log = proc.stdout + proc.stderr
     after = dirty_hashes()
     ok = ran_ok(log)
