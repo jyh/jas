@@ -21,7 +21,7 @@
 
 use crate::ffi::{
     jas_dispatch_action, jas_document_json, jas_engine_free, jas_engine_new, jas_free,
-    jas_last_error_json, jas_panel_behavior, jas_panel_menu, JasBytes, JasEngine, JasStatus,
+    jas_last_error_json, jas_panel_behavior, jas_panel_menu, jas_panel_row_menu, JasBytes, JasEngine, JasStatus,
 };
 use crate::ffi_pointer::{
     jas_pointer_event, jas_set_tool, KIND_DOUBLE_CLICK, KIND_MOVE, KIND_PRESS, KIND_RELEASE, MOD_ALT, MOD_DRAGGING,
@@ -799,11 +799,10 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
         // because the row's scope (`panel.renaming_element`) moves under it.
         let mut field: Option<(String, String, Option<Vec<u64>>, String)> = None;
         // The context menu a row `secondary_press` opened: (panel, the row
-        // widget's path, the items of the nearest `context_menu:` on it, the
-        // row's scope).
+        // widget's path, the entries the ENGINE EXPORTS for it,
+        // `jas_panel_row_menu`, the list a native shell draws; row 257).
         // Only the very next step can pick from it (design section 8 form 2).
-        #[allow(clippy::type_complexity)]
-        let mut menu_open: Option<(String, Vec<usize>, Vec<Value>, Value)> = None;
+        let mut menu_open: Option<(String, Vec<usize>, Vec<Value>)> = None;
         // A widget by id, or by `row` with no bubbling: its path (by row
         // only), its node and the scope its expressions read.
         #[allow(clippy::type_complexity)]
@@ -1021,19 +1020,21 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         break;
                     };
                     let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
-                    let (path, chain) = match row_chain(spec.get("content").unwrap_or(&Value::Null), widget, &r, &scope) {
+                    let (path, _chain) = match row_chain(spec.get("content").unwrap_or(&Value::Null), widget, &r, &scope) {
                         Ok(t) => t,
                         Err(why) => { refuse(&mut out, why); break; }
                     };
-                    let Some(at) = chain.iter().rposition(|(_, node, _)| node.get("context_menu").is_some()) else {
-                        refuse(&mut out, format!("no node on `{widget}`'s path in row {r:?} declares a context_menu"));
+                    // The entries are the ENGINE's export for this path, the list
+                    // a native shell draws (row 257), so a pick below runs exactly
+                    // what was drawn.
+                    let pj = serde_json::to_string(&path).unwrap_or_default();
+                    let Some(drawn) = take(unsafe { jas_panel_row_menu(e, panel.as_ptr(), panel.len(), pj.as_ptr(), pj.len()) }) else {
+                        refuse(&mut out, last_error(e));
                         break;
                     };
-                    // The items are the holder's; the scope and the path are the
-                    // ROW's (the widget's), so the item runs with the row as `node`.
-                    let items = chain[at].1["context_menu"].as_array().cloned().unwrap_or_default();
-                    let row_scope = chain.last().map(|c| c.2.clone()).unwrap_or(Value::Null);
-                    menu_open = Some((panel.to_string(), path.clone(), items, row_scope));
+                    let items: Vec<Value> = serde_json::from_str::<Value>(&drawn).ok()
+                        .and_then(|v| v.as_array().cloned()).unwrap_or_default();
+                    menu_open = Some((panel.to_string(), path.clone(), items));
                     field = None;
                     focus = Some(panel.to_string());
                     continue;
@@ -1254,23 +1255,35 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 // param the step names. It runs through the engine's own door
                 // (`jas_panel_behavior`, event `context_menu`), which refuses a
                 // disabled item and evaluates the params as a behaviour's.
-                let Some((pid, path, items, scope)) = opened else {
+                let Some((pid, path, items)) = opened else {
                     refuse(&mut out, "a context_menu step must directly follow a row secondary_press".to_string());
                     break;
                 };
                 let named = st.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
-                let hits: Vec<usize> = items.iter().enumerate().filter(|(_, item)| {
-                    item.get("action").and_then(Value::as_str)
-                        .is_some_and(|a| crate::interpreter::expr::eval_text(a, &scope) == want)
+                // An exported item carries its action resolved at open, its
+                // declared params, and its index in the DECLARED list, which is
+                // the value the pick sends (separators carry no action).
+                let hits: Vec<u64> = items.iter().filter(|item| {
+                    item.get("action").and_then(Value::as_str) == Some(want)
                         && named.iter().all(|(k, v)| item.get("params").and_then(|p| p.get(k))
                             .is_some_and(|d| plain(d) == plain(v)))
-                }).map(|(n, _)| n).collect();
+                }).filter_map(|item| item.get("index").and_then(Value::as_u64)).collect();
                 let &[at] = hits.as_slice() else {
                     refuse(&mut out, format!("`{want}` is {} item(s) of the row's context_menu, not one", hits.len()));
                     break;
                 };
+                // What the export DREW for this item must agree with what the
+                // pick DOES: an item drawn enabled runs, one drawn disabled is
+                // refused. A disagreement is refused in words that never name
+                // the pick's own class, so it cannot pass for the expected one.
+                let drawn_enabled = items.iter().find(|it| it.get("index").and_then(Value::as_u64) == Some(at))
+                    .and_then(|it| it.get("enabled")).and_then(Value::as_bool).unwrap_or(false);
                 let ev = json!({"widget": "context_menu", "path": path, "event": "context_menu", "value": at}).to_string();
                 let reply = take(unsafe { jas_panel_behavior(e, pid.as_ptr(), pid.len(), ev.as_ptr(), ev.len()) });
+                if reply.is_some() != drawn_enabled {
+                    refuse(&mut out, format!("the row menu export and the pick disagree on item {at}: drawn enabled={drawn_enabled}, ran={}", reply.is_some()));
+                    break;
+                }
                 if !ran(&mut out, reply, last_error(e)) {
                     break;
                 }

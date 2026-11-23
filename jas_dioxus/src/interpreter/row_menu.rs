@@ -38,20 +38,26 @@ pub fn row_menu(holder: &Value, ctx: &Value, path: &[usize]) -> Option<(Vec<RowM
         let p = p.get("__path__").unwrap_or(p);
         p.as_array().is_some_and(|a| a.as_slice() == want.as_slice())
     })?;
+    Some((entries(items, &scope), scope))
+}
+
+/// The entries of a declared `context_menu:` list, read in `scope` (the row's).
+/// The engine's FFI export calls this with the scope its pick runs in, so the
+/// list a native shell draws is the list the pick indexes.
+pub fn entries(items: &[Value], scope: &Value) -> Vec<RowMenuEntry> {
     let empty = Map::new();
-    let entries = items.iter().enumerate().filter_map(|(index, raw)| {
+    items.iter().enumerate().filter_map(|(index, raw)| {
         if raw.as_str() == Some("separator") {
             return Some(RowMenuEntry::Separator { index });
         }
         let item = raw.as_object()?;
         let text = |k: &str| item.get(k).and_then(|v| v.as_str())
-            .map(|t| crate::interpreter::expr::eval_text(t, &scope)).unwrap_or_default();
+            .map(|t| crate::interpreter::expr::eval_text(t, scope)).unwrap_or_default();
         let enabled = item.get("enabled_when").and_then(|v| v.as_str())
-            .map_or(true, |c| crate::interpreter::expr::eval(c, &scope).to_bool());
+            .map_or(true, |c| crate::interpreter::expr::eval(c, scope).to_bool());
         let params = item.get("params").and_then(|p| p.as_object()).unwrap_or(&empty).clone();
         Some(RowMenuEntry::Item { index, label: text("label"), enabled, action: text("action"), params })
-    }).collect();
-    Some((entries, scope))
+    }).collect()
 }
 
 #[cfg(test)]
