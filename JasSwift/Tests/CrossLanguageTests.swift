@@ -4255,12 +4255,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// asserts the resulting [x,y] points match the expected geometry (1e-9). A
 /// generator is just an expression, so this reuses the evaluator. See CONCEPTS.md.
 @Test func conceptConformance() throws {
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     let raw = readFixture("concepts/conformance.json")
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4315,12 +4311,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// The production promote handler runs exactly this and bakes the recovered
 /// values into the op. Mirrors Rust `fitters_conformance`.
 @Test func fittersConformance() throws {
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     let raw = readFixture("concept_fitters/conformance.json")
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -4380,12 +4372,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// expressions are read from the compiled registry, so this pins that a concept's
 /// two halves agree. Mirrors Rust `generator_fitter_round_trip`.
 @Test func generatorFitterRoundTrip() throws {
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     let ws = WorkspaceData.load()
     let concept = ws?.concept("regular_polygon")
@@ -4437,12 +4425,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     let data = raw.data(using: .utf8)!
     let cases = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
 
-    func num(_ v: Any?) -> Double? {
-        if let d = v as? Double { return d }
-        if let n = v as? NSNumber { return n.doubleValue }
-        if let i = v as? Int { return Double(i) }
-        return nil
-    }
+    // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+    func num(_ v: Any?) -> Double? { corpusNumber(v) }
 
     var failures: [String] = []
     for tc in cases {
