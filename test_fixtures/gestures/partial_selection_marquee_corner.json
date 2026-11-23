@@ -8,6 +8,7 @@
       {"kind": "move", "x": 80, "y": 58, "dragging": true},
       {"kind": "release", "x": 80, "y": 58}
     ],
-    "expected_json": "partial_selection_marquee_corner_expected.json"
+    "expected_json": "partial_selection_marquee_corner_expected.json",
+    "expected_can_undo": false
   }
 ]
