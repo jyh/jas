@@ -307,12 +307,38 @@ GESTURE_FIELDS = ("kind", "x", "y", "dragging", "shift", "alt")  # FifoGesture.p
 def locked_acts(acts, item="?"):
     """`plan()`'s acts for the locked route: ("gesture", steps) in place of
     each run of pointer acts, everything else unchanged. Raises Refused."""
-    raise Refused(f"{item}: STUB, red first (row 250)")
+    out, run = [], None
+    for a in acts:
+        if a[0] != "pointer":
+            run = None
+            if a[0] == "key":
+                raise Refused(f"{item}: a key step ({a[1]}) needs a key window, which a locked console never gives")
+            if a[0] in ("menu", "toolbar"):
+                raise Refused(f"{item}: a {a[0]} step is pressed through the window server, "
+                              f"which a locked console does not give")
+            out.append(a)
+            continue
+        _, kind, x, y, dragging, mods = a
+        if "ctrl" in mods:
+            raise Refused(f"{item}: a pointer step carries ctrl, which the canvas reads no form of")
+        if kind == "move" and not dragging and "shift" in mods:
+            raise Refused(f"{item}: a shift on a move that does not drag, which the canvas's mouseMoved drops")
+        st = {"kind": kind, "x": x, "y": y}
+        if dragging:
+            st["dragging"] = True
+        for m in ("shift", "alt"):
+            if m in mods:
+                st[m] = True
+        if run is None:
+            run = []
+            out.append(("gesture", run))
+        run.append(st)
+    return out
 
 
 def gesture_command(act):
     """The FIFO line for a ("gesture", steps) act."""
-    raise Refused("STUB, red first (row 250)")
+    return "gesture " + json.dumps(act[1], separators=(",", ":"))
 
 PERSON_TOLERANCE_S = 0.5  # HID idle clock and the driver's clock may differ by this
 
