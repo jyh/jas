@@ -6,7 +6,8 @@
     "actions": [
       {"action": "boolean_union", "params": {}}
     ],
-    "expected_json": "boolean_union_overlapping_rects_expected.json"
+    "expected_json": "boolean_union_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_subtract_front_overlapping_rects",
@@ -127,6 +128,7 @@
       "id": "boolean_options",
       "params": {"precision": 0.0283, "remove_redundant_points": false, "divide_remove_unpainted": false, "apply_simplify_after_op": false, "simplify_precision": 0.5},
       "state": {"precision": 0.0283, "remove_redundant_points": false, "divide_remove_unpainted": false, "apply_simplify_after_op": false, "simplify_precision": 0.5}
-    }
+    },
+    "expected_can_undo": false
   }
 ]

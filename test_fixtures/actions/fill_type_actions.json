@@ -7,7 +7,8 @@
    {"action": "select_all", "params": {}},
    {"action": "set_fill_type_gradient", "params": {}}
   ],
-  "expected_json": "set_fill_type_gradient_fill_expected.json"
+  "expected_json": "set_fill_type_gradient_fill_expected.json",
+  "expected_can_undo": true
  },
  {
   "name": "set_fill_type_gradient_twice_is_once",
@@ -36,6 +37,7 @@
   "actions": [
    {"action": "set_fill_type_gradient", "params": {}}
   ],
-  "expected_json": "set_fill_type_gradient_nothing_selected_expected.json"
+  "expected_json": "set_fill_type_gradient_nothing_selected_expected.json",
+  "expected_can_undo": false
  }
 ]

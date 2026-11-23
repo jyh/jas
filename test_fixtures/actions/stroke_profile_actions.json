@@ -19,7 +19,8 @@
     "expected_json": "set_stroke_align_inside_expected.json",
     "expected_panel_state": {
       "stroke_align": "inside"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "set_stroke_profile_taper_end_on_a_line",
@@ -99,7 +100,8 @@
     "expected_panel_state": {
       "stroke_profile": "uniform",
       "stroke_profile_flipped": false
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "set_arrow_align_center_at_end",
@@ -141,7 +143,8 @@
     "expected_json": "toggle_link_arrowhead_scale_expected.json",
     "expected_panel_state": {
       "stroke_link_arrowhead_scale": true
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "flip_stroke_profile_twice_restores_the_taper",

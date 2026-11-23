@@ -10,7 +10,8 @@
     "expected_panel_state": {
       "fill_color": "#000000",
       "stroke_color": "#000000"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "solid_leaves_a_mixed_selection_alone",
@@ -23,6 +24,7 @@
     "expected_panel_state": {
       "fill_color": "#ffffff",
       "stroke_color": null
-    }
+    },
+    "expected_can_undo": false
   }
 ]

@@ -14,7 +14,8 @@
         "params": {}
       }
     ],
-    "expected_json": "release_compound_shape_compound_and_rect_expected.json"
+    "expected_json": "release_compound_shape_compound_and_rect_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "release_after_make_round_trips_two_rects",
@@ -39,7 +40,8 @@
         "params": {}
       }
     ],
-    "expected_json": "release_after_make_two_rects_expected.json"
+    "expected_json": "release_after_make_two_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "release_compound_shape_inside_a_group_stays_in_the_group",

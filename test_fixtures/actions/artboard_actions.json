@@ -15,7 +15,8 @@
         "params": {}
       }
     ],
-    "expected_json": "duplicate_artboards_second_expected.json"
+    "expected_json": "duplicate_artboards_second_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "delete_artboards_second",
@@ -161,7 +162,8 @@
         "fade_region_outside_artboard": true,
         "update_while_dragging": true
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_print_dialog_opens_on_the_declared_defaults",
@@ -244,7 +246,8 @@
         "adv_print_as_bitmap": false,
         "adv_overprint_flattener_preset": "medium_resolution"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_appearance_as_opens_with_an_empty_name",
@@ -261,7 +264,8 @@
       "state": {
         "name": ""
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_workspace_as_opens_with_an_empty_name",
@@ -278,7 +282,8 @@
       "state": {
         "name": ""
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_paragraph_justification_shows_the_selections_values",
@@ -309,7 +314,8 @@
         "auto_leading": 110,
         "single_word_justify": "left"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_paragraph_justification_leaves_a_differing_field_blank",
@@ -340,7 +346,8 @@
         "auto_leading": 110,
         "single_word_justify": "left"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_paragraph_justification_with_nothing_selected_shows_the_defaults",
@@ -367,7 +374,8 @@
         "auto_leading": 120,
         "single_word_justify": "justify"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_paragraph_hyphenation_shows_the_selections_values_and_blanks_a_difference",
@@ -395,7 +403,8 @@
         "hyphenate_bias": 0,
         "hyphenate_capitalized": true
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_paragraph_hyphenation_with_nothing_selected_shows_the_defaults",
@@ -419,7 +428,8 @@
         "hyphenate_bias": 0,
         "hyphenate_capitalized": false
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "close_tab_on_an_edited_document_asks_to_save",
@@ -495,7 +505,8 @@
         "params": {}
       }
     ],
-    "expected_json": "toggle_page_isolated_blending_twice_expected.json"
+    "expected_json": "toggle_page_isolated_blending_twice_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "toggle_page_knockout_group_turns_the_page_flag_on",
@@ -521,6 +532,7 @@
         "params": {}
       }
     ],
-    "expected_json": "toggle_page_knockout_group_twice_expected.json"
+    "expected_json": "toggle_page_knockout_group_twice_expected.json",
+    "expected_can_undo": true
   }
 ]

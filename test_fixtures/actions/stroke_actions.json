@@ -16,7 +16,8 @@
         }
       }
     ],
-    "expected_json": "set_stroke_cap_square_expected.json"
+    "expected_json": "set_stroke_cap_square_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "set_stroke_join_round",
@@ -88,6 +89,7 @@
           "mode": "fixed"
         }
       }
-    }
+    },
+    "expected_can_undo": false
   }
 ]

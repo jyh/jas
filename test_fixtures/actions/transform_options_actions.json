@@ -23,7 +23,8 @@
         }
       }
     ],
-    "expected_json": "scale_options_confirm_uniform_150_expected.json"
+    "expected_json": "scale_options_confirm_uniform_150_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "scale_options_confirm_uniform_150_strokes_off",

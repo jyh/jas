@@ -11,6 +11,7 @@
   "expected_json": "delete_symbol_orphan_confirm_ok_expected.json",
   "expected_panel_scope": {
    "symbols_panel_content": {"selected_symbol": null}
-  }
+  },
+  "expected_can_undo": true
  }
 ]

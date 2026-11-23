@@ -6,6 +6,7 @@
     "actions": [
       {"action": "new_symbol", "params": {}}
     ],
-    "expected_json": "new_symbol_expected.json"
+    "expected_json": "new_symbol_expected.json",
+    "expected_can_undo": true
   }
 ]

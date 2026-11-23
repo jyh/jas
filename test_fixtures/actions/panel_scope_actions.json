@@ -16,7 +16,8 @@
    "color_panel_content": {
     "mode": "rgb"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "set_brush_view_mode_list",
@@ -34,7 +35,8 @@
    "brushes_panel_content": {
     "view_mode": "list"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "set_brush_thumbnail_size_large",
@@ -52,7 +54,8 @@
    "brushes_panel_content": {
     "thumbnail_size": "large"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "set_swatch_thumbnail_size_medium",
@@ -70,7 +73,8 @@
    "swatches_panel_content": {
     "thumbnail_size": "medium"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "set_layers_search_query",
@@ -88,7 +92,8 @@
    "layers_panel_content": {
     "search_query": "Rect"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "solo_layers_type_filter_path",
@@ -108,7 +113,8 @@
      "path"
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Soloing the type that is already the only one in the filter turns the solo off: the filter returns to empty (all types shown).",
@@ -133,7 +139,8 @@
    "layers_panel_content": {
     "type_filter": []
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "clear_layers_type_filter_after_solo",
@@ -155,7 +162,8 @@
    "layers_panel_content": {
     "type_filter": []
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "set_artboard_reference_point_top_left",
@@ -173,7 +181,8 @@
    "artboards_panel_content": {
     "reference_point": "top_left"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "name": "reset_artboards_panel_restores_centre",
@@ -196,7 +205,8 @@
     "reference_point": "center",
     "artboards_panel_selection": []
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Select All in the Artboards panel menu selects every artboard in the panel (its row selection is panel-local state). The document does not change.",
@@ -217,7 +227,8 @@
      "ab3"
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Rename (a double-click on an artboard's name) puts that row into rename mode: the panel's renaming_artboard names it. The document does not change until the rename is confirmed.",
@@ -236,7 +247,8 @@
    "artboards_panel_content": {
     "renaming_artboard": "ab2"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Escape cancels a rename: rename mode ends (renaming_artboard null) and the artboard keeps its name.",
@@ -259,7 +271,8 @@
    "artboards_panel_content": {
     "renaming_artboard": null
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Enter confirms a rename: the artboard takes the new name in the document and rename mode ends.",
@@ -285,7 +298,8 @@
    "artboards_panel_content": {
     "renaming_artboard": null
    }
-  }
+  },
+  "expected_can_undo": true
  },
  {
   "_doc": "A click on a symbol's tile selects it in the Symbols panel (panel-local state). The verb records the id it is given; the document does not change.",
@@ -304,7 +318,8 @@
    "symbols_panel_content": {
     "selected_symbol": "sym_star"
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "The eye on a Layers row (STATUS-jas item 38 step 3b): cycle_element_visibility on the circle's path moves it preview -> outline through the op layer (doc.op with an evaluated path); the panel's state does not change.",
@@ -368,7 +383,8 @@
      ]
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Twirling the same container twice expands it again: its path leaves collapsed_paths, and a second container's entry stays.",
@@ -409,7 +425,8 @@
      ]
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Rename (a double-click on a row's name) puts that row into rename mode: renaming_element is the row's path. The document does not change until the rename is confirmed.",
@@ -440,7 +457,8 @@
      0
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Enter confirms a rename: the element takes the typed name through the op layer (set_element_name) and rename mode ends.",
@@ -510,7 +528,8 @@
    "layers_panel_content": {
     "renaming_element": null
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "A confirm with no name (the row template's Enter or blur, whose typed value is not yet a defined event field) ends rename mode and leaves the name as it was; it never clears it.",
@@ -544,7 +563,8 @@
    "layers_panel_content": {
     "renaming_element": null
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "A click on a Layers row (STATUS-jas item 38 step 3c): the row becomes the whole panel selection, stored as a path. The document's element selection does not change; its target layer (selected_layer) becomes the row's layer, 1 (STATUS-jas 38 (iii)).",
@@ -578,7 +598,8 @@
      }
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "A click on a row's select square: the row's element becomes the whole element selection.",
@@ -595,7 +616,8 @@
     }
    }
   ],
-  "expected_json": "layers_element_select_selects_the_element_expected.json"
+  "expected_json": "layers_element_select_selects_the_element_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "Command- or Ctrl-click on an unselected row adds it, after the rows already selected. (STATUS-jas item 38 step 3c)",
@@ -633,7 +655,8 @@
      }
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Command- or Ctrl-click on a selected row takes it out. (STATUS-jas item 38 step 3c)",
@@ -669,7 +692,8 @@
      }
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Shift-click selects the visible rows from the selection's last row to the clicked one, inclusive, in row order (topmost layer first: [1], [1,0], [0], [0,0]). (STATUS-jas item 38 step 3c)",
@@ -713,7 +737,8 @@
      }
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
  {
   "_doc": "Shift-click with nothing selected is a plain click. (STATUS-jas item 38 step 3c)",
@@ -742,7 +767,8 @@
      }
     ]
    }
-  }
+  },
+  "expected_can_undo": false
  },
   {
     "_doc": "The square of a GROUPED child selects that child, not its group (both native trees; STATUS-flask §619/§623). The expected document is the op golden select_path_grouped_child_expected.json.",
@@ -756,7 +782,8 @@
         }
       }
     ],
-    "expected_json": "layers_element_select_keeps_a_grouped_child_expected.json"
+    "expected_json": "layers_element_select_keeps_a_grouped_child_expected.json",
+    "expected_can_undo": false
   },
   {
     "_doc": "Shift-click across a COLLAPSED group selects its hidden descendants too (layers_panel_select: \"selecting a collapsed group includes all its descendants\"): [1] is collapsed, so the range [1] .. [0] is [1], [1,0], [0]. The document does not change (the twirl case's golden).",
@@ -772,7 +799,8 @@
       "layers_panel_content": {
         "layers_panel_selection": [{"__path__": [1]}, {"__path__": [1, 0]}, {"__path__": [0]}]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Toggling the only selected row out leaves the selection empty, and the target layer stays where the click put it (the web reads the LAST entry and does nothing when there is none).",
@@ -787,7 +815,8 @@
       "layers_panel_content": {
         "layers_panel_selection": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Down arrow on a Layers row (layers_nav_down): the next visible row becomes the whole panel selection, through layers_panel_select, so its layer becomes the target layer. Visible rows, top first: [1], [1,0], [0], [0,0]. [1] -> [1,0], layer 1.",
@@ -800,7 +829,8 @@
     "expected_json": "layers_panel_select_selects_the_row_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Down arrow on the last visible row ([0,0] of [1], [1,0], [0], [0,0]) changes nothing: the selection stays, the target layer stays 0.",
@@ -813,7 +843,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Up arrow (layers_nav_up): the previous visible row becomes the selection. [0] -> [1,0] of [1], [1,0], [0], [0,0], layer 1.",
@@ -826,7 +857,8 @@
     "expected_json": "layers_panel_select_selects_the_row_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Up arrow on the first visible row ([1] of [1], [1,0], [0], [0,0]) changes nothing.",
@@ -839,7 +871,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "With several rows selected, the focus is the LAST selected one: [[0,0],[1]] focuses [1], the first row, so Up is a no-op and the selection is kept whole.",
@@ -852,7 +885,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}, {"__path__": [1]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Right arrow on a collapsed container (layers_nav_right) expands it; the selection does not move.",
@@ -866,7 +900,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Right arrow on an expanded container moves the selection to its first child: [1] -> [1,0], layer 1.",
@@ -879,7 +914,8 @@
     "expected_json": "layers_panel_select_selects_the_row_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}], "collapsed_paths": []}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Right arrow on a leaf ([1,0]) changes nothing.",
@@ -892,7 +928,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}], "collapsed_paths": []}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Left arrow on an expanded container (layers_nav_left) collapses it; the selection does not move.",
@@ -905,7 +942,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": [[1]]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Left arrow on a leaf moves the selection to its parent: [1,0] -> [1], layer 1.",
@@ -918,7 +956,8 @@
     "expected_json": "layers_panel_select_selects_the_row_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Left arrow on a collapsed TOP-LEVEL layer: it has no parent, so nothing changes.",
@@ -932,7 +971,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": [[1]]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Right arrow on an EXPANDED container with no children: there is no first child, so nothing changes. Rows, top first: [1] (the empty Foreground), [0], [0,0]; the row after [1] is [0], a sibling, not a child.",
@@ -945,7 +985,8 @@
     "expected_json": "layers_nav_right_on_an_empty_container_is_a_no_op_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}], "collapsed_paths": []}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Down arrow with no row selected selects the FIRST visible row ([1] of [1], [1,0], [0], [0,0]), as the web tree always did; its layer, 1, becomes the target layer.",
@@ -958,7 +999,8 @@
     "expected_json": "layers_panel_select_selects_the_row_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Up arrow with no row selected selects the LAST visible row ([0,0]); its layer, 0, becomes the target layer.",
@@ -971,7 +1013,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [0, 0]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Ctrl/Command+A in the Layers tree (layers_select_all): every visible row becomes the panel selection, top first, as the tree draws them: [1], [1,0], [0], [0,0]. Panel state only, so the document and its target layer do not change.",
@@ -984,7 +1027,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}, {"__path__": [1, 0]}, {"__path__": [0]}, {"__path__": [0, 0]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "layers_select_all with layer [1] collapsed: [1,0] is not a visible row, so it is not selected (a selected collapsed container already covers its descendants, layers.yaml). Rows: [1], [0], [0,0].",
@@ -998,7 +1042,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1]}, {"__path__": [0]}, {"__path__": [0, 0]}], "collapsed_paths": [[1]]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "layers_select_all in isolation mode selects only the visible rows INSIDE the isolated container (the action's description). enter_isolation_mode isolates the one selected container, [1]; its one row inside is [1,0].",
@@ -1012,7 +1057,8 @@
     "expected_json": "toggle_element_twirl_collapses_a_layer_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"layers_panel_selection": [{"__path__": [1, 0]}]}
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": "Option-click on [0,0]'s eye (solo_element_visibility): its sibling [0,1] is hidden and its visibility saved as a [path, visibility] pair; [0,0], already Preview, is untouched.",
@@ -1037,7 +1083,8 @@
     "expected_json": "view_state_two_rects_unchanged_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": null, "solo_saved": []}
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "An Outline sibling comes back Outline, not Preview: the solo saved it exactly. [0,1] cycled to Outline, then solo and unsolo of [0,0].",

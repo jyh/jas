@@ -54,7 +54,8 @@
       "zoom_level": 2.4,
       "view_offset_x": -180.0,
       "view_offset_y": -100.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -80,7 +81,8 @@
       "zoom_level": 1.6666666666666667,
       "view_offset_x": -33.33333333333337,
       "view_offset_y": -8.333333333333343
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -108,7 +110,8 @@
       "zoom_level": 64.0,
       "view_offset_x": -126.66666666666669,
       "view_offset_y": -66.66666666666669
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -134,7 +137,8 @@
       "zoom_level": 0.1,
       "view_offset_x": -100.0,
       "view_offset_y": -50.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -166,7 +170,8 @@
       "zoom_level": 2.88,
       "view_offset_x": -316.0000000000001,
       "view_offset_y": -200.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -197,7 +202,8 @@
       "zoom_level": 5.277777777777778,
       "view_offset_x": 20.0,
       "view_offset_y": 110.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -229,7 +235,8 @@
       "zoom_level": 3.015873015873016,
       "view_offset_x": 20.0,
       "view_offset_y": 191.42857142857144
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -264,7 +271,8 @@
       "zoom_level": 7.777777777777778,
       "view_offset_x": 120.0,
       "view_offset_y": 20.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -310,7 +318,8 @@
       "zoom_level": 2.4,
       "view_offset_x": -200.0,
       "view_offset_y": -120.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -341,7 +350,8 @@
       "zoom_level": 1.6666666666666667,
       "view_offset_x": -16.666666666666686,
       "view_offset_y": 8.333333333333314
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -370,7 +380,8 @@
       "zoom_level": 2.4,
       "view_offset_x": -100.0,
       "view_offset_y": -50.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -414,7 +425,8 @@
       "zoom_level": 1.0,
       "view_offset_x": 225.0,
       "view_offset_y": 175.0
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "_doc": [
@@ -442,6 +454,7 @@
       "zoom_level": 1.0,
       "view_offset_x": -300.0,
       "view_offset_y": -200.0
-    }
+    },
+    "expected_can_undo": false
   }
 ]

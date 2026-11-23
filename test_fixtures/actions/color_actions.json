@@ -17,7 +17,8 @@
       "fill_color": null,
       "stroke_color": "#000000",
       "fill_on_top": true
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "toggle_fill_on_top_then_set_active_color_none_clears_the_stroke",
@@ -154,7 +155,8 @@
         "h": 240,
         "c": 100
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_swatch_options_create_keeps_the_unpassed_fields_null",
@@ -184,7 +186,8 @@
         "swatch_name": null,
         "color_mode": null
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_color_picker_fill_starts_on_the_fill_colour",
@@ -210,7 +213,8 @@
       "state": {
         "color": "#0000ff"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_swatch_library_opens_with_an_empty_name",
@@ -227,7 +231,8 @@
       "state": {
         "name": ""
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "open_color_picker_stroke_starts_on_the_stroke_colour",
@@ -253,6 +258,7 @@
       "state": {
         "color": "#000000"
       }
-    }
+    },
+    "expected_can_undo": false
   }
 ]

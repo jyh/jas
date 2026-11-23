@@ -12,7 +12,8 @@
    }
   ],
   "expected_json": "open_print_dialog_expected.json",
-  "expected_layout": "pane_hide_toolbar.json"
+  "expected_layout": "pane_hide_toolbar.json",
+  "expected_can_undo": false
  },
  {
   "name": "toggle_pane_twice_shows_the_dock_again",
@@ -33,7 +34,8 @@
    }
   ],
   "expected_json": "open_print_dialog_expected.json",
-  "expected_layout": "pane_hide_show.json"
+  "expected_layout": "pane_hide_show.json",
+  "expected_can_undo": false
  },
  {
   "name": "toggle_canvas_maximize_maximizes_the_canvas",
@@ -46,7 +48,8 @@
    }
   ],
   "expected_json": "open_print_dialog_expected.json",
-  "expected_layout": "pane_maximize.json"
+  "expected_layout": "pane_maximize.json",
+  "expected_can_undo": false
  },
  {
   "name": "toggle_panel_hides_an_on_screen_panel",
@@ -61,7 +64,8 @@
    }
   ],
   "expected_json": "open_print_dialog_expected.json",
-  "expected_layout": "panel_toggle_hides_color.json"
+  "expected_layout": "panel_toggle_hides_color.json",
+  "expected_can_undo": false
  },
  {
   "name": "toggle_panel_raises_a_background_tab",
@@ -76,7 +80,8 @@
    }
   ],
   "expected_json": "open_print_dialog_expected.json",
-  "expected_layout": "panel_show_background_tab.json"
+  "expected_layout": "panel_show_background_tab.json",
+  "expected_can_undo": false
  },
  {
   "name": "toggle_panel_shows_a_panel_in_no_group",
@@ -91,6 +96,7 @@
    }
   ],
   "expected_json": "open_print_dialog_expected.json",
-  "expected_layout": "panel_toggle_shows_gradient.json"
+  "expected_layout": "panel_toggle_shows_gradient.json",
+  "expected_can_undo": false
  }
 ]
