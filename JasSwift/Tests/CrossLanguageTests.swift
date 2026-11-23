@@ -5101,8 +5101,9 @@ private func assertGestureTest(_ tc: [String: Any]) {
     // can witness. Mirrors Rust `assert_view_triple`.
     assertActionView(tc, model)
     // `expected_can_undo`: whether the gesture left an undo step (row 241).
-    // The shared check `assertActionCanUndo` reads the same key.
-    assertActionCanUndo(tc, model)
+    // The shared check `assertActionCanUndo` reads the same key, and names
+    // the gesture corpus in its message (row 246).
+    assertActionCanUndo(tc, model, kind: "Gesture")
 }
 
 /// Inc-1 of the shared gesture-fixture corpus: replay each fixture's pointer
@@ -6536,6 +6537,20 @@ private func assertActionCanRedo(_ tc: [String: Any], _ model: Model) {
             "Action test '\(name)': canRedo is \(model.canRedo) but the corpus pins \(want)")
 }
 
+/// The message a failed `expected_can_undo` records, naming the corpus the
+/// case came from (row 246: the gesture runner reuses this check, and its
+/// failures read "Action test").
+func canUndoMessage(kind: String, name: String, got: Bool, want: Bool) -> String {
+    "\(kind) test '\(name)': canUndo is \(got) but the corpus pins \(want)"
+}
+
+@Test func aCanUndoMessageNamesItsCorpus() {
+    #expect(canUndoMessage(kind: "Gesture", name: "g", got: true, want: false)
+            == "Gesture test 'g': canUndo is true but the corpus pins false")
+    #expect(canUndoMessage(kind: "Action", name: "a", got: false, want: true)
+            == "Action test 'a': canUndo is false but the corpus pins true")
+}
+
 /// OPTIONAL assertion: `expected_can_undo` (a bool), whether the model has an
 /// undo step after the case's actions. The document and the panel scope cannot
 /// see the undo stack, so a no-op that left an undo step would pass every other
@@ -6543,15 +6558,15 @@ private func assertActionCanRedo(_ tc: [String: Any], _ model: Model) {
 /// transaction; a transaction with no net change is dropped, OP_LOG.md §5), and
 /// either alone hides the other: the key reds only with both removed (driven
 /// 11-23). Mirrors Rust's `assert_action_can_undo`.
-private func assertActionCanUndo(_ tc: [String: Any], _ model: Model) {
+private func assertActionCanUndo(_ tc: [String: Any], _ model: Model, kind: String = "Action") {
     guard let raw = tc["expected_can_undo"] else { return }
     let name = tc["name"] as? String ?? "?"
     guard let want = corpusBool(raw) else {
-        Issue.record("Action test '\(name)': expected_can_undo is not a bool: \(raw)")
+        Issue.record("\(kind) test '\(name)': expected_can_undo is not a bool: \(raw)")
         return
     }
     #expect(model.canUndo == want,
-            "Action test '\(name)': canUndo is \(model.canUndo) but the corpus pins \(want)")
+            "\(canUndoMessage(kind: kind, name: name, got: model.canUndo, want: want))")
 }
 
 /// OPTIONAL assertion: `expected_dialog`, `{"id", "params": {..}, "state":
