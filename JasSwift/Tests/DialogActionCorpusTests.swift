@@ -343,6 +343,19 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
         default: failures.append("\(name): expected_document \(want) is neither unchanged nor changed")
         }
     }
+    // `expected_can_undo`: whether the model holds an undo step after the last
+    // step. A confirm that changed nothing, and a live PREVIEW (the dialog still
+    // open: a PreviewReapply write, OP_LOG.md section 4), must leave none; a
+    // confirmed change one (row 239). Rust's engine-route runner the same.
+    if let raw = tc["expected_can_undo"] {
+        if let want = corpusBool(raw) {
+            if m.canUndo != want {
+                failures.append("\(name): canUndo is \(m.canUndo) but the corpus pins \(want)")
+            }
+        } else {
+            failures.append("\(name): expected_can_undo is not a bool: \(raw)")
+        }
+    }
     if let file = tc["expected_json"] as? String {
         let want = readText("\(root)/dialog_actions/\(file)")?.trimmingCharacters(in: .whitespacesAndNewlines)
         if want != after {

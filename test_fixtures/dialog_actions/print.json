@@ -28,7 +28,8 @@
     ],
     "expected_dialog": null,
     "expected_document": "changed",
-    "expected_json": "print_done_stores_the_edited_copies_expected.json"
+    "expected_json": "print_done_stores_the_edited_copies_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "print_print_stores_the_edited_copies_and_exports_a_pdf",
@@ -60,7 +61,8 @@
     "expected_dialog": null,
     "expected_document": "changed",
     "expected_json": "print_done_stores_the_edited_copies_expected.json",
-    "expected_pdf_export": true
+    "expected_pdf_export": true,
+    "expected_can_undo": true
   },
   {
     "name": "print_cancel_stores_nothing",
@@ -90,7 +92,8 @@
       }
     ],
     "expected_dialog": null,
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "print_a_tab_switch_keeps_the_edits",
@@ -146,6 +149,7 @@
         "gfx_flatness": 2
       }
     },
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   }
 ]

@@ -31,7 +31,8 @@
       }
     ],
     "expected_dialog": null,
-    "expected_json": "layer_options_create_ok_takes_the_next_preset_colour_expected.json"
+    "expected_json": "layer_options_create_ok_takes_the_next_preset_colour_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "layer_options_create_preset_change_writes_that_preset",
@@ -74,7 +75,8 @@
       }
     ],
     "expected_dialog": null,
-    "expected_json": "layer_options_create_preset_change_writes_that_preset_expected.json"
+    "expected_json": "layer_options_create_preset_change_writes_that_preset_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "layer_options_edit_preset_change_colours_a_colourless_layer",
@@ -108,7 +110,8 @@
       }
     ],
     "expected_dialog": null,
-    "expected_json": "layer_options_edit_preset_change_colours_a_colourless_layer_expected.json"
+    "expected_json": "layer_options_edit_preset_change_colours_a_colourless_layer_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "layer_options_edit_ok_keeps_a_stored_colour",
@@ -133,7 +136,8 @@
       }
     ],
     "expected_dialog": null,
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "layer_options_edit_ok_on_a_colourless_layer_writes_the_default",
@@ -158,6 +162,7 @@
       }
     ],
     "expected_dialog": null,
-    "expected_json": "layer_options_edit_ok_on_a_colourless_layer_writes_the_default_expected.json"
+    "expected_json": "layer_options_edit_ok_on_a_colourless_layer_writes_the_default_expected.json",
+    "expected_can_undo": true
   }
 ]

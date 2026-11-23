@@ -40,7 +40,8 @@
     ],
     "expected_dialog": null,
     "expected_document": "changed",
-    "expected_json": "paragraph_justification_ok_writes_the_edited_fields_expected.json"
+    "expected_json": "paragraph_justification_ok_writes_the_edited_fields_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "paragraph_justification_cancel_writes_nothing",
@@ -81,7 +82,8 @@
       }
     ],
     "expected_dialog": null,
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   },
   {
     "name": "paragraph_hyphenation_ok_writes_the_edited_fields",
@@ -123,7 +125,8 @@
     ],
     "expected_dialog": null,
     "expected_document": "changed",
-    "expected_json": "paragraph_hyphenation_ok_writes_the_edited_fields_expected.json"
+    "expected_json": "paragraph_hyphenation_ok_writes_the_edited_fields_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "paragraph_hyphenation_cancel_writes_nothing",
@@ -163,6 +166,7 @@
       }
     ],
     "expected_dialog": null,
-    "expected_document": "unchanged"
+    "expected_document": "unchanged",
+    "expected_can_undo": false
   }
 ]
