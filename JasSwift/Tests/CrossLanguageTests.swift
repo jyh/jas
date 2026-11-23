@@ -6521,6 +6521,41 @@ func corpusFlag(_ v: Any?) -> Bool { corpusBool(v) ?? false }
             "a flag defaults a number and an absent key to false, as Rust's readers do")
 }
 
+/// A corpus value read as a JSON NUMBER, or nil. `JSONSerialization` hands a
+/// boolean as an `NSNumber` too, and `true as? Double` is `1.0`, so a reader
+/// written as `as? Double` or `(x as! NSNumber).doubleValue` reads a JSON
+/// `true` where Rust's `as_f64()` refuses it. Told apart by CF type (row 237).
+func corpusNumber(_ v: Any?) -> Double? {
+    return nil  // STUB, red first (row 237)
+}
+
+/// A corpus value read as a JSON INTEGER, or nil: a number that is neither a
+/// boolean nor float-typed, as Rust's `as_i64()` reads (`2.0` and `2.5` are
+/// floats there, and so refused). Told apart by CF type (row 237).
+func corpusInt(_ v: Any?) -> Int? {
+    return nil  // STUB, red first (row 237)
+}
+
+@Test func aCorpusNumberRefusesABoolean() throws {
+    let d = try JSONSerialization.jsonObject(
+        with: Data(#"{"t": true, "f": false, "two": 2, "twof": 2.0, "half": 2.5, "neg": -3, "s": "2"}"#.utf8))
+        as! [String: Any]
+    #expect(corpusNumber(d["two"]) == 2.0, "a JSON 2 is the number 2")
+    #expect(corpusNumber(d["twof"]) == 2.0, "a JSON 2.0 is the number 2")
+    #expect(corpusNumber(d["half"]) == 2.5, "a JSON 2.5 is 2.5")
+    #expect(corpusNumber(d["neg"]) == -3.0, "a JSON -3 is -3")
+    #expect(corpusNumber(d["t"]) == nil, "a JSON true is not a number (Swift's as? Double reads 1.0)")
+    #expect(corpusNumber(d["f"]) == nil, "a JSON false is not a number")
+    #expect(corpusNumber(d["s"]) == nil, "a string is not a number")
+    #expect(corpusNumber(nil) == nil, "an absent key is not a number")
+    #expect(corpusInt(d["two"]) == 2, "a JSON 2 is the integer 2")
+    #expect(corpusInt(d["neg"]) == -3, "a JSON -3 is the integer -3")
+    #expect(corpusInt(d["twof"]) == nil, "a JSON 2.0 is a float, as Rust's as_i64 reads it")
+    #expect(corpusInt(d["half"]) == nil, "a JSON 2.5 is not an integer")
+    #expect(corpusInt(d["t"]) == nil, "a JSON true is not an integer (Swift's as? Int reads 1)")
+    #expect(corpusInt(d["s"]) == nil && corpusInt(nil) == nil, "a string or an absent key is not an integer")
+}
+
 /// OPTIONAL assertion: `expected_can_redo` (a bool), whether the model has a
 /// redo step after the case's actions. An undo returns the document to a golden
 /// a no-op would also match, so without this key an undo that dropped its step
