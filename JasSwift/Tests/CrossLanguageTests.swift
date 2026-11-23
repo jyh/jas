@@ -5647,7 +5647,7 @@ private func shiftConstrainEnv(_ fx: [String: Any]) -> (String, [Int], (Double, 
             releaseX: release[0], releaseY: release[1])
 
         // The witness's claim about its own power, checked.
-        guard let claimed = w["discriminating"] as? Bool else {
+        guard let claimed = corpusBool(w["discriminating"]) else {
             Issue.record("witness '\(name)' must record `discriminating`")
             continue
         }
@@ -6487,6 +6487,27 @@ private func assertActionTest(_ tc: [String: Any]) {
     assertActionCanRedo(tc, model)
 }
 
+/// A corpus value read as a JSON BOOLEAN, or nil. `JSONSerialization` hands a
+/// number and a boolean alike as an `NSNumber`, and `1 as? Bool` is `true`
+/// (`0` is `false`), so a guard written as `as? Bool` accepts `1` where Rust's
+/// `as_bool()` refuses it. This tells them apart by CF type, as `keyCanonValue`
+/// does (row 231).
+func corpusBool(_ v: Any?) -> Bool? {
+    guard let n = v as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return nil }
+    return n.boolValue
+}
+
+@Test func aCorpusBoolRefusesANumber() throws {
+    let d = try JSONSerialization.jsonObject(
+        with: Data(#"{"t": true, "f": false, "one": 1, "zero": 0, "s": "true"}"#.utf8)) as! [String: Any]
+    #expect(corpusBool(d["t"]) == true, "a JSON true is true")
+    #expect(corpusBool(d["f"]) == false, "a JSON false is false")
+    #expect(corpusBool(d["one"]) == nil, "a JSON 1 is not a boolean")
+    #expect(corpusBool(d["zero"]) == nil, "a JSON 0 is not a boolean")
+    #expect(corpusBool(d["s"]) == nil, "a string is not a boolean")
+    #expect(corpusBool(nil) == nil, "an absent key is not a boolean")
+}
+
 /// OPTIONAL assertion: `expected_can_redo` (a bool), whether the model has a
 /// redo step after the case's actions. An undo returns the document to a golden
 /// a no-op would also match, so without this key an undo that dropped its step
@@ -6495,7 +6516,7 @@ private func assertActionTest(_ tc: [String: Any]) {
 private func assertActionCanRedo(_ tc: [String: Any], _ model: Model) {
     guard let raw = tc["expected_can_redo"] else { return }
     let name = tc["name"] as? String ?? "?"
-    guard let want = raw as? Bool else {
+    guard let want = corpusBool(raw) else {
         Issue.record("Action test '\(name)': expected_can_redo is not a bool: \(raw)")
         return
     }
@@ -6513,7 +6534,7 @@ private func assertActionCanRedo(_ tc: [String: Any], _ model: Model) {
 private func assertActionCanUndo(_ tc: [String: Any], _ model: Model) {
     guard let raw = tc["expected_can_undo"] else { return }
     let name = tc["name"] as? String ?? "?"
-    guard let want = raw as? Bool else {
+    guard let want = corpusBool(raw) else {
         Issue.record("Action test '\(name)': expected_can_undo is not a bool: \(raw)")
         return
     }
