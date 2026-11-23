@@ -180,7 +180,9 @@ extension JasAppDelegate {
                 return
             }
             guard let model = workspace?.activeModel else { return }
-            FifoActionRouting.dispatch(name, model: model, params: params)
+            if let refusal = FifoActionRouting.dispatch(name, model: model, params: params) {
+                NSLog("test-fifo: %@", refusal)
+            }
         case "open":
             // open <path>: File > Open's document without its dialog, so a
             // level-2 harness can open a script's setup file (TESTING.md §6).

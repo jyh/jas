@@ -35,16 +35,27 @@ public enum FifoActionRouting {
     /// analog of Python monkeypatching dock_panel._dispatch_yaml_action).
     /// It defaults to `LayersPanel.dispatchYamlAction`, exactly what the
     /// FIFO handler used before this native-first layer.
+    ///
+    /// A name the workspace does not define is REFUSED by name and nothing is
+    /// dispatched; the refusal is returned for the FIFO to log (row 226). The
+    /// generic dispatcher returns silently on an unknown name, so a harness
+    /// typo used to do nothing and log nothing. `knows` is injectable so a
+    /// spy test may dispatch a made-up name. Returns nil when dispatched.
+    @discardableResult
     public static func dispatch(
         _ name: String,
         model: Model,
         params: [String: Any] = [:],
+        knows: (String) -> Bool = workspaceDefines,
         fallthrough fallthroughDispatch:
             (_ name: String, _ model: Model, _ params: [String: Any]) -> Void
             = { name, model, params in
                 LayersPanel.dispatchYamlAction(name, model: model, params: params)
             }
-    ) {
+    ) -> String? {
+        guard knows(name) else {
+            return "action REFUSED \(name) (the workspace defines no such action)"
+        }
         fallthroughDispatch(name, model, params)
         // The dock's panel bodies redraw on `panelStateVersion`, and the
         // store publishes nothing; every person's route that runs a panel
@@ -52,6 +63,12 @@ public enum FifoActionRouting {
         // Without this a FIFO `action` wrote the store and the Mac kept
         // drawing the old panel, so a shot read a stale view (row 217).
         model.panelStateVersion &+= 1
+        return nil
+    }
+
+    /// Whether the workspace's `actions` table defines `name`.
+    public static func workspaceDefines(_ name: String) -> Bool {
+        (WorkspaceData.load()?.data["actions"] as? [String: Any])?[name] != nil
     }
 }
 
