@@ -418,7 +418,7 @@ private func hrefRectFillGradient(_ defs: String, _ fill: String = "g") -> Gradi
 
     for (i, tc) in cases.enumerated() {
         let deletePaths: [ElementPath] = (tc["delete_paths"] as! [[Any]]).map { path in
-            path.map { ($0 as! NSNumber).intValue }
+            path.map { corpusInt($0)! }
         }
         let expected = (tc["orphaned"] as! [Any]).map { $0 as! String }
 
@@ -1291,7 +1291,7 @@ private func preservationInvariantsFor(
     let subject = Set(tc["subject_ids"] as! [String])
     let consumed = Set(tc["consumed_ids"] as! [String])
     let speaksTo = Set(tc["speaks_to"] as! [String])
-    let wantFresh = (tc["expected_fresh_ids"] as! NSNumber).intValue
+    let wantFresh = corpusInt(tc["expected_fresh_ids"])!
 
     let beforeSet = Set(before.ids)
     let afterSet = Set(after.ids)
@@ -2269,24 +2269,24 @@ private func assertDragCoalesce(_ tc: [String: Any]) {
         model.commitTxn()
     }
 
-    let expectTxns = (tc["expect_journal_txns"] as! NSNumber).intValue
+    let expectTxns = corpusInt(tc["expect_journal_txns"])!
     #expect(model.journal.count == expectTxns,
         "[\(name)] journal txn count: expected \(expectTxns), got \(model.journal.count)")
 
-    if let ops = (tc["expect_journal_ops"] as? NSNumber)?.intValue {
+    if let ops = corpusInt(tc["expect_journal_ops"]) {
         let tip = model.journal.last!
         #expect(tip.ops.count == ops,
             "[\(name)] tip txn op count: expected \(ops), got \(tip.ops.count)")
     }
-    if let dx = (tc["expect_last_move_dx"] as? NSNumber)?.doubleValue {
-        let dy = (tc["expect_last_move_dy"] as? NSNumber)?.doubleValue ?? 0.0
+    if let dx = corpusNumber(tc["expect_last_move_dx"]) {
+        let dy = corpusNumber(tc["expect_last_move_dy"]) ?? 0.0
         let (gdx, gdy) = lastOpDelta(model.journal.last!)
         #expect(gdx == dx && gdy == dy,
             "[\(name)] summed delta: expected (\(dx),\(dy)), got (\(gdx),\(gdy))")
     }
 
     // Undo-step lock-step: journal cursor == undo depth == declared steps.
-    let steps = (tc["expect_undo_steps"] as! NSNumber).intValue
+    let steps = corpusInt(tc["expect_undo_steps"])!
     #expect(model.journalHeadValue == steps,
         "[\(name)] journalHead (== undo steps): expected \(steps), got \(model.journalHeadValue)")
     for i in 0..<steps {
@@ -2567,7 +2567,7 @@ private func rederiveRecordedOutput(_ fixture: [String: Any], _ journal: [Transa
     let rec = fixture["recorded"] as! [String: Any]
     let edit = rec["edit_source"] as! [String: Any]
     let editId = edit["id"] as! String
-    let newX = ((edit["set"] as! [String: Any])["x"] as! NSNumber).intValue
+    let newX = corpusInt((edit["set"] as! [String: Any])["x"])!
     let svg = readFixture(fixture["setup_svg"] as! String)
     let editedSvg = svg.replacingOccurrences(
         of: "x=\"0\" y=\"0\"", with: "x=\"\(newX)\" y=\"0\"")
@@ -2952,8 +2952,8 @@ private func runWorkspaceOperationFixture(_ fixture: String) throws {
     let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
     func rect(_ v: Any?) -> EdgeRect? {
         guard let d = v as? [String: Any] else { return nil }
-        return EdgeRect(x: (d["x"] as! NSNumber).doubleValue, y: (d["y"] as! NSNumber).doubleValue,
-                        w: (d["w"] as! NSNumber).doubleValue, h: (d["h"] as! NSNumber).doubleValue)
+        return EdgeRect(x: corpusNumber(d["x"])!, y: corpusNumber(d["y"])!,
+                        w: corpusNumber(d["w"])!, h: corpusNumber(d["h"])!)
     }
     var rows = 0
     for tc in tests {
@@ -2967,8 +2967,8 @@ private func runWorkspaceOperationFixture(_ fixture: String) throws {
         }
         let cell = tc["cell"] as! [String: Any]
         let got = layout.edgeDockRects(inCell: rect(cell)!,
-                                       viewportW: (cell["viewport_w"] as! NSNumber).doubleValue,
-                                       viewportH: (cell["viewport_h"] as! NSNumber).doubleValue)
+                                       viewportW: corpusNumber(cell["viewport_w"])!,
+                                       viewportH: corpusNumber(cell["viewport_h"])!)
         let expected = tc["expected"] as! [String: Any]
         #expect(got.left == rect(expected["left"]), "\(name): left")
         #expect(got.bottom == rect(expected["bottom"]), "\(name): bottom")
@@ -3136,8 +3136,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
             Issue.record("no layout pane '\(paneId)' with content")
             continue
         }
-        let availW = (args["avail_w"] as! NSNumber).intValue
-        let availH = (args["avail_h"] as? NSNumber)?.intValue ?? 0
+        let availW = corpusInt(args["avail_w"])!
+        let availH = corpusInt(args["avail_h"]) ?? 0
         let ctx = (args["ctx"] as? [String: Any]) ?? [:]
         let actual = PanelLayout.layoutPanel(pane, availW: availW, availH: availH, ctx: ctx)
         let actualBytes = try JSONSerialization.data(withJSONObject: actual, options: [.sortedKeys])
@@ -3173,8 +3173,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
             Issue.record("no dialog '\(dialogId)' with content")
             continue
         }
-        let availW = (args["avail_w"] as! NSNumber).intValue
-        let availH = (args["avail_h"] as? NSNumber)?.intValue ?? 0
+        let availW = corpusInt(args["avail_w"])!
+        let availH = corpusInt(args["avail_h"]) ?? 0
         let ctx = (args["ctx"] as? [String: Any]) ?? [:]
         let actual = PanelLayout.layoutPanel(["content": content], availW: availW, availH: availH, ctx: ctx)
         let actualBytes = try JSONSerialization.data(withJSONObject: actual, options: [.sortedKeys])
@@ -3208,8 +3208,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         #expect(function == "layout_panel", "Unknown function: \(function)")
         let args = tc["args"] as! [String: Any]
         let panelId = args["panel"] as! String
-        let availW = (args["avail_w"] as! NSNumber).intValue
-        let availH = (args["avail_h"] as? NSNumber)?.intValue ?? 0
+        let availW = corpusInt(args["avail_w"])!
+        let availH = corpusInt(args["avail_h"]) ?? 0
         let ctx = (args["ctx"] as? [String: Any]) ?? [:]
         let expected = tc["expected"] as! [[String: Any]]
 
@@ -3909,9 +3909,9 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     for tc in vectors {
         let name = tc["name"] as! String
         let text = tc["text"] as! String
-        let minVal = (tc["min"] as? NSNumber)?.doubleValue
-        let maxVal = (tc["max"] as? NSNumber)?.doubleValue
-        let expected = (tc["expected"] as? NSNumber)?.doubleValue
+        let minVal = corpusNumber(tc["min"])
+        let maxVal = corpusNumber(tc["max"])
+        let expected = corpusNumber(tc["expected"])
         let got = numberInputCommit(text: text, min: minVal, max: maxVal)
         #expect(got == expected,
                 "number_commit '\(name)': text \(text.debugDescription) with min \(String(describing: minVal)) max \(String(describing: maxVal)) gave \(String(describing: got)), corpus pins \(String(describing: expected))")
@@ -3932,8 +3932,8 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(vectors.count >= 12, "color_bar.json has \(vectors.count) vectors")
     for tc in vectors {
         let name = tc["name"] as! String
-        let u = (tc["u"] as! NSNumber).doubleValue
-        let v = (tc["v"] as! NSNumber).doubleValue
+        let u = corpusNumber(tc["u"])!
+        let v = corpusNumber(tc["v"])!
         let expected = tc["expected"] as! String
         #expect(colorBarHex(u, v) == expected,
                 "color_bar '\(name)': (\(u), \(v)) gave \(colorBarHex(u, v)), corpus pins \(expected)")
@@ -3952,17 +3952,17 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     var strips = 0, fields = 0
     for tc in vectors {
         let name = tc["name"] as! String
-        let v = (tc["v"] as! NSNumber).doubleValue
+        let v = corpusNumber(tc["v"])!
         switch tc["function"] as! String {
         case "strip_value":
             strips += 1
-            let got = stripValue(v: v, max: (tc["max"] as! NSNumber).doubleValue)
-            let want = (tc["expected"] as! NSNumber).doubleValue
+            let got = stripValue(v: v, max: corpusNumber(tc["max"])!)
+            let want = corpusNumber(tc["expected"])!
             #expect(abs(got - want) < 1e-9, "strip_value '\(name)': \(got), corpus pins \(want)")
-            #expect(Int(got.rounded()) == (tc["written"] as! NSNumber).intValue, "strip_value '\(name)' written")
+            #expect(Int(got.rounded()) == corpusInt(tc["written"])!, "strip_value '\(name)' written")
         case "gradient_sb":
             fields += 1
-            let (s, b) = gradientSB(u: (tc["u"] as! NSNumber).doubleValue, v: v)
+            let (s, b) = gradientSB(u: corpusNumber(tc["u"])!, v: v)
             let want = (tc["expected"] as! [NSNumber]).map { $0.doubleValue }
             #expect(abs(s - want[0]) < 1e-9 && abs(b - want[1]) < 1e-9,
                     "gradient_sb '\(name)': (\(s), \(b)), corpus pins (\(want[0]), \(want[1]))")
@@ -3998,7 +3998,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         if let want = tc["value"] as? [NSNumber] {
             #expect((parsed.value as? [Double]) == want.map { $0.doubleValue }, "picker_commits '\(name)': the point")
         } else {
-            #expect((parsed.value as? Double) == (tc["value"] as! NSNumber).doubleValue, "picker_commits '\(name)': v")
+            #expect((parsed.value as? Double) == corpusNumber(tc["value"])!, "picker_commits '\(name)': v")
         }
     }
     #expect(vectors.count >= 20, "picker_commits.json has \(vectors.count) vectors")
@@ -4093,7 +4093,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
                 "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
             ]
             for (key, value) in got {
-                let pinned = (want[key] as! NSNumber).intValue
+                let pinned = corpusInt(want[key])!
                 #expect(value == pinned,
                         "color_convert '\(name)': panel_channels.\(key) is \(value), corpus pins \(pinned)")
             }
@@ -4223,7 +4223,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
             if case .bool(let b) = result { ok = b == (expected as! Bool) } else { ok = false }
         case "number":
             if case .number(let n) = result {
-                ok = abs(n - (expected as! NSNumber).doubleValue) < 1e-9
+                ok = abs(n - corpusNumber(expected)!) < 1e-9
             } else { ok = false }
         case "string":
             if case .string(let s) = result { ok = s == (expected as! String) } else { ok = false }
@@ -4974,8 +4974,8 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false,
             }
             continue
         }
-        let x = (ev["x"] as! NSNumber).doubleValue
-        let y = (ev["y"] as! NSNumber).doubleValue
+        let x = corpusNumber(ev["x"])!
+        let y = corpusNumber(ev["y"])!
         switch ev["kind"] as! String {
         case "press":
             // The canvas's press order (`CanvasSubwindow.mouseDown`): the Align
@@ -5616,8 +5616,8 @@ private func shiftConstrainEnv(_ fx: [String: Any]) -> (String, [Int], (Double, 
     let setup = fx["setup_svg"] as! String
     let path = (fx["element_path"] as! [NSNumber]).map { $0.intValue }
     let viewport = (
-        (fx["viewport_w"] as! NSNumber).doubleValue,
-        (fx["viewport_h"] as! NSNumber).doubleValue
+        corpusNumber(fx["viewport_w"])!,
+        corpusNumber(fx["viewport_h"])!
     )
     return (setup, path, viewport)
 }
@@ -5644,9 +5644,9 @@ private func shiftConstrainEnv(_ fx: [String: Any]) -> (String, [Int], (Double, 
         let press = (w["press"] as! [NSNumber]).map { $0.doubleValue }
         let release = (w["release"] as! [NSNumber]).map { $0.doubleValue }
         let draw = ShiftDraw(
-            zoom: (w["zoom"] as! NSNumber).doubleValue,
-            offsetX: (w["view_offset_x"] as! NSNumber).doubleValue,
-            offsetY: (w["view_offset_y"] as! NSNumber).doubleValue,
+            zoom: corpusNumber(w["zoom"])!,
+            offsetX: corpusNumber(w["view_offset_x"])!,
+            offsetY: corpusNumber(w["view_offset_y"])!,
             pressX: press[0], pressY: press[1],
             releaseX: release[0], releaseY: release[1])
 
@@ -5876,8 +5876,8 @@ private func assertStreamPin(_ fx: [String: Any]) {
     let (setup, path, viewport) = shiftConstrainEnv(fx)
     let tools = shiftConstrainTools(fx)
     let cfg = fx["generative"] as! [String: Any]
-    let cases = (cfg["cases"] as! NSNumber).intValue
-    let minDiscriminating = (cfg["min_discriminating"] as! NSNumber).intValue
+    let cases = corpusInt(cfg["cases"])!
+    let minDiscriminating = corpusInt(cfg["min_discriminating"])!
 
     // The cross-language pin: both ports must draw the SAME vectors from the
     // same seed, or a seed reported by one is meaningless in the other.
@@ -6240,7 +6240,7 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
 /// existing fixture. Mirrors Rust's `seed_case_view`.
 private func seedCaseView(_ model: Model, _ tc: [String: Any]) {
     guard let view = tc["view"] as? [String: Any] else { return }
-    func num(_ key: String) -> Double? { (view[key] as? NSNumber)?.doubleValue }
+    func num(_ key: String) -> Double? { corpusNumber(view[key]) }
     if let v = num("zoom_level") { model.zoomLevel = v }
     if let v = num("view_offset_x") { model.viewOffsetX = v }
     if let v = num("view_offset_y") { model.viewOffsetY = v }
@@ -6265,7 +6265,7 @@ private func assertActionView(_ tc: [String: Any], _ model: Model) {
     guard let expected = tc["expected_view"] as? [String: Any] else { return }
     let name = tc["name"] as! String
     for (key, wantRaw) in expected {
-        guard let want = (wantRaw as? NSNumber)?.doubleValue else {
+        guard let want = corpusNumber(wantRaw) else {
             Issue.record("Action test '\(name)': expected_view.\(key) is not a number")
             continue
         }
@@ -6345,7 +6345,7 @@ private func runActionCase(_ tc: [String: Any], svgText: String? = nil)
     // `set_panel_state` in the action writes the Layers panel, as it does
     // in the app. Without it the selection was never cleared here.
     if let rows = tc["layers_panel_selection"] as? [[Any]] {
-        let paths: [[String: Any]] = rows.map { ["__path__": $0.map { ($0 as! NSNumber).intValue }] }
+        let paths: [[String: Any]] = rows.map { ["__path__": $0.map { corpusInt($0)! }] }
         model.stateStore.setPanel("layers_panel_content", "layers_panel_selection", paths)
         model.stateStore.setActivePanel("layers_panel_content")
     }
@@ -6366,7 +6366,7 @@ private func runActionCase(_ tc: [String: Any], svgText: String? = nil)
     // no-selection fixtures. Mirrors Rust's run_action_model.
     if let selPaths = tc["selection"] as? [[Any]], !selPaths.isEmpty {
         let paths: [ElementPath] = selPaths.map { path in
-            path.map { ($0 as! NSNumber).intValue }
+            path.map { corpusInt($0)! }
         }
         let controller = Controller(model: model)
         controller.setSelection(paths.map { ElementSelection.all($0) })
@@ -6523,7 +6523,7 @@ func corpusFlag(_ v: Any?) -> Bool { corpusBool(v) ?? false }
 
 /// A corpus value read as a JSON NUMBER, or nil. `JSONSerialization` hands a
 /// boolean as an `NSNumber` too, and `true as? Double` is `1.0`, so a reader
-/// written as `as? Double` or `(x as! NSNumber).doubleValue` reads a JSON
+/// written as `as? Double` or `corpusNumber(x)!` reads a JSON
 /// `true` where Rust's `as_f64()` refuses it. Told apart by CF type (row 237).
 func corpusNumber(_ v: Any?) -> Double? {
     guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
@@ -6905,7 +6905,7 @@ private let seedFloor = 20
             var wrapped = svgToDocument(svg)
             var any = false
             for raw in selPaths {
-                let path = raw.compactMap { ($0 as? NSNumber)?.intValue }
+                let path = raw.compactMap { corpusInt($0) }
                 guard path.count == raw.count else { continue }
                 if let next = seedWrap(wrapped, at: path) { wrapped = next; any = true }
             }
@@ -7546,14 +7546,14 @@ private func wireUnhex(_ s: String) -> Data {
     let doc = svgToDocument(readFixture("svg/\(setup)"))
 
     let rows = spec["rows"] as! [[String: Any]]
-    let min = (spec["min_rows"] as! NSNumber).intValue
+    let min = corpusInt(spec["min_rows"])!
     // Anti-vacuity declared BY THE DATA, so the floor cannot drift out of step
     // with the corpus it guards.
     #expect(rows.count == min,
             "walked \(rows.count) row(s) against a declared floor of \(min)")
 
     for row in rows {
-        let path = (row["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        let path = (row["path"] as! [Any]).map { corpusInt($0)! }
         let want = row["token"] as! String
         let why = row["why"] as? String ?? ""
         #expect(layersTypeValue(doc.getElement(path)) == want,
@@ -7776,7 +7776,7 @@ private func wireUnhex(_ s: String) -> Data {
     let fx = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
     let vectors = fx["vectors"] as! [[String: Any]]
     #expect(vectors.count >= 7, "rectCornerPromotion: only \(vectors.count) vectors")
-    func num(_ a: Any?) -> Double { (a as! NSNumber).doubleValue }
+    func num(_ a: Any?) -> Double { corpusNumber(a)! }
     for v in vectors {
         let name = v["name"] as! String
         let r = v["rect"] as! [String: Any]
@@ -7825,7 +7825,7 @@ private func wireUnhex(_ s: String) -> Data {
 
     var exponentCases = 0
     for c in cases {
-        let v = (c["value"] as! NSNumber).doubleValue
+        let v = corpusNumber(c["value"])!
         let want = c["expected"] as! String
         let got = fmtFull(v)
         #expect(got == want, "fmtFull(\(v)) gave \(got), want \(want)")
@@ -8329,7 +8329,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
                 for (name, at) in [("drag_start", pressed), ("drag_move", toRow), ("drag_end", toRow)] {
                     // F1c (row 145): the hover over the target expands it before the drop.
-                    if name == "drag_end", zone == "into", ((st["hover_ms"] as? NSNumber)?.doubleValue ?? 0) >= formsHoverExpandMs {
+                    if name == "drag_end", zone == "into", (corpusNumber(st["hover_ms"]) ?? 0) >= formsHoverExpandMs {
                         formsHoverExpand(pid, toRow, model: model)
                     }
                     let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
