@@ -1306,12 +1306,11 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         guard let args = spec as? [String: Any] else { return nil }
         let (rx, ry, rw, rh, additive) = normalizeRectArgs(args, store: store, ctx: ctx)
         if rw > 1.0 || rh > 1.0 {
-            // Marquee commit is selection-only (non-undoable). beginTxn mirrors
-            // Rust's commit_partial_marquee; directSelectRect writes unbracketed,
-            // so the txn nets no journaled change and commitTxn's no-op rule
-            // drops the checkpoint (no orphan undo step). The runEffects owner
-            // commits. Replaces the legacy snapshot() that left a stray step.
-            model.beginTxn()
+            // Marquee commit is selection-only (non-undoable), so no
+            // transaction: directSelectRect writes unbracketed (.selection). A
+            // beginTxn here was KEPT, not dropped (the selection is a net
+            // document change), and left an undo step a selection must not
+            // have (OP_LOG.md section 4; row 243, measured). Mirrors Rust.
             Controller(model: model).directSelectRect(
                 x: rx, y: ry, width: rw, height: rh, extend: additive)
         } else if !additive {

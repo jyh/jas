@@ -2481,7 +2481,11 @@ fn run_doc_effect(
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
                 if rw > 1.0 || rh > 1.0 {
-                    model.begin_txn();
+                    // Selection-only, so no transaction: partial_select_rect
+                    // writes unbracketed (NonUndoableIntent::Selection), and a
+                    // txn opened around it was KEPT (the selection is a net
+                    // document change), leaving an undo step a selection must
+                    // not have (OP_LOG.md section 4; row 243, measured).
                     Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
                 } else if !additive {
                     Controller::set_selection(model, Vec::new());

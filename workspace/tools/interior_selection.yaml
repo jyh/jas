@@ -35,6 +35,10 @@ state:
   drag_start_y: { default: 0 }
   alt_held: { default: false }
   copied: { default: false }
+  # Has doc.snapshot been taken for this drag yet? Deferred to the first
+  # mousemove, as selection.yaml does, so a click that only selects pushes
+  # no undo entry. Row 243.
+  snapshotted: { default: false }
 
 handlers:
 
@@ -65,7 +69,11 @@ handlers:
             - set: { tool.interior_selection.doc_marquee_end_x: "event.doc_x" }
             - set: { tool.interior_selection.doc_marquee_end_y: "event.doc_y" }
           else:
-            - "doc.snapshot": {}
+            # The snapshot is deferred to the first drag move (as
+            # selection.yaml does), so a click that only selects is not an
+            # undo step (OP_LOG.md section 4), and undo of a click+drag
+            # keeps the new selection. Row 243.
+            - set: { tool.interior_selection.snapshotted: "false" }
             - if: "event.modifiers.shift"
               then:
                 - "doc.toggle_selection": "hit"
@@ -86,6 +94,10 @@ handlers:
         - set: { tool.interior_selection.doc_marquee_end_y: "event.doc_y" }
     - if: "tool.interior_selection.mode == 'drag_move'"
       then:
+        - if: "not tool.interior_selection.snapshotted"
+          then:
+            - "doc.snapshot": {}
+            - set: { tool.interior_selection.snapshotted: "true" }
         - if: "tool.interior_selection.alt_held and not tool.interior_selection.copied"
           then:
             - "doc.copy_selection":

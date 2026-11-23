@@ -24245,6 +24245,9 @@
         },
         "copied": {
           "default": false
+        },
+        "snapshotted": {
+          "default": false
         }
       },
       "handlers": {
@@ -24327,7 +24330,9 @@
                 ],
                 "else": [
                   {
-                    "doc.snapshot": {}
+                    "set": {
+                      "tool.interior_selection.snapshotted": "false"
+                    }
                   },
                   {
                     "if": "event.modifiers.shift",
@@ -24405,6 +24410,19 @@
           {
             "if": "tool.interior_selection.mode == 'drag_move'",
             "then": [
+              {
+                "if": "not tool.interior_selection.snapshotted",
+                "then": [
+                  {
+                    "doc.snapshot": {}
+                  },
+                  {
+                    "set": {
+                      "tool.interior_selection.snapshotted": "true"
+                    }
+                  }
+                ]
+              },
               {
                 "if": "tool.interior_selection.alt_held and not tool.interior_selection.copied",
                 "then": [
@@ -24575,9 +24593,6 @@
               {
                 "if": "buffer_length('lasso') >= 3",
                 "then": [
-                  {
-                    "doc.snapshot": {}
-                  },
                   {
                     "doc.select_polygon_from_buffer": {
                       "buffer": "lasso",
@@ -24801,9 +24816,6 @@
       "tool_options_panel": "magic_wand",
       "handlers": {
         "on_mousedown": [
-          {
-            "doc.snapshot": {}
-          },
           {
             "let": {
               "hit": "hit_test(event.doc_x, event.doc_y)"
