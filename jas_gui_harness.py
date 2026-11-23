@@ -33,6 +33,8 @@ shortcuts. With another Chrome already open, prefer a focus-click over
 
 Verbs:
   script FILE...   (level 2: an input script through the live app; see below)
+  script --locked FILE...  (the same with the console locked: pointer runs through
+                   the FIFO's `gesture`, keys and menus refused by name; row 250)
   dock             (the dock check: three tab drags, one DOCK line; needs JAS_APP)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
@@ -290,9 +292,11 @@ def _app_element():
             return _ax().AXUIElementCreateApplication(w[Quartz.kCGWindowOwnerPID])
     raise _plan.Refused("the harness window has no owning process")
 
-def _launch():
+def _launch(locked=False):
     """With JAS_APP set, each script gets a FRESH app, as each port's level-1
-    runner starts each script from a fresh store. Returns the process."""
+    runner starts each script from a fresh store. Returns the process. LOCKED
+    (`script --locked`): waits for the FIFO only, since a locked console lists
+    no window and gives no frontmost app."""
     fifo = os.environ["JAS_FIFO"]
     log = fifo + ".log"
     if os.path.exists(fifo):
@@ -300,12 +304,15 @@ def _launch():
     proc = subprocess.Popen([os.environ["JAS_APP"], "--title", TITLE, "--test-fifo", fifo],
                             stdout=open(log, "w", encoding="utf-8", newline=""), stderr=subprocess.STDOUT)
     for _ in range(100):
-        if os.path.exists(fifo) and find_window():
+        if os.path.exists(fifo) and (locked or find_window()):
             break
         time.sleep(0.1)
     else:
         proc.terminate()
         raise _plan.Refused("the app did not open its FIFO and window within 10 s")
+    if locked:
+        time.sleep(2.0)  # the FIFO opens before the window's first document can
+        return proc
     subprocess.run(["osascript", "-e", f'tell application "System Events" to set frontmost of (first process whose unix id is {proc.pid}) to true'])
     time.sleep(0.5)
     return proc
@@ -349,20 +356,36 @@ TYPE_DELAY_S = float(os.environ.get("JAS_TYPE_DELAY", "0.25"))  # between typed 
 KEYNAME = {"Delete": "delete", "Backspace": "delete", "Escape": "escape", "Enter": "return",
            "ArrowLeft": "left", "ArrowRight": "right", "ArrowDown": "down", "ArrowUp": "up"}
 
-def _run_script(path, menubar):
+def _locked_app(pid):
+    """The app's accessibility element by pid (no window lookup), for a panel
+    act on the locked route. Refused by name when this process is not trusted
+    for accessibility, where every walk reads one element and finds nothing."""
+    AX = _ax()
+    if not AX.AXIsProcessTrusted():
+        raise _plan.Refused("this process is not trusted for accessibility, so a panel step cannot be pressed")
+    return AX.AXUIElementCreateApplication(pid)
+
+def _run_script(path, menubar, locked=False, pid=None):
     with open(path, encoding="utf-8") as f:
         script = _json.load(f)
     acts = _plan.plan(script, menubar, _plan.load_spec(script))
+    if locked:
+        # Row 250: pointer runs go through the FIFO's `gesture`; keys, menus and
+        # toolbar holds are refused by name (mac_l2_plan.locked_acts).
+        acts = _plan.locked_acts(acts, script.get("item", os.path.basename(path)))
     repo = os.path.dirname(os.path.abspath(__file__))
     # Only a document read compares with expected_json; a toolbar script
     # reads state and the dialog, and carries the expected values itself.
     want = None
     if any(a[0] == "read" and a[1] == "document" for a in acts):
         want = open(os.path.join(os.path.dirname(path), script["expected_json"]), encoding="utf-8").read().strip()
-    app = _app_element()
+    app = None if locked else _app_element()
+    pid_of_app = pid  # the panel act unpacks its own `pid` (a panel id)
     st = {"view": None, "origin": None, "reads": []}
 
     def blocked():
+        if locked:
+            return None  # nothing on this route reaches the window server
         # Before EVERY act: a locked screen, or input after this driver's own
         # last event (a person's), aborts the run (the helm's hardening,
         # 2026-10-17). On a locked screen a key event types into the login
@@ -375,9 +398,31 @@ def _run_script(path, menubar):
         return "a person used the console" if _plan.a_person_acted(idle, mine) else None
 
     def do_act(act):
+        nonlocal app
         view, origin = st["view"], st["origin"]
         k = act[0]
-        if k == "open":
+        if k == "open" and locked:
+            # Document units go straight to the canvas view: no screen mapping.
+            _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
+        elif k == "gesture":
+            # The FIFO is one-way, so a gesture the app did not deliver (an app
+            # built without the verb, a refused step) would read as a FAIL of
+            # the script. The app logs its own receipt; wait for it, and refuse
+            # by name on anything else (row 250).
+            log = os.environ["JAS_FIFO"] + ".log"
+            start = os.path.getsize(log) if os.path.exists(log) else 0
+            _fifo(_plan.gesture_command(act))
+            for _ in range(30):
+                time.sleep(0.1)
+                with open(log, encoding="utf-8", errors="replace") as f:
+                    f.seek(start)
+                    verdict = _plan.gesture_log_verdict(f.read())
+                if verdict is not None:
+                    break
+            if verdict != "delivered":
+                raise _plan.Refused(f"the app did not deliver the gesture: {verdict or 'no receipt in its log within 3 s'}")
+            time.sleep(0.2)
+        elif k == "open":
             _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
             _fifo("view 1 0 0"); time.sleep(0.4)
             view, origin = _canvas(app)
@@ -406,6 +451,8 @@ def _run_script(path, menubar):
                 raise _plan.Refused(f"key {key!r} has no keycode in this harness")
             do_key(ch, ["cmd" if m == "ctrl" else m for m in mods]); time.sleep(0.2)
         elif k == "panel":
+            if app is None:
+                app = _locked_app(pid_of_app)
             _, pid, tab, wpath, widget, event, value, label = act
             panels = _by_id(app, pid)
             if not panels:
@@ -551,9 +598,11 @@ def _write_receipt(path, outcomes, not_run=None):
     print("RECEIPT " + line)
     return True
 
-def do_script(paths, receipt=None):
+def do_script(paths, receipt=None, locked=False):
     global _plan
     import mac_l2_plan as _plan
+    if locked:
+        return _do_script_locked(paths, receipt)
     problem = _plan.launch_env_problem(os.environ)
     if problem:
         print("REFUSED: " + problem)
@@ -608,6 +657,46 @@ def do_script(paths, receipt=None):
     print(f"{len(paths) - bad} of {len(paths)} scripts passed")
     if receipt and not _write_receipt(receipt, outcomes):
         return 4
+    return 1 if bad else 0
+
+def _do_script_locked(paths, receipt):
+    """`script --locked` (row 250): each script in a FRESH app (JAS_APP), its
+    pointer runs through the FIFO's `gesture`, its reads through `read`. Runs
+    whether or not the console is locked, because nothing on this route
+    reaches the window server; so there is no person check and no modifier
+    reset. NOT witnessed: the window's first-mouse and key routing. Writes no
+    receipt: a locked run is not the board's mac.live suite, and no other
+    token is declared for it."""
+    if receipt:
+        print("REFUSED: --locked writes no receipt (the board declares no token for a locked run)")
+        return 3
+    if not os.environ.get("JAS_APP") or not os.environ.get("JAS_FIFO"):
+        print("REFUSED: --locked needs JAS_APP (a fresh app per script, by pid) and JAS_FIFO")
+        return 3
+    menubar = _plan.load_menubar()
+    bad = 0
+    for p in paths:
+        name = os.path.basename(p)
+        proc = None
+        try:
+            proc = _launch(locked=True)
+            ok, got, want = _run_script(p, menubar, locked=True, pid=proc.pid)
+            print(("PASS " if ok else "FAIL ") + name)
+            if not ok:
+                bad += 1
+                print("  got  ", got); print("  want ", want)
+        except _plan.Refused as e:
+            bad += 1
+            print("REFUSED " + name + ": " + str(e))
+        finally:
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                time.sleep(0.3)
+    print(f"{len(paths) - bad} of {len(paths)} scripts passed (locked route: first-mouse and key routing not witnessed)")
     return 1 if bad else 0
 
 # ── `dock`: the dock check on the Mac (row 89; the web channel's is
@@ -750,11 +839,14 @@ if __name__=="__main__":
     if v=="script":
         args=sys.argv[2:]
         receipt=None
+        locked=False
+        if args[:1]==["--locked"]:
+            locked, args = True, args[1:]
         if args[:1]==["--receipt"]:
             if len(args)<2: print("--receipt names a file"); sys.exit(2)
             receipt, args = args[1], args[2:]
         paths=[a for a in args if not a.endswith(".expected.json")]
-        sys.exit(do_script(paths, receipt))
+        sys.exit(do_script(paths, receipt, locked))
     if not WIN: print("WINDOW NOT FOUND"); sys.exit(1)
     if v=="geom": print(WIN)
     elif v=="shot": do_shot(sys.argv[2]); print("shot",sys.argv[2])

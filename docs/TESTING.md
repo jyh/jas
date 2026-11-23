@@ -383,6 +383,12 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
      click on an inactive window's view on keying the window, so a posted click (`events`) never reaches the canvas.
      This route does not witness that first-mouse and key-window routing. `ctrl`, `meta` and a double-click are
      refused by name. Undo there is `action undo`, because a key needs a key window.
+     `jas_gui_harness.py script --locked <file>...` drives a script this way, with `JAS_APP` and `JAS_FIFO` set: each
+     run of pointer steps becomes one `gesture` (`mac_l2_plan.locked_acts`), and the driver waits for the app's own
+     `gesture delivered` log line, so an app without the verb is refused by name, not read as a FAIL. A key, menu or
+     toolbar step is refused by name. A panel step needs accessibility, so it is refused unless the driver's
+     process is trusted for it. A locked run writes no receipt. Measured 2026-11-23 with the console locked: the
+     13 shipped scripts with no panel, key or menu step all pass.
    * A panel step finds AXIdentifier = widget id inside AXIdentifier = panel content id (the dock wraps each
      panel body in one containing element with that id). If the panel is not shown, the driver first presses its
      dock tab, AXIdentifier `<panel content id>_tab`, as a person clicks it, or, for a panel in no dock group, its
