@@ -7,7 +7,8 @@
       {"action": "align_left", "params": {}}
     ],
     "expected_json": "align_left_two_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "align_right_two_rects",
@@ -17,7 +18,8 @@
       {"action": "align_right", "params": {}}
     ],
     "expected_json": "align_right_two_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "align_horizontal_center_two_rects",
@@ -27,7 +29,8 @@
       {"action": "align_horizontal_center", "params": {}}
     ],
     "expected_json": "align_horizontal_center_two_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "align_top_three_rects",
@@ -37,7 +40,8 @@
       {"action": "align_top", "params": {}}
     ],
     "expected_json": "align_top_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "align_bottom_three_rects",
@@ -47,7 +51,8 @@
       {"action": "align_bottom", "params": {}}
     ],
     "expected_json": "align_bottom_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "align_vertical_center_three_rects",
@@ -57,7 +62,8 @@
       {"action": "align_vertical_center", "params": {}}
     ],
     "expected_json": "align_vertical_center_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_left_three_rects",
@@ -67,7 +73,8 @@
       {"action": "distribute_left", "params": {}}
     ],
     "expected_json": "distribute_left_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_right_three_rects",
@@ -77,7 +84,8 @@
       {"action": "distribute_right", "params": {}}
     ],
     "expected_json": "distribute_right_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_horizontal_center_three_rects",
@@ -87,7 +95,8 @@
       {"action": "distribute_horizontal_center", "params": {}}
     ],
     "expected_json": "distribute_horizontal_center_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_top_three_rects",
@@ -97,7 +106,8 @@
       {"action": "distribute_top", "params": {}}
     ],
     "expected_json": "distribute_top_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_bottom_three_rects",
@@ -107,7 +117,8 @@
       {"action": "distribute_bottom", "params": {}}
     ],
     "expected_json": "distribute_bottom_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_vertical_center_three_rects",
@@ -117,7 +128,8 @@
       {"action": "distribute_vertical_center", "params": {}}
     ],
     "expected_json": "distribute_vertical_center_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_horizontal_spacing_three_rects",
@@ -127,7 +139,8 @@
       {"action": "distribute_horizontal_spacing", "params": {}}
     ],
     "expected_json": "distribute_horizontal_spacing_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "distribute_vertical_spacing_three_rects",
@@ -137,7 +150,8 @@
       {"action": "distribute_vertical_spacing", "params": {}}
     ],
     "expected_json": "distribute_vertical_spacing_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "align_left_compound_and_rect",
@@ -147,6 +161,7 @@
       {"action": "align_left", "params": {}}
     ],
     "expected_json": "align_left_compound_and_rect_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

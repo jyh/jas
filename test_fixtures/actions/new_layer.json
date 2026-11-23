@@ -6,6 +6,7 @@
       {"action": "new_layer", "params": {}}
     ],
     "expected_json": "new_layer_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]
