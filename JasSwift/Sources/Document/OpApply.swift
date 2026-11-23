@@ -171,11 +171,19 @@ func applySelectByIds(_ model: Model, _ controller: Controller, _ ids: [String])
 }
 
 /// Read a bool field, defaulting to `def`. Distinguishes a JSON bool from a
-/// JSON number (JSONSerialization maps both to NSNumber) via `isBool`.
+/// JSON number (JSONSerialization maps both to NSNumber) via `isBool`: a
+/// number is NOT a bool and reads as `def`, as the reference's `bool_field`
+/// and Rust's `as_bool()` read it. (An `as? Bool` fallback here read a JSON
+/// `1` as `true`; row 233.)
 private func boolField(_ op: [String: Any], _ key: String, _ def: Bool) -> Bool {
     if let n = op[key] as? NSNumber, n.isBool { return n.boolValue }
-    if let b = op[key] as? Bool { return b }
     return def
+}
+
+/// A REQUIRED bool field, or nil when it is absent or not a JSON bool.
+private func requiredBool(_ op: [String: Any], _ key: String) -> Bool? {
+    guard let n = op[key] as? NSNumber, n.isBool else { return nil }
+    return n.boolValue
 }
 
 /// Convert a RESOLVED JSON value (the `value` op param, from
@@ -1776,9 +1784,7 @@ public func opApply(
             y: numField(op, "y"),
             width: numField(op, "width"),
             height: numField(op, "height"),
-            extend: (op["extend"] as? NSNumber)?.isBool == true
-                ? (op["extend"] as! NSNumber).boolValue
-                : (op["extend"] as? Bool ?? false),
+            extend: boolField(op, "extend", false),
             root: root)
         // Keystone: the resolved selection is this op's targets, so
         // captureRecipe can seed its working set (empty targets ⇒ empty
@@ -1921,13 +1927,13 @@ public func opApply(
     // gradient takes its own solid colour's seed. Selection-relative: the seed
     // is a function of the document the op applies to, so replay rebuilds it.
     case "promote_to_gradient":
-        guard let fillOnTop = op["fill_on_top"] as? Bool else { return reqErr(op, "fill_on_top") }
+        guard let fillOnTop = requiredBool(op, "fill_on_top") else { return reqErr(op, "fill_on_top") }
         controller.promoteSelectionToGradient(fillOnTop: fillOnTop)
     // The fill/stroke widget's Color button (GRADIENT.md §Demotion to solid):
     // every selected member whose active attribute holds a gradient takes its
     // first stop as the solid. Selection-relative, as promote_to_gradient.
     case "demote_to_solid":
-        guard let fillOnTop = op["fill_on_top"] as? Bool else { return reqErr(op, "fill_on_top") }
+        guard let fillOnTop = requiredBool(op, "fill_on_top") else { return reqErr(op, "fill_on_top") }
         controller.demoteSelectionToSolid(fillOnTop: fillOnTop)
     case "detach":
         guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
@@ -2044,7 +2050,7 @@ public func opApply(
     // pasting one payload three times at offset 24 lands at 24, 48, 72.
     case "paste":
         let offset = numField(op, "offset")
-        let preserve = (op["preserve_layers"] as? Bool) ?? false
+        let preserve = boolField(op, "preserve_layers", false)
         // `text` = the RAW CLIPBOARD PAYLOAD, before any branch is chosen — the
         // D4/D5 dispatch (`paste_clipboard_text.json`). JSON null (NSNull) means
         // the clipboard read FAILED; the empty string means it succeeded and was
@@ -2128,7 +2134,7 @@ public func opApply(
     // law the Opacity panel's Make Mask / Release run; `clip` and `invert`
     // default false. Rust `op_apply` the same.
     case "make_mask":
-        controller.makeMaskOnSelection(clip: op["clip"] as? Bool ?? false, invert: op["invert"] as? Bool ?? false)
+        controller.makeMaskOnSelection(clip: boolField(op, "clip", false), invert: boolField(op, "invert", false))
     case "release_mask":
         controller.releaseMaskOnSelection()
     // Make Mask / Release as ONE verb: release when every selected element has
@@ -2136,9 +2142,9 @@ public func opApply(
     // The Opacity menu's Disable / Unlink Opacity Mask (row 172). Rust the same.
     // The Opacity panel's Clip and Invert Mask checkboxes (row 169 slice 2).
     case "set_mask_clip":
-        controller.setMaskClipOnSelection(op["clip"] as? Bool ?? false)
+        controller.setMaskClipOnSelection(boolField(op, "clip", false))
     case "set_mask_invert":
-        controller.setMaskInvertOnSelection(op["invert"] as? Bool ?? false)
+        controller.setMaskInvertOnSelection(boolField(op, "invert", false))
     case "toggle_mask_disabled":
         controller.toggleMaskDisabledOnSelection()
     case "toggle_mask_linked":
@@ -2147,7 +2153,7 @@ public func opApply(
         if selectionHasMask(model.document) {
             controller.releaseMaskOnSelection()
         } else {
-            controller.makeMaskOnSelection(clip: op["clip"] as? Bool ?? false, invert: op["invert"] as? Bool ?? false)
+            controller.makeMaskOnSelection(clip: boolField(op, "clip", false), invert: boolField(op, "invert", false))
         }
     case "hide_selection":
         controller.hideSelection()
