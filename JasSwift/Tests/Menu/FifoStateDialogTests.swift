@@ -78,3 +78,62 @@ private func tmpPath(_ name: String) throws -> (URL, String) {
     try FifoDialog.write(dialog: nil, to: path)
     #expect(try String(contentsOfFile: path, encoding: .utf8) == #"{"dialog":null}"#)
 }
+
+// ── Row 219: `state` reads a panel key ─────────────────────────────────
+// Before this, `state` read global keys only (`store.get`), so a harness
+// could not read a panel's state and had to infer it from pixels; row 217's
+// stale Mac view read exactly like a failed toggle. `panel.<id>.<key>`
+// reads the named panel's scope (the short kind or the content id, one
+// scope either way); a scope never initialised, a key the scope does not
+// hold and a malformed name are each refused BY NAME, so a missing value
+// never reads as a measured one.
+
+@Test func fifoStateReadsAPanelKeyInEitherSpellingOfThePanel() throws {
+    let store = StateStore(defaults: [:])
+    store.initPanel("character", defaults: ["snap_to_glyph_visible": false])
+    let short = try FifoState.json(keys: ["panel.character.snap_to_glyph_visible"],
+                                   store: store, liveTool: "pen")
+    #expect(short == #"{"panel.character.snap_to_glyph_visible":false}"#)
+    let long = try FifoState.json(keys: ["panel.character_panel_content.snap_to_glyph_visible"],
+                                  store: store, liveTool: "pen")
+    #expect(long == #"{"panel.character_panel_content.snap_to_glyph_visible":false}"#)
+    // The value is the store's, not a default: flip it and read again.
+    store.setPanel("character", "snap_to_glyph_visible", true)
+    let after = try FifoState.json(keys: ["panel.character.snap_to_glyph_visible"],
+                                   store: store, liveTool: "pen")
+    #expect(after == #"{"panel.character.snap_to_glyph_visible":true}"#)
+}
+
+private func fifoPanelRefusal(_ key: String, _ store: StateStore) -> String? {
+    do {
+        _ = try FifoState.json(keys: [key], store: store, liveTool: "pen")
+        return nil
+    } catch let e as FifoReadError {
+        return "\(e)"
+    } catch {
+        return "unexpected \(error)"
+    }
+}
+
+@Test func fifoStateRefusesAPanelScopeNeverInitialisedByName() {
+    let store = StateStore(defaults: [:])
+    let r = fifoPanelRefusal("panel.character.snap_to_glyph_visible", store)
+    #expect(r?.contains("no panel scope character_panel_content") == true, "\(r ?? "nil")")
+}
+
+@Test func fifoStateRefusesAPanelKeyTheScopeDoesNotHoldByName() {
+    let store = StateStore(defaults: [:])
+    store.initPanel("character", defaults: ["snap_to_glyph_visible": true])
+    let r = fifoPanelRefusal("panel.character.no_such_key", store)
+    #expect(r?.contains("panel scope character_panel_content holds no no_such_key") == true,
+            "\(r ?? "nil")")
+}
+
+@Test func fifoStateRefusesAMalformedPanelKeyByName() {
+    let store = StateStore(defaults: [:])
+    store.initPanel("character", defaults: ["snap_to_glyph_visible": true])
+    for bad in ["panel.character", "panel..snap_to_glyph_visible", "panel.character."] {
+        let r = fifoPanelRefusal(bad, store)
+        #expect(r?.contains("want panel.<id>.<key>") == true, "\(bad): \(r ?? "nil")")
+    }
+}
