@@ -14,7 +14,8 @@
   "expected_panel_state": {
    "active_tool": "pen"
   },
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  },
  {
   "name": "reset_fill_stroke_puts_fill_back_on_top",
@@ -35,7 +36,8 @@
    "fill_color": "#ffffff",
    "stroke_color": "#000000"
   },
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  },
  {
   "name": "set_align_to_artboard",
@@ -52,7 +54,8 @@
   "expected_panel_state": {
    "align_to": "artboard"
   },
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  },
  {
   "name": "toggle_use_preview_bounds_turns_it_on",
@@ -67,7 +70,8 @@
   "expected_panel_state": {
    "align_use_preview_bounds": true
   },
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  },
  {
   "name": "toggle_use_preview_bounds_twice_turns_it_off_again",
@@ -86,7 +90,8 @@
   "expected_panel_state": {
    "align_use_preview_bounds": false
   },
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  },
  {
   "name": "reset_align_panel_after_two_changes",
@@ -112,6 +117,7 @@
    "align_to": "selection",
    "align_use_preview_bounds": false
   },
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  }
 ]

@@ -20,7 +20,8 @@
     "expected_panel_state": {
       "stroke_align": "inside"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "set_stroke_profile_taper_end_on_a_line",
@@ -43,7 +44,8 @@
     "expected_panel_state": {
       "stroke_profile": "taper_end"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "flip_stroke_profile_mirrors_a_taper_end",
@@ -71,7 +73,8 @@
       "stroke_profile": "taper_end",
       "stroke_profile_flipped": true
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "reset_stroke_profile_after_a_flipped_taper",
@@ -103,7 +106,8 @@
       "stroke_profile": "uniform",
       "stroke_profile_flipped": false
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "set_arrow_align_center_at_end",
@@ -126,7 +130,8 @@
     "expected_panel_state": {
       "stroke_arrow_align": "center_at_end"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_link_arrowhead_scale_links",
@@ -147,7 +152,8 @@
     "expected_panel_state": {
       "stroke_link_arrowhead_scale": true
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "flip_stroke_profile_twice_restores_the_taper",
@@ -178,7 +184,8 @@
     "expected_panel_state": {
       "stroke_profile_flipped": false
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "set_stroke_profile_scales_each_line_by_its_own_width",
@@ -205,6 +212,7 @@
     "expected_panel_state": {
       "stroke_profile": "taper_end"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

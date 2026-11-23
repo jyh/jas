@@ -16,7 +16,8 @@
       }
     ],
     "expected_json": "duplicate_artboards_second_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "delete_artboards_second",
@@ -35,7 +36,8 @@
       }
     ],
     "expected_json": "delete_artboards_second_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "move_artboard_up_third",
@@ -54,7 +56,8 @@
       }
     ],
     "expected_json": "move_artboard_up_third_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "move_artboard_down_first",
@@ -73,7 +76,8 @@
       }
     ],
     "expected_json": "move_artboard_down_first_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "delete_empty_artboards_all",
@@ -134,7 +138,8 @@
         "discard_white_overprint": true
       }
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "open_artboard_options_reads_the_named_artboard",
@@ -168,7 +173,8 @@
         "update_while_dragging": true
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_print_dialog_opens_on_the_declared_defaults",
@@ -252,7 +258,8 @@
         "adv_overprint_flattener_preset": "medium_resolution"
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "save_appearance_as_opens_with_an_empty_name",
@@ -270,7 +277,8 @@
         "name": ""
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "save_workspace_as_opens_with_an_empty_name",
@@ -288,7 +296,8 @@
         "name": ""
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_paragraph_justification_shows_the_selections_values",
@@ -320,7 +329,8 @@
         "single_word_justify": "left"
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_paragraph_justification_leaves_a_differing_field_blank",
@@ -352,7 +362,8 @@
         "single_word_justify": "left"
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_paragraph_justification_with_nothing_selected_shows_the_defaults",
@@ -380,7 +391,8 @@
         "single_word_justify": "justify"
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_paragraph_hyphenation_shows_the_selections_values_and_blanks_a_difference",
@@ -409,7 +421,8 @@
         "hyphenate_capitalized": true
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_paragraph_hyphenation_with_nothing_selected_shows_the_defaults",
@@ -434,7 +447,8 @@
         "hyphenate_capitalized": false
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "close_tab_on_an_edited_document_asks_to_save",
@@ -461,7 +475,8 @@
     "expected_dialog": {
       "id": "save_changes_tab"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "quit_with_an_edited_document_asks_to_save",
@@ -486,7 +501,8 @@
     "expected_dialog": {
       "id": "save_changes_window"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_page_isolated_blending_turns_the_page_flag_on",
@@ -498,7 +514,8 @@
       }
     ],
     "expected_json": "toggle_page_isolated_blending_on_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_page_isolated_blending_twice_turns_it_back_off",
@@ -514,7 +531,8 @@
       }
     ],
     "expected_json": "toggle_page_isolated_blending_twice_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_page_knockout_group_turns_the_page_flag_on",
@@ -526,7 +544,8 @@
       }
     ],
     "expected_json": "toggle_page_knockout_group_on_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_page_knockout_group_twice_turns_it_back_off",
@@ -542,6 +561,7 @@
       }
     ],
     "expected_json": "toggle_page_knockout_group_twice_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

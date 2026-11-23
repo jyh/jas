@@ -7,6 +7,7 @@
       {"action": "toggle_all_layers_outline", "params": {}}
     ],
     "expected_json": "toggle_all_layers_outline_all_outline_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

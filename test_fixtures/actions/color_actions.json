@@ -18,7 +18,8 @@
       "stroke_color": "#000000",
       "fill_on_top": true
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_fill_on_top_then_set_active_color_none_clears_the_stroke",
@@ -43,7 +44,8 @@
       "stroke_color": null,
       "fill_on_top": false
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "invert_active_color_inverts_the_fill",
@@ -63,7 +65,8 @@
       "fill_color": "#379bcd",
       "stroke_color": "#000000"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "invert_active_color_inverts_the_stroke_when_stroke_is_on_top",
@@ -87,7 +90,8 @@
       "fill_color": "#c86432",
       "stroke_color": "#ffffff"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "complement_active_color_rotates_the_fill_hue_by_180",
@@ -107,7 +111,8 @@
       "fill_color": "#3295c7",
       "stroke_color": "#000000"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "swap_fill_stroke_swaps_the_selections_colors",
@@ -127,7 +132,8 @@
       "fill_color": "#000000",
       "stroke_color": "#c86432"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "new_swatch_opens_swatch_options_with_the_active_fill",
@@ -161,7 +167,8 @@
         "c": 100
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_swatch_options_create_keeps_the_unpassed_fields_null",
@@ -192,7 +199,8 @@
         "color_mode": null
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_color_picker_fill_starts_on_the_fill_colour",
@@ -219,7 +227,8 @@
         "color": "#0000ff"
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "save_swatch_library_opens_with_an_empty_name",
@@ -237,7 +246,8 @@
         "name": ""
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "open_color_picker_stroke_starts_on_the_stroke_colour",
@@ -264,6 +274,7 @@
         "color": "#000000"
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   }
 ]

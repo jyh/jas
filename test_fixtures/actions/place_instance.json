@@ -8,6 +8,7 @@
       {"action": "place_instance", "params": {}}
     ],
     "expected_json": "place_instance_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]
