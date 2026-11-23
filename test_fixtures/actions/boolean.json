@@ -7,7 +7,8 @@
       {"action": "boolean_union", "params": {}}
     ],
     "expected_json": "boolean_union_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_subtract_front_overlapping_rects",
@@ -17,7 +18,8 @@
       {"action": "boolean_subtract_front", "params": {}}
     ],
     "expected_json": "boolean_subtract_front_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_intersection_overlapping_rects",
@@ -27,7 +29,8 @@
       {"action": "boolean_intersection", "params": {}}
     ],
     "expected_json": "boolean_intersection_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_exclude_overlapping_rects",
@@ -37,7 +40,8 @@
       {"action": "boolean_exclude", "params": {}}
     ],
     "expected_json": "boolean_exclude_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_crop_overlapping_rects",
@@ -47,7 +51,8 @@
       {"action": "boolean_crop", "params": {}}
     ],
     "expected_json": "boolean_crop_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_divide_overlapping_rects",
@@ -57,7 +62,8 @@
       {"action": "boolean_divide", "params": {}}
     ],
     "expected_json": "boolean_divide_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_trim_overlapping_rects",
@@ -67,7 +73,8 @@
       {"action": "boolean_trim", "params": {}}
     ],
     "expected_json": "boolean_trim_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_merge_overlapping_rects",
@@ -77,7 +84,8 @@
       {"action": "boolean_merge", "params": {}}
     ],
     "expected_json": "boolean_merge_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_subtract_back_overlapping_rects",
@@ -87,7 +95,8 @@
       {"action": "boolean_subtract_back", "params": {}}
     ],
     "expected_json": "boolean_subtract_back_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_union_compound_overlapping_rects",
@@ -97,7 +106,8 @@
       {"action": "boolean_union_compound", "params": {}}
     ],
     "expected_json": "boolean_union_compound_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_subtract_front_compound_overlapping_rects",
@@ -107,7 +117,8 @@
       {"action": "boolean_subtract_front_compound", "params": {}}
     ],
     "expected_json": "boolean_subtract_front_compound_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_intersection_compound_overlapping_rects",
@@ -117,7 +128,8 @@
       {"action": "boolean_intersection_compound", "params": {}}
     ],
     "expected_json": "boolean_intersection_compound_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "boolean_exclude_compound_overlapping_rects",
@@ -127,7 +139,8 @@
       {"action": "boolean_exclude_compound", "params": {}}
     ],
     "expected_json": "boolean_exclude_compound_overlapping_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "open_boolean_options_opens_with_the_state_defaults",
@@ -141,6 +154,7 @@
       "params": {"precision": 0.0283, "remove_redundant_points": false, "divide_remove_unpainted": false, "apply_simplify_after_op": false, "simplify_precision": 0.5},
       "state": {"precision": 0.0283, "remove_redundant_points": false, "divide_remove_unpainted": false, "apply_simplify_after_op": false, "simplify_precision": 0.5}
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   }
 ]

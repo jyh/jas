@@ -11,7 +11,8 @@
       "fill_color": null,
       "stroke_color": "#000000"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "set_stroke_none_publishes_null_to_the_panel_scope",
@@ -25,7 +26,8 @@
       "fill_color": "#0000ff",
       "stroke_color": null
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "set_active_color_still_publishes_the_colour",
@@ -39,7 +41,8 @@
       "fill_color": "#112233",
       "stroke_color": "#000000"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "nothing_selected_publishes_the_seeded_app_default",
@@ -50,7 +53,8 @@
       "fill_color": "#ffffff",
       "stroke_color": "#000000"
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   },
   {
     "name": "nothing_selected_and_fill_none_still_publishes_null",
@@ -63,6 +67,7 @@
       "fill_color": null,
       "stroke_color": "#000000"
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   }
 ]

@@ -14,6 +14,7 @@
    }
   ],
   "expected_json": "promote_to_concept_square_expected.json",
-  "expected_can_undo": true
+  "expected_can_undo": true,
+  "expected_can_redo": false
  }
 ]

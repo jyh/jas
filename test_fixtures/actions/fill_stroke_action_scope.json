@@ -11,7 +11,8 @@
       "fill_color": "#000000",
       "stroke_color": "#000000"
     },
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "solid_leaves_a_mixed_selection_alone",
@@ -25,6 +26,7 @@
       "fill_color": "#ffffff",
       "stroke_color": null
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   }
 ]

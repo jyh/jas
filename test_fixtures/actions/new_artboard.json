@@ -6,6 +6,7 @@
       {"action": "new_artboard", "params": {}}
     ],
     "expected_json": "new_artboard_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

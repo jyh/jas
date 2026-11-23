@@ -17,7 +17,8 @@
       }
     ],
     "expected_json": "set_stroke_cap_square_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "set_stroke_join_round",
@@ -37,7 +38,8 @@
       }
     ],
     "expected_json": "set_stroke_join_round_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "toggle_dashed_line_on",
@@ -55,7 +57,8 @@
       }
     ],
     "expected_json": "toggle_dashed_line_on_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "open_brush_options_create_opens_on_the_declared_defaults",
@@ -92,6 +95,7 @@
         }
       }
     },
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   }
 ]
