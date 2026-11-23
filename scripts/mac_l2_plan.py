@@ -290,6 +290,70 @@ def plan(script, menubar, spec=None, state_keys=None):
     return acts
 
 
+# ── the locked-console route (STATUS-jas row 250) ─────────────────────────
+# With the console locked the app is never active, so a Quartz event lands
+# nowhere and a posted click never reaches the canvas (row 249). The FIFO's
+# `gesture <json>` (FifoGesture.swift) delivers a pointer run to the canvas
+# view's own handlers instead, in document units, and `read` reads back. So a
+# locked run folds each run of pointer acts into ONE gesture act, and refuses
+# BY NAME what that route cannot deliver: a key needs a key window, a menu and
+# a toolbar hold are pressed through a window server a locked console does
+# not give. A panel act is left for the driver, whose accessibility walk
+# either finds the widget or refuses by name. NOT witnessed on this route:
+# the window's first-mouse and key routing.
+GESTURE_FIELDS = ("kind", "x", "y", "dragging", "shift", "alt")  # FifoGesture.parse's fields
+
+
+def locked_acts(acts, item="?"):
+    """`plan()`'s acts for the locked route: ("gesture", steps) in place of
+    each run of pointer acts, everything else unchanged. Raises Refused."""
+    out, run = [], None
+    for a in acts:
+        if a[0] != "pointer":
+            run = None
+            if a[0] == "key":
+                raise Refused(f"{item}: a key step ({a[1]}) needs a key window, which a locked console never gives")
+            if a[0] in ("menu", "toolbar"):
+                raise Refused(f"{item}: a {a[0]} step is pressed through the window server, "
+                              f"which a locked console does not give")
+            out.append(a)
+            continue
+        _, kind, x, y, dragging, mods = a
+        if "ctrl" in mods:
+            raise Refused(f"{item}: a pointer step carries ctrl, which the canvas reads no form of")
+        if kind == "move" and not dragging and "shift" in mods:
+            raise Refused(f"{item}: a shift on a move that does not drag, which the canvas's mouseMoved drops")
+        st = {"kind": kind, "x": x, "y": y}
+        if dragging:
+            st["dragging"] = True
+        for m in ("shift", "alt"):
+            if m in mods:
+                st[m] = True
+        if run is None:
+            run = []
+            out.append(("gesture", run))
+        run.append(st)
+    return out
+
+
+def gesture_log_verdict(text):
+    """The app's own receipt for a gesture, from its log since the command was
+    sent: "delivered", the refusal's text, or None while nothing is there yet.
+    The FIFO is one-way, so this is the only way a refused or unknown gesture
+    is not read as a FAIL of the script (row 250)."""
+    for line in text.splitlines():
+        if "test-fifo: gesture delivered" in line:
+            return "delivered"
+        for tell in ("gesture REFUSED", "unknown command gesture"):
+            if tell in line:
+                return line[line.index(tell):].strip()
+    return None
+
+
+def gesture_command(act):
+    """The FIFO line for a ("gesture", steps) act."""
+    return "gesture " + json.dumps(act[1], separators=(",", ":"))
+
 PERSON_TOLERANCE_S = 0.5  # HID idle clock and the driver's clock may differ by this
 
 
@@ -1036,8 +1100,72 @@ def self_test():
     check("a dialog read of the wrong shape is refused",
           refused(lambda: compare_read(dact, '"arrow_alternates"', None), "dialog read"))
 
+    # ── the locked route (row 250) ──
+    mv = {"kind": "move", "x": 48, "y": 24, "dragging": True}
+    def locked(steps):
+        return locked_acts(plan(dict(base, steps=steps), mb), "t")
+    def lk(steps):
+        try:
+            return locked(steps)
+        except Refused:
+            return None
+    la = lk([press, mv, rel, read])
+    check("a locked run folds a pointer run into ONE gesture",
+          la is not None and [a[0] for a in la] == ["open", "tool", "gesture", "read"])
+    check("the gesture carries the steps in document units, dragging only on the move",
+          la is not None and la[2][1] == [{"kind": "press", "x": 36, "y": 18},
+                                          {"kind": "move", "x": 48, "y": 24, "dragging": True},
+                                          {"kind": "release", "x": 36, "y": 18}])
+    lb = lk([press, rel, read, press, rel, read])
+    check("a read between two runs makes two gestures",
+          lb is not None and [a[0] for a in lb] == ["open", "tool", "gesture", "read", "gesture", "read"])
+    ls = lk([dict(press, shift=True), dict(mv, alt=True), rel, read])
+    check("shift and alt ride on their own steps",
+          ls is not None and ls[2][1][0].get("shift") is True and ls[2][1][1].get("alt") is True
+          and "alt" not in ls[2][1][0] and "shift" not in ls[2][1][1])
+    check("every gesture step carries only FifoGesture's fields",
+          ls is not None and all(set(st) <= set(GESTURE_FIELDS) for st in ls[2][1]))
+    check("a locked ctrl pointer step is refused by name",
+          refused(lambda: locked([dict(press, ctrl=True), rel, read]), "ctrl"))
+    check("a locked shift on a move that does not drag is refused by name",
+          refused(lambda: locked([dict(mv, dragging=False, shift=True), read]), "does not drag"))
+    check("a locked key step is refused by name",
+          refused(lambda: locked([{"key": "Z", "ctrl": True}, read]), "key window"))
+    check("a locked menu step is refused by name",
+          refused(lambda: locked([{"menu": "menu_group"}, read]), "menu"))
+    lp = lk([pan, read])
+    check("a locked panel step is left for the driver", lp is not None and lp[2][0] == "panel")
+    check("the gesture's FIFO line is the verb and compact JSON",
+          la is not None and gesture_command(la[2]) ==
+          'gesture [{"kind":"press","x":36,"y":18},{"kind":"move","x":48,"y":24,"dragging":true},'
+          '{"kind":"release","x":36,"y":18}]')
+    check("a delivered gesture reads delivered",
+          gesture_log_verdict("x Jas[1:2] test-fifo: gesture [..]\ny test-fifo: gesture delivered 3: press@(1,2)")
+          == "delivered")
+    check("an app without the verb reads as its refusal",
+          (gesture_log_verdict("t test-fifo: unknown command gesture [{}]") or "").startswith("unknown command gesture"))
+    check("a refused gesture reads as its refusal",
+          (gesture_log_verdict("t test-fifo: gesture REFUSED (step 0: unknown kind 'x')") or "")
+          .startswith("gesture REFUSED (step 0"))
+    check("an empty log is not yet a verdict", gesture_log_verdict("") is None
+          and gesture_log_verdict("t test-fifo: gesture [{}]") is None)
+    # The shipped corpus: which scripts the locked route drives whole (no
+    # panel act left for the accessibility walk). Counted and printed, not pinned.
+    locked_whole = 0
+    for f in sorted(os.listdir(os.path.join(REPO, "test_fixtures", "input_scripts"))):
+        if not f.endswith(".json") or f.endswith(".expected.json"):
+            continue
+        scr = json.load(open(os.path.join(REPO, "test_fixtures", "input_scripts", f), encoding="utf-8"))
+        try:
+            got = locked_acts(plan(scr, load_menubar(), load_spec(scr)), scr.get("item", f))
+        except Refused:
+            continue
+        if not any(a[0] == "panel" for a in got):
+            locked_whole += 1
+    check("some shipped script is drivable whole on the locked route", locked_whole > 0)
+
     total = ran[0]
-    print(f"mac_l2_plan self-test: {total - len(fails)} of {total} checks passed, {planned} shipped scripts planned")
+    print(f"mac_l2_plan self-test: {total - len(fails)} of {total} checks passed, {planned} shipped scripts planned, {locked_whole} drivable whole with the console locked")
     for f in fails:
         print("  FAIL:", f)
     return 1 if fails else 0
