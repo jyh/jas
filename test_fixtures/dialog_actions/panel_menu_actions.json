@@ -46,7 +46,8 @@
           5
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "delete_swatch_removes_the_selected_swatches",
@@ -81,7 +82,8 @@
       "swatches_panel_content": {
         "selected_swatches": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "sort_swatches_by_name_orders_by_code_point_and_clears_the_selection",
@@ -115,7 +117,8 @@
       "swatches_panel_content": {
         "selected_swatches": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "select_all_unused_swatches_skips_the_document_red",
@@ -359,7 +362,8 @@
           215
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "duplicate_brush_inserts_a_copy_with_a_free_slug",
@@ -409,7 +413,8 @@
           "round_3pt_copy"
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "delete_brush_removes_the_selected_slugs",
@@ -443,7 +448,8 @@
       "brushes_panel_content": {
         "selected_brushes": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "sort_brushes_by_name_orders_by_code_point",
@@ -470,7 +476,8 @@
       "brush_libraries.default_brushes.brushes.1.slug": "round_3pt",
       "brush_libraries.default_brushes.brushes.5.slug": "basic",
       "brush_libraries.default_brushes.brushes.-1.slug": "art_tapered"
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "select_all_unused_brushes_skips_the_applied_brush",
@@ -515,7 +522,8 @@
           "bristle_round"
         ]
       }
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "show_art_brushes_toggles_art_out_of_the_filter",
@@ -547,7 +555,8 @@
           "bristle"
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "reset_magic_wand_panel_restores_every_option",
@@ -594,7 +603,8 @@
       "magic_wand_opacity": true,
       "magic_wand_opacity_tolerance": 5,
       "magic_wand_blending_mode": false
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "reset_boolean_panel_clears_the_last_operation",
@@ -618,7 +628,8 @@
     ],
     "expected_state": {
       "last_boolean_op": null
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "enter_isolation_mode_pushes_the_selected_group",
@@ -653,7 +664,8 @@
           ]
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "exit_isolation_mode_pops_one_level",
@@ -690,7 +702,8 @@
           ]
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "hanging_punctuation_turns_on_for_the_selected_paragraph",
@@ -709,7 +722,8 @@
         }
       }
     ],
-    "expected_json": "hanging_punctuation_turns_on_for_the_selected_paragraph_expected.json"
+    "expected_json": "hanging_punctuation_turns_on_for_the_selected_paragraph_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "reset_paragraph_panel_clears_the_paragraph_fields",
@@ -728,7 +742,8 @@
         }
       }
     ],
-    "expected_json": "reset_paragraph_panel_clears_the_paragraph_fields_expected.json"
+    "expected_json": "reset_paragraph_panel_clears_the_paragraph_fields_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "repeat_boolean_operation_reapplies_the_remembered_union",
@@ -750,7 +765,8 @@
         }
       }
     ],
-    "expected_json": "../actions/boolean_union_overlapping_rects_expected.json"
+    "expected_json": "../actions/boolean_union_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "swatch_options_ok_edits_the_selected_swatch",
@@ -807,7 +823,8 @@
       "swatch_libraries.web_colors.swatches.3.color": "#1a2b3c",
       "swatch_libraries.web_colors.swatches.2.name": "R=0 G=0 B=102",
       "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "new_swatch_ok_appends_to_the_selected_library",
@@ -861,7 +878,8 @@
       "swatch_libraries.web_colors.swatches.216.name": "Fresh",
       "swatch_libraries.web_colors.swatches.216.color": "#1a2b3c",
       "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "add_used_colors_appends_the_one_colour_the_library_lacks",
@@ -892,7 +910,8 @@
       },
       "swatch_libraries.web_colors.swatches.-1.color": "#008000",
       "swatch_libraries.web_colors.swatches.215.name": "R=255 G=255 B=255"
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "stroke_swap_arrowheads_exchanges_shape_and_scale",
@@ -932,7 +951,8 @@
       "stroke_end_arrowhead": "simple_arrow",
       "stroke_start_arrowhead_scale": 100,
       "stroke_end_arrowhead_scale": 150
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "layers_type_filter_pick_checks_and_unchecks_a_type",
@@ -976,7 +996,8 @@
           "path"
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "exit_isolation_to_level_keeps_the_levels_up_to_the_clicked_crumb",
@@ -1012,7 +1033,8 @@
           ]
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "exit_isolation_to_level_zero_exits_isolation",
@@ -1044,7 +1066,8 @@
       "layers_panel_content": {
         "isolation_stack": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_brush_library_opens_with_the_library_name",
@@ -1071,7 +1094,8 @@
       "state": {
         "name": "Default Brushes"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_brush_library_ok_saves_a_copy_under_a_new_slug",
@@ -1131,7 +1155,8 @@
           }
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_brush_library_under_the_source_slug_saves_in_place",
@@ -1185,7 +1210,8 @@
           }
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "toggle_brush_library_open_closes_an_open_library_whatever_its_collapse",
@@ -1215,7 +1241,8 @@
       "brushes_panel_content": {
         "open_libraries": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "toggle_brush_library_open_opens_a_closed_library_expanded",
@@ -1245,7 +1272,8 @@
           }
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "toggle_swatch_library_open_closes_an_open_library_whatever_its_collapse",
@@ -1275,7 +1303,8 @@
       "swatches_panel_content": {
         "open_libraries": []
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "toggle_swatch_library_open_opens_a_closed_library_expanded",
@@ -1305,7 +1334,8 @@
           }
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_swatch_library_opens_with_the_library_name",
@@ -1338,7 +1368,8 @@
       "state": {
         "name": "Web Colors"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_swatch_library_ok_saves_a_copy_under_a_new_id",
@@ -1404,7 +1435,8 @@
           }
         ]
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "set_gradient_active_library_switches_the_preset_strip",
@@ -1427,7 +1459,8 @@
       "gradient_panel_content": {
         "active_library_id": "spectrums"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_gradient_library_opens_with_the_active_library_name",
@@ -1453,7 +1486,8 @@
       "state": {
         "name": "Neutrals"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "save_gradient_library_ok_saves_a_copy_that_becomes_active",
@@ -1501,7 +1535,8 @@
       "gradient_panel_content": {
         "active_library_id": "warm_tones"
       }
-    }
+    },
+    "expected_can_undo": false
   },
   {
     "name": "gradient_reverse_flips_the_selected_fill_gradient",
@@ -1521,7 +1556,8 @@
         }
       }
     ],
-    "expected_json": "gradient_reverse_flips_the_selected_fill_gradient_expected.json"
+    "expected_json": "gradient_reverse_flips_the_selected_fill_gradient_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "gradient_reset_midpoints_resets_the_selected_fill_gradient",
@@ -1541,7 +1577,8 @@
         }
       }
     ],
-    "expected_json": "gradient_reset_midpoints_resets_the_selected_fill_gradient_expected.json"
+    "expected_json": "gradient_reset_midpoints_resets_the_selected_fill_gradient_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "gradient_distribute_stops_spaces_the_selected_fill_gradient",
@@ -1561,6 +1598,7 @@
         }
       }
     ],
-    "expected_json": "gradient_distribute_stops_spaces_the_selected_fill_gradient_expected.json"
+    "expected_json": "gradient_distribute_stops_spaces_the_selected_fill_gradient_expected.json",
+    "expected_can_undo": true
   }
 ]
