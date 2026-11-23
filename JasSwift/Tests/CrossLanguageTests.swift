@@ -6510,7 +6510,7 @@ func corpusFlag(_ v: Any?) -> Bool { corpusBool(v) ?? false }
 
 /// A corpus value read as a JSON NUMBER, or nil. `JSONSerialization` hands a
 /// boolean as an `NSNumber` too, and `true as? Double` is `1.0`, so a reader
-/// written as `as? Double` or `corpusNumber(x)!` reads a JSON
+/// written as `as? Double` or `(x as! NSNumber).doubleValue` reads a JSON
 /// `true` where Rust's `as_f64()` refuses it. Told apart by CF type (row 237).
 func corpusNumber(_ v: Any?) -> Double? {
     guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
