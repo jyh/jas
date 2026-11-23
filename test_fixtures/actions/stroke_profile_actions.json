@@ -42,7 +42,8 @@
     "expected_json": "set_stroke_profile_taper_end_expected.json",
     "expected_panel_state": {
       "stroke_profile": "taper_end"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "flip_stroke_profile_mirrors_a_taper_end",
@@ -69,7 +70,8 @@
     "expected_panel_state": {
       "stroke_profile": "taper_end",
       "stroke_profile_flipped": true
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "reset_stroke_profile_after_a_flipped_taper",
@@ -123,7 +125,8 @@
     "expected_json": "set_arrow_align_center_at_end_expected.json",
     "expected_panel_state": {
       "stroke_arrow_align": "center_at_end"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "toggle_link_arrowhead_scale_links",
@@ -174,7 +177,8 @@
     "expected_json": "set_stroke_profile_taper_end_expected.json",
     "expected_panel_state": {
       "stroke_profile_flipped": false
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "set_stroke_profile_scales_each_line_by_its_own_width",
@@ -200,6 +204,7 @@
     "expected_json": "set_stroke_profile_two_widths_expected.json",
     "expected_panel_state": {
       "stroke_profile": "taper_end"
-    }
+    },
+    "expected_can_undo": true
   }
 ]

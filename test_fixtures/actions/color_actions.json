@@ -42,7 +42,8 @@
       "fill_color": "#0000ff",
       "stroke_color": null,
       "fill_on_top": false
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "invert_active_color_inverts_the_fill",
@@ -61,7 +62,8 @@
     "expected_panel_state": {
       "fill_color": "#379bcd",
       "stroke_color": "#000000"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "invert_active_color_inverts_the_stroke_when_stroke_is_on_top",
@@ -84,7 +86,8 @@
     "expected_panel_state": {
       "fill_color": "#c86432",
       "stroke_color": "#ffffff"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "complement_active_color_rotates_the_fill_hue_by_180",
@@ -103,7 +106,8 @@
     "expected_panel_state": {
       "fill_color": "#3295c7",
       "stroke_color": "#000000"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "swap_fill_stroke_swaps_the_selections_colors",
@@ -122,7 +126,8 @@
     "expected_panel_state": {
       "fill_color": "#000000",
       "stroke_color": "#c86432"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "new_swatch_opens_swatch_options_with_the_active_fill",

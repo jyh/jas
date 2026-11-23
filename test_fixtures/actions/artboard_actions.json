@@ -34,7 +34,8 @@
         "params": {}
       }
     ],
-    "expected_json": "delete_artboards_second_expected.json"
+    "expected_json": "delete_artboards_second_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "move_artboard_up_third",
@@ -52,7 +53,8 @@
         "params": {}
       }
     ],
-    "expected_json": "move_artboard_up_third_expected.json"
+    "expected_json": "move_artboard_up_third_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "move_artboard_down_first",
@@ -70,7 +72,8 @@
         "params": {}
       }
     ],
-    "expected_json": "move_artboard_down_first_expected.json"
+    "expected_json": "move_artboard_down_first_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "delete_empty_artboards_all",
@@ -130,7 +133,8 @@
         "transparency_flattener_preset": "high_resolution",
         "discard_white_overprint": true
       }
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "open_artboard_options_reads_the_named_artboard",
@@ -456,7 +460,8 @@
     "expected_json": "close_tab_on_an_edited_document_expected.json",
     "expected_dialog": {
       "id": "save_changes_tab"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "quit_with_an_edited_document_asks_to_save",
@@ -480,7 +485,8 @@
     "expected_json": "quit_with_an_edited_document_expected.json",
     "expected_dialog": {
       "id": "save_changes_window"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "toggle_page_isolated_blending_turns_the_page_flag_on",
@@ -491,7 +497,8 @@
         "params": {}
       }
     ],
-    "expected_json": "toggle_page_isolated_blending_on_expected.json"
+    "expected_json": "toggle_page_isolated_blending_on_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "toggle_page_isolated_blending_twice_turns_it_back_off",
@@ -518,7 +525,8 @@
         "params": {}
       }
     ],
-    "expected_json": "toggle_page_knockout_group_on_expected.json"
+    "expected_json": "toggle_page_knockout_group_on_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "toggle_page_knockout_group_twice_turns_it_back_off",

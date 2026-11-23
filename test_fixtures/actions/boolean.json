@@ -16,7 +16,8 @@
     "actions": [
       {"action": "boolean_subtract_front", "params": {}}
     ],
-    "expected_json": "boolean_subtract_front_overlapping_rects_expected.json"
+    "expected_json": "boolean_subtract_front_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_intersection_overlapping_rects",
@@ -25,7 +26,8 @@
     "actions": [
       {"action": "boolean_intersection", "params": {}}
     ],
-    "expected_json": "boolean_intersection_overlapping_rects_expected.json"
+    "expected_json": "boolean_intersection_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_exclude_overlapping_rects",
@@ -34,7 +36,8 @@
     "actions": [
       {"action": "boolean_exclude", "params": {}}
     ],
-    "expected_json": "boolean_exclude_overlapping_rects_expected.json"
+    "expected_json": "boolean_exclude_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_crop_overlapping_rects",
@@ -43,7 +46,8 @@
     "actions": [
       {"action": "boolean_crop", "params": {}}
     ],
-    "expected_json": "boolean_crop_overlapping_rects_expected.json"
+    "expected_json": "boolean_crop_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_divide_overlapping_rects",
@@ -52,7 +56,8 @@
     "actions": [
       {"action": "boolean_divide", "params": {}}
     ],
-    "expected_json": "boolean_divide_overlapping_rects_expected.json"
+    "expected_json": "boolean_divide_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_trim_overlapping_rects",
@@ -61,7 +66,8 @@
     "actions": [
       {"action": "boolean_trim", "params": {}}
     ],
-    "expected_json": "boolean_trim_overlapping_rects_expected.json"
+    "expected_json": "boolean_trim_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_merge_overlapping_rects",
@@ -70,7 +76,8 @@
     "actions": [
       {"action": "boolean_merge", "params": {}}
     ],
-    "expected_json": "boolean_merge_overlapping_rects_expected.json"
+    "expected_json": "boolean_merge_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_subtract_back_overlapping_rects",
@@ -79,7 +86,8 @@
     "actions": [
       {"action": "boolean_subtract_back", "params": {}}
     ],
-    "expected_json": "boolean_subtract_back_overlapping_rects_expected.json"
+    "expected_json": "boolean_subtract_back_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_union_compound_overlapping_rects",
@@ -88,7 +96,8 @@
     "actions": [
       {"action": "boolean_union_compound", "params": {}}
     ],
-    "expected_json": "boolean_union_compound_overlapping_rects_expected.json"
+    "expected_json": "boolean_union_compound_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_subtract_front_compound_overlapping_rects",
@@ -97,7 +106,8 @@
     "actions": [
       {"action": "boolean_subtract_front_compound", "params": {}}
     ],
-    "expected_json": "boolean_subtract_front_compound_overlapping_rects_expected.json"
+    "expected_json": "boolean_subtract_front_compound_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_intersection_compound_overlapping_rects",
@@ -106,7 +116,8 @@
     "actions": [
       {"action": "boolean_intersection_compound", "params": {}}
     ],
-    "expected_json": "boolean_intersection_compound_overlapping_rects_expected.json"
+    "expected_json": "boolean_intersection_compound_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "boolean_exclude_compound_overlapping_rects",
@@ -115,7 +126,8 @@
     "actions": [
       {"action": "boolean_exclude_compound", "params": {}}
     ],
-    "expected_json": "boolean_exclude_compound_overlapping_rects_expected.json"
+    "expected_json": "boolean_exclude_compound_overlapping_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "open_boolean_options_opens_with_the_state_defaults",

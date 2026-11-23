@@ -42,7 +42,8 @@
         }
       }
     ],
-    "expected_json": "nudge_down_large_moves_both_rects_expected.json"
+    "expected_json": "nudge_down_large_moves_both_rects_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "nudges_accumulate_on_both_axes",
@@ -76,7 +77,8 @@
         }
       }
     ],
-    "expected_json": "nudges_accumulate_on_both_axes_expected.json"
+    "expected_json": "nudges_accumulate_on_both_axes_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "nudge_with_nothing_selected_changes_nothing",

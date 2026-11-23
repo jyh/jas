@@ -36,7 +36,8 @@
         }
       }
     ],
-    "expected_json": "set_stroke_join_round_expected.json"
+    "expected_json": "set_stroke_join_round_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "toggle_dashed_line_on",
@@ -53,7 +54,8 @@
         "params": {}
       }
     ],
-    "expected_json": "toggle_dashed_line_on_expected.json"
+    "expected_json": "toggle_dashed_line_on_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "open_brush_options_create_opens_on_the_declared_defaults",
