@@ -3353,6 +3353,7 @@ pub(crate) mod tests {
         assert_action_dialog(tc, &st, &deferred);
         assert_action_layout(tc, &st);
         assert_action_can_undo(tc, &st);
+        assert_action_can_redo(tc, &st);
     }
 
     #[cfg(feature = "web")]
@@ -3377,6 +3378,27 @@ pub(crate) mod tests {
         assert_eq!(
             got, want,
             "Action test '{name}': can_undo is {got} but the corpus pins {want}"
+        );
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL assertion: `expected_can_redo` (a bool), whether the active
+    /// tab's model has a redo step after the case's actions. An undo returns
+    /// the document to a golden a no-op would also match, so without this key
+    /// an undo that dropped its step instead of moving it to the redo stack
+    /// would pass (row 229). Mirrors Swift's `assertActionCanRedo`.
+    fn assert_action_can_redo(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(want) = tc.get("expected_can_redo") else { return };
+        let name = tc["name"].as_str().unwrap();
+        let want = want.as_bool().unwrap_or_else(|| {
+            panic!("Action test '{name}': expected_can_redo is not a bool: {want}")
+        });
+        let got = st.tabs[st.active_tab].model.can_redo();
+        assert_eq!(
+            got, want,
+            "Action test '{name}': can_redo is {got} but the corpus pins {want}"
         );
     }
 
