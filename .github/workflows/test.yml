@@ -1278,6 +1278,13 @@ jobs:
           python scripts/check_rust_suite_ran.py --self-test
           (cd jas_dioxus && cargo test) 2>&1 | tee rust-test.log
           python scripts/check_rust_suite_ran.py --log rust-test.log
+      # The golden-generator gate's self-test on the second platform family:
+      # its source scan and its dirty-state comparison are path and text
+      # handling, which is what differs here. The full regeneration runs in
+      # the rust job, where the goldens were written.
+      - name: The golden-generator gate's self-test, on the second platform family
+        if: ${{ !cancelled() }}
+        run: python scripts/check_generators_reproduce_goldens.py --self-test
 
       # The Swift execution gate's READER, on Windows. There is no Swift
       # toolchain on this runner and no log to read, so only the self-test runs
@@ -1712,6 +1719,15 @@ jobs:
           python3 scripts/check_rust_suite_ran.py --self-test
           (cd jas_dioxus && cargo test) 2>&1 | tee rust-test.log
           python3 scripts/check_rust_suite_ran.py --log rust-test.log
+      # The corpus runners TRIM what they read, so a golden whose bytes differ
+      # from its generator's output passes every test and drifts unseen: rows
+      # 222 and 234 fixed 18 such goldens on one day. This runs every generator
+      # (derived from the source) and requires that nothing changes.
+      - name: Every golden generator reproduces the committed bytes
+        if: ${{ !cancelled() }}
+        run: |
+          python3 scripts/check_generators_reproduce_goldens.py --self-test
+          python3 scripts/check_generators_reproduce_goldens.py
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because
       # check_cbindgen_freshness.py REFUSES on any other version: a version bump
