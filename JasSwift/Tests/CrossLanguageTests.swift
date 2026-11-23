@@ -1430,7 +1430,7 @@ private func preservationVectors(_ raw: String) throws -> [[String: Any]] {
             """)
         return []
     }
-    guard let min = obj["min_vectors"] as? Int, min >= 1 else {
+    guard let min = corpusInt(obj["min_vectors"]), min >= 1 else {
         Issue.record("the preservation corpus must declare an integer 'min_vectors' >= 1 — a floor of zero is not a floor")
         return []
     }
@@ -3085,7 +3085,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         let name = tc["name"] as! String
         let function = tc["function"] as! String
         let args = tc["args"] as! [String: Any]
-        let expected = tc["expected"] as! Double
+        let expected = corpusNumber(tc["expected"])!
 
         let actual: Double
         switch function {
@@ -3094,10 +3094,10 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
                 id: PaneId(0),
                 kind: .canvas,
                 config: .forKind(.canvas),
-                x: args["x"] as! Double,
-                y: args["y"] as! Double,
-                width: args["width"] as! Double,
-                height: args["height"] as! Double
+                x: corpusNumber(args["x"])!,
+                y: corpusNumber(args["y"])!,
+                width: corpusNumber(args["width"])!,
+                height: corpusNumber(args["height"])!
             )
             let edge = parseEdgeSideOp(args["edge"] as! String)
             actual = PaneLayout.paneEdgeCoord(pane, edge)
@@ -7625,7 +7625,7 @@ private func wireUnhex(_ s: String) -> Data {
     let root = try JSONSerialization.jsonObject(
         with: Data(raw.utf8)) as! [String: Any]
     let vectors = root["vectors"] as! [[String: Any]]
-    let minVectors = root["min_vectors"] as! Int
+    let minVectors = corpusInt(root["min_vectors"])!
 
     // Anti-vacuity, EXACT rather than slack: a reader that walked zero vectors
     // asserts nothing and is indistinguishable from a clean run. The floor is
@@ -7689,7 +7689,7 @@ private func wireUnhex(_ s: String) -> Data {
 
     let items = menu["items"] as! [[String: Any]]
     // Anti-vacuity declared BY THE DATA, exact rather than slack.
-    #expect(items.count == menu["min_items"] as! Int,
+    #expect(items.count == corpusInt(menu["min_items"])!,
             "walked \(items.count) menu item(s) against the declared floor")
 
     let rows = layersFilterMenuRows(items)
@@ -7720,7 +7720,7 @@ private func wireUnhex(_ s: String) -> Data {
 
     // (2) INVOKING THE ACTION yields the everything-visible state.
     let vectors = menu["action_vectors"] as! [[String: Any]]
-    #expect(vectors.count == menu["min_action_vectors"] as! Int,
+    #expect(vectors.count == corpusInt(menu["min_action_vectors"])!,
             "walked \(vectors.count) action vector(s) against the declared floor")
     for v in vectors {
         let name = v["name"] as? String ?? "<unnamed>"
@@ -7749,7 +7749,7 @@ private func wireUnhex(_ s: String) -> Data {
     // (3) THE REGRESSION ITSELF, as the blank tree it produced in the other port.
     let d = menu["defect_if_the_action_row_were_a_toggle"] as! [String: Any]
     let hidden = layersHiddenFromChecked(Set(d["checked"] as! [String]))
-    #expect(hidden.count == d["expected_hidden_count"] as! Int,
+    #expect(hidden.count == corpusInt(d["expected_hidden_count"])!,
             "checking a token no element answers must hide the WHOLE vocabulary")
     #expect(keepOf(hidden) == Set(d["expected_keep"] as! [[Int]]),
             "the defect's blank tree is not what the fixture records")
