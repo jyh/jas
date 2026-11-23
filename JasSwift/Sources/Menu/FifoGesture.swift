@@ -93,6 +93,16 @@ public enum FifoGesture {
         }
     }
 
+    /// The app's entry (TestFifo `gesture`): parse, find the canvas showing
+    /// `model`, deliver. Everything is refused before the first step is
+    /// delivered except a failure to build an event mid-gesture.
+    @MainActor
+    public static func run(_ json: String, model: Model, window: NSWindow) throws -> String {
+        let steps = try parse(json)
+        let view = try canvas(for: model, in: window)
+        return "\(steps.count): " + (try deliver(steps, to: view))
+    }
+
     /// The ONE canvas view in `window` whose controller holds `model`.
     @MainActor
     static func canvas(for model: Model, in window: NSWindow) throws -> CanvasNSView {
