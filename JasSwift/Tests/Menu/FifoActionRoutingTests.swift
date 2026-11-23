@@ -67,3 +67,45 @@ private func fifoTwoRectModel(selected: Bool) -> Model {
     #expect(calls.first?.0 == "some_panel_action")
     #expect((calls.first?.1["k"] as? Int) == 1)
 }
+
+// ── Row 217: a FIFO `action` publishes its panel-state write ───────────
+// The dock's panel bodies redraw on `model.panelStateVersion`
+// (`PanelBodyObserver`); `StateStore` publishes nothing. Every person's
+// route that runs `dispatchYamlAction` bumps the version after it (the
+// panel menu, the Layers keys, the eye button); the FIFO `action` did not,
+// so on the Mac `action toggle_snap_to_glyph_visible` wrote the store and
+// the Character panel kept drawing the old section until a tab switch
+// (measured 11-22 at a78197a4: shown -> shown, then hidden after the
+// switch). A harness that shot after the action read a stale view.
+
+@Test func fifoActionPublishesAPanelStateChangeAfterItsWrite() {
+    let model = fifoTwoRectModel(selected: false)
+    let before = model.panelStateVersion
+    var versionDuringWrite: Int?
+    FifoActionRouting.dispatch(
+        "some_panel_action", model: model,
+        fallthrough: { _, m, _ in versionDuringWrite = m.panelStateVersion })
+    // The bump comes AFTER the write: a bump before it would announce the
+    // old state, and the view would read it before the write landed.
+    #expect(versionDuringWrite == before)
+    #expect(model.panelStateVersion != before)
+}
+
+@Test func fifoSnapToGlyphToggleWritesTheCharacterScopeBothWaysAndPublishesEach() {
+    let model = fifoTwoRectModel(selected: false)
+    let store = model.stateStore
+    let pid = "character_panel_content"
+    store.initPanel(pid, defaults: WorkspaceData.load()?.panelStateDefaults(pid) ?? [:])
+    // The declared default is shown (character.yaml `snap_to_glyph_visible`).
+    #expect(store.getPanel(pid, "snap_to_glyph_visible") as? Bool == true)
+    let v0 = model.panelStateVersion
+    FifoActionRouting.dispatch("toggle_snap_to_glyph_visible", model: model)
+    #expect(store.getPanel(pid, "snap_to_glyph_visible") as? Bool == false)
+    let v1 = model.panelStateVersion
+    #expect(v1 != v0)
+    // Both directions: a toggle is a radio of two, and the forward one is
+    // the direction a test naturally drives.
+    FifoActionRouting.dispatch("toggle_snap_to_glyph_visible", model: model)
+    #expect(store.getPanel(pid, "snap_to_glyph_visible") as? Bool == true)
+    #expect(model.panelStateVersion != v1)
+}
