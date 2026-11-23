@@ -166,6 +166,16 @@ def select_label(widget, value):
     return None
 
 
+def icon_option_matches(description, label):
+    """Whether an icon_select popover button's AXDescription names `label`.
+    JasSwift describes each option as "<glyph>, <label>" with no identifier
+    (the AX dump of pg_bullets on the Mac test box, 2026-11-23, row 83), so the label is
+    matched as the WHOLE text after ", ": "Circle" never picks "Open Circle"."""
+    if not isinstance(description, str) or not isinstance(label, str):
+        return False
+    return description.endswith(", " + label) and len(description) > len(label) + 2
+
+
 def canonical_state(text):
     """A state read as the comparison reads it: JSON, keys sorted, no whitespace."""
     return json.dumps(json.loads(text), sort_keys=True, separators=(",", ":"))
@@ -226,7 +236,7 @@ def _plan_toolbar(item, i, st, spec):
 def plan(script, menubar, spec=None, state_keys=None):
     """The script as acts: ("open", svg) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
-    window_path, widget, event, value, option_label) ("menu", path)
+    window_path, widget, event, value, option_label, widget_type) ("menu", path)
     ("read", "document") ("toolbar", slot, hold_ms) ("read", "state", keys,
     canonical expected) ("read", "dialog", expected id or None). `spec` is the
     script's panel spec, parsed (workspace/layout.yaml for a toolbar step); a
@@ -272,12 +282,15 @@ def plan(script, menubar, spec=None, state_keys=None):
             # only if it needs it, when the panel has no dock tab either.
             label = None
             w = find_widget(spec, st["widget"]) if spec is not None else None
-            if w is not None and w.get("type") == "select" and st["event"] == "commit":
+            wtype = w.get("type") if w is not None else None
+            # A select's option is a menu item; an icon_select's is a popover
+            # button (row 83). Both carry the option's label; the type says which.
+            if wtype in ("select", "icon_select") and st["event"] == "commit":
                 label = select_label(w, st.get("value"))
                 if label is None:
-                    raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of select {st['widget']!r}")
+                    raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of {wtype} {st['widget']!r}")
             acts.append(("panel", pid, pid + TAB_SUFFIX, panels.get(pid[: -len(PANEL_SUFFIX)]),
-                         st["widget"], st["event"], st.get("value"), label))
+                         st["widget"], st["event"], st.get("value"), label, wtype))
             continue
         if "menu" in st:
             _refuse_undelivered(item, i, st, "menu")
@@ -821,6 +834,30 @@ def self_test():
         check(f"a combo commit of {v!r} is typed (no label), option or not",
               a[7] is None and a[6] == v)
     check("a click carries no label", acts[4][7] is None)
+    # An icon_select (paragraph.yaml pg_bullets) opens a POPOVER, not a menu:
+    # its options are AXButtons described "<glyph>, <label>" with no
+    # AXIdentifier (row 83, read on the Mac test box 11-23). So its commit carries the
+    # option label AND the widget type, and the driver matches the label as a
+    # description SUFFIX after ", " (so "Circle" never picks "Open Circle").
+    icon = {"content": [{"id": "pg_bullets", "type": "icon_select",
+                         "options": [{"value": "", "glyph": "\u2014", "label": "None"},
+                                     {"value": "bullet-disc", "glyph": "\u2022", "label": "Disc"},
+                                     {"value": "bullet-open-circle", "glyph": "\u25cb", "label": "Open Circle"}]}]}
+    istep = {"panel": "paragraph_panel_content", "widget": "pg_bullets", "event": "commit", "value": "bullet-disc"}
+    ia = plan(dict(base, steps=[istep, read]), mb, icon)[2]
+    check("an icon_select commit carries its option label", ia[7] == "Disc")
+    check("an icon_select commit carries its widget type", ia[8] == "icon_select")
+    check("an icon_select's empty value is its None option",
+          plan(dict(base, steps=[dict(istep, value=""), read]), mb, icon)[2][7] == "None")
+    check("an icon_select value that is not an option is refused",
+          refused(lambda: plan(dict(base, steps=[dict(istep, value="nope"), read]), mb, icon), "not an option"))
+    check("a select commit carries its widget type", plan(dict(base, steps=[sstep, read]), mb, sel)[2][8] == "select")
+    check("a panel act with no spec carries no widget type", acts[4][8] is None)
+    for desc, label, want in (("\u2022, Disc", "Disc", True), ("\u2014, None", "None", True),
+                              ("\u25cb, Open Circle", "Open Circle", True), ("\u25cb, Open Circle", "Circle", False),
+                              ("\u2022, Disc", "disc", False), ("Disc", "Disc", False), ("", "Disc", False),
+                              (None, "Disc", False)):
+        check(f"icon option {desc!r} matches {label!r}: {want}", icon_option_matches(desc, label) is want)
     check("modifiers are carried", plan(dict(base, steps=[dict(press, shift=True), read]), mb)[2][5] == ("shift",))
     check("no read is refused", refused(lambda: plan(dict(base, steps=[press]), mb), "without a read"))
     check("a tree read is refused", refused(lambda: plan(dict(base, steps=[{"read": "tree"}]), mb), "reads 'tree'"))

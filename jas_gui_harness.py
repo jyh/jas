@@ -455,7 +455,7 @@ def _run_script(path, menubar, locked=False, pid=None):
         elif k == "panel":
             if app is None:
                 app = _locked_app(pid_of_app)
-            _, pid, tab, wpath, widget, event, value, label = act
+            _, pid, tab, wpath, widget, event, value, label, wtype = act
             panels = _by_id(app, pid)
             if not panels:
                 # Show it as a person does: its dock tab, or, for a panel in no
@@ -481,6 +481,21 @@ def _run_script(path, menubar, locked=False, pid=None):
                 raise _plan.Refused(f"widget {widget!r} is disabled")
             if event == "click":
                 _press(w)
+            elif wtype == "icon_select":
+                # An icon_select opens a POPOVER of buttons described "<glyph>,
+                # <label>", none with an identifier (row 83, the AX dump on the Mac test box):
+                # press the widget, then the one option whose description names
+                # the label. A popover with no match is cancelled, never picked.
+                _press(w); time.sleep(0.5)
+                pops = _find_all(app, lambda e: _attr(e, "AXRole") == "AXPopover")
+                if len(pops) != 1:
+                    raise _plan.Refused(f"icon_select {widget!r}: {len(pops)} popovers open after its press")
+                items = [b for b in _find_all(pops[0], lambda e: _attr(e, "AXRole") == "AXButton")
+                         if _plan.icon_option_matches(_attr(b, "AXDescription"), label)]
+                if len(items) != 1:
+                    _ax().AXUIElementPerformAction(pops[0], "AXCancel")
+                    raise _plan.Refused(f"icon_select {widget!r}: {len(items)} options named {label!r}")
+                _press(items[0])
             elif label is not None:
                 # A select: open its popup and choose the item a person reads.
                 _press(w); time.sleep(0.4)
