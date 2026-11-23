@@ -16,7 +16,7 @@ import AppKit
 /// app sees the events) and hardware timing.
 ///
 /// The JSON is an array of steps:
-///   {"kind": "move" | "left_down" | "left_up" | "right_down" | "right_up",
+///   {"kind": "move" | "left_down" | "left_drag" | "left_up" | "right_down" | "right_up",
 ///    "at": "<accessibility identifier>" | [x, y], "flags": [...]}
 ///   {"kind": "key", "key": "<name>", "flags": [...]}   (a keyDown and its keyUp)
 /// An identifier resolves to its element's CENTRE; `[x, y]` is a point in
@@ -26,6 +26,9 @@ public enum FifoEvents {
     public enum Kind: String, CaseIterable, Equatable {
         case move, key, enter, warp
         case leftDown = "left_down", leftUp = "left_up"
+        /// A move with the left button held: `leftMouseDragged`, which a
+        /// drag session needs (a `move` is `mouseMoved` and starts none).
+        case leftDrag = "left_drag"
         case rightDown = "right_down", rightUp = "right_up"
     }
 
@@ -211,6 +214,7 @@ public enum FifoEvents {
             case .move: type = .mouseMoved
             case .leftDown: type = .leftMouseDown
             case .leftUp: type = .leftMouseUp
+            case .leftDrag: type = .leftMouseDragged
             case .rightDown: type = .rightMouseDown
             case .rightUp: type = .rightMouseUp
             case .key: throw refuse("step \(i): a key step has no key")
@@ -219,7 +223,8 @@ public enum FifoEvents {
                 with: type, location: p, modifierFlags: mods, timestamp: t,
                 windowNumber: window.windowNumber, context: nil, eventNumber: i,
                 clickCount: type == .mouseMoved ? 0 : 1,
-                pressure: (type == .leftMouseDown || type == .rightMouseDown) ? 1 : 0) else {
+                pressure: (type == .leftMouseDown || type == .rightMouseDown
+                           || type == .leftMouseDragged) ? 1 : 0) else {
                 throw refuse("step \(i): AppKit built no \(type)")
             }
             out.append(e)
@@ -253,6 +258,7 @@ public enum FifoEvents {
                 case .mouseEntered: name = "enter"
                 case .leftMouseDown: name = "leftDown"
                 case .leftMouseUp: name = "leftUp"
+                case .leftMouseDragged: name = "leftDrag"
                 case .rightMouseDown: name = "rightDown"
                 case .rightMouseUp: name = "rightUp"
                 default: name = "type\(e.type.rawValue)"

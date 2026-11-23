@@ -129,6 +129,27 @@ import AppKit
     #expect(r[3].hasSuffix("+cmd") && r[4] == "keyDown:51", "\(r)")
 }
 
+/// A press-move-release sequence is a DRAG only if the moves between the
+/// press and the release are `leftMouseDragged`: a `move` is `mouseMoved`
+/// and starts no drag session (measured 11-23 on the dock: a left_down,
+/// three moves and a left_up from the Align tab to the Swatches tab left
+/// the layout byte-identical, behind a click control that did move it).
+/// So `left_drag` is its own kind, pressed, and named in the receipt.
+@Test @MainActor func eventsBuildMakesALeftDragADraggedEventWithTheButtonDown() throws {
+    let w = window(with: [("tab", NSRect(x: 20, y: 40, width: 100, height: 20))])
+    let specs = try FifoEvents.parse("""
+        [{"kind":"left_down","at":"tab"},{"kind":"left_drag","at":[90,120]},
+         {"kind":"left_drag","at":[95,150]},{"kind":"left_up","at":[95,150]}]
+        """)
+    #expect(specs[1] == .init(kind: .leftDrag, target: .point(90, 120), key: nil, flags: []))
+    let evs = try FifoEvents.build(specs, window: w)
+    #expect(evs.map(\.type) == [.leftMouseDown, .leftMouseDragged, .leftMouseDragged, .leftMouseUp])
+    #expect(evs[1].pressure == 1 && evs[2].pressure == 1, "the button is held through the drag")
+    #expect(evs[2].locationInWindow == NSPoint(x: 95, y: 150))
+    let r = FifoEvents.receipt(evs).split(separator: " ").map(String.init)
+    #expect(r == ["leftDown@(70,50)", "leftDrag@(90,120)", "leftDrag@(95,150)", "leftUp@(95,150)"], "\(r)")
+}
+
 // MARK: menu watch
 
 @Test @MainActor func menuWatchRecordsTheTitlesOfTheMenuThatBeganTracking() throws {
