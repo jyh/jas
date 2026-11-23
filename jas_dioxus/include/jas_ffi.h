@@ -740,6 +740,37 @@ struct JasBytes jas_layout_apply(struct JasEngine *e, const uint8_t *op, uintptr
 struct JasBytes jas_layout_edge_rects(struct JasEngine *e, const uint8_t *cell, uintptr_t len);
 
 /**
+ * The entries a native shell draws for the context menu at a row (STATUS-jas
+ * row 257): `path_json` is the row widget's plan path (the path the shell
+ * sends with that row's events), as a JSON array of indices. The reply is a
+ * JSON array in the declared order: `{"separator": true, "index": n}` or
+ * `{"index": n, "label": "…", "enabled": bool, "action": "…", "params": {…}}`,
+ * with the label and action resolved in the row's scope and the params as
+ * declared. A pick sends `{"widget": "context_menu", "path": <the same path>,
+ * "event": "context_menu", "value": <index>}` through [`jas_panel_behavior`],
+ * which uses the same holder and scope, so it runs the item drawn.
+ *
+ * # ⛔ A refusal draws NOTHING
+ *
+ * A path that names nothing, or names no node with a `context_menu:`, returns
+ * the empty span, and [`jas_last_error_json`] reads
+ * `{"panel_event":"<class>","detail":"<detail>"}` (`NoRow`, `MissingTarget`,
+ * `NoContextMenu`, `MissingTarget` for an unknown panel, `BadUtf8`,
+ * `BadJson`).
+ *
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or live; both spans must be NULL or valid for their
+ * stated lengths.
+ */
+struct JasBytes jas_panel_row_menu(struct JasEngine *e,
+                                   const uint8_t *panel_id,
+                                   uintptr_t panel_len,
+                                   const uint8_t *path_json,
+                                   uintptr_t path_len);
+
+/**
  * **A widget's behavior**, run in the engine (wave 2, A6).
  *
  * `{"widget":"align_left_button","event":"click","alt":false}`: the shell

@@ -683,6 +683,36 @@ fn resolve_path(content: &Value, path: &[usize], scope: &Value) -> Result<(Value
     Ok((cur, sc))
 }
 
+/// The node whose `context_menu:` a pick at `path` runs: the NEAREST node
+/// along the path that declares one (Layers declares it on `lp_tree`, the
+/// foreach, not on the row), or the addressed `node` itself when there is no
+/// path. The pick and the export (`context_menu_entries`) both use this, so
+/// the list a shell draws is the list the pick indexes.
+fn context_menu_holder(content: &Value, path: Option<&[usize]>, node: &Value, panel_scope: &Value) -> Option<Value> {
+    match path {
+        Some(p) => (0..=p.len()).rev().find_map(|k| resolve_path(content, &p[..k], panel_scope).ok()
+            .map(|r| r.0).filter(|n| n.get("context_menu").is_some())),
+        None => Some(node.clone()).filter(|n| n.get("context_menu").is_some()),
+    }
+}
+
+/// The entries a shell draws for the context menu at `path` in panel `spec`
+/// (row 257): the holder the pick would use, read in the scope at the END of
+/// the path (so `node` is the row), each with its index in the declared list.
+/// Refuses as the pick would: `NoRow`/`MissingTarget` for a path that names
+/// nothing, `NoContextMenu` when no node on it declares a menu.
+pub fn context_menu_entries(spec: &Value, path: &[usize], panel_scope: &Value)
+    -> Result<Vec<crate::interpreter::row_menu::RowMenuEntry>, Refusal> {
+    let canonical = crate::panel_plan::canonical_tabs(spec, panel_scope);
+    let content = canonical.get("content").unwrap_or(&Value::Null);
+    let (node, scope) = resolve_path(content, path, panel_scope)?;
+    let holder = context_menu_holder(content, Some(path), &node, panel_scope)
+        .ok_or_else(|| Refusal::new("NoContextMenu", format!("{path:?}")))?;
+    let items = holder.get("context_menu").and_then(Value::as_array)
+        .ok_or_else(|| Refusal::new("NoContextMenu", format!("{path:?}")))?;
+    Ok(crate::interpreter::row_menu::entries(items, &scope))
+}
+
 /// The first node with id `widget` under `node`, and whether it sits under a
 /// `foreach`. First wins, as `panel_scope::binding_of` has it.
 /// The node `widget` names in `spec`'s content, addressed by id (the first
@@ -837,12 +867,8 @@ fn run_widget_behavior_in(
     // ride in a `dispatch` effect, which the effects runner evaluates exactly
     // as a behaviour's.
     if ev.event == "context_menu" {
-        let holder = match &ev.path {
-            Some(p) => (0..=p.len()).rev().find_map(|k| resolve_path(content, &p[..k], panel_scope).ok()
-                .map(|r| r.0).filter(|n| n.get("context_menu").is_some())),
-            None => Some(node.clone()).filter(|n| n.get("context_menu").is_some()),
-        };
-        let holder = holder.ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
+        let holder = context_menu_holder(content, ev.path.as_deref(), node, panel_scope)
+            .ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
         let items = holder.get("context_menu").and_then(Value::as_array)
             .ok_or_else(|| Refusal::new("NoContextMenu", ev.widget.clone()))?;
         let at = ev.value.as_ref().and_then(Value::as_u64)

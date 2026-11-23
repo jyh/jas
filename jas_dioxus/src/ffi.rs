@@ -1250,6 +1250,75 @@ pub unsafe extern "C" fn jas_layout_edge_rects(e: *mut JasEngine, cell: *const u
     out
 }
 
+/// The entries a native shell draws for the context menu at a row (STATUS-jas
+/// row 257): `path_json` is the row widget's plan path (the path the shell
+/// sends with that row's events), as a JSON array of indices. The reply is a
+/// JSON array in the declared order: `{"separator": true, "index": n}` or
+/// `{"index": n, "label": "…", "enabled": bool, "action": "…", "params": {…}}`,
+/// with the label and action resolved in the row's scope and the params as
+/// declared. A pick sends `{"widget": "context_menu", "path": <the same path>,
+/// "event": "context_menu", "value": <index>}` through [`jas_panel_behavior`],
+/// which uses the same holder and scope, so it runs the item drawn.
+///
+/// # ⛔ A refusal draws NOTHING
+///
+/// A path that names nothing, or names no node with a `context_menu:`, returns
+/// the empty span, and [`jas_last_error_json`] reads
+/// `{"panel_event":"<class>","detail":"<detail>"}` (`NoRow`, `MissingTarget`,
+/// `NoContextMenu`, `MissingTarget` for an unknown panel, `BadUtf8`,
+/// `BadJson`).
+///
+/// **BL4**: copy the span, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or live; both spans must be NULL or valid for their
+/// stated lengths.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_panel_row_menu(
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    panel_len: usize,
+    path_json: *const u8,
+    path_len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::PanelRowMenu, panel_len + path_len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let (Ok(id), Ok(raw)) = (unsafe { utf8(panel_id, panel_len) }, unsafe { utf8(path_json, path_len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(path) = serde_json::from_str::<Vec<usize>>(raw) else {
+        set_panel_event_error(engine, "BadJson", raw);
+        return JasBytes::empty();
+    };
+    let Some(ws) = Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let Some(spec) = ws.panel(id) else {
+        set_panel_event_error(engine, "MissingTarget", id);
+        return JasBytes::empty();
+    };
+    let scope = panel_ctx(engine, &ws, id);
+    let entries = match crate::panel_behavior::context_menu_entries(spec, &path, &scope) {
+        Ok(es) => es,
+        Err(r) => {
+            set_panel_event_error(engine, r.class, &r.detail);
+            return JasBytes::empty();
+        }
+    };
+    use crate::interpreter::row_menu::RowMenuEntry;
+    let out: Vec<serde_json::Value> = entries.into_iter().map(|e| match e {
+        RowMenuEntry::Separator { index } => serde_json::json!({"separator": true, "index": index}),
+        RowMenuEntry::Item { index, label, enabled, action, params } =>
+            serde_json::json!({"index": index, "label": label, "enabled": enabled, "action": action, "params": params}),
+    }).collect();
+    let out = JasBytes::from_vec(serde_json::to_vec(&out).unwrap_or_default());
+    ffi_instr::record_out(Crossing::PanelRowMenu, out.len);
+    out
+}
+
 /// **A widget's behavior**, run in the engine (wave 2, A6).
 ///
 /// `{"widget":"align_left_button","event":"click","alt":false}`: the shell
@@ -9217,6 +9286,31 @@ mod tests {
         assert_eq!(edge_rects_of(e, &good.replace(r#""h":100.0,"#, "")), "");
         assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadCell", "h"));
         assert_ne!(edge_rects_of(e, good), "", "the control cell is answered");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 257: a row-menu query the engine cannot answer draws nothing and
+    /// names its class. (The answered case, and that its indices run the item
+    /// drawn, is witnessed by the replay's context-menu arms, which now read
+    /// this export: an export that refused everything fails them.)
+    #[test]
+    fn a_row_menu_query_is_refused_by_name() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let menu = |panel: &str, path: &[u8]| take(unsafe {
+            jas_panel_row_menu(e, panel.as_ptr(), panel.len(), path.as_ptr(), path.len()) });
+        let class = || take(unsafe { jas_last_error_json(e) });
+        let layers = "layers_panel_content";
+        assert_eq!(menu(layers, &[0xff, 0xfe]), "");
+        assert_eq!(class(), refusal("BadUtf8", ""));
+        assert_eq!(menu(layers, b"{"), "");
+        assert_eq!(class(), refusal("BadJson", "{"));
+        assert_eq!(menu("no_such_panel", b"[]"), "");
+        assert_eq!(class(), refusal("MissingTarget", "no_such_panel"));
+        assert_eq!(menu(layers, b"[]"), "", "the panel root declares no context menu");
+        assert_eq!(class(), refusal("NoContextMenu", "[]"));
+        assert_eq!(menu(layers, b"[999]"), "", "a path past the content names nothing");
+        assert!(class().contains("MissingTarget") || class().contains("NoRow"), "{}", class());
         unsafe { jas_engine_free(e) };
     }
 
