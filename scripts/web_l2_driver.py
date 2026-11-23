@@ -193,6 +193,8 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             raise _plan.Refused(why)
         k = act[0]
         if k == "open":
+            # act[2], the reset workspace (row 254), holds by construction here:
+            # every case runs in a new browser context, so its storage is fresh.
             with open(os.path.join(SVGS, act[1]), encoding="utf-8") as f:
                 svg = f.read()
             if not page.evaluate("([t, n]) => window.__jasTest.open(t, n)", [svg, act[1]]):

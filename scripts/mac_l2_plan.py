@@ -234,7 +234,7 @@ def _plan_toolbar(item, i, st, spec):
 
 
 def plan(script, menubar, spec=None, state_keys=None):
-    """The script as acts: ("open", svg) ("tool", id) ("pointer", kind, x, y,
+    """The script as acts: ("open", svg, reset_workspace) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
     window_path, widget, event, value, option_label, widget_type) ("menu", path)
     ("read", "document") ("toolbar", slot, hold_ms) ("read", "state", keys,
@@ -247,7 +247,9 @@ def plan(script, menubar, spec=None, state_keys=None):
     if not any(isinstance(s, dict) and "read" in s for s in steps):
         raise Refused(f"{item}: a script without a read step asserts nothing")
     menus, panels = menu_paths(menubar), panel_menu_paths(menubar)
-    acts = [("open", script["setup_svg"]), ("tool", script["tool"])]
+    # The open act asks for a reset workspace: the app persists its dock layout,
+    # so a fresh process alone starts where the last script left it (row 254).
+    acts = [("open", script["setup_svg"], True), ("tool", script["tool"])]
     for i, st in enumerate(steps):
         if "read" in st:
             if st["read"] == "state" and state_keys is None:
@@ -812,6 +814,12 @@ def self_test():
     check("plan opens, picks the tool, then the steps in order",
           [a[0] for a in acts] == ["open", "tool", "pointer", "pointer", "panel", "menu", "read"])
     check("a panel act carries its dock tab's id", acts[4][2] == "stroke_panel_content_tab")
+    # The app persists its dock layout (UserDefaults `jas_layout:Workspace`), so a
+    # fresh PROCESS is not a fresh STATE: the 11-23 nightly left gradient and
+    # opacity appended to the dock, and the next script started from that.
+    # Level 1 starts every script from a fresh store, so the open act (always
+    # the first, built unconditionally) asks the driver to reset the workspace.
+    check("the open act asks for a reset workspace", acts[0] == ("open", "s.svg", True))
     check("a panel act carries its Window item", acts[4][3] == ["Window", "Stroke"])
     check("panel paths", panel_menu_paths(mb) == {"stroke": ["Window", "Stroke"]})
     sel = {"content": [{"id": "op_mode", "type": "select",
