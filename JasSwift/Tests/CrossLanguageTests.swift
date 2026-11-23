@@ -5727,8 +5727,9 @@ private func signedMagnitude(_ u: Double, _ lo: Double, _ hi: Double) -> Double 
 /// `shift_draw_sample`.
 private func shiftDrawSample(_ st: inout PropertyStream, _ cfg: [String: Any]) -> ShiftDraw {
     func n(_ k: String) -> Double {
-        guard let v = cfg[k] as? NSNumber else { fatalError("generative.\(k) must be a number") }
-        return v.doubleValue
+        // A number, never a bool, as Rust's `as_f64()` reads (row 251).
+        guard let v = corpusNumber(cfg[k]) else { fatalError("generative.\(k) must be a number") }
+        return v
     }
     let zoom = lerp(n("zoom_min"), n("zoom_max"), st.u())
     let offsetX = lerp(n("offset_min"), n("offset_max"), st.u())
@@ -5810,7 +5811,9 @@ private func pinnedF64(_ v: Any?) -> Double {
 /// `assert_stream_pin`.
 private func assertStreamPin(_ fx: [String: Any]) {
     let pin = fx["stream_pin"] as! [String: Any]
-    let seed = (pin["seed"] as! NSNumber).uint64Value
+    // An integer, never a bool or a float, as Rust's `as_u64()` reads (row 251).
+    guard let seedInt = corpusInt(pin["seed"]), seedInt >= 0 else { fatalError("stream_pin.seed must be a non-negative integer") }
+    let seed = UInt64(seedInt)
     let cfg = fx["generative"] as! [String: Any]
     var st = PropertyStream(seed: seed)
     for (i, want) in (pin["cases"] as! [[String: Any]]).enumerated() {
