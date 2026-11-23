@@ -8,7 +8,8 @@
       {"kind": "move", "x": 110, "y": 70, "dragging": true, "shift": true},
       {"kind": "release", "x": 110, "y": 70, "shift": true}
     ],
-    "expected_json": "draw_ellipse_shift_expected.json"
+    "expected_json": "draw_ellipse_shift_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "draw_ellipse_shift_horizontal_drag_still_commits",
@@ -19,6 +20,7 @@
       {"kind": "move", "x": 110, "y": 20, "dragging": true, "shift": true},
       {"kind": "release", "x": 110, "y": 20, "shift": true}
     ],
-    "expected_json": "draw_ellipse_shift_horizontal_expected.json"
+    "expected_json": "draw_ellipse_shift_horizontal_expected.json",
+    "expected_can_undo": true
   }
 ]

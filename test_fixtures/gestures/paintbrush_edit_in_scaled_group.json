@@ -12,6 +12,7 @@
       {"kind": "move", "x": 160, "y": 65, "dragging": true},
       {"kind": "release", "x": 180, "y": 30}
     ],
-    "expected_json": "paintbrush_edit_in_scaled_group_expected.json"
+    "expected_json": "paintbrush_edit_in_scaled_group_expected.json",
+    "expected_can_undo": true
   }
 ]

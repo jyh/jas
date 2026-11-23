@@ -10,6 +10,7 @@
    {"kind": "move", "x": 287, "y": 231, "dragging": true},
    {"kind": "release", "x": 287, "y": 231}
   ],
-  "expected_json": "smooth_zigzag_in_scaled_group_expected.json"
+  "expected_json": "smooth_zigzag_in_scaled_group_expected.json",
+  "expected_can_undo": true
  }
 ]

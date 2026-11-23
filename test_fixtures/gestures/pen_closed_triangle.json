@@ -46,6 +46,7 @@
     "y": 12
    }
   ],
-  "expected_json": "pen_closed_triangle_expected.json"
+  "expected_json": "pen_closed_triangle_expected.json",
+  "expected_can_undo": true
  }
 ]

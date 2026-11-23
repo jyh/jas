@@ -56,6 +56,7 @@
     "expected_exact": {
       "path": [0, 1],
       "fields": { "rx": 30.0, "ry": 30.0 }
-    }
+    },
+    "expected_can_undo": true
   }
 ]

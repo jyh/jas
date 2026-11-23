@@ -22,7 +22,8 @@
     "y": 150
    }
   ],
-  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A click on its drawn corner must delete nothing.",
@@ -41,7 +42,8 @@
     "y": 120
    }
   ],
-  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A click on its drawn segment must add nothing.",
@@ -60,7 +62,8 @@
     "y": 75
    }
   ],
-  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A Partial Selection marquee around the drawn corner selects nothing. select_recursive already skipped hidden elements, so this case is the control.",
@@ -85,7 +88,8 @@
     "y": 110
    }
   ],
-  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A Selection marquee over the drawn corner selects nothing: a band asks about members, and a hidden member does not answer for its group.",
@@ -110,7 +114,8 @@
     "y": 110
    }
   ],
-  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A drag from its drawn corner must find nothing and change nothing.",
@@ -135,7 +140,8 @@
     "y": 150
    }
   ],
-  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A click on its drawn corner must delete nothing.",
@@ -154,7 +160,8 @@
     "y": 120
    }
   ],
-  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A click on its drawn segment must add nothing.",
@@ -173,7 +180,8 @@
     "y": 75
    }
   ],
-  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A Partial Selection marquee around the drawn corner selects nothing. select_recursive already skipped hidden elements, so this case is the control.",
@@ -198,7 +206,8 @@
     "y": 110
    }
   ],
-  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A Selection marquee over the drawn corner selects nothing: a band asks about members, and a hidden member does not answer for its group.",
@@ -223,7 +232,8 @@
     "y": 110
    }
   ],
-  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path and its group are visible and their LAYER is hidden. A click on its drawn corner must delete nothing.",
@@ -242,7 +252,8 @@
     "y": 120
    }
   ],
-  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path and its group are visible and their LAYER is hidden. A click on its drawn segment must add nothing.",
@@ -261,7 +272,8 @@
     "y": 75
    }
   ],
-  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path and its group are visible and their LAYER is hidden. A Selection marquee over the drawn corner selects nothing; the marquee already skipped a hidden layer, so this case is a control.",
@@ -286,7 +298,8 @@
     "y": 110
    }
   ],
-  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The line (0,30) -> (120,30) in pt carries the matrix (2,0,0,3,60,30), so it is DRAWN along y = 120 from x 60 to 300 (the S5 witness's geometry). The LINE is hidden. A click at (150,120) must erase nothing.",
@@ -305,7 +318,8 @@
     "y": 120
    }
   ],
-  "expected_json": "hidden_transformed_line_unchanged_expected.json"
+  "expected_json": "hidden_transformed_line_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The line (0,30) -> (120,30) in pt carries the matrix (2,0,0,3,60,30), so it is DRAWN along y = 120 from x 60 to 300 (the S5 witness's geometry). The line is visible and its LAYER is hidden. A click at (150,120) must erase nothing.",
@@ -324,7 +338,8 @@
     "y": 120
    }
   ],
-  "expected_json": "transformed_line_in_hidden_layer_unchanged_expected.json"
+  "expected_json": "transformed_line_in_hidden_layer_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE meets F3 (the Path Eraser descends into groups, 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). The PATH is hidden. A click on the drawn corner must erase nothing.",
@@ -343,7 +358,8 @@
     "y": 120
    }
   ],
-  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE meets F3 (the Path Eraser descends into groups, 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). Its GROUP is hidden. A click on the drawn corner must erase nothing.",
@@ -362,7 +378,8 @@
     "y": 120
    }
   ],
-  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "INVISIBLE meets F3 (the Path Eraser descends into groups, 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). Its LAYER is hidden. A click on the drawn corner must erase nothing.",
@@ -381,7 +398,8 @@
     "y": 120
    }
   ],
-  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json",
+  "expected_can_undo": false
  },
  {
   "_doc": "F3's lock clause (2026-10-17): the eraser descends into a group only as the anchor tools do, so a LOCKED group's paths are never erased. The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). The path is visible and its group is locked. A click on the drawn corner must erase nothing.",
@@ -400,6 +418,7 @@
     "y": 120
    }
   ],
-  "expected_json": "path_in_locked_scaled_group_unchanged_expected.json"
+  "expected_json": "path_in_locked_scaled_group_unchanged_expected.json",
+  "expected_can_undo": false
  }
 ]

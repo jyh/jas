@@ -5100,6 +5100,9 @@ private func assertGestureTest(_ tc: [String: Any]) {
     // The Hand and Zoom tools change only the view, which no document golden
     // can witness. Mirrors Rust `assert_view_triple`.
     assertActionView(tc, model)
+    // `expected_can_undo`: whether the gesture left an undo step (row 241).
+    // The shared check `assertActionCanUndo` reads the same key.
+    assertActionCanUndo(tc, model)
 }
 
 /// Inc-1 of the shared gesture-fixture corpus: replay each fixture's pointer

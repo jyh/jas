@@ -8,6 +8,7 @@
       {"kind": "move", "x": 130, "y": 100, "dragging": true},
       {"kind": "release", "x": 130, "y": 100}
     ],
-    "expected_json": "partial_selection_drag_corner_in_scaled_group_expected.json"
+    "expected_json": "partial_selection_drag_corner_in_scaled_group_expected.json",
+    "expected_can_undo": true
   }
 ]

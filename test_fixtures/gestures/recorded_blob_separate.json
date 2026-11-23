@@ -75,6 +75,7 @@
         "y": 291.5
       }
     ],
-    "expected_json": "recorded_blob_separate_1_expected.json"
+    "expected_json": "recorded_blob_separate_1_expected.json",
+    "expected_can_undo": true
   }
 ]

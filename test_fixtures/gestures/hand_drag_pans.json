@@ -27,6 +27,7 @@
     "y": 25
    }
   ],
-  "expected_json": "hand_drag_pans_expected.json"
+  "expected_json": "hand_drag_pans_expected.json",
+  "expected_can_undo": false
  }
 ]

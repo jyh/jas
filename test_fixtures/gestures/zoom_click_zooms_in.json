@@ -21,6 +21,7 @@
     "y": 40
    }
   ],
-  "expected_json": "zoom_click_zooms_in_expected.json"
+  "expected_json": "zoom_click_zooms_in_expected.json",
+  "expected_can_undo": false
  }
 ]

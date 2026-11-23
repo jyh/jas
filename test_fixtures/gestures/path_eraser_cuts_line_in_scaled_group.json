@@ -16,6 +16,7 @@
     "y": 120
    }
   ],
-  "expected_json": "path_eraser_cuts_line_in_scaled_group_expected.json"
+  "expected_json": "path_eraser_cuts_line_in_scaled_group_expected.json",
+  "expected_can_undo": true
  }
 ]

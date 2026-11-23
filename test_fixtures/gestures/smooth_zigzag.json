@@ -28,6 +28,7 @@
     "y": 27
    }
   ],
-  "expected_json": "smooth_zigzag_expected.json"
+  "expected_json": "smooth_zigzag_expected.json",
+  "expected_can_undo": true
  }
 ]

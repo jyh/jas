@@ -11,6 +11,7 @@
       {"kind": "move", "x": 100, "y": 40, "dragging": true},
       {"kind": "release", "x": 120, "y": 60}
     ],
-    "expected_json": "paintbrush_paint_fill_expected.json"
+    "expected_json": "paintbrush_paint_fill_expected.json",
+    "expected_can_undo": true
   }
 ]

@@ -28,6 +28,7 @@
     "y": 108
    }
   ],
-  "expected_json": "scale_drag_double_expected.json"
+  "expected_json": "scale_drag_double_expected.json",
+  "expected_can_undo": true
  }
 ]

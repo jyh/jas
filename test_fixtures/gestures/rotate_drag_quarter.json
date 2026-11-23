@@ -28,6 +28,7 @@
     "y": 72
    }
   ],
-  "expected_json": "rotate_drag_quarter_expected.json"
+  "expected_json": "rotate_drag_quarter_expected.json",
+  "expected_can_undo": true
  }
 ]
