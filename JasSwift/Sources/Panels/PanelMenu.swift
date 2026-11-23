@@ -214,6 +214,12 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
         if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)) }
         else { panelDispatchRow(.gradient, action: cmd, params: [:], model: model) }
     }
+    // Publish the write (row 220). The panel body redraws on the model's
+    // objectWillChange; a row whose write changes no document (Artboards'
+    // Duplicate with nothing selected still sets `rearrange_dirty`, the
+    // Rearrange badge) published nothing, and the badge waited for an
+    // unrelated redraw. Every other panel-action route bumps after its write.
+    model?.panelStateVersion &+= 1
 }
 
 /// The panel, submenu label and `items_from` spec of the menu item an
