@@ -6557,6 +6557,12 @@ func corpusInt(_ v: Any?) -> Int? {
     #expect(corpusInt(d["half"]) == nil, "a JSON 2.5 is not an integer")
     #expect(corpusInt(d["t"]) == nil, "a JSON true is not an integer (Swift's as? Int reads 1)")
     #expect(corpusInt(d["s"]) == nil && corpusInt(nil) == nil, "a string or an absent key is not an integer")
+    // An evaluator's output arrives as a native Swift value, not a decoded
+    // NSNumber; it bridges to the same CF types, so the same reader serves
+    // both (row 251, the value coercers that read both).
+    let nativeTrue: Any = true, nativeHalf: Any = 2.5, nativeThree: Any = 3
+    #expect(corpusNumber(nativeTrue) == nil, "a native Swift true is not a number")
+    #expect(corpusNumber(nativeHalf) == 2.5 && corpusNumber(nativeThree) == 3.0, "native numbers read as numbers")
 }
 
 /// OPTIONAL assertion: `expected_can_redo` (a bool), whether the model has a
