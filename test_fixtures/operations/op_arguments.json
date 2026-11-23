@@ -287,7 +287,8 @@
     },
     "select_rect": {
       "extend": [
-        "boolean"
+        "boolean",
+        "number"
       ],
       "height": [
         "number"
