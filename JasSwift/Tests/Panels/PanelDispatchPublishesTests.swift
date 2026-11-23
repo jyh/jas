@@ -5,14 +5,14 @@ import Combine
 
 // Row 220: `panelDispatch` publishes the panel-state write it makes.
 //
-// The dock's panel bodies redraw on `Model.panelStateVersion`, and the
-// `StateStore` publishes nothing. The ≡ menu redrew only because its one call
-// site (`DockPanelView`) passes the `@Binding` layout `inout`, and the
-// write-back sets the binding on every dispatch whether or not the layout
-// changed. That is incidental: a refactor passing the layout by value would
-// silently stop every panel-menu redraw. These arms make the publish part of
-// `panelDispatch` itself, as the FIFO `action` (row 217) and the Layers keys
-// already do.
+// The dock's panel bodies hold the model as an @ObservedObject, so they redraw
+// on any `objectWillChange`; the `StateStore` publishes nothing. Most kinds'
+// dispatchers already bump `panelStateVersion` (Character and Opacity: the two
+// narrow arms below passed on main, so they witness the value flips, not the
+// fix). The population arm found the gap: three Artboards rows (Duplicate,
+// Delete, Delete Empty) set `rearrange_dirty`, the Rearrange badge, and when
+// they change no document nothing is published. `panelDispatch` now bumps
+// after every kind's dispatch.
 
 private func dispatchOnce(_ kind: PanelKind, _ cmd: String, _ model: Model) {
     var layout = WorkspaceLayout.defaultLayout()
