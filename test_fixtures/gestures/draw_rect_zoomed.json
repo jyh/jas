@@ -44,6 +44,7 @@
       { "kind": "move", "x": 340, "y": 290, "dragging": true },
       { "kind": "release", "x": 340, "y": 290 }
     ],
-    "expected_json": "draw_rect_zoomed_expected.json"
+    "expected_json": "draw_rect_zoomed_expected.json",
+    "expected_can_undo": true
   }
 ]

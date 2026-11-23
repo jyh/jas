@@ -22,6 +22,7 @@
     "y": 36
    }
   ],
-  "expected_json": "eyedropper_click_copies_to_selection_expected.json"
+  "expected_json": "eyedropper_click_copies_to_selection_expected.json",
+  "expected_can_undo": true
  }
 ]

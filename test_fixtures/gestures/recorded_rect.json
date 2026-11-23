@@ -53,6 +53,7 @@
         "y": 341.5
       }
     ],
-    "expected_json": "recorded_rect_1_expected.json"
+    "expected_json": "recorded_rect_1_expected.json",
+    "expected_can_undo": true
   }
 ]

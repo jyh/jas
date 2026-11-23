@@ -9,6 +9,7 @@
       { "kind": "move", "x": 110, "y": 80, "dragging": true },
       { "kind": "release", "x": 110, "y": 80 }
     ],
-    "expected_json": "select_marquee_in_scaled_group_expected.json"
+    "expected_json": "select_marquee_in_scaled_group_expected.json",
+    "expected_can_undo": false
   }
 ]

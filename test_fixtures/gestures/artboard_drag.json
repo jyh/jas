@@ -8,6 +8,7 @@
       {"kind": "move", "x": 300, "y": 260, "dragging": true},
       {"kind": "release", "x": 300, "y": 260}
     ],
-    "expected_json": "artboard_drag_expected.json"
+    "expected_json": "artboard_drag_expected.json",
+    "expected_can_undo": true
   }
 ]

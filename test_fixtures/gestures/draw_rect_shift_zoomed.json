@@ -58,6 +58,7 @@
     "expected_exact": {
       "path": [0, 1],
       "fields": { "width": 60.0, "height": 60.0 }
-    }
+    },
+    "expected_can_undo": true
   }
 ]

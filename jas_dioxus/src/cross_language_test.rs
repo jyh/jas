@@ -1985,6 +1985,15 @@ pub(crate) mod tests {
 
         assert_gesture_exact(tc, model.document());
         assert_view_triple(tc, &model);
+        // `expected_can_undo`: whether the gesture left an undo step (row
+        // 241). Swift's gesture runner reads the same key.
+        if let Some(want) = tc.get("expected_can_undo") {
+            let want = want.as_bool().unwrap_or_else(|| {
+                panic!("Gesture test '{name}': expected_can_undo is not a bool: {want}")
+            });
+            assert_eq!(model.can_undo(), want,
+                "Gesture test '{name}': can_undo is {} but the corpus pins {want}", model.can_undo());
+        }
     }
 
     #[cfg(feature = "web")]

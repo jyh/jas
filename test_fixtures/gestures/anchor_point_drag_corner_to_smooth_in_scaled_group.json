@@ -9,6 +9,7 @@
    {"kind": "move", "x": 140, "y": 120, "dragging": true},
    {"kind": "release", "x": 140, "y": 120}
   ],
-  "expected_json": "anchor_point_drag_corner_to_smooth_in_scaled_group_expected.json"
+  "expected_json": "anchor_point_drag_corner_to_smooth_in_scaled_group_expected.json",
+  "expected_can_undo": true
  }
 ]

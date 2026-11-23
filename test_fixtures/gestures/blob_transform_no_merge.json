@@ -14,6 +14,7 @@
       { "kind": "move", "x": 150, "y": 50, "dragging": true },
       { "kind": "release", "x": 150, "y": 50 }
     ],
-    "expected_json": "blob_transform_no_merge_expected.json"
+    "expected_json": "blob_transform_no_merge_expected.json",
+    "expected_can_undo": true
   }
 ]

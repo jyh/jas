@@ -28,6 +28,7 @@
     "y": 72
    }
   ],
-  "expected_json": "shear_drag_along_diagonal_expected.json"
+  "expected_json": "shear_drag_along_diagonal_expected.json",
+  "expected_can_undo": true
  }
 ]

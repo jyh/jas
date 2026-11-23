@@ -75,6 +75,7 @@
         "y": 331.5
       }
     ],
-    "expected_json": "recorded_blob_merge_1_expected.json"
+    "expected_json": "recorded_blob_merge_1_expected.json",
+    "expected_can_undo": true
   }
 ]

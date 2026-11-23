@@ -53,6 +53,7 @@
         "y": 395.6666666666667
       }
     ],
-    "expected_json": "recorded_rect_panzoom_1_expected.json"
+    "expected_json": "recorded_rect_panzoom_1_expected.json",
+    "expected_can_undo": true
   }
 ]

@@ -8,6 +8,7 @@
       { "kind": "move", "x": 200, "y": 100, "dragging": true },
       { "kind": "release", "x": 200, "y": 100 }
     ],
-    "expected_json": "select_marquee_expected.json"
+    "expected_json": "select_marquee_expected.json",
+    "expected_can_undo": false
   }
 ]

@@ -8,7 +8,8 @@
       {"kind": "move", "x": 110, "y": 70, "dragging": true, "shift": true},
       {"kind": "release", "x": 110, "y": 70, "shift": true}
     ],
-    "expected_json": "draw_rect_shift_expected.json"
+    "expected_json": "draw_rect_shift_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "draw_rect_shift_up_left_drag_keeps_the_anchor",
@@ -19,6 +20,7 @@
       {"kind": "move", "x": 110, "y": 170, "dragging": true, "shift": true},
       {"kind": "release", "x": 110, "y": 170, "shift": true}
     ],
-    "expected_json": "draw_rect_shift_up_left_expected.json"
+    "expected_json": "draw_rect_shift_up_left_expected.json",
+    "expected_can_undo": true
   }
 ]

@@ -8,6 +8,7 @@
    {"kind": "press", "x": 120, "y": 120},
    {"kind": "release", "x": 120, "y": 120}
   ],
-  "expected_json": "delete_anchor_point_in_scaled_group_expected.json"
+  "expected_json": "delete_anchor_point_in_scaled_group_expected.json",
+  "expected_can_undo": true
  }
 ]

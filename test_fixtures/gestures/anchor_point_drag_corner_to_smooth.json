@@ -22,6 +22,7 @@
     "y": 30
    }
   ],
-  "expected_json": "anchor_point_drag_corner_to_smooth_expected.json"
+  "expected_json": "anchor_point_drag_corner_to_smooth_expected.json",
+  "expected_can_undo": true
  }
 ]

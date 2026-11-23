@@ -16,6 +16,7 @@
     "y": 25
    }
   ],
-  "expected_json": "add_anchor_point_on_line_expected.json"
+  "expected_json": "add_anchor_point_on_line_expected.json",
+  "expected_can_undo": true
  }
 ]

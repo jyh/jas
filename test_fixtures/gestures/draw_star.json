@@ -8,6 +8,7 @@
       {"kind": "move", "x": 110, "y": 70, "dragging": true},
       {"kind": "release", "x": 110, "y": 70}
     ],
-    "expected_json": "draw_star_expected.json"
+    "expected_json": "draw_star_expected.json",
+    "expected_can_undo": true
   }
 ]
