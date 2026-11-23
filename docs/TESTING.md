@@ -377,6 +377,12 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
      Its value is the view it has (`view z x y`), so the driver reads the mapping back instead of assuming it.
    * Pointer and key steps are real Quartz events at the canvas's screen frame plus the document point. A script's
      `ctrl` is posted as Cmd, the Mac's command modifier.
+   * **With the console locked**, the FIFO's `gesture <json>` takes a script's pointer steps as written (`kind x y
+     dragging shift alt`, document units) and calls the active canvas view's own `mouseDown`, `mouseDragged`,
+     `mouseUp` and `mouseMoved` (`FifoGesture`). A locked console never makes the app active, and AppKit spends a
+     click on an inactive window's view on keying the window, so a posted click (`events`) never reaches the canvas.
+     This route does not witness that first-mouse and key-window routing. `ctrl`, `meta` and a double-click are
+     refused by name. Undo there is `action undo`, because a key needs a key window.
    * A panel step finds AXIdentifier = widget id inside AXIdentifier = panel content id (the dock wraps each
      panel body in one containing element with that id). If the panel is not shown, the driver first presses its
      dock tab, AXIdentifier `<panel content id>_tab`, as a person clicks it, or, for a panel in no dock group, its

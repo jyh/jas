@@ -27,6 +27,10 @@ import JasLib
 //     events <json>             -> an input SEQUENCE posted into the app's own
 //                                  event queue (FifoEvents), routed by AppKit
 //                                  as a person's input is
+//     gesture <json>            -> an input script's POINTER steps, in document
+//                                  units, delivered to the active canvas
+//                                  view's own mouse handlers (FifoGesture);
+//                                  reaches the tool with the console locked
 //     activate                  -> the app active and its window key, for keys
 //     hover <path>              -> the Layers row onHover last marked
 //     menu <path>               -> the titles of the last menu that began
@@ -321,6 +325,23 @@ extension JasAppDelegate {
                     NSLog("test-fifo: events posted %ld (warps %ld, %@): %@", evs.count, warps.count,
                           FifoEvents.keyState(active: NSApp.isActive, targetIsKey: window.isKeyWindow),
                           FifoEvents.receipt(evs))
+                } catch {
+                    NSLog("test-fifo: %@", "\(error)")
+                }
+            }
+        case "gesture":
+            // gesture <json>: an input script's pointer steps, delivered to the
+            // active canvas view's own handlers (FifoGesture; row 249), because
+            // a posted click cannot reach the canvas of an inactive app.
+            guard let model = workspace?.activeModel,
+                  let window = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) else {
+                NSLog("test-fifo: gesture REFUSED (no active canvas or no visible window)")
+                return
+            }
+            MainActor.assumeIsolated {
+                do {
+                    NSLog("test-fifo: gesture delivered %@",
+                          try FifoGesture.run(rest, model: model, window: window))
                 } catch {
                     NSLog("test-fifo: %@", "\(error)")
                 }
