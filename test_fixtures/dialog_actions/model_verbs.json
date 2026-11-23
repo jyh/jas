@@ -8,7 +8,8 @@
         "action": "select_all"
       }
     ],
-    "expected_json": "select_all_selects_each_unlocked_top_level_object_once_expected.json"
+    "expected_json": "select_all_selects_each_unlocked_top_level_object_once_expected.json",
+    "expected_can_undo": false
   },
   {
     "name": "unlock_all_clears_every_lock",
@@ -19,7 +20,8 @@
         "action": "unlock_all"
       }
     ],
-    "expected_json": "unlock_all_clears_every_lock_expected.json"
+    "expected_json": "unlock_all_clears_every_lock_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "hide_selection_hides_and_clears_the_selection",
@@ -33,7 +35,8 @@
         "action": "hide_selection"
       }
     ],
-    "expected_json": "hide_selection_hides_and_clears_the_selection_expected.json"
+    "expected_json": "hide_selection_hides_and_clears_the_selection_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "show_all_reveals_and_selects_what_it_showed",
@@ -50,7 +53,8 @@
         "action": "show_all"
       }
     ],
-    "expected_json": "show_all_reveals_and_selects_what_it_showed_expected.json"
+    "expected_json": "show_all_reveals_and_selects_what_it_showed_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "lock_locks_the_selection_and_clears_it",
@@ -64,7 +68,8 @@
         "action": "lock"
       }
     ],
-    "expected_json": "lock_locks_the_selection_and_clears_it_expected.json"
+    "expected_json": "lock_locks_the_selection_and_clears_it_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "group_wraps_the_selection_in_one_group",
@@ -78,7 +83,8 @@
         "action": "group"
       }
     ],
-    "expected_json": "group_wraps_the_selection_in_one_group_expected.json"
+    "expected_json": "group_wraps_the_selection_in_one_group_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "ungroup_replaces_the_group_with_its_members",
@@ -92,7 +98,8 @@
         "action": "ungroup"
       }
     ],
-    "expected_json": "ungroup_replaces_the_group_with_its_members_expected.json"
+    "expected_json": "ungroup_replaces_the_group_with_its_members_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "ungroup_all_flattens_every_unlocked_group",
@@ -103,6 +110,7 @@
         "action": "ungroup_all"
       }
     ],
-    "expected_json": "ungroup_all_flattens_every_unlocked_group_expected.json"
+    "expected_json": "ungroup_all_flattens_every_unlocked_group_expected.json",
+    "expected_can_undo": true
   }
 ]
