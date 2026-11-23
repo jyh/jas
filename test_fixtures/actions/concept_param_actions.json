@@ -47,7 +47,8 @@
     }
    }
   ],
-  "expected_json": "set_concept_param_sets_sides_expected.json"
+  "expected_json": "set_concept_param_sets_sides_expected.json",
+  "expected_can_undo": true
  },
  {
   "_doc": "remove_side clamps at the three-side minimum: from 3 it stays 3 (the placed golden with params.sides 6 -> 3, one edit, round-trip checked).",
@@ -78,6 +79,7 @@
     }
    }
   ],
-  "expected_json": "apply_concept_operation_clamps_at_three_expected.json"
+  "expected_json": "apply_concept_operation_clamps_at_three_expected.json",
+  "expected_can_undo": true
  }
 ]

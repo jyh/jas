@@ -32,7 +32,8 @@
         }
       }
     ],
-    "expected_json": "layer_options_confirm_creates_an_outline_layer_expected.json"
+    "expected_json": "layer_options_confirm_creates_an_outline_layer_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "artboard_options_confirm_edits_the_second_board",
@@ -57,6 +58,7 @@
         }
       }
     ],
-    "expected_json": "artboard_options_confirm_edits_the_second_board_expected.json"
+    "expected_json": "artboard_options_confirm_edits_the_second_board_expected.json",
+    "expected_can_undo": true
   }
 ]

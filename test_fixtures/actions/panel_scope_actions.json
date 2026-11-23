@@ -342,7 +342,8 @@
     "renaming_element": null,
     "collapsed_paths": []
    }
-  }
+  },
+  "expected_can_undo": true
  },
  {
   "_doc": "The lock on a Layers row: toggle_element_lock on the Background layer's path locks that layer only (lock is inherited, nothing is written onto its contents).",
@@ -358,7 +359,8 @@
     }
    }
   ],
-  "expected_json": "toggle_element_lock_on_a_layer_expected.json"
+  "expected_json": "toggle_element_lock_on_a_layer_expected.json",
+  "expected_can_undo": true
  },
  {
   "_doc": "The twirl on a Layers row: toggle_element_twirl adds the container's path to collapsed_paths; the document does not change.",
@@ -496,7 +498,8 @@
    "layers_panel_content": {
     "renaming_element": null
    }
-  }
+  },
+  "expected_can_undo": true
  },
  {
   "_doc": "Escape cancels a rename: rename mode ends and the element keeps its name.",
@@ -1070,7 +1073,8 @@
     "expected_json": "solo_element_visibility_hides_the_sibling_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "A second Option-click on the same element restores every saved sibling and clears the solo: the document is back where it started.",
@@ -1098,7 +1102,8 @@
     "expected_json": "solo_restores_an_outline_sibling_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": null, "solo_saved": []}
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "A plain eye click between the two Option-clicks discards the solo (the description's manual change): [0,1] stays hidden, [0,0] cycles to Outline, and nothing is saved.",
@@ -1111,7 +1116,8 @@
     "expected_json": "two_rects_first_outline_second_hidden_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": null, "solo_saved": []}
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "Soloing a hidden element shows it: [0,0] cycled to Invisible, then soloed, is Preview again, and [0,1] is hidden.",
@@ -1125,7 +1131,8 @@
     "expected_json": "solo_element_visibility_hides_the_sibling_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "Soloing an Outline element leaves it Outline (both native trees' rule); only the sibling is hidden.",
@@ -1138,7 +1145,8 @@
     "expected_json": "two_rects_first_outline_second_hidden_expected.json",
     "expected_panel_scope": {
       "layers_panel_content": {"solo_path": {"__path__": [0, 0]}, "solo_saved": [[{"__path__": [0, 1]}, "preview"]]}
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "_doc": "Delete Empty Artboards with nothing deletable (the one artboard is empty, and position 1 is always kept) deletes nothing, so it leaves the Artboards panel selection and the Rearrange badge (rearrange_dirty, true when the artboards list has changed) as they were. Row 221.",

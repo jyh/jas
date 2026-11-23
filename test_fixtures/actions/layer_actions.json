@@ -41,7 +41,8 @@
       "layers_panel_content": {
         "layers_panel_selection": []
       }
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "duplicate_layer_selection_foreground",
@@ -57,7 +58,8 @@
         "params": {}
       }
     ],
-    "expected_json": "duplicate_layer_selection_foreground_expected.json"
+    "expected_json": "duplicate_layer_selection_foreground_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "new_group_from_layer_row_circle",
@@ -74,7 +76,8 @@
         "params": {}
       }
     ],
-    "expected_json": "new_group_from_layer_row_circle_expected.json"
+    "expected_json": "new_group_from_layer_row_circle_expected.json",
+    "expected_can_undo": true
   },
   {
     "name": "open_layer_options_edit_reads_the_layer_and_keeps_the_defaults",

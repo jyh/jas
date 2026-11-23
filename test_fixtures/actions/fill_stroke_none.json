@@ -24,7 +24,8 @@
     "expected_panel_state": {
       "fill_color": "#0000ff",
       "stroke_color": null
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "set_active_color_still_publishes_the_colour",
@@ -37,7 +38,8 @@
     "expected_panel_state": {
       "fill_color": "#112233",
       "stroke_color": "#000000"
-    }
+    },
+    "expected_can_undo": true
   },
   {
     "name": "nothing_selected_publishes_the_seeded_app_default",
