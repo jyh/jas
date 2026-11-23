@@ -8,7 +8,8 @@
    {"action": "set_fill_type_gradient", "params": {}}
   ],
   "expected_json": "set_fill_type_gradient_fill_expected.json",
-  "expected_can_undo": true
+  "expected_can_undo": true,
+  "expected_can_redo": false
  },
  {
   "name": "set_fill_type_gradient_twice_is_once",
@@ -19,7 +20,8 @@
    {"action": "set_fill_type_gradient", "params": {}}
   ],
   "expected_json": "set_fill_type_gradient_fill_expected.json",
-  "expected_can_undo": true
+  "expected_can_undo": true,
+  "expected_can_redo": false
  },
  {
   "name": "set_fill_type_gradient_with_stroke_on_top_promotes_the_stroke",
@@ -30,7 +32,8 @@
    {"action": "set_fill_type_gradient", "params": {}}
   ],
   "expected_json": "set_fill_type_gradient_stroke_expected.json",
-  "expected_can_undo": true
+  "expected_can_undo": true,
+  "expected_can_redo": false
  },
  {
   "name": "set_fill_type_gradient_with_nothing_selected_changes_nothing",
@@ -40,6 +43,7 @@
    {"action": "set_fill_type_gradient", "params": {}}
   ],
   "expected_json": "set_fill_type_gradient_nothing_selected_expected.json",
-  "expected_can_undo": false
+  "expected_can_undo": false,
+  "expected_can_redo": false
  }
 ]

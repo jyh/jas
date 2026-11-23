@@ -6,6 +6,7 @@
       {"action": "toggle_all_layers_visibility", "params": {}}
     ],
     "expected_json": "toggle_all_layers_visibility_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

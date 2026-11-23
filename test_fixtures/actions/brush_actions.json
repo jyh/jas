@@ -18,7 +18,8 @@
       }
     ],
     "expected_json": "apply_brush_to_selection_sets_the_composed_id_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "remove_brush_from_selection_after_apply_restores_the_path",
@@ -43,6 +44,7 @@
       }
     ],
     "expected_json": "remove_brush_from_selection_after_apply_restores_the_path_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]

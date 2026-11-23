@@ -18,7 +18,8 @@
       }
     ],
     "expected_json": "nudge_right_moves_only_the_selected_rect_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "nudge_down_large_moves_both_rects",
@@ -43,7 +44,8 @@
       }
     ],
     "expected_json": "nudge_down_large_moves_both_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "nudges_accumulate_on_both_axes",
@@ -78,7 +80,8 @@
       }
     ],
     "expected_json": "nudges_accumulate_on_both_axes_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "nudge_with_nothing_selected_changes_nothing",
@@ -100,6 +103,7 @@
       }
     ],
     "expected_json": "nudge_with_nothing_selected_changes_nothing_expected.json",
-    "expected_can_undo": false
+    "expected_can_undo": false,
+    "expected_can_redo": false
   }
 ]

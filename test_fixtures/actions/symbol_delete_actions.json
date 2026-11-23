@@ -12,6 +12,7 @@
   "expected_panel_scope": {
    "symbols_panel_content": {"selected_symbol": null}
   },
-  "expected_can_undo": true
+  "expected_can_undo": true,
+  "expected_can_redo": false
  }
 ]

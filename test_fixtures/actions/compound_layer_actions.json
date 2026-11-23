@@ -15,7 +15,8 @@
       }
     ],
     "expected_json": "release_compound_shape_compound_and_rect_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "release_after_make_round_trips_two_rects",
@@ -41,7 +42,8 @@
       }
     ],
     "expected_json": "release_after_make_two_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "release_compound_shape_inside_a_group_stays_in_the_group",
@@ -60,7 +62,8 @@
       }
     ],
     "expected_json": "release_compound_shape_inside_a_group_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "release_compound_shape_reaches_a_compound_inside_a_selected_group",
@@ -78,7 +81,8 @@
       }
     ],
     "expected_json": "release_compound_shape_through_a_group_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "expand_compound_shape_bakes_a_made_union_in_its_paint",
@@ -104,7 +108,8 @@
       }
     ],
     "expected_json": "expand_compound_shape_after_make_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "repeat_boolean_operation_unions_again_after_select_all",
@@ -134,7 +139,8 @@
       }
     ],
     "expected_json": "repeat_boolean_operation_three_rects_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "collect_in_new_layer_moves_the_panel_selection_up",
@@ -152,7 +158,8 @@
       }
     ],
     "expected_json": "collect_in_new_layer_multi_layer_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "flatten_artwork_dissolves_the_selected_group",
@@ -170,7 +177,8 @@
       }
     ],
     "expected_json": "flatten_artwork_group_nested_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   },
   {
     "name": "release_transform_replaces_the_wrapper_by_its_released_child",
@@ -188,6 +196,7 @@
       }
     ],
     "expected_json": "release_transform_transformed_wrapper_expected.json",
-    "expected_can_undo": true
+    "expected_can_undo": true,
+    "expected_can_redo": false
   }
 ]
