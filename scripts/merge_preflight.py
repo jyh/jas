@@ -698,6 +698,8 @@ def self_test(fixture: Path | None = None) -> int:
     #     REFUSES (raises, and logs) any other, so no arm can reach the network.
     old_lay = "root:\n  - id: canvas_tab_bar\n    label: '{{doc.name}}'\n"
     new_lay = "root:\n  - id: canvas_tab_bar\n    label: '{{doc.name}} *'\n"
+    g_true = '[{"name": "w", "tool": "magic_wand", "expected_can_undo": true}]'
+    g_false = '[{"name": "w", "tool": "magic_wand", "expected_can_undo": false}]'
     global _gh
     real_gh = _gh
     stray: list[tuple[str, ...]] = []
@@ -734,6 +736,15 @@ def self_test(fixture: Path | None = None) -> int:
              {"MB": RuntimeError("gh api failed: HTTP 502 Bad Gateway"), "HEAD": new_lay}, "UNAVAILABLE"),
             ("no layout.yaml in the PR reads no forge content",
              "README.md\n", "MB", {}, "no panel YAML changed"),
+            # The undo-step arm (l2_baselines_at_risk, O97 11-23): a gesture
+            # pin moved between merge base and head names the baselines of
+            # that tool, read from the forge like the tab bar.
+            ("a gesture pin flipped between merge base and head lists its tool's baselines",
+             "test_fixtures/gestures/g.json\n", "MB", {"MB": g_true, "HEAD": g_false}, "magic_wand.click"),
+            ("a gesture file with no pin moved reads unmoved",
+             "test_fixtures/gestures/g.json\n", "MB", {"MB": g_true, "HEAD": g_true}, "no gesture's expected_can_undo moved"),
+            ("a merge base that IS the head lists the gesture arm and says so",
+             "test_fixtures/gestures/g.json\n", "HEAD", {"HEAD": g_false}, "merge base IS the head"),
         ):
             declared += 1
             _gh = stub(files, mb, contents)
@@ -815,7 +826,8 @@ def level2_notice(pr: int, repo: str = REPO, head_sha: str | None = None) -> lis
         why: dict[str, str] = {}
         read_base = read_head = None
         degenerate = None
-        if head_sha and l2.LAYOUT in files:
+        gestures = any(f.startswith(l2.GESTURES) for f in files)
+        if head_sha and (l2.LAYOUT in files or gestures):
             mb = _gh("api", f"repos/{repo}/compare/{BASE}...{head_sha}", "--jq", ".merge_base_commit.sha").strip()
             read_head = forge_reader(repo, head_sha)
             # A head already in the base (a merged PR) has ITSELF as merge base,
@@ -827,9 +839,10 @@ def level2_notice(pr: int, repo: str = REPO, head_sha: str | None = None) -> lis
             else:
                 read_base = forge_reader(repo, mb)
         risk = l2.at_risk(files, read_head or l2._read, l2.load_baselines(), tab_items=l2.load_tab_items(),
-                          read_base=read_base, why=why)
-        if degenerate and l2.TAB_KEY in risk:
-            why[l2.TAB_KEY] = degenerate
+                          read_base=read_base, why=why, tool_items=l2.load_tool_items())
+        for key in (l2.TAB_KEY, l2.UNDO_KEY):
+            if degenerate and key in risk:
+                why[key] = degenerate
         return l2.report(risk, why)
     except Exception as e:  # advice must not hide the verdict above it
         return [f"LEVEL-2 NOTICE UNAVAILABLE: {type(e).__name__}: {e}"]
