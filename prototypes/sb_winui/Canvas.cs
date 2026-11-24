@@ -367,13 +367,6 @@ internal sealed class MenuActionCmd : Cmd
 }
 
 /// <summary>
-/// A dock group's panel menu (the owner's note 3, 2026-10-12). `Index` &lt; 0
-/// READS the menu (`jas_panel_menu`) and posts its rows to the UI thread to
-/// draw; `Index` &gt;= 0 RUNS that item in the engine with its panel active
-/// (`jas_dispatch_action`, `{"panel","menu_index"}`). The shell names the
-/// panel and the index; the core reads the item's action and params.
-/// </summary>
-/// <summary>
 /// Row 257 D4: READ a row's context menu (`jas_panel_row_menu`) for the pane
 /// to draw. It is queued right after the row's `secondary_press`, so the menu
 /// is read in the selection that press left. A pick is a <see cref="PanelClickCmd"/>
@@ -386,6 +379,13 @@ internal sealed class RowMenuCmd : Cmd
     internal string Via = "hand";
 }
 
+/// <summary>
+/// A dock group's panel menu (the owner's note 3, 2026-10-12). `Index` &lt; 0
+/// READS the menu (`jas_panel_menu`) and posts its rows to the UI thread to
+/// draw; `Index` &gt;= 0 RUNS that item in the engine with its panel active
+/// (`jas_dispatch_action`, `{"panel","menu_index"}`). The shell names the
+/// panel and the index; the core reads the item's action and params.
+/// </summary>
 internal sealed class PanelMenuCmd : Cmd
 {
     internal string Group = "";

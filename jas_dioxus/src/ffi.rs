@@ -9362,7 +9362,7 @@ mod tests {
         let got = take(unsafe { jas_panel_row_menu(e, panel.as_ptr(), panel.len(), row.as_ptr(), row.len()) });
         assert!(!got.is_empty(), "the export answered: {}", take(unsafe { jas_last_error_json(e) }));
         let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../test_fixtures/panel_row_menu/layers_layer_row.json");
+            .join("../test_fixtures").join("panel_row_menu/layers_layer_row.json");
         if std::env::var("JAS_WRITE_ROW_MENU_FIXTURE").as_deref() == Ok("1") {
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             let v: serde_json::Value = serde_json::from_str(&got).unwrap();

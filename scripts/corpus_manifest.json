@@ -300,6 +300,19 @@
       },
       "notes": "The op_apply corpus — the journal/undo spine's byte gate. 60+ of these files exist ONLY as data references (expected_json / expected_journal_json inside the driver fixtures); the transitive pass claims them. Port symmetry here is the gate's founding case: the Swift registration set lacked tspan_ops.json until S4 forced the remediation."
     },
+    "test_fixtures/panel_row_menu": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust"
+      ],
+      "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "a pin of one export's bytes; the law is the export itself (row_menu.rs), which the FFI replay's context-menu arms already drive",
+      "claim_style": {
+        "rust": "path reference (ffi.rs the_layer_row_menu_export_is_the_shells_fixture, CARGO_MANIFEST_DIR join)"
+      },
+      "notes": "Row 257 D4: the ENGINE's jas_panel_row_menu export for the default document's layer row, pinned by the Rust test, which rewrites it under JAS_WRITE_ROW_MENU_FIXTURE=1. Its second consumer is the WinUI shell's wire test (prototypes/sb_winui_tests/Program.cs, RowMenuWire.Parse), which this gate's consumer set (rust, swift, reference, scripts) does not cover, so it is named here instead of claimed. Not port-symmetric BY DESIGN: Swift draws the row menu from the same spec through its own door (LayersRowMenu), not from this export."
+    },
     "test_fixtures/panel_keys": {
       "kind": "fixtures",
       "required_consumers": [

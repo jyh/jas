@@ -2323,11 +2323,6 @@ public sealed partial class MainWindow
             }
         }
 
-        /// <summary>
-        /// Send one act on a pane control to the core, addressed to the panel the
-        /// control was built from. A press is `click` with no value; a commit is
-        /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
-        /// </summary>
         /// <summary>Row 257 D4: the row a right-tap opened a menu for, the surface
         /// and the point to open it at; the READ's reply must name the same row.</summary>
         private (string Path, FrameworkElement Surface, Windows.Foundation.Point At)? _rowMenuAnchor;
@@ -2383,6 +2378,11 @@ public sealed partial class MainWindow
             _w._canvas.PanelClick(act);
         }
 
+        /// <summary>
+        /// Send one act on a pane control to the core, addressed to the panel the
+        /// control was built from. A press is `click` with no value; a commit is
+        /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
+        /// </summary>
         private void SendPane(string widget, string eventName, string? value, string? path = null,
                               Dictionary<string, object>? gesture = null, string? key = null)
         {
