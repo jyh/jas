@@ -378,6 +378,21 @@ public sealed partial class MainWindow : Window
         flyout.ShowAt(g.Menu);
     }
 
+    /// <summary>Row 257 D4: a row menu READ, on the UI thread, drawn by the
+    /// pane that shows its panel; a panel no drawn pane shows is said so.</summary>
+    private void OnRowMenuRead(string panelId, string path, string json)
+    {
+        var views = new List<PaneView> { _toolbar, _canvasStrip };
+        views.AddRange(_dockGroups.Values.Select(g => g.View));
+        var view = views.FirstOrDefault(v => string.Equals(v._paneDrawnPanel, panelId, StringComparison.Ordinal));
+        if (view is null)
+        {
+            Report($"ROW MENU DROPPED panel={panelId} path={path} -- no drawn pane shows the panel");
+            return;
+        }
+        view.ShowRowMenu(path, json);
+    }
+
     /// <summary>jas §915: an `items_from` item's rows as flyout items (a toggle
     /// where the core gave a check state), each click sending the item's index
     /// and the row's.</summary>
@@ -1382,6 +1397,7 @@ public sealed partial class MainWindow : Window
         _canvas.PanelChanged = OnPanelChanged;
         _canvas.PaneChanged = OnPaneChanged;
         _canvas.PanelMenuRead = OnPanelMenuRead;
+        _canvas.RowMenuRead = OnRowMenuRead;
         _canvas.PanelMenuPopup = OnPanelMenuPopup;
         _canvas.DockChanged = OnDockChanged;
         _canvas.LayoutChanged = OnLayoutChanged;

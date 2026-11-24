@@ -1745,6 +1745,73 @@ internal sealed record PanelMenuRow(int Index, string Kind, string Label, string
                                     string Id = "", IReadOnlyList<PanelMenuSubRow>? Rows = null);
 
 /// <summary>
+/// One entry of `jas_panel_row_menu` (row 257): a separator, or an item with
+/// the label, enabled state and action the ENGINE resolved in the row's scope.
+/// `Index` is the item's place in the DECLARED list, the value a pick sends.
+/// </summary>
+internal sealed record RowMenuEntry(int Index, bool Separator, string Label, bool Enabled, string Action);
+
+/// <summary>
+/// A row's context menu (row 257 D4), read off the engine's export and sent
+/// back as a pick. Pure, so `sb_winui_tests` drives it. The shell evaluates
+/// nothing: label, enabled and the action are the engine's.
+/// </summary>
+internal static class RowMenuWire
+{
+    /// <summary>The export's array. Empty, unreadable or not an array is an
+    /// empty menu, never a throw; the caller reports the count it drew.</summary>
+    internal static List<RowMenuEntry> Parse(string? json)
+    {
+        var rows = new List<RowMenuEntry>();
+        if (string.IsNullOrWhiteSpace(json)) return rows;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return rows;
+            foreach (var r in doc.RootElement.EnumerateArray())
+            {
+                var index = r.TryGetProperty("index", out var i) && i.TryGetInt32(out var iv) ? iv : rows.Count;
+                var sep = r.TryGetProperty("separator", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.True;
+                rows.Add(new RowMenuEntry(index, sep, Str(r, "label"), !sep && Enabled(r), Str(r, "action")));
+            }
+        }
+        catch (System.Text.Json.JsonException) { rows.Clear(); }
+        return rows;
+
+        static string Str(System.Text.Json.JsonElement e, string k) =>
+            e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+        static bool Enabled(System.Text.Json.JsonElement e) =>
+            !e.TryGetProperty("enabled", out var v) || v.ValueKind != System.Text.Json.JsonValueKind.False;
+    }
+
+    /// <summary>
+    /// The pick of item <paramref name="index"/> at row <paramref name="path"/>
+    /// (the row's plan path, the one its events carry), for `jas_panel_behavior`:
+    /// `{"widget":"context_menu","event":"context_menu","value":&lt;index&gt;,…,"path":[…]}`.
+    /// The index is a JSON NUMBER: the engine reads it as an unsigned integer and
+    /// refuses a string `MissingValue`. Null when the path does not parse or the
+    /// index is negative, so nothing is sent.
+    /// </summary>
+    internal static byte[]? PickJson(int index, string? path, bool alt = false, bool shift = false,
+                                     bool ctrl = false, bool meta = false)
+    {
+        if (index < 0 || PanelWire.PlanPath(path) is not { } p) { return null; }
+        var ev = new Dictionary<string, object>
+        {
+            ["widget"] = "context_menu",
+            ["event"] = "context_menu",
+            ["value"] = index,
+            ["alt"] = alt,
+            ["shift"] = shift,
+            ["ctrl"] = ctrl,
+            ["meta"] = meta,
+            ["path"] = p,
+        };
+        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
+    }
+}
+
+/// <summary>
 /// One row of an `items_from` item's submenu (jas §915), as the core evaluated
 /// it. A click sends it back by `Index` as `{"panel", "menu_index", "row"}`.
 /// </summary>

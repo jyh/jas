@@ -2331,6 +2331,32 @@ static class Program
         Eq("panel menu knob: a negative or non-number index is refused", "refused,refused", PK("dock1:-1") + "," + PK("dock1:x"));
         Eq("panel menu knob: unset is refused (the caller reads it as not asked)", "refused", PK(null));
 
+        // -- ROW 257 D4: A LAYERS ROW'S CONTEXT MENU (jas_panel_row_menu) -----------
+        // The fixture is the ENGINE's export for the default document's layer row
+        // (ffi.rs `the_layer_row_menu_export_is_the_shells_fixture` pins it), so
+        // this reads real bytes, never a hand-typed reading of the header.
+        var rmDir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (rmDir is not null && !File.Exists(Path.Combine(rmDir.FullName, "test_fixtures", "panel_row_menu", "layers_layer_row.json"))) { rmDir = rmDir.Parent; }
+        var rmJson = rmDir is null ? "" : File.ReadAllText(Path.Combine(rmDir.FullName, "test_fixtures", "panel_row_menu", "layers_layer_row.json"));
+        var rm = RowMenuWire.Parse(rmJson);
+        Check("row menu: the engine's fixture was found and read", rm.Count == 8, $"{rm.Count} entries (dir {(rmDir?.FullName ?? "NOT FOUND")})");
+        Eq("row menu: entries keep the export's declared indices, in order", "0,1,2,3,4,5,6,7", string.Join(",", rm.Select(r => r.Index)));
+        Eq("row menu: the separators are where the export put them", "3,5", string.Join(",", rm.Where(r => r.Separator).Select(r => r.Index)));
+        Eq("row menu: labels are the export's", "Options for Layer...|Duplicate|Delete Selection",
+            string.Join("|", rm.Where(r => !r.Separator).Take(3).Select(r => r.Label)));
+        Eq("row menu: enabled is the engine's (Flatten and Collect are off on this row)", "6,7",
+            string.Join(",", rm.Where(r => !r.Separator && !r.Enabled).Select(r => r.Index)));
+        Eq("row menu: an item's action is read", "duplicate_layer_selection", rm[1].Action);
+        Check("row menu: empty or unreadable is an empty menu, never a throw",
+              RowMenuWire.Parse("").Count == 0 && RowMenuWire.Parse("{x").Count == 0 && RowMenuWire.Parse("{}").Count == 0, "threw or read entries");
+        // The pick: the index crosses as a JSON NUMBER (the engine reads it with
+        // as_u64, so a string "1" is refused MissingValue), with the row's path.
+        Eq("row menu pick: {widget, event, value as a number, path}",
+            "{\"widget\":\"context_menu\",\"event\":\"context_menu\",\"value\":1,\"alt\":false,\"shift\":false,\"ctrl\":false,\"meta\":false,\"path\":[3,1]}",
+            System.Text.Encoding.UTF8.GetString(RowMenuWire.PickJson(1, "[3,1]") ?? Array.Empty<byte>()));
+        Check("row menu pick: no path, a bad path or a negative index sends nothing",
+              RowMenuWire.PickJson(1, null) is null && RowMenuWire.PickJson(1, "x") is null && RowMenuWire.PickJson(-1, "[3,1]") is null, "a pick was built");
+
         // -- ROW 8 (jas §915/§916): AN items_from ITEM'S ROWS, THE POPUP, THE WRITES --
         // A plan row may carry `rows` (a dynamic submenu) and `id`; no `rows` key
         // is a plain item, and `rows: []` is an EMPTY submenu, not a plain item.
