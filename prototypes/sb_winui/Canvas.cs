@@ -373,6 +373,19 @@ internal sealed class MenuActionCmd : Cmd
 /// (`jas_dispatch_action`, `{"panel","menu_index"}`). The shell names the
 /// panel and the index; the core reads the item's action and params.
 /// </summary>
+/// <summary>
+/// Row 257 D4: READ a row's context menu (`jas_panel_row_menu`) for the pane
+/// to draw. It is queued right after the row's `secondary_press`, so the menu
+/// is read in the selection that press left. A pick is a <see cref="PanelClickCmd"/>
+/// with <see cref="PanelClickCmd.MenuIndex"/>.
+/// </summary>
+internal sealed class RowMenuCmd : Cmd
+{
+    internal string PanelId = "";
+    internal string Path = "";
+    internal string Via = "hand";
+}
+
 internal sealed class PanelMenuCmd : Cmd
 {
     internal string Group = "";
@@ -429,6 +442,14 @@ internal sealed class PanelClickCmd : Cmd
     /// null for every other act.
     /// </summary>
     internal string? Key;
+
+    /// <summary>
+    /// Row 257 D4: a row context menu's pick, the item's index in the DECLARED
+    /// list; null for every other act. Set, the act crosses as
+    /// <see cref="RowMenuWire.PickJson"/> (the index a JSON number, which the
+    /// engine requires), and runs through the click's whole reply path.
+    /// </summary>
+    internal int? MenuIndex;
 
     /// <summary>
     /// WHO clicked: `hand` for a person, `synth:&lt;step&gt;` for Q6's replay.
@@ -2144,6 +2165,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PanelMenuCmd pm:
                     if (ApplyPanelMenu(pm)) { dirty = true; cause = "panel-menu"; }
+                    break;
+
+                case RowMenuCmd rm:
+                    ApplyRowMenu(rm);  // a read: it moves nothing
                     break;
 
                 case PanelSynthCmd ps:
@@ -5310,6 +5335,8 @@ internal sealed unsafe class Canvas : IDisposable
 
     internal void PanelMenu(PanelMenuCmd cmd) => _queue.Add(cmd);
 
+    internal void RowMenu(RowMenuCmd cmd) => _queue.Add(cmd);
+
     internal void LayoutOp(LayoutOpCmd cmd) => _queue.Add(cmd);
 
     internal void EdgeRects(EdgeRectsCmd cmd) => _queue.Add(cmd);
@@ -5489,6 +5516,37 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>Raised on the UI thread with a READ's group, panel, via and rows
     /// (`jas_panel_menu`'s JSON), for the window to draw the flyout.</summary>
     internal Action<string, string, string, string>? PanelMenuRead { get; set; }
+
+    /// <summary>Row 257 D4: raised on the UI thread with a row menu READ's panel,
+    /// row path and entries (`jas_panel_row_menu`'s JSON), for the pane to draw.</summary>
+    internal Action<string, string, string>? RowMenuRead { get; set; }
+
+    /// <summary>
+    /// Row 257 D4: a row's context menu, READ in the engine. Every outcome is a
+    /// row: `ROW MENU READ` names the counts and the disabled indices, `ROW MENU
+    /// REFUSED` the channel; never a silent no-op. It reads only: a pick is a
+    /// panel click (<see cref="PanelClickCmd.MenuIndex"/>).
+    /// </summary>
+    private void ApplyRowMenu(RowMenuCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var head = $"panel={cmd.PanelId} path={cmd.Path} via={cmd.Via}";
+        var pid = System.Text.Encoding.UTF8.GetBytes(cmd.PanelId);
+        var path = System.Text.Encoding.UTF8.GetBytes(cmd.Path);
+        var json = JasCore.TakeString(JasCore.jas_panel_row_menu(_engine, pid, (nuint)pid.Length, path, (nuint)path.Length));
+        var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+        if (json.Length == 0)
+        {
+            _report($"ROW MENU REFUSED {head} channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+            return;
+        }
+        var rows = RowMenuWire.Parse(json);
+        var off = rows.Where(r => !r.Separator && !r.Enabled).Select(r => r.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        _report($"ROW MENU READ {head} items={rows.Count(r => !r.Separator)} separators={rows.Count(r => r.Separator)} "
+              + $"disabled=[{string.Join(",", off)}] {Tids()}");
+        var p = cmd.PanelId; var at = cmd.Path;
+        PostToUi(() => RowMenuRead?.Invoke(p, at, json));
+    }
 
     /// <summary>
     /// A panel menu, READ or RUN in the engine. Every outcome is a row: `PANEL
@@ -5825,6 +5883,13 @@ internal sealed unsafe class Canvas : IDisposable
                       + $"an empty reply and an empty error channel {Tids()}");
                 return false;
             }
+            // Row 257 D3: a secondary press on a row that is already selected
+            // runs nothing by design (layers.yaml), so it is INERT, never a refusal.
+            if (click.Event == "secondary_press" && channel.Contains("\"EmptyBehavior\"", StringComparison.Ordinal))
+            {
+                _report($"PANEL CLICK INERT {head} -- the row is already selected; the menu acts on the selection {Tids()}");
+                return false;
+            }
             _report($"PANEL CLICK REFUSED {head} channel={channel} {Tids()}");
             return false;
         }
@@ -6115,7 +6180,9 @@ internal sealed unsafe class Canvas : IDisposable
     /// parse.
     /// </summary>
     private static byte[] PanelEventJson(PanelClickCmd click) =>
-        click.Gesture is { } gesture
+        click.MenuIndex is { } menuIndex
+            ? RowMenuWire.PickJson(menuIndex, click.Path, click.Alt, click.Shift, click.Ctrl, click.Meta) ?? Array.Empty<byte>()
+        : click.Gesture is { } gesture
             ? PanelWire.GestureJson(click.Widget, click.Event, gesture,
                                     click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path)
             : PanelWire.EventJson(click.Widget, click.Event, click.Value,

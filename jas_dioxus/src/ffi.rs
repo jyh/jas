@@ -9343,6 +9343,42 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 257 D4: the export's REAL bytes for the default document's layer
+    /// row, pinned in `test_fixtures/panel_row_menu/layers_layer_row.json`,
+    /// the file the WinUI shell's wire test (`RowMenuWire`) parses. So the
+    /// shell's fixture is the engine's output, never a hand-typed reading of
+    /// the header. `JAS_WRITE_ROW_MENU_FIXTURE=1` rewrites it from the export.
+    #[test]
+    fn the_layer_row_menu_export_is_the_shells_fixture() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+        let row = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten()
+            .find(|r| r["type"] == "container" && r["values"].get("bind.opacity").is_some())
+            .map(|r| r["path"].to_string()).expect("a layer row");
+        let panel = "layers_panel_content";
+        let got = take(unsafe { jas_panel_row_menu(e, panel.as_ptr(), panel.len(), row.as_ptr(), row.len()) });
+        assert!(!got.is_empty(), "the export answered: {}", take(unsafe { jas_last_error_json(e) }));
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../test_fixtures/panel_row_menu/layers_layer_row.json");
+        if std::env::var("JAS_WRITE_ROW_MENU_FIXTURE").as_deref() == Ok("1") {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&got).unwrap();
+            std::fs::write(&file, serde_json::to_string_pretty(&v).unwrap() + "\n").unwrap();
+        }
+        let want: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("{}: {e} (JAS_WRITE_ROW_MENU_FIXTURE=1 writes it)", file.display())))
+            .expect("fixture JSON");
+        let got: serde_json::Value = serde_json::from_str(&got).expect("export JSON");
+        assert_eq!(got, want, "the export moved; the WinUI wire test reads the fixture");
+        let items = want.as_array().map_or(0, |a| a.iter().filter(|x| x.get("label").is_some()).count());
+        let seps = want.as_array().map_or(0, |a| a.iter().filter(|x| x.get("separator").is_some()).count());
+        assert!(items >= 3 && seps >= 1, "the fixture carries items and a separator: {items} {seps}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 257: a row-menu query the engine cannot answer draws nothing and
     /// names its class. (The answered case, and that its indices run the item
     /// drawn, is witnessed by the replay's context-menu arms, which now read

@@ -1,0 +1,57 @@
+[
+  {
+    "action": "open_layer_options",
+    "enabled": true,
+    "index": 0,
+    "label": "Options for Layer...",
+    "params": {
+      "layer_id": "'' + as_path(node.path)",
+      "mode": "edit"
+    }
+  },
+  {
+    "action": "duplicate_layer_selection",
+    "enabled": true,
+    "index": 1,
+    "label": "Duplicate",
+    "params": {}
+  },
+  {
+    "action": "delete_layer_selection",
+    "enabled": true,
+    "index": 2,
+    "label": "Delete Selection",
+    "params": {}
+  },
+  {
+    "index": 3,
+    "separator": true
+  },
+  {
+    "action": "enter_isolation_mode",
+    "enabled": true,
+    "index": 4,
+    "label": "Enter Isolation Mode",
+    "params": {
+      "container_id": "'' + as_path(node.path)"
+    }
+  },
+  {
+    "index": 5,
+    "separator": true
+  },
+  {
+    "action": "flatten_artwork",
+    "enabled": false,
+    "index": 6,
+    "label": "Flatten Artwork",
+    "params": {}
+  },
+  {
+    "action": "collect_in_new_layer",
+    "enabled": false,
+    "index": 7,
+    "label": "Collect in New Layer",
+    "params": {}
+  }
+]

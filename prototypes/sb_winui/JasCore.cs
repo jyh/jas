@@ -618,6 +618,19 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_panel_menu(IntPtr engine, byte[] panelId, nuint panelLen);
 
     /// <summary>
+    /// Row 257: the entries a native shell draws for the context menu at a row
+    /// (`jas_panel_row_menu`): `pathJson` is the row's plan path as a JSON array,
+    /// the path its events carry. The reply is `[{separator, index} | {index,
+    /// label, enabled, action, params}]` in declared order; a pick goes back
+    /// through <see cref="jas_panel_behavior"/> as event `context_menu` with the
+    /// index as `value`. A refusal is the empty span, its class in
+    /// <see cref="jas_last_error_json"/>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_panel_row_menu(IntPtr engine, byte[] panelId, nuint panelLen,
+                                                       byte[] pathJson, nuint pathLen);
+
+    /// <summary>
     /// The panels the pane can offer (`jas_panel_list`, W2b-2):
     /// `[{"id","summary"}]`, sorted by content id, `summary` null where the
     /// core will not send one. Takes no engine, like

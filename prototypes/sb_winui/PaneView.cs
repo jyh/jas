@@ -418,6 +418,21 @@ public sealed partial class MainWindow
                 {
                     surface.DoubleTapped += (_, _) => SendPane(hitId, "double_click", null, hitPath);
                 }
+                // Row 257 D4: a right-tap sends the row's `secondary_press` (the
+                // spec decides the selection), then READS the row's menu, which
+                // the queue runs after the press; the flyout opens where the
+                // pointer was, from the engine's entries alone.
+                if (PanelWire.RoutesEvent(hit.Events, hitId, hitPath, "secondary_press") && hitPath is { Length: > 0 } rowPath)
+                {
+                    var anchor = surface;
+                    surface.RightTapped += (_, e) =>
+                    {
+                        e.Handled = true;
+                        _rowMenuAnchor = (rowPath, anchor, e.GetPosition(anchor));
+                        SendPane(hitId, "secondary_press", null, rowPath);
+                        _w._canvas.RowMenu(new RowMenuCmd { PanelId = _paneDrawnPanel, Path = rowPath, Via = "hand" });
+                    };
+                }
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(surface, hit.X);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(surface, hit.Y);
                 host.Children.Add(surface);
@@ -2313,6 +2328,61 @@ public sealed partial class MainWindow
         /// control was built from. A press is `click` with no value; a commit is
         /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
         /// </summary>
+        /// <summary>Row 257 D4: the row a right-tap opened a menu for, the surface
+        /// and the point to open it at; the READ's reply must name the same row.</summary>
+        private (string Path, FrameworkElement Surface, Windows.Foundation.Point At)? _rowMenuAnchor;
+
+        /// <summary>
+        /// Row 257 D4: draw a row's context menu from the engine's entries
+        /// (`jas_panel_row_menu`, read after the row's `secondary_press`). A
+        /// separator, or an item enabled as the engine said; a click sends the
+        /// item's DECLARED index back as a pick (<see cref="PanelClickCmd.MenuIndex"/>),
+        /// so it runs exactly the item drawn. A reply for a row this pane did not
+        /// right-tap, or whose surface is gone, is dropped and said so.
+        /// </summary>
+        internal void ShowRowMenu(string path, string json)
+        {
+            if (_rowMenuAnchor is not { } a || !string.Equals(a.Path, path, StringComparison.Ordinal))
+            {
+                _w.Report($"ROW MENU DROPPED panel={_paneDrawnPanel} path={path} -- no right-tap on this row is waiting for it");
+                return;
+            }
+            _rowMenuAnchor = null;
+            if (a.Surface.XamlRoot is null)
+            {
+                _w.Report($"ROW MENU DROPPED panel={_paneDrawnPanel} path={path} -- the row was redrawn before its menu arrived");
+                return;
+            }
+            var flyout = new MenuFlyout();
+            var drawn = 0;
+            foreach (var entry in RowMenuWire.Parse(json))
+            {
+                if (entry.Separator) { flyout.Items.Add(new MenuFlyoutSeparator()); continue; }
+                var (text, _) = MenuWire.Label(entry.Label);
+                var item = new MenuFlyoutItem { Text = text, IsEnabled = entry.Enabled };
+                var index = entry.Index;
+                item.Click += (_, _) => SendRowMenuPick(path, index);
+                flyout.Items.Add(item);
+                drawn++;
+            }
+            _w.Report($"ROW MENU DRAWN panel={_paneDrawnPanel} path={path} items={drawn}");
+            flyout.ShowAt(a.Surface, new FlyoutShowOptions { Position = a.At });
+        }
+
+        private void SendRowMenuPick(string path, int index)
+        {
+            var act = new PanelClickCmd
+            {
+                PanelId = _paneDrawnPanel,
+                Widget = "context_menu",
+                Path = path,
+                Via = "hand",
+                Event = "context_menu",
+                MenuIndex = index,
+            };
+            _w._canvas.PanelClick(act);
+        }
+
         private void SendPane(string widget, string eventName, string? value, string? path = null,
                               Dictionary<string, object>? gesture = null, string? key = null)
         {
