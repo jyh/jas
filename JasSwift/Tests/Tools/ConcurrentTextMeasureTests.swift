@@ -22,8 +22,10 @@ import AppKit
 // service, with no reply. With `withFontLookup` (Element.swift) it passed 4 runs
 // of 4, and a mutant that removes the lock hung again. So this arm guards a
 // PROPERTY (concurrent widths equal serial ones, and no deadlock) and does not
-// witness the defect. Its failure path is proved by a 1 s sleep mutant, which
-// fails it by name at 30.001 s.
+// witness the defect. Its failure path is a STALL (no job finishing for 10 s;
+// row 262 replaced the 30 s wall bound), proved by the two arms on
+// `concurrently` below and by their mutants (the old wall bound reds the slow
+// arm; a stall check never taken reds the deadlock arm).
 
 private let families = ["Helvetica", "Times New Roman", "Courier", "Georgia", "Menlo",
                         "Avenir", "Futura", "Optima", "Palatino", "Gill Sans",
