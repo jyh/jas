@@ -44,6 +44,13 @@ Verbs:
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
   MODS = comma-list of shift,cmd,alt,ctrl,space.
 
+THE OWNER'S CLAIM (council 2026-11-24): before EVERY console step on every
+verb above (a launch, an act, a reset, a drag) the driver reads the claim file
+on this box (JAS_CLAIM_FILE, default ~/.fleet/watch/CONSOLE-CLAIM) and its
+`.relay` heartbeat, and stops while the claim exists. It fails closed: no
+heartbeat, or one older than 120 s, refuses by name. The law and its arms are
+mac_l2_plan.claim_check; JAS_CLAIM_FILE=none turns it off and says so.
+
 HARD-WON GOTCHAS (do not regress):
   - Run exactly ONE instance; multiple windows / the 33px menu-bar strips make
     the owner name ambiguous. find_window() prefers a kCGWindowName == JAS_TITLE
@@ -387,6 +394,9 @@ def _run_script(path, menubar, locked=False, pid=None):
     st = {"view": None, "origin": None, "reads": []}
 
     def blocked():
+        why = _claimed()  # the owner's claim binds the box, so both routes
+        if why:
+            return why
         if locked:
             return None  # nothing on this route reaches the window server
         # Before EVERY act: a locked screen, or input after this driver's own
@@ -587,6 +597,20 @@ def _console_in_use():
         return False, idle  # the last input was the driver's own
     return idle < IDLE_FLOOR_S, idle
 
+def _claimed():
+    """The owner's claim on this box (mac_l2_plan.claim_check), or None. Read
+    before EVERY console step on every route: a launch, an act, a reset, a drag."""
+    return _plan.claim_check(os.environ, time.time())
+
+def _claim_gate():
+    why = _claimed()
+    if why:
+        raise _plan.Refused(why)
+
+def _claim_banner():
+    if _plan.claim_check_off(os.environ):
+        print("CLAIM CHECK OFF (JAS_CLAIM_FILE=none): the owner's claim on this box is NOT read")
+
 def _screen_locked():
     d = Quartz.CGSessionCopyCurrentDictionary()
     return bool(d and d.get("CGSSessionScreenIsLocked"))
@@ -631,6 +655,13 @@ def do_script(paths, receipt=None, locked=False):
         if receipt:
             _write_receipt(receipt, {}, not_run=problem)
         return 3
+    _claim_banner()
+    why = _claimed()
+    if why:
+        print("REFUSED: " + why)
+        if receipt:
+            _write_receipt(receipt, {}, not_run=why)
+        return 3
     if _screen_locked():
         print("REFUSED: the screen is locked; a key event would type into the login window")
         if receipt:
@@ -649,6 +680,7 @@ def do_script(paths, receipt=None, locked=False):
         name = os.path.basename(p)
         proc = None
         try:
+            _claim_gate()
             if _screen_locked():
                 raise _plan.Refused("the screen is locked")
             clear_mods()  # a flag-carrying event leaks its modifier into the next script
@@ -701,6 +733,13 @@ def _do_script_locked(paths, receipt):
         if receipt:
             _write_receipt(receipt, {}, not_run=why, suite=suite)
         return 3
+    _claim_banner()
+    why = _claimed()
+    if why:
+        print("REFUSED: " + why)
+        if receipt:
+            _write_receipt(receipt, {}, not_run=why, suite=suite)
+        return 3
     menubar = _plan.load_menubar()
     if receipt:
         scripts = {}
@@ -717,6 +756,7 @@ def _do_script_locked(paths, receipt):
         name = os.path.basename(p)
         proc = None
         try:
+            _claim_gate()
             proc = _launch(locked=True)
             ok, got, want = _run_script(p, menubar, locked=True, pid=proc.pid)
             print(("PASS " if ok else "FAIL ") + name)
@@ -817,6 +857,7 @@ def _dock_case(kind, edge, via):
     band = _plan.snap_distance()
     legs = [_plan.dock_point(via, vw, vh, band)] if via else []
     legs.append(_plan.dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2))
+    _claim_gate()
     _session_drag(tx + tw / 2, ty + th / 2, [(ox + px, oy + py) for px, py in legs])
     after = _layout_read()
     return _plan.dock_verdict(before, after, kind, edge, _drawn_counts(app, tab_id))
@@ -831,6 +872,10 @@ def do_dock():
         print("REFUSED: " + (problem or "the dock check needs JAS_APP: each case starts from a fresh app"))
         print("DOCK NOT RUN")
         return 3
+    _claim_banner()
+    why = _claimed()
+    if why:
+        print("REFUSED: " + why); print("DOCK NOT RUN"); return 3
     if _screen_locked():
         print("REFUSED: the screen is locked"); print("DOCK NOT RUN"); return 3
     busy, idle = _console_in_use()
@@ -841,6 +886,7 @@ def do_dock():
     for kind, edge, via in _plan.DOCK_CASES:
         proc = None
         try:
+            _claim_gate()
             clear_mods()
             proc = _launch()
             status, detail = _dock_case(kind, edge, via)
@@ -880,6 +926,7 @@ def _right_groups(layout_text):
 
 def _group_case(case):
     global WIN
+    _claim_gate()
     _fifo("action reset_workspace"); time.sleep(1.0)
     WIN = find_window()
     if not WIN:
@@ -895,6 +942,7 @@ def _group_case(case):
     (x1, y1), (x2, y2) = _plan.group_case_targets(case, frames)
     if not (WIN["y"] <= y2 < WIN["y"] + WIN["h"] and WIN["y"] <= y1 < WIN["y"] + WIN["h"]):
         raise _plan.Refused(f"a {case} target lies outside the window (AX reports clipped frames)")
+    _claim_gate()
     _session_drag(x1, y1, [(x2, y2)])
     return _plan.group_case_verdict(case, before, _right_groups(_layout_read()))
 
@@ -906,6 +954,10 @@ def do_dock_groups():
     if problem or not os.environ.get("JAS_APP"):
         print("REFUSED: " + (problem or "the group cases need JAS_APP: each starts from a fresh app"))
         print("DOCKGROUPS NOT RUN"); return 3
+    _claim_banner()
+    why = _claimed()
+    if why:
+        print("REFUSED: " + why); print("DOCKGROUPS NOT RUN"); return 3
     if _screen_locked():
         print("REFUSED: the screen is locked"); print("DOCKGROUPS NOT RUN"); return 3
     busy, idle = _console_in_use()
@@ -916,6 +968,7 @@ def do_dock_groups():
     for case in _plan.GROUP_CASES:
         proc = None
         try:
+            _claim_gate()
             clear_mods()
             proc = _launch()
             status, detail = _group_case(case)

@@ -425,6 +425,61 @@ def a_person_acted(idle_s, since_mine_s, tolerance=PERSON_TOLERANCE_S):
     return idle_s < since_mine_s - tolerance
 
 
+# THE OWNER'S CLAIM (council 2026-11-24): the test box is free for the fleet at
+# any time unless its owner says it is his. The fleet records that word on the
+# coordinating host, and a relay there mirrors it onto this box: the claim file
+# while he holds the box, and a heartbeat (`<claim>.relay`, touched on every
+# pass) either way. The driver reads both before EVERY console act and stops
+# while the claim exists. It FAILS CLOSED: a heartbeat that is missing or older
+# than the bound means the claim cannot be read, and an unread claim is never
+# read as "free". `JAS_CLAIM_FILE=none` turns the check off, and the driver says
+# so on every run (a dev box with no relay).
+CLAIM_RELAY_MAX_AGE_S = 120  # the relay writes every 30 s; four missed passes is a dead relay
+CLAIM_DEFAULT = os.path.join("~", ".fleet", "watch", "CONSOLE-CLAIM")
+
+
+def claim_refusal(claim_text, relay_age_s, max_age_s=CLAIM_RELAY_MAX_AGE_S):
+    """None to go on, or the reason to stop. `claim_text` is the claim file's
+    text (None when there is no claim); `relay_age_s` is the heartbeat's age in
+    seconds (None when there is no heartbeat). A claim wins over everything."""
+    if claim_text is not None:
+        return "the owner has claimed this box"
+    if relay_age_s is None:
+        return "the owner's claim cannot be read: no relay heartbeat"
+    if relay_age_s > max_age_s:
+        return (f"the owner's claim cannot be read: the relay last wrote {relay_age_s:.0f} s ago "
+                f"(bound {max_age_s} s)")
+    return None
+
+
+def claim_check_off(env):
+    return env.get("JAS_CLAIM_FILE", "").strip().lower() == "none"
+
+
+def claim_path(env):
+    return os.path.expanduser(env.get("JAS_CLAIM_FILE") or CLAIM_DEFAULT)
+
+
+def claim_check(env, now):
+    """`claim_refusal` over the files on this box (`JAS_CLAIM_FILE`, default
+    CLAIM_DEFAULT, and its `.relay` heartbeat), at time `now`."""
+    if claim_check_off(env):
+        return None
+    path = claim_path(env)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            claim = f.read()
+    except FileNotFoundError:
+        claim = None
+    except OSError as e:
+        return f"the owner's claim cannot be read: {type(e).__name__}"
+    try:
+        age = now - os.stat(path + ".relay").st_mtime
+    except OSError:
+        age = None
+    return claim_refusal(claim, age)
+
+
 def run_guarded(acts, blocked, do_act):
     """Run each act, asking `blocked()` BEFORE every one. It returns None to
     go on, or the reason to stop (a person used the console, the screen is
@@ -1030,6 +1085,48 @@ def self_test():
     ran2 = []
     check("an unbroken run returns the last act's result",
           run_guarded(acts5, lambda: None, lambda a: ran2.append(a) or a[0]) == "read" and len(ran2) == 5)
+    # THE OWNER'S CLAIM (council 2026-11-24): the test box is free unless its
+    # owner claims it, and a relay mirrors that claim onto the box with a
+    # heartbeat. Each arm differs from its neighbour in ONE input.
+    check("no claim and a fresh relay: go", claim_refusal(None, 10.0) is None)
+    check("a claim stops the driver",
+          "the owner has claimed this box" in (claim_refusal("", 10.0) or ""))
+    check("a claim stops it even with a stale relay",
+          "the owner has claimed this box" in (claim_refusal("", 10_000.0) or ""))
+    check("no heartbeat is unreadable, never free",
+          "no relay heartbeat" in (claim_refusal(None, None) or ""))
+    check("a stale heartbeat is unreadable, never free",
+          "relay last wrote 121 s ago" in (claim_refusal(None, 121.0) or ""))
+    check("the heartbeat at the bound is fresh", claim_refusal(None, CLAIM_RELAY_MAX_AGE_S) is None)
+    check("a heartbeat a little in the future is fresh", claim_refusal(None, -2.0) is None)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        cf = os.path.join(td, "CLAIM")
+        env = {"JAS_CLAIM_FILE": cf}
+        check("the reader: no files at all is refused (no heartbeat)",
+              "no relay heartbeat" in (claim_check(env, 1000.0) or ""))
+        with open(cf + ".relay", "w", encoding="utf-8", newline="") as f:
+            f.write("")
+        os.utime(cf + ".relay", (1.0, 990.0))  # atime differs, so the age must come from the mtime
+        check("the reader: a fresh heartbeat and no claim goes", claim_check(env, 1000.0) is None)
+        check("the reader: the heartbeat's AGE is read from its mtime",
+              "relay last wrote 210 s ago" in (claim_check(env, 1200.0) or ""))
+        with open(cf, "w", encoding="utf-8", newline="") as f:
+            f.write("his\n")
+        check("the reader: a claim file present stops it", "claimed" in (claim_check(env, 1000.0) or ""))
+        check("the reader: the check off is named, never silent",
+              claim_check({"JAS_CLAIM_FILE": "none"}, 1000.0) is None
+              and claim_check_off({"JAS_CLAIM_FILE": "none"}))
+        check("the reader: the default is ON", not claim_check_off({}))
+        check("the reader: the default path is the box's watch dir",
+              claim_path({}) == os.path.expanduser(os.path.join("~", ".fleet", "watch", "CONSOLE-CLAIM")))
+    # The guard consults the claim before EVERY act: a claim landing mid-run
+    # aborts at the next act (run_guarded's contract, driven with the claim's words).
+    done2 = []
+    readings2 = iter([None, claim_refusal("", 5.0)])
+    check("a claim landing mid-run aborts at the next act",
+          refused(lambda: run_guarded(acts5, lambda: next(readings2), done2.append), "claimed this box before act 1 (tool)")
+          and [a[0] for a in done2] == ["open"])
     check("view report parses", parse_view_report("view 1.0 0.0 0.0") == (1.0, 0.0, 0.0))
     check("view report with other text is None", parse_view_report("zoom 1") is None)
     check("view report with zoom 0 is None", parse_view_report("view 0 0 0") is None)
