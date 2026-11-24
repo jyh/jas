@@ -45,12 +45,18 @@ private func jobs(seed: Double) -> [Job] {
     return out
 }
 
-/// Run `body` once per job on `threads` threads at once. Returns nil on a
-/// timeout, and otherwise one result per job.
-private func concurrently(_ js: [Job], threads: Int, timeout: Double,
+/// Run `body` once per job on `threads` threads at once. Returns nil when NO
+/// job has finished for `stall` seconds (a deadlock), and otherwise one result
+/// per job. Row 262: this was a WALL-CLOCK bound of 30 s, and the arm's wall
+/// time tracks the whole parallel suite's, not its own work (measured 11-24:
+/// 0.09 s alone, 1.2-1.6 s inside a 2 s local suite, 33.1 s inside CI's 34.5 s
+/// suite, where it failed). A starved run that keeps finishing jobs is not a
+/// hang, so only a stall fails it.
+private func concurrently(_ js: [Job], threads: Int, stall: Double,
                           _ body: @escaping @Sendable (Job) -> Double) -> [Job: Double]? {
     let lock = NSLock()
     nonisolated(unsafe) var results: [Job: Double] = [:]
+    nonisolated(unsafe) var lastDone = Date()
     let group = DispatchGroup()
     let queue = DispatchQueue(label: "row140", attributes: .concurrent)
     for t in 0..<threads {
@@ -61,21 +67,42 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
             for k in 0..<js.count {
                 let job = js[(k + t * 7) % js.count]
                 let w = body(job)
-                lock.lock(); results[job] = w; lock.unlock()
+                lock.lock(); results[job] = w; lastDone = Date(); lock.unlock()
             }
             group.leave()
         }
     }
-    guard group.wait(timeout: .now() + timeout) == .success else { return nil }
+    while group.wait(timeout: .now() + 0.05) != .success {
+        lock.lock(); let idle = Date().timeIntervalSince(lastDone); lock.unlock()
+        if idle > stall { return nil }
+    }
     return results
+}
+
+/// Row 262, the bound's own two arms. A run whose WALL time exceeds the stall
+/// bound but which keeps finishing jobs is NOT a deadlock (the CI shape that
+/// failed the 30 s wall bound), and a run in which nothing finishes for longer
+/// than the bound IS one, so the bound can still fail.
+@Test func aSlowRunThatKeepsFinishingJobsIsNotADeadlock() {
+    let js = Array(jobs(seed: 3.0).prefix(12))
+    let start = Date()
+    let got = concurrently(js, threads: 2, stall: 0.5) { _ in Thread.sleep(forTimeInterval: 0.1); return 1 }
+    #expect(Date().timeIntervalSince(start) > 0.5, "the run's wall time must exceed the stall bound, or this arm proves nothing")
+    #expect(got?.count == js.count, "a slow but progressing run returned its results")
+}
+
+@Test func aRunThatFinishesNothingForLongerThanTheBoundIsADeadlock() {
+    let js = Array(jobs(seed: 4.0).prefix(2))
+    let got = concurrently(js, threads: 1, stall: 0.3) { _ in Thread.sleep(forTimeInterval: 1.5); return 1 }
+    #expect(got == nil, "a stall longer than the bound is refused as a deadlock")
 }
 
 @Test func renderedTextWidthIsSafeUnderConcurrency() {
     let js = jobs(seed: 13.03)
-    let got = concurrently(js, threads: 8, timeout: 30) { j in
+    let got = concurrently(js, threads: 8, stall: 10) { j in
         renderedTextWidth("Row 140 Wq", family: j.family, weight: j.weight, style: j.style, size: j.size)
     }
-    #expect(got != nil, "renderedTextWidth did not finish on 8 threads within 30 s (a deadlock)")
+    #expect(got != nil, "renderedTextWidth finished no job on 8 threads for 10 s (a deadlock)")
     guard let got else { return }
     #expect(got.count == js.count)
     let failuresBefore = faceLookupFailures()
@@ -90,10 +117,10 @@ private func concurrently(_ js: [Job], threads: Int, timeout: Double,
 
 @Test func makeMeasurerIsSafeUnderConcurrency() {
     let js = jobs(seed: 17.41)
-    let got = concurrently(js, threads: 8, timeout: 30) { j in
+    let got = concurrently(js, threads: 8, stall: 10) { j in
         makeMeasurer(family: j.family, weight: j.weight, style: j.style, size: j.size)("Row 140 Wq")
     }
-    #expect(got != nil, "makeMeasurer did not finish on 8 threads within 30 s (a deadlock)")
+    #expect(got != nil, "makeMeasurer finished no job on 8 threads for 10 s (a deadlock)")
     guard let got else { return }
     #expect(got.count == js.count)
     for j in js {
