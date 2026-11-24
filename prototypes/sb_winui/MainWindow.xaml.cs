@@ -378,13 +378,31 @@ public sealed partial class MainWindow : Window
         flyout.ShowAt(g.Menu);
     }
 
+    /// <summary>
+    /// Every view that can hold a drawn panel control, in lookup order: the
+    /// toolbar, the canvas strip, the dock groups, and LAST the single pane
+    /// (`_dock`, the pane SB_PANEL runs draw into). Last, so a dock-mode lookup
+    /// resolves exactly as it did before the single pane was searched at all
+    /// (flask §1001 found three lookups that never searched it).
+    /// </summary>
+    private List<PaneView> DrawnViews()
+    {
+        var views = new List<PaneView> { _toolbar, _canvasStrip };
+        views.AddRange(_dockGroups.Values.Select(g => g.View));
+        views.Add(_dock);
+        return views;
+    }
+
     /// <summary>Row 257 D4: a row menu READ, on the UI thread, drawn by the
     /// pane that shows its panel; a panel no drawn pane shows is said so.</summary>
     private void OnRowMenuRead(string panelId, string path, string json)
     {
-        var views = new List<PaneView> { _toolbar, _canvasStrip };
-        views.AddRange(_dockGroups.Values.Select(g => g.View));
-        var view = views.FirstOrDefault(v => string.Equals(v._paneDrawnPanel, panelId, StringComparison.Ordinal));
+        var views = DrawnViews();
+        // The view that right-tapped this row is the one waiting for its menu
+        // (flask §1001: in single-pane mode that is `_dock`, which no lookup by
+        // panel id here used to search).
+        var view = views.FirstOrDefault(v => v.AwaitsRowMenu(path))
+                   ?? views.FirstOrDefault(v => string.Equals(v._paneDrawnPanel, panelId, StringComparison.Ordinal));
         if (view is null)
         {
             Report($"ROW MENU DROPPED panel={panelId} path={path} -- no drawn pane shows the panel");
@@ -420,8 +438,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnPanelMenuPopup(DialogOpener at, PanelMenuRow item)
     {
-        var views = new List<PaneView> { _toolbar, _canvasStrip };
-        views.AddRange(_dockGroups.Values.Select(g => g.View));
+        var views = DrawnViews();
         var view = views.FirstOrDefault(v => v._paneDrawnPanel == at.Panel);
         var el = view?.ControlAt(at.Path);
         if (el is null || el.ActualWidth <= 0 || el.ActualHeight <= 0)
@@ -1237,8 +1254,7 @@ public sealed partial class MainWindow : Window
     private (double X, double Y, double W, double H)? AnchorOf(DialogOpener? opener)
     {
         if (opener is null) { return null; }
-        var views = new List<PaneView> { _toolbar, _canvasStrip };
-        views.AddRange(_dockGroups.Values.Select(g => g.View));
+        var views = DrawnViews();
         var el = views.FirstOrDefault(v => v._paneDrawnPanel == opener.Panel)?.ControlAt(opener.Path);
         if (el is null || el.ActualWidth <= 0 || el.ActualHeight <= 0) { return null; }
         var r = el.TransformToVisual((UIElement)Content)

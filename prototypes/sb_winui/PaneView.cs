@@ -2327,6 +2327,11 @@ public sealed partial class MainWindow
         /// and the point to open it at; the READ's reply must name the same row.</summary>
         private (string Path, FrameworkElement Surface, Windows.Foundation.Point At)? _rowMenuAnchor;
 
+        /// <summary>Whether a right-tap on row <paramref name="path"/> is waiting
+        /// for its menu here: the window routes a READ to this view (flask §1001).</summary>
+        internal bool AwaitsRowMenu(string path) =>
+            _rowMenuAnchor is { } a && string.Equals(a.Path, path, StringComparison.Ordinal);
+
         /// <summary>
         /// Row 257 D4: draw a row's context menu from the engine's entries
         /// (`jas_panel_row_menu`, read after the row's `secondary_press`). A
