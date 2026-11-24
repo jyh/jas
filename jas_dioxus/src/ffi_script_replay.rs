@@ -1020,6 +1020,33 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         break;
                     };
                     let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
+                    // Row 257 D3: the press first runs the row's own
+                    // `secondary_press`, as every shell does before it opens
+                    // the menu (layers.yaml: an unselected row becomes the sole
+                    // selection). A condition that holds on no entry is
+                    // `EmptyBehavior` with no reply, which is the press on a
+                    // selected row, recorded `unchanged`. A panel whose rows
+                    // declare no `secondary_press` sends nothing.
+                    if let Ok((p, _, node)) = row_declaring(spec.get("content").unwrap_or(&Value::Null),
+                                                            widget, "secondary_press", &r, &scope) {
+                        if declares_an_act(&node, "secondary_press") {
+                            let ev = json!({"widget": widget, "event": "secondary_press", "path": p,
+                                "shift": flag(st, "shift"), "alt": flag(st, "alt"), "ctrl": flag(st, "ctrl")}).to_string();
+                            let reply = take(unsafe { jas_panel_behavior(e, panel.as_ptr(), panel.len(), ev.as_ptr(), ev.len()) });
+                            let err = last_error(e);
+                            if reply.is_none() && err.contains(r#""panel_event":"EmptyBehavior""#) {
+                                out.push(json!({"step": i, "unchanged": true}));
+                            } else if !ran(&mut out, reply, err) {
+                                break;
+                            }
+                        }
+                    }
+                    // The selection may have moved: the menu is resolved in the
+                    // scope as it now stands.
+                    let Some(scope) = engine.script_panel_scope(panel) else {
+                        refuse(&mut out, format!("UnknownPanel {panel}"));
+                        break;
+                    };
                     let (path, _chain) = match row_chain(spec.get("content").unwrap_or(&Value::Null), widget, &r, &scope) {
                         Ok(t) => t,
                         Err(why) => { refuse(&mut out, why); break; }
@@ -1837,6 +1864,29 @@ fn a_row_secondary_press_opens_its_context_menu_and_the_picked_item_runs() {
     ]))).unwrap();
     assert_eq!(refusal(&iso), None, "{iso:?}");
     assert_eq!(panel_reads(&iso)[0]["isolation_stack"], serde_json::json!([[0, 2]]), "the row is node: {iso:?}");
+}
+
+/// Row 257 D3: a row `secondary_press` first runs the row's own
+/// `secondary_press` behaviour, as every shell does before it opens the menu,
+/// so a right-click on an UNSELECTED row makes it the sole selection and the
+/// menu acts on it. Before D3's runner change this replay opened the menu with
+/// the old selection, and Duplicate copied the clicked row instead.
+#[test]
+fn a_secondary_press_on_an_unselected_row_makes_the_menu_act_on_it() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&layers_script(serde_json::json!([
+        {"read": "document"}, click_row(serde_json::json!([0, 1]), &[]), secondary_press(serde_json::json!([0, 2])),
+        {"context_menu": "duplicate_layer_selection"}, {"read": "document"},
+    ]))).unwrap();
+    assert_eq!(refusal(&out), None, "{out:?}");
+    let docs = doc_reads(&out);
+    let strip = |v: &Value| { let mut v = v.clone(); if let Some(o) = v.as_object_mut() { o.remove("id"); } v };
+    let before: Vec<Value> = docs[0]["layers"][0]["children"].as_array().unwrap().iter().map(strip).collect();
+    let after: Vec<Value> = docs[1]["layers"][0]["children"].as_array().unwrap().iter().map(strip).collect();
+    assert_ne!(before[1], before[2], "the fixture's two rows must differ for this arm to see which was copied");
+    assert_eq!(after.len(), before.len() + 1, "one element was duplicated");
+    assert_eq!(after.iter().filter(|c| **c == before[2]).count(), 2, "the right-clicked row [0,2] was duplicated");
+    assert_eq!(after.iter().filter(|c| **c == before[1]).count(), 1, "the previously selected row [0,1] was not");
 }
 
 /// A context-menu step the menu cannot take is refused by name: with no
