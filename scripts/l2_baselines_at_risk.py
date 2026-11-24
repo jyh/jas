@@ -149,16 +149,20 @@ def gesture_pins(text: str | None) -> tuple[dict[str, tuple[str, object]] | None
     return {c.get("name", ""): (c.get("tool", ""), c.get("expected_can_undo", _ABSENT)) for c in cases}, None
 
 
+def gesture_files(changed: list[str]) -> list[str]:
+    """The gesture CORPUS files in a change: its `_expected.json` goldens are
+    outputs, never pins. The one predicate both callers use."""
+    return [p for p in sorted(set(changed))
+            if p.startswith(GESTURES) and p.endswith(".json") and not p.endswith("_expected.json")]
+
+
 def undo_moved_tools(changed: list[str], read_text, read_base) -> tuple[set[str] | None, str | None]:
     """The tools whose gesture cases' `expected_can_undo` moved between base
     and head: `(tools, None)`, or `(None, why)` when a file could not be
     compared (then every tool baseline is listed). A case only ADDED or only
     REMOVED moves no existing behaviour and is not counted; a pin removed from
     a case that stays is a move."""
-    files = [p for p in sorted(set(changed))
-             if p.startswith(GESTURES) and p.endswith(".json") and not p.endswith("_expected.json")]
-    if not files:
-        return set(), None
+    files = gesture_files(changed)
     if read_base is None:
         return None, "UNREADABLE: no base-side reader"
     tools: set[str] = set()
@@ -194,8 +198,7 @@ def at_risk(changed: list[str], read_text, baselines: list[tuple[str, str]],
         out[TAB_KEY] = sorted(tab_items) if moved else []
         if reason and why is not None:
             why[TAB_KEY] = reason
-    if tool_items is not None and any(p.startswith(GESTURES) and p.endswith(".json")
-                                      and not p.endswith("_expected.json") for p in changed):
+    if tool_items is not None and gesture_files(changed):
         tools, reason = undo_moved_tools(changed, read_text, read_base)
         out[UNDO_KEY] = sorted(tool_items) if tools is None else \
             sorted(i for i, t in tool_items.items() if t in tools)
