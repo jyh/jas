@@ -60,10 +60,12 @@ private func concurrently(_ js: [Job], threads: Int, stall: Double,
     nonisolated(unsafe) var results: [Job: Double] = [:]
     nonisolated(unsafe) var lastDone = Date()
     let group = DispatchGroup()
-    let queue = DispatchQueue(label: "row140", attributes: .concurrent)
+    // DEDICATED threads, not GCD's shared pool (row 262): a parallel suite can
+    // hold every pool thread, and then a job here does not even START, which a
+    // deadlock bound reads as a hang.
     for t in 0..<threads {
         group.enter()
-        queue.async {
+        Thread {
             // Each thread walks the list from its own offset, so threads hit
             // DIFFERENT cold pairs at the same moment as well as the same ones.
             for k in 0..<js.count {
@@ -72,7 +74,7 @@ private func concurrently(_ js: [Job], threads: Int, stall: Double,
                 lock.lock(); results[job] = w; lastDone = Date(); lock.unlock()
             }
             group.leave()
-        }
+        }.start()
     }
     while group.wait(timeout: .now() + 0.05) != .success {
         lock.lock(); let idle = Date().timeIntervalSince(lastDone); lock.unlock()
