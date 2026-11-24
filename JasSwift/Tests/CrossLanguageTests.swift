@@ -8295,6 +8295,19 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 let ws = WorkspaceData.load()!
                 guard let panel = ws.panel(pid) else { return refuse("UnknownPanel \(pid)") }
                 if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
+                // Row 257 D3: the press first runs the row's own
+                // `secondary_press`, as every shell does before it opens the
+                // menu (an unselected row becomes the sole selection); on a
+                // selected row it is `inert`, recorded `unchanged`. A panel
+                // whose rows declare none sends nothing.
+                let pressScope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
+                if case .success(let t) = formsRowTarget(panel["content"], widget: widget, event: "secondary_press",
+                                                         row: r, scope: pressScope) {
+                    record(PanelWidgetEvents(model: model, panelId: pid, scope: t.scope)
+                        .behavior(t.node, event: "secondary_press", modifiers: mods))
+                    if stopped { return }
+                }
+                // The selection may have moved: the menu is resolved in the scope as it now stands.
                 let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
                 switch formsRowTarget(panel["content"], widget: widget, event: "", row: r, scope: scope, withKey: "context_menu") {
                 case .failure(let x): return refuse(x.why)
@@ -8918,6 +8931,27 @@ private func formsSecondaryPress(_ row: [Int]) -> [String: Any] {
     #expect(formsRefusal(iso) == nil, "\(iso)")
     let stack = ((formsPanelReads(iso).first?["isolation_stack"] as? [Any]) ?? []).compactMap(formsPath)
     #expect(stack == [[0, 2]], "the row is node: \(iso)")
+}
+
+/// The twin of Rust's `a_secondary_press_on_an_unselected_row_makes_the_menu_act_on_it`
+/// (row 257 D3): the press runs the row's own `secondary_press` first, so the
+/// menu's Duplicate copies the RIGHT-CLICKED row, not the old selection.
+@Test func formsASecondaryPressOnAnUnselectedRowMakesTheMenuActOnIt() throws {
+    let out = formsRun(formsLayersScript([
+        ["read": "document"], formsClickRow([0, 1]), formsSecondaryPress([0, 2]),
+        ["context_menu": "duplicate_layer_selection"], ["read": "document"],
+    ]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    let kids: [[NSDictionary]] = formsDocReads(out).compactMap { $0.data(using: .utf8) }
+        .compactMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        .map { ((($0["layers"] as? [Any])?.first as? [String: Any])?["children"] as? [[String: Any]] ?? [])
+            .map { c in var c = c; c.removeValue(forKey: "id"); return c as NSDictionary } }
+    try #require(kids.count == 2 && kids[0].count >= 3, "\(out)")
+    let (before, after) = (kids[0], kids[1])
+    #expect(before[1] != before[2], "the fixture's two rows must differ")
+    #expect(after.count == before.count + 1, "one element was duplicated")
+    #expect(after.filter { $0 == before[2] }.count == 2, "the right-clicked row [0,2] was duplicated")
+    #expect(after.filter { $0 == before[1] }.count == 1, "the previously selected row [0,1] was not")
 }
 
 /// The twin of Rust's `a_context_menu_step_the_menu_cannot_take_is_refused_by_name`.
