@@ -8183,6 +8183,10 @@ pub(crate) fn layers_tree_key(
 }
 
 fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    // Row 261: the holder and the render scope a row's right-click runs its
+    // yaml `secondary_press` in, shared by every row (one clone per render, not per row).
+    let row_press_holder = std::rc::Rc::new(el.clone());
+    let row_press_scope = std::rc::Rc::new(ctx.clone());
     let id = get_id(el);
     let style = build_style(el, ctx);
 
@@ -8676,9 +8680,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         });
                     };
 
-                    // Right-click: show context menu at cursor, select if not selected
+                    // Right-click: the row's yaml `secondary_press` decides the
+                    // selection (row 261; layers.yaml), then the menu opens at the cursor.
                     let ctx_path = row.path.clone();
                     let ctx_app = app.clone();
+                    let ctx_holder = row_press_holder.clone();
+                    let ctx_scope = row_press_scope.clone();
                     let mut ctx_rev = revision;
                     let on_row_contextmenu = move |evt: Event<MouseData>| {
                         evt.stop_propagation();
@@ -8686,11 +8693,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         let coords = evt.data().client_coordinates();
                         let p = ctx_path.clone();
                         let a = ctx_app.clone();
+                        let (holder, scope) = (ctx_holder.clone(), ctx_scope.clone());
                         spawn(async move {
                             let mut st = a.borrow_mut();
-                            if !st.layers_panel_selection.contains(&p) {
-                                st.layers_panel_selection = vec![p.clone()];
-                            }
+                            let _ = layers_row_secondary_press(&holder, &scope, &p, &mut st);
                             st.layers_context_menu = Some((coords.x, coords.y, p));
                             ctx_rev += 1;
                         });
@@ -9276,6 +9282,22 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             }
         }
     }
+}
+
+/// Row 261 (row 257's web half): a right-click runs the row's yaml
+/// `secondary_press` (layers.yaml: an unselected row becomes the sole panel
+/// selection; a press inside the selection keeps it whole) on the web's
+/// AppState, through the same click-behaviour runner every web click uses, in
+/// the row's scope from [`layers_row_menu`]. The shell decides nothing. Returns
+/// the number of declared entries, or `None` when `path` is not a row of
+/// `holder` (then nothing is sent).
+pub(crate) fn layers_row_secondary_press(holder: &serde_json::Value, ctx: &serde_json::Value, path: &[usize],
+                                         st: &mut crate::workspace::app_state::AppState) -> Option<usize> {
+    let (_, scope) = layers_row_menu(holder, ctx, path)?;
+    let row = holder.get("do")?;
+    let acts = resolve_click_behaviors(row, &scope, "secondary_press");
+    let _deferred = run_click_behaviors(&acts, &scope, st);
+    Some(acts.len())
 }
 
 /// One entry of the Layers row's yaml `context_menu:` as the web draws it
@@ -16688,7 +16710,7 @@ mod layers_tree_key_tests {
 
 #[cfg(test)]
 mod layers_row_menu_tests {
-    use super::{layers_row_menu, RowMenuEntry};
+    use super::{layers_row_menu, layers_row_secondary_press, RowMenuEntry};
 
     /// `lp_tree` as the workspace declares it, and a scope with the shared
     /// element_tree fixture's first case as `active_document.element_tree`
@@ -16728,6 +16750,28 @@ mod layers_row_menu_tests {
             RowMenuEntry::Separator => "-".to_string(),
             RowMenuEntry::Item { label, .. } => label.clone(),
         }).collect()
+    }
+
+    /// Row 261 (row 257's web half): the web's right-click runs the row's
+    /// `secondary_press` from layers.yaml on its own AppState, as every other
+    /// shell sends it; the shell no longer decides. An unselected row becomes
+    /// the sole selection; a press inside a selection keeps it whole.
+    #[test]
+    fn a_secondary_press_runs_the_rows_yaml_rule_on_app_state() {
+        let (holder, mut ctx) = holder_and_ctx(false);
+        let mut st = crate::workspace::app_state::AppState::new();
+        let set = |ctx: &mut serde_json::Value, st: &mut crate::workspace::app_state::AppState, sel: &[Vec<usize>]| {
+            st.layers_panel_selection = sel.to_vec();
+            ctx["panel"]["layers_panel_selection"] = serde_json::Value::Array(
+                sel.iter().map(|p| serde_json::json!({"__path__": p})).collect());
+        };
+        set(&mut ctx, &mut st, &[vec![1]]);
+        assert!(layers_row_secondary_press(&holder, &ctx, &[0], &mut st).is_some(), "row [0] is a row");
+        assert_eq!(st.layers_panel_selection, vec![vec![0]], "an unselected row becomes the sole selection");
+        set(&mut ctx, &mut st, &[vec![1], vec![0]]);
+        layers_row_secondary_press(&holder, &ctx, &[0], &mut st);
+        assert_eq!(st.layers_panel_selection, vec![vec![1], vec![0]], "a press inside the selection keeps it whole");
+        assert!(layers_row_secondary_press(&holder, &ctx, &[7], &mut st).is_none(), "a path that is no row sends nothing");
     }
 
     #[test]
