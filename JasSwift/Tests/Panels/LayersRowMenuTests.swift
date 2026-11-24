@@ -105,14 +105,20 @@ private func index(_ es: [WidgetEvent.ContextMenuEntry], _ label: String) -> Int
 /// already panel-selected, it becomes the sole panel-selected element first,
 /// then the menu acts on the selection." A right-click on a row INSIDE the
 /// selection keeps the selection whole, so a multi-row Duplicate still works.
+///
+/// Row 257 D3: the rule is layers.yaml's row `secondary_press`, run through the
+/// engine's door, not Mac code. `inert` (declared, its condition false) is an
+/// answer only the yaml can give, so it pins that the shell no longer decides.
 @Test func aSecondaryPressSelectsAnUnselectedRowAndKeepsASelectedOne() {
     let model = twoLayers()
     setLayersPanelSelection(model: model, [[0], [1]])
-    LayersRowMenu.selectForSecondaryPress([1, 0], model: model)
+    let ran = LayersRowMenu.secondaryPress([1, 0], model: model)
+    #expect(ran?.outcome == "committed", "the yaml behaviour ran: \(String(describing: ran))")
     #expect(Set(layersPanelSelection(model: model)) == [[1, 0]], "an unselected row becomes the sole selection")
 
     setLayersPanelSelection(model: model, [[0], [1]])
-    LayersRowMenu.selectForSecondaryPress([1], model: model)
+    let kept = LayersRowMenu.secondaryPress([1], model: model)
+    #expect(kept?.outcome == "inert", "declared, its condition false: \(String(describing: kept))")
     #expect(Set(layersPanelSelection(model: model)) == [[0], [1]], "a selected row keeps the selection")
 }
 
@@ -121,7 +127,7 @@ private func index(_ es: [WidgetEvent.ContextMenuEntry], _ label: String) -> Int
 @Test func aRightClickedUnselectedRowIsWhatTheMenuActsOn() throws {
     let model = twoLayers()
     setLayersPanelSelection(model: model, [[0]])
-    LayersRowMenu.selectForSecondaryPress([1, 0], model: model)
+    LayersRowMenu.secondaryPress([1, 0], model: model)
     let menu = try #require(LayersRowMenu.at([1, 0], model: model))
     let dup = try #require(index(menu.entries, "Duplicate"))
     #expect(menu.pick(dup, model: model).outcome == "committed")

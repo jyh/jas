@@ -4214,13 +4214,14 @@ struct TreeViewContent: View {
             // arm took every element path.
             NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .leftMouseDown, .rightMouseDown, .keyDown]) { evt in
                 modifierFlags = evt.modifierFlags
-                // Row 142: a secondary press (right-click, or Control-click)
-                // on a row selects it per layers.yaml BEFORE AppKit builds the
-                // row's context menu, so the menu acts on it.
+                // Row 142 / row 257 D3: a secondary press (right-click, or
+                // Control-click) sends the row's `secondary_press` BEFORE
+                // AppKit builds the row's context menu; layers.yaml decides
+                // the selection the menu acts on.
                 let secondary = evt.type == .rightMouseDown
                     || (evt.type == .leftMouseDown && evt.modifierFlags.contains(.control))
                 if secondary, let row = hoveredRow {
-                    LayersRowMenu.selectForSecondaryPress(row, model: model)
+                    LayersRowMenu.secondaryPress(row, model: model)
                 }
                 if evt.type == .keyDown && treeFocused {
                     if evt.keyCode == 51 || evt.keyCode == 117 {

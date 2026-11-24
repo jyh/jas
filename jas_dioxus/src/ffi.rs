@@ -4983,7 +4983,7 @@ mod tests {
             .filter_map(|k| plan[*k].as_array()).flatten()
             .filter(|r| r["type"] == "container" && r["values"].get("bind.opacity").is_some())
             .map(|r| r["events"].clone()).collect();
-        assert_eq!(rows, [serde_json::json!(["click", "double_click", "drag_start", "drag_move", "drag_end"])],
+        assert_eq!(rows, [serde_json::json!(["click", "secondary_press", "double_click", "drag_start", "drag_move", "drag_end"])],
                    "the one row's container, declared order: {plan}");
         unsafe { jas_engine_free(e) };
     }
@@ -5087,6 +5087,60 @@ mod tests {
         assert_eq!(sel(), serde_json::json!([{"__path__": [1]}, {"__path__": [0]}]), "the range");
         click(&r[0], r#","ctrl":true"#);
         assert_eq!(sel(), serde_json::json!([{"__path__": [0]}]), "Ctrl takes it back out");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 257 D3 (design §4, fork (b)): the right-click rule is the spec's, not a
+    /// shell's. A `secondary_press` on a row that is not panel-selected makes it
+    /// the sole selection, so the context menu acts on it; one on a selected row
+    /// keeps a multi-selection whole, so "Delete Selection" still sees all of it.
+    /// The Mac and the web used to carry this rule in shell code; the Windows
+    /// shell sends the event and opens `jas_panel_row_menu`.
+    #[test]
+    fn a_layers_row_secondary_press_selects_only_an_unselected_row() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let mut doc = crate::document::document::Document::default();
+        let layer = doc.layers[0].clone();
+        doc.layers.push(layer.clone());
+        doc.layers.push(layer);
+        let e = engine_with(Model::new(doc, None));
+        let rows = || {
+            let plan: serde_json::Value =
+                serde_json::from_str(&plan_of(e, "layers_panel_content", 228, 600)).expect("plan JSON");
+            ["chrome", "containers", "leaves"].iter()
+                .filter_map(|k| plan[*k].as_array()).flatten()
+                .filter(|r| r["type"] == "container" && r["values"].get("bind.opacity").is_some())
+                .map(|r| r["path"].clone()).collect::<Vec<_>>()
+        };
+        let sel = || unsafe { e.as_ref() }.unwrap().store.borrow()
+            .get_panel("layers_panel_content", "layers_panel_selection").clone();
+        let send = |row: &serde_json::Value, event: &str, mods: &str| {
+            let (reply, err) = behave(e, "layers_panel_content",
+                                      &format!(r#"{{"path":{row},"event":"{event}"{mods}}}"#));
+            assert!(!reply.is_empty(), "the {event}{mods} refused: {err}");
+        };
+        let r = rows();
+        assert_eq!(r.len(), 3, "three layer rows");
+        send(&r[0], "click", "");
+        send(&r[1], "click", r#","shift":true"#);
+        let range = serde_json::json!([{"__path__": [2]}, {"__path__": [1]}]);
+        assert_eq!(sel(), range, "rows 0 and 1 (layers 2 and 1) selected");
+        // On a selected row the behaviour's condition is false, so nothing runs
+        // and the door answers EmptyBehavior with an empty reply, as a blur
+        // after Enter does. The shell opens the menu either way.
+        let inert = |row: &serde_json::Value| {
+            let (reply, err) = behave(e, "layers_panel_content",
+                                      &format!(r#"{{"path":{row},"event":"secondary_press"}}"#));
+            assert_eq!(reply, "", "a secondary press on a selected row runs nothing");
+            assert!(err.contains(r#""panel_event":"EmptyBehavior""#), "{err}");
+        };
+        inert(&r[1]);
+        assert_eq!(sel(), range, "a secondary press inside the selection keeps it whole");
+        send(&r[2], "secondary_press", "");
+        assert_eq!(sel(), serde_json::json!([{"__path__": [0]}]),
+                   "a secondary press on an unselected row makes it the sole selection");
+        inert(&r[2]);
+        assert_eq!(sel(), serde_json::json!([{"__path__": [0]}]), "and again keeps it");
         unsafe { jas_engine_free(e) };
     }
 

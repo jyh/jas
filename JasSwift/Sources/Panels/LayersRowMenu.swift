@@ -33,14 +33,20 @@ struct LayersRowMenu {
         return LayersRowMenu(holder: holder, scope: scope)
     }
 
-    /// Row 142 (layers.yaml, Panel Selection): a right-click on a row that is
-    /// not panel-selected makes it the sole panel selection FIRST, so the menu
-    /// acts on it; a right-click inside the selection keeps the selection.
-    /// The shell calls this on the secondary press, before the menu is built.
-    static func selectForSecondaryPress(_ path: ElementPath, model: Model) {
-        if !layersPanelSelection(model: model).contains(path) {
-            setLayersPanelSelection(model: model, [path])
-        }
+    /// Row 142's rule, which is layers.yaml's since row 257 D3: the row's
+    /// `secondary_press` behaviour makes a row that is not panel-selected the
+    /// sole panel selection, and does nothing on a selected row, so the menu
+    /// acts on the right row. The shell sends the event on the secondary
+    /// press, before the menu is built, and decides nothing itself. It runs
+    /// through the engine's door in the row's scope (the row's container is
+    /// the holder's `do:`), so the answer is the door's: `committed`, `inert`
+    /// (on a selected row), or nil when the row is not drawn.
+    @discardableResult
+    static func secondaryPress(_ path: ElementPath, model: Model) -> WidgetEvent.Result? {
+        guard let menu = at(path, model: model),
+              let row = menu.holder["do"] as? [String: Any] else { return nil }
+        return PanelWidgetEvents(model: model, panelId: panelId, scope: menu.scope)
+            .behavior(row, event: "secondary_press")
     }
 
     /// The entries as a shell draws them (``WidgetEvent/contextMenuEntries``).

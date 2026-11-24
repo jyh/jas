@@ -18117,6 +18117,16 @@
                   }
                 },
                 {
+                  "event": "secondary_press",
+                  "description": "A secondary press (a right-click, or a Control-click on the Mac) arrives before the row's context menu opens, and decides what the menu acts on. On a row that is not panel-selected it makes that row the sole panel selection, so the menu acts on the row under the pointer. On a row that is already panel-selected it does nothing, so a multi-row selection stays whole and the menu's \"Delete Selection\" acts on all of it. Every shell sends this event and then opens the menu; no shell decides the selection itself.",
+                  "condition": "not node.panel_selected",
+                  "action": "layers_panel_select",
+                  "params": {
+                    "path": "node.path",
+                    "modifier": "none"
+                  }
+                },
+                {
                   "event": "double_click",
                   "condition": "node.is_container and event.target_id != 'lp_name'",
                   "action": "enter_isolation_mode",
