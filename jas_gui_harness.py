@@ -858,7 +858,12 @@ def _dock_case(kind, edge, via):
     legs = [_plan.dock_point(via, vw, vh, band)] if via else []
     legs.append(_plan.dock_point(edge, vw, vh, band) if edge else (vw / 2, vh / 2))
     _claim_gate()
-    _session_drag(tx + tw / 2, ty + th / 2, [(ox + px, oy + py) for px, py in legs])
+    pts = [(ox + px, oy + py) for px, py in legs]
+    why = _plan.outside_window(WIN, ("press", tx + tw / 2, ty + th / 2),
+                               *[(f"drop {i}", x, y) for i, (x, y) in enumerate(pts)])
+    if why:
+        return "REFUSED", why
+    _session_drag(tx + tw / 2, ty + th / 2, pts)
     after = _layout_read()
     return _plan.dock_verdict(before, after, kind, edge, _drawn_counts(app, tab_id))
 
@@ -940,8 +945,9 @@ def _group_case(case):
         if len(hits) == 1:
             frames[tid] = _frame(hits[0])
     (x1, y1), (x2, y2) = _plan.group_case_targets(case, frames)
-    if not (WIN["y"] <= y2 < WIN["y"] + WIN["h"] and WIN["y"] <= y1 < WIN["y"] + WIN["h"]):
-        raise _plan.Refused(f"a {case} target lies outside the window (AX reports clipped frames)")
+    why = _plan.outside_window(WIN, ("press", x1, y1), ("drop", x2, y2))
+    if why:
+        raise _plan.Refused(f"{case}: {why}")
     _claim_gate()
     _session_drag(x1, y1, [(x2, y2)])
     return _plan.group_case_verdict(case, before, _right_groups(_layout_read()))

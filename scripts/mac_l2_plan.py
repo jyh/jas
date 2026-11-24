@@ -885,6 +885,19 @@ def viewport_size(layout_text):
     return float(pl["viewport_width"]), float(pl["viewport_height"])
 
 
+def outside_window(win, *points):
+    """None when every named screen point lies inside the window (half-open:
+    the far edges are outside), or the refusal naming the first that does not
+    (row 263). AX reports frames the window clips and posted events at such a
+    point reach another window or nothing, so a drag there is the
+    instrument's failure, never the app's: refuse before posting."""
+    for name, x, y in points:
+        if not (win["x"] <= x < win["x"] + win["w"] and win["y"] <= y < win["y"] + win["h"]):
+            return (f"the {name} ({x:.0f}, {y:.0f}) lies outside the window "
+                    f"({win['x']:.0f}, {win['y']:.0f}, {win['w']:.0f}x{win['h']:.0f}); AX reports clipped frames")
+    return None
+
+
 def viewport_origin(win, vw, vh, slack=2.0):
     """The Mac viewport's top-left in screen points. The pane container
     fills the window below its title bar, so it shares the window's left and
@@ -1127,6 +1140,18 @@ def self_test():
     check("a claim landing mid-run aborts at the next act",
           refused(lambda: run_guarded(acts5, lambda: next(readings2), done2.append), "claimed this box before act 1 (tool)")
           and [a[0] for a in done2] == ["open"])
+    # Row 263: a drag's press and drop must lie inside the window, or the
+    # reading is the instrument's, never the app's (AX reports frames the
+    # window clips). Each arm moves ONE point across ONE edge.
+    W = {"x": 100.0, "y": 50.0, "w": 800.0, "h": 600.0}
+    check("both points inside the window: go", outside_window(W, ("press", 150, 100), ("drop", 850, 640)) is None)
+    check("a press below the window is refused by name",
+          "press (150, 651) lies outside the window" in (outside_window(W, ("press", 150, 651), ("drop", 400, 300)) or ""))
+    check("a drop past the right edge is refused by name",
+          "drop (901, 300)" in (outside_window(W, ("press", 150, 100), ("drop", 901, 300)) or ""))
+    check("a point above the window is refused", outside_window(W, ("press", 150, 49), ("drop", 400, 300)) is not None)
+    check("a point left of the window is refused", outside_window(W, ("press", 99, 100), ("drop", 400, 300)) is not None)
+    check("the far edge itself is outside (half-open)", outside_window(W, ("press", 900, 100)) is not None)
     check("view report parses", parse_view_report("view 1.0 0.0 0.0") == (1.0, 0.0, 0.0))
     check("view report with other text is None", parse_view_report("zoom 1") is None)
     check("view report with zoom 0 is None", parse_view_report("view 0 0 0") is None)
