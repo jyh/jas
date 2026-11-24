@@ -32,14 +32,25 @@ base side, unparseable, absent at head, or present more than once) is listed
 and the receipt says why: a comparison that could not be made never reads as
 "unchanged".
 
+THE UNDO-STEP ARM (the O97 nightly of 2026-11-23): the tab's " *" is the
+document's modified mark, so a gesture that stops or starts recording an undo
+step moves `tab` with no panel YAML and no `layout.yaml` in the change. Row 243
+(#1083) did exactly that to two baselines, one of them through a native effect
+rather than its tool YAML, so this arm reads the gesture corpus's pins: when a
+change moves any existing case's `expected_can_undo` in
+`test_fixtures/gestures/*.json`, it lists every baseline whose input script
+drives that case's tool. A file it cannot compare lists every baseline.
+
 WHAT IT DOES NOT DO, SAID HERE SO THE LIST IS NOT READ AS A VERDICT
 ------------------------------------------------------------------
 * It is an OVER-approximation: a YAML edit that does not reach the resolved
   plan (a `description:` say) moves no `plan_sha`, and those baselines are
   listed anyway. Whether a plan moved is measured only on the box.
-* It sees panel YAML and the tab bar only. A change elsewhere that reaches a
-  plan or the tab (the compiler, a shared action, the engine's plan code, the
-  `doc.name` / `doc.is_modified` values the label reads) is not listed.
+* It sees panel YAML, the tab bar and the gesture corpus's undo pins only. A
+  change elsewhere that reaches a plan or the tab (the compiler, a shared
+  action, the engine's plan code, the `doc.name` value the label reads, or a
+  `doc.is_modified` change that no gesture pin records, such as a panel
+  action's undo step) is not listed.
 * It never refuses. It is advice for the merger, not a gate: level 2 is the
   box's, and a re-freeze is flask's act.
 """
@@ -117,9 +128,59 @@ def tab_bar_moved(read_text, read_base) -> tuple[bool, str | None]:
     return new != old, None
 
 
+GESTURES = "test_fixtures/gestures/"
+UNDO_KEY = f"expected_can_undo ({GESTURES})"
+_ABSENT = "ABSENT"
+
+
+def gesture_pins(text: str | None) -> tuple[dict[str, tuple[str, object]] | None, str | None]:
+    """`({name: (tool, expected_can_undo)}, None)` for one gesture file's text
+    (a pin not given reads `ABSENT`, a value of its own); `(None, why)` when
+    the file cannot be read as a list of cases."""
+    if text is None:
+        return {}, None
+    try:
+        cases = json.loads(text)
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}".splitlines()[0]
+    cases = cases if isinstance(cases, list) else [cases]
+    if not all(isinstance(c, dict) for c in cases):
+        return None, "a case that is not an object"
+    return {c.get("name", ""): (c.get("tool", ""), c.get("expected_can_undo", _ABSENT)) for c in cases}, None
+
+
+def gesture_files(changed: list[str]) -> list[str]:
+    """The gesture CORPUS files in a change: its `_expected.json` goldens are
+    outputs, never pins. The one predicate both callers use."""
+    return [p for p in sorted(set(changed))
+            if p.startswith(GESTURES) and p.endswith(".json") and not p.endswith("_expected.json")]
+
+
+def undo_moved_tools(changed: list[str], read_text, read_base) -> tuple[set[str] | None, str | None]:
+    """The tools whose gesture cases' `expected_can_undo` moved between base
+    and head: `(tools, None)`, or `(None, why)` when a file could not be
+    compared (then every tool baseline is listed). A case only ADDED or only
+    REMOVED moves no existing behaviour and is not counted; a pin removed from
+    a case that stays is a move."""
+    files = gesture_files(changed)
+    if read_base is None:
+        return None, "UNREADABLE: no base-side reader"
+    tools: set[str] = set()
+    for p in files:
+        new, why_new = gesture_pins(read_text(p))
+        old, why_old = gesture_pins(read_base(p))
+        if new is None or old is None:
+            return None, f"UNREADABLE: {p}: {why_new or why_old}"
+        for name in new.keys() & old.keys():
+            if new[name][1] != old[name][1]:
+                tools.update(t for t in (new[name][0], old[name][0]) if t)
+    return tools, None
+
+
 def at_risk(changed: list[str], read_text, baselines: list[tuple[str, str]],
             tab_items: list[str] | None = None, read_base=None,
-            why: dict[str, str] | None = None) -> dict[str, list[str]]:
+            why: dict[str, str] | None = None,
+            tool_items: dict[str, str] | None = None) -> dict[str, list[str]]:
     """`{panel_id: [item, ...]}` for the panel YAMLs in `changed`, plus
     `{TAB_KEY: [...]}` when `workspace/layout.yaml` is in `changed` and
     `tab_items` (the baselines carrying a `tab`) is given.
@@ -137,6 +198,12 @@ def at_risk(changed: list[str], read_text, baselines: list[tuple[str, str]],
         out[TAB_KEY] = sorted(tab_items) if moved else []
         if reason and why is not None:
             why[TAB_KEY] = reason
+    if tool_items is not None and gesture_files(changed):
+        tools, reason = undo_moved_tools(changed, read_text, read_base)
+        out[UNDO_KEY] = sorted(tool_items) if tools is None else \
+            sorted(i for i, t in tool_items.items() if t in tools)
+        if reason and why is not None:
+            why[UNDO_KEY] = reason
     for path in sorted(set(changed)):
         if not (path.startswith(PANELS) and path.endswith(".yaml")):
             continue
@@ -164,6 +231,33 @@ def load_tab_items(root: Path = BASELINES) -> list[str]:
         if "tab" in d:
             rows.append(d.get("item", f.parent.name))
     return rows
+
+
+SCRIPTS = ROOT / "test_fixtures" / "input_scripts"
+
+
+def load_tool_items(root: Path = BASELINES, scripts: Path = SCRIPTS) -> dict[str, str]:
+    """`{item: tool}` for every baseline whose item an input script names
+    (the script's `tool`); the self-test holds the live map to every baseline."""
+    tools = {}
+    for f in sorted(scripts.glob("*.json")):
+        if f.name.endswith(".expected.json"):
+            continue
+        d = json.loads(f.read_text(encoding="utf-8"))
+        if isinstance(d, dict) and d.get("item") and d.get("tool"):
+            tools[d["item"]] = d["tool"]
+    return {i: tools[i] for i, _ in load_baselines(root) if i in tools}
+
+
+def live_gesture_pins() -> dict[str, tuple[str, object]]:
+    """Every live gesture case's `(tool, expected_can_undo)`, by case name."""
+    out: dict[str, tuple[str, object]] = {}
+    for f in sorted((ROOT / GESTURES).glob("*.json")):
+        if f.name.endswith("_expected.json"):
+            continue
+        pins, _ = gesture_pins(f.read_text(encoding="utf-8"))
+        out.update(pins or {})
+    return out
 
 
 def _read(path: str) -> str | None:
@@ -208,6 +302,16 @@ def report(risk: dict[str, list[str]], why: dict[str, str] | None = None) -> lis
             else:
                 lines.append(f"LEVEL-2 NOTICE: {LAYOUT} changed; {TAB_BAR} unchanged (its prose aside), "
                              f"so no baseline's tab arm is at risk")
+        elif pid == UNDO_KEY:
+            reason = (why or {}).get(UNDO_KEY)
+            if items:
+                lines.append(f"LEVEL-2 NOTICE: {UNDO_KEY} "
+                             f"{'could not be compared (' + reason + '), so listed' if reason else 'moved'}; "
+                             f"the tab's modified mark may move for {len(items)} WinUI baseline(s) "
+                             f"(tell flask in the release): {', '.join(items)}")
+            else:
+                lines.append(f"LEVEL-2 NOTICE: a gesture file changed; no gesture's expected_can_undo moved "
+                             f"for a tool a baseline drives")
         elif items:
             lines.append(f"LEVEL-2 NOTICE: {pid} changed; {len(items)} WinUI baseline(s) may need re-freezing "
                          f"(tell flask in the release): {', '.join(items)}")
@@ -215,7 +319,7 @@ def report(risk: dict[str, list[str]], why: dict[str, str] | None = None) -> lis
             lines.append(f"LEVEL-2 NOTICE: {pid} changed; no WinUI baseline is frozen on it")
     if lines:
         lines.append("  (an over-approximation: only the box measures whether a plan moved; "
-                     "a change outside workspace/panels/ and the canvas tab bar is not seen)")
+                     "a change outside workspace/panels/, the canvas tab bar and the gesture undo pins is not seen)")
     return lines
 
 
@@ -319,7 +423,58 @@ def self_test() -> int:
             (Path(td) / item / "baseline.json").write_text(json.dumps(d), encoding="utf-8", newline="")
         got = load_tab_items(Path(td))
     check(got == ["with.tab"], f"the loader takes only baselines that carry a tab: {got}")
-    arms = 25
+
+    # THE UNDO-STEP ARM (O97 nightly 11-23, row 243): the tab's " *" is the
+    # document's modified mark, so a gesture that stops (or starts) recording
+    # an undo step moves `tab` with no panel YAML and no layout.yaml in the
+    # change. Row 243 did exactly that to magic_wand.click and
+    # partial_selection.marquee; one of the two moved through a NATIVE effect,
+    # so the arm reads the gesture corpus's pin, never the tool YAML. Each arm
+    # differs from its neighbour in ONE place.
+    tool_items = {"wand.click": "magic_wand", "sel.click": "selection", "rect.drag": "rect"}
+    G = "test_fixtures/gestures/g.json"
+    def gest(*cases):
+        return json.dumps([{"name": n, "tool": t, "expected_can_undo": u} for n, t, u in cases])
+    g_old = gest(("wand", "magic_wand", True), ("sel", "selection", True))
+    def undo_risk(new_text, old_text=g_old, changed=(G,)):
+        w.clear()
+        return at_risk(list(changed), {G: new_text}.get, base, read_base={G: old_text}.get,
+                       tool_items=tool_items, why=w)
+    r = undo_risk(gest(("wand", "magic_wand", False), ("sel", "selection", True)))
+    check(r == {UNDO_KEY: ["wand.click"]}, f"a flipped can_undo pin lists that tool's baselines only: {r}")
+    check(any("1 WinUI baseline(s)" in x and "wand.click" in x for x in report(r, w)),
+          f"...and the receipt names them: {report(r, w)}")
+    r = undo_risk(gest(("wand", "magic_wand", True), ("sel", "selection", False)))
+    check(r == {UNDO_KEY: ["sel.click"]}, f"the OTHER case flipped lists the other tool: {r}")
+    r = undo_risk(g_old)
+    check(r == {UNDO_KEY: []}, f"a gesture file changed with no pin moved lists nothing: {r}")
+    check(any("no gesture's expected_can_undo moved" in x for x in report(r, w)),
+          f"...and SAYS it read the pins: {report(r, w)}")
+    r = undo_risk(json.dumps([{"name": "wand", "tool": "magic_wand"},
+                              {"name": "sel", "tool": "selection", "expected_can_undo": True}]))
+    check(r == {UNDO_KEY: ["wand.click"]}, f"a pin REMOVED is a move, listed: {r}")
+    r = undo_risk(gest(("wand", "magic_wand", True), ("sel", "selection", True), ("r", "rect", True)))
+    check(r == {UNDO_KEY: []}, f"a case ADDED moves no existing behaviour: {r}")
+    r = undo_risk("[unclosed")
+    check(r == {UNDO_KEY: ["rect.drag", "sel.click", "wand.click"]}, f"an unparseable corpus lists every tool baseline: {r}")
+    check(any("UNREADABLE" in x for x in report(r, w)), f"...and says why: {report(r, w)}")
+    r = undo_risk(gest(("wand", "magic_wand", False)), changed=("README.md",))
+    check(r == {}, f"no gesture file in the change reads nothing: {r}")
+    r = undo_risk(gest(("wand", "magic_wand", False)), changed=("test_fixtures/gestures/g_expected.json",))
+    check(r == {}, f"an _expected.json is a golden, not the corpus: {r}")
+    r = at_risk([G], {G: gest(("wand", "magic_wand", False))}.get, base, tool_items=tool_items)
+    check(r == {UNDO_KEY: ["rect.drag", "sel.click", "wand.click"]}, f"no base-side reader lists conservatively: {r}")
+    # The live tree: the baseline -> tool map comes from the input scripts,
+    # and every baseline must map (an unmapped one would never be listed).
+    live_tools = load_tool_items()
+    check(len(live_tools) == len(live) and len(live) > 0,
+          f"every live baseline maps to a tool: {len(live_tools)} of {len(live)}")
+    check({"magic_wand.click", "partial_selection.marquee"} <= set(live_tools),
+          f"the two items row 243 moved are in the map: {sorted(live_tools)[:3]}...")
+    gl = live_gesture_pins()
+    check(len(gl) >= 50 and all(t for t, _ in gl.values()),
+          f"the live gesture corpus pins a tool per case: {len(gl)} case(s)")
+    arms = 39
     for f in failures:
         print(f"  FAIL: {f}")
     print(f"l2_baselines_at_risk --self-test: {arms} arm(s), {len(failures)} failure(s), "
@@ -341,7 +496,7 @@ def main() -> int:
     base_rev, head_rev = range_ends(args.range)
     why: dict[str, str] = {}
     risk = at_risk(changed, git_reader(head_rev), load_baselines(), tab_items=load_tab_items(),
-                   read_base=git_reader(base_rev), why=why)
+                   read_base=git_reader(base_rev), why=why, tool_items=load_tool_items())
     print("\n".join(report(risk, why)))
     return 0
 
