@@ -1105,13 +1105,13 @@ def self_test():
         env = {"JAS_CLAIM_FILE": cf}
         check("the reader: no files at all is refused (no heartbeat)",
               "no relay heartbeat" in (claim_check(env, 1000.0) or ""))
-        with open(cf + ".relay", "w") as f:
+        with open(cf + ".relay", "w", encoding="utf-8", newline="") as f:
             f.write("")
         os.utime(cf + ".relay", (1.0, 990.0))  # atime differs, so the age must come from the mtime
         check("the reader: a fresh heartbeat and no claim goes", claim_check(env, 1000.0) is None)
         check("the reader: the heartbeat's AGE is read from its mtime",
               "relay last wrote 210 s ago" in (claim_check(env, 1200.0) or ""))
-        with open(cf, "w") as f:
+        with open(cf, "w", encoding="utf-8", newline="") as f:
             f.write("his\n")
         check("the reader: a claim file present stops it", "claimed" in (claim_check(env, 1000.0) or ""))
         check("the reader: the check off is named, never silent",
