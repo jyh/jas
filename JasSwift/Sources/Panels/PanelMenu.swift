@@ -532,9 +532,13 @@ func layersRenamingPath(model: Model?) -> [Int]? {
     model?.stateStore.getPanel("layers_panel_content", "renaming_element").flatMap(layersStoredPath)
 }
 
+/// Stores the PLAIN list, as every YAML route (`rename_element` stores
+/// `as_path(param.path).indices`) and the web do: `lp_name_edit`'s
+/// `panel.renaming_element == node.path` is false on the `__path__` marker
+/// (STATUS-flask §646; row 265: the tree's double-click stored the marker).
 func setLayersRenamingPath(model: Model, _ path: [Int]?) {
     setLayersPanelKey(model: model, "renaming_element",
-                      path.map { ["__path__": $0] as Any } ?? NSNull())
+                      path.map { $0 as Any } ?? NSNull())
 }
 
 /// The artboards-panel selection ids, read from the store scope the

@@ -118,6 +118,22 @@ private func twoLayers() -> Model {
     #expect(layersRenamingPath(model: model) == nil)
 }
 
+@Test func theTreesOwnRenameWriteStoresThePlainList() {
+    // Row 265: the native tree's double-click and the rename field write
+    // through `setLayersRenamingPath`, and it stored the `__path__` marker
+    // while every YAML route stores the plain list `lp_name_edit` compares to
+    // `node.path` (STATUS-flask §646; the web publishes the plain list too).
+    // Measured on the Mac test box 11-24: a double-click read
+    // {"__path__": [1]}, Enter read [0].
+    let model = twoLayers()
+    setLayersRenamingPath(model: model, [1, 0])
+    let stored = model.stateStore.getPanel("layers_panel_content", "renaming_element")
+    #expect(stored as? [Int] == [1, 0], "\(String(describing: stored))")
+    let shown = evaluate("panel.renaming_element == node.path",
+                         context: ["panel": ["renaming_element": stored as Any], "node": ["path": [1, 0]]])
+    #expect(shown == .bool(true), "the YAML field's visible test reads the stored value")
+}
+
 @Test func clearingTheRenameStoresNull() {
     let model = twoLayers()
     setLayersRenamingPath(model: model, [0])
