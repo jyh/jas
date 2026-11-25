@@ -4052,6 +4052,12 @@ struct TreeViewContent: View {
         nonmutating set { model.layersIsolationStack = newValue }
     }
     @FocusState private var treeFocused: Bool
+    /// Whether the tree's Delete monitor holds the keys (row 208 R4). An
+    /// `@State`, not `treeFocused`: the monitor is an escaping closure made in
+    /// `onAppear`, and a build that set `treeFocused` from it on a row press
+    /// still ignored Delete on the Mac test box (11-24); `hoveredRow`, an
+    /// `@State`, reads live in the same closure.
+    @State private var treeHasKeys = false
     /// The row under the pointer, so the event monitor can select it on a
     /// secondary press (row 142). Cleared when the pointer leaves that row.
     @State private var hoveredRow: ElementPath? = nil
@@ -4223,14 +4229,14 @@ struct TreeViewContent: View {
                 if secondary, let row = hoveredRow {
                     LayersRowMenu.secondaryPress(row, model: model)
                 }
-                // Row 208 R4: a press on a row gives the tree keyboard focus
-                // (`.focusable()` takes none from a tap), and a press elsewhere
-                // takes it away.
-                let focus = LayersTreeFocus.afterEvent(evt.type, onRow: hoveredRow != nil,
-                                                       focused: treeFocused,
-                                                       renaming: renameFieldFocused)
-                if focus != treeFocused { treeFocused = focus }
-                if evt.type == .keyDown && treeFocused {
+                // Row 208 R4: a press on a row gives the tree the keys, a press
+                // elsewhere takes them away, and a rename keeps them in its
+                // field. `renamingPath` is the store's, so it reads live here.
+                let keys = LayersTreeFocus.afterEvent(evt.type, onRow: hoveredRow != nil,
+                                                      focused: treeHasKeys,
+                                                      renaming: renamingPath != nil)
+                if keys != treeHasKeys { treeHasKeys = keys }
+                if evt.type == .keyDown && treeHasKeys {
                     if evt.keyCode == 51 || evt.keyCode == 117 {
                         // 51 = Delete (backspace), 117 = Forward Delete
                         performDeleteSelection()
