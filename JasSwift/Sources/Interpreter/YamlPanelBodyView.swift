@@ -4405,7 +4405,10 @@ struct TreeViewContent: View {
                 .font(.system(size: 11))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .focused($renameFieldFocused)
-                .onAppear { renameFieldFocused = true }
+                // Deferred one turn: written inside onAppear the focus did not
+                // take, so the field never had the keyboard (row 208, read live
+                // 11-24: Escape did not cancel and Return did not commit).
+                .onAppear { DispatchQueue.main.async { renameFieldFocused = true } }
                 .onExitCommand { renamingPath = nil }
             } else {
                 SwiftUI.Text(name)
@@ -4600,7 +4603,10 @@ struct TreeViewContent: View {
                 .font(.system(size: 11))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .focused($renameFieldFocused)
-                .onAppear { renameFieldFocused = true }
+                // Deferred one turn: written inside onAppear the focus did not
+                // take, so the field never had the keyboard (row 208, read live
+                // 11-24: Escape did not cancel and Return did not commit).
+                .onAppear { DispatchQueue.main.async { renameFieldFocused = true } }
                 .onExitCommand {
                     renamingPath = nil
                 }
