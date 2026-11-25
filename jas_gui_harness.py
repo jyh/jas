@@ -39,7 +39,7 @@ Verbs:
                    refused by name and left out; the line is scope=partial; row 252)
   dock             (the dock check: three tab drags, one DOCK line; needs JAS_APP)
   dock --groups    (sheet 2's three drops inside the right dock, one DOCKGROUPS line; row 255)
-  layers           (row 208 R1/R4 through the Layers tree, one LAYERS line; row 256)
+  layers           (row 208 through the Layers tree: R1 R4 R5-R7, one LAYERS line; rows 256, 264)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
@@ -1184,6 +1184,59 @@ def _layers_r4():
         selected = after = control  # the verdict reads NO KEY from the control alone
     return _plan.layers_r4_verdict(before, control, selected, after)
 
+def _top_row(app, before):
+    return _layer_row(_layers_rows(app), before["layers"][-1][0])
+
+def _layers_r5():
+    app, before = _layers_open()
+    _row_click(_top_row(app, before))
+    clicked = _layers_state("r5-click")
+    _person_gate(); do_key("down", []); time.sleep(0.6)
+    down = _layers_state("r5-down")
+    _person_gate(); do_key("up", []); time.sleep(0.6)
+    return _plan.layers_r5_verdict(before, clicked, down, _layers_state("r5-up"))
+
+def _layers_r6():
+    app, before = _layers_open()
+    _row_click(_top_row(app, before))
+    clicked = _layers_state("r6-click")
+    _person_gate(); do_key("a", ["cmd"]); time.sleep(0.6)
+    return _plan.layers_r6_verdict(before, clicked, _layers_state("r6-after"))
+
+def _renaming(tag):
+    return _fifo_json("state {out} panel.layers.renaming_element", tag)
+
+def _type_key(ch):
+    _person_gate()
+    keyev(KEYCODE[ch], True); time.sleep(0.05); keyev(KEYCODE[ch], False); time.sleep(0.8)
+
+R7_TYPED = "x"
+
+def _layers_r7():
+    app, before = _layers_open()
+    x, y = _row_point(_top_row(app, before))
+    _person_gate(); _hover(x, y)
+    for n in (1, 2):  # a real double-click: the second press carries click state 2
+        for t in (Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp):
+            ev = Quartz.CGEventCreateMouseEvent(None, t, (x, y), Quartz.kCGMouseButtonLeft)
+            Quartz.CGEventSetIntegerValueField(ev, Quartz.kCGMouseEventClickState, n)
+            _LAST_MINE[0] = time.time()
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev); time.sleep(0.04)
+    time.sleep(0.8)
+    dbl = _renaming("r7-dbl")
+    _type_key(R7_TYPED)
+    _type_key("escape")
+    dbl_esc = _renaming("r7-dbl-esc")
+    dbl_names = [n for n, _ in _layers_state("r7-dbl-names")["layers"]]
+    _row_click(_layer_row(_layers_rows(app), before["layers"][0][0]))
+    _type_key("return")
+    enter = _renaming("r7-enter")
+    _type_key(R7_TYPED)
+    _type_key("return")
+    enter_ret = _renaming("r7-enter-ret")
+    enter_names = [n for n, _ in _layers_state("r7-enter-names")["layers"]]
+    return _plan.layers_r7_verdict(before, R7_TYPED, dbl, dbl_esc, dbl_names, enter, enter_ret, enter_names)
+
 def do_layers():
     """One LAYERS line. Refuses, as `dock` does, on a claim, a locked or a busy console."""
     global _plan
@@ -1202,7 +1255,7 @@ def do_layers():
     if busy:
         print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s)"); print("LAYERS NOT RUN")
         return 3
-    run = {"R1": _layers_r1, "R4": _layers_r4}
+    run = {"R1": _layers_r1, "R4": _layers_r4, "R5": _layers_r5, "R6": _layers_r6, "R7": _layers_r7}
     cases = []
     for case in _plan.LAYERS_CASES:
         proc = None
