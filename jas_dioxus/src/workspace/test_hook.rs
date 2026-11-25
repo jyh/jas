@@ -18,6 +18,10 @@
 //!                                  layout, byte for byte: the dock check
 //!                                  (`web_l2_driver.py --dock`) reads where a
 //!                                  dragged panel was anchored
+//!   state(name)         -> String  one panel-scope value as
+//!                                  `{"panel.<kind>.<key>": value}`, the Mac
+//!                                  FIFO `state` reply's form, or
+//!                                  `{"refused": why}` (the layers check)
 //!
 //! It is installed ONLY when the page's query carries `jas_test=1`. Without
 //! the flag `window.__jasTest` does not exist, so the public demo exposes
@@ -100,6 +104,37 @@ pub(crate) fn read(st: &AppState) -> String {
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // called by the wasm binding
 pub(crate) fn layout(st: &AppState) -> String {
     super::test_json::workspace_to_test_json(&st.workspace_layout)
+}
+
+/// `state`: one panel-scope value, as the panel's YAML expressions read it
+/// (`panel_menu_ctx`: declared defaults, then the stored table, then the
+/// typed slots), in the Mac FIFO `state` verb's reply form
+/// `{"panel.<kind>.<key>": value}`. `<kind>` is a short kind (`layers`) or a
+/// content id (`layers_panel_content`). A name it cannot resolve answers
+/// `{"refused": "<why>"}`, naming what was missing, never a default.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // called by the wasm binding
+pub(crate) fn state(st: &AppState, name: &str) -> String {
+    let refuse = |why: String| serde_json::json!({ "refused": why }).to_string();
+    let parts: Vec<&str> = name.split('.').collect();
+    if parts.len() != 3 || parts[0] != "panel" || parts[1].is_empty() || parts[2].is_empty() {
+        return refuse(format!("{name:?} is not panel.<kind>.<key>"));
+    }
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return refuse("the compiled workspace did not load".into());
+    };
+    let long = format!("{}_panel_content", parts[1]);
+    let content_id = if ws.panel(parts[1]).is_some() {
+        parts[1].to_string()
+    } else if ws.panel(&long).is_some() {
+        long
+    } else {
+        return refuse(format!("no panel {:?} (neither a content id nor a short kind)", parts[1]));
+    };
+    let ctx = crate::panels::panel_menu::panel_menu_ctx(&content_id, st);
+    match ctx.get("panel").and_then(|p| p.get(parts[2])) {
+        Some(v) => serde_json::json!({ name: v }).to_string(),
+        None => refuse(format!("panel {content_id:?} has no key {:?}", parts[2])),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -185,6 +220,14 @@ mod wasm_api {
                 app.try_borrow().map(|st| layout(&st)).unwrap_or_default()
             });
             set(&obj, "layout", cb.as_ref());
+            cb.forget();
+        }
+        {
+            let app = app.clone();
+            let cb = Closure::<dyn Fn(String) -> String>::new(move |name: String| {
+                app.try_borrow().map(|st| state(&st, &name)).unwrap_or_default()
+            });
+            set(&obj, "state", cb.as_ref());
             cb.forget();
         }
         set(&js_sys::global(), "__jasTest", &JsValue::from(obj));
@@ -279,6 +322,43 @@ mod tests {
         assert_eq!(view(&mut st, Some((2.0, 10.0, 20.0))).as_deref(), Some("view 2 10 20"));
         assert_eq!(view(&mut st, None).as_deref(), Some("view 2 10 20"));
         assert_eq!(view(&mut st, Some((1.0, 0.0, 0.0))).as_deref(), Some("view 1 0 0"));
+    }
+
+    /// Row 266: `state(name)` answers in the Mac FIFO `state` verb's form,
+    /// `{"panel.<kind>.<key>": value}`, so `mac_l2_plan.layers_reduce` reads
+    /// both channels' replies by one law.
+    #[test]
+    fn state_reads_a_layers_key_in_the_mac_reply_form() {
+        let mut st = AppState::new();
+        open(&mut st, FIXTURE, "three_rects.svg");
+        st.layers_panel_selection = vec![vec![1], vec![1, 0]];
+        st.layers_renaming = Some(vec![0]);
+        let v = |s: String| serde_json::from_str::<serde_json::Value>(&s).expect("state answers JSON");
+        assert_eq!(v(state(&st, "panel.layers.layers_panel_selection")),
+                   serde_json::json!({"panel.layers.layers_panel_selection": [{"__path__": [1]}, {"__path__": [1, 0]}]}));
+        assert_eq!(v(state(&st, "panel.layers.renaming_element")),
+                   serde_json::json!({"panel.layers.renaming_element": [0]}),
+                   "the plain list, as the Mac stores it after row 265");
+        st.layers_renaming = None;
+        assert_eq!(v(state(&st, "panel.layers.renaming_element")),
+                   serde_json::json!({"panel.layers.renaming_element": null}),
+                   "a closed rename reads null, a value, never a refusal");
+        assert_eq!(v(state(&st, "panel.layers_panel_content.renaming_element")),
+                   serde_json::json!({"panel.layers_panel_content.renaming_element": null}),
+                   "the content id names the same scope as its short kind");
+    }
+
+    #[test]
+    fn state_refuses_a_name_it_cannot_resolve_by_name() {
+        let st = AppState::new();
+        let refused = |name: &str| {
+            let r: serde_json::Value = serde_json::from_str(&state(&st, name)).expect("state answers JSON");
+            r.get("refused").and_then(|v| v.as_str()).map(str::to_string)
+                .unwrap_or_else(|| panic!("{name} was not refused: {r}"))
+        };
+        assert!(refused("layers.renaming_element").contains("panel.<kind>.<key>"), "malformed");
+        assert!(refused("panel.nosuch.key").contains("nosuch"), "an unknown panel");
+        assert!(refused("panel.layers.nosuch_key").contains("nosuch_key"), "an absent key");
     }
 
     #[test]

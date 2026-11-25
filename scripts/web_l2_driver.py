@@ -668,13 +668,170 @@ def run_dock_drag(page, kind, edge, via, pv):
         return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
 
 
+# ── --layers: the Mac harness's `layers` check (rows 256/264) on the web
+# channel (row 266), by the SAME verdicts (mac_l2_plan.layers_*). The app is
+# read by window.__jasTest.read() and .state(), whose reply is the Mac FIFO
+# `state` verb's form; the open row menu by #lp_row_menu and each item's
+# data-enabled; rows by renderer.rs's `lp_row_<path joined by _>`. Each case
+# gets a fresh page, as each dock case does.
+def menu_reply(items):
+    """[(text, data-enabled)] read from #lp_row_menu's children -> the Mac
+    FIFO `menu` reply's form. A child with no text and no data-enabled is a
+    separator and is dropped."""
+    menu = [{"title": t, "enabled": e == "true"} for t, e in items if t or e is not None]
+    return {"open": bool(menu), "menu": menu}
+
+
+def row_dom_id(path):
+    return "lp_row_" + "_".join(str(i) for i in path)
+
+
+def _web_state(page, name):
+    return json.loads(page.evaluate("n => window.__jasTest.state(n)", name) or "null")
+
+
+def _web_layers(page):
+    return _plan.layers_reduce(json.loads(page.evaluate("() => window.__jasTest.read()")),
+                               _web_state(page, "panel.layers.layers_panel_selection"))
+
+
+def _web_row(page, path):
+    loc = page.locator("#" + row_dom_id(path))
+    if loc.count() != 1:
+        raise _plan.Refused(f"{loc.count()} elements carry id {row_dom_id(path)!r}")
+    loc.scroll_into_view_if_needed()
+    return loc
+
+
+HIT_JS = """el => { const b = el.getBoundingClientRect(); const x = b.x + b.width / 2, y = b.y + b.height / 2;
+  const h = document.elementFromPoint(x, y);
+  return `box=${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)}x${Math.round(b.height)} vh=${innerHeight} `
+    + `under=${h ? h.tagName.toLowerCase() + (h.id ? '#' + h.id : '') + (el.contains(h) ? '(inside)' : '(OTHER)') : 'none'}`; }"""
+
+
+def _act(label, loc, how="click", **kw):
+    """One labelled pointer act with a short timeout; a failure names the act
+    and what lies under its point, so a red says which step and why."""
+    try:
+        getattr(loc, how)(timeout=5000, **kw)
+    except Exception as e:
+        try:
+            where = loc.evaluate(HIT_JS)
+        except Exception:
+            where = "unreadable"
+        raise _plan.Refused(f"{label}: {type(e).__name__} ({where})")
+
+
+def _web_layers_open(page):
+    page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+    if not page.evaluate("() => typeof window.__jasTest.state === 'function'"):
+        raise _plan.Refused("window.__jasTest has no state()")
+    svg = open(os.path.join(REPO, _plan.LAYERS_FIXTURE), encoding="utf-8").read()
+    if not page.evaluate("([s, n]) => window.__jasTest.open(s, n)", [svg, os.path.basename(_plan.LAYERS_FIXTURE)]):
+        raise _plan.Refused("window.__jasTest.open returned false")
+    page.wait_for_timeout(300)
+    tab = page.locator("#layers_panel_content_tab")
+    if tab.count() != 1:
+        raise _plan.Refused(f"{tab.count()} elements carry id 'layers_panel_content_tab'")
+    tab.scroll_into_view_if_needed()
+    _act("show the Layers tab", tab)
+    page.wait_for_timeout(300)
+    return _web_layers(page)
+
+
+def _web_key(page, key):
+    page.keyboard.press(key)
+    page.wait_for_timeout(300)
+
+
+def _web_r1(page, before):
+    _act("R1 click the top layer", _web_row(page, [len(before["layers"]) - 1]))
+    _act("R1 right-click the bottom layer's shape", _web_row(page, [0, 0]), button="right")
+    page.wait_for_timeout(300)
+    items = page.locator("#lp_row_menu > div")
+    reply = menu_reply([(items.nth(i).inner_text().strip(), items.nth(i).get_attribute("data-enabled"))
+                        for i in range(items.count())])
+    dup = page.locator("#lp_row_menu > div[data-enabled='true']", has_text="Duplicate")
+    if dup.count() == 1:
+        _act("R1 choose Duplicate", dup)
+    else:
+        _web_key(page, "Escape")
+    page.wait_for_timeout(300)
+    return _plan.layers_r1_verdict(before, reply, _web_layers(page), (0, 0))
+
+
+def _web_r4(page, before):
+    n = len(before["layers"])
+    _act("R4 click the top layer's shape", _web_row(page, [n - 1, 0]))
+    _web_key(page, "Delete")
+    control = _web_layers(page)
+    if control["layers"][-1] != (before["layers"][-1][0], before["layers"][-1][1][1:]):
+        return _plan.layers_r4_verdict(before, control, control, control)
+    _web_key(page, "ControlOrMeta+z")
+    _act("R4 click the top layer", _web_row(page, [n - 1]))
+    for i in reversed(range(n - 1)):
+        _act(f"R4 add layer {i}", _web_row(page, [i]), modifiers=["ControlOrMeta"])
+    selected = _web_layers(page)
+    _web_key(page, "Delete")
+    return _plan.layers_r4_verdict(before, control, selected, _web_layers(page))
+
+
+def _web_r5(page, before):
+    _act("R5 click the top layer", _web_row(page, [len(before["layers"]) - 1]))
+    clicked = _web_layers(page)
+    _web_key(page, "ArrowDown")
+    down = _web_layers(page)
+    _web_key(page, "ArrowUp")
+    return _plan.layers_r5_verdict(before, clicked, down, _web_layers(page))
+
+
+def _web_r6(page, before):
+    _act("R6 click the top layer", _web_row(page, [len(before["layers"]) - 1]))
+    clicked = _web_layers(page)
+    _web_key(page, "ControlOrMeta+a")
+    return _plan.layers_r6_verdict(before, clicked, _web_layers(page))
+
+
+def _web_r7(page, before):
+    typed = "x"
+    ren = lambda: _web_state(page, "panel.layers.renaming_element")
+    names = lambda: [n for n, _ in _web_layers(page)["layers"]]
+    _act("R7 double-click the top layer", _web_row(page, [len(before["layers"]) - 1]), how="dblclick")
+    page.wait_for_timeout(300)
+    dbl = ren()
+    _web_key(page, typed)
+    _web_key(page, "Escape")
+    dbl_esc, dbl_names = ren(), names()
+    _act("R7 click the bottom layer", _web_row(page, [0]))
+    _web_key(page, "Enter")
+    enter = ren()
+    _web_key(page, typed)
+    _web_key(page, "Enter")
+    return _plan.layers_r7_verdict(before, typed, dbl, dbl_esc, dbl_names, enter, ren(), names())
+
+
+WEB_LAYERS_RUN = {"R1": _web_r1, "R4": _web_r4, "R5": _web_r5, "R6": _web_r6, "R7": _web_r7}
+
+
+def run_layers_case(br, case):
+    ctx, page = br.page(True)
+    try:
+        return WEB_LAYERS_RUN[case](page, _web_layers_open(page))
+    except _plan.Refused as e:
+        return "REFUSED", str(e)
+    except Exception as e:
+        return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+    finally:
+        ctx.close()
+
+
 def run(args):
     menubar = _plan.load_menubar()
     menu_ids = menu_ids_by_path(menubar)
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = fit = None
+    dock = dock_cases = fit = layers = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -704,6 +861,11 @@ def run(args):
             dock = dock_summary(dock_cases)
         if args.fit:
             fit = fit_line(run_fit(br)) if not not_run else "FIT NOT RUN (" + not_run + ")"
+        if args.layers:
+            layer_cases = [] if not_run else [(c,) + run_layers_case(br, c) for c in _plan.LAYERS_CASES]
+            for c, st, d in layer_cases:
+                lines.append(f"{st} layers {c}" + (f" -- {d}" if d else ""))
+            layers = _plan.layers_line(layer_cases)
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -712,6 +874,8 @@ def run(args):
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
         body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+    if layers is not None:
+        body.append(layers + " (the --layers check: the Mac harness's `layers` cases on the web, rows 256/264/266)")
     if fit is not None:
         body.append(fit + " (the --fit check: row 66's live arm; the dock's tab bars and sideways scroll under overlay and classic 16-px scrollbars)")
     body += lines
@@ -748,6 +912,17 @@ def self_test():
     def check(cond, what):
         if not cond:
             fails.append(what)
+
+    # The layers check (row 266): the web's open row menu, reduced to the Mac
+    # FIFO `menu` reply's form, which mac_l2_plan.layers_r1_verdict reads.
+    check(menu_reply([("Options for Layer...", "false"), ("Duplicate", "true")]) ==
+          {"open": True, "menu": [{"title": "Options for Layer...", "enabled": False},
+                                  {"title": "Duplicate", "enabled": True}]},
+          "menu_reply keeps order, titles and enabled")
+    check(menu_reply([]) == {"open": False, "menu": []}, "no items read is a closed menu, never an open empty one")
+    check(menu_reply([("", None)])["menu"] == [], "a separator (no text, no data-enabled) is dropped")
+    check(row_dom_id([1, 0]) == "lp_row_1_0" and row_dom_id([0]) == "lp_row_0",
+          "the row id is renderer.rs's lp_row_<path joined by _>")
 
     menubar = _plan.load_menubar()
     paths = script_paths()
@@ -945,6 +1120,8 @@ def main(argv):
                     help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
     ap.add_argument("--fit", action="store_true",
                     help="also read the dock's fit under overlay and classic scrollbars (row 66)")
+    ap.add_argument("--layers", action="store_true",
+                    help="also run the Layers tree cases R1 R4-R7 on the shared verdicts (row 266)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)
