@@ -2091,7 +2091,9 @@ fn patch_ctx_for_input(
 ) -> serde_json::Value {
     let mut cs = render_ctx.clone();
     if let serde_json::Value::Object(root) = &mut cs {
-        if let Some(serde_json::Value::Object(p)) = root.get_mut("panel") {
+        // An empty field is a computed bind (commit_computed_bind): there is
+        // no panel key to patch, only `event.value`.
+        if let (false, Some(serde_json::Value::Object(p))) = (field.is_empty(), root.get_mut("panel")) {
             p.insert(field.to_string(), committed.clone());
         }
         root.insert("event".into(), serde_json::json!({ "value": committed }));
@@ -6059,7 +6061,22 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 revision += 1;
                             });
                         }
-                        BindTarget::None => {}
+                        BindTarget::None => {
+                            // A computed bind: no write-back, but the declared
+                            // behavior runs (commit_computed_bind, row 268).
+                            let v = new_val.clone();
+                            let app = app.clone();
+                            let ctx_snapshot = ctx_snapshot.clone();
+                            let el_for_commit = el_for_commit.clone();
+                            let mut revision = revision;
+                            spawn(async move {
+                                if !el_for_commit.is_null() {
+                                    let mut st = app.borrow_mut();
+                                    commit_computed_bind(&el_for_commit, &v, &ctx_snapshot, &mut st);
+                                }
+                                revision += 1;
+                            });
+                        }
                     }
                 },
             }
@@ -6069,6 +6086,33 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             }
         }
     }
+}
+
+/// A commit on a widget whose `bind.value` is a COMPUTED expression (one that
+/// names no `panel.`/`dialog.` field, `BindTarget::None`): nothing can be
+/// written back, but the widget's declared `commit`/`change` behavior must
+/// still run, with `event.value` the committed value. Row 268: the Gradient
+/// Location combo's bind became `if panel.selected_midpoint_index >= 0 then …`
+/// (row 198) and the web dropped its behavior with the write. A number parses
+/// as a number, as the panel arm's does.
+fn commit_computed_bind(
+    el: &serde_json::Value,
+    raw: &str,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    if !declares_commit_behavior(el) {
+        return;
+    }
+    let committed = match raw.parse::<f64>() {
+        Ok(n) => serde_json::json!(n),
+        Err(_) => match raw {
+            "true" => serde_json::json!(true),
+            "false" => serde_json::json!(false),
+            _ => serde_json::json!(raw),
+        },
+    };
+    run_input_commit_behavior(el, "", &committed, render_ctx, st);
 }
 
 /// A `combo_box`'s presets as `<datalist>` entries, read by
@@ -9796,6 +9840,32 @@ mod tests {
     /// Row 117: the web's Layers tree is `render_tree_view`, never the generic
     /// foreach expansion, although `lp_tree` carries `foreach` + `do` for the
     /// plan. Read from the shipped workspace, so a re-typed widget reds this.
+    #[test]
+    fn a_combo_whose_bind_is_computed_still_runs_its_declared_change() {
+        // Row 268: the Gradient Location combo's bind became an `if … then …`
+        // expression (row 198), which names no panel field, so the web's
+        // onchange took `BindTarget::None => {}` and dropped the declared
+        // `change` behavior with it: gradient.stop_location failed on every
+        // web level-2 run from 11-21 08:55Z. The behavior must run with
+        // `event.value` the committed value.
+        let el = serde_json::json!({
+            "type": "combo_box",
+            "bind": { "value": "if panel.selected_midpoint_index >= 0 then 1 else 0" },
+            "behavior": [{ "event": "change",
+                           "effects": [{ "set": { "gradient_stop_picking": "event.value" } }] }]
+        });
+        assert!(matches!(classify_bind(el["bind"]["value"].as_str().unwrap()), BindTarget::None),
+                "the precondition: a computed bind names no field");
+        let mut st = crate::workspace::app_state::AppState::new();
+        assert!(!st.gradient_panel.picking, "positive control: the key starts false");
+        let ctx = serde_json::json!({ "panel": { "selected_midpoint_index": -1 } });
+        commit_computed_bind(&el, "true", &ctx, &mut st);
+        assert!(st.gradient_panel.picking, "the declared change behavior ran with event.value");
+        // A computed bind with NO declared behavior is a no-op, never a panic.
+        let bare = serde_json::json!({ "type": "combo_box", "bind": { "value": "1 + 1" } });
+        commit_computed_bind(&bare, "5", &ctx, &mut st);
+    }
+
     #[test]
     fn a_tree_view_with_a_foreach_is_the_native_tree_on_the_web() {
         let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
