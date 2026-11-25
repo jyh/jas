@@ -4242,6 +4242,17 @@ struct TreeViewContent: View {
                         performDeleteSelection()
                         return nil
                     }
+                    // The layers.yaml keys (arrows, F2, Enter, Escape, ⌘A): a
+                    // click gives the tree no SwiftUI focus, so `LayersTreeKeys`'
+                    // `onKeyPress` never runs after one (row 208, read live).
+                    // Sent here through the same table; consumed only when a
+                    // row takes it.
+                    if renamingPath == nil,
+                       let chord = layersTreeKeyChord(characters: evt.charactersIgnoringModifiers ?? "",
+                                                      flags: evt.modifierFlags),
+                       LayersPanel.treeKey(chord, model: model) {
+                        return nil
+                    }
                 }
                 return evt
             }
@@ -5097,6 +5108,19 @@ func gradientSliderKey(_ key: KeyEquivalent) -> String? {
 /// rows' tokens; ⌘ is `ctrl`, the command chord (`KeyMods.ctrl`'s rule).
 /// Delete/Backspace are NOT named: the tree's native monitor keeps them (see
 /// `TreeViewContent`).
+/// The same table for an `NSEvent`'s `charactersIgnoringModifiers` and
+/// modifier flags, so the tree's event monitor sends the keys a click on a row
+/// gives it (row 208: the click gives no SwiftUI focus, so `onKeyPress` never
+/// runs). AppKit's function-key characters are `KeyEquivalent`'s own values.
+func layersTreeKeyChord(characters: String, flags: NSEvent.ModifierFlags) -> KeyChord? {
+    guard let c = characters.first else { return nil }
+    var mods: EventModifiers = []
+    if flags.contains(.command) { mods.insert(.command) }
+    if flags.contains(.shift) { mods.insert(.shift) }
+    if flags.contains(.option) { mods.insert(.option) }
+    return layersTreeKeyChord(KeyEquivalent(c), mods)
+}
+
 func layersTreeKeyChord(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyChord? {
     let name: String
     switch key {
