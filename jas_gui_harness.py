@@ -39,6 +39,7 @@ Verbs:
                    refused by name and left out; the line is scope=partial; row 252)
   dock             (the dock check: three tab drags, one DOCK line; needs JAS_APP)
   dock --groups    (sheet 2's three drops inside the right dock, one DOCKGROUPS line; row 255)
+  layers           (row 208 R1/R4 through the Layers tree, one LAYERS line; row 256)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
@@ -998,12 +999,249 @@ def do_dock_groups():
     print(line)
     return 0 if line.startswith("DOCKGROUPS ") and not line.startswith(("DOCKGROUPS RED", "DOCKGROUPS NOT")) else 1
 
+# ── `layers`: row 208's R1 and R4 through the Layers tree, one LAYERS line
+# (row 256). The method is the 11-24 slot's (slot-1124g/v4b on the Mac test
+# box, both A), and the verdicts, the cases and the fixture are mac_l2_plan's
+# (layers_*), which derive what they expect from the document read before
+# each act. Each case gets a fresh app and a reset workspace, as `dock
+# --groups` does. Between acts the driver stops at once on a person's input
+# (an HID event later than its own last one) as well as on the owner's claim.
+def _person_gate():
+    _claim_gate()
+    idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType)
+    mine = _LAST_MINE[0]
+    if mine is not None and idle < (time.time() - mine) - 1.0:
+        raise _plan.Refused(f"a person's input {idle:.1f} s ago, after the driver's last event")
+
+def _fifo_json(cmd, tag):
+    """Send `cmd` with {out} replaced by a fresh file and return the JSON the
+    app writes there; a missing or unparseable reply refuses by name."""
+    out = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"jas-l2-layers-{tag}.json")
+    if os.path.exists(out):
+        os.remove(out)
+    _fifo(cmd.format(out=out))
+    for _ in range(40):
+        if os.path.exists(out):
+            try:
+                return _json.load(open(out, encoding="utf-8"))
+            except ValueError:
+                pass  # still being written
+        time.sleep(0.1)
+    raise _plan.Refused(f"the app wrote no reply to FIFO `{cmd.split()[0]}` within 4 s")
+
+def _layers_state(tag):
+    return _plan.layers_reduce(_fifo_json("read {out}", tag + "-doc"),
+                               _fifo_json("state {out} panel.layers.layers_panel_selection", tag + "-psel"))
+
+def _layers_rows(app):
+    """Every AX element under the Layers panel that carries text, with its
+    frame, top to bottom (the panel lists the TOP layer first)."""
+    roots = _by_id(app, "layers_panel_content")
+    if len(roots) != 1:
+        raise _plan.Refused(f"{len(roots)} elements carry 'layers_panel_content'")
+    out = []
+    for el in _find_all(roots[0], lambda e: True, limit=5000):
+        txt = " ".join(str(_attr(el, a)) for a in ("AXTitle", "AXValue", "AXDescription") if _attr(el, a) is not None)
+        if not txt:
+            continue
+        try:
+            f = _frame(el)
+        except _plan.Refused:
+            continue
+        out.append((txt, f))
+    return sorted(out, key=lambda r: r[1][1])
+
+def _row_point(f):
+    x, y, w, h = f
+    return x + min(w / 2, 40), y + h / 2
+
+def _layer_row(rows, name):
+    hits = [f for t, f in rows if name.lower() in t.lower()]
+    if not hits:
+        raise _plan.Refused(f"no Layers row reads {name!r}")
+    return hits[0]
+
+def _shape_row(rows, layer_name, child_type):
+    """The first row below `layer_name`'s row that names a shape of `child_type`."""
+    top = _layer_row(rows, layer_name)[1]
+    for t, f in rows:
+        if f[1] > top + 2 and (child_type.lower() in t.lower() or t.startswith("<")):
+            return f
+    raise _plan.Refused(f"no {child_type} row under {layer_name!r} in the Layers tree")
+
+def _hover(x, y):
+    mouse(Quartz.kCGEventMouseMoved, x - 6, y); time.sleep(0.1)
+    mouse(Quartz.kCGEventMouseMoved, x, y); time.sleep(0.4)
+
+def _row_click(f, cmd=False):
+    _person_gate()
+    x, y = _row_point(f)
+    _hover(x, y)
+    fl = Quartz.kCGEventFlagMaskCommand if cmd else 0
+    if cmd:
+        keyev(MODKEY["cmd"], True, fl); time.sleep(0.08)
+    mouse(Quartz.kCGEventLeftMouseDown, x, y, fl); time.sleep(0.05)
+    mouse(Quartz.kCGEventLeftMouseUp, x, y, fl); time.sleep(0.4)
+    if cmd:
+        keyev(MODKEY["cmd"], False); time.sleep(0.08)
+
+def _row_right_click(f):
+    _person_gate()
+    x, y = _row_point(f)
+    _hover(x, y)
+    for t in (Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp):
+        _LAST_MINE[0] = time.time()
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, t, (x, y), Quartz.kCGMouseButtonRight))
+        time.sleep(0.05)
+    time.sleep(0.8)
+
+def _layers_open():
+    """Reset the workspace, open the fixture, show the Layers tab and scroll
+    the dock until the layer rows sit inside the window (AX reports frames for
+    rows the window clips; slot 2, 11-23)."""
+    global WIN
+    _person_gate()
+    _fifo("action reset_workspace"); time.sleep(1.2)
+    _fifo("open " + os.path.join(os.path.dirname(os.path.abspath(__file__)), _plan.LAYERS_FIXTURE)); time.sleep(1.5)
+    app = _app_element()
+    tabs = _by_id(app, "layers_panel_content_tab")
+    if len(tabs) != 1:
+        raise _plan.Refused(f"{len(tabs)} elements carry 'layers_panel_content_tab'")
+    _person_gate()
+    _press(tabs[0]); time.sleep(1.0)
+    WIN = find_window()
+    if not WIN:
+        raise _plan.Refused(f"no window titled {TITLE!r}")
+    before = _layers_state("before")
+    names = [n for n, _ in before["layers"]]
+    limit = min(Quartz.CGDisplayBounds(Quartz.CGMainDisplayID()).size.height, WIN["y"] + WIN["h"]) - 8
+    anchor = _by_id(app, "align_panel_content_tab")
+    if len(anchor) != 1:
+        raise _plan.Refused(f"{len(anchor)} elements carry 'align_panel_content_tab' (the scroll point)")
+    ax, ay, _, _ = _frame(anchor[0])
+    sx, sy = ax + 40, min(ay + 200, limit / 2)
+
+    def bottom():
+        ys = [f[1] + f[3] for t, f in _layers_rows(app) if any(n in t for n in names) or t.startswith("<")]
+        return max(ys) if ys else None
+    b, step = bottom(), -5
+    for _ in range(14):
+        if b is not None and b < limit:
+            break
+        _person_gate()
+        _hover(sx, sy)
+        _LAST_MINE[0] = time.time()
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap,
+                           Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, step))
+        time.sleep(0.5)
+        nb = bottom()
+        if nb is not None and b is not None and nb >= b:
+            step = -step  # the wheel moved the wrong way (or not at all): flip once measured
+        b = nb
+    if b is None or b >= limit:
+        raise _plan.Refused(f"the Layers rows stay below the window ({b} >= {limit}) after scrolling")
+    return app, before
+
+def _layers_r1():
+    app, before = _layers_open()
+    first, last = before["layers"][0][0], before["layers"][-1][0]
+    kids = before["layers"][0][1]
+    if not kids:
+        raise _plan.Refused(f"the fixture's bottom layer {first!r} has no shape to right-click")
+    _row_click(_layer_row(_layers_rows(app), last))       # the selection the right-click must replace
+    rows = _layers_rows(app)
+    _row_right_click(_shape_row(rows, first, kids[0]))
+    menu = _fifo_json("menu {out}", "r1-menu")
+    items = _find_all(app, lambda e: _attr(e, "AXRole") == "AXMenuItem" and str(_attr(e, "AXTitle")) == "Duplicate",
+                      limit=20000)
+    _person_gate()
+    if items:
+        _press(items[0])
+    else:
+        do_key("escape", [])
+    time.sleep(0.8)
+    return _plan.layers_r1_verdict(before, menu, _layers_state("r1-after"), (0, 0))
+
+def _layers_r4():
+    app, before = _layers_open()
+    last, kids = before["layers"][-1]
+    first = before["layers"][0][0]
+    if not kids:
+        raise _plan.Refused(f"the fixture's top layer {last!r} has no shape for the control")
+    _row_click(_shape_row(_layers_rows(app), last, kids[0]))
+    _person_gate(); do_key("delete", []); time.sleep(0.6)
+    control = _layers_state("r4-control")
+    if control["layers"][-1] == (last, kids[1:]):
+        _person_gate(); do_key("z", ["cmd"]); time.sleep(0.6)
+        rows = _layers_rows(app)
+        for i, (name, _) in enumerate(reversed(before["layers"])):
+            _row_click(_layer_row(rows, name), cmd=i > 0)
+        selected = _layers_state("r4-selected")
+        _person_gate(); do_key("delete", []); time.sleep(0.8)
+        after = _layers_state("r4-after")
+    else:
+        selected = after = control  # the verdict reads NO KEY from the control alone
+    return _plan.layers_r4_verdict(before, control, selected, after)
+
+def do_layers():
+    """One LAYERS line. Refuses, as `dock` does, on a claim, a locked or a busy console."""
+    global _plan
+    import mac_l2_plan as _plan
+    problem = _plan.launch_env_problem(os.environ)
+    if problem or not os.environ.get("JAS_APP"):
+        print("REFUSED: " + (problem or "the layers cases need JAS_APP: each starts from a fresh app"))
+        print("LAYERS NOT RUN"); return 3
+    _claim_banner()
+    why = _claimed()
+    if why:
+        print("REFUSED: " + why); print("LAYERS NOT RUN"); return 3
+    if _screen_locked():
+        print("REFUSED: the screen is locked"); print("LAYERS NOT RUN"); return 3
+    busy, idle = _console_in_use()
+    if busy:
+        print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s)"); print("LAYERS NOT RUN")
+        return 3
+    run = {"R1": _layers_r1, "R4": _layers_r4}
+    cases = []
+    for case in _plan.LAYERS_CASES:
+        proc = None
+        try:
+            _claim_gate()
+            clear_mods()
+            proc = _launch()
+            status, detail = run[case]()
+        except _plan.Refused as e:
+            status, detail = "REFUSED", str(e)
+        except Exception as e:
+            status, detail = "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+        finally:
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                time.sleep(0.3)
+        cases.append((case, status, detail))
+        print(f"{status} {case}" + (f" -- {detail}" if detail else ""))
+        if status == "REFUSED" and detail.startswith(("a person's input", "the owner")):
+            break  # a person or the owner is at the box: stop at once, the line reads RED
+    clear_mods()
+    with open(_lastpost_file(), "w", encoding="utf-8", newline="") as f:
+        f.write(str(time.time()))
+    line = _plan.layers_line(cases)
+    print(line)
+    return 0 if line.startswith("LAYERS ") and not line.startswith(("LAYERS RED", "LAYERS NOT")) else 1
+
 if __name__=="__main__":
     v=sys.argv[1]
     if v=="dock" and sys.argv[2:3]==["--groups"]:
         sys.exit(do_dock_groups())
     if v=="dock":
         sys.exit(do_dock())
+    if v=="layers":
+        sys.exit(do_layers())
     if v=="activate":
         # Unminimize + frontmost WITHOUT clicking (title-bar clicks risk a
         # double-click-minimize). Does NOT require the window to be found.

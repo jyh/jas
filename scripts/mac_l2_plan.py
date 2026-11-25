@@ -894,7 +894,7 @@ LAYERS_FIXTURE = os.path.join("test_fixtures", "svg", "multi_layer.svg")
 
 
 def layers_reduce(doc, psel):
-    """The FIFO `read` document and `state … panel.layers.layers_panel_selection`
+    """The FIFO `read` document and `state ... panel.layers.layers_panel_selection`
     reply -> {"layers": [(name, [child types])], "psel": [path, ...]}."""
     if not isinstance(psel, dict) or "panel.layers.layers_panel_selection" not in psel:
         raise Refused(f"the panel selection was not read (state reply {psel!r})")
