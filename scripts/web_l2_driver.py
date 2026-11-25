@@ -703,6 +703,25 @@ def _web_row(page, path):
     return loc
 
 
+HIT_JS = """el => { const b = el.getBoundingClientRect(); const x = b.x + b.width / 2, y = b.y + b.height / 2;
+  const h = document.elementFromPoint(x, y);
+  return `box=${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.width)}x${Math.round(b.height)} vh=${innerHeight} `
+    + `under=${h ? h.tagName.toLowerCase() + (h.id ? '#' + h.id : '') + (el.contains(h) ? '(inside)' : '(OTHER)') : 'none'}`; }"""
+
+
+def _act(label, loc, how="click", **kw):
+    """One labelled pointer act with a short timeout; a failure names the act
+    and what lies under its point, so a red says which step and why."""
+    try:
+        getattr(loc, how)(timeout=5000, **kw)
+    except Exception as e:
+        try:
+            where = loc.evaluate(HIT_JS)
+        except Exception:
+            where = "unreadable"
+        raise _plan.Refused(f"{label}: {type(e).__name__} ({where})")
+
+
 def _web_layers_open(page):
     page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
     if not page.evaluate("() => typeof window.__jasTest.state === 'function'"):
@@ -715,7 +734,7 @@ def _web_layers_open(page):
     if tab.count() != 1:
         raise _plan.Refused(f"{tab.count()} elements carry id 'layers_panel_content_tab'")
     tab.scroll_into_view_if_needed()
-    tab.click()
+    _act("show the Layers tab", tab)
     page.wait_for_timeout(300)
     return _web_layers(page)
 
@@ -726,15 +745,15 @@ def _web_key(page, key):
 
 
 def _web_r1(page, before):
-    _web_row(page, [len(before["layers"]) - 1]).click()
-    _web_row(page, [0, 0]).click(button="right")
+    _act("R1 click the top layer", _web_row(page, [len(before["layers"]) - 1]))
+    _act("R1 right-click the bottom layer's shape", _web_row(page, [0, 0]), button="right")
     page.wait_for_timeout(300)
     items = page.locator("#lp_row_menu > div")
     reply = menu_reply([(items.nth(i).inner_text().strip(), items.nth(i).get_attribute("data-enabled"))
                         for i in range(items.count())])
     dup = page.locator("#lp_row_menu > div[data-enabled='true']", has_text="Duplicate")
     if dup.count() == 1:
-        dup.click()
+        _act("R1 choose Duplicate", dup)
     else:
         _web_key(page, "Escape")
     page.wait_for_timeout(300)
@@ -743,22 +762,22 @@ def _web_r1(page, before):
 
 def _web_r4(page, before):
     n = len(before["layers"])
-    _web_row(page, [n - 1, 0]).click()
+    _act("R4 click the top layer's shape", _web_row(page, [n - 1, 0]))
     _web_key(page, "Delete")
     control = _web_layers(page)
     if control["layers"][-1] != (before["layers"][-1][0], before["layers"][-1][1][1:]):
         return _plan.layers_r4_verdict(before, control, control, control)
     _web_key(page, "ControlOrMeta+z")
-    _web_row(page, [n - 1]).click()
+    _act("R4 click the top layer", _web_row(page, [n - 1]))
     for i in reversed(range(n - 1)):
-        _web_row(page, [i]).click(modifiers=["ControlOrMeta"])
+        _act(f"R4 add layer {i}", _web_row(page, [i]), modifiers=["ControlOrMeta"])
     selected = _web_layers(page)
     _web_key(page, "Delete")
     return _plan.layers_r4_verdict(before, control, selected, _web_layers(page))
 
 
 def _web_r5(page, before):
-    _web_row(page, [len(before["layers"]) - 1]).click()
+    _act("R5 click the top layer", _web_row(page, [len(before["layers"]) - 1]))
     clicked = _web_layers(page)
     _web_key(page, "ArrowDown")
     down = _web_layers(page)
@@ -767,7 +786,7 @@ def _web_r5(page, before):
 
 
 def _web_r6(page, before):
-    _web_row(page, [len(before["layers"]) - 1]).click()
+    _act("R6 click the top layer", _web_row(page, [len(before["layers"]) - 1]))
     clicked = _web_layers(page)
     _web_key(page, "ControlOrMeta+a")
     return _plan.layers_r6_verdict(before, clicked, _web_layers(page))
@@ -777,13 +796,13 @@ def _web_r7(page, before):
     typed = "x"
     ren = lambda: _web_state(page, "panel.layers.renaming_element")
     names = lambda: [n for n, _ in _web_layers(page)["layers"]]
-    _web_row(page, [len(before["layers"]) - 1]).dblclick()
+    _act("R7 double-click the top layer", _web_row(page, [len(before["layers"]) - 1]), how="dblclick")
     page.wait_for_timeout(300)
     dbl = ren()
     _web_key(page, typed)
     _web_key(page, "Escape")
     dbl_esc, dbl_names = ren(), names()
-    _web_row(page, [0]).click()
+    _act("R7 click the bottom layer", _web_row(page, [0]))
     _web_key(page, "Enter")
     enter = ren()
     _web_key(page, typed)
