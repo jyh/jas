@@ -889,7 +889,14 @@ def group_line(cases):
 #       enabled_when). Its CONTROL, run first: Delete on a selected shape row
 #       removes the shape, so a refusal is not a dead key (11-24: R4 read NO
 #       KEY before #1107).
-LAYERS_CASES = ("R1", "R4")
+#   R5  after a click on the top layer's row, Down selects the next row and Up
+#       comes back (#1108: the arrows were dead after a click).
+#   R6  after a click, cmd-A selects every row (#1108).
+#   R7  a double-click opens the row's rename and Escape cancels it; Enter on
+#       a clicked row opens its rename and typing then Return names it (#1109).
+#       Read by the store, `panel.layers.renaming_element`, which must hold the
+#       plain list (row 265), never by counting AX text fields.
+LAYERS_CASES = ("R1", "R4", "R5", "R6", "R7")
 LAYERS_FIXTURE = os.path.join("test_fixtures", "svg", "multi_layer.svg")
 
 
@@ -945,6 +952,70 @@ def layers_r4_verdict(before, control, selected, after):
         return "FAIL", f"Delete removed a layer: {n} -> {len(after['layers'])}"
     if after["layers"] != before["layers"]:
         return "FAIL", f"Delete changed the document: want {before['layers']}, read {after['layers']}"
+    return "PASS", ""
+
+
+def layers_visible_rows(before):
+    """The tree's rows, top to bottom, for a document with every layer
+    expanded: the TOP layer first, each layer's shapes under it."""
+    out = []
+    for i in reversed(range(len(before["layers"]))):
+        out.append([i])
+        out.extend([i, j] for j in reversed(range(len(before["layers"][i][1]))))
+    return out
+
+
+def layers_r5_verdict(before, clicked, down, up):
+    """R5 (#1108): after a click on the top layer's row, Down selects the next
+    row and Up comes back. Each argument is a reduced read."""
+    rows = layers_visible_rows(before)
+    if clicked["psel"] != [rows[0]]:
+        return "REFUSED", f"the click selected {clicked['psel']}, not the top row {[rows[0]]}; the arrows' start is unread"
+    if down["psel"] != [rows[1]]:
+        return "FAIL", ("Down moved nothing after a click" if down["psel"] == clicked["psel"] else "Down selected the wrong row") \
+            + f" (want {[rows[1]]}, read {down['psel']})"
+    if up["psel"] != [rows[0]]:
+        return "FAIL", f"Up did not come back (want {[rows[0]]}, read {up['psel']})"
+    return "PASS", ""
+
+
+def layers_r6_verdict(before, clicked, after):
+    """R6 (#1108): after a click, cmd-A selects every visible row."""
+    rows = layers_visible_rows(before)
+    if not clicked["psel"]:
+        return "REFUSED", "the click selected nothing; cmd-A's start is unread"
+    if sorted(after["psel"]) != sorted(rows):
+        return "FAIL", f"cmd-A selected {after['psel']}, want every row {rows}"
+    return "PASS", ""
+
+
+def layers_r7_verdict(before, typed, dbl, dbl_esc, dbl_names, enter, enter_ret, enter_names):
+    """R7 (#1109): a double-click on the top layer's row opens its rename and
+    Escape cancels it; Enter on the bottom layer's row (after a click) opens
+    its rename, and typing then Return names it. `dbl`/`dbl_esc`/`enter`/
+    `enter_ret` are `state ... panel.layers.renaming_element` replies; the names
+    are the top-level layer names read after each half."""
+    for what, r in (("double-click", dbl), ("Escape", dbl_esc), ("Enter", enter), ("Return", enter_ret)):
+        if not isinstance(r, dict) or "panel.layers.renaming_element" not in r:
+            return "REFUSED", f"the rename state after the {what} was not read ({r!r})"
+    key = "panel.layers.renaming_element"
+    names = [n for n, _ in before["layers"]]
+    top, bottom = [len(names) - 1], [0]
+    if dbl[key] is None:
+        return "FAIL", "the double-click opened no rename (renaming_element is null)"
+    if dbl[key] != top:
+        return "FAIL", f"the double-click stored renaming_element {dbl[key]!r}, want the plain list {top} (row 265)"
+    if dbl_esc[key] is not None:
+        return "FAIL", f"Escape left the rename open ({dbl_esc[key]!r})"
+    if dbl_names != names:
+        return "FAIL", f"Escape renamed a layer: {names} -> {dbl_names}"
+    if enter[key] != bottom:
+        return "FAIL", f"Enter stored renaming_element {enter[key]!r}, want the plain list {bottom}"
+    if enter_ret[key] is not None:
+        return "FAIL", f"Return left the rename open ({enter_ret[key]!r})"
+    want = [typed] + names[1:]
+    if enter_names != want:
+        return "FAIL", f"Return did not commit the typed name: want {want}, read {enter_names}"
     return "PASS", ""
 
 
@@ -1130,7 +1201,51 @@ def self_test():
           layers_line([("R1", "PASS", ""), ("R4", "FAIL", "x")]) == "LAYERS RED 1/2 (FAIL R4: x)")
     check("layers: a REFUSED is not a pass", layers_line([("R1", "PASS", ""), ("R4", "REFUSED", "y")]).startswith("LAYERS RED 1/2"))
     check("layers: no cases is NOT RUN, never a pass", layers_line([]) == "LAYERS NOT RUN")
-    check("layers: the cases are R1 then R4", LAYERS_CASES == ("R1", "R4"))
+    check("layers: the cases are R1, R4, then the keys after a click", LAYERS_CASES == ("R1", "R4", "R5", "R6", "R7"))
+    # R5-R7 (row 264): the keys #1108/#1109 fixed, each read in the 11-24 slot
+    # (slot-1124g/v4b: arrows.1.log is the PRE-fix reading, keys.log and
+    # rename4.log the fixed ones). The visible rows are derived from the
+    # document read before the act: the top layer first, each layer's shapes
+    # under it (one shape per layer in the fixture, so the order of a layer's
+    # own shapes is not exercised).
+    check("layers: the visible rows are top layer first, shapes under their layer",
+          layers_visible_rows(d0) == [[1], [1, 0], [0], [0, 0]])
+    p = lambda *ps: doc(L0, ps)
+    check("layers R5: the fixed reading ([1] -> Down [1,0] -> Up [1]) PASSES",
+          layers_r5_verdict(d0, p((1,)), p((1, 0)), p((1,))) == ("PASS", ""))
+    check("layers R5: the pre-#1108 reading (the arrows dead after a click) FAILS by name",
+          layers_r5_verdict(d0, p((1,)), p((1,)), p((1,))) == ("FAIL", "Down moved nothing after a click (want [[1, 0]], read [[1]])"))
+    check("layers R5: a click that selected no row is REFUSED (the arrows' start is unread)",
+          layers_r5_verdict(d0, p(), p((1, 0)), p((1,)))[0] == "REFUSED")
+    check("layers R5: Up must come back", layers_r5_verdict(d0, p((1,)), p((1, 0)), p((1, 0)))[0] == "FAIL")
+    check("layers R6: the fixed reading (every visible row) PASSES",
+          layers_r6_verdict(d0, p((1,)), p((1,), (1, 0), (0,), (0, 0))) == ("PASS", ""))
+    check("layers R6: a cmd-A that left the click's selection FAILS",
+          layers_r6_verdict(d0, p((1,)), p((1,)))[0] == "FAIL")
+    check("layers R6: order does not matter, membership does",
+          layers_r6_verdict(d0, p((1,)), p((0, 0), (0,), (1, 0), (1,)))[0] == "PASS"
+          and layers_r6_verdict(d0, p((1,)), p((1,), (1, 0), (0,)))[0] == "FAIL")
+    # R7 reads the rename by the STORE (`panel.layers.renaming_element`), never
+    # by counting AX text fields (11-24: 25 -> 25 discriminated nothing).
+    ren = lambda v: {"panel.layers.renaming_element": v}
+    names0 = ["Background", "Foreground"]
+    r7_ok = dict(dbl=ren([1]), dbl_esc=ren(None), dbl_names=names0,
+                 enter=ren([0]), enter_ret=ren(None), enter_names=["x", "Foreground"])
+    check("layers R7: the fixed reading PASSES (double-click + Escape cancels, Enter + x + Return names it x)",
+          layers_r7_verdict(d0, "x", **r7_ok) == ("PASS", ""))
+    check("layers R7: the double-click's __path__ marker FAILS (row 265: lp_name_edit compares the plain list)",
+          layers_r7_verdict(d0, "x", **dict(r7_ok, dbl=ren({"__path__": [1]})))[0] == "FAIL")
+    check("layers R7: a double-click that opened no rename FAILS by name",
+          layers_r7_verdict(d0, "x", **dict(r7_ok, dbl=ren(None))) == ("FAIL", "the double-click opened no rename (renaming_element is null)"))
+    check("layers R7: Escape that renamed FAILS",
+          layers_r7_verdict(d0, "x", **dict(r7_ok, dbl_names=["Background", "x"]))[0] == "FAIL")
+    check("layers R7: Escape that left the field open FAILS",
+          layers_r7_verdict(d0, "x", **dict(r7_ok, dbl_esc=ren([1])))[0] == "FAIL")
+    check("layers R7: Enter that opened nothing FAILS", layers_r7_verdict(d0, "x", **dict(r7_ok, enter=ren(None)))[0] == "FAIL")
+    check("layers R7: Return that did not commit the typed name FAILS",
+          layers_r7_verdict(d0, "x", **dict(r7_ok, enter_names=names0))[0] == "FAIL")
+    check("layers R7: an unread rename state is REFUSED, never a pass",
+          layers_r7_verdict(d0, "x", **dict(r7_ok, enter=None))[0] == "REFUSED")
     # The app persists its dock layout (UserDefaults `jas_layout:Workspace`), so a
     # fresh PROCESS is not a fresh STATE: the 11-23 nightly left gradient and
     # opacity appended to the dock, and the next script started from that.
