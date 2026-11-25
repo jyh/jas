@@ -874,6 +874,91 @@ def group_line(cases):
     return f"DOCKGROUPS RED {ok}/{len(cases)} ({bad})"
 
 
+# ── THE `layers` CHECK (row 256): row 208's R1 and R4, read through the Layers
+# tree with real input on the Mac test box (first read by hand in the 11-24
+# slot, both A). The driver opens test_fixtures/svg/multi_layer.svg (two
+# top-level layers, one shape each) in a fresh app and reads the document by
+# the FIFO `read` verb and the panel selection by `state`; the verdicts below
+# take those reads REDUCED by layers_reduce, and derive what they expect from
+# the read taken before the act, never from a typed layout.
+#   R1  a right-click on a row selects that row: right-click Background's
+#       shape row after selecting Foreground, choose Duplicate; Background
+#       gains one shape and no layer is added (layers.yaml row context_menu).
+#   R4  "a document always has at least one layer": with every top-level
+#       layer selected, Delete removes nothing (layers.yaml keyboard Delete,
+#       enabled_when). Its CONTROL, run first: Delete on a selected shape row
+#       removes the shape, so a refusal is not a dead key (11-24: R4 read NO
+#       KEY before #1107).
+LAYERS_CASES = ("R1", "R4")
+LAYERS_FIXTURE = os.path.join("test_fixtures", "svg", "multi_layer.svg")
+
+
+def layers_reduce(doc, psel):
+    """The FIFO `read` document and `state ... panel.layers.layers_panel_selection`
+    reply -> {"layers": [(name, [child types])], "psel": [path, ...]}."""
+    if not isinstance(psel, dict) or "panel.layers.layers_panel_selection" not in psel:
+        raise Refused(f"the panel selection was not read (state reply {psel!r})")
+    paths = [list(p["__path__"]) for p in psel["panel.layers.layers_panel_selection"]]
+    return {"layers": [(l.get("name"), [c.get("type") for c in l.get("children", [])]) for l in doc["layers"]],
+            "psel": paths}
+
+
+def layers_r1_verdict(before, menu, after, target):
+    """-> (status, detail). `target` is the shape row's path (Background's
+    first child); `menu` is the FIFO `menu` reply read with the menu open."""
+    items = {m.get("title"): m.get("enabled") for m in (menu or {}).get("menu", [])}
+    if not (menu or {}).get("open") or not items:
+        return "REFUSED", "no row menu was read open after the right-click"
+    if "Duplicate" not in items:
+        return "FAIL", f"the row menu has no Duplicate (it reads {sorted(items)})"
+    if not items["Duplicate"]:
+        return "FAIL", "the row menu's Duplicate is disabled"
+    li = target[0]
+    want = [(n, kids + [kids[target[1]]] if i == li else kids) for i, (n, kids) in enumerate(before["layers"])]
+    got = after["layers"]
+    if got == before["layers"]:
+        return "FAIL", "the document did not change (did Duplicate run?)"
+    if len(got) == len(before["layers"]) + 1:
+        return "FAIL", f"a LAYER was duplicated, so the right-click did not select the row (read {got})"
+    if got != want:
+        return "FAIL", f"want {want}, read {got}"
+    if after["psel"] != [list(target)]:
+        return "FAIL", f"the panel selection after is {after['psel']}, not the right-clicked row {list(target)}"
+    return "PASS", ""
+
+
+def layers_r4_verdict(before, control, selected, after):
+    """-> (status, detail). `control` is read after Delete on the LAST layer's
+    first shape row; `selected` just before the Delete with every top-level
+    layer selected (after the control was undone); `after` after that Delete."""
+    n = len(before["layers"])
+    if n < 2:
+        return "REFUSED", f"the fixture has {n} top-level layer(s); the refusal needs two or more to mean anything"
+    last, kids = before["layers"][-1]
+    if control["layers"][-1] != (last, kids[1:]):
+        return "FAIL", "NO KEY: Delete on a selected shape row removed nothing"
+    tops = sorted(p for p in selected["psel"] if len(p) == 1)
+    if tops != [[i] for i in range(n)] or selected["layers"] != before["layers"]:
+        return "REFUSED", (f"the selection before Delete is {selected['psel']}, not every top-level layer "
+                           "of the undone document; an empty one would pass vacuously")
+    if len(after["layers"]) != n:
+        return "FAIL", f"Delete removed a layer: {n} -> {len(after['layers'])}"
+    if after["layers"] != before["layers"]:
+        return "FAIL", f"Delete changed the document: want {before['layers']}, read {after['layers']}"
+    return "PASS", ""
+
+
+def layers_line(cases):
+    """cases: [(case, status, detail)] -> one line, the dock line's form."""
+    if not cases:
+        return "LAYERS NOT RUN"
+    ok = sum(1 for c in cases if c[1] == "PASS")
+    if ok == len(cases):
+        return f"LAYERS {ok}/{len(cases)}"
+    bad = "; ".join(f"{st} {c}: {d}" for c, st, d in cases if st != "PASS")
+    return f"LAYERS RED {ok}/{len(cases)} ({bad})"
+
+
 TITLE_BAR_MAX = 64.0  # points; a Mac title bar (with or without a toolbar strip) is under this
 
 
@@ -995,6 +1080,57 @@ def self_test():
     check("sheet 2: no cases is NOT RUN, never a pass", group_line([]) == "DOCKGROUPS NOT RUN")
     check("sheet 2: a missing tab frame refuses by name",
           refused(lambda: group_case_targets("grip_move", {k: v for k, v in fr.items() if not k.startswith("stroke")}), "stroke"))
+
+    # ── the `layers` check (row 256). Every fixture is a line the 11-24 slot
+    # read on the Mac test box (slot-1124g/v4b/slot.json, 208-R1 A, 208-R4 A),
+    # reduced by layers_reduce exactly as the driver reduces a live read.
+    def doc(layers, psel=()):
+        return layers_reduce({"layers": [{"name": n, "children": [{"type": t} for t in kids]} for n, kids in layers]},
+                             {"panel.layers.layers_panel_selection": [{"__path__": list(p)} for p in psel]})
+    L0 = [("Background", ["rect"]), ("Foreground", ["ellipse"])]
+    d0 = doc(L0)
+    check("layers: the reduction keeps names, child types and panel paths",
+          d0 == {"layers": [("Background", ["rect"]), ("Foreground", ["ellipse"])], "psel": []}
+          and doc(L0, [(0, 0)])["psel"] == [[0, 0]])
+    check("layers: an unread panel selection refuses by name",
+          refused(lambda: layers_reduce({"layers": []}, None), "panel selection"))
+    menu = {"menu": [{"enabled": False, "title": "Options for Layer..."}, {"enabled": True, "title": "Duplicate"},
+                     {"enabled": True, "title": "Delete Selection"}], "open": True}
+    r1_after = doc([("Background", ["rect", "rect"]), ("Foreground", ["ellipse"])], [(0, 0)])
+    check("layers R1: the slot's A reading PASSES", layers_r1_verdict(d0, menu, r1_after, (0, 0)) == ("PASS", ""))
+    st, why = layers_r1_verdict(d0, menu, doc([("Background", ["rect"]), ("Foreground", ["ellipse"]), ("Foreground", ["ellipse"])], [(1,)]), (0, 0))
+    check("layers R1: a duplicated LAYER (the right-click left the old selection) FAILS and says so",
+          st == "FAIL" and "did not select the row" in why)
+    check("layers R1: an unchanged document FAILS by name",
+          layers_r1_verdict(d0, menu, doc(L0, [(0, 0)]), (0, 0))[0] == "FAIL")
+    check("layers R1: no menu read is REFUSED, never a pass",
+          layers_r1_verdict(d0, {"menu": [], "open": False}, r1_after, (0, 0))[0] == "REFUSED")
+    check("layers R1: a disabled Duplicate is a FAIL naming it",
+          layers_r1_verdict(d0, {"menu": [{"enabled": False, "title": "Duplicate"}], "open": True}, r1_after, (0, 0))
+          == ("FAIL", "the row menu's Duplicate is disabled"))
+    check("layers R1: the selection after must be the right-clicked row",
+          layers_r1_verdict(d0, menu, doc([("Background", ["rect", "rect"]), ("Foreground", ["ellipse"])], [(1,)]), (0, 0))[0] == "FAIL")
+    # R4: the control (a shape row + Delete removes the shape) proves the key
+    # reaches the tree; only then does "every layer selected + Delete leaves the
+    # layers" mean the refusal, not a dead key (11-24: R4 read NO KEY first).
+    ctl = doc([("Background", ["rect"]), ("Foreground", [])])
+    both = doc(L0, [(0,), (1,)])
+    check("layers R4: the slot's A reading PASSES", layers_r4_verdict(d0, ctl, both, doc(L0, [(0,), (1,)])) == ("PASS", ""))
+    check("layers R4: a control that removed nothing is NO KEY, a FAIL",
+          layers_r4_verdict(d0, d0, both, doc(L0, [(0,), (1,)])) == ("FAIL", "NO KEY: Delete on a selected shape row removed nothing"))
+    check("layers R4: a selection that is not every top-level layer is REFUSED (an empty one would pass vacuously)",
+          layers_r4_verdict(d0, ctl, doc(L0, [(0,)]), doc(L0, [(0,)]))[0] == "REFUSED"
+          and layers_r4_verdict(d0, ctl, doc(L0), doc(L0))[0] == "REFUSED")
+    st, why = layers_r4_verdict(d0, ctl, both, doc([("Background", ["rect"])]))
+    check("layers R4: a deleted layer FAILS and names the count", st == "FAIL" and "2 -> 1" in why)
+    check("layers R4: the case needs two layers or more, else it cannot test the refusal",
+          layers_r4_verdict(doc([("Only", ["rect"])]), ctl, both, both)[0] == "REFUSED")
+    check("layers: the line counts PASSes", layers_line([("R1", "PASS", ""), ("R4", "PASS", "")]) == "LAYERS 2/2")
+    check("layers: a FAIL reddens the line and names the case",
+          layers_line([("R1", "PASS", ""), ("R4", "FAIL", "x")]) == "LAYERS RED 1/2 (FAIL R4: x)")
+    check("layers: a REFUSED is not a pass", layers_line([("R1", "PASS", ""), ("R4", "REFUSED", "y")]).startswith("LAYERS RED 1/2"))
+    check("layers: no cases is NOT RUN, never a pass", layers_line([]) == "LAYERS NOT RUN")
+    check("layers: the cases are R1 then R4", LAYERS_CASES == ("R1", "R4"))
     # The app persists its dock layout (UserDefaults `jas_layout:Workspace`), so a
     # fresh PROCESS is not a fresh STATE: the 11-23 nightly left gradient and
     # opacity appended to the dock, and the next script started from that.
