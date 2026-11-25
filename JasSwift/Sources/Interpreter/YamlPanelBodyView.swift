@@ -4223,6 +4223,13 @@ struct TreeViewContent: View {
                 if secondary, let row = hoveredRow {
                     LayersRowMenu.secondaryPress(row, model: model)
                 }
+                // Row 208 R4: a press on a row gives the tree keyboard focus
+                // (`.focusable()` takes none from a tap), and a press elsewhere
+                // takes it away.
+                let focus = LayersTreeFocus.afterEvent(evt.type, onRow: hoveredRow != nil,
+                                                       focused: treeFocused,
+                                                       renaming: renameFieldFocused)
+                if focus != treeFocused { treeFocused = focus }
                 if evt.type == .keyDown && treeFocused {
                     if evt.keyCode == 51 || evt.keyCode == 117 {
                         // 51 = Delete (backspace), 117 = Forward Delete
