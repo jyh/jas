@@ -9290,10 +9290,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         },
                         RowMenuEntry::Item { label, enabled: true, action, params } => {
                             let on_pick = do_action(action, params);
-                            rsx! { div { key: "{i}", style: "{item_style}", onclick: on_pick, "{label}" } }
+                            rsx! { div { key: "{i}", style: "{item_style}", "data-enabled": "true", onclick: on_pick, "{label}" } }
                         }
                         RowMenuEntry::Item { label, enabled: false, .. } => rsx! {
-                            div { key: "{i}", style: "{item_style_disabled}", "{label}" }
+                            div { key: "{i}", style: "{item_style_disabled}", "data-enabled": "false", "{label}" }
                         },
                     }).collect();
 
@@ -9317,7 +9317,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 });
                             },
                         }
+                        // `lp_row_menu` and each item's `data-enabled` are how the
+                        // web channel's layers check reads the open menu (row 266),
+                        // the twin of the Mac FIFO `menu` verb's reply.
                         div {
+                            id: "lp_row_menu",
                             style: "{menu_style}",
                             {menu_items.into_iter()}
                         }
