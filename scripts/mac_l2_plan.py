@@ -9,6 +9,7 @@ window lives here, so it runs (and self-tests) on any machine:
   plan(script, menubar)       the script as a list of acts, or a refusal by name
   doc_to_screen(...)          a document point as a screen point, from the view
                               the canvas reports and the canvas's screen frame
+  offscreen_refusal(...)      a refusal by name when a press point is on no display
   parse_view_report(text)     the canvas's accessibility value, `view z x y`
   menu_paths(menubar)         menu item id -> its title path in the Mac menubar
   set_aside_the_opens_artboard(got, want)
@@ -680,6 +681,25 @@ def doc_to_screen(view, frame_origin, x, y):
     z, ox, oy = view
     fx, fy = frame_origin
     return (fx + ox + x * z, fy + oy + y * z)
+
+
+def offscreen_refusal(what, x, y, displays):
+    """A refusal when the screen point (x, y) lies on no display, else None.
+
+    `displays` are (x, y, width, height) in the global top-left coordinates
+    AX frames and CGEvents use; each is half-open, so a display's right and
+    bottom edges are outside it. A real event posted off every display lands
+    nowhere, and the step after it then misreads the app (the Mac test box, 11-26: a menu
+    button at y=1210 on a 1080-high display, so no menu popped and the driver
+    reported "0 items titled ..."). No display reported is a refusal too,
+    never a pass."""
+    if not displays:
+        return f"{what} at ({x:.0f}, {y:.0f}): no display reported, so the press cannot be placed"
+    for dx, dy, dw, dh in displays:
+        if dx <= x < dx + dw and dy <= y < dy + dh:
+            return None
+    shown = ", ".join(f"{dw:.0f}x{dh:.0f} at ({dx:.0f}, {dy:.0f})" for dx, dy, dw, dh in displays)
+    return f"{what} at ({x:.0f}, {y:.0f}) is off every display ({shown}); a real press there lands nowhere"
 
 
 _AB_ID = re.compile(r"^[0-9a-z]{8}$")
@@ -1597,6 +1617,24 @@ def self_test():
     # dropped term gives a different answer for every one of them.
     check("doc to screen at the identity view", doc_to_screen((1, 0, 0), (100, 200), 36, 18) == (136, 218))
     check("doc to screen with zoom and pan", doc_to_screen((2, 5, -7), (100, 200), 36, 18) == (177, 229))
+    # A press aimed off every display lands nowhere, and what follows reads
+    # as a fact about the app ("0 items titled ..."). Measured on the Mac test box
+    # 11-26 (slot-1126b): the Artboards menu button at (1508, 1210) on a
+    # 1920x1080 display, and the app showed no AXMenu at all.
+    one = [(0, 0, 1920, 1080)]
+    check("a press inside the display is not refused", offscreen_refusal("menu button 'm'", 1508, 500, one) is None)
+    measured = offscreen_refusal("menu button 'artboards_panel_content_menu'", 1508, 1210, one)
+    check("the measured press below the display is refused by name",
+          measured is not None and "artboards_panel_content_menu" in measured and "(1508, 1210)" in measured and "1920x1080 at (0, 0)" in measured)
+    check("a display's right edge is outside it (half-open)", offscreen_refusal("p", 1920, 10, one) is not None)
+    check("a display's bottom edge is outside it (half-open)", offscreen_refusal("p", 10, 1080, one) is not None)
+    check("the origin corner is inside", offscreen_refusal("p", 0, 0, one) is None)
+    check("a negative coordinate is outside a display at the origin", offscreen_refusal("p", -1, 10, one) is not None)
+    two = [(0, 0, 1920, 1080), (0, 1080, 1920, 1080)]
+    check("a second display below covers the measured press", offscreen_refusal("p", 1508, 1210, two) is None)
+    check("a display at an offset is read at its offset", offscreen_refusal("p", 1508, 1210, [(1000, 1100, 800, 600)]) is None)
+    none = offscreen_refusal("p", 10, 10, [])
+    check("no display reported is a refusal by name, never a pass", none is not None and "no display" in none)
 
     ab = lambda i, n: '{"fill":"transparent","id":"%s","name":"%s","x":0.0}' % (i, n)
     rest = '"layers":[],"selection":[]}'

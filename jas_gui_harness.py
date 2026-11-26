@@ -126,6 +126,16 @@ def flags(mods):
 
 _LAST_MINE = [None]  # when this driver last posted an event (time.time())
 
+def _displays():
+    """Every active display's bounds, (x, y, w, h), in the global top-left
+    coordinates a CGEvent and an AX frame use."""
+    err, ids, n = Quartz.CGGetActiveDisplayList(16, None, None)
+    out = []
+    for d in (ids or [])[:n]:
+        b = Quartz.CGDisplayBounds(d)
+        out.append((b.origin.x, b.origin.y, b.size.width, b.size.height))
+    return out
+
 def mouse(etype, x, y, f=0):
     _LAST_MINE[0] = time.time()
     e=Quartz.CGEventCreateMouseEvent(None, etype, (x,y), Quartz.kCGMouseButtonLeft)
@@ -625,6 +635,9 @@ def _run_script(path, menubar, locked=False, pid=None):
             _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
             _, z = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
             sx, sy = p.x + z.width / 2, p.y + z.height / 2
+            off = _plan.offscreen_refusal(f"menu button {menu_id!r}", sx, sy, _displays())
+            if off:
+                raise _plan.Refused(off)
             mouse(Quartz.kCGEventMouseMoved, sx, sy); mouse(Quartz.kCGEventLeftMouseDown, sx, sy)
             time.sleep(0.05); mouse(Quartz.kCGEventLeftMouseUp, sx, sy)
             time.sleep(0.5)
@@ -656,6 +669,9 @@ def _run_script(path, menubar, locked=False, pid=None):
             _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
             _, z = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
             sx, sy = p.x + z.width / 2, p.y + z.height / 2
+            off = _plan.offscreen_refusal(f"slot {slot!r}", sx, sy, _displays())
+            if off:
+                raise _plan.Refused(off)
             mouse(Quartz.kCGEventMouseMoved, sx, sy); mouse(Quartz.kCGEventLeftMouseDown, sx, sy)
             time.sleep(hold_ms / 1000.0 if hold_ms else 0.05)
             mouse(Quartz.kCGEventLeftMouseUp, sx, sy)
