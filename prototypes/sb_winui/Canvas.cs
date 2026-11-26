@@ -2149,10 +2149,16 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case DialogEventCmd de:
                     if (ApplyDialogEvent(de)) { dirty = true; cause = "dialog"; }
+                    // SB_PROBE (jas 1006 A): a dialog event, OK included, lands on
+                    // the document as a panel step does, so it is read the same
+                    // way, run or refused (ProbeWire.Kinds).
+                    if (ProbePath is not null) { _probePending = true; }
                     break;
 
                 case DialogDismissCmd dd:
                     if (ApplyDialogDismiss(dd)) { dirty = true; cause = "dialog"; }
+                    // SB_PROBE (jas 1006 A): a dismiss restores a previewed document.
+                    if (ProbePath is not null) { _probePending = true; }
                     break;
 
                 case MenuActionCmd ma:
@@ -2165,6 +2171,9 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PanelMenuCmd pm:
                     if (ApplyPanelMenu(pm)) { dirty = true; cause = "panel-menu"; }
+                    // SB_PROBE (jas 1006 A): an item RUN, run or refused; a read
+                    // of the menu (Index < 0) moves nothing and is not probed.
+                    if (ProbePath is not null && pm.Index >= 0) { _probePending = true; }
                     break;
 
                 case RowMenuCmd rm:
@@ -2181,6 +2190,8 @@ internal sealed unsafe class Canvas : IDisposable
                     // It hashes nothing, so a step that moved the document
                     // asks this drain for a frame, as a person's click does.
                     if (ApplyPanelValueSynth(pv)) { dirty = true; cause = "panel"; }
+                    // SB_PROBE (jas 1006 A): it commits as a person's click does.
+                    if (ProbePath is not null) { _probePending = true; }
                     break;
             }
         }
