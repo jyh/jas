@@ -2196,10 +2196,10 @@ Test-Case 'is: an unknown key on a panel step is REFUSED by name, not dropped' {
     $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['zork'] = 1
     Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
 } "REFUSED: step 2 panel step key 'zork' is not a panel-step key"
-Test-Case 'is: a panel step key this driver does not deliver (at) is REFUSED by name, not dropped' {
-    $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['at'] = @(0, 3)
+Test-Case 'is: a panel step key this driver does not deliver (hover_ms) is REFUSED by name, not dropped' {
+    $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['hover_ms'] = 400
     Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
-} "REFUSED: step 2 panel step key 'at': this driver does not deliver it yet"
+} "REFUSED: step 2 panel step key 'hover_ms': this driver does not deliver it yet"
 Test-Case 'is: a press held (hold_ms) is REFUSED by name, not delivered as a click' {
     $j = New-SbFormScript @() | ConvertFrom-Json
     $j.steps[0] | Add-Member -NotePropertyName hold_ms -NotePropertyValue 400
@@ -2436,6 +2436,68 @@ Test-Case 'row join 2: a widget that also lies in ANOTHER row is REFUSED by name
     $s = @($eSurf[0], $eSurf[1], (New-SbRect 'surface [4,0]' 2559 785 342 36))
     Show-SbRowPick (Select-SbRowWidget -Surfaces $s -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye')
 } "REFUSED: the row's surface 'surface [3,1]' overlaps 'surface [4,0]': a widget's row cannot be told by its rect"
+
+# ROW F (jas STATUS-flask 1016/1018): `"at": [i, ...]` ON A PANEL STEP, a
+# widget inside a generic `foreach` repeat by each enclosing repeat's iteration
+# index, outermost first. The plan names each repeat it expands (`repeats`,
+# #1131): iteration k's widgets sit under `path + [k]`. A repeat of document
+# elements (`elements: true`, the Layers tree) is `row`'s, and `at` there is
+# refused, as both level-1 runners refuse it. The join to the widget is E's:
+# rect containment in the iteration's surface, with E's guards.
+$fAt = [ordered]@{ panel = 'artboards_panel_content'; widget = 'ap_options'; event = 'click'; at = @(1) }
+Test-Case 'is: a panel step with an at is carried, and its at shown' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($fAt)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json panels=artboards_panel_content/ap_options#[1]:click'
+Test-Case 'is: a step naming both row and at is REFUSED by name (one address per widget)' {
+    $p = [ordered]@{ panel = 'layers_panel_content'; widget = 'lp_eye'; event = 'click'; row = @(0); at = @(0) }
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
+} 'REFUSED: step 2 panel layers_panel_content/lp_eye names both row and at: a widget has one address'
+Test-Case 'is: an at on a commit (a text or pick step) is REFUSED by name' {
+    $p = [ordered]@{ panel = 'artboards_panel_content'; widget = 'ap_name'; event = 'commit'; value = 'x'; at = @(0) }
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
+} 'REFUSED: step 2 panel artboards_panel_content/ap_name at is delivered on a click only, as the level-1 runners deliver it'
+Test-Case 'is: an at that is not a non-empty list of non-negative integers is REFUSED by name' {
+    $p = [ordered]@{ panel = 'artboards_panel_content'; widget = 'ap_options'; event = 'click'; at = @(-1) }
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
+} 'REFUSED: step 2 panel artboards_panel_content/ap_options at must be a non-empty list of non-negative integers (an iteration index per enclosing repeat)'
+# The join, over a plan shaped as #1131 writes it.
+$fPlan = @{
+    leaves = @(
+        @{ id = 'ap_name'; path = @(0, 0, 1) }, @{ id = 'ap_options'; path = @(0, 0, 3) },
+        @{ id = 'ap_name'; path = @(0, 1, 1) }, @{ id = 'ap_options'; path = @(0, 1, 3) },
+        @{ id = 'ap_new'; path = @(1, 4) }, @{ id = 'lp_eye'; path = @(2, 0, 1) })
+    containers = @()
+    repeats = @(@{ path = @(0); id = 'ap_list'; rows = 2; elements = $false }, @{ path = @(2); id = 'lp_tree'; rows = 1; elements = $true })
+} | ConvertTo-Json -Depth 8
+function Show-SbPlanAt($r) { if ($r.Refusal) { "REFUSED: $($r.Refusal)" } else { "surface=$($r.Surface) repeat=$($r.Foreach) rows=$($r.Rows)" } }
+Test-Case 'at join: an iteration resolves to its surface under the repeat' {
+    (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(1) -Widget 'ap_options')) + ' | ' + (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(0) -Widget 'ap_name'))
+} 'surface=surface [0,1] repeat=[0] rows=2 | surface=surface [0,0] repeat=[0] rows=2'
+Test-Case 'at join: an index past the rows is REFUSED by name' {
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(2) -Widget 'ap_options')
+} "REFUSED: at [2] is past the rows: repeat [0] (ap_list) draws 2"
+Test-Case 'at join: a count of indices other than the enclosing repeats is REFUSED by name' {
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(0, 0) -Widget 'ap_options')
+} "REFUSED: at [0,0] names 2 indices and 'ap_options' sits in 1 repeat ([0] ap_list): name one per enclosing repeat, outermost first"
+Test-Case 'at join: a widget in no repeat (or a plan with no repeats key) is REFUSED by name' {
+    $none = ($fPlan | ConvertFrom-Json); $none.PSObject.Properties.Remove('repeats')
+    (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(0) -Widget 'ap_new')) + ' | ' + (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson ($none | ConvertTo-Json -Depth 8) -At @(0) -Widget 'ap_options'))
+} "REFUSED: 'ap_new' sits in no repeat the plan expands: at names an iteration of one | REFUSED: 'ap_options' sits in no repeat the plan expands: at names an iteration of one"
+Test-Case 'at join: a repeat of document elements is REFUSED by name (it is row''s)' {
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(0) -Widget 'lp_eye')
+} "REFUSED: repeat [2] (lp_tree) is a repeat of document elements: name the row by 'row', not 'at'"
+Test-Case 'at join: a widget the plan does not hold is REFUSED by name' {
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $fPlan -At @(0) -Widget 'zz')
+} "REFUSED: no 'zz' in the plan"
+Test-Case 'at join: nested repeats, outermost first' {
+    $n = @{ leaves = @(@{ id = 'cell'; path = @(0, 1, 2, 2, 0) }, @{ id = 'cell'; path = @(0, 1, 2, 0, 0) }, @{ id = 'cell'; path = @(0, 0, 2, 0, 0) })
+            containers = @()
+            repeats = @(@{ path = @(0); id = 'outer'; rows = 2; elements = $false }, @{ path = @(0, 0, 2); id = 'inner'; rows = 1; elements = $false }, @{ path = @(0, 1, 2); id = 'inner'; rows = 3; elements = $false }) } | ConvertTo-Json -Depth 8
+    (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $n -At @(1, 2) -Widget 'cell')) + ' | ' + (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $n -At @(0, 1) -Widget 'cell'))
+} 'surface=surface [0,1,2,2] repeat=[0,1,2] rows=3 | REFUSED: at [0,1] is past the rows: repeat [0,0,2] (inner) draws 1'
+Test-Case 'at join: a plan that does not parse is REFUSED by name' {
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson '{nope' -At @(0) -Widget 'ap_name')
+} 'REFUSED: the plan does not parse'
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))

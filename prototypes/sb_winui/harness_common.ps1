@@ -3615,7 +3615,7 @@ function Read-SbInputScript([string]$Json) {
     $stepKeys = @{
         pointer = @{ delivered = @('kind', 'x', 'y', 'dragging', 'shift', 'alt', 'ctrl', 'meta', 'mods'); later = @('hold_ms') }
         key     = @{ delivered = @('key', 'ctrl', 'shift', 'alt', 'meta'); later = @() }
-        panel   = @{ delivered = @('panel', 'widget', 'event', 'value', 'row'); later = @('at', 'shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
+        panel   = @{ delivered = @('panel', 'widget', 'event', 'value', 'row', 'at'); later = @('shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
         menu    = @{ delivered = @('menu'); later = @() }
         dialog  = @{ delivered = @('dialog', 'widget', 'event', 'value'); later = @() }
         read    = @{ delivered = @('read'); later = @('keys') }
@@ -3768,7 +3768,20 @@ function Read-SbInputScript([string]$Json) {
                 if (-not $ok) { return (& $no "step $i panel $tag row must be a non-empty list of non-negative integers (an element's document path)") }
                 $row = @($rv | ForEach-Object { [int]$_ })
             }
-            $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value; row = $row })
+            # ROW F: `at` names a widget in a generic foreach repeat by its
+            # iteration index per enclosing repeat, outermost first. One address
+            # per widget, and on a click only, as the level-1 runners deliver it.
+            $at = $null
+            if ($names -contains 'at') {
+                if ($null -ne $row) { return (& $no "step $i panel $tag names both row and at: a widget has one address") }
+                if ($ev -ne 'click') { return (& $no "step $i panel $tag at is delivered on a click only, as the level-1 runners deliver it") }
+                $av = $st.at
+                $ok = $av -is [array] -and @($av).Count -gt 0
+                if ($ok) { foreach ($x in @($av)) { if (-not ($x -is [int] -or $x -is [long]) -or $x -lt 0) { $ok = $false } } }
+                if (-not $ok) { return (& $no "step $i panel $tag at must be a non-empty list of non-negative integers (an iteration index per enclosing repeat)") }
+                $at = @($av | ForEach-Object { [int]$_ })
+            }
+            $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value; row = $row; at = $at })
             continue
         }
         # KEY STEPS (§333), the key corpus's chord form: `key` plus ctrl/shift/alt
@@ -4148,12 +4161,61 @@ function Select-SbRowWidget($Surfaces, $Widgets, [string]$Want, [string]$Widget)
     [pscustomobject]@{ Refusal = $null; Index = $inside[0] }
 }
 
+# ROW F (jas STATUS-flask 1016/1018): a panel step's `"at": [i, ...]`, in the
+# plan's `repeats` (#1131). A widget's enclosing repeats are those whose path
+# is a proper prefix of its leaf path, outermost first; its iteration index at
+# each is the path component just past the repeat's path. A nested repeat is
+# listed once per outer iteration, so the inner instance is found from the
+# outer one plus the template's suffix, never guessed. The result has the
+# shape Resolve-SbPlanRow returns, so the hand's join is the same.
+function Resolve-SbPlanAt([string]$PlanJson, [int[]]$At, [string]$Widget) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why } }
+    try { $plan = $PlanJson | ConvertFrom-Json } catch { return (& $no 'the plan does not parse') }
+    if ($null -eq $plan) { return (& $no 'the plan does not parse') }
+    $want = Format-SbPath $At
+    $cands = @(@($plan.leaves) + @($plan.containers) | Where-Object { $null -ne $_ -and "$($_.id)" -ceq $Widget })
+    if ($cands.Count -eq 0) { return (& $no "no '$Widget' in the plan") }
+    $reps = @()
+    if ($null -ne $plan.PSObject.Properties['repeats']) { $reps = @(foreach ($x in $plan.repeats) { $x }) }
+    # The prefix test, on path arrays as text.
+    $isUnder = { param($inner, $outer) $o = @($outer); $i = @($inner)
+        $i.Count -gt $o.Count -and (Format-SbPath $i[0..($o.Count - 1)]) -ceq (Format-SbPath $o) }
+    $first = $cands[0]
+    $enc = @($reps | Where-Object { & $isUnder $first.path $_.path } | Sort-Object { @($_.path).Count })
+    if ($enc.Count -eq 0) { return (& $no "'$Widget' sits in no repeat the plan expands: at names an iteration of one") }
+    foreach ($r in $enc) {
+        if ($r.elements) { return (& $no "repeat $(Format-SbPath $r.path) ($($r.id)) is a repeat of document elements: name the row by 'row', not 'at'") }
+    }
+    if ($At.Count -ne $enc.Count) {
+        $list = @($enc | ForEach-Object { "$(Format-SbPath $_.path) $($_.id)" }) -join ', '
+        return (& $no "at $want names $($At.Count) indices and '$Widget' sits in $($enc.Count) repeat$(if ($enc.Count -ne 1) { 's' }) (${list}): name one per enclosing repeat, outermost first")
+    }
+    # Level by level: the outermost repeat as listed, then each inner instance
+    # at <outer path> + [k] + <the template's suffix between the two repeats>.
+    $cur = $enc[0]
+    for ($j = 0; $j -lt $At.Count; $j++) {
+        if ($At[$j] -ge [int]$cur.rows) { return (& $no "at $want is past the rows: repeat $(Format-SbPath $cur.path) ($($cur.id)) draws $($cur.rows)") }
+        if ($j -eq $At.Count - 1) { break }
+        $outerLen = @($enc[$j].path).Count
+        $suffix = @(@($enc[$j + 1].path)[($outerLen + 1)..(@($enc[$j + 1].path).Count - 1)])
+        $nextPath = Format-SbPath (@($cur.path) + @($At[$j]) + $suffix)
+        $next = @($reps | Where-Object { (Format-SbPath $_.path) -ceq $nextPath })
+        if ($next.Count -ne 1) { return (& $no "at $want names no drawn iteration: the plan lists no repeat at $nextPath") }
+        $cur = $next[0]
+    }
+    $surfacePath = @($cur.path) + @($At[$At.Count - 1])
+    $hits = @($cands | Where-Object { & $isUnder $_.path $surfacePath -or (Format-SbPath $_.path) -ceq (Format-SbPath $surfacePath) })
+    if ($hits.Count -eq 0) { return (& $no "at $want names no drawn '$Widget': iteration $(Format-SbPath $surfacePath) holds none") }
+    if ($hits.Count -gt 1) { return (& $no "at $want names $($hits.Count) '$Widget' in iteration $(Format-SbPath $surfacePath): this driver will not guess which one") }
+    [pscustomobject]@{ Refusal = $null; K = $At[$At.Count - 1]; Surface = "surface $(Format-SbPath $surfacePath)"; Foreach = (Format-SbPath $cur.path); Label = $null; Rows = [int]$cur.rows }
+}
+
 function Format-SbPanelSteps($Panels) {
     @($Panels | ForEach-Object {
         if ($_.menu) { "menu:$($_.menu)" }
         elseif ($_.click) { "click@($($_.x),$($_.y))" }
         elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
-        else { "$($_.panel)/$($_.widget)$(if ($null -ne $_.row) { '@[' + (@($_.row) -join ',') + ']' }):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
+        else { "$($_.panel)/$($_.widget)$(if ($null -ne $_.row) { '@[' + (@($_.row) -join ',') + ']' })$(if ($null -ne $_.at) { '#[' + (@($_.at) -join ',') + ']' }):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
     }) -join ';'
 }
 
