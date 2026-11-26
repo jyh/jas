@@ -422,7 +422,7 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
      item titled with the option's label, which the planner reads from the panel spec.
    * A menu step presses the menubar item at its title path, derived from the spec's labels. The Mac draws a
      checkable item's state into its title (`✓ Stroke`), so titles are compared without it.
-   * Refused by name: `meta`, a pointer or key step after a panel or menu step, a read other than `document`, a menu
+   * Refused by name: a non-empty `app_state` (this driver seeds nothing, row 279), `meta`, a pointer or key step after a panel or menu step, a read other than `document`, a menu
      id or panel with no unique path, a widget that is not found, found twice or disabled, and an odd or fractional
      unit.
    * The driver also refuses to run while the console has seen input in the last 120 s, and refuses a pointer or key
