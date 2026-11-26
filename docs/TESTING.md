@@ -209,6 +209,13 @@ marked PROPOSED and never gates.
   iteration index, outermost first. A swatch tile is `"at": [library, swatch]`. A widget a repeat stamps out needs an `id`
   on its template to be named at all; the Swatches panel's `color_swatch` tile has none today, so its scripts wait on
   that spec edit.
+  * **One address per widget:** a repeat whose rows are document elements (the Layers tree) is `row`'s, and `at` on
+    it is refused by name. The Artboards list (`ap_list`, a repeat over artboards) is `at`'s: `"at": [1]` is the
+    second artboard's row.
+  * **Delivered by both level-1 forms runners (row 281, 2026-11-26)** on a click or double click: an index past the
+    rows, a count of indices other than the enclosing repeats, `row` and `at` together, and `at` on a
+    `secondary_press`, a drag, or a text or pick widget's step are each refused by name. No level-2 driver delivers it
+    yet.
 * **`shift`, `alt`, `ctrl`, `meta` on a panel step**: booleans, `false` when absent, as on pointer and key steps (an
   eye's Alt-click, a row's Shift- or Ctrl-click). `meta` is refused, as for keys; the Mac's Cmd-click is written `ctrl`.
 * **`"event": "double_click"` on a panel step** (a swatch double-click opens Swatch Options or the Color Picker).

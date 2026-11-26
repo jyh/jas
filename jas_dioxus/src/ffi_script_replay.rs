@@ -518,18 +518,38 @@ fn every_area_text_paragraph_script_moves_the_legacy_layout_and_no_two_move_it_a
 /// declared on `lp_eye` itself and never reaches the row. The second value is
 /// the node the event went to, when it is not the widget. A node declaring no
 /// such event on the whole path is refused by name.
-fn row_plan_path(content: &Value, widget: &str, event: &str, row: &[u64], scope: &Value)
+fn row_plan_path(content: &Value, widget: &str, event: &str, row: RowAddr, scope: &Value)
     -> Result<(Vec<usize>, Option<String>), String> {
     row_declaring(content, widget, event, row, scope).map(|(p, to, _)| (p, to))
 }
 
+/// How a panel step names the repeated widget it addresses (TESTING.md
+/// section 6): `row`, a tree row by its element's document path, under exactly
+/// one repeat; or `at` (row 281), each enclosing generic `foreach` repeat's
+/// iteration index, outermost first. A widget has ONE address: `at` is refused
+/// on a repeat whose rows are document elements, which `row` names.
+#[derive(Clone, Copy, Debug)]
+enum RowAddr<'a> {
+    Row(&'a [u64]),
+    At(&'a [u64]),
+}
+
+impl std::fmt::Display for RowAddr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RowAddr::Row(r) => write!(f, "row {r:?}"),
+            RowAddr::At(a) => write!(f, "at {a:?}"),
+        }
+    }
+}
+
 /// [`row_plan_path`] and the node the event goes to.
-fn row_declaring(content: &Value, widget: &str, event: &str, row: &[u64], scope: &Value)
+fn row_declaring(content: &Value, widget: &str, event: &str, row: RowAddr, scope: &Value)
     -> Result<(Vec<usize>, Option<String>, Value), String> {
     let (path, chain) = row_chain(content, widget, row, scope)?;
     // The walk ends on the widget, so the chain's last node is the widget.
     let Some(at) = chain.iter().rposition(|(_, node, _)| declares(node, event)) else {
-        return Err(format!("no node on `{widget}`'s path in row {row:?} declares `{event}`"));
+        return Err(format!("no node on `{widget}`'s path in {row} declares `{event}`"));
     };
     let (len, node, _) = &chain[at];
     let to = (at + 1 != chain.len()).then(|| node.get("id").and_then(Value::as_str)
@@ -556,7 +576,7 @@ fn declares(node: &Value, event: &str) -> bool {
 /// The widget ITSELF in row `row`, with no bubbling: its path, its node and
 /// its row's scope. A text field's own events do not bubble (section 6: an
 /// `input` on a field that declares none fires nothing).
-fn row_widget(content: &Value, widget: &str, row: &[u64], scope: &Value)
+fn row_widget(content: &Value, widget: &str, row: RowAddr, scope: &Value)
     -> Result<(Vec<usize>, Value, Value), String> {
     let (path, mut chain) = row_chain(content, widget, row, scope)?;
     let (_, node, scope) = chain.pop().expect("the walk ends on the widget");
@@ -631,7 +651,7 @@ fn find_widget<'a>(node: &'a Value, widget: &str) -> Option<&'a Value> {
 /// The walk from `content` to `widget` in row `row`: the widget's path, and
 /// each node on the way with the path length at it and the scope it renders in.
 #[allow(clippy::type_complexity)]
-fn row_chain(content: &Value, widget: &str, row: &[u64], scope: &Value)
+fn row_chain(content: &Value, widget: &str, row: RowAddr, scope: &Value)
     -> Result<(Vec<usize>, Vec<(usize, Value, Value)>), String> {
     fn contains(node: &Value, widget: &str) -> bool {
         if node.get("id").and_then(Value::as_str) == Some(widget) {
@@ -643,7 +663,7 @@ fn row_chain(content: &Value, widget: &str, row: &[u64], scope: &Value)
             _ => false,
         })
     }
-    fn walk(node: &Value, widget: &str, row: &[u64], scope: &Value, path: &mut Vec<usize>, repeats: &mut usize,
+    fn walk(node: &Value, widget: &str, row: RowAddr, scope: &Value, path: &mut Vec<usize>, repeats: &mut usize,
             chain: &mut Vec<(usize, Value, Value)>) -> Result<bool, String> {
         chain.push((path.len(), node.clone(), scope.clone()));
         if node.get("id").and_then(Value::as_str) == Some(widget) {
@@ -654,19 +674,39 @@ fn row_chain(content: &Value, widget: &str, row: &[u64], scope: &Value)
             if !contains(template, widget) {
                 return Ok(false);
             }
+            let depth = *repeats;
             *repeats += 1;
             let var = node["foreach"].get("as").and_then(Value::as_str).unwrap_or("item");
+            let source = node["foreach"]["source"].as_str().unwrap_or("?");
             let as_path = |v: &Value| -> Option<Vec<u64>> {
                 let v = v.get("__path__").unwrap_or(v);
                 v.as_array()?.iter().map(Value::as_u64).collect()
             };
-            let hits: Vec<usize> = rows.iter().enumerate()
-                .filter(|(_, r)| r[var].get("path").and_then(as_path).as_deref() == Some(row))
-                .map(|(i, _)| i)
-                .collect();
-            let &[i] = hits.as_slice() else {
-                return Err(format!("row {row:?} is {} row(s) of `{}`, not one", hits.len(),
-                    node["foreach"]["source"].as_str().unwrap_or("?")));
+            let i = match row {
+                RowAddr::Row(r) => {
+                    let hits: Vec<usize> = rows.iter().enumerate()
+                        .filter(|(_, x)| x[var].get("path").and_then(as_path).as_deref() == Some(r))
+                        .map(|(i, _)| i)
+                        .collect();
+                    let &[i] = hits.as_slice() else {
+                        return Err(format!("row {r:?} is {} row(s) of `{source}`, not one", hits.len()));
+                    };
+                    i
+                }
+                RowAddr::At(a) => {
+                    if rows.iter().any(|x| x[var].get("path").is_some()) {
+                        return Err(format!("`{widget}` repeats once per document element of `{source}`; \
+                            address it by `row`, not `at`"));
+                    }
+                    let Some(&k) = a.get(depth) else {
+                        return Err(format!("`at` names {} index(es) and `{widget}` sits under more repeats", a.len()));
+                    };
+                    let k = k as usize;
+                    if k >= rows.len() {
+                        return Err(format!("at {a:?}: index {k} is past the {} row(s) of `{source}`", rows.len()));
+                    }
+                    k
+                }
             };
             path.push(i);
             return walk(template, widget, row, &rows[i], path, repeats, chain);
@@ -687,10 +727,15 @@ fn row_chain(content: &Value, widget: &str, row: &[u64], scope: &Value)
     if !walk(content, widget, row, scope, &mut path, &mut repeats, &mut chain)? {
         return Err(format!("widget `{widget}` is not in the panel"));
     }
-    match repeats {
-        0 => return Err(format!("`row` on `{widget}`, which no foreach repeats")),
-        1 => {}
-        n => return Err(format!("`{widget}` sits under {n} foreach repeats; that address is `at`, not delivered")),
+    match (row, repeats) {
+        (RowAddr::Row(_), 0) => return Err(format!("`row` on `{widget}`, which no foreach repeats")),
+        (RowAddr::Row(_), 1) => {}
+        (RowAddr::Row(_), n) => return Err(format!("`{widget}` sits under {n} foreach repeats; that address is `at`")),
+        (RowAddr::At(_), 0) => return Err(format!("`at` on `{widget}`, which no foreach repeats")),
+        (RowAddr::At(a), n) if a.len() != n => {
+            return Err(format!("`at` names {} index(es) and `{widget}` sits under {n} repeat(s)", a.len()));
+        }
+        (RowAddr::At(_), _) => {}
     }
     Ok((path, chain))
 }
@@ -816,7 +861,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
             let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
             let content = spec.get("content").cloned().unwrap_or(Value::Null);
             match row {
-                Some(r) => row_widget(&content, widget, r, &scope).map(|(p, n, sc)| (Some(p), n, sc)),
+                Some(r) => row_widget(&content, widget, RowAddr::Row(r), &scope).map(|(p, n, sc)| (Some(p), n, sc)),
                 None => find_widget(&content, widget).cloned().map(|n| (None, n, scope.clone()))
                     .ok_or_else(|| format!("widget `{widget}` is not in the panel")),
             }
@@ -999,8 +1044,21 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     refuse(&mut out, "meta on a panel step is refused (TESTING.md section 6)".to_string());
                     break;
                 }
-                if st.get("at").is_some() {
-                    refuse(&mut out, "`at` is not delivered by this runner".to_string());
+                // Row 281: `at`, each enclosing generic repeat's iteration index.
+                let at = match st.get("at") {
+                    None => None,
+                    Some(a) => match a.as_array().and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()) {
+                        Some(a) => Some(a),
+                        None => { refuse(&mut out, format!("at {a} is not a list of indices")); break; }
+                    },
+                };
+                if at.is_some() && st.get("row").is_some() {
+                    refuse(&mut out, "a panel step names its widget by `row` or by `at`, not both".to_string());
+                    break;
+                }
+                if at.is_some() && (event == "secondary_press" || event == "drag"
+                    || st.get("to").is_some() || st.get("hover_ms").is_some()) {
+                    refuse(&mut out, format!("`at` on a {event} step is not delivered by this runner"));
                     break;
                 }
                 let row = match st.get("row") {
@@ -1033,7 +1091,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     // selected row, recorded `unchanged`. A panel whose rows
                     // declare no `secondary_press` sends nothing.
                     if let Ok((p, _, node)) = row_declaring(spec.get("content").unwrap_or(&Value::Null),
-                                                            widget, "secondary_press", &r, &scope) {
+                                                            widget, "secondary_press", RowAddr::Row(&r), &scope) {
                         if declares_an_act(&node, "secondary_press") {
                             let ev = json!({"widget": widget, "event": "secondary_press", "path": p,
                                 "shift": flag(st, "shift"), "alt": flag(st, "alt"), "ctrl": flag(st, "ctrl")}).to_string();
@@ -1052,7 +1110,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         refuse(&mut out, format!("UnknownPanel {panel}"));
                         break;
                     };
-                    let (path, _chain) = match row_chain(spec.get("content").unwrap_or(&Value::Null), widget, &r, &scope) {
+                    let (path, _chain) = match row_chain(spec.get("content").unwrap_or(&Value::Null), widget, RowAddr::Row(&r), &scope) {
                         Ok(t) => t,
                         Err(why) => { refuse(&mut out, why); break; }
                     };
@@ -1111,7 +1169,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                             break;
                         };
                         let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
-                        let (p, to, node) = match row_declaring(spec.get("content").unwrap_or(&Value::Null), widget, name, at, &scope) {
+                        let (p, to, node) = match row_declaring(spec.get("content").unwrap_or(&Value::Null), widget, name, RowAddr::Row(at), &scope) {
                             Ok(t) => t,
                             Err(why) => { refuse(&mut out, why); ok = false; break; }
                         };
@@ -1147,6 +1205,10 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                         .and_then(|n| n.get("type")).and_then(Value::as_str).map(str::to_string));
                 let text_form = kind.as_deref() == Some("text_input") && ["input", "blur", "commit"].contains(&event);
                 let pick_form = kind.as_deref() == Some("dropdown") && event == "commit";
+                if (text_form || pick_form) && at.is_some() {
+                    refuse(&mut out, format!("`at` on a {event} step of a text or pick widget is not delivered by this runner"));
+                    break;
+                }
                 if text_form || pick_form {
                     let (path, node, scope) = match resolve(panel, widget, &row) {
                         Ok(t) => t,
@@ -1221,7 +1283,8 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     if let Some(v) = st.get("value") {
                         ev["value"] = v.clone();
                     }
-                    if let Some(row) = &row {
+                    let addr = row.as_deref().map(RowAddr::Row).or(at.as_deref().map(RowAddr::At));
+                    if let Some(addr) = addr {
                         // The rows are re-read for each event, in the scope it
                         // runs in, since the click before a double can change it.
                         let (Some(spec), Some(scope)) = (
@@ -1232,7 +1295,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                             break;
                         };
                         let spec = crate::panel_plan::canonical_tabs(&spec, &scope);
-                        match row_plan_path(spec.get("content").unwrap_or(&Value::Null), widget, name, row, &scope) {
+                        match row_plan_path(spec.get("content").unwrap_or(&Value::Null), widget, name, addr, &scope) {
                             Ok((p, to)) => {
                                 ev["path"] = json!(p);
                                 if let Some(to) = to {
@@ -1597,7 +1660,7 @@ fn each_unrunnable_form_is_refused_by_name() {
         (click_row(serde_json::json!([0, 1]), &["meta"]), "meta on a panel step"),
         (serde_json::json!({"panel": LAYERS, "widget": "lp_search_input", "row": [0], "event": "click"}), "which no foreach repeats"),
         (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "event": "click"}), "NotAddressable"),
-        (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "at": [0], "event": "click"}), "`at` is not delivered"),
+        (serde_json::json!({"panel": LAYERS, "widget": "lp_name", "at": [0], "event": "click"}), "address it by `row`"),
         (serde_json::json!({"context_menu": "x", "params": {}}), "must directly follow a row secondary_press"),
     ] {
         let out = replay_forms(&layers_script(serde_json::json!([step.clone(), read_layers()]))).unwrap();
@@ -2054,6 +2117,64 @@ fn artboard_options_script(mid: Vec<Value>) -> Value {
     json!({"item": "forms.dialog", "setup_svg": "paragraph_justified.svg", "tool": "selection",
            "app_state": {"panels": {ARTBOARDS: {"artboards_panel_selection": ["zs8ap4x3"]}}},
            "steps": steps})
+}
+
+/// Row 281: a script on a two-artboard document (the panel menu's New Artboard
+/// mints the second), ending in a read of the Artboards panel's state.
+fn artboards_at_script(steps: Vec<Value>) -> Value {
+    use serde_json::json;
+    let mut all = vec![json!({"panel_menu": ARTBOARDS, "action": "new_artboard"}), json!({"read": "document"})];
+    all.extend(steps);
+    all.push(json!({"read": "panel", "panel": ARTBOARDS}));
+    json!({"item": "forms.at", "setup_svg": "paragraph_justified.svg", "tool": "selection", "steps": all})
+}
+
+/// The artboard ids at the first document read, in order.
+fn artboard_ids(out: &[Value]) -> Vec<Value> {
+    out.iter().find(|r| r["read"] == "document").and_then(|r| r["value"]["artboards"].as_array())
+        .map(|a| a.iter().map(|ab| ab["id"].clone()).collect()).unwrap_or_default()
+}
+
+/// Row 281 (TESTING.md section 6): `at` names a widget inside a generic
+/// `foreach` repeat by each enclosing repeat's iteration index, outermost
+/// first. A click on `ap_name` at [i] selects artboard i, so [0] and [1] must
+/// select DIFFERENT artboards, each the one at that index in the document.
+#[test]
+fn an_at_step_clicks_the_widget_of_the_iteration_it_names() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    use serde_json::json;
+    let mut picked = vec![];
+    for i in [0u64, 1] {
+        let out = replay_forms(&artboards_at_script(vec![
+            json!({"panel": ARTBOARDS, "widget": "ap_name", "at": [i], "event": "click"})])).expect("replay");
+        assert_eq!(refusal(&out), None, "at [{i}]: {out:?}");
+        let ids = artboard_ids(&out);
+        assert_eq!(ids.len(), 2, "the setup holds two artboards: {ids:?}");
+        let sel = panel_reads(&out).last().cloned().unwrap_or(Value::Null)["artboards_panel_selection"].clone();
+        assert_eq!(sel, json!([ids[i as usize].clone()]), "at [{i}] selects artboard {i}: {out:?}");
+        picked.push(sel);
+    }
+    assert_ne!(picked[0], picked[1], "[0] and [1] must address different rows");
+}
+
+/// Row 281's refusals, each by name: an index past the rows, more indices than
+/// enclosing repeats, `row` and `at` together, and `at` on a forms it is not
+/// yet built for. (`at` on a tree widget is refused in the Layers arm above.)
+#[test]
+fn an_at_step_is_refused_by_name_where_it_cannot_address_one_widget() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    use serde_json::json;
+    for (step, needle) in [
+        (json!({"panel": ARTBOARDS, "widget": "ap_name", "at": [5], "event": "click"}), "past the 2 row(s)"),
+        (json!({"panel": ARTBOARDS, "widget": "ap_name", "at": [0, 0], "event": "click"}), "names 2 index(es)"),
+        (json!({"panel": ARTBOARDS, "widget": "ap_name", "at": [0], "row": [0], "event": "click"}), "not both"),
+        (json!({"panel": ARTBOARDS, "widget": "ap_name", "at": [0], "event": "secondary_press"}), "`at` on a secondary_press"),
+        (json!({"panel": ARTBOARDS, "widget": "ap_name", "at": "x", "event": "click"}), "is not a list of indices"),
+    ] {
+        let out = replay_forms(&artboards_at_script(vec![step.clone()])).expect("replay");
+        let why = refusal(&out).unwrap_or_default();
+        assert!(why.contains(needle), "{step}: refused {why:?}, want {needle:?}");
+    }
 }
 
 fn dialog_reads(out: &[Value]) -> Vec<Value> {
