@@ -1754,6 +1754,19 @@ static class Program
         Eq("probe census: a drain case arms SB_PROBE exactly when ProbeWire.Kinds says it probes",
             string.Join("|", ProbeWire.Kinds.Where(kv => kv.Value.Probes).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)),
             string.Join("|", cvArms.Where(kv => kv.Value).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)));
+        // Row 275 C2: the PROBE row's dialog= field, which prove_e2e reads for a
+        // script's {"read": "dialog"}: the open dialog's id, `none` when none is
+        // open (or none was ever read), and UNREADABLE for a plan that did not
+        // parse, which a script can never expect.
+        Eq("probe dialog field: open, closed, never read, unreadable",
+            "artboard_options|none|none|UNREADABLE",
+            string.Join("|", new[]
+            {
+                ProbeWire.DialogField(true, DialogWire.Read("""{"open":true,"id":"artboard_options","summary":"Artboard Options","modal":true,"depth":1,"plan":{}}""")),
+                ProbeWire.DialogField(true, DialogWire.Read("""{"open":false}""")),
+                ProbeWire.DialogField(false, null),
+                ProbeWire.DialogField(true, null),
+            }));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
             "Proposed: nudge|(no bar)",
