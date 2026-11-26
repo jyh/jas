@@ -125,7 +125,47 @@ DELIVERED_KEYS = {
     "menu": {"menu"},
     "toolbar": {"panel", "widget", "event", "hold_ms"},
     "read state": {"read", "keys"},
+    "panel_menu": {"panel_menu", "action", "params"},
 }
+# A panel group's hamburger is `<active panel content id>_menu` (the Swift
+# header's panelMenuButtonId, which the self-test reads from the source).
+MENU_SUFFIX = "_menu"
+
+
+def load_panel_menus():
+    """Panel content id -> its declared `menu:` list, from workspace/panels/*.yaml."""
+    import glob
+    import yaml
+    out = {}
+    for f in sorted(glob.glob(os.path.join(REPO, "workspace", "panels", "*.yaml"))):
+        with open(f, encoding="utf-8") as fh:
+            d = yaml.safe_load(fh) or {}
+        if d.get("id") and d.get("menu"):
+            out[d["id"]] = d["menu"]
+    return out
+
+
+def _plan_panel_menu(item, i, st, panels, panel_menus):
+    """A panel-menu step as the person's route: show the panel, press its group's
+    menu button, pick the item by the title the menu shows. The item is the one
+    whose action is the step's and whose declared params equal every param the
+    step names (TESTING.md section 6); its label is what AX can see."""
+    _refuse_undelivered(item, i, st, "panel_menu")
+    pid, action, want = st["panel_menu"], st.get("action"), st.get("params") or {}
+    if not isinstance(pid, str) or not pid.endswith(PANEL_SUFFIX):
+        raise Refused(f"{item}: step {i} names panel {pid!r}, not a panel content id")
+    menu = panel_menus.get(pid)
+    if not menu:
+        raise Refused(f"{item}: step {i}: panel {pid!r} declares no menu")
+    hits = [m for m in menu if isinstance(m, dict) and m.get("action") == action
+            and all((m.get("params") or {}).get(k) == v for k, v in want.items())]
+    if len(hits) != 1:
+        raise Refused(f"{item}: step {i}: {len(hits)} items of {pid!r}'s menu run {action!r} with params {want}")
+    label = hits[0].get("label") or ""
+    if "{{" in label:
+        raise Refused(f"{item}: step {i}: the item running {action!r} has a computed label {label!r}; "
+                      f"this driver picks by the title a person reads and cannot evaluate it")
+    return ("panel_menu", pid, pid + TAB_SUFFIX, panels.get(pid[: -len(PANEL_SUFFIX)]), pid + MENU_SUFFIX, label)
 TOOLBAR_PANE = "toolbar_pane"  # a toolbar step's panel: the slots live in workspace/layout.yaml
 
 
@@ -246,7 +286,7 @@ def _plan_toolbar(item, i, st, spec):
     return ("toolbar", st["widget"], hold)
 
 
-def plan(script, menubar, spec=None, state_keys=None):
+def plan(script, menubar, spec=None, state_keys=None, panel_menus=None):
     """The script as acts: ("open", svg, reset_workspace) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
     window_path, widget, event, value, option_label, widget_type) ("menu", path)
@@ -274,6 +314,11 @@ def plan(script, menubar, spec=None, state_keys=None):
             if st["read"] == "state" and state_keys is None:
                 state_keys = load_state_keys()
             acts.append(_plan_read(item, i, st, script, state_keys))
+            continue
+        if "panel_menu" in st:
+            if panel_menus is None:
+                panel_menus = load_panel_menus()
+            acts.append(_plan_panel_menu(item, i, st, panels, panel_menus))
             continue
         if st.get("panel") == TOOLBAR_PANE:
             acts.append(_plan_toolbar(item, i, st, spec))
@@ -347,7 +392,7 @@ def locked_acts(acts, item="?"):
             run = None
             if a[0] == "key":
                 raise Refused(f"{item}: a key step ({a[1]}) needs a key window, which a locked console never gives")
-            if a[0] in ("menu", "toolbar"):
+            if a[0] in ("menu", "toolbar", "panel_menu"):
                 raise Refused(f"{item}: a {a[0]} step is pressed through the window server, "
                               f"which a locked console does not give")
             out.append(a)
@@ -1664,6 +1709,50 @@ def self_test():
     check("an expected_dialog list of the wrong length is refused",
           refused(lambda: plan(dict(tb, expected_dialog=["arrow_alternates"], steps=[hold, rdl, click, rdl]),
                                mb, lay, state_keys=SK), "lists 1"))
+    # The panel-menu step (TESTING.md section 6, row 275 Mac slice (a)): the
+    # one item whose action is the step's and whose declared params equal every
+    # param the step names; the plan carries the panel's tab, its Window item,
+    # the hamburger's identifier and the item's label, which is what AX titles.
+    PM = {"stroke_panel_content": [
+        {"label": "Options...", "action": "open_opts", "params": {"id": "sel[0]"}}, "separator",
+        {"label": "Twice A", "action": "twice", "params": {"k": "a"}},
+        {"label": "Twice B", "action": "twice", "params": {"k": "b"}},
+        {"label": "{{if x then 'Hide' else 'Show'}} All", "action": "toggle_all"}]}
+    rd = {"read": "document"}
+    pm = plan(dict(base, steps=[{"panel_menu": "stroke_panel_content", "action": "open_opts"}, rd]),
+              mb, panel_menus=PM)
+    check("a panel_menu step plans as its panel, tab, Window item, menu button and item label",
+          pm[2] == ("panel_menu", "stroke_panel_content", "stroke_panel_content_tab", ["Window", "Stroke"],
+                    "stroke_panel_content" + MENU_SUFFIX, "Options..."))
+    check("a panel_menu step's params pick among items sharing an action",
+          plan(dict(base, steps=[{"panel_menu": "stroke_panel_content", "action": "twice", "params": {"k": "b"}},
+                                 rd]), mb, panel_menus=PM)[2][5] == "Twice B")
+    check("a panel_menu action two items share, with no params to pick one, is refused",
+          refused(lambda: plan(dict(base, steps=[{"panel_menu": "stroke_panel_content", "action": "twice"}, rd]),
+                               mb, panel_menus=PM), "2 items"))
+    check("a panel_menu action no item carries is refused",
+          refused(lambda: plan(dict(base, steps=[{"panel_menu": "stroke_panel_content", "action": "nope"}, rd]),
+                               mb, panel_menus=PM), "0 items"))
+    check("a panel_menu item whose label is computed is refused, never matched by its template",
+          refused(lambda: plan(dict(base, steps=[{"panel_menu": "stroke_panel_content", "action": "toggle_all"},
+                                                 rd]), mb, panel_menus=PM), "computed"))
+    check("a panel_menu step on a panel with no menu is refused",
+          refused(lambda: plan(dict(base, steps=[{"panel_menu": "color_panel_content", "action": "a"}, rd]),
+                               mb, panel_menus=PM), "no menu"))
+    check("a panel_menu step's other keys are refused by name",
+          refused(lambda: plan(dict(base, steps=[{"panel_menu": "stroke_panel_content", "action": "open_opts",
+                                                  "label": "Options..."}, rd]), mb, panel_menus=PM), "label"))
+    check("a panel_menu step is refused on the locked route (its menu opens on a real click)",
+          refused(lambda: locked_acts(pm, "t"), "panel_menu step"))
+    check("the shipped panel menus load by their content id (the Artboards menu holds Artboard Options...)",
+          any(isinstance(i, dict) and i.get("action") == "open_artboard_options"
+              for i in load_panel_menus().get("artboards_panel_content", [])))
+    # The identifier is the Swift header's, by construction: the suffix this
+    # plan appends is the one panelMenuButtonId appends (read from the source).
+    swift = open(os.path.join(REPO, "JasSwift", "Sources", "Interpreter", "WorkspaceLoader.swift"),
+                 encoding="utf-8").read()
+    check("the menu button suffix is the one the Swift header's panelMenuButtonId appends",
+          f'panelKindToContentId(kind) + "{MENU_SUFFIX}"' in swift)
     check("a toolbar step's event is press",
           refused(lambda: plan(dict(tb, steps=[dict(click, event="click"), rst]), mb, lay, state_keys=SK), "press"))
     for bad in (0, -5, 2.5, "400", True):
