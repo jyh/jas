@@ -5,14 +5,16 @@ The web's renderers classify a widget's bind (`classify_bind`): `panel.<f>` and
 renderers ran NOTHING on None, so a widget with a computed bind lost its
 declared behavior with the write-back: the Gradient Location combo (row 268,
 four days of red on the web) and Artboard Options' Fill and Size selects
-(row 270). Those two kinds are routed now. This gate keeps the class closed:
+(row 270). Those two kinds are routed now, and icon_select and toggle since row
+276. This gate keeps the class closed:
 
   * the DROPPING kinds are DERIVED from the renderer source: every
     `fn render_<kind>(` whose body has a `BindTarget::None => {}` or
     `BindTarget::None => { return; }` arm;
   * a shipped widget (workspace/**/*.yaml) of a dropping kind whose
     `bind.value` / `bind.checked` names no `panel.`/`dialog.` field AND that
-    declares a `behavior` is refused by name.
+    declares a `behavior` is refused by name;
+  * and (row 276) any dropping kind at all is refused, before a widget lands on it.
 
     python3 scripts/check_computed_bind_behaviors.py [--self-test]
 
@@ -33,9 +35,31 @@ DROP_ARM = re.compile(r"BindTarget::None\s*=>\s*\{\s*(return;\s*)?\}")
 BIND_KEYS = ("value", "checked")
 
 
+def none_arms(body):
+    """The balanced `{ ... }` body of each `BindTarget::None =>` arm in `body`."""
+    out = []
+    for m in re.finditer(r"BindTarget::None\s*=>\s*\{", body):
+        depth, i = 1, m.end()
+        while i < len(body) and depth:
+            depth += {"{": 1, "}": -1}.get(body[i], 0)
+            i += 1
+        out.append(body[m.end():i - 1])
+    return out
+
+
+# A None arm ROUTES a computed bind's behavior only if it calls THE door,
+# computed_bind_door, which runs apply_dialog_behavior in a dialog and
+# commit_computed_bind in a panel (row 276). Row 276 found render_select's arm
+# ran the dialog's and `return`ed in a panel, which the first DROP_ARM (an
+# empty or bare-return arm) could not see; an arm that reaches one door by hand
+# is the shape that hid it, so only the door counts.
+ROUTES = ("computed_bind_door(",)
+
+
 def dropping_kinds(src):
     """{kind: True if its render fn drops on None}, for every render_<kind> fn
-    that has a BindTarget::None arm at all."""
+    that has a BindTarget::None arm at all: an arm that is empty, a bare
+    `return;`, or does not call computed_bind_door."""
     out = {}
     starts = [(m.start(), m.group(1)) for m in re.finditer(r"\nfn render_([a-z_]+)\(", src)]
     for i, (at, kind) in enumerate(starts):
@@ -45,7 +69,8 @@ def dropping_kinds(src):
         end = src.find("\n}", at + 1)
         body = src[at:end if end >= 0 else len(src)]
         if "BindTarget::None" in body:
-            out[kind] = bool(DROP_ARM.search(body))
+            arms = none_arms(body)
+            out[kind] = bool(DROP_ARM.search(body)) or any(not all(r in a for r in ROUTES) for a in arms)
     return out
 
 
@@ -83,8 +108,8 @@ def findings(docs, kinds):
             if kinds.get(w["type"]):
                 out.append(f"{os.path.relpath(path, REPO)} {w.get('id')!r}: a {w['type']} with a computed "
                            f"bind.{cb[0]} ({cb[1][:50]!r}) and a declared behavior; the web's render_{w['type']} "
-                           f"drops it on BindTarget::None. Route that arm as render_combo_box/render_select do "
-                           f"(commit_computed_bind, apply_dialog_behavior).")
+                           f"drops it on BindTarget::None. Route that arm through computed_bind_door, as every "
+                           f"other renderer does (row 276).")
     return out, census
 
 
@@ -100,14 +125,16 @@ def self_test():
         if not cond:
             fails.append(what)
     src = ("\nfn render_toggle(el) {\n  match t { BindTarget::None => {} }\n}\n"
-           "\nfn render_select(el) {\n  match t { BindTarget::None => { apply(); } }\n}\n"
+           "\nfn render_select(el) {\n  match t { BindTarget::None => { computed_bind_door(&e, v); return; } }\n}\n"
+           "\nfn render_dialog_only(el) {\n  match t { BindTarget::None => { if d { apply_dialog_behavior(); } else { return; } } }\n}\n"
            "\nfn render_icon_select(el) {\n  match t { BindTarget::None => { return; } }\n}\n"
            "\nfn render_button(el) {\n}\n"
            "\nfn render_placeholder(el) {\n  click(el)\n}\n"
            "\nfn helper_after_it(t) {\n  match t { BindTarget::None => {} }\n}\n")
     k = dropping_kinds(src)
-    check(k == {"toggle": True, "select": False, "icon_select": True},
-          f"the dropping kinds derive from the source, and a helper's None arm is not the render fn before it: {k}")
+    check(k == {"toggle": True, "select": False, "icon_select": True, "dialog_only": True},
+          f"the dropping kinds derive from the source, an arm that reaches a door by hand drops (row 276), "
+          f"and a helper's None arm is not the render fn before it: {k}")
     w = lambda t, bind, beh=True: {"type": t, "id": "x", "bind": bind, **({"behavior": [{"event": "change"}]} if beh else {})}
     docs = [("/r/workspace/a.yaml", {"children": [w("toggle", {"checked": "a and b"})]})]
     f, c = findings(docs, k)
@@ -122,7 +149,11 @@ def self_test():
     check(len(real) >= 3, f"the real renderer has render fns with a None arm (vacuity floor): {real}")
     check(real.get("combo_box") is False and real.get("select") is False,
           f"combo_box and select are routed in the real renderer (rows 268, 270): {real}")
-    print(f"check_computed_bind_behaviors --self-test: {8 - len(fails)} of 8 arms")
+    check(real.get("icon_select") is False and real.get("toggle") is False,
+          f"icon_select and toggle are routed in the real renderer (row 276): {real}")
+    check(not [k for k, d in real.items() if d],
+          f"no web renderer drops a computed bind's behavior (row 276 closes the class): {real}")
+    print(f"check_computed_bind_behaviors --self-test: {10 - len(fails)} of 10 arms")
     for x in fails:
         print("  FAIL:", x)
     return 1 if fails else 0
@@ -138,7 +169,12 @@ def main():
           f"dropping kinds on the web (derived): {drop or 'none'}; {len(f)} finding(s)")
     for x in f:
         print("  " + x)
-    return 1 if f else 0
+    # Row 276: the class is closed, so a dropping kind is refused even before a
+    # shipped widget lands on it (the first such widget would ship broken).
+    for k in drop:
+        print(f"  render_{k} drops a computed bind's behavior: its BindTarget::None arm does not call "
+              f"computed_bind_door, the one door every renderer routes through (row 276)")
+    return 1 if (f or drop) else 0
 
 
 if __name__ == "__main__":
