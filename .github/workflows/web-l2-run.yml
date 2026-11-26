@@ -57,7 +57,7 @@ jobs:
         run: |
           python scripts/web_l2_driver.py --url http://127.0.0.1:8080/jas/ \
             --head "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock --fit --layers
+            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock --fit --layers --artboard-fill
       - name: The receipt in the run summary
         if: always()
         run: |

@@ -5759,6 +5759,8 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                     BindTarget::Dialog(field) => {
                         if let Some(mut ds) = dialog_signal() {
                             ds.set_value(field, serde_json::json!(new_val));
+                            // Row 270: then the declared `change` behavior.
+                            apply_dialog_behavior(&el_for_commit, &serde_json::json!(new_val), &mut ds, &app);
                             dialog_signal.set(Some(ds));
                         }
                     }
@@ -5784,7 +5786,16 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         });
                         return;
                     }
-                    BindTarget::None => { return; }
+                    // A computed bind (Artboard Options' Fill): nothing is written
+                    // back, but the declared `change` behavior runs (row 270).
+                    BindTarget::None => {
+                        if let Some(mut ds) = dialog_signal() {
+                            apply_dialog_behavior(&el_for_commit, &serde_json::json!(new_val), &mut ds, &app);
+                            dialog_signal.set(Some(ds));
+                        } else {
+                            return;
+                        }
+                    }
                 }
                 revision += 1;
             },
@@ -6315,6 +6326,113 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
 /// without it pressing the shown orientation swapped it.
 fn behavior_condition_holds(b: &serde_json::Value, ctx: &serde_json::Value) -> bool {
     b.get("condition").and_then(|c| c.as_str()).map_or(true, |c| expr::eval(c, ctx).to_bool())
+}
+
+/// A dialog widget's declared `commit`/`change` behavior, run as the web's
+/// dialog needs it (row 270): its `effects`, and its `action`'s own effects
+/// with the action's params evaluated against `event.value`, walked through
+/// their `if:` branches. Each `set: { dialog.<field>: <expr> }` comes back as
+/// a `(field, value)` write for the live `DialogState` (later effects see the
+/// earlier writes); every other effect comes back with the context to run it
+/// in, for the AppState runner. The select read the bound value and ran
+/// nothing, so Artboard Options' Fill and Size presets did nothing on the web.
+pub(crate) fn dialog_behavior_effects(
+    el: &serde_json::Value,
+    committed: &serde_json::Value,
+    dialog: &serde_json::Map<String, serde_json::Value>,
+    dialog_params: &serde_json::Map<String, serde_json::Value>,
+) -> (Vec<(String, serde_json::Value)>, Vec<(serde_json::Value, serde_json::Value)>) {
+    use serde_json::{json, Value};
+    let mut dialog = dialog.clone();
+    let mut writes = Vec::new();
+    let mut rest = Vec::new();
+    fn walk(effs: &[Value], param: &Value, dialog: &mut serde_json::Map<String, Value>,
+            writes: &mut Vec<(String, Value)>, rest: &mut Vec<(Value, Value)>, event: &Value) {
+        for e in effs {
+            let ctx = json!({ "dialog": Value::Object(dialog.clone()), "param": param, "event": event });
+            if let Some(cond) = e.get("if") {
+                let holds = cond.get("condition").and_then(|c| c.as_str())
+                    .map_or(false, |c| expr::eval(c, &ctx).to_bool());
+                let branch = if holds { cond.get("then") } else { cond.get("else") };
+                if let Some(b) = branch.and_then(|b| b.as_array()) {
+                    walk(b, param, dialog, writes, rest, event);
+                }
+            } else if let Some(set) = e.get("set").and_then(|v| v.as_object()) {
+                let mut residual = serde_json::Map::new();
+                for (k, v) in set {
+                    if let Some(field) = k.strip_prefix('$').unwrap_or(k).strip_prefix("dialog.") {
+                        let val = match v.as_str() {
+                            Some(x) => super::effects::value_to_json(&expr::eval(x, &ctx)),
+                            None => v.clone(),
+                        };
+                        dialog.insert(field.to_string(), val.clone());
+                        writes.push((field.to_string(), val));
+                    } else {
+                        residual.insert(k.clone(), v.clone());
+                    }
+                }
+                if !residual.is_empty() {
+                    rest.push((json!({ "set": residual }), ctx));
+                }
+            } else {
+                rest.push((e.clone(), ctx));
+            }
+        }
+    }
+    let event = json!({ "value": committed });
+    let behaviors = el.get("behavior").and_then(|b| b.as_array()).cloned().unwrap_or_default();
+    let ws = crate::interpreter::workspace::Workspace::load();
+    for b in behaviors.iter().filter(|b| b.get("event").and_then(|e| e.as_str())
+        .is_some_and(|e| crate::interpreter::widget_commit::COMMIT_EVENTS.contains(&e))) {
+        let outer = json!({ "dialog": Value::Object(dialog.clone()), "param": dialog_params, "event": event });
+        if !behavior_condition_holds(b, &outer) {
+            continue;
+        }
+        if let Some(effs) = b.get("effects").and_then(|e| e.as_array()) {
+            walk(effs, &Value::Object(dialog_params.clone()), &mut dialog, &mut writes, &mut rest, &event);
+        }
+        if let Some(action) = b.get("action").and_then(|a| a.as_str()) {
+            let mut resolved = serde_json::Map::new();
+            for (k, v) in b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default() {
+                let val = match v.as_str() {
+                    Some(x) => super::effects::value_to_json(&expr::eval(x, &outer)),
+                    None => v.clone(),
+                };
+                resolved.insert(k, val);
+            }
+            let effs = ws.as_ref().and_then(|w| w.actions().get(action).and_then(|a| a.get("effects"))
+                .and_then(|e| e.as_array()).cloned()).unwrap_or_default();
+            walk(&effs, &Value::Object(resolved), &mut dialog, &mut writes, &mut rest, &event);
+        }
+    }
+    (writes, rest)
+}
+
+/// Apply [`dialog_behavior_effects`] to the open dialog: its `dialog.*`
+/// writes to `ds`, every other effect through the AppState runner in its own
+/// context. A null `el` (no declared commit behavior) is a no-op.
+fn apply_dialog_behavior(
+    el: &serde_json::Value,
+    committed: &serde_json::Value,
+    ds: &mut super::dialog_state::DialogState,
+    app: &crate::workspace::app_state::AppHandle,
+) {
+    if el.is_null() {
+        return;
+    }
+    let params: serde_json::Map<String, serde_json::Value> =
+        ds.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let (writes, rest) = dialog_behavior_effects(el, committed, &ds.eval_context(), &params);
+    for (f, v) in writes {
+        ds.set_value(&f, v);
+    }
+    if !rest.is_empty() {
+        if let Ok(mut st) = app.try_borrow_mut() {
+            for (e, ctx) in rest {
+                run_yaml_effects(&[e], &ctx, &mut st);
+            }
+        }
+    }
 }
 
 /// Partition a radio's `on_check` effects into live-dialog writes and
@@ -9940,6 +10058,46 @@ mod tests {
         // A computed bind with NO declared behavior is a no-op, never a panic.
         let bare = serde_json::json!({ "type": "combo_box", "bind": { "value": "1 + 1" } });
         commit_computed_bind(&bare, "5", &ctx, &mut st);
+    }
+
+    /// Row 270: a dialog select's declared `change` behavior, its action's
+    /// effects included, as the web must run it. Read from the SHIPPED
+    /// Artboard Options widgets, so a YAML change cannot drift past this.
+    #[test]
+    fn a_dialog_selects_change_writes_its_dialog_fields() {
+        fn find<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match n {
+                serde_json::Value::Object(m) => {
+                    if m.get("id").and_then(|v| v.as_str()) == Some(id) { return Some(n); }
+                    m.values().find_map(|v| find(v, id))
+                }
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let dlg = &ws.dialogs()["artboard_options"];
+        let fill = find(dlg, "ao_fill_dropdown").expect("the fill select");
+        let preset = find(dlg, "ao_preset").expect("the preset select");
+        let dialog = serde_json::json!({ "fill": "transparent", "width": 100.0, "height": 100.0 });
+        let dialog = dialog.as_object().unwrap();
+        let params = serde_json::Map::new();
+        let (w, rest) = dialog_behavior_effects(fill, &serde_json::json!("white"), dialog, &params);
+        assert_eq!(w, vec![("fill".to_string(), serde_json::json!("#ffffff"))], "White writes dialog.fill");
+        assert!(rest.is_empty(), "{rest:?}");
+        let (w, _) = dialog_behavior_effects(fill, &serde_json::json!("transparent"), dialog, &params);
+        assert_eq!(w, vec![("fill".to_string(), serde_json::json!("transparent"))]);
+        let (w, rest) = dialog_behavior_effects(fill, &serde_json::json!("custom"), dialog, &params);
+        assert!(w.is_empty(), "Custom writes no field itself: {w:?}");
+        assert!(rest.iter().any(|(e, _)| e.get("dispatch").is_some()), "Custom opens the picker: {rest:?}");
+        // A `dialog.preset` bind: the select's Dialog arm writes the pick into
+        // the dialog FIRST, and the behavior's `preset: "dialog.preset"` reads it.
+        let mut picked = dialog.clone();
+        picked.insert("preset".into(), serde_json::json!("letter"));
+        let (w, _) = dialog_behavior_effects(preset, &serde_json::json!("letter"), &picked, &params);
+        let got: std::collections::HashMap<_, _> = w.into_iter().collect();
+        assert_eq!((got.get("width").and_then(|v| v.as_f64()), got.get("height").and_then(|v| v.as_f64())),
+                   (Some(612.0), Some(792.0)), "Letter is 612 x 792, the option's own label");
     }
 
     /// Row 117: the web's Layers tree is `render_tree_view`, never the generic
