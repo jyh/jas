@@ -832,23 +832,33 @@ def run_layers_case(br, case):
 ARTBOARD_FILL_WANT = "#ffffff"
 
 
-def artboard_fill_verdict(before, after, want=ARTBOARD_FILL_WANT):
+def artboard_fill_verdict(before, after, want=ARTBOARD_FILL_WANT, what="fill", widget="the Fill dropdown's pick"):
     if before == want:
-        return "REFUSED", f"the artboard's fill is already {want!r}; the pick cannot be read"
+        return "REFUSED", f"the artboard's {what} is already {want!r}; the pick cannot be read"
     if after == before:
-        return "FAIL", f"the Fill dropdown's pick wrote nothing (the fill stayed {before!r})"
+        return "FAIL", f"{widget} wrote nothing (the {what} stayed {before!r})"
     if after != want:
-        return "FAIL", f"the fill reads {after!r}, want {want!r}"
+        return "FAIL", f"the {what} reads {after!r}, want {want!r}"
     return "PASS", ""
 
 
-def artboard_fill_line(verdict):
+def artboard_fill_line(verdict, cases=None):
+    """The fill case's verdict first; `cases` [(name, (status, detail))] add
+    the control (a typed width, a `dialog.` bind) and the Size preset. The
+    fill and the preset prove nothing about their selects unless the control
+    passed: the line says CONTROL FAILED instead of FAIL then."""
     st, why = verdict
-    return f"ARTBOARDFILL {st}" + (f" ({why})" if why else "")
+    line = f"ARTBOARDFILL {st}" + (f" ({why})" if why else "")
+    for name, (cst, cwhy) in cases or []:
+        line += f"; {name} {cst}" + (f" ({cwhy})" if cwhy else "")
+    if cases and dict(cases).get("control", ("PASS", ""))[0] != "PASS":
+        line = "ARTBOARDFILL CONTROL FAILED: " + line[len("ARTBOARDFILL "):]
+    return line
 
 
-def _artboard_fill(page):
-    ab = lambda: (json.loads(page.evaluate("() => window.__jasTest.read()")).get("artboards") or [{}])[0].get("fill")
+def _artboard_fill(page, case="fill"):
+    key = {"fill": "fill", "control": "width", "preset": "width"}[case]
+    ab = lambda: (json.loads(page.evaluate("() => window.__jasTest.read()")).get("artboards") or [{}])[0].get(key)
     page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
     svg = open(os.path.join(REPO, _plan.LAYERS_FIXTURE), encoding="utf-8").read()
     if not page.evaluate("([s, n]) => window.__jasTest.open(s, n)", [svg, "artboard_fill.svg"]):
@@ -866,23 +876,37 @@ def _artboard_fill(page):
         raise _plan.Refused("no artboard row has an Options button (#ap_options)")
     _act("open Artboard Options", opt.first)
     page.wait_for_timeout(400)
-    dd = page.locator("#ao_fill_dropdown")
-    if dd.count() != 1:
-        raise _plan.Refused(f"{dd.count()} elements carry id 'ao_fill_dropdown'")
-    try:
-        dd.select_option("white", timeout=5000)
-    except Exception as e:
-        raise _plan.Refused(f"choose White in the Fill dropdown: {type(e).__name__}")
+    if case == "control":
+        w = page.locator("#ao_width input, input#ao_width").first
+        try:
+            w.fill("300", timeout=5000); w.press("Enter", timeout=5000)
+        except Exception as e:
+            raise _plan.Refused(f"type 300 into Width: {type(e).__name__}")
+        want, what, widget = 300.0, "width", "the typed Width"
+    else:
+        wid, val = ("ao_fill_dropdown", "white") if case == "fill" else ("ao_preset", "letter")
+        dd = page.locator("#" + wid)
+        if dd.count() != 1:
+            raise _plan.Refused(f"{dd.count()} elements carry id {wid!r}")
+        try:
+            dd.select_option(val, timeout=5000)
+        except Exception as e:
+            raise _plan.Refused(f"choose {val} in {wid}: {type(e).__name__}")
+        want, what, widget = ((ARTBOARD_FILL_WANT, "fill", "the Fill dropdown's pick") if case == "fill"
+                              else (612.0, "width", "the Size preset's pick (Letter)"))
     page.wait_for_timeout(300)
     _act("press OK", page.get_by_role("button", name="OK", exact=True).last)
     page.wait_for_timeout(400)
-    return artboard_fill_verdict(before, ab())
+    after = ab()
+    if isinstance(want, float):
+        before, after = (float(before) if before is not None else None), (float(after) if after is not None else None)
+    return artboard_fill_verdict(before, after, want, what, widget)
 
 
-def run_artboard_fill(br):
+def run_artboard_fill(br, case="fill"):
     ctx, page = br.page(True)
     try:
-        return _artboard_fill(page)
+        return _artboard_fill(page, case)
     except _plan.Refused as e:
         return "REFUSED", str(e)
     except Exception as e:
@@ -933,7 +957,9 @@ def run(args):
                 lines.append(f"{st} layers {c}" + (f" -- {d}" if d else ""))
             layers = _plan.layers_line(layer_cases)
         if args.artboard_fill:
-            abfill = "ARTBOARDFILL NOT RUN (" + not_run + ")" if not_run else artboard_fill_line(run_artboard_fill(br))
+            abfill = ("ARTBOARDFILL NOT RUN (" + not_run + ")" if not_run else
+                      artboard_fill_line(run_artboard_fill(br, "fill"),
+                                         [(c, run_artboard_fill(br, c)) for c in ("control", "preset")]))
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -999,6 +1025,10 @@ def self_test():
           ("FAIL", "the Fill dropdown's pick wrote nothing (the fill stayed 'transparent')"), "nothing written: FAIL by name")
     check(artboard_fill_verdict("#ffffff", "#ffffff")[0] == "REFUSED", "a start already white cannot test the pick")
     check(artboard_fill_verdict("transparent", "#000000")[0] == "FAIL", "the wrong preset: FAIL")
+    check(artboard_fill_line(("FAIL", "x"), [("control", ("PASS", "")), ("preset", ("FAIL", "y"))])
+          == "ARTBOARDFILL FAIL (x); control PASS; preset FAIL (y)", "the line carries the control and the preset")
+    check(artboard_fill_line(("FAIL", "x"), [("control", ("FAIL", "z"))]).startswith("ARTBOARDFILL CONTROL FAILED: FAIL (x)"),
+          "a failed control voids the reading, by name")
     check(artboard_fill_line(("PASS", "")) == "ARTBOARDFILL PASS"
           and artboard_fill_line(("FAIL", "x")) == "ARTBOARDFILL FAIL (x)", "the line names its verdict")
 
