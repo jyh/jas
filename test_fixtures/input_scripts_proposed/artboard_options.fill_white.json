@@ -1,0 +1,42 @@
+{
+  "item": "artboard_options.fill_white",
+  "proposed": "row 275: the dialog step is delivered by Rust's engine replay only; PROPOSED until every gating runner and driver delivers it (docs/TESTING.md section 6)",
+  "spec": "workspace/dialogs/artboard_options.yaml",
+  "setup_svg": "paragraph_justified.svg",
+  "tool": "selection",
+  "app_state": {
+    "panels": {
+      "artboards_panel_content": {
+        "artboards_panel_selection": [
+          "zs8ap4x3"
+        ]
+      }
+    }
+  },
+  "steps": [
+    {
+      "panel_menu": "artboards_panel_content",
+      "action": "open_artboard_options"
+    },
+    {
+      "read": "dialog"
+    },
+    {
+      "dialog": "artboard_options",
+      "widget": "ao_fill_dropdown",
+      "event": "commit",
+      "value": "white"
+    },
+    {
+      "dialog": "artboard_options",
+      "widget": "ao_ok",
+      "event": "click"
+    },
+    {
+      "read": "dialog"
+    },
+    {
+      "read": "document"
+    }
+  ]
+}

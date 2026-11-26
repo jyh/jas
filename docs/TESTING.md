@@ -240,8 +240,9 @@ marked PROPOSED and never gates.
   the click's pair. Both are wrong answers the reads tell apart, so neither defect can pass as the other.
 * **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
   `jas_gui_harness.py`) and not yet measured on a live app. The web channel refuses all three by name until its test
-  hook has them, and no level-1 runner reads them yet, so no shipped script uses them.
-* **A dialog step (row 275, written 2026-11-25; delivered by no runner or driver yet):**
+  hook has them, and no level-1 runner reads them yet, so no shipped script uses them. (Since 2026-11-25 Rust's engine
+  replay reads `{"read": "dialog"}`, for the dialog step below; the other two are still read by none.)
+* **A dialog step (row 275, written 2026-11-25):**
   `{"dialog": "<dialog id>", "widget": "<widget id>", "event": "click" | "commit", "value": …}`. It addresses a widget
   of the OPEN dialog by the `id` its `workspace/dialogs/*.yaml` gives it, as a panel step addresses a panel widget.
   * **The dialog is opened by the person's route**: an earlier panel or menu step whose act opens it (the Artboards
@@ -260,6 +261,8 @@ marked PROPOSED and never gates.
     script waits on the swatch tile's. `artboard_options` gives its two `ao_ok` and `ao_cancel`.
   * **The outcome is read by the reads that exist:** `{"read": "dialog"}` (`null` once OK or Cancel has closed it) and
     `{"read": "document"}`.
+  * **Delivered by Rust's engine replay (`replay_forms`, 2026-11-25) and by nothing else yet.** Swift's forms runner,
+    the Mac and Windows drivers and the web hook refuse it by name.
   * **Until a runner or driver delivers it, it refuses the step by name**, and a script that uses it is PROPOSED
     (`test_fixtures/input_scripts_proposed/`, which no gating runner reads) and never gates. It moves into
     `input_scripts/` when every runner and driver that gates delivers it.
@@ -345,7 +348,7 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
     and evaluates the params as a behaviour's.
   * Any other step closes the menu.
   * ⚠️ Both shells still hand-build the Layers row context menu, so this form drives the yaml's route, not theirs.
-* **Still refused by name there:** `at`, `hold_ms`, the `dialog` step, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Still refused by name there:** `at`, `hold_ms`, and `meta` on a panel step. **The dialog step and `{"read": "dialog"}` are delivered there (row 275, 2026-11-25)**, through `jas_dialog_event` by widget id. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
 * **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. Both runners also
   deliver the text and dropdown forms (rows 135 and 136):
   * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,

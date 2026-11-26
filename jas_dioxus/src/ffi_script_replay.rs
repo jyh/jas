@@ -2136,3 +2136,44 @@ fn a_dialog_step_naming_a_widget_the_dialog_lacks_is_refused_by_name() {
     let why = refusal(&out).expect("refused");
     assert!(why.contains("no_such_widget"), "{why}");
 }
+
+/// The A4 preset's size, from its own option label `A4 (W × H)` in the spec.
+fn a4_from_the_spec() -> (f64, f64) {
+    let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+    let spec = ws.dialog("artboard_options").expect("artboard_options");
+    let node = find_widget(&spec["content"], "ao_preset").expect("ao_preset");
+    let label = node["options"].as_array().unwrap().iter().find(|o| o["value"] == "a4").expect("an a4 option")["label"]
+        .as_str().unwrap().to_string();
+    let inner = &label[label.find('(').unwrap() + 1..label.find(')').unwrap()];
+    let mut it = inner.split('×').map(|x| x.trim().parse::<f64>().expect("a number"));
+    (it.next().unwrap(), it.next().unwrap())
+}
+
+/// Every PROPOSED script replays with no refusal, opens the dialog its steps
+/// name and ends with none open. The size preset's script ends with the
+/// artboard at its option label's size, and the fill's at the bind's white.
+#[test]
+fn every_proposed_dialog_script_replays_to_its_outcome() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let dir = format!("{}/../test_fixtures/input_scripts_proposed", env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<String> = std::fs::read_dir(&dir).expect("the proposed directory").filter_map(|d| {
+        let n = d.ok()?.file_name().into_string().ok()?;
+        n.ends_with(".json").then_some(n)
+    }).collect();
+    names.sort();
+    assert_eq!(names, ["artboard_options.fill_white.json", "artboard_options.preset_a4.json"], "the population moved");
+    for n in &names {
+        let script: Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{n}")).unwrap()).unwrap();
+        let out = replay_forms(&script).expect("replay");
+        assert_eq!(refusal(&out), None, "{n}: {out:?}");
+        assert_eq!(dialog_reads(&out), vec![Value::String("artboard_options".into()), Value::Null], "{n}: {out:?}");
+        let doc = &out.iter().rev().find(|r| r["read"] == "document").expect("a document read")["value"];
+        let ab = doc["artboards"].as_array().unwrap().iter().find(|ab| ab["id"] == "zs8ap4x3").expect("zs8ap4x3");
+        if n.contains("fill_white") {
+            assert_eq!(ab["fill"], white_from_the_spec(), "{n}: {ab}");
+        } else {
+            let (w, h) = a4_from_the_spec();
+            assert_eq!((ab["width"].as_f64(), ab["height"].as_f64()), (Some(w), Some(h)), "{n}: {ab}");
+        }
+    }
+}
