@@ -2196,10 +2196,10 @@ Test-Case 'is: an unknown key on a panel step is REFUSED by name, not dropped' {
     $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['zork'] = 1
     Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
 } "REFUSED: step 2 panel step key 'zork' is not a panel-step key"
-Test-Case 'is: a panel step key this driver does not deliver (row) is REFUSED by name, not dropped' {
-    $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['row'] = @(3, 3)
+Test-Case 'is: a panel step key this driver does not deliver (at) is REFUSED by name, not dropped' {
+    $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['at'] = @(0, 3)
     Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
-} "REFUSED: step 2 panel step key 'row': this driver does not deliver it yet"
+} "REFUSED: step 2 panel step key 'at': this driver does not deliver it yet"
 Test-Case 'is: a press held (hold_ms) is REFUSED by name, not delivered as a click' {
     $j = New-SbFormScript @() | ConvertFrom-Json
     $j.steps[0] | Add-Member -NotePropertyName hold_ms -NotePropertyValue 400
@@ -2355,6 +2355,87 @@ Test-Case 'is: the clipboard-deferred steps are exactly the spec''s paste action
     } | Sort-Object)
     "actions=$($clipActs -join ',') menus-match=$((($menus -join ',') -ceq ((@($SbClipboardMenus) | Sort-Object) -join ','))) chords-match=$((($chords -join ',') -ceq ((@($SbClipboardKeyChords) | Sort-Object) -join ','))) menus=$($menus.Count) chords=$($chords.Count)"
 } 'actions=paste,paste_preserving_layers,paste_in_place menus-match=True chords-match=True menus=3 chords=2'
+
+# ROW E (jas STATUS-flask 1013/1014): `"row": [i, j, ...]` ON A PANEL STEP.
+# UIA gives a Layers row's widgets no row identity (flask 1014 census), so the
+# row is resolved in two joins, each refused by name when it is not unique:
+# (1) the row PATH -> the drawn row k, in the newest probe's plan: the one
+# `bind.source` item whose `path` is the row (lp_preview's `bind.element_path`
+# is the second witness); (2) k -> the widget, by UIA rect containment in the
+# row's own hit surface `surface [<foreach path>,k]`, which must be on screen,
+# overlap no other row, and hold exactly one such widget, which no other row
+# holds. A label guard refuses a stale plan; it cannot tell two rows of one
+# label apart, so the containment is unique on its own (jas 11-26 02:5x).
+$eRow = [ordered]@{ panel = 'layers_panel_content'; widget = 'lp_eye'; event = 'click'; row = @(0) }
+Test-Case 'is: a panel step with a row is carried, and its row shown' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($eRow)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json panels=layers_panel_content/lp_eye@[0]:click'
+Test-Case 'is: a row that is not a non-empty list of non-negative integers is REFUSED by name' {
+    @(@(), @(-1), @(1.5), 'x') | ForEach-Object {
+        $p = [ordered]@{ panel = 'layers_panel_content'; widget = 'lp_eye'; event = 'click'; row = $_ }
+        $r = Read-SbInputScript (New-SbFormScript @($p))
+        if ($null -ne $r.Refusal -and $r.Refusal -like 'step 2 panel layers_panel_content/lp_eye row *') { 'R' } else { "A($($r.Refusal))" }
+    } | ForEach-Object -Begin { $o = '' } -Process { $o += $_ } -End { $o }
+} 'RRRR'
+# Join 1, over a plan shaped as the shell writes it (flask 1014: lp_tree at [3]).
+$ePlan = @{
+    leaves = @(
+        @{ id = 'lp_preview'; path = @(3, 0, 5); values = @{ 'bind.element_path' = '[1]' } },
+        @{ id = 'lp_preview'; path = @(3, 1, 5); values = @{ 'bind.element_path' = '[1,0]' } },
+        @{ id = 'lp_preview'; path = @(3, 2, 5); values = @{ 'bind.element_path' = '[0]' } })
+    containers = @(@{ id = 'lp_tree'; path = @(3); values = @{ 'bind.source' = '[{"path":[1],"name":"Text","type_label":"Layer"},{"path":[1,0],"name":"","type_label":"Text"},{"path":[0],"name":"Shapes","type_label":"Layer"}]' } })
+} | ConvertTo-Json -Depth 8
+function Show-SbPlanRow($r) { if ($r.Refusal) { "REFUSED: $($r.Refusal)" } else { "k=$($r.K) surface=$($r.Surface) label=$($r.Label) rows=$($r.Rows)" } }
+Test-Case 'row join 1: a drawn row resolves to its index, surface and label (a named row, an unnamed one)' {
+    (Show-SbPlanRow (Resolve-SbPlanRow -PlanJson $ePlan -Row @(1))) + ' | ' + (Show-SbPlanRow (Resolve-SbPlanRow -PlanJson $ePlan -Row @(1, 0)))
+} 'k=0 surface=surface [3,0] label=Text rows=3 | k=1 surface=surface [3,1] label=<Text> rows=3'
+Test-Case 'row join 1: a row that is NOT DRAWN (collapsed under its parent, or no such element) is REFUSED by name' {
+    Show-SbPlanRow (Resolve-SbPlanRow -PlanJson $ePlan -Row @(0, 2))
+} 'REFUSED: row [0,2] is not a drawn row in the plan (collapsed under its parent, filtered out, or no such element): a row the panel does not draw cannot be pressed'
+Test-Case 'row join 1: the second witness disagreeing (lp_preview names another element) is REFUSED by name' {
+    $bad = $ePlan -replace '"bind.element_path":\s*"\[1,0\]"', '"bind.element_path": "[0,0]"'
+    Show-SbPlanRow (Resolve-SbPlanRow -PlanJson $bad -Row @(1, 0))
+} "REFUSED: row [1,0] is drawn row 1 of [3], but that row's bind.element_path reads [0,0]: the plan's two witnesses disagree"
+Test-Case 'row join 1: a row two foreach sources both draw is REFUSED by name' {
+    $two = $ePlan | ConvertFrom-Json
+    $two.containers = @($two.containers[0], [pscustomobject]@{ id = 'other'; path = @(4); values = [pscustomobject]@{ 'bind.source' = '[{"path":[1]}]' } })
+    Show-SbPlanRow (Resolve-SbPlanRow -PlanJson ($two | ConvertTo-Json -Depth 8) -Row @(1))
+} 'REFUSED: row [1] is drawn 2 times in the plan ([3] row 0, [4] row 0): this driver will not guess which one'
+Test-Case 'row join 1: a plan that does not parse is REFUSED by name' {
+    Show-SbPlanRow (Resolve-SbPlanRow -PlanJson '{not json' -Row @(1))
+} 'REFUSED: the plan does not parse'
+# Join 2, over UIA rects as the census measured them (physical px).
+function New-SbRect([string]$Name, [double]$X, [double]$Y, [double]$W, [double]$H, [bool]$Off = $false) {
+    [pscustomobject]@{ Name = $Name; X = $X; Y = $Y; W = $W; H = $H; Offscreen = $Off }
+}
+$eSurf = @((New-SbRect 'surface [3,0]' 2559 749 342 36), (New-SbRect 'surface [3,1]' 2559 785 342 36), (New-SbRect 'surface [3,2]' 2559 821 342 36))
+$eEyes = @((New-SbRect 'lp_eye' 2568 755 24 24), (New-SbRect 'lp_eye' 2592 791 24 24), (New-SbRect 'lp_eye' 2568 827 24 24))
+function Show-SbRowPick($r) { if ($r.Refusal) { "REFUSED: $($r.Refusal)" } else { "widget=$($r.Index)" } }
+Test-Case 'row join 2: the widget inside the row surface, and only that one, is picked' {
+    Show-SbRowPick (Select-SbRowWidget -Surfaces $eSurf -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye')
+} 'widget=1'
+Test-Case 'row join 2: a row surface that is not in the UI is REFUSED by name' {
+    Show-SbRowPick (Select-SbRowWidget -Surfaces $eSurf -Widgets $eEyes -Want 'surface [3,5]' -Widget 'lp_eye')
+} "REFUSED: the row's surface 'surface [3,5]' is not in the UI: a row the panel does not draw cannot be pressed"
+Test-Case 'row join 2: a row SCROLLED OUT (offscreen, or no rect) is REFUSED by name' {
+    $s = @($eSurf[0], (New-SbRect 'surface [3,1]' 2559 785 342 36 $true), $eSurf[2])
+    (Show-SbRowPick (Select-SbRowWidget -Surfaces $s -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye')) + ' | ' +
+    (Show-SbRowPick (Select-SbRowWidget -Surfaces @($eSurf[0], (New-SbRect 'surface [3,1]' 0 0 0 0), $eSurf[2]) -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye'))
+} "REFUSED: the row's surface 'surface [3,1]' has no rect on screen (scrolled out of the panel): it cannot be pressed | REFUSED: the row's surface 'surface [3,1]' has no rect on screen (scrolled out of the panel): it cannot be pressed"
+Test-Case 'row join 2: two row surfaces that OVERLAP are REFUSED by name (containment would not be unique)' {
+    $s = @($eSurf[0], (New-SbRect 'surface [3,1]' 2559 770 342 36), $eSurf[2])
+    Show-SbRowPick (Select-SbRowWidget -Surfaces $s -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye')
+} "REFUSED: the row's surface 'surface [3,1]' overlaps 'surface [3,0]': a widget's row cannot be told by its rect"
+Test-Case 'row join 2: no such widget inside the row is REFUSED by name' {
+    Show-SbRowPick (Select-SbRowWidget -Surfaces $eSurf -Widgets @($eEyes[0], $eEyes[2]) -Want 'surface [3,1]' -Widget 'lp_eye')
+} "REFUSED: no 'lp_eye' lies inside 'surface [3,1]' (2 found in the panel, none in that row)"
+Test-Case 'row join 2: two such widgets inside the row are REFUSED by name' {
+    Show-SbRowPick (Select-SbRowWidget -Surfaces $eSurf -Widgets @($eEyes[0], $eEyes[1], (New-SbRect 'lp_eye' 2650 791 24 24), $eEyes[2]) -Want 'surface [3,1]' -Widget 'lp_eye')
+} "REFUSED: 2 'lp_eye' lie inside 'surface [3,1]': this driver will not guess which one a person meant"
+Test-Case 'row join 2: a widget that also lies in ANOTHER row is REFUSED by name (two same-label rows stay apart)' {
+    $s = @($eSurf[0], $eSurf[1], (New-SbRect 'surface [4,0]' 2559 785 342 36))
+    Show-SbRowPick (Select-SbRowWidget -Surfaces $s -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye')
+} "REFUSED: the row's surface 'surface [3,1]' overlaps 'surface [4,0]': a widget's row cannot be told by its rect"
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
