@@ -8068,27 +8068,12 @@ private func formsPanelState(_ pid: String, model: Model) -> [String: Any]? {
 /// Replay `script` with the §6 panel forms. Mirrors Rust `replay_forms`.
 private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], FormsRefusal> {
     guard let steps = script["steps"] as? [[String: Any]] else { return .failure(FormsRefusal("a script has steps")) }
-    var seeds: [(String, String, Any)] = []
-    if let app = script["app_state"] {
-        guard let app = app as? [String: Any] else { return .failure(FormsRefusal("app_state is not an object")) }
-        for (k, v) in app {
-            guard k == "panels" else {
-                return .failure(FormsRefusal("app_state.\(k) is not a ruled form; seed a panel's declared state as app_state.panels.<content id>.<key>"))
-            }
-            for (pid, keys) in (v as? [String: Any]) ?? [:] {
-                let declared = WorkspaceData.load()?.panelStateDefaults(pid) ?? [:]
-                for (key, val) in (keys as? [String: Any]) ?? [:] {
-                    guard declared[key] != nil else {
-                        return .failure(FormsRefusal("app_state.panels.\(pid).\(key): UndeclaredPanelKey \(pid).\(key)"))
-                    }
-                    // In a list, an index array is a PATH (the ruled form).
-                    let seeded: Any = (val as? [Any]).map { items in
-                        items.map { item -> Any in formsPath(item).map { p in ["__path__": p] as Any } ?? item }
-                    } ?? val
-                    seeds.append((pid, key, seeded))
-                }
-            }
-        }
+    // The ruled `app_state` form, parsed by the SAME code the live app's test
+    // FIFO `seed` verb runs (ScriptPanelSeeds, row 275 (b)).
+    let seeds: [ScriptPanelSeeds.Seed]
+    switch ScriptPanelSeeds.parse(script["app_state"]) {
+    case .success(let s): seeds = s
+    case .failure(let why): return .failure(FormsRefusal(why.description))
     }
     var out: [[String: Any]] = []
     var stopped = false
@@ -8136,18 +8121,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
         if stopped { return }
         func refuse(_ why: String) { out.append(["step": i, "refused": why]); stopped = true }
         if i == -1 {
-            for (pid, key, val) in seeds {
-                // A key the app holds on the Model is seeded there, as `read:
-                // panel` reads it there (``modelHeldPanelState``).
-                if let items = val as? [Any], modelHeldPanelState(pid, model: model)[key] != nil {
-                    let paths = items.compactMap(formsPath)
-                    if paths.count == items.count, setModelHeldPanelState(pid, key, paths: paths, model: model) { continue }
-                }
-                if !model.stateStore.hasPanel(pid) {
-                    model.stateStore.initPanel(pid, defaults: WorkspaceData.load()!.panelStateDefaults(pid))
-                }
-                model.stateStore.setPanel(pid, key, val)
-            }
+            ScriptPanelSeeds.apply(seeds, model: model)
             return
         }
         let opened = menuOpen

@@ -329,6 +329,20 @@ extension JasAppDelegate {
                     NSLog("test-fifo: %@", "\(error)")
                 }
             }
+        case "seed":
+            // seed <json>: an input script's `app_state`, seeded into the
+            // active canvas's model by the parse and apply the level-1 forms
+            // runner uses (ScriptPanelSeeds; row 275 (b)). The harness waits
+            // for this receipt line and refuses the script on anything else.
+            guard let model = workspace?.activeModel else {
+                NSLog("test-fifo: seed REFUSED (no active canvas)")
+                return
+            }
+            do {
+                NSLog("test-fifo: seed delivered %@", try FifoSeed.run(rest, model: model))
+            } catch {
+                NSLog("test-fifo: seed REFUSED %@", "\(error)")
+            }
         case "gesture":
             // gesture <json>: an input script's pointer steps, delivered to the
             // active canvas view's own handlers (FifoGesture; row 249), because
