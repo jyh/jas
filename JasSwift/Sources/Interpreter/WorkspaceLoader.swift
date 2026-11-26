@@ -369,6 +369,14 @@ public func iconButtonHasAlternates(_ element: [String: Any]) -> Bool {
     return true
 }
 
+/// The AX identifier of a panel group's hamburger while `kind` is its active
+/// panel: `<content id>_menu`, beside the tab's `<content id>_tab`. A level-2
+/// driver (scripts/mac_l2_plan.py, MENU_SUFFIX) presses the menu of the panel
+/// a `panel_menu` step names by this id (docs/TESTING.md section 6).
+func panelMenuButtonId(_ kind: PanelKind) -> String {
+    panelKindToContentId(kind) + "_menu"
+}
+
 /// Map PanelKind to YAML content id.
 func panelKindToContentId(_ kind: PanelKind) -> String {
     switch kind {

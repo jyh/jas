@@ -348,6 +348,12 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   * `{"panel_menu": P, "action": A, "params": {...}}` picks the one item whose action is `A` and whose declared params
     equal every param the step names. Labels are never used. Zero or two matches, or a disabled item, are refused by
     name. The item runs as a shell's pick does.
+  * **The Mac driver delivers the `panel_menu` step (row 275), built and not yet measured on a live app.** It picks the
+    item by the same rule from the panel's `menu:`, then drives the person's route: the panel's tab (or Window item), a
+    real click on the group's hamburger (AX identifier `<panel content id>_menu`; it pops its menu from the click, so an
+    AXPress opens nothing), and the one item outside the menubar whose title is the item's label. An item whose label
+    is computed (`{{…}}`) is refused by name, and so is the step on the locked route, which gives no real click. The
+    `read: panel_menu` form is still refused there.
 * **Both runners deliver the row context menu (row 139).**
   * A row `secondary_press` opens the `context_menu:` declared on the nearest node along the widget's path, with the
     row as its `node`. It dispatches nothing of its own.
