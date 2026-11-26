@@ -3589,6 +3589,50 @@ function Read-SbInputScript([string]$Json) {
     $no = { param($why) [pscustomobject]@{ Refusal = $why } }
     try { $s = $Json | ConvertFrom-Json } catch { return (& $no 'the script does not parse') }
     if ($null -eq $s) { return (& $no 'the script does not parse') }
+    # ROW 275 C1 (STATUS-flask 1006/1007): EVERY KEY IS READ OR REFUSED BY
+    # NAME, before anything else, so a form this driver does not deliver can
+    # never be dropped (accepted with its key ignored) nor refused under another
+    # form's name, nor hidden behind a later refusal (a missing expected_json
+    # hid every form of the proposed scripts). `delivered` is what the code
+    # below reads; `later` is what docs/TESTING.md section 6 defines and this
+    # driver does not deliver yet.
+    $topDelivered = @('item', 'spec', 'setup_svg', 'tool', 'app_state', 'steps', 'expected_json', 'proposed')
+    $topLater = @('expected_dialog', 'expected_state_json')
+    foreach ($k in @($s.PSObject.Properties | ForEach-Object { $_.Name })) {
+        if ($topDelivered -ccontains $k) { continue }
+        if ($topLater -ccontains $k) { return (& $no "top-level key '$k': this driver does not deliver it yet") }
+        return (& $no "top-level key '$k' is not a script key (docs/TESTING.md section 6)")
+    }
+    $stepKeys = @{
+        pointer = @{ delivered = @('kind', 'x', 'y', 'dragging', 'shift', 'alt', 'ctrl', 'meta', 'mods'); later = @('hold_ms') }
+        key     = @{ delivered = @('key', 'ctrl', 'shift', 'alt', 'meta'); later = @() }
+        panel   = @{ delivered = @('panel', 'widget', 'event', 'value'); later = @('row', 'at', 'shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
+        menu    = @{ delivered = @('menu'); later = @() }
+        read    = @{ delivered = @('read'); later = @('keys') }
+    }
+    $formSteps = @($s.steps)
+    for ($fi = 0; $fi -lt $formSteps.Count; $fi++) {
+        $fnames = @($formSteps[$fi].PSObject.Properties | ForEach-Object { $_.Name })
+        # A step's form is named by its discriminating key, a dialog step first:
+        # one that also names a panel is still a dialog step.
+        $form = if ($fnames -ccontains 'dialog') { 'dialog' }
+                elseif ($fnames -ccontains 'panel_menu') { 'panel_menu' }
+                elseif ($fnames -ccontains 'read') { 'read' }
+                elseif ($fnames -ccontains 'menu') { 'menu' }
+                elseif ($fnames -ccontains 'panel' -or $fnames -ccontains 'widget') { 'panel' }
+                elseif ($fnames -ccontains 'key') { 'key' }
+                else { 'pointer' }
+        if (-not $stepKeys.ContainsKey($form)) {
+            return (& $no "step $fi is a $form step: this driver does not deliver $form steps yet")
+        }
+        # A pointer step of an unknown `kind` is named by its kind below.
+        if ($form -eq 'pointer' -and @('press', 'move', 'release', 'double_click') -cnotcontains "$($formSteps[$fi].kind)") { continue }
+        foreach ($k in $fnames) {
+            if ($stepKeys[$form].delivered -ccontains $k) { continue }
+            if ($stepKeys[$form].later -ccontains $k) { return (& $no "step $fi $form step key '$k': this driver does not deliver it yet") }
+            return (& $no "step $fi $form step key '$k' is not a $form-step key")
+        }
+    }
     # Any NAMED tool: the shell resolves it against the core's own list
     # (SB_TOOL by name, `ToolKnob.Resolve`) and refuses an unknown one by name.
     if ([string]::IsNullOrWhiteSpace("$($s.tool)")) {
