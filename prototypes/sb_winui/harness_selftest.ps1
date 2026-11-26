@@ -2308,6 +2308,9 @@ Test-Case 'dialog reads: a PROBE row with no dialog= field (a shell before row 2
 Test-Case 'dialog reads: seq=1 is not seq=12 (the probe number is a whole token)' {
     Get-SbDialogReadVerdict -Rows @('PROBE seq=12 surface=1x1 frame=f doc-sha=a dialog=none selection=[] plan=p') -BaseSeq 1 -Reads @(0) -Expected @('none')
 } 'FAIL(read 1: no PROBE seq=1 row)'
+Test-Case 'dialog reads: reads and expectations of different lengths FAIL by name, never compare against an empty want' {
+    Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(1, 3) -Expected @('artboard_options')
+} 'FAIL(2 dialog read(s) and 1 expected entry: the reader pairs them one to one)'
 Test-Case 'dialog reads: a script with none reads none' {
     Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @() -Expected @()
 } 'none'

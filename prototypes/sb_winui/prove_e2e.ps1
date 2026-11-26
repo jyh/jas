@@ -117,6 +117,8 @@ $clickCount = [int]$sc.Clicks
 $clickPoints = @(ConvertFrom-SbPanelText $panelText | Where-Object { $_.click })
 # DIALOG STEPS (row 275 C2) ride the same list; each probes (jas 1006 A).
 $dialogCount = [int]$sc.Dialogs
+# Captured here: `$sc` is reused for the scale below.
+$dialogReads = @($sc.DialogReads); $expectedDialog = @($sc.ExpectedDialog)
 $lateCount = $panelCount + $menuCount + $clickCount + $dialogCount
 # G11 STEP 3: A DOUBLE-CLICK is the gesture's click and then one more click at
 # the same point inside the double-click time (`double`), and `then-click`
@@ -514,7 +516,7 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
 }
 # {"read": "dialog"} (row 275 C2): each read is the dialog= field of the probe
 # the act before it wrote; the release (and a double's clicks) probe first.
-$dialogV = Get-SbDialogReadVerdict -Rows @(Read-SbRows $log $mark) -BaseSeq (1 + $doubleClicks) -Reads @($sc.DialogReads) -Expected @($sc.ExpectedDialog)
+$dialogV = Get-SbDialogReadVerdict -Rows @(Read-SbRows $log $mark) -BaseSeq (1 + $doubleClicks) -Reads $dialogReads -Expected $expectedDialog
 if ($dialogV -notlike 'PASS*' -and $dialogV -ne 'none') { $core = if ($core -eq 'PASS') { "FAIL(dialog=$dialogV)" } else { "$core dialog=$dialogV" } }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS' -and $paint -like 'PASS*' -and $gaps -like 'PASS*') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($lateCount -gt 0) { ",panels=$panelShow" })):$drive " +

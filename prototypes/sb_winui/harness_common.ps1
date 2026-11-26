@@ -4009,6 +4009,7 @@ function ConvertFrom-SbPanelText([string]$Text) {
 # or a PROBE row with no `dialog=` field, FAILS by name: neither is `none`.
 function Get-SbDialogReadVerdict([string[]]$Rows, [int]$BaseSeq, [int[]]$Reads, [string[]]$Expected) {
     if (@($Reads).Count -eq 0) { return 'none' }
+    if (@($Expected).Count -ne @($Reads).Count) { return "FAIL($(@($Reads).Count) dialog read(s) and $(@($Expected).Count) expected entr$(if (@($Expected).Count -eq 1) { 'y' } else { 'ies' }): the reader pairs them one to one)" }
     $fails = New-Object System.Collections.Generic.List[string]
     for ($i = 0; $i -lt $Reads.Count; $i++) {
         $seq = $BaseSeq + $Reads[$i]
