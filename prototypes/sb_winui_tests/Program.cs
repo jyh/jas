@@ -1743,8 +1743,16 @@ static class Program
         }
         Check("probe census: ApplyBatch's cases were read from Canvas.cs", cvArms.Count >= 30, $"read {cvArms.Count} case(s)");
         var probeKinds = new[] { "PointerCmd", "KeyCmd", "PanelClickCmd", "MenuActionCmd", "DialogEventCmd", "DialogDismissCmd", "PanelMenuCmd", "PanelValueSynthCmd" };
-        Eq("probe census: the kinds that arm SB_PROBE in the drain are exactly the ones that can move the document by an act",
+        Eq("probe census: the table's probing kinds are the eight that can move the document by an act",
             string.Join("|", probeKinds.OrderBy(k => k, StringComparer.Ordinal)),
+            string.Join("|", ProbeWire.Kinds.Where(kv => kv.Value.Probes).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)));
+        Eq("probe census: every kind the drain switches on is classified in ProbeWire.Kinds, and no stale kind is",
+            "missing=|stale=",
+            "missing=" + string.Join(",", cvArms.Keys.Where(k => !ProbeWire.Kinds.ContainsKey(k)).OrderBy(k => k, StringComparer.Ordinal))
+            + "|stale=" + string.Join(",", ProbeWire.Kinds.Keys.Where(k => !cvArms.ContainsKey(k)).OrderBy(k => k, StringComparer.Ordinal)));
+        Check("probe census: every kind in the table says why", ProbeWire.Kinds.All(kv => kv.Value.Why.Length > 0), "a reason is empty");
+        Eq("probe census: a drain case arms SB_PROBE exactly when ProbeWire.Kinds says it probes",
+            string.Join("|", ProbeWire.Kinds.Where(kv => kv.Value.Probes).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)),
             string.Join("|", cvArms.Where(kv => kv.Value).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
