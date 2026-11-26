@@ -510,6 +510,7 @@ struct YamlElementView: View {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
                     YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                        .modifier(RepeatIterationAx(id: repeatIterationAxId(foreachId: element["id"] as? String, index: i)))
                 }
             }
         } else if layout == "row" {
@@ -517,6 +518,7 @@ struct YamlElementView: View {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
                     YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                        .modifier(RepeatIterationAx(id: repeatIterationAxId(foreachId: element["id"] as? String, index: i)))
                 }
             }
         } else {
@@ -528,6 +530,7 @@ struct YamlElementView: View {
                 ForEach(0..<items.count, id: \.self) { i in
                     let childScope = scope.extend(itemBindings(varName, item: items[i], index: i))
                     YamlElementView(element: template, context: childScope.toDict(), model: model, panelId: panelId, onWidgetAction: onWidgetAction, theme: theme, flyoutIconDefault: flyoutIconDefault, onDialogWrite: onDialogWrite, onStoreDialogOpened: onStoreDialogOpened, onStoreDialogClosed: onStoreDialogClosed)
+                        .modifier(RepeatIterationAx(id: repeatIterationAxId(foreachId: element["id"] as? String, index: i)))
                 }
             }
         }
@@ -4783,6 +4786,9 @@ struct YamlPanelBodyView: View {
         let y: Int
         let w: Int
         let h: Int
+        /// The identified foreach iterations this leaf is drawn in, outermost
+        /// first (``iterationChain(leafPath:repeats:)``), e.g. `["ap_list#1"]`.
+        var chain: [String] = []
     }
 
     /// The full Path B layout for this panel: the chrome boxes (layout-only
@@ -4819,9 +4825,51 @@ struct YamlPanelBodyView: View {
         }
         let leaves = plan.leaves.enumerated().map { (idx, leaf) in
             PathBLeaf(id: idx, node: leaf.node, ctx: leaf.ctx,
-                      x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h)
+                      x: leaf.x, y: leaf.y, w: leaf.w, h: leaf.h,
+                      chain: iterationChain(leafPath: leaf.path, repeats: plan.repeats))
         }
         return PathBLayout(chrome: chrome, leaves: leaves, panelH: plan.height)
+    }
+
+    /// The Path B leaves at one depth of iteration layers (row 281). Leaves
+    /// in no further identified iteration render directly, as they always
+    /// have; the rest are grouped by their next `<foreach id>#<k>` into a
+    /// full-panel layer that is its own accessibility container with that
+    /// identifier, so a level-2 driver finds `ap_list#1` and then the one
+    /// `ap_name` inside it. Each layer keeps the panel's coordinates, so every
+    /// leaf stays at its plan rect. A panel with no identified repeat draws
+    /// exactly what it drew before.
+    private func pathBLayer(_ leaves: [PathBLeaf], depth: Int, panelH: Int) -> AnyView {
+        let direct = leaves.filter { $0.chain.count == depth }
+        var order: [String] = []
+        var groups: [String: [PathBLeaf]] = [:]
+        for leaf in leaves where leaf.chain.count > depth {
+            let key = leaf.chain[depth]
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(leaf)
+        }
+        return AnyView(SwiftUI.Group {
+            ForEach(direct) { leaf in
+                YamlElementView(
+                    element: leaf.node, context: leaf.ctx, model: model,
+                    panelId: panelId, theme: theme,
+                    flyoutIconDefault: flyoutIconDefault,
+                    onDialogWrite: onDialogWrite,
+                    onStoreDialogOpened: onStoreDialogOpened,
+                    onStoreDialogClosed: onStoreDialogClosed
+                )
+                .frame(width: CGFloat(leaf.w), height: CGFloat(leaf.h), alignment: .topLeading)
+                .offset(x: CGFloat(leaf.x), y: CGFloat(leaf.y))
+            }
+            ForEach(order, id: \.self) { key in
+                ZStack(alignment: .topLeading) {
+                    pathBLayer(groups[key] ?? [], depth: depth + 1, panelH: panelH)
+                }
+                .frame(width: 228, height: CGFloat(panelH), alignment: .topLeading)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(key)
+            }
+        })
     }
 
     /// Strip a chrome node's content keys (`children` / `do` / `foreach`) so the
@@ -4856,18 +4904,7 @@ struct YamlPanelBodyView: View {
                     .frame(width: CGFloat(box.w), height: CGFloat(box.h), alignment: .topLeading)
                     .offset(x: CGFloat(box.x), y: CGFloat(box.y))
                 }
-                ForEach(layout.leaves) { leaf in
-                    YamlElementView(
-                        element: leaf.node, context: leaf.ctx, model: model,
-                        panelId: panelId, theme: theme,
-                        flyoutIconDefault: flyoutIconDefault,
-                        onDialogWrite: onDialogWrite,
-                        onStoreDialogOpened: onStoreDialogOpened,
-                        onStoreDialogClosed: onStoreDialogClosed
-                    )
-                    .frame(width: CGFloat(leaf.w), height: CGFloat(leaf.h), alignment: .topLeading)
-                    .offset(x: CGFloat(leaf.x), y: CGFloat(leaf.y))
-                }
+                pathBLayer(layout.leaves, depth: 0, panelH: layout.panelH)
             }
             .frame(width: 228, height: CGFloat(layout.panelH), alignment: .topLeading)
             // Default foreground = theme.text, cascaded to all leaves. The flat
@@ -5195,4 +5232,34 @@ let hueBarHStops: [(Int, Int, Int)] = [
 /// `max`, the bottom is 0, for every channel. Twin of Rust's `hue_bar_value`.
 func hueBarValue(y: Double, height: Double, max: Double) -> Double {
     stripValue(v: y / height, max: max)
+}
+
+
+// MARK: - Repeat iteration identity (row 281)
+
+/// The accessibility identifier of one foreach iteration: `<foreach id>#<index>`,
+/// or nil when the foreach has no id. Every iteration draws the same template,
+/// so its widgets share one identifier; this per-iteration container is what a
+/// level-2 driver addresses by `at` (the Artboards list: `ap_list#1`, then the
+/// one `ap_name` inside it). Ordering by frame was rejected: it is a guess
+/// about layout.
+func repeatIterationAxId(foreachId: String?, index: Int) -> String? {
+    guard let id = foreachId, !id.isEmpty else { return nil }
+    return "\(id)#\(index)"
+}
+
+/// Wraps one iteration in an accessibility container carrying its identifier,
+/// keeping the template's own elements (and their identifiers) inside it.
+/// With no identifier it changes nothing.
+struct RepeatIterationAx: ViewModifier {
+    let id: String?
+    func body(content: Content) -> some View {
+        if let id {
+            content
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(id)
+        } else {
+            content
+        }
+    }
 }
