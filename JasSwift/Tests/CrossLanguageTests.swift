@@ -9200,7 +9200,8 @@ private func formsFindWidget(_ node: Any?, _ id: String) -> [String: Any]? {
         "input_scripts_proposed/artboard_options.preset_a4.json",
     ]
     let dir = (fixturesPath() as NSString).appendingPathComponent("input_scripts_proposed")
-    let onDisk = try FileManager.default.contentsOfDirectory(atPath: dir).filter { $0.hasSuffix(".json") }.sorted()
+    let onDisk = try FileManager.default.contentsOfDirectory(atPath: dir)
+        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".expected.json") }.sorted()
         .map { "input_scripts_proposed/\($0)" }
     #expect(onDisk == proposed, "the population moved")
     for n in proposed {
@@ -9208,6 +9209,14 @@ private func formsFindWidget(_ node: Any?, _ id: String) -> [String: Any]? {
         let out = formsRun(script)
         #expect(formsRefusal(out) == nil, "\(n): \(out)")
         #expect(formsDialogReads(out) == ["artboard_options", "null"], "\(n): \(out)")
+        // The script's own expectations (docs/TESTING.md section 6): one
+        // expected_dialog entry per dialog read, in order, and the document
+        // read byte for byte equal to its golden, which Rust's replay also pins.
+        let wantDialogs = ((script["expected_dialog"] as? [Any]) ?? []).map { ($0 as? String) ?? "null" }
+        #expect(wantDialogs == formsDialogReads(out), "\(n): expected_dialog \(wantDialogs)")
+        let golden = (script["expected_json"] as? String) ?? "(no expected_json)"
+        let want = readFixture("input_scripts_proposed/\(golden)").trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(formsDocReads(out).last == want, "\(n): the document read is not \(golden)")
         let ab = formsArtboard(out).last ?? [:]
         if n.contains("fill_white") {
             #expect("\(ab["fill"] ?? "nil")" == formsWhiteFromTheSpec(), "\(n): \(ab)")

@@ -2209,14 +2209,16 @@ Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as
     $j = New-SbFormScript @([ordered]@{ read = 'state'; keys = @('active_tool') })
     Show-SbScript (Read-SbInputScript $j)
 } "REFUSED: step 2 read step key 'keys': this driver does not deliver it yet"
-# Over the REAL files: both proposed scripts name their FIRST undelivered form
-# (the panel_menu step), not the missing expected_json that used to hide it.
+# Over the REAL files: both proposed scripts name their FIRST undelivered form,
+# not a missing expected_json hiding it. Since row 275's expectations they carry
+# a top-level expected_dialog list, which the key check reads before any step,
+# so that is the form named; the panel_menu refusal keeps its synthetic arm above.
 $fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 foreach ($fp in 'fill_white', 'preset_a4') {
     Test-Case "is: the proposed artboard_options.$fp names its first undelivered form" {
         $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
         Show-SbScript (Read-SbInputScript $t)
-    } 'REFUSED: step 0 is a panel_menu step: this driver does not deliver panel_menu steps yet'
+    } "REFUSED: top-level key 'expected_dialog': this driver does not deliver it yet"
 }
 # And the control: no SHIPPED script is refused by the new form checks (they
 # would have stopped gating), and the read found the corpus at all.

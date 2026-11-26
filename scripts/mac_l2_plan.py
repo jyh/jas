@@ -211,6 +211,19 @@ def _plan_read(item, i, st, script, state_keys):
         if "expected_dialog" not in script:
             raise Refused(f"{item}: step {i} reads the dialog; the script carries no expected_dialog")
         want = script["expected_dialog"]
+        # One entry per dialog read, in step order, when the script reads the
+        # dialog more than once (TESTING.md section 6); a scalar is the form for
+        # exactly one read. Never one value compared against every read.
+        reads = [j for j, s in enumerate(script.get("steps") or [])
+                 if isinstance(s, dict) and s.get("read") == "dialog"]
+        if isinstance(want, list):
+            if len(want) != len(reads):
+                raise Refused(f"{item}: the script reads the dialog {len(reads)} time(s); "
+                              f"expected_dialog lists {len(want)}")
+            want = want[reads.index(i)]
+        elif len(reads) > 1:
+            raise Refused(f"{item}: the script reads the dialog {len(reads)} times; expected_dialog must "
+                          f"list one entry per dialog read, in order")
         if want is not None and not isinstance(want, str):
             raise Refused(f"{item}: step {i}: expected_dialog is {want!r}, not a dialog id or null")
         return ("read", "dialog", want)
@@ -1638,6 +1651,19 @@ def self_test():
     tc = plan(dict(tb, expected_dialog=None, steps=[click, rst, rdl]), mb, lay, state_keys=SK)
     check("a press with no hold_ms plans as a hold of 0 (a click)", tc[2] == ("toolbar", "btn_arrow_slot", 0))
     check("a dialog read can expect none open", tc[4] == ("read", "dialog", None))
+    # Two dialog reads (row 275's proposed scripts): expected_dialog lists one
+    # entry per read, in order; a scalar or a list of the wrong length is
+    # refused by name, never compared against every read.
+    td = plan(dict(tb, expected_dialog=["arrow_alternates", None], steps=[hold, rdl, click, rdl]),
+              mb, lay, state_keys=SK)
+    check("two dialog reads take their expected ids in order",
+          (td[3], td[5]) == (("read", "dialog", "arrow_alternates"), ("read", "dialog", None)))
+    check("two dialog reads with a scalar expected_dialog are refused",
+          refused(lambda: plan(dict(tb, steps=[hold, rdl, click, rdl]), mb, lay, state_keys=SK),
+                  "one entry per dialog read"))
+    check("an expected_dialog list of the wrong length is refused",
+          refused(lambda: plan(dict(tb, expected_dialog=["arrow_alternates"], steps=[hold, rdl, click, rdl]),
+                               mb, lay, state_keys=SK), "lists 1"))
     check("a toolbar step's event is press",
           refused(lambda: plan(dict(tb, steps=[dict(click, event="click"), rst]), mb, lay, state_keys=SK), "press"))
     for bad in (0, -5, 2.5, "400", True):
