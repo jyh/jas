@@ -825,13 +825,79 @@ def run_layers_case(br, case):
         ctx.close()
 
 
+# ── --artboard-fill (row 270): Artboard Options' Fill dropdown (`ao_fill_dropdown`,
+# a `select` whose bind is a computed expression) by the person's route: the
+# Artboards tab, the row's Options button, White in the dropdown, OK; then the
+# document's artboard fill by __jasTest.read().
+ARTBOARD_FILL_WANT = "#ffffff"
+
+
+def artboard_fill_verdict(before, after, want=ARTBOARD_FILL_WANT):
+    if before == want:
+        return "REFUSED", f"the artboard's fill is already {want!r}; the pick cannot be read"
+    if after == before:
+        return "FAIL", f"the Fill dropdown's pick wrote nothing (the fill stayed {before!r})"
+    if after != want:
+        return "FAIL", f"the fill reads {after!r}, want {want!r}"
+    return "PASS", ""
+
+
+def artboard_fill_line(verdict):
+    st, why = verdict
+    return f"ARTBOARDFILL {st}" + (f" ({why})" if why else "")
+
+
+def _artboard_fill(page):
+    ab = lambda: (json.loads(page.evaluate("() => window.__jasTest.read()")).get("artboards") or [{}])[0].get("fill")
+    page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+    svg = open(os.path.join(REPO, _plan.LAYERS_FIXTURE), encoding="utf-8").read()
+    if not page.evaluate("([s, n]) => window.__jasTest.open(s, n)", [svg, "artboard_fill.svg"]):
+        raise _plan.Refused("window.__jasTest.open returned false")
+    page.wait_for_timeout(300)
+    before = ab()
+    tab = page.locator("#artboards_panel_content_tab")
+    if tab.count() != 1:
+        raise _plan.Refused(f"{tab.count()} elements carry id 'artboards_panel_content_tab'")
+    tab.scroll_into_view_if_needed()
+    _act("show the Artboards tab", tab)
+    page.wait_for_timeout(300)
+    opt = page.locator("#ap_options")
+    if opt.count() < 1:
+        raise _plan.Refused("no artboard row has an Options button (#ap_options)")
+    _act("open Artboard Options", opt.first)
+    page.wait_for_timeout(400)
+    dd = page.locator("#ao_fill_dropdown")
+    if dd.count() != 1:
+        raise _plan.Refused(f"{dd.count()} elements carry id 'ao_fill_dropdown'")
+    try:
+        dd.select_option("white", timeout=5000)
+    except Exception as e:
+        raise _plan.Refused(f"choose White in the Fill dropdown: {type(e).__name__}")
+    page.wait_for_timeout(300)
+    _act("press OK", page.get_by_role("button", name="OK", exact=True).last)
+    page.wait_for_timeout(400)
+    return artboard_fill_verdict(before, ab())
+
+
+def run_artboard_fill(br):
+    ctx, page = br.page(True)
+    try:
+        return _artboard_fill(page)
+    except _plan.Refused as e:
+        return "REFUSED", str(e)
+    except Exception as e:
+        return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+    finally:
+        ctx.close()
+
+
 def run(args):
     menubar = _plan.load_menubar()
     menu_ids = menu_ids_by_path(menubar)
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = fit = layers = None
+    dock = dock_cases = fit = layers = abfill = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -866,6 +932,8 @@ def run(args):
             for c, st, d in layer_cases:
                 lines.append(f"{st} layers {c}" + (f" -- {d}" if d else ""))
             layers = _plan.layers_line(layer_cases)
+        if args.artboard_fill:
+            abfill = "ARTBOARDFILL NOT RUN (" + not_run + ")" if not_run else artboard_fill_line(run_artboard_fill(br))
     finally:
         br.close()
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -874,6 +942,8 @@ def run(args):
     if dock is not None:
         body.append(dock + " (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)")
         body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
+    if abfill is not None:
+        body.append(abfill + " (the --artboard-fill check: Artboard Options' Fill dropdown by the person's route, row 270)")
     if layers is not None:
         body.append(layers + " (the --layers check: the Mac harness's `layers` cases on the web, rows 256/264/266)")
     if fit is not None:
@@ -923,6 +993,14 @@ def self_test():
     check(menu_reply([("", None)])["menu"] == [], "a separator (no text, no data-enabled) is dropped")
     check(row_dom_id([1, 0]) == "lp_row_1_0" and row_dom_id([0]) == "lp_row_0",
           "the row id is renderer.rs's lp_row_<path joined by _>")
+    # --artboard-fill (row 270): Artboard Options' Fill dropdown, by the person's route.
+    check(artboard_fill_verdict("transparent", "#ffffff") == ("PASS", ""), "white written: PASS")
+    check(artboard_fill_verdict("transparent", "transparent") ==
+          ("FAIL", "the Fill dropdown's pick wrote nothing (the fill stayed 'transparent')"), "nothing written: FAIL by name")
+    check(artboard_fill_verdict("#ffffff", "#ffffff")[0] == "REFUSED", "a start already white cannot test the pick")
+    check(artboard_fill_verdict("transparent", "#000000")[0] == "FAIL", "the wrong preset: FAIL")
+    check(artboard_fill_line(("PASS", "")) == "ARTBOARDFILL PASS"
+          and artboard_fill_line(("FAIL", "x")) == "ARTBOARDFILL FAIL (x)", "the line names its verdict")
 
     menubar = _plan.load_menubar()
     paths = script_paths()
@@ -1120,6 +1198,8 @@ def main(argv):
                     help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
     ap.add_argument("--fit", action="store_true",
                     help="also read the dock's fit under overlay and classic scrollbars (row 66)")
+    ap.add_argument("--artboard-fill", action="store_true",
+                    help="also pick White in Artboard Options' Fill dropdown and read the artboard (row 270)")
     ap.add_argument("--layers", action="store_true",
                     help="also run the Layers tree cases R1 R4-R7 on the shared verdicts (row 266)")
     ap.add_argument("--advisory", action="store_true",
