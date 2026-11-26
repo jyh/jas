@@ -3519,3 +3519,68 @@ internal sealed record LibraryWrite(string Kind, string Slug, string? Manifest)
         };
     }
 }
+
+/// <summary>
+/// SB_PROBE (jas 1006 A): which command kinds the render drain
+/// (<c>Canvas.ApplyBatch</c>) re-reads the probe after, and why each other
+/// kind does not. A probe is the reading of the document after an ACT: a
+/// release, a key, a panel step, a menu item, a dialog event (OK included), a
+/// dialog dismiss (a preview is restored), a panel-menu item run, and a panel
+/// value synth. Before this table the drain armed only the first four, so a
+/// probe read after a dialog's OK described the moment before it.
+///
+/// ⛔ A CENSUS, NOT A LIST TO REMEMBER: <c>sb_winui_tests</c> reads every
+/// <c>case</c> of the drain from <c>Canvas.cs</c> and refuses a kind missing
+/// here, and refuses a case that arms the probe when this table says it does
+/// not (or the reverse). A new command kind is classified here or the suite
+/// is red.
+/// </summary>
+internal static class ProbeWire
+{
+    /// <summary>
+    /// Every command kind the drain switches on: <c>true</c> when the drain
+    /// re-reads SB_PROBE after it (its own condition aside: a release, an
+    /// undeferred key or menu item, a panel-menu RUN rather than a read), and
+    /// the reason in either case.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, (bool Probes, string Why)> Kinds =
+        new Dictionary<string, (bool, string)>(StringComparer.Ordinal)
+        {
+            ["PointerCmd"] = (true, "a release lands a gesture on the document"),
+            ["KeyCmd"] = (true, "a shortcut lands on the document as a release does"),
+            ["PanelClickCmd"] = (true, "a panel step, run or refused (jas 373)"),
+            ["MenuActionCmd"] = (true, "a menu step, unless deferred for the clipboard (jas 389)"),
+            ["DialogEventCmd"] = (true, "a dialog event, OK included, can write the document"),
+            ["DialogDismissCmd"] = (true, "a dismiss restores a previewed document"),
+            ["PanelMenuCmd"] = (true, "a panel-menu item run; a read of the menu moves nothing"),
+            ["PanelValueSynthCmd"] = (true, "a synthesised panel value commits as a click does"),
+            ["QuitCmd"] = (false, "the shell is ending"),
+            ["QuitRequestCmd"] = (false, "asks the UI; moves nothing"),
+            ["AttachCmd"] = (false, "the surface, not the document"),
+            ["ResizeCmd"] = (false, "the surface, not the document"),
+            ["RepaintCmd"] = (false, "a frame, not the document"),
+            ["PointerReportCmd"] = (false, "a read for an attached client"),
+            ["DialogOpenCmd"] = (false, "opening a dialog writes no document; its events probe"),
+            ["LoadCmd"] = (false, "the launch document; the first act's probe reads it"),
+            ["SceneCmd"] = (false, "a scene's own steps report their own rows"),
+            ["DumpCmd"] = (false, "a read"),
+            ["HashCmd"] = (false, "a frame label"),
+            ["DpiCmd"] = (false, "the surface's scale"),
+            ["UiStallDoneCmd"] = (false, "a timing receipt"),
+            ["MenuRefreshCmd"] = (false, "a read of enablement"),
+            ["SaveCmd"] = (false, "writes a file, not the document"),
+            ["OpenCmd"] = (false, "a new document, not an act on one (not yet asked of a probe)"),
+            ["OpCmd"] = (false, "a scene's named op; its scene reports it (not yet asked of a probe)"),
+            ["PanelOpenCmd"] = (false, "a panel's plan, not the document"),
+            ["PaneOpenCmd"] = (false, "a pane's plan, not the document"),
+            ["DockOpenCmd"] = (false, "the dock's layout, not the document"),
+            ["LayoutOpCmd"] = (false, "the dock's layout, not the document"),
+            ["EdgeRectsCmd"] = (false, "a geometry read"),
+            ["PaneWidthCmd"] = (false, "the dock's layout, not the document"),
+            ["McpAttachCmd"] = (false, "a client attaching"),
+            ["McpLineCmd"] = (false, "a client's preview; the client reads by observe, not SB_PROBE"),
+            ["McpDecideCmd"] = (false, "a client's accept or reject; the client reads by observe, not SB_PROBE"),
+            ["RowMenuCmd"] = (false, "a read of a row's context menu"),
+            ["PanelSynthCmd"] = (false, "it hashes at each of its own steps"),
+        };
+}
