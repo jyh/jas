@@ -119,3 +119,23 @@ private func writesPanelState(_ o: Any) -> Bool {
         #expect(panelMenuButtonId(k) != panelKindToContentId(k) + "_tab")
     }
 }
+
+// Row 275, the Mac slice (c): the open dialog's body carries the AX identifier
+// `<dialog id>_dialog`, so a level-2 driver finds a dialog step's widget INSIDE
+// the dialog the step names (scripts/mac_l2_plan.py's DIALOG_SUFFIX), never a
+// panel widget that shares its id. No shipped widget id takes that form.
+@Test func dialogAccessibilityIdNamesTheDialogAndCollidesWithNoWidget() {
+    #expect(dialogAccessibilityId("artboard_options") == "artboard_options_dialog")
+    let ws = WorkspaceData.load()!
+    var widgetIds = Set<String>()
+    func walk(_ v: Any?) {
+        if let d = v as? [String: Any] {
+            if let id = d["id"] as? String { widgetIds.insert(id) }
+            d.values.forEach(walk)
+        } else if let a = v as? [Any] { a.forEach(walk) }
+    }
+    walk(ws.dialogs())
+    let ids = ws.dialogs().keys.map { dialogAccessibilityId($0) }
+    #expect(ids.count >= 10, "\(ids.count) dialogs")
+    #expect(Set(ids).isDisjoint(with: widgetIds), "\(Set(ids).intersection(widgetIds))")
+}

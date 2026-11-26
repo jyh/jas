@@ -376,6 +376,63 @@ def _locked_app(pid):
         raise _plan.Refused("this process is not trusted for accessibility, so a panel step cannot be pressed")
     return AX.AXUIElementCreateApplication(pid)
 
+def _drive_widget(app, container, where, widget, event, value, label, wtype):
+    """Drive one widget inside `container` (a panel, or an open dialog's body)
+    as a person does: a click presses it, a select or icon_select commit picks
+    the option a person reads, a text commit types the text. One body for the
+    panel step and the dialog step, so the two routes cannot drift."""
+    ws = _by_id(container, widget)
+    if len(ws) != 1:
+        raise _plan.Refused(f"{len(ws)} widgets carry AXIdentifier {widget!r} in {where!r}")
+    w = ws[0]
+    if _attr(w, "AXEnabled") is False:
+        raise _plan.Refused(f"widget {widget!r} is disabled")
+    if event == "click":
+        _press(w)
+    elif wtype == "icon_select":
+        # An icon_select opens a POPOVER of buttons described "<glyph>,
+        # <label>", none with an identifier (row 83, the AX dump on the Mac test box):
+        # press the widget, then the one option whose description names
+        # the label. A popover with no match is cancelled, never picked.
+        _press(w); time.sleep(0.5)
+        pops = _find_all(app, lambda e: _attr(e, "AXRole") == "AXPopover")
+        if len(pops) != 1:
+            raise _plan.Refused(f"icon_select {widget!r}: {len(pops)} popovers open after its press")
+        items = [b for b in _find_all(pops[0], lambda e: _attr(e, "AXRole") == "AXButton")
+                 if _plan.icon_option_matches(_attr(b, "AXDescription"), label)]
+        if len(items) != 1:
+            _ax().AXUIElementPerformAction(pops[0], "AXCancel")
+            raise _plan.Refused(f"icon_select {widget!r}: {len(items)} options named {label!r}")
+        _press(items[0])
+    elif label is not None:
+        # A select: open its popup and choose the item a person reads.
+        _press(w); time.sleep(0.4)
+        items = [m for m in _find_all(w, lambda e: _attr(e, "AXRole") == "AXMenuItem")
+                 if _plan.live_title(_attr(m, "AXTitle")) == label]
+        if len(items) != 1:
+            do_key("escape", [])
+            raise _plan.Refused(f"select {widget!r}: {len(items)} items titled {label!r}")
+        _press(items[0])
+    else:
+        # Type the text as a person does. Setting AXValue on a SwiftUI
+        # text field does not reach its binding, so Return committed
+        # the old text. The field is the widget or its one text-field
+        # descendant (a length input wraps one).
+        fields = [w] if _attr(w, "AXRole") in TEXT_ROLES else \
+            _find_all(w, lambda e: _attr(e, "AXRole") in TEXT_ROLES)
+        if len(fields) != 1:
+            raise _plan.Refused(f"widget {widget!r} holds {len(fields)} text fields; a commit needs one")
+        text = str(value)
+        bad = [c for c in text if c not in KEYCODE]
+        if bad:
+            raise _plan.Refused(f"commit text {text!r} has characters this harness cannot type: {bad}")
+        _ax().AXUIElementSetAttributeValue(fields[0], "AXFocused", True); time.sleep(0.2)
+        do_key("a", ["cmd"]); time.sleep(0.1)
+        for c in text:
+            do_key(c, []); time.sleep(TYPE_DELAY_S)
+        do_key("return", [])
+
+
 def _run_script(path, menubar, locked=False, pid=None):
     with open(path, encoding="utf-8") as f:
         script = _json.load(f)
@@ -440,6 +497,25 @@ def _run_script(path, menubar, locked=False, pid=None):
             if verdict != "delivered":
                 raise _plan.Refused(f"the app did not deliver the gesture: {verdict or 'no receipt in its log within 3 s'}")
             time.sleep(0.2)
+        elif k == "seed":
+            # Row 275 (b): the script's app_state, seeded by the app's FIFO
+            # `seed` verb (ScriptPanelSeeds, the level-1 runner's own parse and
+            # apply). Its receipt is waited for, as a gesture's is; an app that
+            # refused it, or one built without the verb, refuses the script.
+            log = os.environ["JAS_FIFO"] + ".log"
+            start = os.path.getsize(log) if os.path.exists(log) else 0
+            _fifo(_plan.seed_command(act))
+            verdict = None
+            for _ in range(30):
+                time.sleep(0.1)
+                with open(log, encoding="utf-8", errors="replace") as f:
+                    f.seek(start)
+                    verdict = _plan.fifo_log_verdict("seed", f.read())
+                if verdict is not None:
+                    break
+            if verdict != "delivered":
+                raise _plan.Refused(f"the app did not seed the app_state: {verdict or 'no receipt in its log within 3 s'}")
+            time.sleep(0.2)
         elif k == "open":
             _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
             _fifo("view 1 0 0"); time.sleep(0.4)
@@ -489,59 +565,35 @@ def _run_script(path, menubar, locked=False, pid=None):
                 panels = _by_id(app, pid)
             if len(panels) != 1:
                 raise _plan.Refused(f"{len(panels)} panels carry AXIdentifier {pid!r}")
-            ws = _by_id(panels[0], widget)
-            if len(ws) != 1:
-                raise _plan.Refused(f"{len(ws)} widgets carry AXIdentifier {widget!r} in {pid!r}")
-            w = ws[0]
-            if _attr(w, "AXEnabled") is False:
-                raise _plan.Refused(f"widget {widget!r} is disabled")
-            if event == "click":
-                _press(w)
-            elif wtype == "icon_select":
-                # An icon_select opens a POPOVER of buttons described "<glyph>,
-                # <label>", none with an identifier (row 83, the AX dump on the Mac test box):
-                # press the widget, then the one option whose description names
-                # the label. A popover with no match is cancelled, never picked.
-                _press(w); time.sleep(0.5)
-                pops = _find_all(app, lambda e: _attr(e, "AXRole") == "AXPopover")
-                if len(pops) != 1:
-                    raise _plan.Refused(f"icon_select {widget!r}: {len(pops)} popovers open after its press")
-                items = [b for b in _find_all(pops[0], lambda e: _attr(e, "AXRole") == "AXButton")
-                         if _plan.icon_option_matches(_attr(b, "AXDescription"), label)]
-                if len(items) != 1:
-                    _ax().AXUIElementPerformAction(pops[0], "AXCancel")
-                    raise _plan.Refused(f"icon_select {widget!r}: {len(items)} options named {label!r}")
-                _press(items[0])
-            elif label is not None:
-                # A select: open its popup and choose the item a person reads.
-                _press(w); time.sleep(0.4)
-                items = [m for m in _find_all(w, lambda e: _attr(e, "AXRole") == "AXMenuItem")
-                         if _plan.live_title(_attr(m, "AXTitle")) == label]
-                if len(items) != 1:
-                    do_key("escape", [])
-                    raise _plan.Refused(f"select {widget!r}: {len(items)} items titled {label!r}")
-                _press(items[0])
-            else:
-                # Type the text as a person does. Setting AXValue on a SwiftUI
-                # text field does not reach its binding, so Return committed
-                # the old text. The field is the widget or its one text-field
-                # descendant (a length input wraps one).
-                fields = [w] if _attr(w, "AXRole") in TEXT_ROLES else \
-                    _find_all(w, lambda e: _attr(e, "AXRole") in TEXT_ROLES)
-                if len(fields) != 1:
-                    raise _plan.Refused(f"widget {widget!r} holds {len(fields)} text fields; a commit needs one")
-                text = str(value)
-                bad = [c for c in text if c not in KEYCODE]
-                if bad:
-                    raise _plan.Refused(f"commit text {text!r} has characters this harness cannot type: {bad}")
-                _ax().AXUIElementSetAttributeValue(fields[0], "AXFocused", True); time.sleep(0.2)
-                do_key("a", ["cmd"]); time.sleep(0.1)
-                for c in text:
-                    do_key(c, []); time.sleep(TYPE_DELAY_S)
-                do_key("return", [])
+            _drive_widget(app, panels[0], pid, widget, event, value, label, wtype)
             time.sleep(0.3)
         elif k == "menu":
             _press(_menu_item(app, act[1])); time.sleep(0.4)
+        elif k == "dialog":
+            # Row 275 (c): a widget of the OPEN dialog. The open dialog is read
+            # first, by the FIFO's `dialog` (the same read a script's
+            # `read: dialog` takes), and a step naming another dialog, or none
+            # open, is refused by name; never driven into whatever is open. The
+            # widget is found inside the dialog's body, `<dialog id>_dialog`.
+            if app is None:
+                app = _locked_app(pid_of_app)
+            _, did, body_id, widget, event, value, label, wtype = act
+            out = os.path.join(os.environ.get("TMPDIR", "/tmp"), "jas-l2-dialog-check.json")
+            if os.path.exists(out): os.remove(out)
+            _fifo("dialog " + out)
+            for _ in range(30):
+                if os.path.exists(out): break
+                time.sleep(0.1)
+            else:
+                raise _plan.Refused("the app wrote no dialog read before a dialog step")
+            got = _json.load(open(out, encoding="utf-8")).get("dialog")
+            if got != did:
+                raise _plan.Refused(f"dialog step for {did!r}: the open dialog is {got!r}")
+            bodies = _by_id(app, body_id)
+            if len(bodies) != 1:
+                raise _plan.Refused(f"{len(bodies)} elements carry AXIdentifier {body_id!r}")
+            _drive_widget(app, bodies[0], did, widget, event, value, label, wtype)
+            time.sleep(0.4)
         elif k == "panel_menu":
             # Row 275 (a): the person's route. Show the panel (its dock tab, or
             # its Window item), press its group's hamburger, `<pid>_menu`, by a

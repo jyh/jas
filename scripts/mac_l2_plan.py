@@ -126,7 +126,46 @@ DELIVERED_KEYS = {
     "toolbar": {"panel", "widget", "event", "hold_ms"},
     "read state": {"read", "keys"},
     "panel_menu": {"panel_menu", "action", "params"},
+    "dialog": {"dialog", "widget", "event", "value"},
 }
+# An open dialog's body is `<dialog id>_dialog` (the Swift dialogAccessibilityId,
+# which the self-test reads from the source).
+DIALOG_SUFFIX = "_dialog"
+
+
+def load_dialog_specs():
+    """Dialog id -> its spec, from workspace/dialogs/*.yaml (each file keys its dialog by id)."""
+    import glob
+    import yaml
+    out = {}
+    for f in sorted(glob.glob(os.path.join(REPO, "workspace", "dialogs", "*.yaml"))):
+        with open(f, encoding="utf-8") as fh:
+            for k, v in (yaml.safe_load(fh) or {}).items():
+                if isinstance(v, dict):
+                    out[k] = v
+    return out
+
+
+def _plan_dialog(item, i, st, dialog_specs):
+    """A dialog step: a widget of the OPEN dialog `dialog`, by its id. The
+    driver checks the open dialog by the FIFO's `dialog` read before driving,
+    and finds the widget inside that dialog's body (TESTING.md section 6)."""
+    _refuse_undelivered(item, i, st, "dialog")
+    did, wid, ev = st["dialog"], st.get("widget"), st.get("event")
+    spec = dialog_specs.get(did) if isinstance(did, str) else None
+    if spec is None:
+        raise Refused(f"{item}: step {i}: dialog {did!r} is not declared under workspace/dialogs/")
+    w = find_widget(spec, wid)
+    if w is None:
+        raise Refused(f"{item}: step {i}: dialog {did!r} declares no widget {wid!r}")
+    if ev not in ("click", "commit"):
+        raise Refused(f"{item}: step {i}: a dialog step's event is click or commit, not {ev!r}")
+    wtype, label = w.get("type"), None
+    if wtype in ("select", "icon_select") and ev == "commit":
+        label = select_label(w, st.get("value"))
+        if label is None:
+            raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of {wtype} {wid!r}")
+    return ("dialog", did, did + DIALOG_SUFFIX, wid, ev, st.get("value"), label, wtype)
 # A panel group's hamburger is `<active panel content id>_menu` (the Swift
 # header's panelMenuButtonId, which the self-test reads from the source).
 MENU_SUFFIX = "_menu"
@@ -286,7 +325,7 @@ def _plan_toolbar(item, i, st, spec):
     return ("toolbar", st["widget"], hold)
 
 
-def plan(script, menubar, spec=None, state_keys=None, panel_menus=None):
+def plan(script, menubar, spec=None, state_keys=None, panel_menus=None, dialog_specs=None):
     """The script as acts: ("open", svg, reset_workspace) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
     window_path, widget, event, value, option_label, widget_type) ("menu", path)
@@ -299,21 +338,28 @@ def plan(script, menubar, spec=None, state_keys=None, panel_menus=None):
     steps = script.get("steps") or []
     if not any(isinstance(s, dict) and "read" in s for s in steps):
         raise Refused(f"{item}: a script without a read step asserts nothing")
-    # Row 279: this driver seeds nothing, so a seeded `app_state` is refused by
-    # name. Dropped, the script would run from a state it did not ask for and
-    # its read would be compared as if it had.
-    if script.get("app_state"):
-        raise Refused(f"{item}: app_state {json.dumps(script['app_state'], sort_keys=True)} is not seeded by this "
-                      f"driver; a script that needs it cannot run here")
+    # Row 279, then row 275 (b): a seeded `app_state` is never dropped. Dropped,
+    # the script would run from a state it did not ask for and its read would
+    # be compared as if it had. Its ruled form is checked here, by name, and
+    # seeded by the app's FIFO `seed` verb, which runs the level-1 runner's own
+    # parse and apply (ScriptPanelSeeds) and logs its receipt.
+    seed = _plan_app_state(item, script.get("app_state"))
     menus, panels = menu_paths(menubar), panel_menu_paths(menubar)
     # The open act asks for a reset workspace: the app persists its dock layout,
     # so a fresh process alone starts where the last script left it (row 254).
     acts = [("open", script["setup_svg"], True), ("tool", script["tool"])]
+    if seed is not None:
+        acts.append(seed)
     for i, st in enumerate(steps):
         if "read" in st:
             if st["read"] == "state" and state_keys is None:
                 state_keys = load_state_keys()
             acts.append(_plan_read(item, i, st, script, state_keys))
+            continue
+        if "dialog" in st:
+            if dialog_specs is None:
+                dialog_specs = load_dialog_specs()
+            acts.append(_plan_dialog(item, i, st, dialog_specs))
             continue
         if "panel_menu" in st:
             if panel_menus is None:
@@ -436,6 +482,8 @@ def locked_suite_refusal(script, menubar, spec=None):
         return str(e)
     if any(a[0] == "panel" for a in acts):
         return f"{item}: a panel step needs the accessibility walk, which the locked suite does not measure"
+    if any(a[0] == "dialog" for a in acts):
+        return f"{item}: a dialog step needs the accessibility walk, which the locked suite does not measure"
     return None
 
 
@@ -454,18 +502,69 @@ def locked_suite_split(scripts, menubar):
     return members, refused
 
 
-def gesture_log_verdict(text):
-    """The app's own receipt for a gesture, from its log since the command was
-    sent: "delivered", the refusal's text, or None while nothing is there yet.
-    The FIFO is one-way, so this is the only way a refused or unknown gesture
-    is not read as a FAIL of the script (row 250)."""
+def fifo_log_verdict(verb, text):
+    """The app's own receipt for a FIFO `verb` (gesture, seed), from its log
+    since the command was sent: "delivered", the refusal's text, or None while
+    nothing is there yet. The FIFO is one-way, so this is the only way a
+    refused or unknown command is not read as a FAIL of the script (row 250).
+    The command's own echo (`test-fifo: <verb> <args>`) is not a receipt."""
     for line in text.splitlines():
-        if "test-fifo: gesture delivered" in line:
+        if f"test-fifo: {verb} delivered" in line:
             return "delivered"
-        for tell in ("gesture REFUSED", "unknown command gesture"):
+        for tell in (f"{verb} REFUSED", f"unknown command {verb}"):
             if tell in line:
                 return line[line.index(tell):].strip()
     return None
+
+
+def gesture_log_verdict(text):
+    """The app's own receipt for a gesture (``fifo_log_verdict``)."""
+    return fifo_log_verdict("gesture", text)
+
+
+def seed_command(act):
+    """The FIFO line for a ("seed", json) act."""
+    return "seed " + act[1]
+
+
+def load_panel_state_keys():
+    """Panel content id -> the keys its YAML `state:` declares."""
+    import glob
+    import yaml
+    out = {}
+    for f in sorted(glob.glob(os.path.join(REPO, "workspace", "panels", "*.yaml"))):
+        with open(f, encoding="utf-8") as fh:
+            d = yaml.safe_load(fh) or {}
+        if d.get("id"):
+            out[d["id"]] = set((d.get("state") or {}).keys())
+    return out
+
+
+def _plan_app_state(item, app_state):
+    """None for no app_state (absent or `{}`); else the ("seed", canonical JSON)
+    act. The ruled form only (TESTING.md section 6), refused by name as the
+    level-1 runners refuse it: a top-level key other than `panels`, a panel
+    that is not an object, or a key its `state:` does not declare."""
+    if not app_state:
+        return None
+    if not isinstance(app_state, dict):
+        raise Refused(f"{item}: app_state is not an object")
+    declared = None
+    for k, v in sorted(app_state.items()):
+        if k != "panels":
+            raise Refused(f"{item}: app_state.{k} is not a ruled form; seed a panel's declared state as "
+                          f"app_state.panels.<content id>.<key>")
+        if not isinstance(v, dict):
+            raise Refused(f"{item}: app_state.panels is not an object")
+        for pid, keys in sorted(v.items()):
+            if not isinstance(keys, dict):
+                raise Refused(f"{item}: app_state.panels.{pid} is not an object")
+            if declared is None:
+                declared = load_panel_state_keys()
+            for key in sorted(keys):
+                if key not in declared.get(pid, set()):
+                    raise Refused(f"{item}: app_state.panels.{pid}.{key}: UndeclaredPanelKey {pid}.{key}")
+    return ("seed", json.dumps(app_state, sort_keys=True, separators=(",", ":")))
 
 
 def gesture_command(act):
@@ -1173,11 +1272,28 @@ def self_test():
     check("plan opens, picks the tool, then the steps in order",
           [a[0] for a in acts] == ["open", "tool", "pointer", "pointer", "panel", "menu", "read"])
     check("a panel act carries its dock tab's id", acts[4][2] == "stroke_panel_content_tab")
-    # Row 279: a seeded `app_state` this driver cannot seed is refused, never
-    # dropped; an empty one (every shipped script's) plans as before.
+    # Row 279, then row 275 (b): a seeded `app_state` is never dropped. Its
+    # ruled form (`panels.<content id>.<declared key>`) plans as a FIFO `seed`
+    # act right after the open and the tool, as canonical JSON; any other form,
+    # or a key the panel does not declare, is refused by name. An empty one
+    # (every shipped script's) plans as before.
     seeded = {"panels": {"artboards_panel_content": {"artboards_panel_selection": ["a"]}}}
-    check("a seeded app_state is refused by name, not dropped",
-          refused(lambda: plan(dict(base, app_state=seeded, steps=[read]), mb), "app_state"))
+    sp = plan(dict(base, app_state=seeded, steps=[read]), mb)
+    check("a ruled app_state plans as a seed act after the open and the tool, never dropped",
+          sp[2] == ("seed", '{"panels":{"artboards_panel_content":{"artboards_panel_selection":["a"]}}}')
+          and [a[0] for a in sp] == ["open", "tool", "seed", "read"])
+    check("an app_state key the panel does not declare is refused by name",
+          refused(lambda: plan(dict(base, app_state={"panels": {"artboards_panel_content": {"zork": 1}}},
+                                    steps=[read]), mb), "UndeclaredPanelKey artboards_panel_content.zork"))
+    check("an app_state form that is not panels is refused by name",
+          refused(lambda: plan(dict(base, app_state={"tools": {}}, steps=[read]), mb), "app_state.tools"))
+    check("a seed act's FIFO line is the verb and the JSON", seed_command(sp[2]) == "seed " + sp[2][1])
+    check("the app's seed receipt reads as delivered",
+          fifo_log_verdict("seed", "x test-fifo: seed {..}\ny test-fifo: seed delivered 1 key(s): a.b") == "delivered")
+    check("the app's seed refusal reads as its text",
+          (fifo_log_verdict("seed", "t test-fifo: seed REFUSED app_state.x") or "").startswith("seed REFUSED"))
+    check("the command echo alone is not yet a seed verdict",
+          fifo_log_verdict("seed", "t test-fifo: seed {\"panels\":{}}") is None)
     check("an empty app_state plans as none",
           plan(dict(base, app_state={}, steps=[read]), mb) == plan(dict(base, steps=[read]), mb))
 
@@ -1744,6 +1860,41 @@ def self_test():
                                                   "label": "Options..."}, rd]), mb, panel_menus=PM), "label"))
     check("a panel_menu step is refused on the locked route (its menu opens on a real click)",
           refused(lambda: locked_acts(pm, "t"), "panel_menu step"))
+    # The dialog step (TESTING.md section 6, row 275 Mac slice (c)): a widget
+    # of the OPEN dialog by its id. The plan carries the dialog's body id (the
+    # Swift dialogAccessibilityId's), the widget's type and a select's label.
+    DS = {"artboard_options": {"content": {"type": "container", "children": [
+        {"id": "ao_fill_dropdown", "type": "select",
+         "options": [{"value": "transparent", "label": "Transparent"}, {"value": "white", "label": "White"}]},
+        {"id": "ao_name", "type": "text_input"}, {"id": "ao_ok", "type": "button"}]}}}
+    dok = {"dialog": "artboard_options", "widget": "ao_ok", "event": "click"}
+    dfill = {"dialog": "artboard_options", "widget": "ao_fill_dropdown", "event": "commit", "value": "white"}
+    dp = plan(dict(base, steps=[dfill, dok, rd]), mb, dialog_specs=DS)
+    check("a dialog select commit plans with its dialog body id, type and option label",
+          dp[2] == ("dialog", "artboard_options", "artboard_options" + DIALOG_SUFFIX, "ao_fill_dropdown", "commit",
+                    "white", "White", "select"))
+    check("a dialog button click plans with no label",
+          dp[3] == ("dialog", "artboard_options", "artboard_options_dialog", "ao_ok", "click", None, None, "button"))
+    check("a dialog step naming an undeclared dialog is refused",
+          refused(lambda: plan(dict(base, steps=[dict(dok, dialog="nope"), rd]), mb, dialog_specs=DS), "nope"))
+    check("a dialog step naming a widget its dialog does not declare is refused",
+          refused(lambda: plan(dict(base, steps=[dict(dok, widget="ao_zork"), rd]), mb, dialog_specs=DS),
+                  "ao_zork"))
+    check("a dialog select commit of a value that is no option is refused",
+          refused(lambda: plan(dict(base, steps=[dict(dfill, value="plaid"), rd]), mb, dialog_specs=DS), "plaid"))
+    check("a dialog step's event is click or commit",
+          refused(lambda: plan(dict(base, steps=[dict(dok, event="blur"), rd]), mb, dialog_specs=DS), "blur"))
+    check("a dialog step that also names a panel is refused by name, never driven as a panel step",
+          refused(lambda: plan(dict(base, steps=[dict(dok, panel="stroke_panel_content"), rd]), mb,
+                               dialog_specs=DS), "panel"))
+    check("a dialog step is not a locked-suite member (it needs the accessibility walk)",
+          "a dialog step needs the accessibility walk" in (locked_suite_refusal(dict(base, steps=[dok, rd]), mb) or ""))
+    check("the shipped dialogs load by id (artboard_options declares ao_ok)",
+          find_widget(load_dialog_specs().get("artboard_options"), "ao_ok") is not None)
+    swiftd = open(os.path.join(REPO, "JasSwift", "Sources", "Interpreter", "YamlDialogView.swift"),
+                  encoding="utf-8").read()
+    check("the dialog body suffix is the one the Swift dialogAccessibilityId appends",
+          f'dialogId + "{DIALOG_SUFFIX}"' in swiftd)
     check("the shipped panel menus load by their content id (the Artboards menu holds Artboard Options...)",
           any(isinstance(i, dict) and i.get("action") == "open_artboard_options"
               for i in load_panel_menus().get("artboards_panel_content", [])))
