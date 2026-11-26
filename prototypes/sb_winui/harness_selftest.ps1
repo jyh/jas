@@ -2495,6 +2495,29 @@ Test-Case 'at join: nested repeats, outermost first' {
             repeats = @(@{ path = @(0); id = 'outer'; rows = 2; elements = $false }, @{ path = @(0, 0, 2); id = 'inner'; rows = 1; elements = $false }, @{ path = @(0, 1, 2); id = 'inner'; rows = 3; elements = $false }) } | ConvertTo-Json -Depth 8
     (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $n -At @(1, 2) -Widget 'cell')) + ' | ' + (Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $n -At @(0, 1) -Widget 'cell'))
 } 'surface=surface [0,1,2,2] repeat=[0,1,2] rows=3 | REFUSED: at [0,1] is past the rows: repeat [0,0,2] (inner) draws 1'
+# jas STATUS-flask 1020, N1 and N2 (#1132 review). N1: a widget whose path IS
+# the iteration node (`path + [k]`, the iteration's own container) resolves;
+# the equality arm of the hits filter must be live, not swallowed into the
+# script block's arguments after `&`. N2: an inner repeat at exactly
+# `outer + [k]` (the template is itself a foreach) has an EMPTY suffix, and a
+# repeat at the root path `[]` has an empty prefix; neither may count down.
+Test-Case 'at join N1: a widget AT the iteration node itself (path + [k]) resolves, not "holds none"' {
+    $p = @{ leaves = @(); containers = @(@{ id = 'ap_row'; path = @(0, 0) }, @{ id = 'ap_row'; path = @(0, 1) })
+            repeats = @(@{ path = @(0); id = 'ap_list'; rows = 2; elements = $false }) } | ConvertTo-Json -Depth 8
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $p -At @(1) -Widget 'ap_row')
+} 'surface=surface [0,1] repeat=[0] rows=2'
+Test-Case 'at join N2: an inner repeat at exactly outer + [k] (an empty suffix) resolves' {
+    $p = @{ leaves = @(@{ id = 'cell'; path = @(0, 1, 2) }, @{ id = 'cell'; path = @(0, 0, 0) })
+            containers = @()
+            repeats = @(@{ path = @(0); id = 'outer'; rows = 2; elements = $false }, @{ path = @(0, 0); id = 'inner'; rows = 1; elements = $false }, @{ path = @(0, 1); id = 'inner'; rows = 3; elements = $false }) } | ConvertTo-Json -Depth 8
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $p -At @(1, 2) -Widget 'cell')
+} 'surface=surface [0,1,2] repeat=[0,1] rows=3'
+Test-Case 'at join N2: a repeat at the root path [] (an empty prefix) resolves' {
+    $p = @{ leaves = @(@{ id = 'x'; path = @(0, 0) }, @{ id = 'x'; path = @(1, 0) }); containers = @()
+            repeats = @(@{ path = @(); id = 'root'; rows = 2; elements = $false }) } | ConvertTo-Json -Depth 8
+    Show-SbPlanAt (Resolve-SbPlanAt -PlanJson $p -At @(1) -Widget 'x')
+} 'surface=surface [1] repeat=[] rows=2'
+
 Test-Case 'at join: a plan that does not parse is REFUSED by name' {
     Show-SbPlanAt (Resolve-SbPlanAt -PlanJson '{nope' -At @(0) -Widget 'ap_name')
 } 'REFUSED: the plan does not parse'
