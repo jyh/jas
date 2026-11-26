@@ -7887,7 +7887,7 @@ private func formsPath(_ v: Any?) -> [Int]? {
 /// the widget first, that declares it. `bubbledTo` names that node when it is
 /// not the widget. Refusals mirror the Rust runner's, by name.
 private func formsRowTarget(_ content: Any?, widget: String, event: String, row: [Int],
-                            scope: [String: Any], exact: Bool = false, withKey: String? = nil)
+                            scope: [String: Any], exact: Bool = false, withKey: String? = nil, at: [Int]? = nil)
     -> Result<(node: [String: Any], scope: [String: Any], bubbledTo: String?), FormsRefusal> {
     func contains(_ n: Any?) -> Bool {
         guard let d = n as? [String: Any] else { return false }
@@ -7908,6 +7908,27 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
         if node["foreach"] is [String: Any], let template = node["do"] as? [String: Any] {
             guard contains(template) else { return .failure(FormsRefusal("widget `\(widget)` is not in the panel")) }
             repeats += 1
+            if let at {
+                // Row 281: `at`, the repeat's iteration by index. Mirrors Rust's
+                // RowAddr::At: one address per widget, so a repeat of document
+                // elements (a tree, `row`'s form) refuses it by name.
+                guard let all = WidgetEvent.rowBindings(node, scope: sc) else {
+                    return .failure(FormsRefusal("widget `\(widget)` is not in the panel"))
+                }
+                if all.rows.contains(where: { $0.path != nil }) {
+                    return .failure(FormsRefusal("`\(widget)` repeats once per document element of `\(all.source)`; address it by `row`, not `at`"))
+                }
+                guard repeats - 1 < at.count else {
+                    return .failure(FormsRefusal("`at` names \(at.count) index(es) and `\(widget)` sits under more repeats"))
+                }
+                let k = at[repeats - 1]
+                guard k >= 0, k < all.rows.count else {
+                    return .failure(FormsRefusal("at \(at): index \(k) is past the \(all.rows.count) row(s) of `\(all.source)`"))
+                }
+                sc[all.name] = all.rows[k].data
+                node = template
+                continue
+            }
             // The one row binding the shell also uses (``WidgetEvent/rowBinding``).
             switch WidgetEvent.rowBinding(node, scope: sc, row: row) {
             case .failure(let x): return .failure(FormsRefusal(x.why))
@@ -7921,8 +7942,15 @@ private func formsRowTarget(_ content: Any?, widget: String, event: String, row:
         }
         node = next
     }
-    if repeats == 0 { return .failure(FormsRefusal("`row` on `\(widget)`, which no foreach repeats")) }
-    if repeats > 1 { return .failure(FormsRefusal("`\(widget)` sits under \(repeats) foreach repeats; that address is `at`, not delivered")) }
+    if let at {
+        if repeats == 0 { return .failure(FormsRefusal("`at` on `\(widget)`, which no foreach repeats")) }
+        if at.count != repeats {
+            return .failure(FormsRefusal("`at` names \(at.count) index(es) and `\(widget)` sits under \(repeats) repeat(s)"))
+        }
+    } else {
+        if repeats == 0 { return .failure(FormsRefusal("`row` on `\(widget)`, which no foreach repeats")) }
+        if repeats > 1 { return .failure(FormsRefusal("`\(widget)` sits under \(repeats) foreach repeats; that address is `at`")) }
+    }
     // A text field's own events do not bubble (§6: an `input` on a field that
     // declares none fires nothing), so the target is the widget itself.
     if exact { return .success((chain.last!.0, chain.last!.1, nil)) }
@@ -8271,7 +8299,20 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 return refuse("a panel step names a widget and an event")
             }
             if flag("meta") { return refuse("meta on a panel step is refused (TESTING.md section 6)") }
-            if st["at"] != nil { return refuse("`at` is not delivered by this runner") }
+            // Row 281: `at`, each enclosing generic repeat's iteration index.
+            let at: [Int]?
+            if let a = st["at"] {
+                guard let p = formsPath(a) else { return refuse("at \(a) is not a list of indices") }
+                at = p
+            } else {
+                at = nil
+            }
+            if at != nil && st["row"] != nil {
+                return refuse("a panel step names its widget by `row` or by `at`, not both")
+            }
+            if at != nil && (event == "secondary_press" || event == "drag" || st["to"] != nil || st["hover_ms"] != nil) {
+                return refuse("`at` on a \(event) step is not delivered by this runner")
+            }
             let row: [Int]?
             if let r = st["row"] {
                 guard let p = formsPath(r) else { return refuse("row \(r) is not a path") }
@@ -8354,6 +8395,9 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             let kind = WidgetEvent.findWidget(in: WorkspaceData.load()?.panel(pid)?["content"], id: widget)?["type"] as? String
             let textForm = kind == "text_input" && ["input", "blur", "commit"].contains(event)
             let pickForm = kind.map { WidgetEvent.itemKinds.contains($0) } == true && event == "commit"
+            if at != nil && (textForm || pickForm) {
+                return refuse("`at` on a \(event) step of a text or pick widget is not delivered by this runner")
+            }
             if textForm || pickForm {
                 switch resolve(pid, widget, row) {
                 case .failure(let r): return refuse(r.why)
@@ -8392,7 +8436,9 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
                 return
             }
             field = nil
-            guard let rowPath = row else {
+            // An `at` step takes the row walk too; its `row` argument is then
+            // unread (formsRowTarget picks each iteration by `at`'s index).
+            guard let rowPath = row ?? at.map({ _ in [] }) else {
                 // Addressed by id: the existing level-1 route, which refuses a
                 // repeated widget as the engine does.
                 if !runScriptPanelStep(st, model: model) { refuse("the panel act did not run (NotAddressable or refused)") }
@@ -8404,7 +8450,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             if !model.stateStore.hasPanel(pid) { model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid)) }
             for name in event == "double_click" ? ["click", "double_click"] : [event] {
                 let scope = buildPanelBodyContext(ws: ws, model: model, contentId: pid, opacityPanel: OpacityPanelState())
-                switch formsRowTarget(panel["content"], widget: widget, event: name, row: rowPath, scope: scope) {
+                switch formsRowTarget(panel["content"], widget: widget, event: name, row: rowPath, scope: scope, at: at) {
                 case .failure(let r): return refuse(r.why)
                 case .success(let t):
                     if let to = t.bubbledTo { out.append(["step": i, "event": name, "bubbled_to": to]) }
@@ -8621,7 +8667,7 @@ private func formsDocReads(_ out: [[String: Any]]) -> [String] {
         (formsClickRow([0, 1], ["meta"]), "meta on a panel step"),
         (["panel": formsLayers, "widget": "lp_search_input", "row": [0], "event": "click"], "which no foreach repeats"),
         (["panel": formsLayers, "widget": "lp_name", "event": "click"], "NotAddressable"),
-        (["panel": formsLayers, "widget": "lp_name", "at": [0], "event": "click"], "`at` is not delivered"),
+        (["panel": formsLayers, "widget": "lp_name", "at": [0], "event": "click"], "address it by `row`"),
         (["context_menu": "x", "params": [:] as [String: Any]], "must directly follow a row secondary_press"),
     ]
     for (step, needle) in cases {
@@ -9198,5 +9244,53 @@ private func formsFindWidget(_ node: Any?, _ id: String) -> [String: Any]? {
             let (w, h) = formsA4FromTheSpec()
             #expect((ab["width"] as? Double, ab["height"] as? Double) == (w, h), "\(n): \(ab)")
         }
+    }
+}
+
+
+// Row 281 (TESTING.md section 6): `at` names a widget inside a generic
+// `foreach` repeat by each enclosing repeat's iteration index, outermost first.
+// Mirrors Rust's an_at_step_clicks_the_widget_of_the_iteration_it_names: on a
+// two-artboard document (the panel menu's New Artboard mints the second), a
+// click on `ap_name` at [i] selects artboard i, and [0] and [1] differ.
+private func formsArtboardsAtScript(_ steps: [[String: Any]]) -> [String: Any] {
+    var all: [[String: Any]] = [["panel_menu": formsArtboards, "action": "new_artboard"], ["read": "document"]]
+    all.append(contentsOf: steps)
+    all.append(["read": "panel", "panel": formsArtboards])
+    return ["item": "forms.at", "setup_svg": "paragraph_justified.svg", "tool": "selection", "steps": all]
+}
+
+private func formsArtboardIds(_ out: [[String: Any]]) -> [String] {
+    guard let doc = formsDocReads(out).first, let d = doc.data(using: .utf8),
+          let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+          let abs = obj["artboards"] as? [[String: Any]] else { return [] }
+    return abs.compactMap { $0["id"] as? String }
+}
+
+@Test func formsAnAtStepClicksTheWidgetOfTheIterationItNames() {
+    var picked: [[String]] = []
+    for i in [0, 1] {
+        let out = formsRun(formsArtboardsAtScript([["panel": formsArtboards, "widget": "ap_name", "at": [i], "event": "click"]]))
+        #expect(formsRefusal(out) == nil, "at [\(i)]: \(out)")
+        let ids = formsArtboardIds(out)
+        #expect(ids.count == 2, "the setup holds two artboards: \(ids)")
+        let sel = (formsPanelReads(out).last?["artboards_panel_selection"] as? [String]) ?? []
+        #expect(ids.count == 2 && sel == [ids[i]], "at [\(i)] selects artboard \(i): \(out)")
+        picked.append(sel)
+    }
+    #expect(picked.count == 2 && picked[0] != picked[1], "[0] and [1] must address different rows")
+}
+
+@Test func formsAnAtStepIsRefusedByNameWhereItCannotAddressOneWidget() {
+    let cases: [([String: Any], String)] = [
+        (["panel": formsArtboards, "widget": "ap_name", "at": [5], "event": "click"], "past the 2 row(s)"),
+        (["panel": formsArtboards, "widget": "ap_name", "at": [0, 0], "event": "click"], "names 2 index(es)"),
+        (["panel": formsArtboards, "widget": "ap_name", "at": [0], "row": [0], "event": "click"], "not both"),
+        (["panel": formsArtboards, "widget": "ap_name", "at": [0], "event": "secondary_press"], "`at` on a secondary_press"),
+        (["panel": formsArtboards, "widget": "ap_name", "at": "x", "event": "click"], "is not a list of indices"),
+    ]
+    for (step, needle) in cases {
+        let why = formsRefusal(formsRun(formsArtboardsAtScript([step]))) ?? ""
+        #expect(why.contains(needle), "\(step): refused \(why), want \(needle)")
     }
 }
