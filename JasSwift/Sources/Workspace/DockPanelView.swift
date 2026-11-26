@@ -599,6 +599,51 @@ public struct PanelGroupView: View {
     }
 }
 
+/// Where a dock panel's hamburger menu is popped. The button's own view
+/// wins whenever it is known (in a window), so a click, an accessibility
+/// press and a press after a dock scroll all open the same menu in the
+/// same place. Without it, a mouse event is the fallback; anything else
+/// pops nothing rather than a menu at an arbitrary point.
+enum PanelMenuPlacement: Equatable { case belowAnchor, atEvent, none }
+
+func panelMenuPlacement(hasAnchor: Bool, eventType: NSEvent.EventType?) -> PanelMenuPlacement {
+    if hasAnchor { return .belowAnchor }
+    switch eventType {
+    case .leftMouseDown?, .leftMouseUp?, .rightMouseDown?, .rightMouseUp?,
+         .otherMouseDown?, .otherMouseUp?:
+        return .atEvent
+    default:
+        return .none
+    }
+}
+
+/// The point, in the anchor view's own coordinates, at which the menu's
+/// top-left goes so that it drops below the view: its bottom edge, which
+/// is y = height in a flipped view and y = 0 in an unflipped one.
+func panelMenuAnchorPoint(width: CGFloat, height: CGFloat, isFlipped: Bool) -> NSPoint {
+    NSPoint(x: 0, y: isFlipped ? height : 0)
+}
+
+/// A reference box for the anchor view, so the SwiftUI button can read the
+/// view its background adapter captured without re-rendering on capture.
+final class MenuAnchorBox {
+    weak var view: NSView?
+}
+
+/// A thin AppKit adapter: an empty NSView behind the hamburger button,
+/// whose only job is to be the view the menu is popped in.
+private struct MenuAnchorView: NSViewRepresentable {
+    let anchor: MenuAnchorBox
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        anchor.view = v
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        anchor.view = nsView
+    }
+}
+
 /// Hamburger menu button used in the panel-group header. Built from
 /// a plain SwiftUI Button + native NSMenu so we can force the color
 /// (theme.text) and keep the hit area tight to the glyph — SwiftUI's
@@ -631,8 +676,13 @@ private struct HamburgerMenuButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(MenuAnchorView(anchor: anchor))
         .accessibilityIdentifier(axId)
     }
+
+    /// The button's own NSView, captured by `MenuAnchorView`, so the menu
+    /// is popped below the button however it was pressed.
+    @State private var anchor = MenuAnchorBox()
 
     private func showMenu() {
         let menu = NSMenu()
@@ -663,11 +713,23 @@ private struct HamburgerMenuButton: View {
                 menu.addItem(buildSubmenu(label: label, rows: submenuRows(spec)))
             }
         }
-        // Pop at the current event location so the menu drops below
-        // the hamburger button. Falls back to NSApp.currentEvent when
-        // the click event isn't directly available.
-        if let event = NSApp.currentEvent {
-            NSMenu.popUpContextMenu(menu, with: event, for: NSApp.keyWindow?.contentView ?? NSView())
+        // Drop the menu below the button's own view (panelMenuPlacement):
+        // anchoring to NSApp.currentEvent alone popped nothing for an
+        // AXPress and nothing after a dock scroll (measured, row 275).
+        let event = NSApp.currentEvent
+        switch panelMenuPlacement(hasAnchor: anchor.view?.window != nil, eventType: event?.type) {
+        case .belowAnchor:
+            if let view = anchor.view {
+                let at = panelMenuAnchorPoint(width: view.bounds.width, height: view.bounds.height,
+                                              isFlipped: view.isFlipped)
+                menu.popUp(positioning: nil, at: at, in: view)
+            }
+        case .atEvent:
+            if let event {
+                NSMenu.popUpContextMenu(menu, with: event, for: NSApp.keyWindow?.contentView ?? NSView())
+            }
+        case .none:
+            break
         }
     }
 
