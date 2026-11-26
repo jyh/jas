@@ -811,11 +811,15 @@ internal sealed unsafe class Canvas : IDisposable
             var tabs = PanelWire.TabProbeReading(Panes.TryGetValue(CanvasPaneKey, out var strip), strip?.PlanJson);
             var tabSha = tabs is "NONE" or "UNREADABLE" ? tabs : Sha256Of(tabs);
             var frame = _lastHash ?? "NONE";
+            // Row 275 C2: the open dialog, for a script's {"read": "dialog"}.
+            var dialogSnap = Dialog;
+            var dialog = ProbeWire.DialogField(dialogSnap is not null, dialogSnap?.Reading);
             var body = "{"
                 + $"\"seq\":{_probeSeq},"
                 + $"\"surface\":\"{_lastHashSurface}\","
                 + $"\"frame_hash\":\"{frame}\","
                 + $"\"doc_sha\":\"{docSha}\","
+                + $"\"dialog\":\"{dialog}\","
                 + $"\"selection\":{selection},"
                 + $"\"plan_panel\":\"{Panel?.PanelId ?? ""}\","
                 + $"\"plan_sha\":\"{planSha}\","
@@ -831,7 +835,7 @@ internal sealed unsafe class Canvas : IDisposable
             // ALONE: pulling `doc` back out of the body through a JSON parser would
             // re-serialize it (1.0 becomes 1) and compare a different document.
             System.IO.File.WriteAllText(System.IO.Path.ChangeExtension(full, ".doc.json"), doc);
-            _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc-sha={docSha} "
+            _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc-sha={docSha} dialog={dialog} "
                   + $"selection={selection.Replace(" ", "")} plan={Panel?.PanelId ?? "NONE"} plan-sha={planSha} tab-sha={tabSha} "
                   + $"-> {ProbePath} {Tids()}");
         }

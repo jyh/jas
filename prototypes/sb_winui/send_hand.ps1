@@ -542,7 +542,7 @@ $log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
 # `PANEL REFUSED` in the receipt and exit 6, and nothing after it is sent.
 $panelSteps = @(ConvertFrom-SbPanelText $Panels)
 $clicksSent = 0
-$log.Add("late-steps=$($panelSteps.Count) panels=$(@($panelSteps | Where-Object { $_.panel }).Count) menus=$(@($panelSteps | Where-Object { $_.menu }).Count) parsed-from-bytes=$($Panels.Length)")
+$log.Add("late-steps=$($panelSteps.Count) panels=$(@($panelSteps | Where-Object { $_.panel }).Count) menus=$(@($panelSteps | Where-Object { $_.menu }).Count) dialogs=$(@($panelSteps | Where-Object { $_.dialog }).Count) parsed-from-bytes=$($Panels.Length)")
 if ($panelSteps.Count -gt 0) {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
@@ -623,6 +623,29 @@ if ($panelSteps.Count -gt 0) {
         if ($state -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) { $ec.Collapse() }
         $log.Add("$Tag chose '$Value' list-after-select=$state")
         return $null
+    }
+    # The act a pick names, on the widget it found: shared by panel steps and
+    # dialog steps (row 275 C2), so the two can never act differently.
+    function Invoke-SbPanelPick($pick, $el, $ps, [string]$tag) {
+        switch ($pick.Action) {
+            'Invoke' { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+            'Toggle' { $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
+            'SelectionItem' { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
+            'Choose' {
+                $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag
+                if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
+            }
+            'ChooseByName' {
+                $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag -By 'name'
+                if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
+            }
+            'Value' {
+                $el.SetFocus()
+                $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$($ps.value)")
+                Start-Sleep -Milliseconds $SettleMs
+                [SbHand]::Key(0x0D, $true); [SbHand]::Key(0x0D, $false)
+            }
+        }
     }
     function Find-SbById($Under, [string]$Id) {
         $Under.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $Id)))
@@ -715,6 +738,55 @@ if ($panelSteps.Count -gt 0) {
             $log.Add("MENU SENT: $mtag action=Invoke")
             continue
         }
+        # A DIALOG STEP (row 275 C2, docs/TESTING.md section 6): a widget of
+        # the OPEN dialog, by its id. The shell draws a dialog's plan into the
+        # `DialogScroll` layer with the dialog's id on its host (PaneView), so
+        # the open dialog is the first id under that layer. It is checked
+        # against the step's `dialog` FIRST: with none open, or another one,
+        # the step is refused by name and never addressed into whatever is
+        # open. A dialog opens on the UI thread after the act before it, so it
+        # is re-read for PanelWaitMs.
+        if ($ps.dialog) {
+            $tag = "step $n dialog:$($ps.dialog)/$($ps.widget):$($ps.event)"
+            $named = New-Object System.Windows.Automation.NotCondition(
+                (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, '')))
+            $dsw = [System.Diagnostics.Stopwatch]::StartNew()
+            do {
+                $layers = Find-SbById $window 'DialogScroll'
+                $openId = ''
+                if ($layers.Count -eq 1) {
+                    $first = $layers[0].FindFirst($tree::Descendants, $named)
+                    if ($null -ne $first) { $openId = $first.Current.AutomationId }
+                }
+                $want = "$($ps.dialog)"
+                if ($openId -cne $want) { Start-Sleep -Milliseconds 100 }
+            } while ($openId -cne $want -and $dsw.ElapsedMilliseconds -lt $PanelWaitMs)
+            $log.Add("$tag layers=$($layers.Count) open=$(if ($openId) { $openId } else { 'none' }) waited-ms=$($dsw.ElapsedMilliseconds)")
+            if ($layers.Count -ne 1 -or $openId.Length -eq 0) { Stop-SbPanelHand "$tag -- no dialog is open after $($PanelWaitMs) ms (the shell's dialog layer shows none)" }
+            if ($openId -cne $want) { Stop-SbPanelHand "$tag -- dialog '$openId' is open, not '$want'" }
+            $hostEl = $layers[0].FindFirst($tree::Descendants, $named)
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            do {
+                $widgetHits = Find-SbById $hostEl "$($ps.widget)"
+                $el = $null; $enabled = $false; $ctype = ''; $pats = @()
+                if ($widgetHits.Count -eq 1) {
+                    $el = $widgetHits[0]
+                    $enabled = $el.Current.IsEnabled
+                    $ctype = $el.Current.ControlType.ProgrammaticName
+                    $pats = @($el.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+                }
+                $pick = Select-SbPanelAction -Panel $want -Widget "$($ps.widget)" -Event "$($ps.event)" `
+                    -PanelCount 1 -WidgetCount $widgetHits.Count -Enabled $enabled -ControlType $ctype -Patterns $pats
+                $settled = $null -eq $pick.Refusal -or $widgetHits.Count -ne 1 -or $enabled
+                if (-not $settled) { Start-Sleep -Milliseconds 100 }
+            } while (-not $settled -and $sw.ElapsedMilliseconds -lt $PanelWaitMs)
+            $log.Add("$tag widget-hits=$($widgetHits.Count) type=$ctype enabled=$enabled patterns=[$($pats -join ',')] waited-ms=$($sw.ElapsedMilliseconds)")
+            if ($null -ne $pick.Refusal) { Stop-SbPanelHand "$tag -- $($pick.Refusal)" }
+            Start-Sleep -Milliseconds $SettleMs
+            Invoke-SbPanelPick $pick $el $ps $tag
+            $log.Add("DIALOG SENT: $tag action=$($pick.Action)")
+            continue
+        }
         $tag = "step $n $($ps.panel)/$($ps.widget):$($ps.event)"
         # A pane redraws on the UI thread after the gesture lands, so a control
         # the gesture enables (Align once two things are selected) may still
@@ -744,25 +816,7 @@ if ($panelSteps.Count -gt 0) {
         $log.Add("$tag panel-hits=$($panelHits.Count) widget-hits=$(if ($null -eq $widgetHits) { 0 } else { $widgetHits.Count }) type=$ctype enabled=$enabled patterns=[$($pats -join ',')] waited-ms=$($sw.ElapsedMilliseconds)")
         if ($null -ne $pick.Refusal) { Stop-SbPanelHand "$tag -- $($pick.Refusal)" }
         Start-Sleep -Milliseconds $SettleMs
-        switch ($pick.Action) {
-            'Invoke' { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
-            'Toggle' { $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
-            'SelectionItem' { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
-            'Choose' {
-                $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag
-                if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
-            }
-            'ChooseByName' {
-                $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag -By 'name'
-                if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
-            }
-            'Value' {
-                $el.SetFocus()
-                $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$($ps.value)")
-                Start-Sleep -Milliseconds $SettleMs
-                [SbHand]::Key(0x0D, $true); [SbHand]::Key(0x0D, $false)
-            }
-        }
+        Invoke-SbPanelPick $pick $el $ps $tag
         $log.Add("PANEL SENT: $tag action=$($pick.Action)")
     }
 }
