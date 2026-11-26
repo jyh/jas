@@ -150,11 +150,11 @@ $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
 # ---- launch, holding, with the probe on ------------------------------------
 $env:SB_PROBE = 'sb-probe.json'
-# ROW E: a panel step's `row` is read from the plan the panel was drawn from,
+# ROW E/F: a panel step's `row` or `at` is read from the plan the panel was drawn from,
 # so a script with one opens its panel by SB_PANEL (only that pane then writes
 # SB_PLAN_OUT) and hands the plan file to the hand. Scripts without a row
 # launch exactly as before.
-$rowSteps = @(ConvertFrom-SbPanelText $panelText | Where-Object { $null -ne $_.row }).Count
+$rowSteps = @(ConvertFrom-SbPanelText $panelText | Where-Object { $null -ne $_.row -or $null -ne $_.at }).Count
 $planFile = ''
 if ($rowSteps -gt 0) {
     $env:SB_PANEL = "$(@(ConvertFrom-SbPanelText $panelText | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"

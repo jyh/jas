@@ -796,20 +796,24 @@ if ($panelSteps.Count -gt 0) {
             $lastActUtc = [DateTime]::UtcNow
             continue
         }
-        $tag = "step $n $($ps.panel)/$($ps.widget)$(if ($null -ne $ps.row) { '@[' + (@($ps.row) -join ',') + ']' }):$($ps.event)"
+        $tag = "step $n $($ps.panel)/$($ps.widget)$(if ($null -ne $ps.row) { '@[' + (@($ps.row) -join ',') + ']' })$(if ($null -ne $ps.at) { '#[' + (@($ps.at) -join ',') + ']' }):$($ps.event)"
         # ROW E (jas STATUS-flask 1013/1014): the row's drawn index from the plan
         # the shell wrote AFTER the act before this one (join 1), then the widget
         # by rect containment in that row's surface (join 2, in the loop below).
         $planRow = $null; $rowWhy = $null
-        if ($null -ne $ps.row) {
-            if ($PlanFile.Length -eq 0) { Stop-SbPanelHand "$tag -- a row step needs the shell's plan, and no -PlanFile was passed" }
+        # ROW F: an `at` step resolves in the plan's `repeats` instead, and
+        # joins the same way (its iteration's surface; no label guard).
+        if ($null -ne $ps.row -or $null -ne $ps.at) {
+            if ($PlanFile.Length -eq 0) { Stop-SbPanelHand "$tag -- a row or at step needs the shell's plan, and no -PlanFile was passed" }
             $psw = [System.Diagnostics.Stopwatch]::StartNew()
             while (-not (Test-Path $PlanFile) -or (Get-Item $PlanFile).LastWriteTimeUtc -le $lastActUtc) {
                 if ($psw.ElapsedMilliseconds -ge $PanelWaitMs) { Stop-SbPanelHand "$tag -- the shell wrote no plan after the act before this step within $($PanelWaitMs) ms, so the row cannot be read from a current one" }
                 Start-Sleep -Milliseconds 100
             }
             Start-Sleep -Milliseconds $SettleMs
-            $planRow = Resolve-SbPlanRow -PlanJson ([System.IO.File]::ReadAllText($PlanFile, [System.Text.Encoding]::UTF8)) -Row @($ps.row)
+            $planText = [System.IO.File]::ReadAllText($PlanFile, [System.Text.Encoding]::UTF8)
+            $planRow = if ($null -ne $ps.row) { Resolve-SbPlanRow -PlanJson $planText -Row @($ps.row) }
+                       else { Resolve-SbPlanAt -PlanJson $planText -At @($ps.at) -Widget "$($ps.widget)" }
             if ($null -ne $planRow.Refusal) { Stop-SbPanelHand "$tag -- $($planRow.Refusal)" }
             $log.Add("$tag plan-row k=$($planRow.K) surface=$($planRow.Surface) label=$($planRow.Label) rows=$($planRow.Rows) plan-waited-ms=$($psw.ElapsedMilliseconds)")
         }
