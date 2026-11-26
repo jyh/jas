@@ -9232,13 +9232,24 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             // Context menu overlay
             if let Some((cx, cy, cpath)) = context_menu_state.clone() {
                 {
+                    // Row 141 part 3 (web half): the entries are layers.yaml's
+                    // `context_menu:` in the right-clicked row's scope.
+                    let (entries, row_scope) = layers_row_menu(el, ctx, &cpath).unwrap_or_default();
+                    // Row 269: kept inside the viewport (row_menu_origin).
+                    #[cfg(target_arch = "wasm32")]
+                    let (cx, cy) = {
+                        let (w, h) = row_menu_size(&entries);
+                        let win = web_sys::window();
+                        let dim = |v: Option<Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>>| v.and_then(|r| r.ok()).and_then(|v| v.as_f64());
+                        match (dim(win.as_ref().map(|w| w.inner_width())), dim(win.as_ref().map(|w| w.inner_height()))) {
+                            (Some(vw), Some(vh)) => row_menu_origin(cx, cy, w, h, vw, vh),
+                            _ => (cx, cy),
+                        }
+                    };
                     let menu_style = format!(
                         "position:fixed;left:{}px;top:{}px;background-color:var(--jas-pane-bg,#2a2a2a);border-width:1px; border-style:solid; border-top-color:var(--jas-border,#555); border-right-color:var(--jas-border,#555); border-bottom-color:var(--jas-border,#555); border-left-color:var(--jas-border,#555);border-radius:2px;padding:2px 0;min-width:160px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
                         cx, cy
                     );
-                    // Row 141 part 3 (web half): the entries are layers.yaml's
-                    // `context_menu:` in the right-clicked row's scope.
-                    let (entries, row_scope) = layers_row_menu(el, ctx, &cpath).unwrap_or_default();
                     let item_style = "padding:4px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;";
                     let item_style_disabled = "padding:4px 12px;font-size:11px;color:var(--jas-text-dim,#777);";
 
@@ -9346,6 +9357,42 @@ pub(crate) fn layers_row_secondary_press(holder: &serde_json::Value, ctx: &serde
     let acts = resolve_click_behaviors(row, &scope, "secondary_press");
     let _deferred = run_click_behaviors(&acts, &scope, st);
     Some(acts.len())
+}
+
+/// The row menu's drawn sizes, from its CSS below: an item is 4 px padding
+/// above and below an 11-px line (25 px, the box height the web layers check
+/// read, run 45720004220); a separator is 1 px with 2 px margins; the menu
+/// adds 2 px padding and a 1-px border top and bottom; min-width 160 px plus
+/// its border.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm render (row 269)
+pub(crate) const ROW_MENU_ITEM_H: f64 = 25.0;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm render (row 269)
+pub(crate) const ROW_MENU_SEPARATOR_H: f64 = 5.0;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm render (row 269)
+pub(crate) const ROW_MENU_CHROME_H: f64 = 6.0;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm render (row 269)
+const ROW_MENU_MIN_W: f64 = 162.0;
+
+/// The row menu's (width, height) for `entries`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm render (row 269)
+pub(crate) fn row_menu_size(entries: &[RowMenuEntry]) -> (f64, f64) {
+    let h = entries.iter().map(|e| match e {
+        RowMenuEntry::Separator => ROW_MENU_SEPARATOR_H,
+        RowMenuEntry::Item { .. } => ROW_MENU_ITEM_H,
+    }).sum::<f64>() + ROW_MENU_CHROME_H;
+    (ROW_MENU_MIN_W, h)
+}
+
+/// Where a pointer-anchored menu of `w` x `h` opens in a `vw` x `vh` viewport
+/// (row 269): at the pointer when it fits; flipped to the pointer's other
+/// side on an axis where it does not and the other side has room; otherwise
+/// clamped inside, never above or left of 0. A native menu does the same.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // read by the wasm render (row 269)
+pub(crate) fn row_menu_origin(x: f64, y: f64, w: f64, h: f64, vw: f64, vh: f64) -> (f64, f64) {
+    let axis = |p: f64, size: f64, room: f64| {
+        if p + size <= room { p } else if p - size >= 0.0 { p - size } else { (room - size).max(0.0) }
+    };
+    (axis(x, w, vw), axis(y, h, vh))
 }
 
 /// One entry of the Layers row's yaml `context_menu:` as the web draws it
@@ -9841,9 +9888,34 @@ mod tests {
         assert_eq!(spacer_style(&bare, &ctx), "flex:1;");
     }
 
-    /// Row 117: the web's Layers tree is `render_tree_view`, never the generic
-    /// foreach expansion, although `lp_tree` carries `foreach` + `do` for the
-    /// plan. Read from the shipped workspace, so a re-typed widget reds this.
+    #[test]
+    fn the_layers_row_menu_opens_inside_the_viewport() {
+        // Row 269, found by the web layers check (#1113, run 45720004220): the
+        // row menu opened at the pointer with no viewport clamp, so on a row
+        // near the bottom of the dock its Duplicate item sat at y 914 of a
+        // 900-px viewport, where no click could reach it.
+        let item = || RowMenuEntry::Item { label: "x".into(), enabled: true, action: "a".into(),
+                                           params: serde_json::Map::new() };
+        let entries = vec![item(), item(), item(), RowMenuEntry::Separator, item(), RowMenuEntry::Separator,
+                           item(), item()];
+        let (w, h) = row_menu_size(&entries);
+        assert_eq!(h, 6.0 * ROW_MENU_ITEM_H + 2.0 * ROW_MENU_SEPARATOR_H + ROW_MENU_CHROME_H);
+        assert!(w >= 160.0, "the CSS min-width");
+        // Fits: it opens at the pointer.
+        assert_eq!(row_menu_origin(100.0, 100.0, w, h, 1440.0, 900.0), (100.0, 100.0));
+        // The measured case: no room below, room above: it flips above the pointer.
+        let (_, y) = row_menu_origin(1273.0, 887.0, w, h, 1440.0, 900.0);
+        assert_eq!(y, 887.0 - h, "flips above the pointer");
+        assert!(y + h <= 900.0 && y >= 0.0);
+        // No room right: it flips left of the pointer.
+        let (x, _) = row_menu_origin(1400.0, 100.0, w, h, 1440.0, 900.0);
+        assert_eq!(x, 1400.0 - w);
+        // Room on neither side: clamped inside, never negative.
+        assert_eq!(row_menu_origin(50.0, 60.0, w, h, 120.0, 100.0), (0.0, 0.0));
+        let (x, y) = row_menu_origin(10.0, 90.0, w, h, 400.0, 120.0);
+        assert!(y >= 0.0 && y + h <= 120.0_f64.max(h) && x == 10.0, "({x}, {y})");
+    }
+
     #[test]
     fn a_combo_whose_bind_is_computed_still_runs_its_declared_change() {
         // Row 268: the Gradient Location combo's bind became an `if … then …`
@@ -9870,6 +9942,9 @@ mod tests {
         commit_computed_bind(&bare, "5", &ctx, &mut st);
     }
 
+    /// Row 117: the web's Layers tree is `render_tree_view`, never the generic
+    /// foreach expansion, although `lp_tree` carries `foreach` + `do` for the
+    /// plan. Read from the shipped workspace, so a re-typed widget reds this.
     #[test]
     fn a_tree_view_with_a_foreach_is_the_native_tree_on_the_web() {
         let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
