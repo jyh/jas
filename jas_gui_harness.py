@@ -136,6 +136,12 @@ def _displays():
         out.append((b.origin.x, b.origin.y, b.size.width, b.size.height))
     return out
 
+def _window_rect():
+    """The harness window's on-screen bounds (x, y, w, h), or None when no
+    window is listed (the check then bounds the press by the displays only)."""
+    w = find_window()
+    return (w["x"], w["y"], w["w"], w["h"]) if w else None
+
 def mouse(etype, x, y, f=0):
     _LAST_MINE[0] = time.time()
     e=Quartz.CGEventCreateMouseEvent(None, etype, (x,y), Quartz.kCGMouseButtonLeft)
@@ -635,7 +641,7 @@ def _run_script(path, menubar, locked=False, pid=None):
             _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
             _, z = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
             sx, sy = p.x + z.width / 2, p.y + z.height / 2
-            off = _plan.offscreen_refusal(f"menu button {menu_id!r}", sx, sy, _displays())
+            off = _plan.offscreen_refusal(f"menu button {menu_id!r}", sx, sy, _displays(), window=_window_rect())
             if off:
                 raise _plan.Refused(off)
             mouse(Quartz.kCGEventMouseMoved, sx, sy); mouse(Quartz.kCGEventLeftMouseDown, sx, sy)
@@ -669,7 +675,7 @@ def _run_script(path, menubar, locked=False, pid=None):
             _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
             _, z = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
             sx, sy = p.x + z.width / 2, p.y + z.height / 2
-            off = _plan.offscreen_refusal(f"slot {slot!r}", sx, sy, _displays())
+            off = _plan.offscreen_refusal(f"slot {slot!r}", sx, sy, _displays(), window=_window_rect())
             if off:
                 raise _plan.Refused(off)
             mouse(Quartz.kCGEventMouseMoved, sx, sy); mouse(Quartz.kCGEventLeftMouseDown, sx, sy)

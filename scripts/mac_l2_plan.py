@@ -683,23 +683,29 @@ def doc_to_screen(view, frame_origin, x, y):
     return (fx + ox + x * z, fy + oy + y * z)
 
 
-def offscreen_refusal(what, x, y, displays):
-    """A refusal when the screen point (x, y) lies on no display, else None.
+def offscreen_refusal(what, x, y, displays, window=None):
+    """A refusal when the screen point (x, y) cannot take a real press, else None.
 
-    `displays` are (x, y, width, height) in the global top-left coordinates
-    AX frames and CGEvents use; each is half-open, so a display's right and
-    bottom edges are outside it. A real event posted off every display lands
-    nowhere, and the step after it then misreads the app (the Mac test box, 11-26: a menu
-    button at y=1210 on a 1080-high display, so no menu popped and the driver
-    reported "0 items titled ..."). No display reported is a refusal too,
-    never a pass."""
+    `displays` and `window` are (x, y, width, height) in the global top-left
+    coordinates AX frames and CGEvents use; each is half-open, so its right
+    and bottom edges are outside it. A point off every display lands nowhere;
+    a point on a display but outside the harness window lands on whatever is
+    behind it. Either way the step after it misreads the app (the Mac test
+    box, 11-26: a dock menu button scrolled out of view reported its frame at
+    y=1202, below a window ending at 1005 and a display ending at 1080, so no
+    menu popped and the driver reported "0 items titled ..."). No display
+    reported is a refusal too, never a pass."""
     if not displays:
         return f"{what} at ({x:.0f}, {y:.0f}): no display reported, so the press cannot be placed"
-    for dx, dy, dw, dh in displays:
-        if dx <= x < dx + dw and dy <= y < dy + dh:
-            return None
-    shown = ", ".join(f"{dw:.0f}x{dh:.0f} at ({dx:.0f}, {dy:.0f})" for dx, dy, dw, dh in displays)
-    return f"{what} at ({x:.0f}, {y:.0f}) is off every display ({shown}); a real press there lands nowhere"
+    if not any(dx <= x < dx + dw and dy <= y < dy + dh for dx, dy, dw, dh in displays):
+        shown = ", ".join(f"{dw:.0f}x{dh:.0f} at ({dx:.0f}, {dy:.0f})" for dx, dy, dw, dh in displays)
+        return f"{what} at ({x:.0f}, {y:.0f}) is off every display ({shown}); a real press there lands nowhere"
+    if window is not None:
+        wx, wy, ww, wh = window
+        if not (wx <= x < wx + ww and wy <= y < wy + wh):
+            return (f"{what} at ({x:.0f}, {y:.0f}) is outside the harness window "
+                    f"({wx:.0f}, {wy:.0f}, {ww:.0f}, {wh:.0f}); a real press there lands on what is behind it")
+    return None
 
 
 _AB_ID = re.compile(r"^[0-9a-z]{8}$")
@@ -1635,6 +1641,21 @@ def self_test():
     check("a display at an offset is read at its offset", offscreen_refusal("p", 1508, 1210, [(1000, 1100, 800, 600)]) is None)
     none = offscreen_refusal("p", 10, 10, [])
     check("no display reported is a refusal by name, never a pass", none is not None and "no display" in none)
+    # The same box, measured further (slot-1126c): the harness window is
+    # (319, 105, 1200, 900) and the button's frame (1492, 1202, 31, 16), i.e.
+    # dock content scrolled out of view, which AX still reports a frame for.
+    # A point on the display but outside the window lands on whatever is
+    # behind it, so the window bounds the press too.
+    win = (319, 105, 1200, 900)
+    check("a press inside the window is not refused", offscreen_refusal("p", 1508, 897, one, window=win) is None)
+    below = offscreen_refusal("menu button 'm'", 1508, 1040, one, window=win)
+    check("a press on the display but below the window is refused by name",
+          below is not None and "outside the harness window" in below and "(319, 105, 1200, 900)" in below)
+    check("the window's bottom edge is outside it (half-open)", offscreen_refusal("p", 1508, 1005, one, window=win) is not None)
+    check("the window's right edge is outside it (half-open)", offscreen_refusal("p", 1519, 500, one, window=win) is not None)
+    check("the window's top-left corner is inside", offscreen_refusal("p", 319, 105, one, window=win) is None)
+    check("a point off every display names the display, even with a window",
+          "off every display" in (offscreen_refusal("p", 1508, 1210, one, window=win) or ""))
 
     ab = lambda i, n: '{"fill":"transparent","id":"%s","name":"%s","x":0.0}' % (i, n)
     rest = '"layers":[],"selection":[]}'
