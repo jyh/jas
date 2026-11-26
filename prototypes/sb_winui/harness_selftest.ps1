@@ -2315,6 +2315,47 @@ Test-Case 'dialog reads: a script with none reads none' {
     Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @() -Expected @()
 } 'none'
 
+# ROW 275 C3 (jas's #1125 review): dialog reads pair with probes BY COUNT. A
+# step the shell may defer for the clipboard (a paste: the engine asks for the
+# clipboard, the shell reads it and RESENDS the act, which probes then) can
+# land its probe after a later act's, so a dialog read after one could pair
+# with the wrong probe and pass. Until reads pair by the act's own row, that
+# shape is refused by name. The paste set is the spec's, and the census below
+# re-derives it from the yaml, so a new clipboard action reds this file.
+$cKeyPaste = [ordered]@{ key = 'V'; ctrl = $true }
+$cKeyDelete = [ordered]@{ key = 'Delete' }
+$cMenuPaste = [ordered]@{ menu = 'menu_paste' }
+Test-Case 'is: a dialog read after a paste KEY is REFUSED by name (it may pair with the wrong probe)' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($cKeyPaste, $fOpen, $fReadDialog) @{ expected_dialog = 'artboard_options' }))
+} 'REFUSED: step 4 read dialog comes after step 2 (key ctrl+V), which the shell may defer for the clipboard: this driver pairs dialog reads with probes by count, so it refuses that shape'
+Test-Case 'is: a dialog read after a paste MENU step is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($cMenuPaste, $fOpen, $fReadDialog) @{ expected_dialog = 'artboard_options' }))
+} 'REFUSED: step 4 read dialog comes after step 2 (menu menu_paste), which the shell may defer for the clipboard: this driver pairs dialog reads with probes by count, so it refuses that shape'
+Test-Case 'is: a dialog read BEFORE a paste is accepted (only a read after one can mis-pair)' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, $fReadDialog, $cMenuPaste) @{ expected_dialog = 'artboard_options' }))
+} 'panels=artboards_panel_content/ap_options:click;menu:menu_paste dialogs=0 reads-after=1 expect=artboard_options'
+Test-Case 'is: a dialog read after a key that is not a paste is accepted' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($cKeyDelete, $fOpen, $fReadDialog) @{ expected_dialog = 'artboard_options' }))
+} 'panels=artboards_panel_content/ap_options:click dialogs=0 reads-after=2 expect=artboard_options'
+# The census: every action whose effects read `param.clipboard`
+# (workspace/actions.yaml), every menubar item that runs one, and every
+# shortcut bound to one, is in the reader's lists, and nothing else is.
+Test-Case 'is: the clipboard-deferred steps are exactly the spec''s paste actions, by menu item and by shortcut' {
+    $ws = Join-Path $fRoot 'workspace'
+    $acts = [System.IO.File]::ReadAllText((Join-Path $ws 'actions.yaml'), [System.Text.Encoding]::UTF8)
+    $blocks = [regex]::Split($acts, '(?m)^(?=  [a-z_]+:\s*$)')
+    $clipActs = @($blocks | Where-Object { $_ -match 'param\.clipboard' } | ForEach-Object { [regex]::Match($_, '^  ([a-z_]+):').Groups[1].Value } | Where-Object { $_ })
+    $mb = [System.IO.File]::ReadAllText((Join-Path $ws 'menubar.yaml'), [System.Text.Encoding]::UTF8)
+    $menus = @([regex]::Matches($mb, 'id:\s*(\w+),[^}\n]*?action:\s*(\w+)') | Where-Object { $clipActs -ccontains $_.Groups[2].Value } | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+    $sc = [System.IO.File]::ReadAllText((Join-Path $ws 'shortcuts.yaml'), [System.Text.Encoding]::UTF8)
+    $chords = @([regex]::Matches($sc, 'key:\s*"([^"]+)",\s*action:\s*(\w+)') | Where-Object { $clipActs -ccontains $_.Groups[2].Value } | ForEach-Object {
+        $parts = $_.Groups[1].Value -split '\+'
+        $mods = @($parts[0..($parts.Count - 2)] | ForEach-Object { $_.ToLowerInvariant() })
+        (@(@('ctrl', 'shift', 'alt') | Where-Object { $mods -ccontains $_ }) + @($parts[-1])) -join '+'
+    } | Sort-Object)
+    "actions=$($clipActs -join ',') menus-match=$((($menus -join ',') -ceq ((@($SbClipboardMenus) | Sort-Object) -join ','))) chords-match=$((($chords -join ',') -ceq ((@($SbClipboardKeyChords) | Sort-Object) -join ','))) menus=$($menus.Count) chords=$($chords.Count)"
+} 'actions=paste,paste_preserving_layers,paste_in_place menus-match=True chords-match=True menus=3 chords=2'
+
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
