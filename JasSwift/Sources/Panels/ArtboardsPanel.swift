@@ -32,9 +32,20 @@ public enum ArtboardsPanel {
             guard let m = model else { return }
             let abSel = (m.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
                 .compactMap { $0 as? String } ?? []
+            // The menu dispatches a non-radio item by its bare action
+            // (``menuItems(fromRaw:)``), so the item's declared `params`
+            // are evaluated here, in the menu's own context, as Rust's
+            // panel-menu pick and the web's do. Without it "Artboard
+            // Options..." and "Rename" ran with no `artboard_id` (row 280).
+            let entries = (WorkspaceData.load()?.panelMenuRaw("artboards_panel_content") ?? [])
+                .compactMap { $0 as? [String: Any] }.filter { $0["action"] as? String == cmd }
+            let declared = entries.count == 1 ? (entries[0]["params"] as? [String: Any]) ?? [:] : [:]
+            let params = declared.isEmpty ? [:] : DialogWidgetActions.resolveParams(
+                declared, context: panelMenuContext("artboards_panel_content", layout: layout, model: m))
             LayersPanel.dispatchYamlAction(
                 cmd, model: m,
-                artboardsPanelSelection: abSel
+                artboardsPanelSelection: abSel,
+                params: params
             )
         }
     }

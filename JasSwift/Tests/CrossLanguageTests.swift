@@ -8124,7 +8124,7 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             events.append(ev)
         } else {
             if st["panel"] != nil { focused = true }
-            if st["menu"] != nil || st["panel_menu"] != nil { focused = false }
+            if st["menu"] != nil || st["panel_menu"] != nil || st["dialog"] != nil { focused = false }
             events.append(["kind": "script_step", "index": i, "step": st])
         }
     }
@@ -8195,6 +8195,9 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             case "tree":
                 // Form (e): the rows the tree DRAWS, level 2 only.
                 out.append(["step": i, "read": "tree", "value": "NOT APPLICABLE (read: tree is level 2 only)"])
+            case "dialog":
+                // The open dialog's id, or null when none is open (row 275).
+                out.append(["step": i, "read": "dialog", "value": model.stateStore.getDialogId() ?? NSNull()])
             default:
                 refuse("read: \(kind) is not delivered by this runner")
             }
@@ -8250,7 +8253,22 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             guard hits.count == 1 else { return refuse("`\(want)` is \(hits.count) item(s) of \(pid)'s menu, not one") }
             guard items[hits[0]]["enabled"] as? Bool == true else { return refuse("the menu item `\(want)` is disabled") }
             guard let (kind, addr) = formsPanelKindAndAddr(pid, layout) else { return refuse("no dock holds \(pid)") }
-            panelDispatch(kind, cmd: commandWithParams(nodes[hits[0]]), addr: addr, layout: &layout, model: model)
+            // The command the live menu dispatches for this item, from the
+            // app's own builder (``menuItems(fromRaw:)``): a radio member
+            // carries its params folded in, any other item its bare action.
+            // Rebuilding it here (`commandWithParams` for every item) sent a
+            // command the app never sends (row 275).
+            let built = menuItems(fromRaw: (panel["menu"] as? [Any]) ?? []).filter {
+                if case .separator = $0 { return false }
+                return true
+            }
+            guard built.count == nodes.count else { return refuse("the menu builder made \(built.count) items for \(nodes.count) entries of \(pid)") }
+            let cmd: String
+            switch built[hits[0]] {
+            case .action(_, let c, _), .toggle(_, let c), .radio(_, let c, _): cmd = c
+            case .separator, .submenu: return refuse("the menu item `\(want)` is a submenu, which this runner does not open")
+            }
+            panelDispatch(kind, cmd: cmd, addr: addr, layout: &layout, model: model)
         } else if let want = st["context_menu"] as? String {
             // Design section 8 form 2: the item whose action, RESOLVED at open,
             // is the step's and whose declared params equal every param the step
@@ -8434,8 +8452,26 @@ private func replayForms(_ script: [String: Any]) -> Result<[[String: Any]], For
             case .failure(let r): return refuse(r.why)
             case .success(let f): field = f.map { (pid, $0.widget, rowPath, $0.text) }
             }
+        } else if let want = st["dialog"] as? String {
+            // A DIALOG step (row 275): a widget of the OPEN dialog, by id,
+            // through the route the dialog view takes (``dialogEventRoute``,
+            // the dialog-action corpus's own). The step names the dialog it
+            // expects, so a route that opened another one is refused.
+            focus = nil
+            field = nil
+            guard let open = model.stateStore.getDialogId() else {
+                return refuse("the step names dialog `\(want)`, and no dialog is open")
+            }
+            guard open == want else { return refuse("the step names dialog `\(want)`; the open dialog is `\(open)`") }
+            guard let widget = st["widget"] as? String else { return refuse("a dialog step names no widget") }
+            guard let spec = WorkspaceData.load()?.dialog(open), WidgetEvent.findWidget(in: spec["content"], id: widget) != nil else {
+                return refuse("widget `\(widget)` is not in dialog `\(open)`")
+            }
+            var dev: [String: Any] = ["address": ["id": widget], "event": st["event"] as? String ?? "click"]
+            if let v = st["value"] { dev["value"] = v }
+            if let why = dialogEventRoute(dev, model: model) { return refuse(why) }
         } else {
-            let form = ["dialog", "context_menu"].first { st[$0] != nil }
+            let form = ["context_menu"].first { st[$0] != nil }
             refuse(form.map { "the `\($0)` form is not delivered by this runner" } ?? "\(st) is not a step this runner knows")
         }
     }
@@ -9064,4 +9100,120 @@ private func formsSecondaryPress(_ row: [Int]) -> [String: Any] {
     }
     #expect(selected(true) == [[0, 2, 0]], "isolated: the click selects the child")
     #expect(selected(false) == [[0, 2]], "no double: the click selects the group")
+}
+
+// ── The dialog step (row 275, docs/TESTING.md section 6), Rust's arms' twins ──
+
+private let formsArtboards = "artboards_panel_content"
+
+/// Artboard Options opened by the person's route (the Artboards panel menu on
+/// the seeded panel-selected artboard), `mid` inside the open dialog, then OK.
+private func formsArtboardOptionsScript(_ mid: [[String: Any]]) -> [String: Any] {
+    let steps: [[String: Any]] = [["read": "document"],
+                                  ["panel_menu": formsArtboards, "action": "open_artboard_options"],
+                                  ["read": "dialog"]]
+        + mid
+        + [["dialog": "artboard_options", "widget": "ao_ok", "event": "click"], ["read": "dialog"], ["read": "document"]]
+    return ["item": "forms.dialog", "setup_svg": "paragraph_justified.svg", "tool": "selection",
+            "app_state": ["panels": [formsArtboards: ["artboards_panel_selection": ["zs8ap4x3"]]]], "steps": steps]
+}
+
+/// The `read: dialog` values in order, `"null"` for none open.
+private func formsDialogReads(_ out: [[String: Any]]) -> [String] {
+    out.filter { $0["read"] as? String == "dialog" }.map { ($0["value"] as? String) ?? "null" }
+}
+
+/// Artboard `zs8ap4x3` at each document read, in order.
+private func formsArtboard(_ out: [[String: Any]]) -> [[String: Any]] {
+    formsDocReads(out).compactMap { $0.data(using: .utf8) }
+        .compactMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+        .map { (($0["artboards"] as? [[String: Any]]) ?? []).first { $0["id"] as? String == "zs8ap4x3" } ?? [:] }
+}
+
+/// The fill select's `white`: the colour the dialog's own bind maps to it.
+private func formsWhiteFromTheSpec() -> String {
+    let spec = WorkspaceData.load()!.dialog("artboard_options")!
+    let node = formsFindWidget(spec["content"], "ao_fill_dropdown")!
+    let bind = (node["bind"] as! [String: Any])["value"] as! String
+    let head = bind.components(separatedBy: "then 'white'")[0]
+    return head.components(separatedBy: "== ").last!.trimmingCharacters(in: .whitespaces)
+}
+
+/// The A4 preset's size, from its own option label `A4 (W × H)`.
+private func formsA4FromTheSpec() -> (Double, Double) {
+    let spec = WorkspaceData.load()!.dialog("artboard_options")!
+    let node = formsFindWidget(spec["content"], "ao_preset")!
+    let label = ((node["options"] as! [[String: Any]]).first { $0["value"] as? String == "a4" }!)["label"] as! String
+    let inner = label.split(separator: "(")[1].split(separator: ")")[0]
+    let parts = inner.components(separatedBy: "×").map { Double($0.trimmingCharacters(in: .whitespaces))! }
+    return (parts[0], parts[1])
+}
+
+private func formsFindWidget(_ node: Any?, _ id: String) -> [String: Any]? {
+    if let d = node as? [String: Any] {
+        if d["id"] as? String == id { return d }
+        for v in d.values { if let hit = formsFindWidget(v, id) { return hit } }
+    } else if let a = node as? [Any] {
+        for v in a { if let hit = formsFindWidget(v, id) { return hit } }
+    }
+    return nil
+}
+
+@Test func formsADialogStepCommitsTheFillSelectAndOkAppliesIt() {
+    let out = formsRun(formsArtboardOptionsScript([
+        ["dialog": "artboard_options", "widget": "ao_fill_dropdown", "event": "commit", "value": "white"]]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    #expect(formsDialogReads(out) == ["artboard_options", "null"], "\(out)")
+    let fills = formsArtboard(out).map { "\($0["fill"] ?? "nil")" }
+    let white = formsWhiteFromTheSpec()
+    #expect(white == "#ffffff", "the bind's white literal moved: \(white)")
+    #expect(fills.count == 2 && fills[0] != white, "the setup must not already be white: \(fills)")
+    #expect(fills.count == 2 && fills[1] == white, "OK after the pick: \(fills)")
+}
+
+/// The control: the same route and OK with no pick leaves the fill.
+@Test func formsTheSameRouteWithoutThePickLeavesTheFill() {
+    let out = formsRun(formsArtboardOptionsScript([]))
+    #expect(formsRefusal(out) == nil, "\(out)")
+    #expect(formsDialogReads(out) == ["artboard_options", "null"], "\(out)")
+    let fills = formsArtboard(out).map { "\($0["fill"] ?? "nil")" }
+    #expect(fills.count == 2 && fills[0] == fills[1], "\(fills)")
+}
+
+@Test func formsADialogStepThatCannotAddressIsRefusedByName() {
+    let other = formsRun(formsArtboardOptionsScript([
+        ["dialog": "rotate_options", "widget": "ao_fill_dropdown", "event": "commit", "value": "white"]]))
+    let why = formsRefusal(other) ?? ""
+    #expect(why.contains("rotate_options") && why.contains("artboard_options"), "\(why)")
+    let missing = formsRun(formsArtboardOptionsScript([["dialog": "artboard_options", "widget": "no_such_widget", "event": "click"]]))
+    #expect((formsRefusal(missing) ?? "").contains("no_such_widget"), "\(missing)")
+    let none = formsRun(["item": "forms.dialog", "setup_svg": "paragraph_justified.svg", "tool": "selection",
+                         "steps": [["dialog": "artboard_options", "widget": "ao_ok", "event": "click"], ["read": "document"]]])
+    #expect((formsRefusal(none) ?? "").contains("no dialog is open"), "\(none)")
+}
+
+/// Every PROPOSED script replays to its outcome; the population is pinned in
+/// the corpus manifest's path form against the directory.
+@Test func formsEveryProposedDialogScriptReplaysToItsOutcome() throws {
+    let proposed = [
+        "input_scripts_proposed/artboard_options.fill_white.json",
+        "input_scripts_proposed/artboard_options.preset_a4.json",
+    ]
+    let dir = (fixturesPath() as NSString).appendingPathComponent("input_scripts_proposed")
+    let onDisk = try FileManager.default.contentsOfDirectory(atPath: dir).filter { $0.hasSuffix(".json") }.sorted()
+        .map { "input_scripts_proposed/\($0)" }
+    #expect(onDisk == proposed, "the population moved")
+    for n in proposed {
+        let script = try JSONSerialization.jsonObject(with: readFixture(n).data(using: .utf8)!) as! [String: Any]
+        let out = formsRun(script)
+        #expect(formsRefusal(out) == nil, "\(n): \(out)")
+        #expect(formsDialogReads(out) == ["artboard_options", "null"], "\(n): \(out)")
+        let ab = formsArtboard(out).last ?? [:]
+        if n.contains("fill_white") {
+            #expect("\(ab["fill"] ?? "nil")" == formsWhiteFromTheSpec(), "\(n): \(ab)")
+        } else {
+            let (w, h) = formsA4FromTheSpec()
+            #expect((ab["width"] as? Double, ab["height"] as? Double) == (w, h), "\(n): \(ab)")
+        }
+    }
 }

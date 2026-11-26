@@ -261,8 +261,13 @@ marked PROPOSED and never gates.
     script waits on the swatch tile's. `artboard_options` gives its two `ao_ok` and `ao_cancel`.
   * **The outcome is read by the reads that exist:** `{"read": "dialog"}` (`null` once OK or Cancel has closed it) and
     `{"read": "document"}`.
-  * **Delivered by Rust's engine replay (`replay_forms`, 2026-11-25) and by nothing else yet.** Swift's forms runner,
-    the Mac and Windows drivers and the web hook refuse it by name.
+  * **Delivered by both level-1 forms runners (2026-11-25):** Rust's engine replay (`replay_forms`, through
+    `jas_dialog_event`) and Swift's (`replayForms`, through `dialogEventRoute`, the dialog-action corpus's own route,
+    so the two Swift runners cannot drift). The Mac and Windows drivers and the web hook refuse it by name.
+  * **A panel-menu step runs the command the live menu dispatches** (Swift: the menu builder's own command, the bare
+    action for an item that is not a radio member). Building it any other way drove a route no person takes, and hid
+    row 280: the Mac's Artboards menu dropped its items' declared `params`, so "Artboard Options..." and "Rename" ran
+    with no `artboard_id`.
   * **Until a runner or driver delivers it, it refuses the step by name**, and a script that uses it is PROPOSED
     (`test_fixtures/input_scripts_proposed/`, which no gating runner reads) and never gates. It moves into
     `input_scripts/` when every runner and driver that gates delivers it.

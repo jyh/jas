@@ -23,6 +23,75 @@ private func readText(_ path: String) -> String? {
     FileManager.default.contents(atPath: path).flatMap { String(data: $0, encoding: .utf8) }
 }
 
+/// One event to a widget of the OPEN dialog, by the dialog view's own route
+/// (``PanelWidgetEvents`` with the dialog's writes, `DialogWidgetActions` for a
+/// button's node action). `ev` is `{"address": {...}, "event", "value"}`. Returns
+/// the refusal's text, or nil when it ran. Shared by this corpus's `dialog_event`
+/// and the input scripts' dialog step (row 275), so the two cannot drift.
+func dialogEventRoute(_ ev: [String: Any], model m: Model) -> String? {
+    let store = m.stateStore
+    guard let ws = WorkspaceData.load() else { return "no workspace" }
+    guard let id = store.getDialogId(), let spec = ws.dialog(id) else {
+        return "a dialog_event with no dialog open"
+    }
+    let ctx = buildDialogEvalContextWithGetters(
+        store: store, state: store.getDialogState(),
+        params: store.getDialogParams() ?? [:], outer: [:])
+    let node: [String: Any]
+    switch addressed(spec["content"], ev["address"] as? [String: Any] ?? [:], context: ctx) {
+    case .success(let n): node = n
+    case .failure(let e): return "\(e.text)"
+    }
+    let route = PanelWidgetEvents(model: m, panelId: nil, scope: ctx,
+                                  onDialogWrite: { k, v in DialogWidgetActions.write(k, v, store: store) })
+    switch ev["event"] as? String {
+    case "commit":
+        let r = route.commit(node, text: ev["value"] as? String)
+        if r.outcome == "refused" { return "the commit was refused (\(r.reason ?? "-"))" }
+    case "click":
+        // By the widget's KIND, as the view routes it: a boolean kind is
+        // pressed, a click kind with a node action runs the overlay's
+        // act, any other click kind is the contract's click. A refusal
+        // is a failure, never swallowed (the engine reports its own).
+        let kind = node["type"] as? String ?? ""
+        if WidgetEvent.booleanKinds.contains(kind) {
+            let r = route.press(node)
+            if r.outcome == "refused" { return "the press was refused (\(r.reason ?? "-"))" }
+        } else if WidgetEvent.clickKinds.contains(kind) {
+            if WidgetEvent.clickRunsNodeAction(node), let action = node["action"] as? String {
+                DialogWidgetActions.run(
+                    action,
+                    params: DialogWidgetActions.resolveParams(node["params"] as? [String: Any] ?? [:], context: ctx),
+                    model: m)
+            } else {
+                let r = route.click(node)
+                if r.outcome == "refused" { return "the click was refused (\(r.reason ?? "-"))" }
+            }
+        } else {
+            return "a click on a \(kind), which this runner does not route"
+        }
+    case "change" where node["type"] as? String == "tabs":
+        // A tab pick, as `renderTabs` writes it: the tab id through a
+        // `dialog.` bind. Any other bind, or an id no tab has, refuses.
+        let tabIds = (node["tabs"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+        let expr = (node["bind"] as? [String: Any])?["value"] as? String ?? ""
+        guard expr.hasPrefix("dialog."), let tab = ev["value"] as? String, tabIds.contains(tab) else {
+            return "the tab pick was refused (bind \(expr), value \(ev["value"] ?? "nil"))"
+        }
+        DialogWidgetActions.write(String(expr.dropFirst("dialog.".count)), tab, store: store)
+    case "change" where WidgetEvent.inputKinds.contains(node["type"] as? String ?? ""):
+        // A select's pick (Layer Options' colour preset, row 53(b)) is
+        // a COMMIT event in the contract (`WidgetEvent.commitEvents`),
+        // so it goes through the commit route the view takes; the
+        // engine runner sends the same `change` through its own route.
+        let r = route.commit(node, text: ev["value"] as? String)
+        if r.outcome == "refused" { return "the change was refused (\(r.reason ?? "-"))" }
+    default:
+        return "unknown dialog event \(ev["event"] ?? "nil")"
+    }
+    return nil
+}
+
 /// The path of the ONE static node whose every `address` key equals its own;
 /// zero or two matches is a failure that names the count (Rust's
 /// `dialog_address_path`).
@@ -198,64 +267,7 @@ private func runCase(_ tc: [String: Any], root: String) -> [String] {
                        actions: ws.actions(), dialogs: ws.dialogs(),
                        platformEffects: buildYamlToolEffects(model: m), model: m)
         } else if let ev = step["dialog_event"] as? [String: Any] {
-            guard let id = store.getDialogId(), let spec = ws.dialog(id) else {
-                return ["\(name): a dialog_event with no dialog open"]
-            }
-            let ctx = buildDialogEvalContextWithGetters(
-                store: store, state: store.getDialogState(),
-                params: store.getDialogParams() ?? [:], outer: [:])
-            let node: [String: Any]
-            switch addressed(spec["content"], ev["address"] as? [String: Any] ?? [:], context: ctx) {
-            case .success(let n): node = n
-            case .failure(let e): return ["\(name): \(e.text)"]
-            }
-            let route = PanelWidgetEvents(model: m, panelId: nil, scope: ctx,
-                                          onDialogWrite: { k, v in DialogWidgetActions.write(k, v, store: store) })
-            switch ev["event"] as? String {
-            case "commit":
-                let r = route.commit(node, text: ev["value"] as? String)
-                if r.outcome == "refused" { return ["\(name): the commit was refused (\(r.reason ?? "-"))"] }
-            case "click":
-                // By the widget's KIND, as the view routes it: a boolean kind is
-                // pressed, a click kind with a node action runs the overlay's
-                // act, any other click kind is the contract's click. A refusal
-                // is a failure, never swallowed (the engine reports its own).
-                let kind = node["type"] as? String ?? ""
-                if WidgetEvent.booleanKinds.contains(kind) {
-                    let r = route.press(node)
-                    if r.outcome == "refused" { return ["\(name): the press was refused (\(r.reason ?? "-"))"] }
-                } else if WidgetEvent.clickKinds.contains(kind) {
-                    if WidgetEvent.clickRunsNodeAction(node), let action = node["action"] as? String {
-                        DialogWidgetActions.run(
-                            action,
-                            params: DialogWidgetActions.resolveParams(node["params"] as? [String: Any] ?? [:], context: ctx),
-                            model: m)
-                    } else {
-                        let r = route.click(node)
-                        if r.outcome == "refused" { return ["\(name): the click was refused (\(r.reason ?? "-"))"] }
-                    }
-                } else {
-                    return ["\(name): a click on a \(kind), which this runner does not route"]
-                }
-            case "change" where node["type"] as? String == "tabs":
-                // A tab pick, as `renderTabs` writes it: the tab id through a
-                // `dialog.` bind. Any other bind, or an id no tab has, refuses.
-                let tabIds = (node["tabs"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
-                let expr = (node["bind"] as? [String: Any])?["value"] as? String ?? ""
-                guard expr.hasPrefix("dialog."), let tab = ev["value"] as? String, tabIds.contains(tab) else {
-                    return ["\(name): the tab pick was refused (bind \(expr), value \(ev["value"] ?? "nil"))"]
-                }
-                DialogWidgetActions.write(String(expr.dropFirst("dialog.".count)), tab, store: store)
-            case "change" where WidgetEvent.inputKinds.contains(node["type"] as? String ?? ""):
-                // A select's pick (Layer Options' colour preset, row 53(b)) is
-                // a COMMIT event in the contract (`WidgetEvent.commitEvents`),
-                // so it goes through the commit route the view takes; the
-                // engine runner sends the same `change` through its own route.
-                let r = route.commit(node, text: ev["value"] as? String)
-                if r.outcome == "refused" { return ["\(name): the change was refused (\(r.reason ?? "-"))"] }
-            default:
-                return ["\(name): unknown dialog event \(ev["event"] ?? "nil")"]
-            }
+            if let why = dialogEventRoute(ev, model: m) { return ["\(name): \(why)"] }
         } else if let action = step["action"] as? String {
             // A dialog an action opens (`open_boolean_options`) is compared
             // from the document as it opened, as the engine runner does.
