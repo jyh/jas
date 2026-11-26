@@ -1051,6 +1051,8 @@ jobs:
           python scripts/check_corpus_manifest.py
           python scripts/check_can_undo_coverage.py --self-test
           python scripts/check_can_undo_coverage.py
+          python scripts/check_computed_bind_behaviors.py --self-test
+          python scripts/check_computed_bind_behaviors.py
           python scripts/mac_l2_plan.py --self-test
           python scripts/dialog_openers.py --self-test
           python scripts/web_l2_driver.py --self-test
