@@ -4178,8 +4178,12 @@ function Resolve-SbPlanAt([string]$PlanJson, [int[]]$At, [string]$Widget) {
     $reps = @()
     if ($null -ne $plan.PSObject.Properties['repeats']) { $reps = @(foreach ($x in $plan.repeats) { $x }) }
     # The prefix test, on path arrays as text.
+    # N2 (jas 1020): a repeat at the root `[]` is a prefix of every path; never
+    # index `0..-1`, which in PowerShell counts DOWN and takes the last element.
     $isUnder = { param($inner, $outer) $o = @($outer); $i = @($inner)
-        $i.Count -gt $o.Count -and (Format-SbPath $i[0..($o.Count - 1)]) -ceq (Format-SbPath $o) }
+        if ($i.Count -le $o.Count) { return $false }
+        if ($o.Count -eq 0) { return $true }
+        (Format-SbPath $i[0..($o.Count - 1)]) -ceq (Format-SbPath $o) }
     $first = $cands[0]
     $enc = @($reps | Where-Object { & $isUnder $first.path $_.path } | Sort-Object { @($_.path).Count })
     if ($enc.Count -eq 0) { return (& $no "'$Widget' sits in no repeat the plan expands: at names an iteration of one") }
@@ -4197,14 +4201,20 @@ function Resolve-SbPlanAt([string]$PlanJson, [int[]]$At, [string]$Widget) {
         if ($At[$j] -ge [int]$cur.rows) { return (& $no "at $want is past the rows: repeat $(Format-SbPath $cur.path) ($($cur.id)) draws $($cur.rows)") }
         if ($j -eq $At.Count - 1) { break }
         $outerLen = @($enc[$j].path).Count
-        $suffix = @(@($enc[$j + 1].path)[($outerLen + 1)..(@($enc[$j + 1].path).Count - 1)])
+        # N2 (jas 1020): an inner repeat at exactly <outer> + [k] has an EMPTY
+        # suffix; a range from $outerLen + 1 down to $outerLen would count down.
+        $innerPath = @($enc[$j + 1].path)
+        $suffix = if ($innerPath.Count -gt $outerLen + 1) { @($innerPath[($outerLen + 1)..($innerPath.Count - 1)]) } else { @() }
         $nextPath = Format-SbPath (@($cur.path) + @($At[$j]) + $suffix)
         $next = @($reps | Where-Object { (Format-SbPath $_.path) -ceq $nextPath })
         if ($next.Count -ne 1) { return (& $no "at $want names no drawn iteration: the plan lists no repeat at $nextPath") }
         $cur = $next[0]
     }
     $surfacePath = @($cur.path) + @($At[$At.Count - 1])
-    $hits = @($cands | Where-Object { & $isUnder $_.path $surfacePath -or (Format-SbPath $_.path) -ceq (Format-SbPath $surfacePath) })
+    # N1 (jas 1020, measured): after `&` the rest of a pipeline element is
+    # parsed in ARGUMENT mode, so the invocation is parenthesised or the
+    # equality arm becomes an argument and never runs.
+    $hits = @($cands | Where-Object { (& $isUnder $_.path $surfacePath) -or ((Format-SbPath $_.path) -ceq (Format-SbPath $surfacePath)) })
     if ($hits.Count -eq 0) { return (& $no "at $want names no drawn '$Widget': iteration $(Format-SbPath $surfacePath) holds none") }
     if ($hits.Count -gt 1) { return (& $no "at $want names $($hits.Count) '$Widget' in iteration $(Format-SbPath $surfacePath): this driver will not guess which one") }
     [pscustomobject]@{ Refusal = $null; K = $At[$At.Count - 1]; Surface = "surface $(Format-SbPath $surfacePath)"; Foreach = (Format-SbPath $cur.path); Label = $null; Rows = [int]$cur.rows }
