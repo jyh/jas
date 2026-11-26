@@ -3583,4 +3583,13 @@ internal static class ProbeWire
             ["RowMenuCmd"] = (false, "a read of a row's context menu"),
             ["PanelSynthCmd"] = (false, "it hashes at each of its own steps"),
         };
+
+    /// <summary>
+    /// Row 275 C2: the PROBE row's <c>dialog=</c> field, which prove_e2e reads for
+    /// a script's <c>{"read": "dialog"}</c>. The open dialog's id; <c>none</c> when
+    /// none is open, or when no dialog plan was ever read; <c>UNREADABLE</c> when
+    /// the newest plan did not parse, which no script can expect.
+    /// </summary>
+    internal static string DialogField(bool read, DialogReading? reading) =>
+        !read ? "none" : reading is null ? "UNREADABLE" : reading.Open ? reading.Id : "none";
 }

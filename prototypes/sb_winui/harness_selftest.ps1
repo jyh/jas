@@ -2177,21 +2177,21 @@ $fPanel = [ordered]@{ panel = 'artboards_panel_content'; widget = 'ap_options'; 
 Test-Case 'is: an unknown top-level key is REFUSED by name, not dropped' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ zork = 1 }))
 } "REFUSED: top-level key 'zork' is not a script key (docs/TESTING.md section 6)"
-Test-Case 'is: a top-level key of a form this driver does not deliver (expected_dialog) is REFUSED by name' {
-    Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ expected_dialog = 'artboard_options' }))
-} "REFUSED: top-level key 'expected_dialog': this driver does not deliver it yet"
+Test-Case 'is: a top-level key of a form this driver does not deliver (expected_state_json) is REFUSED by name' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ expected_state_json = 's.json' }))
+} "REFUSED: top-level key 'expected_state_json': this driver does not deliver it yet"
 Test-Case 'is: the proposed key is a script key (a PROPOSED script says why it is one)' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ proposed = 'row 275' }))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json'
 Test-Case 'is: a panel_menu step is REFUSED by its own name, not as a pointer step of kind ''''' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ panel_menu = 'artboards_panel_content'; action = 'open_artboard_options' })))
 } 'REFUSED: step 2 is a panel_menu step: this driver does not deliver panel_menu steps yet'
-Test-Case 'is: a dialog step is REFUSED by its own name, not as a panel step with no panel' {
+Test-Case 'is: a dialog step is read as a dialog step, never as a panel step with no panel' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ dialog = 'artboard_options'; widget = 'ao_fill_dropdown'; event = 'commit'; value = 'white' })))
-} 'REFUSED: step 2 is a dialog step: this driver does not deliver dialog steps yet'
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json panels=dialog:artboard_options/ao_fill_dropdown:commit=white'
 Test-Case 'is: a dialog step that ALSO names a panel is a dialog step, never delivered as a panel step' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ panel = 'artboards_panel_content'; dialog = 'artboard_options'; widget = 'ao_ok'; event = 'click' })))
-} 'REFUSED: step 2 is a dialog step: this driver does not deliver dialog steps yet'
+} "REFUSED: step 2 dialog step key 'panel' is not a dialog-step key"
 Test-Case 'is: an unknown key on a panel step is REFUSED by name, not dropped' {
     $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['zork'] = 1
     Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
@@ -2211,14 +2211,14 @@ Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as
 } "REFUSED: step 2 read step key 'keys': this driver does not deliver it yet"
 # Over the REAL files: both proposed scripts name their FIRST undelivered form,
 # not a missing expected_json hiding it. Since row 275's expectations they carry
-# a top-level expected_dialog list, which the key check reads before any step,
-# so that is the form named; the panel_menu refusal keeps its synthetic arm above.
+# a top-level expected_dialog list, which this driver reads since row 275 C2,
+# so the form named is their panel_menu step (jas 1009 (2): refused on Windows).
 $fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 foreach ($fp in 'fill_white', 'preset_a4') {
     Test-Case "is: the proposed artboard_options.$fp names its first undelivered form" {
         $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
         Show-SbScript (Read-SbInputScript $t)
-    } "REFUSED: top-level key 'expected_dialog': this driver does not deliver it yet"
+    } 'REFUSED: step 0 is a panel_menu step: this driver does not deliver panel_menu steps yet'
 }
 # And the control: no SHIPPED script is refused by the new form checks (they
 # would have stopped gating), and the read found the corpus at all.
@@ -2230,6 +2230,90 @@ Test-Case 'is: no shipped input script is refused by a form check, over the whol
     } | ForEach-Object { $_.Name })
     "read=$(if ($files.Count -ge 100) { 'corpus' } else { $files.Count }) refused-by-form=$($hit.Count)$(if ($hit.Count) { ' ' + ($hit -join ',') })"
 } 'read=corpus refused-by-form=0'
+
+# ROW 275 C2 (STATUS-flask 1006 C, jas 1009 (3)): THE DIALOG STEP and
+# `{"read": "dialog"}` against `expected_dialog`. A dialog step is delivered
+# after the gesture, in script order with the panel steps, by the widget's id
+# inside the OPEN dialog. Each dialog read is the `dialog=` field of the probe
+# the act before it wrote, so the reader records, per read, how many probing
+# acts follow the release before it. `expected_dialog` is one value for one
+# read, or a list with one entry per read in step order (null: none open).
+$fOpen = [ordered]@{ panel = 'artboards_panel_content'; widget = 'ap_options'; event = 'click' }
+$fFill = [ordered]@{ dialog = 'artboard_options'; widget = 'ao_fill_dropdown'; event = 'commit'; value = 'white' }
+$fOk = [ordered]@{ dialog = 'artboard_options'; widget = 'ao_ok'; event = 'click' }
+$fReadDialog = [ordered]@{ read = 'dialog' }
+function Show-SbDialogPlan($r) {
+    if ($null -ne $r.Refusal) { return "REFUSED: $($r.Refusal)" }
+    "panels=$($r.PanelShow) dialogs=$($r.Dialogs) reads-after=$(@($r.DialogReads) -join ',') expect=$(@($r.ExpectedDialog) -join ',')"
+}
+Test-Case 'is: a dialog step and two dialog reads with a list expected_dialog are accepted and carried in order' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, $fReadDialog, $fFill, $fOk, $fReadDialog) @{ expected_dialog = @('artboard_options', $null) }))
+} 'panels=artboards_panel_content/ap_options:click;dialog:artboard_options/ao_fill_dropdown:commit=white;dialog:artboard_options/ao_ok:click dialogs=2 reads-after=1,3 expect=artboard_options,none'
+Test-Case 'is: one dialog read takes a scalar expected_dialog' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, $fReadDialog) @{ expected_dialog = 'artboard_options' }))
+} 'panels=artboards_panel_content/ap_options:click dialogs=0 reads-after=1 expect=artboard_options'
+Test-Case 'is: one dialog read takes a null scalar (no dialog open)' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fReadDialog) @{ expected_dialog = $null }))
+} 'panels= dialogs=0 reads-after=0 expect=none'
+Test-Case 'is: a scalar expected_dialog with two dialog reads is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, $fReadDialog, $fOk, $fReadDialog) @{ expected_dialog = 'artboard_options' }))
+} 'REFUSED: expected_dialog is one value and the script reads dialog 2 times: name one entry per read, as a list'
+Test-Case 'is: a list expected_dialog of the wrong length is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, $fReadDialog, $fOk, $fReadDialog) @{ expected_dialog = @('artboard_options') }))
+} 'REFUSED: expected_dialog lists 1 entry and the script reads dialog 2 times'
+Test-Case 'is: an expected_dialog entry that is neither a dialog id nor null is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fReadDialog) @{ expected_dialog = 7 }))
+} "REFUSED: expected_dialog entry 1 ('7') is neither a dialog id nor null"
+Test-Case 'is: a dialog read with no expected_dialog is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, $fReadDialog)))
+} 'REFUSED: the script reads dialog 1 time(s) and names no expected_dialog'
+Test-Case 'is: an expected_dialog with no dialog read is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen) @{ expected_dialog = 'artboard_options' }))
+} 'REFUSED: expected_dialog is given and the script has no read=dialog step'
+Test-Case 'is: a dialog step before the gesture ends is REFUSED by name' {
+    $j = New-SbFormScript @() | ConvertFrom-Json
+    $j.steps = @($sPress, $fOk, $fRelease, $sRead)
+    Show-SbDialogPlan (Read-SbInputScript ($j | ConvertTo-Json -Depth 8))
+} 'REFUSED: step 1 dialog artboard_options/ao_ok comes before the gesture ends: send_hand.ps1 delivers dialog steps only after the release'
+Test-Case 'is: a dialog read before the gesture ends is REFUSED by name' {
+    $j = New-SbFormScript @() @{ expected_dialog = $null } | ConvertFrom-Json
+    $j.steps = @($sPress, $fReadDialog, $fRelease, $sRead)
+    Show-SbDialogPlan (Read-SbInputScript ($j | ConvertTo-Json -Depth 8))
+} 'REFUSED: step 1 read dialog comes before the gesture ends: a dialog read is the probe an act after the release writes'
+Test-Case 'is: a dialog commit with no string value is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, [ordered]@{ dialog = 'artboard_options'; widget = 'ao_fill_dropdown'; event = 'commit' }, $fReadDialog) @{ expected_dialog = 'artboard_options' }))
+} 'REFUSED: step 3 dialog artboard_options/ao_fill_dropdown commit carries no string value'
+Test-Case 'is: a dialog step event other than click or commit is REFUSED by name' {
+    Show-SbDialogPlan (Read-SbInputScript (New-SbFormScript @($fOpen, [ordered]@{ dialog = 'artboard_options'; widget = 'ao_ok'; event = 'double_click' })))
+} "REFUSED: step 3 dialog artboard_options/ao_ok event 'double_click': this driver delivers click and commit"
+# The dialog-read VERDICT (prove_e2e), over the shell's PROBE rows: read k is
+# the probe BaseSeq + its reads-after, and its `dialog=` field (none: closed).
+$dRows = @(
+    'PROBE seq=1 surface=1x1 frame=f doc-sha=a dialog=none selection=[] plan=p',
+    'PROBE seq=2 surface=1x1 frame=f doc-sha=a dialog=artboard_options selection=[] plan=p',
+    'PROBE seq=3 surface=1x1 frame=f doc-sha=a dialog=artboard_options selection=[] plan=p',
+    'PROBE seq=4 surface=1x1 frame=f doc-sha=b dialog=none selection=[] plan=p')
+Test-Case 'dialog reads: each read is its own probe, and both agree' {
+    Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(1, 3) -Expected @('artboard_options', 'none')
+} 'PASS(reads=2)'
+Test-Case 'dialog reads: a read that disagrees FAILS, naming the read, its probe and both values' {
+    Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(1, 2) -Expected @('artboard_options', 'none')
+} 'FAIL(read 2 at probe 3: dialog=artboard_options want=none)'
+Test-Case 'dialog reads: a probe that never came FAILS by name' {
+    Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(9) -Expected @('none')
+} 'FAIL(read 1: no PROBE seq=10 row)'
+Test-Case 'dialog reads: a PROBE row with no dialog= field (a shell before row 275 C2) FAILS, never passes as none' {
+    Get-SbDialogReadVerdict -Rows @('PROBE seq=2 surface=1x1 frame=f doc-sha=a selection=[] plan=p') -BaseSeq 1 -Reads @(1) -Expected @('none')
+} 'FAIL(read 1 at probe 2: the PROBE row carries no dialog= field)'
+Test-Case 'dialog reads: seq=1 is not seq=12 (the probe number is a whole token)' {
+    Get-SbDialogReadVerdict -Rows @('PROBE seq=12 surface=1x1 frame=f doc-sha=a dialog=none selection=[] plan=p') -BaseSeq 1 -Reads @(0) -Expected @('none')
+} 'FAIL(read 1: no PROBE seq=1 row)'
+Test-Case 'dialog reads: reads and expectations of different lengths FAIL by name, never compare against an empty want' {
+    Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(1, 3) -Expected @('artboard_options')
+} 'FAIL(2 dialog read(s) and 1 expected entry: the reader pairs them one to one)'
+Test-Case 'dialog reads: a script with none reads none' {
+    Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @() -Expected @()
+} 'none'
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
@@ -2276,7 +2360,7 @@ Test-Case 'is: a script with no read step is refused (section 6)' {
 } 'REFUSED: no read step: a script that reads nothing proves nothing'
 Test-Case 'is: a read this driver cannot take is refused by name' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, [ordered]@{ read = 'pixels' })))
-} "REFUSED: read 'pixels': this driver compares only read=document"
+} "REFUSED: read 'pixels': this driver compares only read=document and read=dialog"
 Test-Case 'is: a release away from the last move is refused' {
     $r2 = [ordered]@{ kind = 'release'; x = 80; y = 60 }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $r2, $sRead)))
