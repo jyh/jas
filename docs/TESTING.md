@@ -240,7 +240,32 @@ marked PROPOSED and never gates.
   the click's pair. Both are wrong answers the reads tell apart, so neither defect can pass as the other.
 * **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
   `jas_gui_harness.py`) and not yet measured on a live app. The web channel refuses all three by name until its test
-  hook has them, and no level-1 runner reads them yet, so no shipped script uses them.
+  hook has them, and no level-1 runner reads them yet, so no shipped script uses them. (Since 2026-11-25 Rust's engine
+  replay reads `{"read": "dialog"}`, for the dialog step below; the other two are still read by none.)
+* **A dialog step (row 275, written 2026-11-25):**
+  `{"dialog": "<dialog id>", "widget": "<widget id>", "event": "click" | "commit", "value": …}`. It addresses a widget
+  of the OPEN dialog by the `id` its `workspace/dialogs/*.yaml` gives it, as a panel step addresses a panel widget.
+  * **The dialog is opened by the person's route**: an earlier panel or menu step whose act opens it (the Artboards
+    panel's `ap_options` click opens `artboard_options`). No step opens a dialog by its id. A hook would skip the route
+    that opens it and the shell's own dialog view, which is where rows 268, 270 and 277 found their defects. Opening a
+    dialog directly by id is the level-1 dialog-action corpus's door (`test_fixtures/dialog_actions/`). That corpus
+    pins a dialog's laws; an input script drives the route to them.
+  * **`dialog` names the dialog the script expects to be open**, and the step is refused by name when no dialog is
+    open or when another one is. It is never addressed into whatever happens to be open, so a route that opens the
+    wrong dialog reds the script instead of driving a widget that shares an id.
+  * **`event` and `value` are a panel step's:** `click` on a button or a boolean widget, and `commit` with the text a
+    person entered. A `select`'s commit names the item by its `value`, never its label, and runs the widget's declared
+    `change` behaviour with that value, as a person's pick does.
+  * **OK and Cancel are dialog widgets like any other**, so a button is named only by an `id`. A button with none
+    (57 of the 73 dialog buttons on 2026-11-25) cannot be named, and its script waits on that spec edit, as an `at`
+    script waits on the swatch tile's. `artboard_options` gives its two `ao_ok` and `ao_cancel`.
+  * **The outcome is read by the reads that exist:** `{"read": "dialog"}` (`null` once OK or Cancel has closed it) and
+    `{"read": "document"}`.
+  * **Delivered by Rust's engine replay (`replay_forms`, 2026-11-25) and by nothing else yet.** Swift's forms runner,
+    the Mac and Windows drivers and the web hook refuse it by name.
+  * **Until a runner or driver delivers it, it refuses the step by name**, and a script that uses it is PROPOSED
+    (`test_fixtures/input_scripts_proposed/`, which no gating runner reads) and never gates. It moves into
+    `input_scripts/` when every runner and driver that gates delivers it.
 * **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
   "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
   hovering there that long.
@@ -323,7 +348,7 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
     and evaluates the params as a behaviour's.
   * Any other step closes the menu.
   * ⚠️ Both shells still hand-build the Layers row context menu, so this form drives the yaml's route, not theirs.
-* **Still refused by name there:** `at`, `hold_ms`, the `dialog` step, and `meta` on a panel step. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
+* **Still refused by name there:** `at`, `hold_ms`, and `meta` on a panel step. **The dialog step and `{"read": "dialog"}` are delivered there (row 275, 2026-11-25)**, through `jas_dialog_event` by widget id. `{"read": "tree"}` reads NOT APPLICABLE (level 2 only, below).
 * **Swift's forms runner** (`replayForms` in `CrossLanguageTests.swift`) delivers the same forms. Both runners also
   deliver the text and dropdown forms (rows 135 and 136):
   * `input`, by id or by `row`, sets the field's text and fires the field's own `input` once. The event does not bubble,
@@ -397,7 +422,7 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
      item titled with the option's label, which the planner reads from the panel spec.
    * A menu step presses the menubar item at its title path, derived from the spec's labels. The Mac draws a
      checkable item's state into its title (`✓ Stroke`), so titles are compared without it.
-   * Refused by name: `meta`, a pointer or key step after a panel or menu step, a read other than `document`, a menu
+   * Refused by name: a non-empty `app_state` (this driver seeds nothing, row 279), `meta`, a pointer or key step after a panel or menu step, a read other than `document`, a menu
      id or panel with no unique path, a widget that is not found, found twice or disabled, and an odd or fractional
      unit.
    * The driver also refuses to run while the console has seen input in the last 120 s, and refuses a pointer or key

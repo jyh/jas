@@ -864,6 +864,11 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     "tree" => {
                         out.push(json!({"step": i, "read": "tree", "value": "NOT APPLICABLE (read: tree is level 2 only)"}));
                     }
+                    // The open dialog's id, or null when none is open.
+                    "dialog" => {
+                        let open = engine.script_dialog_id();
+                        out.push(json!({"step": i, "read": "dialog", "value": open}));
+                    }
                     other => {
                         refuse(&mut out, format!("read: {other} is not delivered by this runner"));
                         break;
@@ -1315,8 +1320,43 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                     break;
                 }
                 focus = Some(pid);
+            } else if let Some(want) = st.get("dialog").and_then(Value::as_str) {
+                // A DIALOG step (row 275): a widget of the OPEN dialog, by id,
+                // through the door a shell's dialog view calls. The step names
+                // the dialog it expects, so a route that opened another one is
+                // refused, never driven.
+                focus = None;
+                field = None;
+                let open = engine.script_dialog_id();
+                let Some(open) = open else {
+                    refuse(&mut out, format!("the step names dialog `{want}`, and no dialog is open"));
+                    break;
+                };
+                if open.as_str() != want {
+                    refuse(&mut out, format!("the step names dialog `{want}`; the open dialog is `{open}`"));
+                    break;
+                }
+                let Some(widget) = st.get("widget").and_then(Value::as_str) else {
+                    refuse(&mut out, "a dialog step names no widget".to_string());
+                    break;
+                };
+                let declared = crate::interpreter::workspace::Workspace::load()
+                    .and_then(|ws| ws.dialog(&open).and_then(|d| find_widget(&d["content"], widget)).cloned());
+                if declared.is_none() {
+                    refuse(&mut out, format!("widget `{widget}` is not in dialog `{open}`"));
+                    break;
+                }
+                let mut ev = json!({"widget": widget, "event": st.get("event").and_then(Value::as_str).unwrap_or("click")});
+                if let Some(v) = st.get("value") {
+                    ev["value"] = v.clone();
+                }
+                let ev = ev.to_string();
+                let reply = take(unsafe { crate::ffi::jas_dialog_event(e, ev.as_ptr(), ev.len()) });
+                if !ran(&mut out, reply, last_error(e)) {
+                    break;
+                }
             } else {
-                let form = ["dialog", "context_menu"].into_iter().find(|k| st.get(*k).is_some());
+                let form = ["context_menu"].into_iter().find(|k| st.get(*k).is_some());
                 refuse(&mut out, match form {
                     Some(f) => format!("the `{f}` form is not delivered by this runner"),
                     None => format!("{st} is not a step this runner knows"),
@@ -1988,4 +2028,158 @@ fn the_forms_replay_delivers_a_double_click_step() {
     let doc = reads.last().expect("one document read");
     let text = doc.as_str().map(str::to_string).unwrap_or_else(|| doc.to_string());
     assert_eq!(selected_paths_of(&text), vec![serde_json::json!([0, 2, 0])], "isolated: the click selects the child");
+}
+
+// ── The dialog step (row 275, docs/TESTING.md section 6) ─────────────────────
+
+const ARTBOARDS: &str = "artboards_panel_content";
+
+/// Artboard Options opened by the person's route: the Artboards panel menu's
+/// "Artboard Options..." on the panel-selected artboard (seeded, the one form a
+/// level-1 runner has for a row selection), then `mid` inside the open dialog,
+/// then its OK. Reads the dialog before and after and the document at the end.
+fn artboard_options_script(mid: Vec<Value>) -> Value {
+    use serde_json::json;
+    let mut steps = vec![
+        json!({"read": "document"}),
+        json!({"panel_menu": ARTBOARDS, "action": "open_artboard_options"}),
+        json!({"read": "dialog"}),
+    ];
+    steps.extend(mid);
+    steps.extend([
+        json!({"dialog": "artboard_options", "widget": "ao_ok", "event": "click"}),
+        json!({"read": "dialog"}),
+        json!({"read": "document"}),
+    ]);
+    json!({"item": "forms.dialog", "setup_svg": "paragraph_justified.svg", "tool": "selection",
+           "app_state": {"panels": {ARTBOARDS: {"artboards_panel_selection": ["zs8ap4x3"]}}},
+           "steps": steps})
+}
+
+fn dialog_reads(out: &[Value]) -> Vec<Value> {
+    out.iter().filter(|r| r["read"] == "dialog").map(|r| r["value"].clone()).collect()
+}
+
+/// The fill of artboard `zs8ap4x3` at each document read, in order.
+fn artboard_fills(out: &[Value]) -> Vec<Value> {
+    out.iter().filter(|r| r["read"] == "document").map(|r| {
+        r["value"]["artboards"].as_array().and_then(|a| a.iter().find(|ab| ab["id"] == "zs8ap4x3"))
+            .map(|ab| ab["fill"].clone()).unwrap_or(Value::String("NO ARTBOARD zs8ap4x3".into()))
+    }).collect()
+}
+
+/// The fill select's `white`, as the dialog's own bind reads it back: the
+/// colour the select's bind maps to `'white'`, taken from the spec, not typed.
+fn white_from_the_spec() -> Value {
+    let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+    let spec = ws.dialog("artboard_options").expect("artboard_options");
+    let node = find_widget(&spec["content"], "ao_fill_dropdown").expect("ao_fill_dropdown");
+    let bind = node["bind"]["value"].as_str().expect("a value bind");
+    let at = bind.find("then 'white'").expect("the bind names white");
+    let colour = bind[..at].rsplit("== ").next().expect("a colour before it").trim();
+    Value::String(colour.to_string())
+}
+
+#[test]
+fn a_dialog_step_commits_the_fill_select_and_ok_applies_it() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = artboard_options_script(vec![serde_json::json!(
+        {"dialog": "artboard_options", "widget": "ao_fill_dropdown", "event": "commit", "value": "white"})]);
+    let out = replay_forms(&script).expect("replay");
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(dialog_reads(&out), vec![Value::String("artboard_options".into()), Value::Null], "{out:?}");
+    let fills = artboard_fills(&out);
+    let white = white_from_the_spec();
+    assert_eq!(white, Value::String("#ffffff".into()), "the bind's white literal moved: {white}");
+    assert_ne!(fills[0], white, "the setup must not already be white, or this arm proves nothing: {fills:?}");
+    assert_eq!(fills[1], white, "OK after the pick: {fills:?}");
+}
+
+/// The control: the same route and OK with no pick leaves the fill as it was,
+/// so the arm above is the pick's, not the OK's.
+#[test]
+fn the_same_route_without_the_pick_leaves_the_fill() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let out = replay_forms(&artboard_options_script(vec![])).expect("replay");
+    assert_eq!(refusal(&out), None, "{out:?}");
+    assert_eq!(dialog_reads(&out), vec![Value::String("artboard_options".into()), Value::Null], "{out:?}");
+    let fills = artboard_fills(&out);
+    assert_eq!(fills[0], fills[1], "{fills:?}");
+}
+
+#[test]
+fn a_dialog_step_naming_another_dialog_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = artboard_options_script(vec![serde_json::json!(
+        {"dialog": "rotate_options", "widget": "ao_fill_dropdown", "event": "commit", "value": "white"})]);
+    let out = replay_forms(&script).expect("replay");
+    let why = refusal(&out).expect("refused");
+    assert!(why.contains("rotate_options") && why.contains("artboard_options"), "{why}");
+}
+
+#[test]
+fn a_dialog_step_with_no_dialog_open_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = serde_json::json!({"item": "forms.dialog", "setup_svg": "paragraph_justified.svg", "tool": "selection",
+        "steps": [{"dialog": "artboard_options", "widget": "ao_ok", "event": "click"}, {"read": "document"}]});
+    let out = replay_forms(&script).expect("replay");
+    let why = refusal(&out).expect("refused");
+    assert!(why.contains("no dialog is open"), "{why}");
+}
+
+#[test]
+fn a_dialog_step_naming_a_widget_the_dialog_lacks_is_refused_by_name() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = artboard_options_script(vec![serde_json::json!(
+        {"dialog": "artboard_options", "widget": "no_such_widget", "event": "click"})]);
+    let out = replay_forms(&script).expect("replay");
+    let why = refusal(&out).expect("refused");
+    assert!(why.contains("no_such_widget"), "{why}");
+}
+
+/// The A4 preset's size, from its own option label `A4 (W × H)` in the spec.
+fn a4_from_the_spec() -> (f64, f64) {
+    let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+    let spec = ws.dialog("artboard_options").expect("artboard_options");
+    let node = find_widget(&spec["content"], "ao_preset").expect("ao_preset");
+    let label = node["options"].as_array().unwrap().iter().find(|o| o["value"] == "a4").expect("an a4 option")["label"]
+        .as_str().unwrap().to_string();
+    let inner = &label[label.find('(').unwrap() + 1..label.find(')').unwrap()];
+    let mut it = inner.split('×').map(|x| x.trim().parse::<f64>().expect("a number"));
+    (it.next().unwrap(), it.next().unwrap())
+}
+
+/// Every PROPOSED script replays with no refusal, opens the dialog its steps
+/// name and ends with none open. The size preset's script ends with the
+/// artboard at its option label's size, and the fill's at the bind's white.
+#[test]
+fn every_proposed_dialog_script_replays_to_its_outcome() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    // The population, pinned in the corpus manifest's path form and checked
+    // against the directory, so a script added there reds this arm.
+    const PROPOSED: [&str; 2] = [
+        "input_scripts_proposed/artboard_options.fill_white.json",
+        "input_scripts_proposed/artboard_options.preset_a4.json",
+    ];
+    let dir = format!("{}/../test_fixtures/input_scripts_proposed", env!("CARGO_MANIFEST_DIR"));
+    let mut on_disk: Vec<String> = std::fs::read_dir(&dir).expect("the proposed directory").filter_map(|d| {
+        let n = d.ok()?.file_name().into_string().ok()?;
+        n.ends_with(".json").then(|| format!("input_scripts_proposed/{n}"))
+    }).collect();
+    on_disk.sort();
+    assert_eq!(on_disk, PROPOSED, "the population moved");
+    for n in PROPOSED {
+        let script: Value = serde_json::from_str(&read(n)).unwrap();
+        let out = replay_forms(&script).expect("replay");
+        assert_eq!(refusal(&out), None, "{n}: {out:?}");
+        assert_eq!(dialog_reads(&out), vec![Value::String("artboard_options".into()), Value::Null], "{n}: {out:?}");
+        let doc = &out.iter().rev().find(|r| r["read"] == "document").expect("a document read")["value"];
+        let ab = doc["artboards"].as_array().unwrap().iter().find(|ab| ab["id"] == "zs8ap4x3").expect("zs8ap4x3");
+        if n.contains("fill_white") {
+            assert_eq!(ab["fill"], white_from_the_spec(), "{n}: {ab}");
+        } else {
+            let (w, h) = a4_from_the_spec();
+            assert_eq!((ab["width"].as_f64(), ab["height"].as_f64()), (Some(w), Some(h)), "{n}: {ab}");
+        }
+    }
 }

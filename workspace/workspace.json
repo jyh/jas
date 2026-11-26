@@ -29295,11 +29295,13 @@
                 }
               },
               {
+                "id": "ao_cancel",
                 "type": "button",
                 "label": "Cancel",
                 "action": "dismiss_dialog"
               },
               {
+                "id": "ao_ok",
                 "type": "button",
                 "label": "OK",
                 "action": "artboard_options_confirm",

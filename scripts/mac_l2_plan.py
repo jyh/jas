@@ -246,6 +246,12 @@ def plan(script, menubar, spec=None, state_keys=None):
     steps = script.get("steps") or []
     if not any(isinstance(s, dict) and "read" in s for s in steps):
         raise Refused(f"{item}: a script without a read step asserts nothing")
+    # Row 279: this driver seeds nothing, so a seeded `app_state` is refused by
+    # name. Dropped, the script would run from a state it did not ask for and
+    # its read would be compared as if it had.
+    if script.get("app_state"):
+        raise Refused(f"{item}: app_state {json.dumps(script['app_state'], sort_keys=True)} is not seeded by this "
+                      f"driver; a script that needs it cannot run here")
     menus, panels = menu_paths(menubar), panel_menu_paths(menubar)
     # The open act asks for a reset workspace: the app persists its dock layout,
     # so a fresh process alone starts where the last script left it (row 254).
@@ -1109,6 +1115,13 @@ def self_test():
     check("plan opens, picks the tool, then the steps in order",
           [a[0] for a in acts] == ["open", "tool", "pointer", "pointer", "panel", "menu", "read"])
     check("a panel act carries its dock tab's id", acts[4][2] == "stroke_panel_content_tab")
+    # Row 279: a seeded `app_state` this driver cannot seed is refused, never
+    # dropped; an empty one (every shipped script's) plans as before.
+    seeded = {"panels": {"artboards_panel_content": {"artboards_panel_selection": ["a"]}}}
+    check("a seeded app_state is refused by name, not dropped",
+          refused(lambda: plan(dict(base, app_state=seeded, steps=[read]), mb), "app_state"))
+    check("an empty app_state plans as none",
+          plan(dict(base, app_state={}, steps=[read]), mb) == plan(dict(base, steps=[read]), mb))
 
     # ── sheet 2's dock drops (rows 129/132/133; row 255): the expectation is
     # DERIVED from each case's own before-read, so a non-default start still
