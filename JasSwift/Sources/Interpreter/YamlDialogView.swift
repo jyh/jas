@@ -223,6 +223,13 @@ private func valueToAnyDlg(_ v: Value) -> Any? {
 /// into a "Artboards: N" label. Default: an empty closure, matching
 /// the back-compat path for dialogs (like color_picker) that read only
 /// ``dialog.*`` / ``state.*``.
+/// The AX identifier of an open dialog's body: `<dialog id>_dialog`. A
+/// level-2 driver (scripts/mac_l2_plan.py, DIALOG_SUFFIX) finds a dialog
+/// step's widget inside it (docs/TESTING.md section 6, the dialog step).
+func dialogAccessibilityId(_ dialogId: String) -> String {
+    dialogId + "_dialog"
+}
+
 struct YamlDialogOverlay: View {
     @Binding var dialogState: YamlDialogState?
     let theme: Theme
@@ -445,6 +452,11 @@ struct YamlDialogOverlay: View {
             )
                 .foregroundColor(SwiftUI.Color(nsColor: theme.text))
                 .padding(4)
+                // Row 275 (c): the dialog's body is one AX element CONTAINING
+                // its widgets, named `<dialog id>_dialog`, so a level-2 driver
+                // addresses a dialog step's widget inside the open dialog.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(dialogAccessibilityId(ds.id))
         }
     }
 

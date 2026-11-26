@@ -270,7 +270,11 @@ marked PROPOSED and never gates.
     so the two Swift runners cannot drift).
   * **Delivered by the Windows driver (2026-11-26, row 275 C2):** `prove_e2e.ps1` sends it through the hand after
     checking the open dialog's id, and reads `{"read": "dialog"}` and `expected_dialog` (both forms), measured live on
-    the Windows box against the `fill_white` golden. The Mac driver and the web hook still refuse it by name.
+    the Windows box against the `fill_white` golden. The web hook still refuses it by name.
+  * **The Mac driver delivers it (row 275, built and not yet measured on a live app):** it reads the open dialog by
+    the FIFO's `dialog` first and refuses a step naming another dialog, or none open, by name. It then drives the
+    widget inside the dialog's body (AX identifier `<dialog id>_dialog`) by the panel step's own widget code: a
+    click presses it, and a commit picks a select's option by its label or types the text.
   * **A panel-menu step runs the command the live menu dispatches** (Swift: the menu builder's own command, the bare
     action for an item that is not a radio member). Building it any other way drove a route no person takes, and hid
     row 280: the Mac's Artboards menu dropped its items' declared `params`, so "Artboard Options..." and "Rename" ran
@@ -443,9 +447,13 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
      item titled with the option's label, which the planner reads from the panel spec.
    * A menu step presses the menubar item at its title path, derived from the spec's labels. The Mac draws a
      checkable item's state into its title (`✓ Stroke`), so titles are compared without it.
-   * Refused by name: a non-empty `app_state` (this driver seeds nothing, row 279), `meta`, a pointer or key step after a panel or menu step, a read other than `document`, a menu
-     id or panel with no unique path, a widget that is not found, found twice or disabled, and an odd or fractional
-     unit.
+   * A non-empty `app_state` is seeded right after the open, by the app's test-FIFO `seed <json>` verb (row 275 (b)),
+     which runs the level-1 Swift runner's own parse and apply (`ScriptPanelSeeds`). The driver waits for the app's
+     receipt line and refuses the script on a refusal or on no receipt. Built and not yet measured on a live app.
+   * Refused by name: an `app_state` that is not the ruled form, or that names a key the panel's `state:` does not
+     declare (row 279: never dropped), `meta`, a pointer or key step after a panel or menu step, a read other than
+     `document`, `state` or `dialog`, a menu id or panel with no unique path, a widget that is not found, found twice
+     or disabled, and an odd or fractional unit.
    * The driver also refuses to run while the console has seen input in the last 120 s, and refuses a pointer or key
      act unless Jas is frontmost. Real events land wherever the pointer is.
    * Modifiers are released before and after every script. A flag-carrying event leaks its modifier into later
