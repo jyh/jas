@@ -1720,6 +1720,32 @@ static class Program
         Eq("mcp observe: every drain observes while attached, a load, an open and a panel menu run included",
             "True|True|True|True|True",
             string.Join("|", new[] { "LoadCmd", "OpenCmd", "PanelMenuCmd", "ResizeCmd", "KeyCmd" }.Select(k => McpWire.ObserveAfter(k).ToString())));
+        // SB_PROBE re-read (jas 1006 A, flask 1005): the drain in Canvas.cs's
+        // ApplyBatch re-reads the probe after every command kind that a step or
+        // a person's act can move the document with. A dialog event (OK), a
+        // dismiss (a preview restored) and a panel-menu run did not, so a probe
+        // read after a dialog's OK described the moment BEFORE it. Census over
+        // the real source: every case kind is in the table, and a case arms the
+        // probe exactly when the table says it does.
+        var cvDir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (cvDir is not null && !File.Exists(Path.Combine(cvDir.FullName, "prototypes", "sb_winui", "Canvas.cs"))) { cvDir = cvDir.Parent; }
+        var cvSrc = cvDir is null ? "" : File.ReadAllText(Path.Combine(cvDir.FullName, "prototypes", "sb_winui", "Canvas.cs"));
+        var cvStart = cvSrc.IndexOf("private bool ApplyBatch(", StringComparison.Ordinal);
+        var cvEnd = cvStart < 0 ? -1 : cvSrc.IndexOf("if (_mcpAttached && editing)", cvStart, StringComparison.Ordinal);
+        var cvBody = cvStart < 0 || cvEnd < 0 ? "" : cvSrc[cvStart..cvEnd];
+        var cvCases = System.Text.RegularExpressions.Regex.Matches(cvBody, @"^\s*case (\w+Cmd) \w+:", System.Text.RegularExpressions.RegexOptions.Multiline);
+        var cvArms = new Dictionary<string, bool>(StringComparer.Ordinal);
+        for (var ci = 0; ci < cvCases.Count; ci++)
+        {
+            var from = cvCases[ci].Index;
+            var to = ci + 1 < cvCases.Count ? cvCases[ci + 1].Index : cvBody.Length;
+            cvArms[cvCases[ci].Groups[1].Value] = cvBody[from..to].Contains("_probePending = true", StringComparison.Ordinal);
+        }
+        Check("probe census: ApplyBatch's cases were read from Canvas.cs", cvArms.Count >= 30, $"read {cvArms.Count} case(s)");
+        var probeKinds = new[] { "PointerCmd", "KeyCmd", "PanelClickCmd", "MenuActionCmd", "DialogEventCmd", "DialogDismissCmd", "PanelMenuCmd", "PanelValueSynthCmd" };
+        Eq("probe census: the kinds that arm SB_PROBE in the drain are exactly the ones that can move the document by an act",
+            string.Join("|", probeKinds.OrderBy(k => k, StringComparer.Ordinal)),
+            string.Join("|", cvArms.Where(kv => kv.Value).Select(kv => kv.Key).OrderBy(k => k, StringComparer.Ordinal)));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
             "Proposed: nudge|(no bar)",
