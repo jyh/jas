@@ -117,6 +117,9 @@ jobs:
       # Every action, dialog-action and gesture case pins expected_can_undo
       # (rows 227-247): an omitted pin reads as green, so the next case cannot omit it.
       - run: python scripts/check_can_undo_coverage.py --self-test && python scripts/check_can_undo_coverage.py
+      # A computed-bind widget with a behavior must not sit on a web renderer that
+      # drops it (rows 268, 270, 273); the dropping kinds derive from renderer.rs.
+      - run: python scripts/check_computed_bind_behaviors.py --self-test && python scripts/check_computed_bind_behaviors.py
       # The Mac level-2 driver's pure half: plans every shipped input script
       # against the real menubar, with no window (docs/TESTING.md section 6).
       - run: python scripts/mac_l2_plan.py --self-test
@@ -1048,6 +1051,8 @@ jobs:
           python scripts/check_corpus_manifest.py
           python scripts/check_can_undo_coverage.py --self-test
           python scripts/check_can_undo_coverage.py
+          python scripts/check_computed_bind_behaviors.py --self-test
+          python scripts/check_computed_bind_behaviors.py
           python scripts/mac_l2_plan.py --self-test
           python scripts/dialog_openers.py --self-test
           python scripts/web_l2_driver.py --self-test
