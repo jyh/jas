@@ -708,6 +708,45 @@ def offscreen_refusal(what, x, y, displays, window=None):
     return None
 
 
+def frame_inside(frame, window, margin=8):
+    """True when the AX frame (x, y, w, h) can be pressed at its centre inside
+    the window: vertically the WHOLE frame lies inside, `margin` points clear
+    of the top and bottom (a dock row half under the window's edge is not
+    pressable for certain); horizontally only the centre must, because every
+    dock menu button's frame was measured running 4 points past the window's
+    right edge (x 1492-1523 against 1519) while its centre press works. No
+    frame or no window is never inside."""
+    if frame is None or window is None:
+        return False
+    x, y, w, h = frame
+    wx, wy, ww, wh = window
+    return wx <= x + w / 2 < wx + ww and wy + margin <= y and y + h <= wy + wh - margin
+
+
+POPUP_MENU_LAYER = 101  # kCGPopUpMenuWindowLevel, as CGWindowList reports an open NSMenu
+
+
+def popup_menu_window(windows, pid):
+    """The bounds (x, y, w, h) of the one popped menu window the app `pid`
+    has on screen, and None; or None and a refusal by name. `windows` are
+    {"pid", "layer", "bounds"} rows from CGWindowList. A panel menu popped by
+    NSMenu.popUpContextMenu is not among the app element's AX children
+    (measured 11-26), so the driver finds it as this window and hit-tests it."""
+    hits = [w["bounds"] for w in windows if w.get("pid") == pid and w.get("layer") == POPUP_MENU_LAYER]
+    if len(hits) == 1:
+        return tuple(hits[0]), None
+    if not hits:
+        return None, f"no popped menu window (layer {POPUP_MENU_LAYER}) for the app is on screen"
+    return None, f"{len(hits)} popped menu windows for the app are on screen; this driver will not guess which one"
+
+
+def popup_hit_point(bounds):
+    """The point a hit test into a popped menu window takes: its centre (the
+    window's bounds include the shadow, so an edge point can miss the menu)."""
+    x, y, w, h = bounds
+    return (x + w / 2.0, y + h / 2.0)
+
+
 _AB_ID = re.compile(r"^[0-9a-z]{8}$")
 
 
@@ -1656,6 +1695,34 @@ def self_test():
     check("the window's top-left corner is inside", offscreen_refusal("p", 319, 105, one, window=win) is None)
     check("a point off every display names the display, even with a window",
           "off every display" in (offscreen_refusal("p", 1508, 1210, one, window=win) or ""))
+    # Reaching it: the dock is scrolled by real wheel events until the frame
+    # sits wholly inside the window, `margin` clear of its top and bottom.
+    check("the measured button frame is not inside the window", frame_inside((1492, 1202, 31, 16), win) is False)
+    check("a frame well inside the window is inside", frame_inside((1492, 889, 31, 16), win) is True)
+    check("a frame touching the bottom margin is not inside", frame_inside((1492, 1005 - 8 - 15, 31, 16), win) is False)
+    check("a frame one point clear of the bottom margin is inside", frame_inside((1492, 1005 - 8 - 16, 31, 16), win) is True)
+    check("a frame above the top margin is not inside", frame_inside((1492, 105 + 7, 31, 16), win) is False)
+    check("a frame at the top margin is inside", frame_inside((1492, 105 + 8, 31, 16), win) is True)
+    check("a frame whose centre is past the window's right edge is not inside", frame_inside((1510, 500, 31, 16), win) is False)
+    check("a measured dock button overhanging the right edge by 4 is inside", frame_inside((1492, 500, 31, 16), win) is True)
+    check("a frame whose centre is left of the window is not inside", frame_inside((290, 500, 31, 16), win) is False)
+    check("no frame is never inside", frame_inside(None, win) is False and frame_inside((1, 1, 1, 1), None) is False)
+    # The popped panel menu (NSMenu.popUpContextMenu) is NOT among the app
+    # element's AX children (measured: window + menubar only, with the menu
+    # on screen); it is a layer-101 window of the app's own pid, and hit-
+    # testing its centre reaches the AXMenu. The window is picked here.
+    cg = [{"pid": 7, "layer": 0, "bounds": (319, 105, 1200, 900)},
+          {"pid": 7, "layer": 101, "bounds": (1433, 799, 272, 350)},
+          {"pid": 9, "layer": 101, "bounds": (10, 10, 200, 200)}]
+    got, why = popup_menu_window(cg, 7)
+    check("the app's own layer-101 window is the popped menu", got == (1433, 799, 272, 350) and why is None)
+    got, why = popup_menu_window(cg, 8)
+    check("no popped menu for the pid is a refusal by name", got is None and "no popped menu" in why)
+    got, why = popup_menu_window(cg + [{"pid": 7, "layer": 101, "bounds": (0, 0, 50, 50)}], 7)
+    check("two popped menus for the pid is a refusal by name, never a guess", got is None and "2 popped menu" in why)
+    got, why = popup_menu_window([{"pid": 7, "layer": 0, "bounds": (319, 105, 1200, 900)}], 7)
+    check("the app's ordinary window is never taken for its menu", got is None)
+    check("the menu window's centre is the hit-test point", popup_hit_point((1433, 799, 272, 350)) == (1569.0, 974.0))
 
     ab = lambda i, n: '{"fill":"transparent","id":"%s","name":"%s","x":0.0}' % (i, n)
     rest = '"layers":[],"selection":[]}'

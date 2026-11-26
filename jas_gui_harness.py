@@ -352,6 +352,33 @@ def _press(el):
     if _ax().AXUIElementPerformAction(el, "AXPress") != 0:
         raise _plan.Refused(f"AXPress failed on {_attr(el, 'AXRole')} {_attr(el, 'AXIdentifier')!r}")
 
+def _popped_menu_items(app, label):
+    """The items titled `label` in the menu the app has popped, found by its
+    window (CGWindowList, the app's pid, the popped-menu layer) and a hit test
+    at that window's centre walked up to its AXMenu. Returns (items, None) or
+    ([], refusal)."""
+    AX = _ax()
+    err, pid = AX.AXUIElementGetPid(app, None)
+    if err != 0:
+        return [], "the app element reports no pid"
+    wl = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+    rows = [{"pid": w.get(Quartz.kCGWindowOwnerPID), "layer": w.get(Quartz.kCGWindowLayer),
+             "bounds": (w["kCGWindowBounds"]["X"], w["kCGWindowBounds"]["Y"],
+                        w["kCGWindowBounds"]["Width"], w["kCGWindowBounds"]["Height"])} for w in wl]
+    bounds, why = _plan.popup_menu_window(rows, pid)
+    if why:
+        return [], why
+    hx, hy = _plan.popup_hit_point(bounds)
+    err, el = AX.AXUIElementCopyElementAtPosition(AX.AXUIElementCreateSystemWide(), hx, hy, None)
+    for _ in range(6):
+        if el is None or _attr(el, "AXRole") == "AXMenu":
+            break
+        el = _attr(el, "AXParent")
+    if el is None or _attr(el, "AXRole") != "AXMenu":
+        return [], f"a hit test at the popped menu window's centre ({hx:.0f}, {hy:.0f}) reaches no AXMenu"
+    return [m for m in _find_all(el, lambda e: _attr(e, "AXRole") == "AXMenuItem")
+            if _plan.live_title(_attr(m, "AXTitle")) == label], None
+
 def _menu_item(app, path):
     bar = _attr(app, "AXMenuBar")
     level = [c for c in _children(bar)] if bar else []
@@ -634,6 +661,29 @@ def _run_script(path, menubar, locked=False, pid=None):
                 buttons = _by_id(app, menu_id)
             if len(buttons) != 1:
                 raise _plan.Refused(f"{len(buttons)} menu buttons carry AXIdentifier {menu_id!r}")
+            # A dock panel below the fold reports an AX frame outside the
+            # window (measured: y 1202 against a window ending at 1005), and
+            # AXScrollToVisible returns success without moving it. Scroll the
+            # dock with real wheel events over the button's own column, as a
+            # person would, until the whole button is inside the window.
+            win = _window_rect()
+
+            def _btn_frame():
+                b = _by_id(app, menu_id)
+                try:
+                    return _frame(b[0]) if len(b) == 1 else None
+                except _plan.Refused:
+                    return None
+            f0 = _btn_frame()
+            if win is not None and f0 is not None and not _plan.frame_inside(f0, win) and f0[1] > win[1]:
+                wx_, wy_, ww_, wh_ = win
+                cx = min(max(f0[0] + f0[2] / 2, wx_ + 1), wx_ + ww_ - 2)
+                _wheel_until(cx, wy_ + wh_ * 0.75,
+                             lambda: (lambda f: None if f is None else f[1])(_btn_frame()),
+                             lambda _y: _plan.frame_inside(_btn_frame(), win))
+                buttons = _by_id(app, menu_id)
+                if len(buttons) != 1:
+                    raise _plan.Refused(f"{len(buttons)} menu buttons carry AXIdentifier {menu_id!r} after scrolling the dock")
             import ApplicationServices as AX
             pos, size = _attr(buttons[0], "AXPosition"), _attr(buttons[0], "AXSize")
             if pos is None or size is None:
@@ -652,6 +702,15 @@ def _run_script(path, menubar, locked=False, pid=None):
             items = [m for root in _children(app) if _attr(root, "AXRole") != "AXMenuBar"
                      for m in _find_all(root, lambda e: _attr(e, "AXRole") == "AXMenuItem")
                      if _plan.live_title(_attr(m, "AXTitle")) == label]
+            if not items:
+                # The dock's menu is NSMenu.popUpContextMenu, which is NOT among
+                # the app element's children (measured 11-26: window + menubar
+                # only, with the menu on screen). Find it as the app's own
+                # popped-menu window and hit-test its centre up to the AXMenu.
+                items, why = _popped_menu_items(app, label)
+                if why:
+                    do_key("escape", [])
+                    raise _plan.Refused(f"panel menu {menu_id!r}: {why}")
             if len(items) != 1:
                 do_key("escape", [])
                 raise _plan.Refused(f"panel menu {menu_id!r}: {len(items)} items titled {label!r} "
@@ -1217,6 +1276,28 @@ def _row_right_click(f):
         time.sleep(0.05)
     time.sleep(0.8)
 
+def _wheel_until(sx, sy, measure, done, tries=14):
+    """Real scroll-wheel events at (sx, sy), a person's way to bring content
+    into view, until `done(measure())`. `measure` is a screen y that must
+    DECREASE (content moving up); the wheel's direction is flipped once a
+    step is measured not to decrease it. Returns the last measurement (None
+    when it could not be read); the caller refuses on it by name."""
+    v, step = measure(), -5
+    for _ in range(tries):
+        if v is not None and done(v):
+            break
+        _person_gate()
+        _hover(sx, sy)
+        _LAST_MINE[0] = time.time()
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap,
+                           Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, step))
+        time.sleep(0.5)
+        nv = measure()
+        if nv is not None and v is not None and nv >= v:
+            step = -step  # the wheel moved the wrong way (or not at all): flip once measured
+        v = nv
+    return v
+
 def _layers_open():
     """Reset the workspace, open the fixture, show the Layers tab and scroll
     the dock until the layer rows sit inside the window (AX reports frames for
@@ -1246,20 +1327,7 @@ def _layers_open():
     def bottom():
         ys = [f[1] + f[3] for t, f in _layers_rows(app) if any(n in t for n in names) or t.startswith("<")]
         return max(ys) if ys else None
-    b, step = bottom(), -5
-    for _ in range(14):
-        if b is not None and b < limit:
-            break
-        _person_gate()
-        _hover(sx, sy)
-        _LAST_MINE[0] = time.time()
-        Quartz.CGEventPost(Quartz.kCGHIDEventTap,
-                           Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, step))
-        time.sleep(0.5)
-        nb = bottom()
-        if nb is not None and b is not None and nb >= b:
-            step = -step  # the wheel moved the wrong way (or not at all): flip once measured
-        b = nb
+    b = _wheel_until(sx, sy, bottom, lambda v: v < limit)
     if b is None or b >= limit:
         raise _plan.Refused(f"the Layers rows stay below the window ({b} >= {limit}) after scrolling")
     return app, before
