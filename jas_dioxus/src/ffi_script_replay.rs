@@ -2164,7 +2164,7 @@ fn every_proposed_dialog_script_replays_to_its_outcome() {
     let dir = format!("{}/../test_fixtures/input_scripts_proposed", env!("CARGO_MANIFEST_DIR"));
     let mut on_disk: Vec<String> = std::fs::read_dir(&dir).expect("the proposed directory").filter_map(|d| {
         let n = d.ok()?.file_name().into_string().ok()?;
-        n.ends_with(".json").then(|| format!("input_scripts_proposed/{n}"))
+        (n.ends_with(".json") && !n.ends_with(".expected.json")).then(|| format!("input_scripts_proposed/{n}"))
     }).collect();
     on_disk.sort();
     assert_eq!(on_disk, PROPOSED, "the population moved");
@@ -2173,7 +2173,14 @@ fn every_proposed_dialog_script_replays_to_its_outcome() {
         let out = replay_forms(&script).expect("replay");
         assert_eq!(refusal(&out), None, "{n}: {out:?}");
         assert_eq!(dialog_reads(&out), vec![Value::String("artboard_options".into()), Value::Null], "{n}: {out:?}");
+        // The script carries its own expectations (docs/TESTING.md section 6),
+        // so a driver with no test of its own can compare: one expected_dialog
+        // entry per dialog read, in order, and the document read's golden.
+        assert_eq!(script["expected_dialog"], Value::Array(dialog_reads(&out)), "{n}: expected_dialog");
+        let golden = script["expected_json"].as_str().unwrap_or_else(|| panic!("{n}: no expected_json"));
+        let want: Value = serde_json::from_str(&read(&format!("input_scripts_proposed/{golden}"))).unwrap();
         let doc = &out.iter().rev().find(|r| r["read"] == "document").expect("a document read")["value"];
+        assert_eq!(doc, &want, "{n}: the document read is not {golden}:\n{doc}");
         let ab = doc["artboards"].as_array().unwrap().iter().find(|ab| ab["id"] == "zs8ap4x3").expect("zs8ap4x3");
         if n.contains("fill_white") {
             assert_eq!(ab["fill"], white_from_the_spec(), "{n}: {ab}");

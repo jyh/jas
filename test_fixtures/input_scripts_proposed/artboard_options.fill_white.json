@@ -38,5 +38,10 @@
     {
       "read": "document"
     }
-  ]
+  ],
+  "expected_dialog": [
+    "artboard_options",
+    null
+  ],
+  "expected_json": "artboard_options.fill_white.expected.json"
 }

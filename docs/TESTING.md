@@ -231,7 +231,10 @@ marked PROPOSED and never gates.
   initialised, a key it does not hold and a malformed name are each refused by name); a script's `read: state` still
   names only `state.yaml` keys.
 * **`{"read": "dialog"}`** reads the id of the open dialog, or `null` when none is open (a slot's alternates flyout is
-  the dialog its timer opens, `arrow_alternates`), against the script's `expected_dialog` (an id or `null`). The Mac
+  the dialog its timer opens, `arrow_alternates`), against the script's `expected_dialog` (an id or `null`). A script
+  that reads the dialog more than once carries `expected_dialog` as a list, one entry per dialog read in step order
+  (`["artboard_options", null]` for a read after the route opens it and a read after OK). A scalar with more than one
+  read, or a list of the wrong length, is refused by name; one value is never compared against every read. The Mac
   reads it through the same FIFO: `dialog <path>` writes `{"dialog": <id or null>}`.
 * **The press-and-hold pair these three forms exist for** (row 50): from tool `selection`, a hold on
   `btn_arrow_slot` must read `{"active_tool": "selection"}` and dialog `arrow_alternates`, and the same press with no
@@ -270,7 +273,10 @@ marked PROPOSED and never gates.
     with no `artboard_id`.
   * **Until a runner or driver delivers it, it refuses the step by name**, and a script that uses it is PROPOSED
     (`test_fixtures/input_scripts_proposed/`, which no gating runner reads) and never gates. It moves into
-    `input_scripts/` when every runner and driver that gates delivers it.
+    `input_scripts/` when every runner and driver that gates delivers it. A proposed script still carries its own
+    expectations, as a shipped one does: its `expected_dialog` list and an `expected_json` golden beside it
+    (`<item>.expected.json`, the core's document bytes). Rust's replay compares the read structurally and Swift's byte
+    for byte, so a driver that has no test of its own compares against the script and never against a runner's code.
 * **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
   "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
   hovering there that long.
