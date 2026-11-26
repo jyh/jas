@@ -590,7 +590,7 @@ def _run_script(path, menubar, locked=False, pid=None):
         elif k == "panel":
             if app is None:
                 app = _locked_app(pid_of_app)
-            _, pid, tab, wpath, widget, event, value, label, wtype = act
+            _, pid, tab, wpath, widget, event, value, label, wtype, scope = act
             panels = _by_id(app, pid)
             if not panels:
                 # Show it as a person does: its dock tab, or, for a panel in no
@@ -608,7 +608,18 @@ def _run_script(path, menubar, locked=False, pid=None):
                 panels = _by_id(app, pid)
             if len(panels) != 1:
                 raise _plan.Refused(f"{len(panels)} panels carry AXIdentifier {pid!r}")
-            _drive_widget(app, panels[0], pid, widget, event, value, label, wtype)
+            # Row 281: `at` scopes the widget to one foreach iteration, drawn
+            # by Swift as its own AX container `<foreach id>#<k>`. Each level
+            # must be exactly one container; none means the iteration is not
+            # drawn (past the rows), and the step is refused by name.
+            where, root = pid, panels[0]
+            for name in scope:
+                hits = _by_id(root, name)
+                if len(hits) != 1:
+                    raise _plan.Refused(f"{len(hits)} iteration containers carry AXIdentifier {name!r} in {where!r}"
+                                        + ("; that iteration is not drawn" if not hits else ""))
+                where, root = name, hits[0]
+            _drive_widget(app, root, where, widget, event, value, label, wtype)
             time.sleep(0.3)
         elif k == "menu":
             _press(_menu_item(app, act[1])); time.sleep(0.4)
