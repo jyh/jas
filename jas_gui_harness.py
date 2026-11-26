@@ -449,7 +449,7 @@ def _run_script(path, menubar, locked=False, pid=None):
                 raise _plan.Refused(f"the canvas reports view {view} after `view 1 0 0`")
         elif k == "tool":
             _fifo("tool " + act[1]); time.sleep(0.3)
-        elif k in ("pointer", "key", "toolbar") and not _front_is_jas():
+        elif k in ("pointer", "key", "toolbar", "panel_menu") and not _front_is_jas():
             raise _plan.Refused("Jas is not the frontmost app; a real event would land elsewhere")
         elif k == "pointer":
             _, kind, x, y, dragging, mods = act
@@ -542,6 +542,53 @@ def _run_script(path, menubar, locked=False, pid=None):
             time.sleep(0.3)
         elif k == "menu":
             _press(_menu_item(app, act[1])); time.sleep(0.4)
+        elif k == "panel_menu":
+            # Row 275 (a): the person's route. Show the panel (its dock tab, or
+            # its Window item), press its group's hamburger, `<pid>_menu`, by a
+            # REAL click at its AX frame (it pops an NSMenu from the current
+            # event, so an AXPress opens nothing), then press the one item
+            # titled as the YAML labels it. A disabled item is refused by name.
+            if app is None:
+                app = _locked_app(pid_of_app)
+            _, pid, tab, wpath, menu_id, label = act
+            buttons = _by_id(app, menu_id)
+            if not buttons:
+                tabs = _by_id(app, tab)
+                if len(tabs) > 1:
+                    raise _plan.Refused(f"{len(tabs)} dock tabs carry AXIdentifier {tab!r}")
+                if tabs:
+                    _press(tabs[0])
+                elif wpath:
+                    _press(_menu_item(app, wpath))
+                else:
+                    raise _plan.Refused(f"panel {pid!r} has no dock tab and no unique Window item")
+                time.sleep(0.6)
+                buttons = _by_id(app, menu_id)
+            if len(buttons) != 1:
+                raise _plan.Refused(f"{len(buttons)} menu buttons carry AXIdentifier {menu_id!r}")
+            import ApplicationServices as AX
+            pos, size = _attr(buttons[0], "AXPosition"), _attr(buttons[0], "AXSize")
+            if pos is None or size is None:
+                raise _plan.Refused(f"menu button {menu_id!r} reports no AX frame")
+            _, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+            _, z = AX.AXValueGetValue(size, AX.kAXValueCGSizeType, None)
+            sx, sy = p.x + z.width / 2, p.y + z.height / 2
+            mouse(Quartz.kCGEventMouseMoved, sx, sy); mouse(Quartz.kCGEventLeftMouseDown, sx, sy)
+            time.sleep(0.05); mouse(Quartz.kCGEventLeftMouseUp, sx, sy)
+            time.sleep(0.5)
+            # The popped menu, never the menubar: its items are in the AX tree
+            # even while closed, and a panel item can share a menubar title.
+            items = [m for root in _children(app) if _attr(root, "AXRole") != "AXMenuBar"
+                     for m in _find_all(root, lambda e: _attr(e, "AXRole") == "AXMenuItem")
+                     if _plan.live_title(_attr(m, "AXTitle")) == label]
+            if len(items) != 1:
+                do_key("escape", [])
+                raise _plan.Refused(f"panel menu {menu_id!r}: {len(items)} items titled {label!r} "
+                                    f"outside the menubar")
+            if _attr(items[0], "AXEnabled") is False:
+                do_key("escape", [])
+                raise _plan.Refused(f"panel menu {menu_id!r}: {label!r} is disabled")
+            _press(items[0]); time.sleep(0.5)
         elif k == "toolbar":
             # A real press at the slot's AX frame, held hold_ms, then released:
             # an AXPress has no duration, so it cannot drive a hold (TESTING.md,

@@ -104,3 +104,18 @@ private func writesPanelState(_ o: Any) -> Bool {
     #expect(silent.isEmpty, "rows whose write publishes nothing (\(population.count) driven): \(silent)")
     print("row 218 census: \(population.count) driven; no change in this fixture, so unwitnessed: \(unwitnessed)")
 }
+
+// Row 275, the Mac slice (a): a panel group's hamburger carries the identifier
+// `<active panel content id>_menu`, so a level-2 driver presses the menu of the
+// panel it names (scripts/mac_l2_plan.py's MENU_SUFFIX). Every kind gets a
+// distinct id, and none collides with that kind's `_tab`.
+@Test func panelMenuButtonIdNamesTheActivePanelsContentId() {
+    #expect(panelMenuButtonId(.artboards) == "artboards_panel_content_menu")
+    let kinds = PanelKind.all
+    let ids = kinds.map { panelMenuButtonId($0) }
+    #expect(Set(ids).count == kinds.count, "\(ids)")
+    for k in kinds {
+        #expect(panelMenuButtonId(k) == panelKindToContentId(k) + "_menu")
+        #expect(panelMenuButtonId(k) != panelKindToContentId(k) + "_tab")
+    }
+}

@@ -568,6 +568,7 @@ public struct PanelGroupView: View {
         let capturedKind = activeKind
         let capturedLabelModel = model
         return HamburgerMenuButton(
+            axId: panelMenuButtonId(activeKind),
             items: items,
             color: theme.text,
             // A label's `{{expr}}` regions (Layers' Hide/Show All Layers)
@@ -604,6 +605,9 @@ public struct PanelGroupView: View {
 /// own `Menu` primitive overrode both. The NSMenu is rebuilt on each
 /// click so toggle/radio checkmarks reflect the current layout state.
 private struct HamburgerMenuButton: View {
+    /// `<active panel content id>_menu` (panelMenuButtonId): the id a level-2
+    /// driver presses this menu by, as a tab is pressed by `<id>_tab`.
+    let axId: String
     let items: [PanelMenuItem]
     let color: NSColor
     /// Resolve an item's display label from its (command, YAML label).
@@ -627,6 +631,7 @@ private struct HamburgerMenuButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(axId)
     }
 
     private func showMenu() {
