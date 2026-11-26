@@ -158,8 +158,23 @@ struct PanelWidgetEvents {
             Self.seedLayoutHeldPanelState(scope: scope, panelId: pid, store: store)
         }
         let dialogBefore = store.getDialogId()
-        let host = WidgetEvent.Host(scope: scope, writeBind: writeBind, dispatch: dispatch)
+        // Row 277: a behavior's `dialog.*` writes land in the store, and the
+        // dialog VIEW re-syncs only on `onDialogWrite`, which `writeBind` fires
+        // for the widget's own bound field alone. So the view, whose context
+        // OK's params resolve against, never heard a Size preset's width.
+        let dialogStateBefore = dialogBefore != nil ? store.getDialogState() : [:]
+        var heard = Set<String>()
+        let host = WidgetEvent.Host(scope: scope, writeBind: { scope, key, value, global in
+            if scope != "panel" { heard.insert(key) }
+            self.writeBind(scope: scope, key: key, value: value, global: global)
+        }, dispatch: dispatch)
         let result = event(host, panel, ws)
+        if let id = dialogBefore, store.getDialogId() == id, let onDialogWrite = onDialogWrite {
+            for (key, value) in store.getDialogState() where !heard.contains(key)
+                && !Self.sameValue(dialogStateBefore[key], value) {
+                onDialogWrite(key, value)
+            }
+        }
         if result.outcome == "committed" {
             // A behavior's store writes bypass commitPanelField's bump, and
             // a bound widget re-reads only when the version moves.
@@ -169,6 +184,15 @@ struct PanelWidgetEvents {
             onDialogClosed?()
         }
         return result
+    }
+
+    /// Value equality for store values (JSON-shaped `Any?`).
+    static func sameValue(_ a: Any?, _ b: Any?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case (nil, _), (_, nil): return false
+        case let (x?, y?): return NSDictionary(dictionary: ["v": x]).isEqual(to: ["v": y])
+        }
     }
 
     private func writeBind(scope: String, key: String, value: Any?, global: String?) {
