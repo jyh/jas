@@ -150,6 +150,18 @@ $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
 # ---- launch, holding, with the probe on ------------------------------------
 $env:SB_PROBE = 'sb-probe.json'
+# ROW E: a panel step's `row` is read from the plan the panel was drawn from,
+# so a script with one opens its panel by SB_PANEL (only that pane then writes
+# SB_PLAN_OUT) and hands the plan file to the hand. Scripts without a row
+# launch exactly as before.
+$rowSteps = @(ConvertFrom-SbPanelText $panelText | Where-Object { $null -ne $_.row }).Count
+$planFile = ''
+if ($rowSteps -gt 0) {
+    $env:SB_PANEL = "$(@(ConvertFrom-SbPanelText $panelText | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
+    $env:SB_PLAN_OUT = 'sb-e2e-plan.json'
+    $planFile = Join-Path $exeDir 'sb-e2e-plan.json'
+    Remove-Item $planFile -ErrorAction SilentlyContinue
+}
 # jas STATUS-flask 932: NO SAVED LIBRARY IS AN INPUT TO A CERTIFICATE. The shell
 # merges the libraries saved under its data root at launch (row 149), so this run
 # gets a fresh, empty root of its own, read back from the launch row below and
@@ -210,7 +222,8 @@ try {
     # ---- drive: a real SendInput drag, in session 1 -------------------------
     $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
                 " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Alt $altMode -Double $doubleMode -Keys `"$keyText`" -Panels `"$panelText`"" +
-                " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY")
+                " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY" +
+                $(if ($planFile) { " -PlanFile `"$planFile`"" } else { '' }))
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
         -Action (New-SbSession1Action $handArg) | Out-Null
