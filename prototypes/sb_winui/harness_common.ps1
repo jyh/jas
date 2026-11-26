@@ -3596,8 +3596,8 @@ function Read-SbInputScript([string]$Json) {
     # hid every form of the proposed scripts). `delivered` is what the code
     # below reads; `later` is what docs/TESTING.md section 6 defines and this
     # driver does not deliver yet.
-    $topDelivered = @('item', 'spec', 'setup_svg', 'tool', 'app_state', 'steps', 'expected_json', 'proposed')
-    $topLater = @('expected_dialog', 'expected_state_json')
+    $topDelivered = @('item', 'spec', 'setup_svg', 'tool', 'app_state', 'steps', 'expected_json', 'proposed', 'expected_dialog')
+    $topLater = @('expected_state_json')
     foreach ($k in @($s.PSObject.Properties | ForEach-Object { $_.Name })) {
         if ($topDelivered -ccontains $k) { continue }
         if ($topLater -ccontains $k) { return (& $no "top-level key '$k': this driver does not deliver it yet") }
@@ -3608,6 +3608,7 @@ function Read-SbInputScript([string]$Json) {
         key     = @{ delivered = @('key', 'ctrl', 'shift', 'alt', 'meta'); later = @() }
         panel   = @{ delivered = @('panel', 'widget', 'event', 'value'); later = @('row', 'at', 'shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
         menu    = @{ delivered = @('menu'); later = @() }
+        dialog  = @{ delivered = @('dialog', 'widget', 'event', 'value'); later = @() }
         read    = @{ delivered = @('read'); later = @('keys') }
     }
     $formSteps = @($s.steps)
@@ -3653,10 +3654,49 @@ function Read-SbInputScript([string]$Json) {
     $reads = New-Object System.Collections.Generic.List[string]
     $keys = New-Object System.Collections.Generic.List[string]
     $panels = New-Object System.Collections.Generic.List[object]
+    # ROW 275 C2: per dialog read, how many probing acts after the release come
+    # before it (keys, then late steps); prove_e2e adds the release's probe.
+    $dialogReads = New-Object System.Collections.Generic.List[int]
     for ($i = 0; $i -lt $steps.Count; $i++) {
         $st = $steps[$i]
         $names = @($st.PSObject.Properties | ForEach-Object { $_.Name })
-        if ($names -contains 'read') { $reads.Add("$($st.read)"); continue }
+        if ($names -contains 'read') {
+            if ("$($st.read)" -eq 'dialog') {
+                if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                    return (& $no "step $i read dialog comes before the gesture ends: a dialog read is the probe an act after the release writes")
+                }
+                $dialogReads.Add($keys.Count + $panels.Count)
+            }
+            $reads.Add("$($st.read)"); continue
+        }
+        # ROW 275 C2: A DIALOG STEP (docs/TESTING.md section 6), `dialog` +
+        # `widget` + `event` (+ `value` for a commit): a widget of the OPEN
+        # dialog, by its id. send_hand.ps1 delivers it in script order with the
+        # panel steps, after checking that the open dialog IS `dialog`.
+        if ($names -contains 'dialog') {
+            $dn = "$($st.dialog)"; $wn = "$($st.widget)"
+            if ($dn.Length -eq 0 -or $wn.Length -eq 0) { return (& $no "step $i dialog step names no dialog or no widget") }
+            $tag = "$dn/$wn"
+            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                return (& $no "step $i dialog $tag comes before the gesture ends: send_hand.ps1 delivers dialog steps only after the release")
+            }
+            $ev = "$($st.event)"
+            if (@('click', 'commit') -cnotcontains $ev) {
+                return (& $no "step $i dialog $tag event '$ev': this driver delivers click and commit")
+            }
+            $value = $null
+            if ($ev -eq 'commit') {
+                if ($names -notcontains 'value' -or $st.value -isnot [string]) {
+                    return (& $no "step $i dialog $tag commit carries no string value")
+                }
+                $value = $st.value
+            }
+            elseif ($names -contains 'value' -and $null -ne $st.value) {
+                return (& $no "step $i dialog $tag click carries a value: only a commit has one")
+            }
+            $panels.Add([ordered]@{ dialog = $dn; widget = $wn; event = $ev; value = $value })
+            continue
+        }
         # PANEL STEPS (jas section 373), `panel` + `widget` + `event` (+ `value`
         # for a commit). send_hand.ps1 delivers them LAST, through UI Automation,
         # after the gesture and the keys (docs/TESTING.md section 6's order), so
@@ -3806,7 +3846,39 @@ function Read-SbInputScript([string]$Json) {
     $shift = $held['shift']
     if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
     foreach ($r in $reads) {
-        if ($r -ne 'document') { return (& $no "read '$r': this driver compares only read=document") }
+        if (@('document', 'dialog') -cnotcontains $r) { return (& $no "read '$r': this driver compares only read=document and read=dialog") }
+    }
+    # ROW 275 C2 (jas 1009 (3)): `expected_dialog`, one value for one dialog
+    # read, or a list with one entry per read in step order; null is none open.
+    $expDialog = New-Object System.Collections.Generic.List[string]
+    $hasExpDialog = @($s.PSObject.Properties | ForEach-Object { $_.Name }) -ccontains 'expected_dialog'
+    if ($dialogReads.Count -eq 0) {
+        if ($hasExpDialog) { return (& $no 'expected_dialog is given and the script has no read=dialog step') }
+    }
+    else {
+        if (-not $hasExpDialog) { return (& $no "the script reads dialog $($dialogReads.Count) time(s) and names no expected_dialog") }
+        $ed = $s.expected_dialog
+        if ($ed -is [array]) {
+            $edList = $ed
+            if ($edList.Count -ne $dialogReads.Count) {
+                return (& $no "expected_dialog lists $($edList.Count) entr$(if ($edList.Count -eq 1) { 'y' } else { 'ies' }) and the script reads dialog $($dialogReads.Count) times")
+            }
+        }
+        else {
+            if ($dialogReads.Count -ne 1) {
+                return (& $no "expected_dialog is one value and the script reads dialog $($dialogReads.Count) times: name one entry per read, as a list")
+            }
+            $edList = New-Object object[] 1
+            $edList[0] = $ed
+        }
+        for ($e = 0; $e -lt $edList.Count; $e++) {
+            $entry = $edList[$e]
+            if ($null -eq $entry) { $expDialog.Add('none'); continue }
+            if ($entry -isnot [string] -or $entry -cnotmatch '^[a-z0-9_]+$') {
+                return (& $no "expected_dialog entry $($e + 1) ('$entry') is neither a dialog id nor null")
+            }
+            $expDialog.Add($entry)
+        }
     }
     # G11 STEP 3 (jas sections 756, 758): A DOUBLE-CLICK, in the browser's order
     # at ONE point -- press, release, press, release, double_click -- and
@@ -3846,6 +3918,7 @@ function Read-SbInputScript([string]$Json) {
             Clicks = @($panels | Where-Object { $_.click }).Count
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
+            Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
         }
     }
     # A CLICK (flask section 348): press + release at ONE point, no move, k=0.
@@ -3873,6 +3946,7 @@ function Read-SbInputScript([string]$Json) {
             Clicks = @($panels | Where-Object { $_.click }).Count
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
+            Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
         }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
@@ -3905,6 +3979,7 @@ function Read-SbInputScript([string]$Json) {
         Clicks = @($panels | Where-Object { $_.click }).Count
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
         Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
+        Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
     }
 }
 
@@ -3928,10 +4003,30 @@ function ConvertFrom-SbPanelText([string]$Text) {
 
 # What a certificate line and a receipt show: `panel/widget:event`, a commit's
 # value after `=`, steps joined by `;`.
+# ROW 275 C2: each `{"read": "dialog"}` against its `expected_dialog` entry.
+# Read k is the `dialog=` field of PROBE seq BaseSeq + Reads[k] (the probe the
+# act before it wrote; `none` when no dialog is open). A probe that never came,
+# or a PROBE row with no `dialog=` field, FAILS by name: neither is `none`.
+function Get-SbDialogReadVerdict([string[]]$Rows, [int]$BaseSeq, [int[]]$Reads, [string[]]$Expected) {
+    if (@($Reads).Count -eq 0) { return 'none' }
+    $fails = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $Reads.Count; $i++) {
+        $seq = $BaseSeq + $Reads[$i]
+        $row = @($Rows | Where-Object { $_ -cmatch "(^|\s)PROBE seq=$seq " }) | Select-Object -Last 1
+        if ($null -eq $row) { $fails.Add("read $($i + 1): no PROBE seq=$seq row"); continue }
+        $got = Get-SbField $row 'dialog'
+        if ([string]::IsNullOrEmpty($got)) { $fails.Add("read $($i + 1) at probe ${seq}: the PROBE row carries no dialog= field"); continue }
+        if ($got -cne $Expected[$i]) { $fails.Add("read $($i + 1) at probe ${seq}: dialog=$got want=$($Expected[$i])") }
+    }
+    if ($fails.Count -gt 0) { return "FAIL($($fails -join '; '))" }
+    "PASS(reads=$($Reads.Count))"
+}
+
 function Format-SbPanelSteps($Panels) {
     @($Panels | ForEach-Object {
         if ($_.menu) { "menu:$($_.menu)" }
         elseif ($_.click) { "click@($($_.x),$($_.y))" }
+        elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
         else { "$($_.panel)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
     }) -join ';'
 }
