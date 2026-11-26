@@ -2157,6 +2157,78 @@ Test-Case 'is: an empty expected_json is REFUSED by name' {
     $j.expected_json = ' '
     Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 6))
 } 'REFUSED: the script names no expected_json'
+# Row 275 C1 (jas STATUS-flask 1006 C, census in 1007): a form this driver
+# does not deliver is REFUSED BY NAME, never dropped and never misnamed. The
+# census found three forms accepted with a key silently ignored (an unknown
+# top-level key, an unknown key on a panel step, and a `dialog` key on a step
+# that also names a panel, which was delivered as a PANEL step), and two
+# refused under another form's name (`panel_menu` read as a pointer step of
+# kind '', a dialog step as a panel step with no panel). And the proposed
+# scripts were refused for their missing expected_json, which hid all of it:
+# the form checks now run first.
+function New-SbFormScript([object[]]$Extra, [hashtable]$Top = @{}) {
+    $o = [ordered]@{ item = 'selection.drag'; setup_svg = 'complex_document.svg'; tool = 'selection'
+                     app_state = @{}; steps = @($sPress, $fRelease) + $Extra + @($sRead); expected_json = 'x.expected.json' }
+    foreach ($k in $Top.Keys) { $o[$k] = $Top[$k] }
+    $o | ConvertTo-Json -Depth 8
+}
+$fRelease = [ordered]@{ kind = 'release'; x = 36; y = 36 }
+$fPanel = [ordered]@{ panel = 'artboards_panel_content'; widget = 'ap_options'; event = 'click' }
+Test-Case 'is: an unknown top-level key is REFUSED by name, not dropped' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ zork = 1 }))
+} "REFUSED: top-level key 'zork' is not a script key (docs/TESTING.md section 6)"
+Test-Case 'is: a top-level key of a form this driver does not deliver (expected_dialog) is REFUSED by name' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ expected_dialog = 'artboard_options' }))
+} "REFUSED: top-level key 'expected_dialog': this driver does not deliver it yet"
+Test-Case 'is: the proposed key is a script key (a PROPOSED script says why it is one)' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ proposed = 'row 275' }))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json'
+Test-Case 'is: a panel_menu step is REFUSED by its own name, not as a pointer step of kind ''''' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ panel_menu = 'artboards_panel_content'; action = 'open_artboard_options' })))
+} 'REFUSED: step 2 is a panel_menu step: this driver does not deliver panel_menu steps yet'
+Test-Case 'is: a dialog step is REFUSED by its own name, not as a panel step with no panel' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ dialog = 'artboard_options'; widget = 'ao_fill_dropdown'; event = 'commit'; value = 'white' })))
+} 'REFUSED: step 2 is a dialog step: this driver does not deliver dialog steps yet'
+Test-Case 'is: a dialog step that ALSO names a panel is a dialog step, never delivered as a panel step' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ panel = 'artboards_panel_content'; dialog = 'artboard_options'; widget = 'ao_ok'; event = 'click' })))
+} 'REFUSED: step 2 is a dialog step: this driver does not deliver dialog steps yet'
+Test-Case 'is: an unknown key on a panel step is REFUSED by name, not dropped' {
+    $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['zork'] = 1
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
+} "REFUSED: step 2 panel step key 'zork' is not a panel-step key"
+Test-Case 'is: a panel step key this driver does not deliver (row) is REFUSED by name, not dropped' {
+    $p = [ordered]@{}; foreach ($k in $fPanel.Keys) { $p[$k] = $fPanel[$k] }; $p['row'] = @(3, 3)
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
+} "REFUSED: step 2 panel step key 'row': this driver does not deliver it yet"
+Test-Case 'is: a press held (hold_ms) is REFUSED by name, not delivered as a click' {
+    $j = New-SbFormScript @() | ConvertFrom-Json
+    $j.steps[0] | Add-Member -NotePropertyName hold_ms -NotePropertyValue 400
+    Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 8))
+} "REFUSED: step 0 pointer step key 'hold_ms': this driver does not deliver it yet"
+Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as a bare read' {
+    $j = New-SbFormScript @([ordered]@{ read = 'state'; keys = @('active_tool') })
+    Show-SbScript (Read-SbInputScript $j)
+} "REFUSED: step 2 read step key 'keys': this driver does not deliver it yet"
+# Over the REAL files: both proposed scripts name their FIRST undelivered form
+# (the panel_menu step), not the missing expected_json that used to hide it.
+$fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+foreach ($fp in 'fill_white', 'preset_a4') {
+    Test-Case "is: the proposed artboard_options.$fp names its first undelivered form" {
+        $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
+        Show-SbScript (Read-SbInputScript $t)
+    } 'REFUSED: step 0 is a panel_menu step: this driver does not deliver panel_menu steps yet'
+}
+# And the control: no SHIPPED script is refused by the new form checks (they
+# would have stopped gating), and the read found the corpus at all.
+Test-Case 'is: no shipped input script is refused by a form check, over the whole corpus' {
+    $files = @(Get-ChildItem (Join-Path $fRoot 'test_fixtures\input_scripts') -Filter '*.json' | Where-Object { $_.Name -notlike '*.expected.json' })
+    $hit = @($files | Where-Object {
+        $r = Read-SbInputScript ([System.IO.File]::ReadAllText($_.FullName, [System.Text.Encoding]::UTF8))
+        $null -ne $r.Refusal -and $r.Refusal -match "key '|is a \w+ step: this driver does not deliver"
+    } | ForEach-Object { $_.Name })
+    "read=$(if ($files.Count -ge 100) { 'corpus' } else { $files.Count }) refused-by-form=$($hit.Count)$(if ($hit.Count) { ' ' + ($hit -join ',') })"
+} 'read=corpus refused-by-form=0'
+
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
