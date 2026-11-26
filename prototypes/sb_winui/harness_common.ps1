@@ -3615,7 +3615,7 @@ function Read-SbInputScript([string]$Json) {
     $stepKeys = @{
         pointer = @{ delivered = @('kind', 'x', 'y', 'dragging', 'shift', 'alt', 'ctrl', 'meta', 'mods'); later = @('hold_ms') }
         key     = @{ delivered = @('key', 'ctrl', 'shift', 'alt', 'meta'); later = @() }
-        panel   = @{ delivered = @('panel', 'widget', 'event', 'value'); later = @('row', 'at', 'shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
+        panel   = @{ delivered = @('panel', 'widget', 'event', 'value', 'row'); later = @('at', 'shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
         menu    = @{ delivered = @('menu'); later = @() }
         dialog  = @{ delivered = @('dialog', 'widget', 'event', 'value'); later = @() }
         read    = @{ delivered = @('read'); later = @('keys') }
@@ -3758,7 +3758,17 @@ function Read-SbInputScript([string]$Json) {
                 return (& $no "step $i panel $tag names a second panel (step $firstPanelStep named $($firstPanel.panel)): the hand opens one panel, through the pane's selector")
             }
             if ($null -eq $firstPanel) { $firstPanelStep = $i }
-            $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value })
+            # ROW E: a row is the element's document path, a non-empty list of
+            # non-negative integers; the hand resolves it (Resolve-SbPlanRow).
+            $row = $null
+            if ($names -contains 'row') {
+                $rv = $st.row
+                $ok = $rv -is [array] -and @($rv).Count -gt 0
+                if ($ok) { foreach ($x in @($rv)) { if (-not ($x -is [int] -or $x -is [long]) -or $x -lt 0) { $ok = $false } } }
+                if (-not $ok) { return (& $no "step $i panel $tag row must be a non-empty list of non-negative integers (an element's document path)") }
+                $row = @($rv | ForEach-Object { [int]$_ })
+            }
+            $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value; row = $row })
             continue
         }
         # KEY STEPS (§333), the key corpus's chord form: `key` plus ctrl/shift/alt
@@ -4039,12 +4049,111 @@ function Get-SbDialogReadVerdict([string[]]$Rows, [int]$BaseSeq, [int[]]$Reads, 
     "PASS(reads=$($Reads.Count))"
 }
 
+# ROW E (jas STATUS-flask 1013/1014): a panel step's `"row": [i, j, ...]`.
+# UIA gives a Layers row's widgets no row identity, so the row is resolved in
+# two joins, each REFUSED BY NAME when it is not unique (jas 11-26 02:5x).
+#
+# Join 1, the row PATH -> its drawn row, in the plan the shell drew: the one
+# node whose `bind.source` (a foreach's items) has an item whose `path` is the
+# row. Its drawn row is `surface [<node path>,k]`. lp_preview's
+# `bind.element_path` on that row, when the row has one, must agree. A row the
+# plan does not draw (collapsed under its parent, filtered) has no item.
+function Format-SbPath($p) { '[' + (@($p) -join ',') + ']' }
+function Resolve-SbPlanRow([string]$PlanJson, [int[]]$Row) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why } }
+    try { $plan = $PlanJson | ConvertFrom-Json } catch { return (& $no 'the plan does not parse') }
+    if ($null -eq $plan) { return (& $no 'the plan does not parse') }
+    $want = Format-SbPath $Row
+    $nodes = @(@($plan.containers) + @($plan.leaves) | Where-Object { $null -ne $_ })
+    $hits = New-Object System.Collections.Generic.List[object]
+    foreach ($n in $nodes) {
+        $src = $null
+        if ($null -ne $n.values) { $src = $n.values.'bind.source' }
+        if ([string]::IsNullOrEmpty($src)) { continue }
+        # 5.1: ConvertFrom-Json emits a JSON array as ONE pipeline object, so it is unrolled.
+        try { $parsed = ConvertFrom-Json $src } catch { continue }
+        $items = @(foreach ($x in $parsed) { $x })
+        for ($k = 0; $k -lt $items.Count; $k++) {
+            $it = $items[$k]
+            if ($null -eq $it -or $null -eq $it.PSObject.Properties['path']) { continue }
+            if ((Format-SbPath $it.path) -ceq $want) { $hits.Add([pscustomobject]@{ Node = $n; K = $k; Item = $it; Rows = $items.Count }) }
+        }
+    }
+    if ($hits.Count -eq 0) {
+        return (& $no "row $want is not a drawn row in the plan (collapsed under its parent, filtered out, or no such element): a row the panel does not draw cannot be pressed")
+    }
+    if ($hits.Count -gt 1) {
+        $where = @($hits | ForEach-Object { "$(Format-SbPath $_.Node.path) row $($_.K)" }) -join ', '
+        return (& $no "row $want is drawn $($hits.Count) times in the plan ($where): this driver will not guess which one")
+    }
+    $h = $hits[0]
+    $base = @($h.Node.path) + @($h.K)
+    $prefix = Format-SbPath $base
+    # The second witness: a leaf on that row naming its element path.
+    foreach ($leaf in @($plan.leaves)) {
+        if ($null -eq $leaf.values) { continue }
+        $ep = $leaf.values.'bind.element_path'
+        if ([string]::IsNullOrEmpty($ep)) { continue }
+        $lp = @($leaf.path)
+        if ($lp.Count -le $base.Count) { continue }
+        if ((Format-SbPath $lp[0..($base.Count - 1)]) -cne $prefix) { continue }
+        $epText = Format-SbPath @(foreach ($x in (ConvertFrom-Json $ep)) { $x })
+        if ($epText -cne $want) {
+            return (& $no "row $want is drawn row $($h.K) of $(Format-SbPath $h.Node.path), but that row's bind.element_path reads ${epText}: the plan's two witnesses disagree")
+        }
+    }
+    $label = $null
+    if ($null -ne $h.Item.PSObject.Properties['name'] -and "$($h.Item.name)".Length -gt 0) { $label = "$($h.Item.name)" }
+    elseif ($null -ne $h.Item.PSObject.Properties['type_label'] -and "$($h.Item.type_label)".Length -gt 0) { $label = "<$($h.Item.type_label)>" }
+    [pscustomobject]@{ Refusal = $null; K = $h.K; Surface = "surface $prefix"; Foreach = (Format-SbPath $h.Node.path); Label = $label; Rows = $h.Rows }
+}
+
+# Join 2, the drawn row -> the widget, over UIA rects (physical px): the row's
+# hit surface must be in the UI, on screen, and overlap no other row of any
+# foreach; then exactly one widget of the step's id lies wholly inside it.
+# Containment is unique on its own: the label guard cannot tell two rows of
+# one label apart.
+function Test-SbRectInside($In, $Out, [double]$Slack = 1) {
+    $In.X -ge $Out.X - $Slack -and $In.Y -ge $Out.Y - $Slack -and
+    $In.X + $In.W -le $Out.X + $Out.W + $Slack -and $In.Y + $In.H -le $Out.Y + $Out.H + $Slack
+}
+function Select-SbRowWidget($Surfaces, $Widgets, [string]$Want, [string]$Widget) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why; Index = -1 } }
+    $mine = @($Surfaces | Where-Object { $_.Name -ceq $Want })
+    if ($mine.Count -eq 0) { return (& $no "the row's surface '$Want' is not in the UI: a row the panel does not draw cannot be pressed") }
+    if ($mine.Count -gt 1) { return (& $no "the row's surface '$Want' is in the UI $($mine.Count) times: this driver will not guess which one") }
+    $t = $mine[0]
+    if ($t.Offscreen -or $t.W -le 0 -or $t.H -le 0) { return (& $no "the row's surface '$Want' has no rect on screen (scrolled out of the panel): it cannot be pressed") }
+    # Any other row surface (a name of the same shape: `surface [p...,k]` with
+    # one index past a foreach) that overlaps this one by any area.
+    $over = @($Surfaces | Where-Object {
+        $_.Name -cne $Want -and $_.Name -cmatch '^surface \[\d+(,\d+)*\]$' -and -not $_.Offscreen -and $_.W -gt 0 -and $_.H -gt 0 -and
+        [Math]::Min($_.X + $_.W, $t.X + $t.W) - [Math]::Max($_.X, $t.X) -gt 1 -and
+        [Math]::Min($_.Y + $_.H, $t.Y + $t.H) - [Math]::Max($_.Y, $t.Y) -gt 1 -and
+        -not (Test-SbRectInside $_ $t 0) -and -not (Test-SbRectInside $t $_ 0)
+    } | ForEach-Object { "'$($_.Name)'" })
+    # A surface wholly inside or around the row (a widget's own hit surface,
+    # `lp_select`'s `surface [3,k,8]`) is not another row; only a partial
+    # overlap, or another row drawn at the same rect, makes containment
+    # ambiguous.
+    $same = @($Surfaces | Where-Object { $_.Name -cne $Want -and $_.Name -cmatch '^surface \[\d+(,\d+)*\]$' -and
+        ($_.Name -split ',').Count -eq ($Want -split ',').Count -and
+        [Math]::Abs($_.X - $t.X) -le 1 -and [Math]::Abs($_.Y - $t.Y) -le 1 -and [Math]::Abs($_.W - $t.W) -le 1 -and [Math]::Abs($_.H - $t.H) -le 1 } |
+        ForEach-Object { "'$($_.Name)'" })
+    $all = @($over + $same | Select-Object -Unique)
+    if ($all.Count -gt 0) { return (& $no "the row's surface '$Want' overlaps $($all -join ', '): a widget's row cannot be told by its rect") }
+    $inside = @(for ($i = 0; $i -lt @($Widgets).Count; $i++) { if (Test-SbRectInside $Widgets[$i] $t) { $i } })
+    if ($inside.Count -eq 0) { return (& $no "no '$Widget' lies inside '$Want' ($(@($Widgets).Count) found in the panel, none in that row)") }
+    if ($inside.Count -gt 1) { return (& $no "$($inside.Count) '$Widget' lie inside '$Want': this driver will not guess which one a person meant") }
+    [pscustomobject]@{ Refusal = $null; Index = $inside[0] }
+}
+
 function Format-SbPanelSteps($Panels) {
     @($Panels | ForEach-Object {
         if ($_.menu) { "menu:$($_.menu)" }
         elseif ($_.click) { "click@($($_.x),$($_.y))" }
         elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
-        else { "$($_.panel)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
+        else { "$($_.panel)/$($_.widget)$(if ($null -ne $_.row) { '@[' + (@($_.row) -join ',') + ']' }):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
     }) -join ';'
 }
 

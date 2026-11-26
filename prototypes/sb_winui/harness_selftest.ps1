@@ -2425,7 +2425,7 @@ Test-Case 'row join 2: a row SCROLLED OUT (offscreen, or no rect) is REFUSED by 
 Test-Case 'row join 2: two row surfaces that OVERLAP are REFUSED by name (containment would not be unique)' {
     $s = @($eSurf[0], (New-SbRect 'surface [3,1]' 2559 770 342 36), $eSurf[2])
     Show-SbRowPick (Select-SbRowWidget -Surfaces $s -Widgets $eEyes -Want 'surface [3,1]' -Widget 'lp_eye')
-} "REFUSED: the row's surface 'surface [3,1]' overlaps 'surface [3,0]', 'surface [3,2]': a widget's row cannot be told by its rect"
+} "REFUSED: the row's surface 'surface [3,1]' overlaps 'surface [3,0]': a widget's row cannot be told by its rect"
 Test-Case 'row join 2: no such widget inside the row is REFUSED by name' {
     Show-SbRowPick (Select-SbRowWidget -Surfaces $eSurf -Widgets @($eEyes[0], $eEyes[2]) -Want 'surface [3,1]' -Widget 'lp_eye')
 } "REFUSED: no 'lp_eye' lies inside 'surface [3,1]' (2 found in the panel, none in that row)"
