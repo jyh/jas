@@ -3585,6 +3585,15 @@ function Get-SbKeyVk([string]$Name) {
 # against an expected one it did not earn. Returns { Refusal; Item; Svg; Tool;
 # DocX; DocY; Dx; Dy; Moves; Read; Expected }.
 # ---------------------------------------------------------------------------
+# ROW 275 C3 (jas's #1125 review): the steps the shell may DEFER for the
+# clipboard -- the spec's paste actions (their effects read `param.clipboard`),
+# by menubar item and by shortcut chord in this reader's chord form. A deferred
+# act probes when its resend lands, so a dialog read after one is refused: the
+# reads pair with probes by count. harness_selftest re-derives both lists from
+# workspace/actions.yaml, menubar.yaml and shortcuts.yaml.
+$SbClipboardMenus = @('menu_paste', 'menu_paste_in_place', 'menu_paste_preserving_layers')
+$SbClipboardKeyChords = @('ctrl+V', 'ctrl+shift+V')
+
 function Read-SbInputScript([string]$Json) {
     $no = { param($why) [pscustomobject]@{ Refusal = $why } }
     try { $s = $Json | ConvertFrom-Json } catch { return (& $no 'the script does not parse') }
@@ -3657,6 +3666,8 @@ function Read-SbInputScript([string]$Json) {
     # ROW 275 C2: per dialog read, how many probing acts after the release come
     # before it (keys, then late steps); prove_e2e adds the release's probe.
     $dialogReads = New-Object System.Collections.Generic.List[int]
+    # The first step the shell may defer for the clipboard, if any (C3).
+    $deferrable = $null
     for ($i = 0; $i -lt $steps.Count; $i++) {
         $st = $steps[$i]
         $names = @($st.PSObject.Properties | ForEach-Object { $_.Name })
@@ -3664,6 +3675,9 @@ function Read-SbInputScript([string]$Json) {
             if ("$($st.read)" -eq 'dialog') {
                 if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
                     return (& $no "step $i read dialog comes before the gesture ends: a dialog read is the probe an act after the release writes")
+                }
+                if ($null -ne $deferrable) {
+                    return (& $no "step $i read dialog comes after $deferrable, which the shell may defer for the clipboard: this driver pairs dialog reads with probes by count, so it refuses that shape")
                 }
                 $dialogReads.Add($keys.Count + $panels.Count)
             }
@@ -3712,6 +3726,7 @@ function Read-SbInputScript([string]$Json) {
                 return (& $no "step $i menu $mn comes before the gesture ends: send_hand.ps1 delivers menu steps only after the release")
             }
             $panels.Add([ordered]@{ menu = $mn })
+            if ($null -eq $deferrable -and $SbClipboardMenus -ccontains $mn) { $deferrable = "step $i (menu $mn)" }
             continue
         }
         if ($names -contains 'panel' -or $names -contains 'widget') {
@@ -3769,6 +3784,7 @@ function Read-SbInputScript([string]$Json) {
             }
             $chord = @(@('ctrl', 'shift', 'alt') | Where-Object { $names -contains $_ -and $st.$_ }) + @($kn)
             $keys.Add($chord -join '+')
+            if ($null -eq $deferrable -and $SbClipboardKeyChords -contains ($chord -join '+')) { $deferrable = "step $i (key $($chord -join '+'))" }
             continue
         }
         # A LATE CLICK (flask section 443, node 29): after a panel or menu
