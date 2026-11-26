@@ -360,6 +360,12 @@ impl JasEngine {
     /// runner's `read: panel` and its `app_state` seed. A key the panel does
     /// not declare is never returned, so a port's private store keys never
     /// enter a script. `None` when the workspace does not hold the panel.
+    /// The open dialog's id, or `None`: the level-1 runner's `read: dialog`
+    /// and the check a dialog step makes before it addresses a widget.
+    pub(crate) fn script_dialog_id(&self) -> Option<String> {
+        self.store.borrow().dialog_id().map(str::to_string)
+    }
+
     pub(crate) fn script_panel_state(&self, panel_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
         let ws = Workspace::load()?;
         ws.panel(panel_id)?;

@@ -241,6 +241,28 @@ marked PROPOSED and never gates.
 * **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
   `jas_gui_harness.py`) and not yet measured on a live app. The web channel refuses all three by name until its test
   hook has them, and no level-1 runner reads them yet, so no shipped script uses them.
+* **A dialog step (row 275, written 2026-11-25; delivered by no runner or driver yet):**
+  `{"dialog": "<dialog id>", "widget": "<widget id>", "event": "click" | "commit", "value": …}`. It addresses a widget
+  of the OPEN dialog by the `id` its `workspace/dialogs/*.yaml` gives it, as a panel step addresses a panel widget.
+  * **The dialog is opened by the person's route**: an earlier panel or menu step whose act opens it (the Artboards
+    panel's `ap_options` click opens `artboard_options`). No step opens a dialog by its id. A hook would skip the route
+    that opens it and the shell's own dialog view, which is where rows 268, 270 and 277 found their defects. Opening a
+    dialog directly by id is the level-1 dialog-action corpus's door (`test_fixtures/dialog_actions/`). That corpus
+    pins a dialog's laws; an input script drives the route to them.
+  * **`dialog` names the dialog the script expects to be open**, and the step is refused by name when no dialog is
+    open or when another one is. It is never addressed into whatever happens to be open, so a route that opens the
+    wrong dialog reds the script instead of driving a widget that shares an id.
+  * **`event` and `value` are a panel step's:** `click` on a button or a boolean widget, and `commit` with the text a
+    person entered. A `select`'s commit names the item by its `value`, never its label, and runs the widget's declared
+    `change` behaviour with that value, as a person's pick does.
+  * **OK and Cancel are dialog widgets like any other**, so a button is named only by an `id`. A button with none
+    (57 of the 73 dialog buttons on 2026-11-25) cannot be named, and its script waits on that spec edit, as an `at`
+    script waits on the swatch tile's. `artboard_options` gives its two `ao_ok` and `ao_cancel`.
+  * **The outcome is read by the reads that exist:** `{"read": "dialog"}` (`null` once OK or Cancel has closed it) and
+    `{"read": "document"}`.
+  * **Until a runner or driver delivers it, it refuses the step by name**, and a script that uses it is PROPOSED
+    (`test_fixtures/input_scripts_proposed/`, which no gating runner reads) and never gates. It moves into
+    `input_scripts/` when every runner and driver that gates delivers it.
 * **A row drag** (spec's S2): `{"panel": …, "widget": …, "row": [...], "event": "drag", "to": {"row": [...], "zone":
   "before" | "into" | "after"}, "hover_ms": <n>}`. It is pressed on one row and released in a named zone of another, after
   hovering there that long.
