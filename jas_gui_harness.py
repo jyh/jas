@@ -684,6 +684,18 @@ def _run_script(path, menubar, locked=False, pid=None):
                 buttons = _by_id(app, menu_id)
                 if len(buttons) != 1:
                     raise _plan.Refused(f"{len(buttons)} menu buttons carry AXIdentifier {menu_id!r} after scrolling the dock")
+                # After a wheel scroll a real click on a dock button pops
+                # nothing until the pointer has left the window and come back
+                # (measured 11-26: two clicks in place, nothing; leave and
+                # re-enter, then one click, the menu).
+                lp = _plan.leave_point(win, _displays())
+                if lp is None:
+                    raise _plan.Refused(f"menu button {menu_id!r}: no on-screen point off the window to leave by after scrolling the dock")
+                _person_gate()
+                mouse(Quartz.kCGEventMouseMoved, lp[0], lp[1]); time.sleep(0.6)
+                fb = _btn_frame()
+                if fb is not None:  # come back onto the button and settle, as measured
+                    mouse(Quartz.kCGEventMouseMoved, fb[0] + fb[2] / 2, fb[1] + fb[3] / 2); time.sleep(0.3)
             import ApplicationServices as AX
             pos, size = _attr(buttons[0], "AXPosition"), _attr(buttons[0], "AXSize")
             if pos is None or size is None:

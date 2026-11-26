@@ -723,6 +723,22 @@ def frame_inside(frame, window, margin=8):
     return wx <= x + w / 2 < wx + ww and wy + margin <= y and y + h <= wy + wh - margin
 
 
+def leave_point(window, displays, gap=40):
+    """A screen point on a display but off the window, `gap` points from its
+    left edge (else its right), at the window's mid height; None when there
+    is no such point. After a dock wheel scroll, a real click on a dock
+    button pops nothing until the pointer has left the window and come back
+    (measured 11-26), so the driver moves here and back before the press."""
+    if window is None:
+        return None
+    wx, wy, ww, wh = window
+    y = wy + wh / 2
+    for x in (wx - gap, wx + ww + gap):
+        if offscreen_refusal("p", x, y, displays) is None:
+            return (x, y)
+    return None
+
+
 POPUP_MENU_LAYER = 101  # kCGPopUpMenuWindowLevel, as CGWindowList reports an open NSMenu
 
 
@@ -1707,6 +1723,19 @@ def self_test():
     check("a measured dock button overhanging the right edge by 4 is inside", frame_inside((1492, 500, 31, 16), win) is True)
     check("a frame whose centre is left of the window is not inside", frame_inside((290, 500, 31, 16), win) is False)
     check("no frame is never inside", frame_inside(None, win) is False and frame_inside((1, 1, 1, 1), None) is False)
+    # After a dock wheel scroll a real click on a dock button pops nothing
+    # until the pointer leaves the window and comes back (measured 11-26,
+    # probe 10: two clicks in place popped nothing; leave/re-enter, then one
+    # click, popped the menu). The leave point is on a display, off the window.
+    lp = leave_point(win, one)
+    check("the leave point is off the window", lp is not None and offscreen_refusal("p", lp[0], lp[1], one, window=win) is not None
+          and "outside the harness window" in offscreen_refusal("p", lp[0], lp[1], one, window=win))
+    check("the leave point is on a display", lp is not None and offscreen_refusal("p", lp[0], lp[1], one) is None)
+    check("the leave point is left of the window when there is room", lp == (319 - 40, 105 + 450))
+    flush = leave_point((0, 105, 1200, 900), one)
+    check("a window flush left is left by its right side", flush == (1200 + 40, 105 + 450))
+    check("a window filling every display has no leave point", leave_point((0, 0, 1920, 1080), one) is None)
+    check("no window has no leave point", leave_point(None, one) is None)
     # The popped panel menu (NSMenu.popUpContextMenu) is NOT among the app
     # element's AX children (measured: window + menubar only, with the menu
     # on screen); it is a layer-101 window of the app's own pid, and hit-
