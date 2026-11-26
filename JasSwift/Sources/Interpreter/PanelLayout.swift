@@ -63,6 +63,23 @@ public enum PanelLayout {
         public let h: Int
         public let node: [String: Any]
         public let ctx: [String: Any]
+        /// The leaf's path in the plan's one scheme: a child's index under
+        /// its parent, and under a foreach, iteration k sits at
+        /// `repeat.path + [k]` (``RenderRepeat``).
+        public var path: [Int] = []
+    }
+
+    /// One foreach the plan expands (row 281), as the Rust panel plan's
+    /// `repeats` key lists it (`panel_plan.rs` `repeats_of`): its path,
+    /// its `id` (nil when it has none), its row count, and whether its rows
+    /// are document elements (each row carries a `path`), which `row`
+    /// addresses and `at` must not. Iteration k's leaves sit under
+    /// `path + [k]`.
+    public struct RenderRepeat: Equatable {
+        public let path: [Int]
+        public let id: String?
+        public let rows: Int
+        public let elements: Bool
     }
 
     /// The render-side projection of the layout pass: the canonical panel
@@ -73,6 +90,8 @@ public enum PanelLayout {
         public let height: Int
         public let chrome: [RenderLeaf]
         public let leaves: [RenderLeaf]
+        /// Each foreach this plan expands, outermost first in document order.
+        public var repeats: [RenderRepeat] = []
     }
 
     /// Layout-only node types: they position their children but draw no widget
@@ -151,7 +170,7 @@ public enum PanelLayout {
         var out: [RenderLeaf] = []
         for it in items {
             let entry = RenderLeaf(x: it.x, y: it.y, w: it.w, h: it.h,
-                                   node: it.node, ctx: it.ctx)
+                                   node: it.node, ctx: it.ctx, path: it.path)
             if isLayoutOnly(it.node) {
                 // Layout-only container: omitted unless it carries chrome
                 // (a border / background) worth drawing behind the leaves.
@@ -160,7 +179,41 @@ public enum PanelLayout {
                 out.append(entry)
             }
         }
-        return RenderPlanResult(height: height, chrome: chrome, leaves: out)
+        var reps: [RenderRepeat] = []
+        repeatsOf(root, path: [], ctx: ctx, out: &reps)
+        return RenderPlanResult(height: height, chrome: chrome, leaves: out, repeats: reps)
+    }
+
+    /// The foreach repeats under `node`, as Rust's `repeats_of` walks them: a
+    /// hidden node (static or dynamic) places nothing and lists nothing; a
+    /// foreach lists itself and walks its template once per row in that
+    /// row's scope, at `path + [k]`; any other node walks its children.
+    private static func repeatsOf(_ node: [String: Any], path: [Int], ctx: [String: Any],
+                                  out: inout [RenderRepeat]) {
+        if hidden(node, ctx) { return }
+        if let spec = node["foreach"] as? [String: Any], let template = node["do"] as? [String: Any] {
+            let src = (spec["source"] as? String) ?? ""
+            let varName = (spec["as"] as? String) ?? "item"
+            var rows: [Any] = []
+            if !src.isEmpty, case .list(let arr) = evaluate(src, context: ctx) {
+                rows = arr.map { $0.value }
+            }
+            let elements = rows.contains { ($0 as? [String: Any])?["path"] != nil }
+            out.append(RenderRepeat(path: path, id: node["id"] as? String, rows: rows.count, elements: elements))
+            for (k, row) in rows.enumerated() {
+                var data: [String: Any] = (row as? [String: Any]) ?? ["_value": row]
+                data["_index"] = k
+                var childCtx = ctx
+                childCtx[varName] = data
+                repeatsOf(template, path: path + [k], ctx: childCtx, out: &out)
+            }
+            return
+        }
+        if let ch = node["children"] as? [Any] {
+            for (i, c) in ch.enumerated() {
+                if let c = c as? [String: Any] { repeatsOf(c, path: path + [i], ctx: ctx, out: &out) }
+            }
+        }
     }
 
     // MARK: - value readers
@@ -1157,4 +1210,19 @@ public enum PanelLayout {
         }
         return (out, measured.isEmpty ? 0 : cy - gap)
     }
+}
+
+/// The identified iteration layers a Path B leaf is drawn in, outermost first
+/// (row 281): `<foreach id>#<k>` for each repeat whose `path + [k]` is a
+/// component-wise prefix of the leaf's path. A repeat with no id contributes
+/// no layer, so a level-2 driver refuses `at` there by name rather than guess
+/// by layout. The repeats come from ``PanelLayout/renderPlan(_:availW:availH:ctx:)``.
+func iterationChain(leafPath: [Int], repeats: [PanelLayout.RenderRepeat]) -> [String] {
+    var chain: [(depth: Int, name: String)] = []
+    for r in repeats {
+        guard leafPath.count > r.path.count, Array(leafPath.prefix(r.path.count)) == r.path,
+              let name = repeatIterationAxId(foreachId: r.id, index: leafPath[r.path.count]) else { continue }
+        chain.append((r.path.count, name))
+    }
+    return chain.sorted { $0.depth < $1.depth }.map(\.name)
 }

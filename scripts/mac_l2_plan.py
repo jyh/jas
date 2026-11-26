@@ -122,7 +122,7 @@ DELIVERED_KEYS = {
     "read": {"read"},
     "pointer": {"kind", "x", "y", "dragging", "shift", "alt", "ctrl", "meta"},
     "key": {"key", "shift", "alt", "ctrl", "meta"},
-    "panel": {"panel", "widget", "event", "value"},
+    "panel": {"panel", "widget", "event", "value", "at"},
     "menu": {"menu"},
     "toolbar": {"panel", "widget", "event", "hold_ms"},
     "read state": {"read", "keys"},
@@ -219,6 +219,52 @@ MODS = ("shift", "alt", "ctrl")
 
 def _even(v):
     return isinstance(v, (int, float)) and float(v).is_integer() and int(v) % 2 == 0
+
+
+def _foreach_ancestors(node, wid, above):
+    """The foreach nodes whose template holds the element `wid`, outermost
+    first, or None when `wid` is not under `node`."""
+    if isinstance(node, dict):
+        if node.get("id") == wid:
+            return above
+        is_foreach = isinstance(node.get("foreach"), dict) and node.get("do") is not None
+        for k, v in node.items():
+            here = above + [node] if (is_foreach and k == "do") else above
+            hit = _foreach_ancestors(v, wid, here)
+            if hit is not None:
+                return hit
+    elif isinstance(node, list):
+        for v in node:
+            hit = _foreach_ancestors(v, wid, above)
+            if hit is not None:
+                return hit
+    return None
+
+
+def foreach_scope(spec, wid, at):
+    """Row 281: the AX containers a panel step's `at` names, outermost first
+    (`["ap_list#1"]`), and None; or None and a refusal by name. Swift draws
+    each iteration of an identified foreach as its own container
+    `<foreach id>#<k>` (measured 11-26), so the scope comes from the spec:
+    `at` must give one non-negative integer per enclosing foreach, and every
+    enclosing foreach must have an id. No `at` is no scope."""
+    if at is None:
+        return [], None
+    chain = _foreach_ancestors(spec, wid, [])
+    if chain is None:
+        return None, f"at names an iteration of {wid!r}, which the panel spec does not have"
+    if not chain:
+        return None, f"at names an iteration, but {wid!r} sits in no foreach"
+    anon = [n for n in chain if not n.get("id")]
+    if anon:
+        return None, (f"at names an iteration of a foreach with no id (source "
+                      f"{anon[0]['foreach'].get('source')!r}); its iterations have no identifier to find")
+    if not isinstance(at, list) or len(at) != len(chain):
+        return None, f"at {at!r} gives {len(at) if isinstance(at, list) else 'no'} index(es); {wid!r} sits in {len(chain)} foreach(es)"
+    for k in at:
+        if not isinstance(k, int) or isinstance(k, bool) or k < 0:
+            return None, f"at {at!r}: index {k!r} is not a non-negative integer"
+    return [f"{n['id']}#{k}" for n, k in zip(chain, at)], None
 
 
 def find_widget(spec, wid):
@@ -329,7 +375,7 @@ def _plan_toolbar(item, i, st, spec):
 def plan(script, menubar, spec=None, state_keys=None, panel_menus=None, dialog_specs=None):
     """The script as acts: ("open", svg, reset_workspace) ("tool", id) ("pointer", kind, x, y,
     dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
-    window_path, widget, event, value, option_label, widget_type) ("menu", path)
+    window_path, widget, event, value, option_label, widget_type, scope) ("menu", path)
     ("read", "document") ("toolbar", slot, hold_ms) ("read", "state", keys,
     canonical expected) ("read", "dialog", expected id or None). `spec` is the
     script's panel spec, parsed (workspace/layout.yaml for a toolbar step); a
@@ -402,8 +448,15 @@ def plan(script, menubar, spec=None, state_keys=None, panel_menus=None, dialog_s
                 label = select_label(w, st.get("value"))
                 if label is None:
                     raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of {wtype} {st['widget']!r}")
+            scope = []
+            if "at" in st:
+                if spec is None:
+                    raise Refused(f"{item}: step {i} carries at, and there is no panel spec to scope it by")
+                scope, why = foreach_scope(spec, st["widget"], st["at"])
+                if why:
+                    raise Refused(f"{item}: step {i}: {why}")
             acts.append(("panel", pid, pid + TAB_SUFFIX, panels.get(pid[: -len(PANEL_SUFFIX)]),
-                         st["widget"], st["event"], st.get("value"), label, wtype))
+                         st["widget"], st["event"], st.get("value"), label, wtype, scope))
             continue
         if "menu" in st:
             _refuse_undelivered(item, i, st, "menu")
@@ -1586,7 +1639,6 @@ def self_test():
         ("an unknown key-step key", {"key": "Z", "repeat": 2}, "repeat"),
         ("a panel step's alt", dict(pan, alt=True), "alt"),
         ("a panel step's row", dict(pan, row=[0]), "row"),
-        ("a panel step's at", dict(pan, at=[0, 1]), "at"),
         ("a panel step's hold_ms", dict(pan, hold_ms=400), "hold_ms"),
         ("a menu step's extra key", {"menu": "menu_group", "shift": True}, "shift"),
         ("a read step's extra key", {"read": "document", "window": {"w": 1, "h": 1}}, "window"),
@@ -1723,6 +1775,42 @@ def self_test():
     check("a measured dock button overhanging the right edge by 4 is inside", frame_inside((1492, 500, 31, 16), win) is True)
     check("a frame whose centre is left of the window is not inside", frame_inside((290, 500, 31, 16), win) is False)
     check("no frame is never inside", frame_inside(None, win) is False and frame_inside((1, 1, 1, 1), None) is False)
+    # Row 281: a panel step's `at` names a foreach iteration. Swift draws each
+    # identified iteration as its own AX container `<foreach id>#<k>` (measured
+    # 11-26: AXGroup 'ap_list#0' holding that row's ap_number, ap_name,
+    # ap_options), so the scope is derived from the panel spec, never guessed.
+    fs_spec = {"content": {"type": "col", "children": [
+        {"id": "head", "type": "text"},
+        {"id": "outer", "foreach": {"source": "xs", "as": "x"}, "do": {"type": "row", "children": [
+            {"id": "cell", "type": "text"},
+            {"id": "inner", "foreach": {"source": "x.ys", "as": "y"}, "do": {"id": "leaf", "type": "button"}}]}},
+        {"foreach": {"source": "zs", "as": "z"}, "do": {"id": "anon_cell", "type": "text"}}]}}
+    check("at in one foreach scopes to its iteration", foreach_scope(fs_spec, "cell", [1]) == (["outer#1"], None))
+    check("at in nested foreaches scopes outermost first", foreach_scope(fs_spec, "leaf", [1, 2]) == (["outer#1", "inner#2"], None))
+    sc, why = foreach_scope(fs_spec, "head", [0])
+    check("at on a widget in no foreach is refused by name", sc is None and "in no foreach" in why)
+    sc, why = foreach_scope(fs_spec, "anon_cell", [0])
+    check("at under a foreach with no id is refused by name, never guessed", sc is None and "no id" in why)
+    sc, why = foreach_scope(fs_spec, "leaf", [1])
+    check("at shorter than the foreach depth is refused by name", sc is None and "2 foreach" in why)
+    sc, why = foreach_scope(fs_spec, "cell", [1, 0])
+    check("at longer than the foreach depth is refused by name", sc is None and "1 foreach" in why)
+    for bad in (-1, 1.5, "1", True):
+        sc, why = foreach_scope(fs_spec, "cell", [bad])
+        check(f"an at index {bad!r} is refused by name", sc is None and "index" in why)
+    sc, why = foreach_scope(fs_spec, "nope", [0])
+    check("at on a widget the spec does not have is refused by name", sc is None and "'nope'" in why)
+    check("no at is no scope", foreach_scope(fs_spec, "cell", None) == ([], None))
+    fs_pan = {"panel": "x_panel_content", "widget": "cell", "event": "click"}
+    fs_acts = plan(dict(base, steps=[dict(fs_pan, at=[1]), read]), mb, spec=fs_spec)
+    check("a panel step's at plans its iteration scope as the act's last field",
+          [a[-1] for a in fs_acts if a[0] == "panel"] == [["outer#1"]])
+    fs_acts = plan(dict(base, steps=[fs_pan, read]), mb, spec=fs_spec)
+    check("a panel step with no at plans an empty scope", [a[-1] for a in fs_acts if a[0] == "panel"] == [[]])
+    check("a panel step's bad at is refused by name at plan time",
+          refused(lambda: plan(dict(base, steps=[dict(fs_pan, at=[1, 1]), read]), mb, spec=fs_spec), "foreach"))
+    check("a panel step's at with no spec to scope it is refused by name",
+          refused(lambda: plan(dict(base, steps=[dict(fs_pan, at=[1]), read]), mb), "no panel spec"))
     # After a dock wheel scroll a real click on a dock button pops nothing
     # until the pointer leaves the window and comes back (measured 11-26,
     # probe 10: two clicks in place popped nothing; leave/re-enter, then one
