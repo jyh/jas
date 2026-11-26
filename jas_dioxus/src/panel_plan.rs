@@ -33,7 +33,12 @@
 //!                             template, a templated display string or id:
 //!                             named, never sent raw
 //!  "icons":      {"<name>": {"viewbox": "...", "svg": "..."}, ...},
-//!  "icons_missing": ["<name>", ...]}
+//!  "icons_missing": ["<name>", ...],
+//!  "repeats":    [{"path": [...], "id": "..."|null, "rows": n, "elements": bool}...]}
+//!                             each `foreach` the plan expands: iteration k's
+//!                             widgets sit under path + [k] (see [`repeats_of`]).
+//!                             ABSENT when the panel expands none, so such a plan's
+//!                             bytes are unchanged by the key's arrival.
 //! entry = {"path": [...], "rect": {x,y,w,h}, "type": "...", "id": "...",
 //!          "values": {"<bind_values key>": "<resolved value>", ...},
 //!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...},
@@ -715,7 +720,55 @@ pub fn panel_plan(
         "icons": icons,
         "icons_missing": icons_missing,
     });
+    // Row 281: present ONLY when the panel expands a repeat, so a plan with none
+    // keeps its bytes (and every Windows e2e baseline's `plan_sha` with them).
+    let repeats = repeats_of(&laid_out, ctx, &hidden);
+    let mut out = out;
+    if !repeats.is_empty() {
+        out["repeats"] = Value::Array(repeats);
+    }
     (out, rows)
+}
+
+/// Row 281 (`at`, docs/TESTING.md section 6): every `foreach` repeat the plan
+/// expands, in walk order, as `{path, id, rows, elements}`. `path` is the
+/// repeat's own path, so iteration `k`'s widgets sit under `path + [k]` (the
+/// plan's one path scheme); `rows` is its iteration count; `elements` is true
+/// when its rows are document elements (they carry a `path`), which `row`
+/// addresses and `at` must not. A hidden repeat (static `visible: false`, or a
+/// dynamic visibility resolved false) places nothing and is not listed. A
+/// repeat nested in an iteration is walked in that iteration's scope.
+fn repeats_of(laid_out: &Value, ctx: &Value, hidden: &[Vec<i64>]) -> Vec<Value> {
+    fn walk(node: &Value, scope: &Value, path: &mut Vec<i64>, hidden: &[Vec<i64>], out: &mut Vec<Value>) {
+        if node.get("visible") == Some(&Value::Bool(false)) || hidden.iter().any(|h| path.starts_with(h)) {
+            return;
+        }
+        if let Some(rows) = crate::interpreter::foreach::row_scopes(node, scope) {
+            let var = node["foreach"].get("as").and_then(Value::as_str).unwrap_or("item");
+            out.push(json!({
+                "path": path.clone(),
+                "id": node.get("id").cloned().unwrap_or(Value::Null),
+                "rows": rows.len(),
+                "elements": rows.iter().any(|r| r[var].get("path").is_some()),
+            }));
+            for (k, r) in rows.iter().enumerate() {
+                path.push(k as i64);
+                walk(&node["do"], r, path, hidden, out);
+                path.pop();
+            }
+            return;
+        }
+        if let Some(Value::Array(children)) = node.get("children") {
+            for (i, c) in children.iter().enumerate() {
+                path.push(i as i64);
+                walk(c, scope, path, hidden, out);
+                path.pop();
+            }
+        }
+    }
+    let mut out = vec![];
+    walk(laid_out.get("content").unwrap_or(laid_out), ctx, &mut vec![], hidden, &mut out);
+    out
 }
 
 /// `spec` with every `tabs` node in the form the plan and the behavior door
@@ -1560,6 +1613,50 @@ mod tests {
             chrome_total > 0 && leaves_total > 0 && containers_total > 0,
             "vacuous partition: chrome={chrome_total} leaves={leaves_total} containers={containers_total}"
         );
+    }
+
+    /// Row 281 (`at`, flask STATUS-flask 1017): the plan names each `foreach`
+    /// repeat it expanded, so a shell resolves `at: [k]` as the entries under
+    /// `path + [k]` without inferring which path component is an iteration.
+    /// The scheme is pinned by the plan's OWN leaves: each iteration's `name`
+    /// leaf sits under exactly `repeat.path + [k]`. A repeat whose rows are
+    /// document elements says so (`elements`), since `at` is refused there; a
+    /// hidden repeat is not listed, as its rows are not placed.
+    #[test]
+    fn the_plan_names_each_repeat_it_expands_with_its_row_count() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "text", "id": "head", "content": "x"},
+            {"type": "col", "id": "list", "foreach": {"source": "items", "as": "it"},
+             "do": {"type": "row", "children": [{"type": "text", "id": "name", "content": "{{it.name}}"}]}},
+            {"type": "col", "id": "tree", "foreach": {"source": "els", "as": "e"},
+             "do": {"type": "text", "id": "el", "content": "{{e.name}}"}},
+            {"type": "col", "id": "gone", "visible": false, "foreach": {"source": "items", "as": "g"},
+             "do": {"type": "text", "id": "g", "content": "{{g.name}}"}},
+        ]}});
+        let ctx = json!({"items": [{"name": "a"}, {"name": "b"}],
+                         "els": [{"name": "p", "path": [0]}, {"name": "q", "path": [1]}, {"name": "r", "path": [1, 0]}]});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
+        assert_eq!(plan["repeats"], json!([
+            {"path": [1], "id": "list", "rows": 2, "elements": false},
+            {"path": [2], "id": "tree", "rows": 3, "elements": true},
+        ]), "{plan}");
+        let names: Vec<Value> = plan["leaves"].as_array().unwrap().iter()
+            .filter(|l| l["id"] == "name").map(|l| l["path"].clone()).collect();
+        assert_eq!(names.len(), 2, "two iterations, two name leaves: {plan}");
+        for (k, p) in names.iter().enumerate() {
+            let p: Vec<i64> = p.as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect();
+            assert!(p.starts_with(&[1, k as i64]), "iteration {k}'s leaf {p:?} sits under repeat [1] + [{k}]");
+        }
+        // A plan that expands no repeat carries no key, so its bytes are those
+        // it had before row 281 (the Windows e2e baselines pin `plan_sha`).
+        let flat = json!({"content": {"type": "col", "children": [{"type": "text", "id": "head", "content": "x"}]}});
+        let (plain, _) = panel_plan(&flat, 228, 0, &ctx, &Value::Null, &Value::Null);
+        assert!(plain.get("repeats").is_none(), "no repeat, no key: {plain}");
+        let (empty, _) = panel_plan(&panel, 228, 0, &json!({"items": [], "els": []}), &Value::Null, &Value::Null);
+        assert_eq!(empty["repeats"], json!([
+            {"path": [1], "id": "list", "rows": 0, "elements": false},
+            {"path": [2], "id": "tree", "rows": 0, "elements": false},
+        ]), "an expanded repeat with no rows is still named, with rows 0: {empty}");
     }
 
     /// A bound widget the layout pass never places (a static `visible: false`)

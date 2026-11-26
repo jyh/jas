@@ -5454,6 +5454,9 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let mut dialog_signal = rctx.dialog_ctx.0;
     let mut revision = rctx.revision;
     let app = rctx.app.clone();
+    // Row 276: the one computed-bind door's captures (computed_bind_door).
+    let ctx_snapshot = ctx.clone();
+    let el_for_commit = if declares_commit_behavior(el) { el.clone() } else { serde_json::Value::Null };
     let app_for_input = app.clone();
     let panel_kind = rctx.panel_kind;
     // Special case: layers panel search binding
@@ -5651,7 +5654,12 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                         });
                     }
                     BindTarget::None => {
-                        revision += 1;
+                        // Row 276: a computed bind's commit/change behavior runs
+                        // (the one door). Inert for a field whose behaviors are
+                        // keydown/blur only (ap_name_edit, lp_name_edit): those
+                        // run from their own handlers, and el_for_commit is Null.
+                        computed_bind_door(&el_for_commit, serde_json::json!(new_val), &ctx_snapshot,
+                                           dialog_signal, &app, revision);
                     }
                 }
             },
@@ -5789,12 +5797,9 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                     // A computed bind (Artboard Options' Fill): nothing is written
                     // back, but the declared `change` behavior runs (row 270).
                     BindTarget::None => {
-                        if let Some(mut ds) = dialog_signal() {
-                            apply_dialog_behavior(&el_for_commit, &serde_json::json!(new_val), &mut ds, &app);
-                            dialog_signal.set(Some(ds));
-                        } else {
-                            return;
-                        }
+                        computed_bind_door(&el_for_commit, serde_json::json!(new_val), &ctx_snapshot,
+                                           dialog_signal, &app, revision);
+                        return;
                     }
                 }
                 revision += 1;
@@ -5897,6 +5902,9 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
+    // Row 276: the one computed-bind door's captures (computed_bind_door).
+    let ctx_snapshot = ctx.clone();
+    let el_for_commit = if declares_commit_behavior(el) { el.clone() } else { serde_json::Value::Null };
     let cv = current_value.clone();
     let panel_kind = rctx.panel_kind;
 
@@ -5937,7 +5945,12 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                 commit_panel_field(&mut st, panel_kind, &f, &serde_json::json!(v));
                             });
                         }
-                        BindTarget::None => { return; }
+                        BindTarget::None => {
+                            // Row 276: a computed bind's behavior runs (the one door).
+                            computed_bind_door(&el_for_commit, serde_json::json!(new_val), &ctx_snapshot,
+                                               dialog_signal, &app, revision);
+                            return;
+                        }
                     }
                     revision += 1;
                 },
@@ -6074,19 +6087,9 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         }
                         BindTarget::None => {
                             // A computed bind: no write-back, but the declared
-                            // behavior runs (commit_computed_bind, row 268).
-                            let v = new_val.clone();
-                            let app = app.clone();
-                            let ctx_snapshot = ctx_snapshot.clone();
-                            let el_for_commit = el_for_commit.clone();
-                            let mut revision = revision;
-                            spawn(async move {
-                                if !el_for_commit.is_null() {
-                                    let mut st = app.borrow_mut();
-                                    commit_computed_bind(&el_for_commit, &v, &ctx_snapshot, &mut st);
-                                }
-                                revision += 1;
-                            });
+                            // behavior runs (row 268; the one door, row 276).
+                            computed_bind_door(&el_for_commit, serde_json::json!(new_val), &ctx_snapshot,
+                                               dialog_signal, &app, revision);
                         }
                     }
                 },
@@ -6097,6 +6100,44 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             }
         }
     }
+}
+
+/// Row 276: THE door for a commit on a COMPUTED bind (`BindTarget::None`),
+/// called by every web renderer that classifies a bind, so none routes only one
+/// context (render_select ran the dialog's behavior and dropped the panel's).
+/// Inside a dialog the declared behavior runs on the dialog's state
+/// (`apply_dialog_behavior`); in a panel it runs on the app
+/// (`commit_computed_bind`), deferred as the panel writes are, and the
+/// revision then bumps. `el_for_commit` is Null for a widget that declares no
+/// commit/change behavior, and then neither path runs anything.
+fn computed_bind_door(
+    el_for_commit: &serde_json::Value,
+    committed: serde_json::Value,
+    ctx_snapshot: &serde_json::Value,
+    mut dialog_signal: Signal<Option<super::dialog_state::DialogState>>,
+    app: &AppHandle,
+    mut revision: Signal<u64>,
+) {
+    if let Some(mut ds) = dialog_signal() {
+        apply_dialog_behavior(el_for_commit, &committed, &mut ds, app);
+        dialog_signal.set(Some(ds));
+        revision += 1;
+        return;
+    }
+    let raw = match &committed {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    let app = app.clone();
+    let ctx_snapshot = ctx_snapshot.clone();
+    let el_for_commit = el_for_commit.clone();
+    spawn(async move {
+        if !el_for_commit.is_null() {
+            let mut st = app.borrow_mut();
+            commit_computed_bind(&el_for_commit, &raw, &ctx_snapshot, &mut st);
+        }
+        revision += 1;
+    });
 }
 
 /// A commit on a widget whose `bind.value` is a COMPUTED expression (one that
@@ -6174,6 +6215,9 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
     let mut dialog_signal = rctx.dialog_ctx.0;
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
+    // Row 276: the one computed-bind door's captures (computed_bind_door).
+    let ctx_snapshot = ctx.clone();
+    let el_for_commit = if declares_commit_behavior(el) { el.clone() } else { serde_json::Value::Null };
     let on_click = build_click_handler(el, &boolean_press_ctx(ctx, checked), rctx);
     let panel_kind = rctx.panel_kind;
 
@@ -6284,7 +6328,12 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                 });
                 return;
             }
-            BindTarget::None => {}
+            BindTarget::None => {
+                // Row 276: a computed bind's change behavior runs (the one door).
+                computed_bind_door(&el_for_commit, serde_json::json!(new_val), &ctx_snapshot,
+                                   dialog_signal, &app, revision);
+                return;
+            }
         }
         revision += 1;
     };

@@ -3699,6 +3699,34 @@ mod tests {
 
     const PLAN_SIZES: [(i64, i64); 3] = [(228, 0), (228, 600), (0, 0)];
 
+    /// Row 281 (flask STATUS-flask 1017): the REAL Artboards plan names its
+    /// `ap_list` repeat with the live row count, through the shells' own door,
+    /// so a shell resolves `at: [k]` from the plan alone. New Artboard runs by
+    /// the panel menu's pick (`jas_dispatch_action({"panel", "menu_index"})`),
+    /// as the forms runner's `panel_menu` step does. Control: the Layers tree's
+    /// repeat is document elements (`row`'s address, never `at`'s).
+    #[test]
+    fn the_real_artboards_plan_names_its_repeat_with_the_live_row_count() {
+        use serde_json::{json, Value};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("paragraph_justified.svg");
+        let repeat_of = |e: *mut JasEngine, pid: &str, id: &str| -> Value {
+            let plan: Value = serde_json::from_str(&plan_of(e, pid, 228, 0)).unwrap();
+            plan["repeats"].as_array().into_iter().flatten().find(|r| r["id"] == id).cloned()
+                .unwrap_or_else(|| panic!("{pid} names no repeat `{id}`: {}", plan["repeats"]))
+        };
+        assert_eq!(repeat_of(e, "artboards_panel_content", "ap_list")["rows"], 1, "the fixture opens with one artboard");
+        let req = json!({"panel": "artboards_panel_content", "menu_index": 0}).to_string();
+        take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
+        let ab = repeat_of(e, "artboards_panel_content", "ap_list");
+        assert_eq!((ab["rows"].clone(), ab["elements"].clone()), (json!(2), json!(false)), "{ab}");
+        unsafe { jas_engine_free(e) };
+        let l = engine_on("complex_document.svg");
+        let tree = repeat_of(l, "layers_panel_content", "lp_tree");
+        assert_eq!(tree["elements"], true, "the Layers tree is `row`'s: {tree}");
+        unsafe { jas_engine_free(l) };
+    }
+
     /// The panel files' own `id:` and `summary:` lines, read from the YAML
     /// SOURCE with a line reader: a second method beside the compiled bundle
     /// `jas_panel_list` reads. Only column-0 keys count, so a widget's nested
