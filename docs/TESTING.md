@@ -243,8 +243,9 @@ marked PROPOSED and never gates.
   the click's pair. Both are wrong answers the reads tell apart, so neither defect can pass as the other.
 * **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
   `jas_gui_harness.py`) and not yet measured on a live app. The web channel refuses all three by name until its test
-  hook has them, and no level-1 runner reads them yet, so no shipped script uses them. (Since 2026-11-25 Rust's engine
-  replay reads `{"read": "dialog"}`, for the dialog step below; the other two are still read by none.)
+  hook has them, and no level-1 runner reads them yet, so no shipped script uses them. (`{"read": "dialog"}` is read
+  since 2026-11-25 by Rust's engine replay and Swift's forms runner, and since 2026-11-26 by the Windows driver
+  (`prove_e2e.ps1`, the PROBE row's `dialog=` field), for the dialog step below; the other two are still read by none.)
 * **A dialog step (row 275, written 2026-11-25):**
   `{"dialog": "<dialog id>", "widget": "<widget id>", "event": "click" | "commit", "value": …}`. It addresses a widget
   of the OPEN dialog by the `id` its `workspace/dialogs/*.yaml` gives it, as a panel step addresses a panel widget.
@@ -266,7 +267,10 @@ marked PROPOSED and never gates.
     `{"read": "document"}`.
   * **Delivered by both level-1 forms runners (2026-11-25):** Rust's engine replay (`replay_forms`, through
     `jas_dialog_event`) and Swift's (`replayForms`, through `dialogEventRoute`, the dialog-action corpus's own route,
-    so the two Swift runners cannot drift). The Mac and Windows drivers and the web hook refuse it by name.
+    so the two Swift runners cannot drift).
+  * **Delivered by the Windows driver (2026-11-26, row 275 C2):** `prove_e2e.ps1` sends it through the hand after
+    checking the open dialog's id, and reads `{"read": "dialog"}` and `expected_dialog` (both forms), measured live on
+    the Windows box against the `fill_white` golden. The Mac driver and the web hook still refuse it by name.
   * **A panel-menu step runs the command the live menu dispatches** (Swift: the menu builder's own command, the bare
     action for an item that is not a radio member). Building it any other way drove a route no person takes, and hid
     row 280: the Mac's Artboards menu dropped its items' declared `params`, so "Artboard Options..." and "Rename" ran
