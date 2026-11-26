@@ -115,7 +115,10 @@ param(
     # double-click time, so WinUI raises DoubleTapped; `then-click` also sends
     # one more click there AFTER that time has passed, so it is a click and not
     # a third tap. Read-SbInputScript maps the corpus form onto these.
-    [ValidateSet('none', 'double', 'then-click')][string]$Double = 'none'
+    [ValidateSet('none', 'double', 'then-click')][string]$Double = 'none',
+    # ROW E: the shell's SB_PLAN_OUT file, for a panel step's `row` (the plan
+    # the panel was drawn from). Empty when no step names a row.
+    [string]$PlanFile = ''
 )
 
 # Select-SbPanelAction and ConvertFrom-SbPanelText: the panel steps' rules,
@@ -530,6 +533,8 @@ foreach ($chord in $chords) {
     foreach ($m in $mods) { [SbHand]::Key($m, $false); $keyEvents++ }
 }
 $log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
+# ROW E: a row step reads a plan the shell wrote AFTER the act before it.
+$lastActUtc = [DateTime]::UtcNow
 
 # THE PANEL STEPS (jas section 373), last, through UI Automation. Each finds
 # the panel by AutomationId (the panel content id, `PanelHost`), the widget by
@@ -676,6 +681,7 @@ if ($panelSteps.Count -gt 0) {
             } while ($shown.Count -eq 0 -and $osw.ElapsedMilliseconds -lt $PanelWaitMs)
             $log.Add("$openTag panel-appeared=$($shown.Count -eq 1) waited-ms=$($osw.ElapsedMilliseconds)")
             if ($shown.Count -ne 1) { Stop-SbPanelHand "$openTag -- panel '$want' was chosen in PanePicker and $($shown.Count) such panels were shown after $($PanelWaitMs) ms" }
+            $lastActUtc = [DateTime]::UtcNow
         }
     }
     $n = 0
@@ -700,6 +706,7 @@ if ($panelSteps.Count -gt 0) {
             $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
             $clicksSent++
             $log.Add("CLICK SENT: $ctag screen=($cx,$cy)")
+            $lastActUtc = [DateTime]::UtcNow
             continue
         }
         # A MENU STEP (jas sections 389/392): open each top menu of the menubar
@@ -736,6 +743,7 @@ if ($panelSteps.Count -gt 0) {
             Start-Sleep -Milliseconds $SettleMs
             $hits[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
             $log.Add("MENU SENT: $mtag action=Invoke")
+            $lastActUtc = [DateTime]::UtcNow
             continue
         }
         # A DIALOG STEP (row 275 C2, docs/TESTING.md section 6): a widget of
@@ -785,9 +793,26 @@ if ($panelSteps.Count -gt 0) {
             Start-Sleep -Milliseconds $SettleMs
             Invoke-SbPanelPick $pick $el $ps $tag
             $log.Add("DIALOG SENT: $tag action=$($pick.Action)")
+            $lastActUtc = [DateTime]::UtcNow
             continue
         }
-        $tag = "step $n $($ps.panel)/$($ps.widget):$($ps.event)"
+        $tag = "step $n $($ps.panel)/$($ps.widget)$(if ($null -ne $ps.row) { '@[' + (@($ps.row) -join ',') + ']' }):$($ps.event)"
+        # ROW E (jas STATUS-flask 1013/1014): the row's drawn index from the plan
+        # the shell wrote AFTER the act before this one (join 1), then the widget
+        # by rect containment in that row's surface (join 2, in the loop below).
+        $planRow = $null; $rowWhy = $null
+        if ($null -ne $ps.row) {
+            if ($PlanFile.Length -eq 0) { Stop-SbPanelHand "$tag -- a row step needs the shell's plan, and no -PlanFile was passed" }
+            $psw = [System.Diagnostics.Stopwatch]::StartNew()
+            while (-not (Test-Path $PlanFile) -or (Get-Item $PlanFile).LastWriteTimeUtc -le $lastActUtc) {
+                if ($psw.ElapsedMilliseconds -ge $PanelWaitMs) { Stop-SbPanelHand "$tag -- the shell wrote no plan after the act before this step within $($PanelWaitMs) ms, so the row cannot be read from a current one" }
+                Start-Sleep -Milliseconds 100
+            }
+            Start-Sleep -Milliseconds $SettleMs
+            $planRow = Resolve-SbPlanRow -PlanJson ([System.IO.File]::ReadAllText($PlanFile, [System.Text.Encoding]::UTF8)) -Row @($ps.row)
+            if ($null -ne $planRow.Refusal) { Stop-SbPanelHand "$tag -- $($planRow.Refusal)" }
+            $log.Add("$tag plan-row k=$($planRow.K) surface=$($planRow.Surface) label=$($planRow.Label) rows=$($planRow.Rows) plan-waited-ms=$($psw.ElapsedMilliseconds)")
+        }
         # A pane redraws on the UI thread after the gesture lands, so a control
         # the gesture enables (Align once two things are selected) may still
         # read disabled for a moment. It is re-read for up to PanelWaitMs; the
@@ -800,6 +825,39 @@ if ($panelSteps.Count -gt 0) {
             if ($panelHits.Count -eq 1) {
                 $widgetHits = $panelHits[0].FindAll($tree::Descendants,
                     (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, "$($ps.widget)")))
+                if ($null -ne $planRow -and $widgetHits.Count -ge 1) {
+                    $rowWhy = $null
+                    $named = @($panelHits[0].FindAll($tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+                        Where-Object { $_.Current.Name -cmatch '^surface \[' })
+                    $surfs = @($named | ForEach-Object { $r = $_.Current.BoundingRectangle
+                        [pscustomobject]@{ Name = $_.Current.Name; X = $r.X; Y = $r.Y; W = $r.Width; H = $r.Height; Offscreen = $_.Current.IsOffscreen } })
+                    # The UI must draw the rows the plan does: a different count is a stale plan.
+                    $esc = [regex]::Escape($planRow.Foreach.TrimEnd(']'))
+                    $drawnRows = @($surfs | Where-Object { $_.Name -cmatch ('^surface ' + $esc + ',\d+\]$') }).Count
+                    if ($drawnRows -ne $planRow.Rows) { $rowWhy = "the plan draws $($planRow.Rows) rows of $($planRow.Foreach) and the panel shows ${drawnRows}: the plan is not the drawn one" }
+                    else {
+                        $wr = @($widgetHits | ForEach-Object { $r = $_.Current.BoundingRectangle
+                            [pscustomobject]@{ Name = $_.Current.AutomationId; X = $r.X; Y = $r.Y; W = $r.Width; H = $r.Height; Offscreen = $_.Current.IsOffscreen } })
+                        $rp = Select-SbRowWidget -Surfaces $surfs -Widgets $wr -Want $planRow.Surface -Widget "$($ps.widget)"
+                        if ($null -ne $rp.Refusal) { $rowWhy = $rp.Refusal }
+                        else {
+                            $one = $widgetHits[$rp.Index]
+                            # The label guard: the row shows the plan row's label. It
+                            # catches a stale plan, never a twin (two rows of one label).
+                            $tsurf = @($surfs | Where-Object { $_.Name -ceq $planRow.Surface })[0]
+                            if ($null -ne $planRow.Label) {
+                                $texts = @($panelHits[0].FindAll($tree::Descendants,
+                                        (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) |
+                                    Where-Object { $r = $_.Current.BoundingRectangle
+                                        Test-SbRectInside ([pscustomobject]@{ X = $r.X; Y = $r.Y; W = $r.Width; H = $r.Height }) $tsurf } |
+                                    ForEach-Object { $_.Current.Name })
+                                if ($texts -cnotcontains $planRow.Label) { $rowWhy = "row $($planRow.Surface) shows [$($texts -join ', ')], and the plan's row is '$($planRow.Label)': the plan is not the drawn one" }
+                            }
+                            if ($null -eq $rowWhy) { $widgetHits = @($one) }
+                        }
+                    }
+                    if ($null -ne $rowWhy) { break }
+                }
                 if ($widgetHits.Count -eq 1) {
                     $el = $widgetHits[0]
                     $enabled = $el.Current.IsEnabled
@@ -814,10 +872,12 @@ if ($panelSteps.Count -gt 0) {
             if (-not $settled) { Start-Sleep -Milliseconds 100 }
         } while (-not $settled -and $sw.ElapsedMilliseconds -lt $PanelWaitMs)
         $log.Add("$tag panel-hits=$($panelHits.Count) widget-hits=$(if ($null -eq $widgetHits) { 0 } else { $widgetHits.Count }) type=$ctype enabled=$enabled patterns=[$($pats -join ',')] waited-ms=$($sw.ElapsedMilliseconds)")
+        if ($null -ne $rowWhy) { Stop-SbPanelHand "$tag -- $rowWhy" }
         if ($null -ne $pick.Refusal) { Stop-SbPanelHand "$tag -- $($pick.Refusal)" }
         Start-Sleep -Milliseconds $SettleMs
         Invoke-SbPanelPick $pick $el $ps $tag
         $log.Add("PANEL SENT: $tag action=$($pick.Action)")
+        $lastActUtc = [DateTime]::UtcNow
     }
 }
 $log.Add("alt=$Alt alt-down=$(if ($Alt -eq 'none') { 'never' } else { "before-$Alt" }) alt-up=$(if ($altDown) { 'after-release' } else { 'never' })")
