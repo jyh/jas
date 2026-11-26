@@ -115,7 +115,9 @@ $menuCount = [int]$sc.Menus
 # probes, so each is one more PROBE seq, and each writes its own POINTER row.
 $clickCount = [int]$sc.Clicks
 $clickPoints = @(ConvertFrom-SbPanelText $panelText | Where-Object { $_.click })
-$lateCount = $panelCount + $menuCount + $clickCount
+# DIALOG STEPS (row 275 C2) ride the same list; each probes (jas 1006 A).
+$dialogCount = [int]$sc.Dialogs
+$lateCount = $panelCount + $menuCount + $clickCount + $dialogCount
 # G11 STEP 3: A DOUBLE-CLICK is the gesture's click and then one more click at
 # the same point inside the double-click time (`double`), and `then-click`
 # adds one more after that time. Each extra click is a release, so each writes
@@ -497,19 +499,26 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
     $clickRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'PANEL CLICK panel=\S+ widget=\S+ via=hand ' -and $_ -notmatch 'PANEL CLICK (DROPPED|REFUSED)' })
     # A menu step's arrival is the shell's `MENU ACTION RAN item=<id>` row.
     $menuRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'MENU ACTION RAN item=' })
+    # A dialog step's (row 275 C2) is the shell's own `DIALOG EVENT via=hand` row.
+    $dialogRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'DIALOG EVENT via=hand widget=' })
     # A late click (node 29) is not a panel step: its arrival is its own
     # POINTER REAL row, which the drive check above already holds to the script.
     $missing = @(ConvertFrom-SbPanelText $panelText | Where-Object { -not $_.click } | Where-Object {
         if ($_.menu) { $want = "MENU ACTION RAN item=$($_.menu) "; @($menuRows | Where-Object { $_.Contains($want) }).Count -eq 0 }
+        elseif ($_.dialog) { $want = "DIALOG EVENT via=hand widget=$($_.widget) "; $ev = " event=$($_.event) "; @($dialogRows | Where-Object { $_.Contains($want) -and $_.Contains($ev) }).Count -eq 0 }
         else {
             $want = "PANEL CLICK panel=$($_.panel) widget=$($_.widget) via=hand event=$($_.event) "
             @($clickRows | Where-Object { $_.Contains($want) }).Count -eq 0 } } |
-        ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } else { "$($_.panel)/$($_.widget)" } })
-    if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK or MENU ACTION RAN row for $($missing -join ','))" }
+        ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget)" } else { "$($_.panel)/$($_.widget)" } })
+    if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK, MENU ACTION RAN or DIALOG EVENT row for $($missing -join ','))" }
 }
+# {"read": "dialog"} (row 275 C2): each read is the dialog= field of the probe
+# the act before it wrote; the release (and a double's clicks) probe first.
+$dialogV = Get-SbDialogReadVerdict -Rows @(Read-SbRows $log $mark) -BaseSeq (1 + $doubleClicks) -Reads @($sc.DialogReads) -Expected @($sc.ExpectedDialog)
+if ($dialogV -notlike 'PASS*' -and $dialogV -ne 'none') { $core = if ($core -eq 'PASS') { "FAIL(dialog=$dialogV)" } else { "$core dialog=$dialogV" } }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS' -and $paint -like 'PASS*' -and $gaps -like 'PASS*') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($lateCount -gt 0) { ",panels=$panelShow" })):$drive " +
-        "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) paint=$paint gaps=$gaps screenshot=$shotSha(archived,not compared) " +
+        "spec=$moved script=$Script readback=$readback dialog=$dialogV core=$core tree=$tree pixels=$pix@$($r.surface) paint=$paint gaps=$gaps screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
 Add-Content -Path (Join-Path $exeDir 'e2e-certificates.log') -Value $line -Encoding ascii
