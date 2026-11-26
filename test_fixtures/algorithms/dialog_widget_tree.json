@@ -1270,7 +1270,7 @@
           2
         ],
         "type": "button",
-        "id": "",
+        "id": "ao_cancel",
         "kind": "button",
         "col": 0,
         "visible": true,
@@ -1284,7 +1284,7 @@
           3
         ],
         "type": "button",
-        "id": "",
+        "id": "ao_ok",
         "kind": "button",
         "col": 0,
         "visible": true,

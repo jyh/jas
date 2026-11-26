@@ -2155,15 +2155,21 @@ fn a4_from_the_spec() -> (f64, f64) {
 #[test]
 fn every_proposed_dialog_script_replays_to_its_outcome() {
     let _counters = crate::ffi_instr::test_lock::lock();
+    // The population, pinned in the corpus manifest's path form and checked
+    // against the directory, so a script added there reds this arm.
+    const PROPOSED: [&str; 2] = [
+        "input_scripts_proposed/artboard_options.fill_white.json",
+        "input_scripts_proposed/artboard_options.preset_a4.json",
+    ];
     let dir = format!("{}/../test_fixtures/input_scripts_proposed", env!("CARGO_MANIFEST_DIR"));
-    let mut names: Vec<String> = std::fs::read_dir(&dir).expect("the proposed directory").filter_map(|d| {
+    let mut on_disk: Vec<String> = std::fs::read_dir(&dir).expect("the proposed directory").filter_map(|d| {
         let n = d.ok()?.file_name().into_string().ok()?;
-        n.ends_with(".json").then_some(n)
+        n.ends_with(".json").then(|| format!("input_scripts_proposed/{n}"))
     }).collect();
-    names.sort();
-    assert_eq!(names, ["artboard_options.fill_white.json", "artboard_options.preset_a4.json"], "the population moved");
-    for n in &names {
-        let script: Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{n}")).unwrap()).unwrap();
+    on_disk.sort();
+    assert_eq!(on_disk, PROPOSED, "the population moved");
+    for n in PROPOSED {
+        let script: Value = serde_json::from_str(&read(n)).unwrap();
         let out = replay_forms(&script).expect("replay");
         assert_eq!(refusal(&out), None, "{n}: {out:?}");
         assert_eq!(dialog_reads(&out), vec![Value::String("artboard_options".into()), Value::Null], "{n}: {out:?}");
