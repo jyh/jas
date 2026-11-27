@@ -1867,6 +1867,14 @@ static class Program
         Eq("seed knob: JSON that does not parse, or is not an object, is REFUSED by name",
             "REFUSED: SB_PANEL_SEED does not parse as JSON|REFUSED: SB_PANEL_SEED is not an object",
             ShowSeeds(SeedWire.Seeds("{nope")) + "|" + ShowSeeds(SeedWire.Seeds("[1]")));
+        // The knob crosses into session 1 on a scheduled task's command line,
+        // which strips a JSON's double quotes (measured: the first seeded live
+        // run read "does not parse"), so it may come as `b64:<base64 UTF-8>`.
+        Eq("seed knob: the b64: form decodes to the same seeds",
+            "artboards_panel_content.artboards_panel_selection=[\"zs8ap4x3\"]",
+            ShowSeeds(SeedWire.Seeds("b64:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("""{"panels":{"artboards_panel_content":{"artboards_panel_selection":["zs8ap4x3"]}}}""")))));
+        Eq("seed knob: a b64: payload that does not decode is REFUSED by name",
+            "REFUSED: SB_PANEL_SEED's b64: payload does not decode", ShowSeeds(SeedWire.Seeds("b64:%%%")));
         Eq("seed door envelope: panel, key, and the value's JSON as written",
             """{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":["zs8ap4x3"]}""",
             SeedWire.Envelope("artboards_panel_content", "artboards_panel_selection", """["zs8ap4x3"]"""));
