@@ -965,6 +965,13 @@ private func runOne(
     if effect.keys.contains("log") {
         return
     }
+
+    // No branch above took it, and no platform handler did: say so, by name,
+    // instead of skipping it without a word (STATUS-jas row 288; the class of
+    // #1143, where a click's nested `doc.*` effect met a table with no handler).
+    for key in effect.keys.sorted() where key != "as" {
+        diagnostics.append(Diagnostic(level: "warning", key: key, reason: "unhandled effect"))
+    }
 }
 
 // MARK: - Stroke panel state binding
