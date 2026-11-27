@@ -8514,6 +8514,42 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// flask STATUS 1030 / jas 1031: FILE > NEW AFTER THE LAST TAB CLOSES. The
+    /// engine is the Windows shell's document host and holds exactly ONE
+    /// document, so `new_document` is the engine's to run, as `revert` is: with
+    /// no document open (the last tab closed) it opens a fresh, untitled,
+    /// unmodified document whose tab the bar draws again; with one open it is
+    /// refused by name (`OneDocument`), never half run. Until this the engine
+    /// refused it as `UnknownEffect:create_child`, so after the last tab
+    /// closed a person on Windows could make no document at all.
+    #[test]
+    fn file_new_after_the_last_tab_closes_opens_a_fresh_untitled_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
+        assert!(reply.is_empty(), "the one-document engine refuses New while one is open: {reply}");
+        assert!(err.contains("OneDocument"), "{err}");
+        assert_eq!(canvas_tabs(e).len(), 1, "the refusal ran nothing");
+        assert_eq!(unsafe { jas_document_close(e) }, 1, "the last tab closes");
+        assert_eq!(canvas_tabs(e).len(), 0, "no document, no tab");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
+        assert!(err.is_empty(), "New after the close runs: {err}");
+        let reply: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(reply["doc_changed"], serde_json::json!(true), "{reply}");
+        assert_eq!(canvas_tabs(e).len(), 1, "the bar draws the new document's tab");
+        assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(1));
+        let name = unsafe { &*e }.model.borrow().filename.clone();
+        assert!(name.starts_with("Untitled-"), "the new document is untitled: {name:?}");
+        let doc: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+        assert_eq!(doc["artboards"].as_array().map(Vec::len), Some(1), "a fresh document's one artboard: {doc}");
+        assert!(doc["layers"].as_array().unwrap().iter()
+                    .all(|l| l["children"].as_array().map_or(true, Vec::is_empty)), "and nothing drawn: {doc}");
+        assert_eq!(unsafe { jas_document_modified(e) }, 0, "a fresh document is unmodified");
+        let (_, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
+        assert!(err.contains("OneDocument"), "with it open, New is refused again: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn dispatch_action_refuses_new_document_by_its_missing_effect_and_runs_nothing() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -8523,7 +8559,7 @@ mod tests {
         let e = jas_engine_new();
         let (reply, err) = dispatch(e, r#"{"action":"new_document"}"#);
         assert!(reply.is_empty(), "a refused action replies nothing: {reply}");
-        assert!(err.contains("PlatformEffect") && err.contains("create_child"), "{err}");
+        assert!(err.contains("OneDocument"), "a fresh engine holds its one document, so New is refused by name: {err}");
         // Nothing ran: the tab bar still shows the engine's one document,
         // and only it (owner note 4b: tabs are drawn from the open documents).
         assert_eq!(canvas_tabs(e).len(), 1, "nothing ran");
