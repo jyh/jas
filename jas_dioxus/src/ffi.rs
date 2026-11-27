@@ -9487,6 +9487,46 @@ mod tests {
         assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
     }
 
+    fn script_seed(e: *mut JasEngine, json: &str) -> (JasStatus, String) {
+        let s = unsafe { jas_script_seed_panel(e, json.as_ptr(), json.len()) };
+        (s, last_error_of(e))
+    }
+
+    /// Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR. A script's
+    /// `app_state.panels.<content id>.<key>` reaches a native shell's engine as
+    /// it reaches Rust's replay (`script_seed_panel`): a key the panel's
+    /// `state:` declares is set, read back as a person's own selection would be
+    /// (the Artboards menu's Options enables), and anything else is refused by
+    /// name, with no state changed.
+    #[test]
+    fn a_script_seed_sets_a_declared_panel_key_as_the_replay_does() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/paragraph_justified.svg")).unwrap();
+        let e = jas_engine_new();
+        assert!(engine_of(e).open_svg(&svg), "the fixture opens as the shell opens it");
+        let options = |e: *mut JasEngine| panel_menu(e, "artboards_panel_content").0.iter()
+            .find(|r| r["action"] == "open_artboard_options").map(|r| r["enabled"].clone());
+        assert_eq!(options(e), Some(serde_json::json!(false)), "the control: nothing selected, Options is disabled");
+        assert_eq!(script_seed(e, r#"{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":["zs8ap4x3"]}"#),
+                   (JasStatus::Ok, String::new()));
+        assert_eq!(options(e), Some(serde_json::json!(true)), "the seed is the selection a person makes");
+        let (s, err) = script_seed(e, r#"{"panel":"no_such_panel_content","key":"k","value":1}"#);
+        assert_eq!(s, JasStatus::MissingTarget);
+        assert!(err.contains("UnknownPanel"), "{err}");
+        let (s, err) = script_seed(e, r#"{"panel":"artboards_panel_content","key":"not_a_declared_key","value":1}"#);
+        assert_eq!(s, JasStatus::MissingTarget);
+        assert!(err.contains("UndeclaredPanelKey"), "{err}");
+        assert_eq!(script_seed(e, "{nope").0, JasStatus::BadJson);
+        let (s, err) = script_seed(e, r#"{"key":"artboards_panel_selection","value":[]}"#);
+        assert_eq!(s, JasStatus::MissingParam);
+        assert!(err.contains("MissingParam"), "{err}");
+        assert_eq!(options(e), Some(serde_json::json!(true)), "no refusal changed the state");
+        assert_eq!(script_seed(e, r#"{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":[]}"#).0, JasStatus::Ok);
+        assert_eq!(options(e), Some(serde_json::json!(false)), "and an empty seed empties it again");
+        assert_eq!(unsafe { jas_script_seed_panel(std::ptr::null_mut(), b"{}".as_ptr(), 2) }, JasStatus::NullHandle);
+        unsafe { jas_engine_free(e) };
+    }
+
     fn panel_menu(e: *mut JasEngine, panel: &str) -> (Vec<serde_json::Value>, String) {
         let raw = take(unsafe { jas_panel_menu(e, panel.as_ptr(), panel.len()) });
         let rows = if raw.is_empty() { vec![] } else {
