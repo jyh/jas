@@ -2713,6 +2713,20 @@ pub unsafe extern "C" fn jas_document_close(e: *mut JasEngine) -> u8 {
     u8::from(engine.document_open.replace(false))
 }
 
+/// **Whether the engine holds an open document** (jas STATUS-flask 1031): 1
+/// when one is open, 0 when none is (the last tab closed, [`jas_document_close`]),
+/// 255 for a null engine. A shell covers its surface while none is open, and an
+/// act can open one (File > New after the last tab closed), so the shell ASKS
+/// after an act rather than guess from a changed document.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_is_open(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    u8::from(engine.document_open.get())
+}
+
 /// **The shell names the document it opened or saved** (flask §256): the
 /// model's `filename`, which the canvas tab shows (`workspace.open_documents`,
 /// owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the
