@@ -163,7 +163,9 @@ $env:SB_PROBE = 'sb-probe.json'
 # ROW 284: a script with a panel_menu step launches the Default dock, where
 # its panel's tab and group menu are; every other script launches as before.
 if ($launchMode -eq 'dock') { $env:SB_DOCK = 'Default' }
-if ($appStateSeed.Length -gt 0) { $env:SB_PANEL_SEED = $appStateSeed }
+# As base64: the knob crosses a scheduled task's command line, which strips a
+# JSON's double quotes (measured on the first seeded run).
+if ($appStateSeed.Length -gt 0) { $env:SB_PANEL_SEED = 'b64:' + [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($appStateSeed)) }
 # ROW E/F: a panel step's `row` or `at` is read from the plan the panel was drawn from,
 # so a script with one opens its panel by SB_PANEL (only that pane then writes
 # SB_PLAN_OUT) and hands the plan file to the hand. Scripts without a row

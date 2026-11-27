@@ -3631,6 +3631,13 @@ internal static class SeedWire
     {
         var seeds = new List<(string, string, string)>();
         if (string.IsNullOrEmpty(knob)) { return (seeds, null); }
+        // The knob crosses into session 1 on a scheduled task's command line,
+        // which strips a JSON's double quotes, so a driver sends `b64:<base64>`.
+        if (knob.StartsWith("b64:", StringComparison.Ordinal))
+        {
+            try { knob = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(knob[4..])); }
+            catch (FormatException) { return (seeds, "SB_PANEL_SEED's b64: payload does not decode"); }
+        }
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(knob);
