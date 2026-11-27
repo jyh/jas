@@ -8555,8 +8555,12 @@ mod tests {
         assert!(reply.is_empty(), "the one-document engine refuses New while one is open: {reply}");
         assert!(err.contains("OneDocument"), "{err}");
         assert_eq!(canvas_tabs(e).len(), 1, "the refusal ran nothing");
+        // A shell covers the surface while no document is open, so it must be
+        // able to ASK (jas_document_is_open), not guess from a changed document.
+        assert_eq!(unsafe { jas_document_is_open(e) }, 1, "a document is open");
         assert_eq!(unsafe { jas_document_close(e) }, 1, "the last tab closes");
         assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(0), "no document, no tab");
+        assert_eq!(unsafe { jas_document_is_open(e) }, 0, "and the engine says none is open");
         let (reply, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
         assert!(err.is_empty(), "New after the close runs: {err}");
         let reply: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
@@ -8570,6 +8574,8 @@ mod tests {
         assert!(doc["layers"].as_array().unwrap().iter()
                     .all(|l| l["children"].as_array().map_or(true, Vec::is_empty)), "and nothing drawn: {doc}");
         assert_eq!(unsafe { jas_document_modified(e) }, 0, "a fresh document is unmodified");
+        assert_eq!(unsafe { jas_document_is_open(e) }, 1, "New opened it, and the engine says so");
+        assert_eq!(unsafe { jas_document_is_open(std::ptr::null_mut()) }, 255, "a null engine");
         let (_, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
         assert!(err.contains("OneDocument"), "with it open, New is refused again: {err}");
         unsafe { jas_engine_free(e) };
