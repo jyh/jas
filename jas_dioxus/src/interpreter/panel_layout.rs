@@ -52,8 +52,6 @@ struct MItem {
 /// what lets a consumer join a leaf to its `bind_values` rows by path; a join
 /// on `id` would be wrong, because a foreach template repeats its ids.
 pub struct RenderLeaf {
-    // Read only by the ffi panel plan; the web binary's renderer places by rect.
-    #[allow(dead_code)]
     pub path: Vec<i64>,
     pub x: i64,
     pub y: i64,
@@ -73,6 +71,111 @@ pub struct RenderPlan {
     pub height: i64,
     pub chrome: Vec<RenderLeaf>,
     pub leaves: Vec<RenderLeaf>,
+    /// Each foreach this plan expands, in walk order (row 290; Swift's
+    /// `RenderPlanResult.repeats`, row 281). Iteration k's leaves sit under
+    /// `path + [k]`, so [`iteration_chain`] names a leaf's iteration layers
+    /// from its path alone.
+    pub repeats: Vec<RenderRepeat>,
+}
+
+/// One foreach a render plan expands (row 290): its own path in the plan's
+/// one scheme, and its `id` (`None` when it has none). It is the path and id
+/// of an entry of the panel plan's `repeats` key (`panel_plan.rs`
+/// `repeats_of`), the two fields a renderer needs to draw each iteration in
+/// a container named `<id>#<k>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderRepeat {
+    pub path: Vec<i64>,
+    pub id: Option<String>,
+}
+
+/// The identified iteration layers a leaf at `leaf_path` is drawn in,
+/// outermost first: `<foreach id>#<k>` for each repeat whose `path + [k]` is
+/// a component-wise prefix of the leaf's path (Swift's `iterationChain`,
+/// row 281). A repeat with no id contributes no layer, so a level-2 driver
+/// refuses `at` there by name rather than guess by layout; the repeat node
+/// itself is in no layer of its own.
+pub fn iteration_chain(leaf_path: &[i64], repeats: &[RenderRepeat]) -> Vec<String> {
+    let mut chain: Vec<(usize, String)> = repeats
+        .iter()
+        .filter(|r| leaf_path.len() > r.path.len() && leaf_path.starts_with(&r.path))
+        .filter_map(|r| {
+            let id = r.id.as_deref().filter(|id| !id.is_empty())?;
+            Some((r.path.len(), format!("{id}#{}", leaf_path[r.path.len()])))
+        })
+        .collect();
+    chain.sort_by_key(|(depth, _)| *depth);
+    chain.into_iter().map(|(_, name)| name).collect()
+}
+
+/// A leaf (by its index in the plan's `leaves`) or an identified iteration
+/// layer holding the leaves and layers drawn in it ([`iteration_layers`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IterationLayer {
+    Leaf(usize),
+    Iteration(String, Vec<IterationLayer>),
+}
+
+/// The leaves grouped into their iteration layers (row 290), given each
+/// leaf's [`iteration_chain`] in plan order. A leaf in no further layer
+/// stays where it is; a run of consecutive leaves sharing their next layer
+/// becomes one [`IterationLayer::Iteration`], grouped again one level down.
+/// The leaves keep their plan order (and so their paint order), and since
+/// an iteration's leaves are one contiguous run of the pre-order walk, each
+/// layer occurs once. With no identified repeat the result is exactly the
+/// flat leaves, in order.
+pub fn iteration_layers(chains: &[Vec<String>]) -> Vec<IterationLayer> {
+    fn group(chains: &[Vec<String>], idx: &[usize], depth: usize) -> Vec<IterationLayer> {
+        let mut out = vec![];
+        let mut i = 0;
+        while i < idx.len() {
+            let chain = &chains[idx[i]];
+            if chain.len() <= depth {
+                out.push(IterationLayer::Leaf(idx[i]));
+                i += 1;
+                continue;
+            }
+            let key = &chain[depth];
+            let mut j = i;
+            while j < idx.len() && chains[idx[j]].len() > depth && &chains[idx[j]][depth] == key {
+                j += 1;
+            }
+            out.push(IterationLayer::Iteration(key.clone(), group(chains, &idx[i..j], depth + 1)));
+            i = j;
+        }
+        out
+    }
+    let idx: Vec<usize> = (0..chains.len()).collect();
+    group(chains, &idx, 0)
+}
+
+/// The foreach repeats under `node`, as the panel plan's `repeats_of` walks
+/// them: a hidden node (static or dynamic, [`hidden`]) places nothing and
+/// lists nothing; a foreach lists itself and walks its template once per row
+/// in that row's scope, at `path + [k]`; any other node walks its children.
+fn repeats_of(node: &Value, scope: &Value, path: &mut Vec<i64>, out: &mut Vec<RenderRepeat>) {
+    if hidden(node, scope) {
+        return;
+    }
+    if let Some(rows) = crate::interpreter::foreach::row_scopes(node, scope) {
+        out.push(RenderRepeat {
+            path: path.clone(),
+            id: node.get("id").and_then(Value::as_str).map(str::to_string),
+        });
+        for (k, r) in rows.iter().enumerate() {
+            path.push(k as i64);
+            repeats_of(&node["do"], r, path, out);
+            path.pop();
+        }
+        return;
+    }
+    if let Some(Value::Array(children)) = node.get("children") {
+        for (i, c) in children.iter().enumerate() {
+            path.push(i as i64);
+            repeats_of(c, scope, path, out);
+            path.pop();
+        }
+    }
 }
 
 /// Layout-only node types: they position their children but draw no widget of
@@ -150,7 +253,7 @@ pub fn render_plan_with_omitted(
 ) -> (RenderPlan, Vec<RenderLeaf>) {
     let root = match panel_node.get("content") {
         Some(r) if r.is_object() => r,
-        _ => return (RenderPlan { height: 0, chrome: vec![], leaves: vec![] }, vec![]),
+        _ => return (RenderPlan { height: 0, chrome: vec![], leaves: vec![], repeats: vec![] }, vec![]),
     };
     let (_w, _h, items) = measure(root, &[], avail_w, avail_h, ctx);
     let height = items.first().map_or(0, |it| it.h);
@@ -182,7 +285,9 @@ pub fn render_plan_with_omitted(
             leaves.push(leaf);
         }
     }
-    (RenderPlan { height, chrome, leaves }, omitted)
+    let mut repeats = vec![];
+    repeats_of(root, ctx, &mut vec![], &mut repeats);
+    (RenderPlan { height, chrome, leaves, repeats }, omitted)
 }
 
 /// A layout-only container still worth drawing — it carries a border /
@@ -1908,5 +2013,151 @@ mod row_floor_stretch_tests {
         let (toggle, rowr) = (r[&tp], r[&rowp]);
         assert_eq!(toggle.3, super::kind_height("toggle"), "{toggle:?}");
         assert_eq!(toggle.1 - rowr.1, (rowr.3 - toggle.3) / 2, "centred: {toggle:?} in {rowr:?}");
+    }
+}
+
+/// Row 290: the web draws Path B panels (the Artboards list among them) as flat
+/// absolutely placed leaves, so iteration k of an identified foreach has no
+/// container a level-2 driver can scope a step's `at` to. The render plan now
+/// names each repeat it expands, and each leaf's chain of `<foreach id>#<k>`
+/// layers comes from its path, as Swift's Path B builds them (row 281,
+/// `RenderPlanRepeatsTests.swift`). The repeat case is Rust's panel plan's
+/// `the_plan_names_each_repeat_it_expands_with_its_row_count` (`panel_plan.rs`),
+/// so the plan, Swift and the web pin one scheme.
+#[cfg(test)]
+mod iteration_layer_tests {
+    use super::{iteration_chain, iteration_layers, render_plan, IterationLayer, RenderRepeat};
+    use serde_json::{json, Value};
+
+    fn panel() -> Value {
+        json!({"content": {"type": "col", "children": [
+            {"type": "text", "id": "head", "content": "x"},
+            {"type": "col", "id": "list", "foreach": {"source": "items", "as": "it"},
+             "do": {"type": "row", "children": [{"type": "text", "id": "name", "content": "{{it.name}}"}]}},
+            {"type": "col", "id": "tree", "foreach": {"source": "els", "as": "e"},
+             "do": {"type": "text", "id": "el", "content": "{{e.name}}"}},
+            {"type": "col", "id": "gone", "visible": false, "foreach": {"source": "items", "as": "g"},
+             "do": {"type": "text", "id": "g", "content": "{{g.name}}"}},
+        ]}})
+    }
+
+    fn ctx() -> Value {
+        json!({"items": [{"name": "a"}, {"name": "b"}],
+               "els": [{"name": "p", "path": [0]}, {"name": "q", "path": [1]}, {"name": "r", "path": [1, 0]}]})
+    }
+
+    fn rep(path: &[i64], id: Option<&str>) -> RenderRepeat {
+        RenderRepeat { path: path.to_vec(), id: id.map(str::to_string) }
+    }
+
+    #[test]
+    fn the_render_plan_names_each_repeat_it_expands() {
+        let plan = render_plan(&panel(), 228, 0, &ctx());
+        assert_eq!(plan.repeats, vec![rep(&[1], Some("list")), rep(&[2], Some("tree"))]);
+        let names: Vec<&Vec<i64>> = plan.leaves.iter().filter(|l| l.node["id"] == "name").map(|l| &l.path).collect();
+        assert_eq!(names.len(), 2, "two iterations, two name leaves: {names:?}");
+        for (k, p) in names.iter().enumerate() {
+            assert!(p.starts_with(&[1, k as i64]), "iteration {k}'s leaf {p:?} sits under repeat [1] + [{k}]");
+        }
+    }
+
+    #[test]
+    fn a_plan_that_expands_no_repeat_lists_none_and_an_empty_one_is_still_named() {
+        let flat = json!({"content": {"type": "col", "children": [{"type": "text", "id": "head", "content": "x"}]}});
+        assert!(render_plan(&flat, 228, 0, &ctx()).repeats.is_empty());
+        let empty = render_plan(&panel(), 228, 0, &json!({"items": [], "els": []}));
+        assert_eq!(empty.repeats, vec![rep(&[1], Some("list")), rep(&[2], Some("tree"))]);
+    }
+
+    #[test]
+    fn a_dynamically_hidden_repeat_is_not_listed() {
+        let p = json!({"content": {"type": "col", "children": [
+            {"type": "col", "id": "maybe", "bind": {"visible": "show"}, "foreach": {"source": "items", "as": "it"},
+             "do": {"type": "text", "id": "n", "content": "{{it.name}}"}},
+        ]}});
+        let mut c = ctx();
+        c["show"] = json!(false);
+        assert!(render_plan(&p, 228, 0, &c).repeats.is_empty(), "hidden: places nothing, lists nothing");
+        c["show"] = json!(true);
+        assert_eq!(render_plan(&p, 228, 0, &c).repeats, vec![rep(&[0], Some("maybe"))], "the control: shown, listed");
+    }
+
+    fn reps() -> Vec<RenderRepeat> {
+        vec![rep(&[0], Some("outer")), rep(&[0, 1, 2], Some("inner")), rep(&[1], None)]
+    }
+
+    #[test]
+    fn a_leafs_chain_names_its_identified_iterations_outermost_first() {
+        let r = reps();
+        assert_eq!(iteration_chain(&[2, 0], &r), Vec::<String>::new(), "outside every repeat");
+        assert_eq!(iteration_chain(&[0, 1, 0], &r), vec!["outer#1"]);
+        assert_eq!(iteration_chain(&[0, 1, 2, 2, 0], &r), vec!["outer#1", "inner#2"], "nested, outermost first");
+        assert_eq!(iteration_chain(&[0, 0], &r), vec!["outer#0"], "a template that is itself a leaf sits at path + [k]");
+        assert_eq!(iteration_chain(&[1, 1, 0], &r), Vec::<String>::new(), "a repeat with no id contributes no layer");
+        assert_eq!(iteration_chain(&[0], &r), Vec::<String>::new(), "the repeat node itself is in no layer of its own");
+        let a = vec![rep(&[0, 1], Some("a"))];
+        assert_eq!(iteration_chain(&[0, 12, 0], &a), Vec::<String>::new(), "components, never a text prefix");
+        // Order is by depth, whatever order the repeats are listed in.
+        let rev: Vec<RenderRepeat> = r.into_iter().rev().collect();
+        assert_eq!(iteration_chain(&[0, 1, 2, 2, 0], &rev), vec!["outer#1", "inner#2"]);
+    }
+
+    fn show(layers: &[IterationLayer]) -> String {
+        layers.iter().map(|l| match l {
+            IterationLayer::Leaf(i) => i.to_string(),
+            IterationLayer::Iteration(id, kids) => format!("{id}[{}]", show(kids)),
+        }).collect::<Vec<_>>().join(" ")
+    }
+
+    fn chains(cs: &[&[&str]]) -> Vec<Vec<String>> {
+        cs.iter().map(|c| c.iter().map(|s| s.to_string()).collect()).collect()
+    }
+
+    #[test]
+    fn iteration_layers_group_each_iteration_once_and_keep_the_leaves_in_plan_order() {
+        // head, list#0's two leaves, list#1's two leaves, a footer: paint order unchanged.
+        let c = chains(&[&[], &["list#0"], &["list#0"], &["list#1"], &["list#1"], &[]]);
+        assert_eq!(show(&iteration_layers(&c)), "0 list#0[1 2] list#1[3 4] 5");
+        // Nested: outer#0 holds inner#0 and inner#1, then a leaf of outer#0's own.
+        let n = chains(&[&["o#0", "i#0"], &["o#0", "i#1"], &["o#0"], &["o#1", "i#0"]]);
+        assert_eq!(show(&iteration_layers(&n)), "o#0[i#0[0] i#1[1] 2] o#1[i#0[3]]");
+        assert_eq!(show(&iteration_layers(&chains(&[&[], &[]]))), "0 1", "no repeat: exactly the flat leaves");
+        assert_eq!(show(&iteration_layers(&[])), "");
+    }
+
+    /// The live subject: the shipped Artboards panel at two artboards gives one
+    /// `ap_list#<k>` layer per artboard, each holding that row's leaves, and
+    /// every layer id occurs exactly once (two copies would make the driver's
+    /// count refuse, and a copy is a split run).
+    #[test]
+    fn the_artboards_panel_draws_one_layer_per_artboard() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        let content = ws.panel("artboards_panel_content").expect("the Artboards panel").clone();
+        let node = if content.get("content").is_some() { content } else { json!({"content": content}) };
+        let c = json!({"active_document": {"artboards": [
+            {"id": "a1", "name": "Artboard 1", "number": 1},
+            {"id": "a2", "name": "Artboard 2", "number": 2},
+        ], "artboards_panel_selection_ids": []}, "theme": {"colors": {"selection": "#3a6ea5"}}, "panel": {}, "state": {}});
+        let plan = render_plan(&node, 228, 0, &c);
+        let ap: Vec<&RenderRepeat> = plan.repeats.iter().filter(|r| r.id.as_deref() == Some("ap_list")).collect();
+        assert_eq!(ap.len(), 1, "the panel expands ap_list once: {:?}", plan.repeats);
+        let cs: Vec<Vec<String>> = plan.leaves.iter().map(|l| iteration_chain(&l.path, &plan.repeats)).collect();
+        let layers = iteration_layers(&cs);
+        fn ids(ls: &[IterationLayer], out: &mut Vec<String>) {
+            for l in ls {
+                if let IterationLayer::Iteration(id, kids) = l {
+                    out.push(id.clone());
+                    ids(kids, out);
+                }
+            }
+        }
+        let mut all = vec![];
+        ids(&layers, &mut all);
+        let ap_ids: Vec<&String> = all.iter().filter(|s| s.starts_with("ap_list#")).collect();
+        assert_eq!(ap_ids, vec!["ap_list#0", "ap_list#1"], "one layer per artboard, in order: {all:?}");
+        let mut sorted = all.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), all.len(), "every layer id occurs once: {all:?}");
     }
 }
