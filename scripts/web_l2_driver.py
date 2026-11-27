@@ -53,6 +53,10 @@ import mac_l2_plan as _plan  # noqa: E402
 
 REPO = _plan.REPO
 SCRIPTS = os.path.join(REPO, "test_fixtures", "input_scripts")
+# Row 291: scripts PROPOSED for the corpus, run by --proposed into one receipt
+# BODY line (outside line 1's count), so a PR shows whether the web passes
+# them before an admission PR moves them into SCRIPTS.
+PROPOSED = os.path.join(REPO, "test_fixtures", "input_scripts_proposed")
 SVGS = os.path.join(REPO, "test_fixtures", "svg")
 SUITE = "web.live"
 WITNESS = "align.left"
@@ -135,8 +139,9 @@ class Browser:
             ctx.close()
 
 
-def run_script(br, path, menubar, menu_ids, artifacts=None):
-    """-> (status, detail, moved). status is PASS, FAIL or REFUSED."""
+def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS):
+    """-> (status, detail, moved). status is PASS, FAIL or REFUSED. The
+    expected JSON is read from `scripts_dir` (the corpus, or PROPOSED)."""
     with open(path, encoding="utf-8") as f:
         script = json.load(f)
     name = os.path.basename(path)[:-5]
@@ -144,7 +149,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         acts = _plan.plan(script, menubar, _plan.load_spec(script))
     except _plan.Refused as e:
         return "REFUSED", str(e), None
-    with open(os.path.join(SCRIPTS, script["expected_json"]), encoding="utf-8") as f:
+    with open(os.path.join(scripts_dir, script["expected_json"]), encoding="utf-8") as f:
         want = f.read().strip()
     ctx, page = br.page(True)
     try:
@@ -154,7 +159,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         ctx.close()
         return "REFUSED", f"window.__jasTest did not appear within {HOOK_TIMEOUT_MS} ms", None
     held = set()
-    st = {"origin": None, "view": None, "opened": None}
+    st = {"origin": None, "view": None, "opened": None, "misreads": []}
 
     def sync_mods(mods):
         for m in sorted(held - set(mods)):
@@ -180,6 +185,22 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         item.wait_for(timeout=5000)
         item.click()
         page.wait_for_timeout(200)
+
+    def show_panel(pid, tab, wpath):
+        """Show panel `pid` as a person does when it is not drawn: its dock
+        tab, or, for a panel in no dock group, its Window menu item."""
+        if page.locator(f"#{pid}").count() != 0:
+            return
+        tabs = page.locator(f"#{tab}")
+        if tabs.count() > 1:
+            raise _plan.Refused(f"{tabs.count()} dock tabs carry id {tab!r}")
+        if tabs.count() == 1:
+            tabs.click()
+        elif wpath:
+            menu_click(wpath)
+        else:
+            raise _plan.Refused(f"panel {pid!r} has no dock tab and no unique Window item")
+        page.wait_for_timeout(300)
 
     def canvas_origin():
         loc = page.locator("#jas-canvas")
@@ -230,19 +251,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
         elif k == "panel":
             release_mods()
             pid, tab, wpath, widget, event, value, iterations = panel_fields(act)
-            if page.locator(f"#{pid}").count() == 0:
-                # Show it as a person does: its dock tab, or, for a panel in no
-                # dock group, its Window menu item.
-                tabs = page.locator(f"#{tab}")
-                if tabs.count() > 1:
-                    raise _plan.Refused(f"{tabs.count()} dock tabs carry id {tab!r}")
-                if tabs.count() == 1:
-                    tabs.click()
-                elif wpath:
-                    menu_click(wpath)
-                else:
-                    raise _plan.Refused(f"panel {pid!r} has no dock tab and no unique Window item")
-                page.wait_for_timeout(300)
+            show_panel(pid, tab, wpath)
             panels = page.locator(f"#{pid}")
             if panels.count() != 1:
                 raise _plan.Refused(f"{panels.count()} panels carry id {pid!r}")
@@ -266,6 +275,73 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
                 fields.first.fill(str(value))
                 fields.first.press("Enter")
             page.wait_for_timeout(200)
+        elif k == "seed":
+            # Row 291: the script's app_state, through the hook's seed (the
+            # engine's ruled check, then the app's set_panel_state route).
+            r = seed_reply(page.evaluate("(j) => window.__jasTest.seed(j)", act[1]))
+            if r is not None:
+                raise _plan.Refused(r)
+            page.wait_for_timeout(200)
+        elif k == "panel_menu":
+            # Row 291: the person's route. Show the panel, press its group's
+            # hamburger (the identity the plan names), pick the item by the
+            # title a person reads.
+            release_mods()
+            pid, tab, wpath, menu_id, label = panel_menu_fields(act)
+            show_panel(pid, tab, wpath)
+            btn = page.locator(f'[id="{menu_id}"]')
+            if btn.count() != 1:
+                raise _plan.Refused(f"{btn.count()} panel menu buttons carry id {menu_id!r}")
+            # The hamburger opens on mousedown at the press point, as a
+            # menubar title does (menu_click), so the press carries one.
+            box = btn.bounding_box()
+            btn.dispatch_event("mousedown", {"bubbles": True, "clientX": box["x"] + box["width"] / 2,
+                                             "clientY": box["y"] + box["height"] / 2})
+            flyout = page.locator(f'[id="{menu_id}_items"]')
+            flyout.wait_for(timeout=5000)
+            items = flyout.get_by_role("menuitem", name=label, exact=True)
+            if items.count() != 1:
+                raise _plan.Refused(f"{items.count()} items of {menu_id!r} read {label!r}")
+            if items.first.get_attribute("aria-disabled") == "true":
+                raise _plan.Refused(f"the item {label!r} of {menu_id!r} is disabled")
+            items.first.click()
+            page.wait_for_timeout(300)
+        elif k == "dialog":
+            # Row 291: a widget of the OPEN dialog, found inside that dialog's
+            # box (`<dialog id>_dialog`), after the hook confirms which is open.
+            release_mods()
+            did, box_id, wid, event, value = dialog_fields(act)
+            open_id = dialog_open(page.evaluate("() => window.__jasTest.dialog()"))
+            if open_id != did:
+                raise _plan.Refused(f"a dialog step for {did!r}, but the open dialog is {open_id!r}")
+            boxes = page.locator(f'[id="{box_id}"]')
+            if boxes.count() != 1:
+                raise _plan.Refused(f"{boxes.count()} dialog boxes carry id {box_id!r}")
+            ws = boxes.locator(f'[id="{wid}"]')
+            if ws.count() != 1:
+                raise _plan.Refused(f"{ws.count()} widgets carry id {wid!r} in {box_id!r}")
+            w = ws.first
+            if w.is_disabled() or w.get_attribute("aria-disabled") == "true":
+                raise _plan.Refused(f"widget {wid!r} is disabled")
+            tag = w.evaluate("e => e.tagName.toLowerCase()")
+            if event == "click":
+                w.click()
+            elif tag == "select" or w.locator("select").count() == 1:
+                (w if tag == "select" else w.locator("select")).select_option(value=str(value))
+            else:
+                fields = w if tag in ("input", "textarea") else w.locator("input, textarea")
+                if fields.count() != 1:
+                    raise _plan.Refused(f"widget {wid!r} holds {fields.count()} text fields; a commit needs one")
+                fields.first.fill(str(value))
+                fields.first.press("Enter")
+            page.wait_for_timeout(300)
+        elif k == "read" and act[1] == "dialog":
+            # Row 291: the open dialog, by the hook, against the plan's id.
+            release_mods()
+            page.wait_for_timeout(150)
+            ok, g, w = _plan.compare_read(act, page.evaluate("() => window.__jasTest.dialog()"), None)
+            if not ok:
+                st["misreads"].append(f"read dialog: the open dialog is {g}, not {w}")
         elif k == "menu":
             release_mods()
             menu_click(act[1])
@@ -283,6 +359,8 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
                 got = r
         opened = _plan.set_aside_the_opens_artboard(st["opened"], want) if st["opened"] else None
         moved = got != opened
+        if st["misreads"]:
+            return "FAIL", "; ".join(st["misreads"]), moved
         if got == want:
             return "PASS", "", moved
         if artifacts:
@@ -999,7 +1077,7 @@ def run(args):
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = fit = layers = abfill = at = None
+    dock = dock_cases = fit = layers = abfill = at = proposed = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -1034,6 +1112,17 @@ def run(args):
             for c, st, d in layer_cases:
                 lines.append(f"{st} layers {c}" + (f" -- {d}" if d else ""))
             layers = _plan.layers_line(layer_cases)
+        if args.proposed:
+            if not_run:
+                proposed = "PROPOSED NOT RUN (" + not_run + ")"
+            else:
+                pres = []
+                for p in sorted(glob.glob(os.path.join(PROPOSED, "*.json"))):
+                    if p.endswith(".expected.json"):
+                        continue
+                    st_, d_, _m = run_script(br, p, menubar, menu_ids, args.artifacts, scripts_dir=PROPOSED)
+                    pres.append((os.path.basename(p)[:-5], st_, d_))
+                proposed = proposed_line(pres)
         if args.at:
             at = ("AT NOT RUN (" + not_run + ")" if not_run else
                   at_line([(k,) + run_at_check(br, k) for k in (1, 0)]))
@@ -1053,6 +1142,8 @@ def run(args):
         body.append(abfill + " (the --artboard-fill check: Artboard Options' Fill dropdown by the person's route, row 270)")
     if at is not None:
         body.append(at + " (the --at check: Options pressed inside iteration k of ap_list, Fill > White; k=0 is k=1's control, row 290)")
+    if proposed is not None:
+        body.append(proposed + " (the --proposed check: the scripts in test_fixtures/input_scripts_proposed, outside items=P/N on purpose, row 291)")
     if layers is not None:
         body.append(layers + " (the --layers check: the Mac harness's `layers` cases on the web, rows 256/264/266)")
     if fit is not None:
@@ -1074,8 +1165,50 @@ def run(args):
 # read (TESTING.md, row 50) have no web hook yet; they are refused by name,
 # because answering a state read with the document, or skipping a press, would
 # read as measured.
-WEB_ACTS = {"open", "tool", "pointer", "key", "panel", "menu"}
-WEB_READS = {"document"}
+WEB_ACTS = {"open", "tool", "pointer", "key", "panel", "menu", "seed", "panel_menu", "dialog"}
+WEB_READS = {"document", "dialog"}
+
+
+def panel_menu_fields(act):
+    """A planned panel_menu act (mac_l2_plan._plan_panel_menu) as (pid, tab,
+    wpath, menu button id, item title), or Refused by name."""
+    if len(act) != 6:
+        raise _plan.Refused(f"a panel_menu act has 6 fields, not {len(act)}: {act!r}")
+    _, pid, tab, wpath, menu_id, label = act
+    return pid, tab, wpath, menu_id, label
+
+
+def dialog_fields(act):
+    """A planned dialog act (mac_l2_plan._plan_dialog) as (dialog id, its box's
+    DOM id, widget, event, value), or Refused by name."""
+    if len(act) != 8:
+        raise _plan.Refused(f"a dialog act has 8 fields, not {len(act)}: {act!r}")
+    _, did, box_id, wid, event, value, _label, _wtype = act
+    return did, box_id, wid, event, value
+
+
+def seed_reply(text):
+    """None when the hook's seed answered {"seeded": n}; else the refusal."""
+    try:
+        r = json.loads(text or "")
+    except ValueError:
+        return f"the app's seed answered {text!r}, not JSON"
+    if isinstance(r, dict) and isinstance(r.get("refused"), str):
+        return "seed REFUSED " + r["refused"]
+    if isinstance(r, dict) and set(r) == {"seeded"} and isinstance(r["seeded"], int):
+        return None
+    return f"the app's seed answered {text!r}"
+
+
+def dialog_open(text):
+    """The open dialog's id (or None) from the hook's dialog reply, or Refused."""
+    try:
+        r = json.loads(text or "")
+    except ValueError:
+        r = None
+    if not (isinstance(r, dict) and set(r) == {"dialog"}):
+        raise _plan.Refused(f"the app's dialog read is {text!r}, not {{\"dialog\": <id or null>}}")
+    return r["dialog"]
 
 
 def panel_fields(act):
@@ -1146,6 +1279,17 @@ def scoped_root(root, iterations, where):
                 raise _plan.Refused(f"iteration {k} of {name!r} in {where!r} is not drawn")
         root, where = it, f"{name}#{k}"
     return root, where
+
+
+def proposed_line(results):
+    """Row 291: the --proposed body line over [(name, status, detail)]:
+    `PROPOSED PASS` only when there is at least one script and every one
+    passed; else FAIL, or REFUSED when any was refused, naming each."""
+    if not results:
+        return "PROPOSED REFUSED -- no proposed script was found"
+    sts = [st for _, st, _ in results]
+    v = "PASS" if all(st == "PASS" for st in sts) else ("REFUSED" if "REFUSED" in sts else "FAIL")
+    return f"PROPOSED {v} -- " + "; ".join(f"{n}: {st}" + (f" ({d})" if d else "") for n, st, d in results)
 
 
 def undelivered(act):
@@ -1286,9 +1430,56 @@ def self_test():
             fails.append(f"a malformed scope {bad} raises {type(e).__name__}, not a refusal: {e}")
     ids = menu_ids_by_path(menubar)
     check(ids.get(tuple(_plan.menu_paths(menubar)["menu_group"])) == "menu_group", "a menu path maps back to its id")
-    for a in (("toolbar", "btn_arrow_slot", 400), ("read", "state", ("active_tool",), "{}"), ("read", "dialog", None)):
+    for a in (("toolbar", "btn_arrow_slot", 400), ("read", "state", ("active_tool",), "{}")):
         check(undelivered(a) is not None and str(a[1]) in undelivered(a), f"{a[:2]} is refused by name")
     check(undelivered(("read", "document")) is None, "a document read is delivered")
+    # Row 291: seed, panel_menu, the dialog step and the dialog read are
+    # delivered, and both proposed Artboard Options scripts plan to acts the
+    # web delivers, each of the four kinds at least once.
+    check(undelivered(("read", "dialog", None)) is None, "a dialog read is delivered")
+    kinds = set()
+    for fp in ("fill_white", "preset_a4"):
+        sp = os.path.join(REPO, "test_fixtures", "input_scripts_proposed", f"artboard_options.{fp}.json")
+        with open(sp, encoding="utf-8") as fh:
+            sc = json.load(fh)
+        try:
+            pa = _plan.plan(sc, menubar, _plan.load_spec(sc))
+            bad = [a[:2] for a in pa if undelivered(a)]
+            check(not bad, f"proposed {fp}: every act is delivered (undelivered: {bad})")
+            kinds |= {a[0] if a[0] != "read" else "read " + a[1] for a in pa}
+        except _plan.Refused as e:
+            fails.append(f"proposed {fp} is refused by the plan: {e}")
+    check({"seed", "panel_menu", "dialog", "read dialog"} <= kinds, f"the proposed scripts exercise all four ({sorted(kinds)})")
+    check(proposed_line([("a", "PASS", ""), ("b", "PASS", "")]) == "PROPOSED PASS -- a: PASS; b: PASS",
+          "--proposed passes only when every proposed script passes")
+    check(proposed_line([("a", "PASS", ""), ("b", "FAIL", "x")]).startswith("PROPOSED FAIL -- a: PASS; b: FAIL (x)"),
+          "--proposed names a failing script and its reason")
+    check(proposed_line([("a", "FAIL", ""), ("b", "REFUSED", "y")]).startswith("PROPOSED REFUSED"),
+          "--proposed reads REFUSED when any script was refused")
+    check(proposed_line([]).startswith("PROPOSED REFUSED"), "--proposed with no script is never a pass")
+    check(seed_reply('{"seeded": 1}') is None, "a seeded reply passes")
+    check(seed_reply('{"refused": "UndeclaredPanelKey p.k"}') == "seed REFUSED UndeclaredPanelKey p.k",
+          "a refused seed is refused by name, carrying the app's reason")
+    for odd in ("", "x", '{"seeded": "1"}', '{"seeded": 1, "x": 2}', "[]"):
+        check(seed_reply(odd) is not None, f"an odd seed reply {odd!r} is never a pass")
+    check(dialog_open('{"dialog": "artboard_options"}') == "artboard_options" and dialog_open('{"dialog": null}') is None,
+          "the dialog read gives the open id or None")
+    for odd in ("", '{"dialog": 1, "x": 2}', '"artboard_options"'):
+        try:
+            dialog_open(odd)
+            fails.append(f"an odd dialog reply {odd!r} is refused by name")
+        except _plan.Refused:
+            pass
+    check(panel_menu_fields(("panel_menu", "p_c", "p_c_tab", None, "p_c_menu", "Options..."))
+          == ("p_c", "p_c_tab", None, "p_c_menu", "Options..."), "a panel_menu act reads as its five fields")
+    check(dialog_fields(("dialog", "d", "d_dialog", "w", "commit", "white", "White", "select"))
+          == ("d", "d_dialog", "w", "commit", "white"), "a dialog act reads as its five fields")
+    for short in (("panel_menu", "p"), ("dialog", "d", "d_dialog")):
+        try:
+            (panel_menu_fields if short[0] == "panel_menu" else dialog_fields)(short)
+            fails.append(f"a short {short[0]} act is refused by name")
+        except _plan.Refused:
+            pass
     check(undelivered(("pointer", "press", 0, 0, False, ())) is None, "a pointer act is delivered")
     check(key_chord("Z", ("ctrl",)) == "Control+Z", "ctrl is Control")
     check(key_chord("Delete", ()) == "Delete", "named keys pass through")
@@ -1460,6 +1651,8 @@ def main(argv):
                     help="also read the dock's fit under overlay and classic scrollbars (row 66)")
     ap.add_argument("--at", action="store_true",
                     help="also drive a panel step scoped to one foreach iteration (Artboards Options in row k) and read it (row 290)")
+    ap.add_argument("--proposed", action="store_true",
+                    help="also run the PROPOSED scripts into one receipt body line, outside the corpus count (row 291)")
     ap.add_argument("--artboard-fill", action="store_true",
                     help="also pick White in Artboard Options' Fill dropdown and read the artboard (row 270)")
     ap.add_argument("--layers", action="store_true",

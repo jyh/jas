@@ -65,6 +65,14 @@ pub fn panel_menu_items_dom_id(content_id: &str) -> String {
     format!("{}_items", panel_menu_dom_id(content_id))
 }
 
+/// The DOM id of an open dialog's box (row 291): the dialog's id plus
+/// `_dialog`, the id the shared planner's dialog act names
+/// (`mac_l2_plan.DIALOG_SUFFIX`), so a driver finds a widget inside the
+/// dialog that is open and nowhere else.
+pub fn dialog_dom_id(dialog_id: &str) -> String {
+    format!("{dialog_id}_dialog")
+}
+
 /// The DOM id of a dock GROUP's root element (row 111: Window > <panel>
 /// scrolls the group it leaves a panel in into view). One statement, used by
 /// the render and by the scroll.
@@ -361,6 +369,7 @@ mod tests {
         assert_eq!(panel_menu_dom_id("artboards_panel_content"), "artboards_panel_content_menu");
         assert_eq!(panel_menu_items_dom_id("artboards_panel_content"), "artboards_panel_content_menu_items");
         assert_ne!(panel_menu_dom_id("artboards_panel_content"), tab_dom_id("artboards_panel_content"));
+        assert_eq!(dialog_dom_id("artboard_options"), "artboard_options_dialog", "the planner's DIALOG_SUFFIX");
     }
 
     #[test]
