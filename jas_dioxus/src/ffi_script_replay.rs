@@ -370,6 +370,58 @@ fn the_location_combo_on_a_midpoint_moves_the_midpoint() {
     assert_eq!(stop[0]["midpoint_to_next"].as_f64(), Some(50.0), "got {stop}");
 }
 
+/// Whether a script uses a section-6 form `replay` does not take: a
+/// panel_menu or dialog step, a read before its last step, or a non-empty
+/// `app_state` seed. `replay_forms` is the engine replay that delivers them
+/// (row 275); row 284 admitted the first scripts that need it.
+fn uses_forms(script: &Value) -> bool {
+    let steps = script["steps"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let early_read = steps.iter().rev().skip(1).any(|st| st.get("read").is_some());
+    steps.iter().any(|st| st.get("panel_menu").is_some() || st.get("dialog").is_some())
+        || early_read
+        || script["app_state"].as_object().is_some_and(|m| !m.is_empty())
+}
+
+/// A corpus script's read-back: through `replay`, or, for a script that
+/// uses a form only `replay_forms` delivers, its LAST document read, after
+/// checking its `expected_dialog` (one entry per dialog read, in order)
+/// when it has one. A refusal is named, as `replay` names one.
+fn corpus_read_back(script: &Value) -> Result<String, String> {
+    if !uses_forms(script) {
+        return replay(script);
+    }
+    let item = script["item"].as_str().unwrap_or("?");
+    let out = replay_forms(script)?;
+    if let Some(why) = refusal(&out) {
+        return Err(format!("script {item}: {why}"));
+    }
+    if let Some(want) = script.get("expected_dialog") {
+        let got = Value::Array(dialog_reads(&out));
+        if &got != want {
+            return Err(format!("script {item}: the dialog reads {got} are not expected_dialog {want}"));
+        }
+    }
+    let doc = out.iter().rev().find(|r| r["read"] == "document")
+        .ok_or_else(|| format!("script {item}: no document read"))?;
+    serde_json::to_string(&doc["value"]).map_err(|x| x.to_string())
+}
+
+/// The forms route checks a script's `expected_dialog`, so a corpus script
+/// whose dialog reads are not its own expectation is refused by name. The
+/// control is the same script as shipped, which reads back.
+#[test]
+fn a_forms_script_whose_dialog_reads_are_not_its_expectation_is_refused() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let mut script: Value = serde_json::from_str(&read("input_scripts/artboard_options.fill_white.json")).unwrap();
+    assert!(uses_forms(&script), "the subject takes the forms route");
+    assert!(corpus_read_back(&script).is_ok(), "the control: as shipped it reads back");
+    script["expected_dialog"] = serde_json::json!([null, null]);
+    let why = corpus_read_back(&script).expect_err("a wrong expected_dialog is refused");
+    assert!(why.contains("expected_dialog"), "{why}");
+    let plain: Value = serde_json::from_str(&read("input_scripts/align.left.json")).unwrap();
+    assert!(!uses_forms(&plain), "a panel script with one final read takes `replay`");
+}
+
 #[test]
 fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
     // The ABI's counters are process-wide; the tests that read them serialise
@@ -378,11 +430,12 @@ fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
     let files = script_files();
     assert!(files.iter().any(|f| f == "align.left.json"), "the population lacks a panel script: {files:?}");
     assert!(files.iter().any(|f| f == "shortcut.undo.json"), "the population lacks a key script: {files:?}");
+    assert!(files.iter().any(|f| f == "artboard_options.fill_white.json"), "the population lacks a forms script: {files:?}");
     let mut wrong = vec![];
     for f in &files {
         let script: Value = serde_json::from_str(&read(&format!("input_scripts/{f}"))).unwrap();
         let expected = read(&format!("input_scripts/{}", script["expected_json"].as_str().unwrap()));
-        match replay(&script)
+        match corpus_read_back(&script)
             .and_then(|got| set_aside_the_opens_artboard(&got, expected.trim()))
             .and_then(|got| accept_minted_ids(&got, expected.trim())) {
             Ok(actual) if actual == expected.trim() => {}
