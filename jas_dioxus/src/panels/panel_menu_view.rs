@@ -41,6 +41,7 @@ pub fn PanelMenuOverlay() -> Element {
     // `enabled_when` / `checked_when` — the same context `panel_is_enabled` /
     // `panel_is_checked` build per call.
     let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+    let items_dom_id = crate::workspace::test_hook::panel_menu_items_dom_id(content_id);
     let menu_ctx = super::panel_menu::panel_menu_ctx(content_id, &st);
         // Flip submenu to the left when the parent menu is near
         // the right edge of the viewport — otherwise left:100%
@@ -137,9 +138,14 @@ pub fn PanelMenuOverlay() -> Element {
                 } else {
                     (THEME_TEXT_HINT, "default", "0.5")
                 };
+                let disabled = if enabled { "false" } else { "true" };
                 rsx! {
                     div {
                         class: "jas-menu-item",
+                        // Row 291: an action item a level-2 driver picks by
+                        // its title, as the Mac picks it by its AX title.
+                        role: "menuitem",
+                        "aria-disabled": "{disabled}",
                         style: "padding:4px 24px 4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                         // Stop the mousedown so the backdrop doesn't
                         // dismiss the menu before our onclick fires.
@@ -287,6 +293,8 @@ pub fn PanelMenuOverlay() -> Element {
         }
         // Menu dropdown
         div {
+            id: "{items_dom_id}",
+            role: "menu",
             style: "position:fixed; left:{x}px; top:{y}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();

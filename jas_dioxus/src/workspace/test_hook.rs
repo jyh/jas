@@ -52,6 +52,19 @@ pub fn tab_dom_id(content_id: &str) -> String {
     format!("{content_id}_tab")
 }
 
+/// The DOM id of a dock group's hamburger (row 291): the ACTIVE panel's
+/// content id plus `_menu`, as the Mac's `panelMenuButtonId` names it and as
+/// the shared planner's panel_menu act names it (`mac_l2_plan.MENU_SUFFIX`).
+pub fn panel_menu_dom_id(content_id: &str) -> String {
+    format!("{content_id}_menu")
+}
+
+/// The DOM id of that hamburger's flyout (row 291), whose action items carry
+/// `role="menuitem"` and are picked by the title a person reads.
+pub fn panel_menu_items_dom_id(content_id: &str) -> String {
+    format!("{}_items", panel_menu_dom_id(content_id))
+}
+
 /// The DOM id of a dock GROUP's root element (row 111: Window > <panel>
 /// scrolls the group it leaves a panel in into view). One statement, used by
 /// the render and by the scroll.
@@ -339,6 +352,16 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = include_str!("../../../test_fixtures/svg/three_rects.svg");
+
+    /// Row 291: a dock group's hamburger is `<active panel content id>_menu`
+    /// (the Mac's `panelMenuButtonId`, and the id the shared planner's
+    /// panel_menu act names), and its flyout is that id plus `_items`.
+    #[test]
+    fn the_panel_menu_ids_derive_from_the_content_id() {
+        assert_eq!(panel_menu_dom_id("artboards_panel_content"), "artboards_panel_content_menu");
+        assert_eq!(panel_menu_items_dom_id("artboards_panel_content"), "artboards_panel_content_menu_items");
+        assert_ne!(panel_menu_dom_id("artboards_panel_content"), tab_dom_id("artboards_panel_content"));
+    }
 
     #[test]
     fn the_flag_is_one_whole_parameter() {
