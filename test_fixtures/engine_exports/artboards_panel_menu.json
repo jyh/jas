@@ -1,0 +1,108 @@
+[
+  {
+    "action": "new_artboard",
+    "checked": null,
+    "enabled": true,
+    "id": null,
+    "index": 0,
+    "kind": "item",
+    "label": "New Artboard"
+  },
+  {
+    "action": "duplicate_artboards",
+    "checked": null,
+    "enabled": false,
+    "id": null,
+    "index": 1,
+    "kind": "item",
+    "label": "Duplicate Artboards"
+  },
+  {
+    "action": "delete_artboards",
+    "checked": null,
+    "enabled": false,
+    "id": null,
+    "index": 2,
+    "kind": "item",
+    "label": "Delete Artboards"
+  },
+  {
+    "action": "rename_artboard",
+    "checked": null,
+    "enabled": false,
+    "id": null,
+    "index": 3,
+    "kind": "item",
+    "label": "Rename"
+  },
+  {
+    "index": 4,
+    "kind": "separator"
+  },
+  {
+    "action": "delete_empty_artboards",
+    "checked": null,
+    "enabled": true,
+    "id": null,
+    "index": 5,
+    "kind": "item",
+    "label": "Delete Empty Artboards"
+  },
+  {
+    "index": 6,
+    "kind": "separator"
+  },
+  {
+    "action": "convert_to_artboards",
+    "checked": null,
+    "enabled": false,
+    "id": null,
+    "index": 7,
+    "kind": "item",
+    "label": "Convert to Artboards"
+  },
+  {
+    "action": "open_artboard_options",
+    "checked": null,
+    "enabled": false,
+    "id": null,
+    "index": 8,
+    "kind": "item",
+    "label": "Artboard Options..."
+  },
+  {
+    "action": "rearrange_artboards",
+    "checked": null,
+    "enabled": false,
+    "id": null,
+    "index": 9,
+    "kind": "item",
+    "label": "Rearrange..."
+  },
+  {
+    "index": 10,
+    "kind": "separator"
+  },
+  {
+    "action": "reset_artboards_panel",
+    "checked": null,
+    "enabled": true,
+    "id": null,
+    "index": 11,
+    "kind": "item",
+    "label": "Reset Panel"
+  },
+  {
+    "index": 12,
+    "kind": "separator"
+  },
+  {
+    "action": "close_panel",
+    "checked": null,
+    "enabled": true,
+    "id": null,
+    "index": 13,
+    "kind": "item",
+    "label": "Close Artboards"
+  }
+]

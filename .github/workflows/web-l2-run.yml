@@ -53,11 +53,13 @@ jobs:
       # and classic 16-px scrollbars); its FIT line rides in the receipt body.
       # --layers: the Mac harness's Layers tree cases on the web (row 266); its
       # LAYERS line rides in the receipt body.
+      # --at: a panel step scoped to one foreach iteration (row 290); its AT line
+      # rides in the receipt body.
       - name: Every input script through the live web app
         run: |
           python scripts/web_l2_driver.py --url http://127.0.0.1:8080/jas/ \
             --head "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock --fit --layers --artboard-fill
+            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock --fit --layers --artboard-fill --at
       - name: The receipt in the run summary
         if: always()
         run: |

@@ -1767,6 +1767,15 @@ static class Program
                 ProbeWire.DialogField(false, null),
                 ProbeWire.DialogField(true, null),
             }));
+        // Row 284 (jas STATUS-flask 1027 item 1): the dock's tab and the panel
+        // menu's items carry an AutomationId a driver can find them by. Neither is
+        // read aloud (a Name or HelpText would be), so a person hears nothing new.
+        Eq("dock tab id: the group key and the panel content id",
+            "dock4_tab_artboards_panel_content", DockWire.TabAutomationId("dock4", "artboards_panel_content"));
+        Eq("panel menu item id: the item's action; a row with none has none",
+            "open_artboard_options|",
+            PanelMenuWire.ItemAutomationId(new PanelMenuRow(8, "item", "Artboard Options...", "open_artboard_options", true, null))
+            + "|" + PanelMenuWire.ItemAutomationId(new PanelMenuRow(0, "item", "x", "", true, null)));
         // THE CLASS AUDIT, arm D (jas STATUS-flask 1024 item 1): the shell's plan
         // readers over the WHOLE corpus of the engine's real plan bytes, the 116
         // e2e baselines' probes (each plan sliced raw from the probe body and
@@ -1837,6 +1846,13 @@ static class Program
             "plans=corpus values=read failed=0",
             $"plans={(auPlans >= 100 ? "corpus" : auPlans.ToString(System.Globalization.CultureInfo.InvariantCulture))} values={(auValues >= 100 ? "read" : auValues.ToString(System.Globalization.CultureInfo.InvariantCulture))} failed={auBad.Count}"
             + (auBad.Count > 0 ? " " + string.Join(" | ", auBad.Take(3)) : ""));
+        // jas STATUS-flask 1031: after a menu act the shell asks the engine whether
+        // a document is open (jas_document_is_open), so File > New after the last
+        // tab closed lifts the no-document cover. 1 open, 0 closed; 255 (a null
+        // engine) or any other value is unknown, and the cover is left as it is.
+        Eq("document open: 1 is open, 0 is closed, anything else is unknown",
+            "True|False|(unknown)|(unknown)",
+            string.Join("|", new byte[] { 1, 0, 255, 7 }.Select(b => DocumentWire.OpenOf(b) is bool o ? o.ToString() : "(unknown)")));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
             "Proposed: nudge|(no bar)",

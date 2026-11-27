@@ -328,6 +328,19 @@
       },
       "notes": "Row 257 D4: the ENGINE's jas_panel_row_menu export for the default document's layer row, pinned by the Rust test, which rewrites it under JAS_WRITE_ROW_MENU_FIXTURE=1. Its second consumer is the WinUI shell's wire test (prototypes/sb_winui_tests/Program.cs, RowMenuWire.Parse), which this gate's consumer set (rust, swift, reference, scripts) does not cover, so it is named here instead of claimed. Not port-symmetric BY DESIGN: Swift draws the row menu from the same spec through its own door (LayersRowMenu), not from this export."
     },
+    "test_fixtures/engine_exports": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust"
+      ],
+      "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "pins of the engine's exports; the laws are the exports themselves, each already driven by its own arms in ffi.rs",
+      "claim_style": {
+        "rust": "path reference (ffi.rs the_engine_exports_a_shell_reads_are_pinned, CARGO_MANIFEST_DIR join)"
+      },
+      "notes": "Row 287 (STATUS-flask 1025, the class audit after #1137's web red): the ENGINE's real bytes for the shapes a shell reads that no shipped corpus holds (the Layers plan at the default document with its hit surfaces and tree binds; the Artboards plan with two artboards, its repeats and named row leaves; the Artboards panel menu; a row click's reply; the Artboard Options dialog plan; the Default dock layout), pinned by the Rust test, which rewrites them under JAS_WRITE_ENGINE_EXPORTS=1 and floors what each pin is for. The WinUI harness's corpus arms are their next consumer (flask)."
+    },
     "test_fixtures/panel_keys": {
       "kind": "fixtures",
       "required_consumers": [

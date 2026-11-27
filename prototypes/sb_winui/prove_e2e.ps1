@@ -117,9 +117,13 @@ $clickCount = [int]$sc.Clicks
 $clickPoints = @(ConvertFrom-SbPanelText $panelText | Where-Object { $_.click })
 # DIALOG STEPS (row 275 C2) ride the same list; each probes (jas 1006 A).
 $dialogCount = [int]$sc.Dialogs
+# PANEL_MENU STEPS (row 284) ride the same list; each probes (a panel-menu run).
+# A script with one is a DOCK script: the group menu exists only in the dock.
+$panelMenuCount = [int]$sc.PanelMenus
+$launchMode = "$($sc.Mode)"
 # Captured here: `$sc` is reused for the scale below.
 $dialogReads = @($sc.DialogReads); $expectedDialog = @($sc.ExpectedDialog)
-$lateCount = $panelCount + $menuCount + $clickCount + $dialogCount
+$lateCount = $panelCount + $menuCount + $clickCount + $dialogCount + $panelMenuCount
 # G11 STEP 3: A DOUBLE-CLICK is the gesture's click and then one more click at
 # the same point inside the double-click time (`double`), and `then-click`
 # adds one more after that time. Each extra click is a release, so each writes
@@ -150,6 +154,9 @@ $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
 # ---- launch, holding, with the probe on ------------------------------------
 $env:SB_PROBE = 'sb-probe.json'
+# ROW 284: a script with a panel_menu step launches the Default dock, where
+# its panel's tab and group menu are; every other script launches as before.
+if ($launchMode -eq 'dock') { $env:SB_DOCK = 'Default' }
 # ROW E/F: a panel step's `row` or `at` is read from the plan the panel was drawn from,
 # so a script with one opens its panel by SB_PANEL (only that pane then writes
 # SB_PLAN_OUT) and hands the plan file to the hand. Scripts without a row
@@ -516,15 +523,18 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
     $menuRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'MENU ACTION RAN item=' })
     # A dialog step's (row 275 C2) is the shell's own `DIALOG EVENT via=hand` row.
     $dialogRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'DIALOG EVENT via=hand widget=' })
+    # A panel_menu step's (row 284) is the shell's `PANEL MENU RAN … via=hand` row.
+    $pmRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'PANEL MENU RAN group=' })
     # A late click (node 29) is not a panel step: its arrival is its own
     # POINTER REAL row, which the drive check above already holds to the script.
     $missing = @(ConvertFrom-SbPanelText $panelText | Where-Object { -not $_.click } | Where-Object {
         if ($_.menu) { $want = "MENU ACTION RAN item=$($_.menu) "; @($menuRows | Where-Object { $_.Contains($want) }).Count -eq 0 }
         elseif ($_.dialog) { $want = "DIALOG EVENT via=hand widget=$($_.widget) "; $ev = " event=$($_.event) "; @($dialogRows | Where-Object { $_.Contains($want) -and $_.Contains($ev) }).Count -eq 0 }
+        elseif ($_.panel_menu) { $pmp = " panel=$($_.panel_menu) "; @($pmRows | Where-Object { $_.Contains($pmp) -and $_.Contains(' via=hand ') }).Count -eq 0 }
         else {
             $want = "PANEL CLICK panel=$($_.panel) widget=$($_.widget) via=hand event=$($_.event) "
             @($clickRows | Where-Object { $_.Contains($want) }).Count -eq 0 } } |
-        ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget)" } else { "$($_.panel)/$($_.widget)" } })
+        ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } elseif ($_.panel_menu) { "panel_menu:$($_.panel_menu)/$($_.action)" } elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget)" } else { "$($_.panel)/$($_.widget)" } })
     if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK, MENU ACTION RAN or DIALOG EVENT row for $($missing -join ','))" }
 }
 # {"read": "dialog"} (row 275 C2): each read is the dialog= field of the probe

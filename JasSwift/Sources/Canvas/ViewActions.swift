@@ -29,14 +29,12 @@ import Foundation
 /// the panel body renders from it, so it is where `artboards_panel_select` puts the
 /// selection.
 ///
-/// KNOWN, NOT FIXED HERE: four Swift sites read or write the UN-suffixed
-/// `"artboards"` bucket instead — `ContentView.buildDialogOuterScope`,
-/// `ArtboardsPanel.dispatch`, `YamlDialogView`, and the Artboard TOOL's writes in
-/// `YamlToolEffects`. Those are a different bucket entirely (`StateStore` does no
-/// normalisation on read), so a panel row-click and a canvas artboard click record
-/// their selection in two places that cannot see each other. Rust has one bucket
-/// (`AppState.artboards_panel_selection`). Naming the canonical scope here rather
-/// than joining the split; the four sites are banked as their own item.
+/// Sites that spell it `"artboards"` (the dialog scope, `ArtboardsPanel.dispatch`,
+/// the Artboard tool, the align-to-artboard verb) address this SAME scope:
+/// ``StateStore/panelContentId(_:)`` appends the suffix at the store's boundary
+/// on every read and write, so there is one bucket, as Rust has one
+/// (`AppState.artboards_panel_selection`). (Until that normalisation this note
+/// said the two spellings were two buckets; STATUS-jas row 289 found it stale.)
 let artboardsPanelScope = "artboards_panel_content"
 
 public enum ViewActions {

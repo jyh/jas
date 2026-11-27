@@ -667,6 +667,25 @@ if ($panelSteps.Count -gt 0) {
     if ($want.Length -gt 0) {
         $shown = Find-SbById $window $want
         $pickers = Find-SbById $window 'PanePicker'
+        # ROW 284: in the DOCK there is no PanePicker; the panel opens by its tab
+        # (DockWire's `<group>_tab_<panel>`), chosen as a person chooses it.
+        if ($shown.Count -eq 0 -and $pickers.Count -eq 0) {
+            $tabEls = @($window.FindAll($tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.AutomationId -cmatch '_tab_' })
+            $tp = Select-SbDockTab -TabIds @($tabEls | ForEach-Object { $_.Current.AutomationId }) -Panel $want
+            if ($null -eq $tp.Refusal) {
+                $tabEl = @($tabEls | Where-Object { $_.Current.AutomationId -ceq "$($tp.Group)_tab_$want" })[0]
+                $sip = $null
+                if ($tabEl.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$sip)) { try { $sip.ScrollIntoView() } catch { } }
+                $tabEl.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                $osw = [System.Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $shown = Find-SbById $window $want
+                    if ($shown.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+                } while ($shown.Count -eq 0 -and $osw.ElapsedMilliseconds -lt $PanelWaitMs)
+                $log.Add("$openTag dock-tab=$($tp.Group)_tab_$want panel-appeared=$($shown.Count -eq 1) waited-ms=$($osw.ElapsedMilliseconds)")
+                $lastActUtc = [DateTime]::UtcNow
+            }
+        }
         $pickerPats = if ($pickers.Count -eq 1) { @($pickers[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
         $open = Select-SbPanelOpen -Panel $want -PanelCount $shown.Count -PickerCount $pickers.Count -PickerPatterns $pickerPats
         $log.Add("$openTag shown=$($shown.Count) pickers=$($pickers.Count) action=$(if ($open.Action) { $open.Action } else { 'refused' })")
@@ -706,6 +725,54 @@ if ($panelSteps.Count -gt 0) {
             $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
             $clicksSent++
             $log.Add("CLICK SENT: $ctag screen=($cx,$cy)")
+            $lastActUtc = [DateTime]::UtcNow
+            continue
+        }
+        # A PANEL_MENU STEP (row 284, jas STATUS-flask 1027): the person's route
+        # in the DOCK. The panel's tab (`<group>_tab_<panel>`, so it names its
+        # group), brought into view and chosen; that group's menu button
+        # (`<group>_menu`); then the one menu item whose AutomationId is the
+        # step's action. No tab (the single pane), two tabs, no item or two, or
+        # a disabled item is refused by name (Select-SbDockTab,
+        # Select-SbMenuItemByAction), and nothing after it is sent.
+        if ($ps.panel_menu) {
+            $tag = "step $n panel_menu:$($ps.panel_menu)/$($ps.action)"
+            $allEls = $window.FindAll($tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+            $tabEls = @($allEls | Where-Object { $_.Current.AutomationId -cmatch '_tab_' })
+            $tp = Select-SbDockTab -TabIds @($tabEls | ForEach-Object { $_.Current.AutomationId }) -Panel "$($ps.panel_menu)"
+            if ($null -ne $tp.Refusal) { Stop-SbPanelHand "$tag -- $($tp.Refusal)" }
+            $tabEl = @($tabEls | Where-Object { $_.Current.AutomationId -ceq "$($tp.Group)_tab_$($ps.panel_menu)" })[0]
+            $bring = {
+                param($el)
+                $sip = $null
+                if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$sip)) { try { $sip.ScrollIntoView() } catch { } }
+            }
+            & $bring $tabEl
+            Start-Sleep -Milliseconds $SettleMs
+            $tabEl.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            Start-Sleep -Milliseconds $SettleMs
+            $menus = @(Find-SbById $window "$($tp.Group)_menu")
+            if ($menus.Count -ne 1) { Stop-SbPanelHand "$tag -- group $($tp.Group)'s menu button is found $($menus.Count) times, not once" }
+            & $bring $menus[0]
+            Start-Sleep -Milliseconds $SettleMs
+            $menus[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            # The flyout is a popup of the process: its items are read from the root.
+            $itemCond = New-Object System.Windows.Automation.AndCondition(
+                (New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $ProcessId)),
+                (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)))
+            $isw = [System.Diagnostics.Stopwatch]::StartNew()
+            do {
+                $items = @($AE::RootElement.FindAll($tree::Descendants, $itemCond) | Where-Object { $_.Current.ClassName -cne 'Microsoft.UI.Xaml.Controls.MenuBarItem' })
+                if ($items.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+            } while ($items.Count -eq 0 -and $isw.ElapsedMilliseconds -lt $PanelWaitMs)
+            $ip = Select-SbMenuItemByAction -ItemIds @($items | ForEach-Object { $_.Current.AutomationId }) -Action "$($ps.action)" -Panel "$($ps.panel_menu)"
+            $log.Add("$tag group=$($tp.Group) items=$($items.Count) waited-ms=$($isw.ElapsedMilliseconds)")
+            if ($null -ne $ip.Refusal) { Stop-SbPanelHand "$tag -- $($ip.Refusal)" }
+            $chosen = $items[$ip.Index]
+            if (-not $chosen.Current.IsEnabled) { Stop-SbPanelHand "$tag -- the item that dispatches '$($ps.action)' is disabled" }
+            Start-Sleep -Milliseconds $SettleMs
+            $chosen.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            $log.Add("PANEL MENU SENT: $tag group=$($tp.Group) item='$($chosen.Current.Name)' action=Invoke")
             $lastActUtc = [DateTime]::UtcNow
             continue
         }

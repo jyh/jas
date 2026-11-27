@@ -296,6 +296,38 @@ public enum LayersPanel {
         onCloseDialog: (() -> Void)?,
         onLayoutOp: (([String: Any]) -> Void)? = nil
     ) {
+        let platformEffects = layersPanelPlatformEffects(
+            model: model, onCloseDialog: onCloseDialog, onLayoutOp: onLayoutOp)
+        // Use the model's own StateStore so effects (open_dialog,
+        // close_dialog, set_panel_state, and anything reading
+        // panel / dialog scope via expressions) see the live app
+        // state instead of a throwaway fresh store. Required for the
+        // Artboards panel — open_artboard_options writes its dialog
+        // state here and the DockPanelView bridge reads the
+        // transition to show the overlay. ``dialogs`` must be
+        // supplied for open_dialog to locate the dialog definition.
+        //
+        // OP_LOG.md §9: name this panel-action dispatch site so the owning
+        // transaction is stamped with the actions.yaml verb (`nameTxn`). The
+        // verb33 doc.* handlers above route through `opApply` (which calls
+        // `recordOp`), so the named transaction now journals a real op per
+        // panel/menu gesture — matching Rust's `run_yaml_effects_named`.
+        runEffects(effects, ctx: ctx, store: model.stateStore,
+                   actions: actions,
+                   dialogs: dialogs,
+                   platformEffects: platformEffects,
+                   model: model, actionName: actionName)
+    }
+
+    /// The Layers registry: the platform-effect table that holds the `doc.*`
+    /// handlers (and, as an overlay, every key Align's table and the tool table
+    /// register). Built for each run by ``runLayersPanelEffects``; exposed so
+    /// the click-effects gate (STATUS-jas row 288) can read which keys this
+    /// route runs, from the table itself rather than a list typed beside it.
+    static func layersPanelPlatformEffects(
+        model: Model, onCloseDialog: (() -> Void)?,
+        onLayoutOp: (([String: Any]) -> Void)? = nil
+    ) -> [String: PlatformEffect] {
         // Platform handlers
         // OP_LOG.md Increment 1: the `snapshot` effect OPENS the undo
         // transaction (beginTxn) rather than pushing a bare checkpoint, so the
@@ -1165,25 +1197,7 @@ public enum LayersPanel {
             }
         }
 
-        // Use the model's own StateStore so effects (open_dialog,
-        // close_dialog, set_panel_state, and anything reading
-        // panel / dialog scope via expressions) see the live app
-        // state instead of a throwaway fresh store. Required for the
-        // Artboards panel — open_artboard_options writes its dialog
-        // state here and the DockPanelView bridge reads the
-        // transition to show the overlay. ``dialogs`` must be
-        // supplied for open_dialog to locate the dialog definition.
-        //
-        // OP_LOG.md §9: name this panel-action dispatch site so the owning
-        // transaction is stamped with the actions.yaml verb (`nameTxn`). The
-        // verb33 doc.* handlers above route through `opApply` (which calls
-        // `recordOp`), so the named transaction now journals a real op per
-        // panel/menu gesture — matching Rust's `run_yaml_effects_named`.
-        runEffects(effects, ctx: ctx, store: model.stateStore,
-                   actions: actions,
-                   dialogs: dialogs,
-                   platformEffects: platformEffects,
-                   model: model, actionName: actionName)
+        return platformEffects
     }
 
     #if DEBUG

@@ -2183,9 +2183,9 @@ Test-Case 'is: a top-level key of a form this driver does not deliver (expected_
 Test-Case 'is: the proposed key is a script key (a PROPOSED script says why it is one)' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @() @{ proposed = 'row 275' }))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json'
-Test-Case 'is: a panel_menu step is REFUSED by its own name, not as a pointer step of kind ''''' {
+Test-Case 'is: a panel_menu step is read as a panel_menu step, not as a pointer step of kind ''''' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ panel_menu = 'artboards_panel_content'; action = 'open_artboard_options' })))
-} 'REFUSED: step 2 is a panel_menu step: this driver does not deliver panel_menu steps yet'
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json panels=panel_menu:artboards_panel_content/open_artboard_options'
 Test-Case 'is: a dialog step is read as a dialog step, never as a panel step with no panel' {
     Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ dialog = 'artboard_options'; widget = 'ao_fill_dropdown'; event = 'commit'; value = 'white' })))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json panels=dialog:artboard_options/ao_fill_dropdown:commit=white'
@@ -2212,13 +2212,14 @@ Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as
 # Over the REAL files: both proposed scripts name their FIRST undelivered form,
 # not a missing expected_json hiding it. Since row 275's expectations they carry
 # a top-level expected_dialog list, which this driver reads since row 275 C2,
-# so the form named is their panel_menu step (jas 1009 (2): refused on Windows).
+# so the form named was their panel_menu step until row 284 delivered it; now it
+# is their seeded app_state (jas 1027 item 2's seed door).
 $fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 foreach ($fp in 'fill_white', 'preset_a4') {
     Test-Case "is: the proposed artboard_options.$fp names its first undelivered form" {
         $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
         Show-SbScript (Read-SbInputScript $t)
-    } 'REFUSED: step 0 is a panel_menu step: this driver does not deliver panel_menu steps yet'
+    } 'REFUSED: app_state sets panels: this driver cannot seed state'
 }
 # And the control: no SHIPPED script is refused by the new form checks (they
 # would have stopped gating), and the read found the corpus at all.
@@ -2522,6 +2523,57 @@ Test-Case 'at join: a plan that does not parse is REFUSED by name' {
     Show-SbPlanAt (Resolve-SbPlanAt -PlanJson '{nope' -At @(0) -Widget 'ap_name')
 } 'REFUSED: the plan does not parse'
 
+# ROW 284 (jas STATUS-flask 1027 item 1): A PANEL_MENU STEP, delivered by the
+# person's route in the DOCK: the panel's tab, the group's menu button, then
+# the one item that dispatches the step's action. The engine's menu rows
+# (`jas_panel_menu`) carry each item's action and no params, and a click
+# dispatches the declared params by index, so an item is chosen by its action
+# alone: a step that names params, or an action two items dispatch, is refused
+# by name. The single pane has no group menu, so there it is refused by name.
+$pmStep = [ordered]@{ panel_menu = 'artboards_panel_content'; action = 'open_artboard_options' }
+Test-Case 'pm: a panel_menu step is carried, shown, and makes the script a DOCK script' {
+    $r = Read-SbInputScript (New-SbFormScript @($pmStep))
+    "$(Show-SbScript $r) mode=$($r.Mode) menus=$($r.PanelMenus)"
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=x.expected.json panels=panel_menu:artboards_panel_content/open_artboard_options mode=dock menus=1'
+Test-Case 'pm: a script with no panel_menu step stays a single-pane script' {
+    (Read-SbInputScript (New-SbFormScript @($fOpen))).Mode
+} 'single'
+Test-Case 'pm: a panel_menu step that names params is REFUSED by name (the engine reports none to compare)' {
+    $p = [ordered]@{ panel_menu = 'artboards_panel_content'; action = 'open_artboard_options'; params = @{ artboard_id = 'x' } }
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($p)))
+} "REFUSED: step 2 panel_menu step key 'params': this driver does not deliver it yet"
+Test-Case 'pm: a panel_menu step with no panel or no action is REFUSED by name' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @([ordered]@{ panel_menu = 'artboards_panel_content' })))
+} 'REFUSED: step 2 panel_menu step names no panel or no action'
+Test-Case 'pm: a panel_menu step before the gesture ends is REFUSED by name' {
+    $j = New-SbFormScript @() | ConvertFrom-Json
+    $j.steps = @($sPress, $pmStep, $fRelease, $sRead)
+    Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 8))
+} 'REFUSED: step 1 panel_menu artboards_panel_content/open_artboard_options comes before the gesture ends: send_hand.ps1 delivers panel_menu steps only after the release'
+Test-Case 'pm: a row or at step in a DOCK script is REFUSED by name (its plan is the single pane''s)' {
+    Show-SbScript (Read-SbInputScript (New-SbFormScript @($pmStep, $eRow)))
+} 'REFUSED: step 3 panel layers_panel_content/lp_eye names a row or at in a script with a panel_menu step: this driver reads a row from the single pane''s plan, and a panel_menu step launches the dock'
+# The hand's two choices, pure: the tab (and so its group), then the item.
+function Show-SbPick($r) { if ($r.Refusal) { "REFUSED: $($r.Refusal)" } else { "group=$($r.Group)" } }
+Test-Case 'pm hand: the dock tab of the panel names its group' {
+    Show-SbPick (Select-SbDockTab -TabIds @('dock0_tab_color_panel_content', 'dock4_tab_artboards_panel_content', 'dock4_tab_layers_panel_content') -Panel 'artboards_panel_content')
+} 'group=dock4'
+Test-Case 'pm hand: NO dock tab for the panel (the single pane) is REFUSED by name' {
+    Show-SbPick (Select-SbDockTab -TabIds @() -Panel 'artboards_panel_content')
+} "REFUSED: no dock tab shows 'artboards_panel_content': a panel_menu step needs the dock, and the single pane has no group menu"
+Test-Case 'pm hand: a panel tabbed in two groups is REFUSED by name' {
+    Show-SbPick (Select-SbDockTab -TabIds @('dock1_tab_artboards_panel_content', 'dock4_tab_artboards_panel_content') -Panel 'artboards_panel_content')
+} "REFUSED: 'artboards_panel_content' is tabbed in 2 dock groups (dock1, dock4): this driver will not guess which menu a person meant"
+function Show-SbItem($r) { if ($r.Refusal) { "REFUSED: $($r.Refusal)" } else { "item=$($r.Index)" } }
+Test-Case 'pm hand: the one item that dispatches the action is picked' {
+    Show-SbItem (Select-SbMenuItemByAction -ItemIds @('rename_artboard', 'open_artboard_options', 'delete_artboards') -Action 'open_artboard_options' -Panel 'artboards_panel_content')
+} 'item=1'
+Test-Case 'pm hand: no item dispatching the action is REFUSED by name' {
+    Show-SbItem (Select-SbMenuItemByAction -ItemIds @('rename_artboard') -Action 'open_artboard_options' -Panel 'artboards_panel_content')
+} "REFUSED: no item of 'artboards_panel_content''s menu dispatches 'open_artboard_options' (1 item(s) shown)"
+Test-Case 'pm hand: an action two items dispatch is REFUSED by name (their params differ, and none are reported)' {
+    Show-SbItem (Select-SbMenuItemByAction -ItemIds @('set_mode', 'set_mode') -Action 'set_mode' -Panel 'color_panel_content')
+} "REFUSED: 2 items of 'color_panel_content''s menu dispatch 'set_mode': they differ only by params, which the engine does not report"
 # THE CLASS AUDIT (jas STATUS-flask 1024 item 1, after the web L2 red of #1137):
 # a reader is driven over the WHOLE shipped corpus of its producer's real
 # bytes, never only over a hand-built fixture, so a producer that drops or

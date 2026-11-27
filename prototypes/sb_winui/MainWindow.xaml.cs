@@ -371,6 +371,11 @@ public sealed partial class MainWindow : Window
                 ? new ToggleMenuFlyoutItem { Text = text, IsChecked = on }
                 : new MenuFlyoutItem { Text = text };
             item.IsEnabled = row.Enabled;
+            // Row 284: the item names the command it dispatches, for a driver.
+            if (PanelMenuWire.ItemAutomationId(row) is { Length: > 0 } itemId)
+            {
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, itemId);
+            }
             var index = row.Index;
             item.Click += (_, _) => _canvas?.PanelMenu(new PanelMenuCmd { Group = key, PanelId = panelId, Index = index, Via = "hand" });
             flyout.Items.Add(item);
@@ -958,6 +963,8 @@ public sealed partial class MainWindow : Window
                         MinWidth = 0,
                         MinHeight = 0,
                     };
+                    // Row 284: the tab names its panel and its group for a driver.
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(tab, DockWire.TabAutomationId(key, panelId));
                     tab.Click += (_, _) => _canvas.OpenPane(key, panelId, PaneAvailW);
                     if (address is { } ta) { WireTearOut(tab, key, () => LayoutWire.DetachPanel(ta.DockId, ta.GroupIdx, panelIdx, _tearX, _tearY)); }
                     tabs.Children.Add(tab);

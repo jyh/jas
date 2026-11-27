@@ -1824,6 +1824,14 @@ internal sealed record PanelMenuSubRow(int Index, string Label, string Action, b
 /// </summary>
 internal static class PanelMenuWire
 {
+    /// <summary>
+    /// Row 284 (jas STATUS-flask 1027): the AutomationId of a panel-menu item,
+    /// its action, so a driver picks the item a script's `panel_menu` step names
+    /// by the command it dispatches (TESTING.md section 6). Empty for a row with
+    /// no action. An AutomationId is not read aloud, so a person hears nothing new.
+    /// </summary>
+    internal static string ItemAutomationId(PanelMenuRow row) => row.Action ?? "";
+
     /// <summary>`jas_panel_menu`'s array. Empty or unreadable is an empty menu,
     /// never a throw; the caller reports the count it drew.</summary>
     internal static List<PanelMenuRow> Parse(string? json)
@@ -3592,4 +3600,27 @@ internal static class ProbeWire
     /// </summary>
     internal static string DialogField(bool read, DialogReading? reading) =>
         !read ? "none" : reading is null ? "UNREADABLE" : reading.Open ? reading.Id : "none";
+}
+
+/// <summary>
+/// Row 284 (jas STATUS-flask 1027): the dock's per-panel identities a driver
+/// reaches a panel menu by. A tab is `<group key>_tab_<panel content id>`, so
+/// the tab names its group, whose menu button is `<group key>_menu`.
+/// </summary>
+internal static class DockWire
+{
+    /// <summary>The AutomationId of a dock tab: its group key and its panel content id.</summary>
+    internal static string TabAutomationId(string groupKey, string panelId) => $"{groupKey}_tab_{panelId}";
+}
+
+/// <summary>
+/// jas STATUS-flask 1031: the engine's answer to "is a document open?"
+/// (`jas_document_is_open`). The shell asks after a menu act, because an act
+/// can open one (File &gt; New after the last tab closed), so the no-document
+/// cover follows the engine and never a guess from a changed document.
+/// </summary>
+internal static class DocumentWire
+{
+    /// <summary>1 is open, 0 is closed; 255 (a null engine) or any other value is unknown (null).</summary>
+    internal static bool? OpenOf(byte rc) => rc switch { 1 => true, 0 => false, _ => null };
 }

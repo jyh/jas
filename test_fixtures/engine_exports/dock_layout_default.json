@@ -1,0 +1,41 @@
+{
+  "groups": [
+    {
+      "active": 0,
+      "panels": [
+        "color_panel_content",
+        "swatches_panel_content",
+        "brushes_panel_content"
+      ]
+    },
+    {
+      "active": 0,
+      "panels": [
+        "align_panel_content",
+        "boolean_panel_content"
+      ]
+    },
+    {
+      "active": 0,
+      "panels": [
+        "character_panel_content",
+        "paragraph_panel_content"
+      ]
+    },
+    {
+      "active": 0,
+      "panels": [
+        "stroke_panel_content",
+        "properties_panel_content"
+      ]
+    },
+    {
+      "active": 0,
+      "panels": [
+        "artboards_panel_content",
+        "layers_panel_content",
+        "symbols_panel_content"
+      ]
+    }
+  ]
+}
