@@ -600,7 +600,7 @@ fn hover_expand(engine: &JasEngine, panel: &str, target: &[u64]) -> Result<(), S
         return Ok(());
     }
     let kept: Vec<Value> = paths.into_iter().filter(|p| *p != target).collect();
-    engine.script_seed_panel(panel, "collapsed_paths", seed_value(&Value::Array(kept)))
+    engine.script_seed_panel(panel, "collapsed_paths", crate::ffi::seed_panel_value(&Value::Array(kept)))
 }
 
 /// F6 (row 145, TESTING.md section 6): the ids of the fields a row step can
@@ -785,15 +785,6 @@ fn canonical_panel_value(v: &Value) -> Value {
 
 /// A seeded value in the store's form: in a list, an item that is a list of
 /// non-negative integers is a PATH (the ruled form: "entries are PATHS").
-fn seed_value(v: &Value) -> Value {
-    let is_path = |x: &Value| x.as_array().is_some_and(|a| a.iter().all(|i| i.as_u64().is_some()));
-    match v {
-        Value::Array(items) => Value::Array(items.iter()
-            .map(|x| if is_path(x) { serde_json::json!({"__path__": x}) } else { x.clone() })
-            .collect()),
-        other => other.clone(),
-    }
-}
 
 /// Replay a script with the §6 panel forms; every read-back in step order, as
 /// `{"step": i, "read": kind, "value": ...}`. A step that ran and changed
@@ -829,7 +820,7 @@ fn replay_forms(script: &Value) -> Result<Vec<Value>, String> {
                 for (pid, keys) in panels {
                     let keys = keys.as_object().ok_or_else(|| format!("script {item}: app_state.panels.{pid} is not an object"))?;
                     for (key, val) in keys {
-                        engine.script_seed_panel(pid, key, seed_value(val))
+                        engine.script_seed_panel(pid, key, crate::ffi::seed_panel_value(val))
                             .map_err(|why| format!("script {item}: app_state.panels.{pid}.{key}: {why}"))?;
                     }
                 }

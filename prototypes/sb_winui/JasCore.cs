@@ -418,6 +418,15 @@ internal static unsafe class JasCore
     internal static extern byte jas_dialog_dismiss(IntPtr engine);
 
     /// <summary>
+    /// Row 284: set one key a panel's `state:` declares, from a script's
+    /// `app_state` (`jas_script_seed_panel`, a SCRIPT SEAM): <paramref name="json"/>
+    /// is `{"panel", "key", "value"}`. Returns a <c>JasStatus</c>: 0 on a set; an
+    /// unknown panel or an undeclared key is refused by name in <c>jas_last_error_json</c>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_script_seed_panel(IntPtr engine, byte[] json, nuint len);
+
+    /// <summary>
     /// jas STATUS-flask 1031: whether the engine holds an open document
     /// (`jas_document_is_open`): 1 open, 0 closed, 255 for a null engine.
     /// </summary>
