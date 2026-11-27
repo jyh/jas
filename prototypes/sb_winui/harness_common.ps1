@@ -4229,7 +4229,9 @@ function Resolve-SbPlanAt([string]$PlanJson, [int[]]$At, [string]$Widget) {
         # N2 (jas 1020): an inner repeat at exactly <outer> + [k] has an EMPTY
         # suffix; a range from $outerLen + 1 down to $outerLen would count down.
         $innerPath = @($enc[$j + 1].path)
-        $suffix = if ($innerPath.Count -gt $outerLen + 1) { @($innerPath[($outerLen + 1)..($innerPath.Count - 1)]) } else { @() }
+        # jas 1022: `@(if ...)`, so an empty suffix is an empty ARRAY, never the
+        # AutomationNull an `if` expression returns for an empty branch.
+        $suffix = @(if ($innerPath.Count -gt $outerLen + 1) { $innerPath[($outerLen + 1)..($innerPath.Count - 1)] })
         $nextPath = Format-SbPath (@($cur.path) + @($At[$j]) + $suffix)
         $next = @($reps | Where-Object { (Format-SbPath $_.path) -ceq $nextPath })
         if ($next.Count -ne 1) { return (& $no "at $want names no drawn iteration: the plan lists no repeat at $nextPath") }
