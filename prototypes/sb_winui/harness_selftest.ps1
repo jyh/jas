@@ -2624,6 +2624,43 @@ Test-Case 'audit C: every baseline''s live document passes the read-back compara
     "compared=$(if ($n -ge 100) { 'corpus' } else { $n }) failed=$($bad.Count)$(if ($bad.Count) { ' ' + (($bad | Select-Object -First 3) -join ' | ') })"
 } 'compared=corpus failed=0'
 
+# ROW 284 (jas STATUS-flask 1027 item 2, ruled in 1029): THE NO-GESTURE FORM
+# and THE APP_STATE SEED. A script with NO pointer step sends no gesture: its
+# late steps start at probe 0, and the drive reads no POINTER row. It must
+# still read something and act at all. Its app_state is read in the ruled form
+# only (`panels.<content id>.<key>`, what Rust's replay and the Mac apply) and
+# crosses to the shell whole, as SB_PANEL_SEED; any other form is refused by name.
+function New-SbNoGestureScript([object[]]$Steps, [hashtable]$Top = @{}) {
+    $o = [ordered]@{ item = 'ng'; setup_svg = 'paragraph_justified.svg'; tool = 'selection'; app_state = @{}; steps = $Steps; expected_json = 'ng.expected.json' }
+    foreach ($k in $Top.Keys) { $o[$k] = $Top[$k] }
+    $o | ConvertTo-Json -Depth 8
+}
+function Show-SbNg($r) {
+    if ($null -ne $r.Refusal) { return "REFUSED: $($r.Refusal)" }
+    "nogesture=$($r.NoGesture) mode=$($r.Mode) panels=$($r.PanelShow) reads-after=$(@($r.DialogReads) -join ',') seed=$($r.AppState)"
+}
+Test-Case 'ng: a script with no pointer step is a NO-GESTURE script; its late steps run from probe 0' {
+    Show-SbNg (Read-SbInputScript (New-SbNoGestureScript @($pmStep, $fReadDialog, $sRead) @{ expected_dialog = 'artboard_options' }))
+} 'nogesture=True mode=dock panels=panel_menu:artboards_panel_content/open_artboard_options reads-after=1 seed='
+Test-Case 'ng: a script WITH a gesture is not a no-gesture script' {
+    (Read-SbInputScript (New-SbFormScript @($fOpen))).NoGesture
+} 'False'
+Test-Case 'ng: a no-gesture script that acts on nothing is REFUSED by name' {
+    Show-SbNg (Read-SbInputScript (New-SbNoGestureScript @($sRead)))
+} 'REFUSED: the script has no pointer step and no act: it would read the setup only'
+Test-Case 'ng: a no-gesture script with no read is still REFUSED by name' {
+    Show-SbNg (Read-SbInputScript (New-SbNoGestureScript @($pmStep)))
+} 'REFUSED: no read step: a script that reads nothing proves nothing'
+Test-Case 'seed: the ruled app_state crosses whole, compact' {
+    Show-SbNg (Read-SbInputScript (New-SbNoGestureScript @($pmStep, $sRead) @{ app_state = [ordered]@{ panels = [ordered]@{ artboards_panel_content = [ordered]@{ artboards_panel_selection = @('zs8ap4x3') } } } }))
+} 'nogesture=True mode=dock panels=panel_menu:artboards_panel_content/open_artboard_options reads-after= seed={"panels":{"artboards_panel_content":{"artboards_panel_selection":["zs8ap4x3"]}}}'
+Test-Case 'seed: an app_state key that is not the ruled form is REFUSED by name' {
+    Show-SbNg (Read-SbInputScript (New-SbNoGestureScript @($pmStep, $sRead) @{ app_state = @{ fill_color = '#fff' } }))
+} "REFUSED: app_state.fill_color is not a ruled form: seed a panel's declared state as app_state.panels.<content id>.<key>"
+Test-Case 'seed: a panels entry that is not an object is REFUSED by name' {
+    Show-SbNg (Read-SbInputScript (New-SbNoGestureScript @($pmStep, $sRead) @{ app_state = @{ panels = @{ artboards_panel_content = 3 } } }))
+} 'REFUSED: app_state.panels.artboards_panel_content is not an object'
+
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
