@@ -2453,7 +2453,9 @@ pub(crate) fn seed_panel_value(v: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR. A script's
+/// Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR, A SCRIPT
+/// SEAM: no person's act reaches it; a driver seeds a script's starting state
+/// through it before the first act, as Rust's replay does. A script's
 /// `app_state.panels.<content id>.<key>` reaches a native shell's engine as it
 /// reaches Rust's replay: `{"panel": <content id>, "key": <key>, "value": ...}`
 /// sets one key the panel's `state:` declares ([`JasEngine::script_seed_panel`],
@@ -9559,6 +9561,7 @@ mod tests {
     /// name, with no state changed.
     #[test]
     fn a_script_seed_sets_a_declared_panel_key_as_the_replay_does() {
+        let _counters = crate::ffi_instr::test_lock::lock();
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/paragraph_justified.svg")).unwrap();
         let e = jas_engine_new();
