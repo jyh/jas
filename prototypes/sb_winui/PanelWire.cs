@@ -3614,6 +3614,61 @@ internal static class DockWire
 }
 
 /// <summary>
+/// Row 284 (jas STATUS-flask 1027 item 2): `SB_PANEL_SEED`, a script's `app_state`
+/// for the launch's document, read in its RULED form only:
+/// `{"panels": {<content id>: {<key>: <value>}}}`, which Rust's replay and the
+/// Mac's ScriptPanelSeeds apply. Any other shape is refused by name, never
+/// dropped. Whether a key is declared is the engine's to answer, at the door
+/// (`jas_script_seed_panel`), which refuses an undeclared key by name.
+/// </summary>
+internal static class SeedWire
+{
+    /// <summary>
+    /// The knob's seeds in order, each `(panel, key, value as written)`, or the
+    /// refusal. Unset or empty is no seed and no refusal.
+    /// </summary>
+    internal static (IReadOnlyList<(string Panel, string Key, string ValueJson)> Seeds, string? Refusal) Seeds(string? knob)
+    {
+        var seeds = new List<(string, string, string)>();
+        if (string.IsNullOrEmpty(knob)) { return (seeds, null); }
+        // The knob crosses into session 1 on a scheduled task's command line,
+        // which strips a JSON's double quotes, so a driver sends `b64:<base64>`.
+        if (knob.StartsWith("b64:", StringComparison.Ordinal))
+        {
+            try { knob = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(knob[4..])); }
+            catch (FormatException) { return (seeds, "SB_PANEL_SEED's b64: payload does not decode"); }
+        }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(knob);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) { return (seeds, "SB_PANEL_SEED is not an object"); }
+            foreach (var top in doc.RootElement.EnumerateObject())
+            {
+                if (top.Name != "panels")
+                {
+                    return (seeds, $"app_state.{top.Name} is not a ruled form: seed a panel's declared state as app_state.panels.<content id>.<key>");
+                }
+                if (top.Value.ValueKind != System.Text.Json.JsonValueKind.Object) { return (seeds, "app_state.panels is not an object"); }
+                foreach (var panel in top.Value.EnumerateObject())
+                {
+                    if (panel.Value.ValueKind != System.Text.Json.JsonValueKind.Object) { return (seeds, $"app_state.panels.{panel.Name} is not an object"); }
+                    foreach (var key in panel.Value.EnumerateObject()) { seeds.Add((panel.Name, key.Name, key.Value.GetRawText())); }
+                }
+            }
+            return (seeds, null);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return (new List<(string, string, string)>(), "SB_PANEL_SEED does not parse as JSON");
+        }
+    }
+
+    /// <summary>The seed door's envelope: `{"panel", "key", "value"}`, the value's JSON as written.</summary>
+    internal static string Envelope(string panel, string key, string valueJson) =>
+        "{\"panel\":" + System.Text.Json.JsonSerializer.Serialize(panel) + ",\"key\":" + System.Text.Json.JsonSerializer.Serialize(key) + ",\"value\":" + valueJson + "}";
+}
+
+/// <summary>
 /// jas STATUS-flask 1031: the engine's answer to "is a document open?"
 /// (`jas_document_is_open`). The shell asks after a menu act, because an act
 /// can open one (File &gt; New after the last tab closed), so the no-document

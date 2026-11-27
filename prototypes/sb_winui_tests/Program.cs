@@ -1846,6 +1846,38 @@ static class Program
             "plans=corpus values=read failed=0",
             $"plans={(auPlans >= 100 ? "corpus" : auPlans.ToString(System.Globalization.CultureInfo.InvariantCulture))} values={(auValues >= 100 ? "read" : auValues.ToString(System.Globalization.CultureInfo.InvariantCulture))} failed={auBad.Count}"
             + (auBad.Count > 0 ? " " + string.Join(" | ", auBad.Take(3)) : ""));
+        // Row 284 (jas STATUS-flask 1027 item 2): SB_PANEL_SEED, a script's
+        // app_state, read in its RULED form only (`panels.<content id>.<key>`,
+        // what Rust's replay and the Mac's ScriptPanelSeeds apply). Anything
+        // else is refused by name, never dropped; each seed crosses the door as
+        // {panel, key, value} with the value's JSON as written.
+        static string ShowSeeds((IReadOnlyList<(string Panel, string Key, string ValueJson)> Seeds, string? Refusal) r) =>
+            r.Refusal is { } why ? "REFUSED: " + why : string.Join(";", r.Seeds.Select(s => $"{s.Panel}.{s.Key}={s.ValueJson}"));
+        Eq("seed knob: unset or empty seeds nothing", "|", ShowSeeds(SeedWire.Seeds(null)) + "|" + ShowSeeds(SeedWire.Seeds("")));
+        Eq("seed knob: the ruled form, in order, each value as written",
+            "artboards_panel_content.artboards_panel_selection=[\"zs8ap4x3\"];layers_panel_content.collapsed_paths=[[0,1]]",
+            ShowSeeds(SeedWire.Seeds("""{"panels":{"artboards_panel_content":{"artboards_panel_selection":["zs8ap4x3"]},"layers_panel_content":{"collapsed_paths":[[0,1]]}}}""")));
+        Eq("seed knob: an empty object seeds nothing", "", ShowSeeds(SeedWire.Seeds("{}")));
+        Eq("seed knob: a top-level key that is not the ruled form is REFUSED by name",
+            "REFUSED: app_state.fill_color is not a ruled form: seed a panel's declared state as app_state.panels.<content id>.<key>",
+            ShowSeeds(SeedWire.Seeds("""{"fill_color":"#fff"}""")));
+        Eq("seed knob: a panel entry that is not an object is REFUSED by name",
+            "REFUSED: app_state.panels.artboards_panel_content is not an object",
+            ShowSeeds(SeedWire.Seeds("""{"panels":{"artboards_panel_content":3}}""")));
+        Eq("seed knob: JSON that does not parse, or is not an object, is REFUSED by name",
+            "REFUSED: SB_PANEL_SEED does not parse as JSON|REFUSED: SB_PANEL_SEED is not an object",
+            ShowSeeds(SeedWire.Seeds("{nope")) + "|" + ShowSeeds(SeedWire.Seeds("[1]")));
+        // The knob crosses into session 1 on a scheduled task's command line,
+        // which strips a JSON's double quotes (measured: the first seeded live
+        // run read "does not parse"), so it may come as `b64:<base64 UTF-8>`.
+        Eq("seed knob: the b64: form decodes to the same seeds",
+            "artboards_panel_content.artboards_panel_selection=[\"zs8ap4x3\"]",
+            ShowSeeds(SeedWire.Seeds("b64:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("""{"panels":{"artboards_panel_content":{"artboards_panel_selection":["zs8ap4x3"]}}}""")))));
+        Eq("seed knob: a b64: payload that does not decode is REFUSED by name",
+            "REFUSED: SB_PANEL_SEED's b64: payload does not decode", ShowSeeds(SeedWire.Seeds("b64:%%%")));
+        Eq("seed door envelope: panel, key, and the value's JSON as written",
+            """{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":["zs8ap4x3"]}""",
+            SeedWire.Envelope("artboards_panel_content", "artboards_panel_selection", """["zs8ap4x3"]"""));
         // jas STATUS-flask 1031: after a menu act the shell asks the engine whether
         // a document is open (jas_document_is_open), so File > New after the last
         // tab closed lifts the no-document cover. 1 open, 0 closed; 255 (a null

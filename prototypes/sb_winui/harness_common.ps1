@@ -3622,6 +3622,9 @@ function Read-SbInputScript([string]$Json) {
         read    = @{ delivered = @('read'); later = @('keys') }
     }
     $formSteps = @($s.steps)
+    # ROW 284 (ruled 1029): a script with NO pointer step is a no-gesture
+    # script: no drag is sent, and its late steps run from probe 0.
+    $noGesture = $true
     for ($fi = 0; $fi -lt $formSteps.Count; $fi++) {
         $fnames = @($formSteps[$fi].PSObject.Properties | ForEach-Object { $_.Name })
         # A step's form is named by its discriminating key, a dialog step first:
@@ -3633,6 +3636,7 @@ function Read-SbInputScript([string]$Json) {
                 elseif ($fnames -ccontains 'panel' -or $fnames -ccontains 'widget') { 'panel' }
                 elseif ($fnames -ccontains 'key') { 'key' }
                 else { 'pointer' }
+        if ($form -eq 'pointer') { $noGesture = $false }
         if (-not $stepKeys.ContainsKey($form)) {
             return (& $no "step $fi is a $form step: this driver does not deliver $form steps yet")
         }
@@ -3655,9 +3659,21 @@ function Read-SbInputScript([string]$Json) {
     if ([string]::IsNullOrWhiteSpace("$($s.expected_json)")) {
         return (& $no 'the script names no expected_json')
     }
+    # ROW 284 (jas 1027 item 2, ruled 1029): app_state in its RULED form only,
+    # `panels.<content id>.<key>` (what Rust's replay and the Mac's
+    # ScriptPanelSeeds apply), carried WHOLE to the shell as SB_PANEL_SEED,
+    # which seeds it through jas_script_seed_panel right after the open. Whether
+    # a key is declared is the engine's to refuse there, by name.
+    $appState = ''
     if ($null -ne $s.app_state) {
-        $keys = @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })
-        if ($keys.Count -gt 0) { return (& $no "app_state sets $($keys -join ','): this driver cannot seed state") }
+        foreach ($ak in @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })) {
+            if ($ak -cne 'panels') { return (& $no "app_state.$ak is not a ruled form: seed a panel's declared state as app_state.panels.<content id>.<key>") }
+            if ($s.app_state.panels -isnot [System.Management.Automation.PSCustomObject]) { return (& $no 'app_state.panels is not an object') }
+            foreach ($pp in @($s.app_state.panels.PSObject.Properties)) {
+                if ($pp.Value -isnot [System.Management.Automation.PSCustomObject]) { return (& $no "app_state.panels.$($pp.Name) is not an object") }
+            }
+        }
+        if (@($s.app_state.PSObject.Properties).Count -gt 0) { $appState = ConvertTo-Json -InputObject $s.app_state -Compress -Depth 12 }
     }
     $steps = @($s.steps)
     $acts = New-Object System.Collections.Generic.List[object]
@@ -3677,7 +3693,7 @@ function Read-SbInputScript([string]$Json) {
         $names = @($st.PSObject.Properties | ForEach-Object { $_.Name })
         if ($names -contains 'read') {
             if ("$($st.read)" -eq 'dialog') {
-                if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                if (-not $noGesture -and ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release')) {
                     return (& $no "step $i read dialog comes before the gesture ends: a dialog read is the probe an act after the release writes")
                 }
                 if ($null -ne $deferrable) {
@@ -3695,7 +3711,7 @@ function Read-SbInputScript([string]$Json) {
             $dn = "$($st.dialog)"; $wn = "$($st.widget)"
             if ($dn.Length -eq 0 -or $wn.Length -eq 0) { return (& $no "step $i dialog step names no dialog or no widget") }
             $tag = "$dn/$wn"
-            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+            if (-not $noGesture -and ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release')) {
                 return (& $no "step $i dialog $tag comes before the gesture ends: send_hand.ps1 delivers dialog steps only after the release")
             }
             $ev = "$($st.event)"
@@ -3730,7 +3746,7 @@ function Read-SbInputScript([string]$Json) {
         if ($names -contains 'panel_menu') {
             $pm = "$($st.panel_menu)"; $pa = "$($st.action)"
             if ($pm.Length -eq 0 -or $pa.Length -eq 0) { return (& $no "step $i panel_menu step names no panel or no action") }
-            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+            if (-not $noGesture -and ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release')) {
                 return (& $no "step $i panel_menu $pm/$pa comes before the gesture ends: send_hand.ps1 delivers panel_menu steps only after the release")
             }
             $panels.Add([ordered]@{ panel_menu = $pm; action = $pa })
@@ -3740,7 +3756,7 @@ function Read-SbInputScript([string]$Json) {
         if ($names -contains 'menu') {
             $mn = "$($st.menu)"
             if ($mn.Length -eq 0) { return (& $no "step $i menu step names no item") }
-            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+            if (-not $noGesture -and ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release')) {
                 return (& $no "step $i menu $mn comes before the gesture ends: send_hand.ps1 delivers menu steps only after the release")
             }
             $panels.Add([ordered]@{ menu = $mn })
@@ -3751,7 +3767,7 @@ function Read-SbInputScript([string]$Json) {
             $pn = "$($st.panel)"; $wn = "$($st.widget)"
             if ($pn.Length -eq 0 -or $wn.Length -eq 0) { return (& $no "step $i panel step names no panel or no widget") }
             $tag = "$pn/$wn"
-            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+            if (-not $noGesture -and ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release')) {
                 return (& $no "step $i panel $tag comes before the gesture ends: send_hand.ps1 delivers panel steps only after the release")
             }
             $ev = "$($st.event)"
@@ -3812,7 +3828,7 @@ function Read-SbInputScript([string]$Json) {
             if ($panels.Count -gt 0) {
                 return (& $no "step $i key $kn comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps")
             }
-            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+            if (-not $noGesture -and ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release')) {
                 return (& $no "step $i key $kn comes before the gesture ends: send_hand.ps1 delivers keys only after the release")
             }
             foreach ($mod in @('ctrl', 'shift', 'alt', 'meta')) {
@@ -3941,6 +3957,21 @@ function Read-SbInputScript([string]$Json) {
             $expDialog.Add($entry)
         }
     }
+    if ($noGesture) {
+        if ($panels.Count -eq 0 -and $keys.Count -eq 0) { return (& $no 'the script has no pointer step and no act: it would read the setup only') }
+        return [pscustomobject]@{
+            Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
+            DocX = 0.0; DocY = 0.0; Dx = 0.0; Dy = 0.0; Moves = 0; Read = 'document'; Expected = "$($s.expected_json)"
+            Shift = 'none'; Alt = 'none'; Double = 'none'; NoGesture = $true; AppState = $appState
+            Keys = $keys.Count; KeyText = ($keys -join ';')
+            Panels = @($panels | Where-Object { $_.panel }).Count; Menus = @($panels | Where-Object { $_.menu }).Count
+            Clicks = @($panels | Where-Object { $_.click }).Count
+            PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
+            Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
+            Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
+            PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
+        }
+    }
     # G11 STEP 3 (jas sections 756, 758): A DOUBLE-CLICK, in the browser's order
     # at ONE point -- press, release, press, release, double_click -- and
     # optionally ONE click there after it. send_hand.ps1 sends the two clicks
@@ -3981,6 +4012,7 @@ function Read-SbInputScript([string]$Json) {
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
             Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
             PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
+            NoGesture = $false; AppState = $appState
         }
     }
     # A CLICK (flask section 348): press + release at ONE point, no move, k=0.
@@ -4010,6 +4042,7 @@ function Read-SbInputScript([string]$Json) {
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
             Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
             PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
+            NoGesture = $false; AppState = $appState
         }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
@@ -4044,6 +4077,7 @@ function Read-SbInputScript([string]$Json) {
         Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
         Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
         PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
+        NoGesture = $false; AppState = $appState
     }
 }
 

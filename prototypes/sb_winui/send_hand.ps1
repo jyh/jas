@@ -118,7 +118,10 @@ param(
     [ValidateSet('none', 'double', 'then-click')][string]$Double = 'none',
     # ROW E: the shell's SB_PLAN_OUT file, for a panel step's `row` (the plan
     # the panel was drawn from). Empty when no step names a row.
-    [string]$PlanFile = ''
+    [string]$PlanFile = '',
+    # ROW 284 (ruled 1029): a script with no pointer step sends NO gesture; only
+    # its keys and late steps are delivered.
+    [switch]$NoGesture
 )
 
 # Select-SbPanelAction and ConvertFrom-SbPanelText: the panel steps' rules,
@@ -421,6 +424,10 @@ $sent = 0
 # move, because SendInput emits no motion for a move that does not move.
 # The reader admits k = 0 only when press == release.
 if ($Moves -lt 0) { $Moves = 0 }
+$shiftDown = $false; $altDown = $false; $collisions = 0; $doubleEvents = 0
+$dragSw = [System.Diagnostics.Stopwatch]::new(); $heldSw = [System.Diagnostics.Stopwatch]::new()
+if ($NoGesture) { $log.Add('gesture=none (a script with no pointer step)') }
+else {
 
 $n = ConvertTo-Normalized $px0 $py0
 $sent += [SbHand]::Send($moveFlags, $n[0], $n[1])
@@ -512,6 +519,7 @@ if ($Double -ne 'none') {
 } finally {
     if ($altDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Key(0x12, $false) }
     if ($shiftDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Shift($false) }
+}
 }
 # THE KEYS, after the gesture: each chord's modifiers down, the key down and
 # up, the modifiers up in reverse. The reader admits only the names mapped here.
@@ -958,9 +966,10 @@ $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$coll
 $log.Add(("post-press-ms={0} button-held-ms={1} settle-ms={2}" -f
           [int]$dragSw.Elapsed.TotalMilliseconds, [int]$heldSw.Elapsed.TotalMilliseconds, $SettleMs))
 $log.Add("double=$Double double-events=$doubleEvents double-click-ms=$doubleClickMs")
-$log.Add("events-inserted=$sent expected=$($Moves + 3 + 3 * $clicksSent + $doubleEvents) late-clicks=$clicksSent")
+$gestureEvents = if ($NoGesture) { 0 } else { $Moves + 3 }
+$log.Add("events-inserted=$sent expected=$($gestureEvents + 3 * $clicksSent + $doubleEvents) late-clicks=$clicksSent")
 $log.Add("NOTE: SendInput returning the expected count proves the events were INSERTED, not that they ARRIVED. UIPI discards are invisible here by design; the shell's counters are the only oracle for arrival.")
 $log.Add("NOTE: post-press-moves is what THIS injector sent, and as of 2026-09-06 it is also what the shell counts. The `move != k` extras are IDENTIFIED: they were RE-DELIVERIES of a pointer frame the shell had already applied -- same FrameId, same Timestamp, same position, raised again by XAML while the contact sat still, so they multiplied with the idle gap after each move (settle 10ms: 0 extras; 40/100/300ms: 1; 800ms: 5). NOT a system arrival: probe_hold.ps1 drives a bare Win32 window with THIS construction at these same configurations and reads arrivals == k exactly, in both input stacks. The shell now suppresses a repeated frame and reports the count as `dup-frames=` on its POINTER row. move<k with normalized-collisions=0 still means the window coalesced despite MOVE_NOCOALESCE.")
 $log | Set-Content -Path $Out -Encoding utf8
-if ($sent -ne ($Moves + 3 + 3 * $clicksSent + $doubleEvents)) { exit 5 }
+if ($sent -ne ($gestureEvents + 3 * $clicksSent + $doubleEvents)) { exit 5 }
 exit 0

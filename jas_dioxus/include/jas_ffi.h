@@ -999,6 +999,24 @@ struct JasBytes jas_engine_load_user_libraries(struct JasEngine *e,
                                                uintptr_t len);
 
 /**
+ * Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR, A SCRIPT
+ * SEAM: no person's act reaches it; a driver seeds a script's starting state
+ * through it before the first act, as Rust's replay does. A script's
+ * `app_state.panels.<content id>.<key>` reaches a native shell's engine as it
+ * reaches Rust's replay: `{"panel": <content id>, "key": <key>, "value": ...}`
+ * sets one key the panel's `state:` declares ([`JasEngine::script_seed_panel`],
+ * the value as [`seed_panel_value`] stores it), so the shell reads it back as
+ * it would a person's own selection. `Ok` and no error on a set. Refused by
+ * name on [`jas_last_error_json`], with nothing changed: `MissingParam` (no
+ * panel, key or value), `BadParamType` (not an object), `BadJson`, `BadUtf8`,
+ * and `MissingTarget` carrying `UnknownPanel` or `UndeclaredPanelKey`.
+ *
+ * # Safety
+ * `e` must be NULL or a live engine; `json` must be readable for `len` bytes.
+ */
+JasStatus jas_script_seed_panel(struct JasEngine *e, const uint8_t *json, uintptr_t len);
+
+/**
  * Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
  * the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
  * a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON

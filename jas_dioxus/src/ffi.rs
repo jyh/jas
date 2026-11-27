@@ -2461,6 +2461,67 @@ pub unsafe extern "C" fn jas_engine_load_user_libraries(e: *mut JasEngine, root:
     JasBytes::from_string(serde_json::Value::Object(taken).to_string())
 }
 
+/// A script seed's value as the engine stores it: an array whose items are
+/// index paths (an element's document path) has each path wrapped as
+/// `{"__path__": [...]}`, the form the panel state holds a selection of
+/// elements in; every other value goes as written. Rust's replay and the
+/// native shells' seed door ([`jas_script_seed_panel`]) both use this one.
+pub(crate) fn seed_panel_value(v: &serde_json::Value) -> serde_json::Value {
+    let is_path = |x: &serde_json::Value| x.as_array().is_some_and(|a| a.iter().all(|i| i.as_u64().is_some()));
+    match v {
+        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter()
+            .map(|x| if is_path(x) { serde_json::json!({"__path__": x}) } else { x.clone() })
+            .collect()),
+        other => other.clone(),
+    }
+}
+
+/// Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR, A SCRIPT
+/// SEAM: no person's act reaches it; a driver seeds a script's starting state
+/// through it before the first act, as Rust's replay does. A script's
+/// `app_state.panels.<content id>.<key>` reaches a native shell's engine as it
+/// reaches Rust's replay: `{"panel": <content id>, "key": <key>, "value": ...}`
+/// sets one key the panel's `state:` declares ([`JasEngine::script_seed_panel`],
+/// the value as [`seed_panel_value`] stores it), so the shell reads it back as
+/// it would a person's own selection. `Ok` and no error on a set. Refused by
+/// name on [`jas_last_error_json`], with nothing changed: `MissingParam` (no
+/// panel, key or value), `BadParamType` (not an object), `BadJson`, `BadUtf8`,
+/// and `MissingTarget` carrying `UnknownPanel` or `UndeclaredPanelKey`.
+///
+/// # Safety
+/// `e` must be NULL or a live engine; `json` must be readable for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_script_seed_panel(e: *mut JasEngine, json: *const u8, len: usize) -> JasStatus {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
+    *engine.last_error.borrow_mut() = None;
+    let Ok(raw) = (unsafe { utf8(json, len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasStatus::BadUtf8;
+    };
+    let Ok(seed) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasStatus::BadJson;
+    };
+    if !seed.is_object() {
+        set_panel_event_error(engine, "BadParamType", "the seed is not an object");
+        return JasStatus::BadParamType;
+    }
+    let (Some(panel), Some(key), Some(value)) =
+        (seed.get("panel").and_then(serde_json::Value::as_str), seed.get("key").and_then(serde_json::Value::as_str), seed.get("value"))
+    else {
+        set_panel_event_error(engine, "MissingParam", "a seed names a panel, a key and a value");
+        return JasStatus::MissingParam;
+    };
+    match engine.script_seed_panel(panel, key, seed_panel_value(value)) {
+        Ok(()) => JasStatus::Ok,
+        Err(why) => {
+            let kind = why.split(' ').next().unwrap_or("MissingTarget").to_string();
+            set_panel_event_error(engine, &kind, &why);
+            JasStatus::MissingTarget
+        }
+    }
+}
+
 /// Open a dialog BY ID in the engine's store (jas STATUS-flask 756, piece 2;
 /// the level-2 dialog pass, flask STATUS 749): the same `open_dialog` effect
 /// a tool's dialog takes ([`open_tool_dialog`]), with `params_json` a JSON
@@ -9642,6 +9703,47 @@ mod tests {
     fn undo(e: *mut JasEngine) {
         let op = r#"{"op":"undo"}"#;
         assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
+    }
+
+    fn script_seed(e: *mut JasEngine, json: &str) -> (JasStatus, String) {
+        let s = unsafe { jas_script_seed_panel(e, json.as_ptr(), json.len()) };
+        (s, last_error_of(e))
+    }
+
+    /// Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR. A script's
+    /// `app_state.panels.<content id>.<key>` reaches a native shell's engine as
+    /// it reaches Rust's replay (`script_seed_panel`): a key the panel's
+    /// `state:` declares is set, read back as a person's own selection would be
+    /// (the Artboards menu's Options enables), and anything else is refused by
+    /// name, with no state changed.
+    #[test]
+    fn a_script_seed_sets_a_declared_panel_key_as_the_replay_does() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/paragraph_justified.svg")).unwrap();
+        let e = jas_engine_new();
+        assert!(engine_of(e).open_svg(&svg), "the fixture opens as the shell opens it");
+        let options = |e: *mut JasEngine| panel_menu(e, "artboards_panel_content").0.iter()
+            .find(|r| r["action"] == "open_artboard_options").map(|r| r["enabled"].clone());
+        assert_eq!(options(e), Some(serde_json::json!(false)), "the control: nothing selected, Options is disabled");
+        assert_eq!(script_seed(e, r#"{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":["zs8ap4x3"]}"#),
+                   (JasStatus::Ok, String::new()));
+        assert_eq!(options(e), Some(serde_json::json!(true)), "the seed is the selection a person makes");
+        let (s, err) = script_seed(e, r#"{"panel":"no_such_panel_content","key":"k","value":1}"#);
+        assert_eq!(s, JasStatus::MissingTarget);
+        assert!(err.contains("UnknownPanel"), "{err}");
+        let (s, err) = script_seed(e, r#"{"panel":"artboards_panel_content","key":"not_a_declared_key","value":1}"#);
+        assert_eq!(s, JasStatus::MissingTarget);
+        assert!(err.contains("UndeclaredPanelKey"), "{err}");
+        assert_eq!(script_seed(e, "{nope").0, JasStatus::BadJson);
+        let (s, err) = script_seed(e, r#"{"key":"artboards_panel_selection","value":[]}"#);
+        assert_eq!(s, JasStatus::MissingParam);
+        assert!(err.contains("MissingParam"), "{err}");
+        assert_eq!(options(e), Some(serde_json::json!(true)), "no refusal changed the state");
+        assert_eq!(script_seed(e, r#"{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":[]}"#).0, JasStatus::Ok);
+        assert_eq!(options(e), Some(serde_json::json!(false)), "and an empty seed empties it again");
+        assert_eq!(unsafe { jas_script_seed_panel(std::ptr::null_mut(), b"{}".as_ptr(), 2) }, JasStatus::NullHandle);
+        unsafe { jas_engine_free(e) };
     }
 
     fn panel_menu(e: *mut JasEngine, panel: &str) -> (Vec<serde_json::Value>, String) {

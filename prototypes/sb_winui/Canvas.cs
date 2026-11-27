@@ -2047,9 +2047,12 @@ internal sealed unsafe class Canvas : IDisposable
                     break;
 
                 case LoadCmd l:
-                    _report(ApplyLoad(l)
+                    var loaded = ApplyLoad(l);
+                    _report(loaded
                         ? $"RUSTOK {LastStatus} {Tids()}"
                         : $"RUSTFAIL {LastStatus} {Tids()}");
+                    // Row 284: a script's app_state, right after the launch's open.
+                    if (loaded) { ApplySeeds(); }
                     dirty = true;
                     cause = "load";
                     _panelStale = true;
@@ -2815,6 +2818,41 @@ internal sealed unsafe class Canvas : IDisposable
               + $"{selField} the scene's completion is posted now "
               + $"surface={_width}x{_height} {Tids()}");
         PostToUi(() => SceneCompleted?.Invoke());
+    }
+
+    /// <summary>Row 284: whether `SB_PANEL_SEED` was applied (once, to the launch's document).</summary>
+    private bool _seedsApplied;
+
+    /// <summary>
+    /// Row 284 (jas STATUS-flask 1027 item 2): `SB_PANEL_SEED` (a script's
+    /// `app_state`, <see cref="SeedWire"/>) seeded into the engine right after the
+    /// launch's open, through `jas_script_seed_panel`, so the panels read it back
+    /// as they would a person's own selection. Once per launch. Named, never
+    /// silent: `SEED panel=… key=… ok` per seed, `SEED DONE seeds=N`, or
+    /// `RUSTFAIL SEED REFUSED` with the knob's or the engine's reason.
+    /// </summary>
+    private void ApplySeeds()
+    {
+        if (_seedsApplied) { return; }
+        _seedsApplied = true;
+        var (seeds, why) = SeedWire.Seeds(Environment.GetEnvironmentVariable("SB_PANEL_SEED"));
+        if (why is not null) { _report($"RUSTFAIL SEED REFUSED -- {why} {Tids()}"); return; }
+        if (seeds.Count == 0) { return; }
+        foreach (var (panel, key, value) in seeds)
+        {
+            var json = System.Text.Encoding.UTF8.GetBytes(SeedWire.Envelope(panel, key, value));
+            var rc = JasCore.jas_script_seed_panel(_engine, json, (nuint)json.Length);
+            if (rc != 0)
+            {
+                var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+                _report($"RUSTFAIL SEED REFUSED panel={panel} key={key} status={rc} channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+                return;
+            }
+            _report($"SEED panel={panel} key={key} ok {Tids()}");
+        }
+        _report($"SEED DONE seeds={seeds.Count} {Tids()}");
+        _panelStale = true;
+        ApplyMenuRefresh("seed");
     }
 
     /// <summary>
@@ -4134,6 +4172,9 @@ internal sealed unsafe class Canvas : IDisposable
             LastStatus = $"APP FAILED: could not open '{preload}' — see the OPEN row above";
             return false;
         }
+        // Row 284: a script's app_state, right after the launch's open (the app
+        // scene opens its document here, not through a LoadCmd).
+        if (!string.IsNullOrWhiteSpace(preload)) { ApplySeeds(); }
 
         ApplyMenuRefresh("startup");
         RepaintOnce("app", 0);
