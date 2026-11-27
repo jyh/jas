@@ -104,12 +104,15 @@ func resolveIconButtonSize(
 /// Where a click hands a menu its action asked the HOST for (`open_menu`,
 /// ``StateStore/pendingMenu``, STATUS-jas row 8). The dock installs it with
 /// its layout and model; it is nil outside a dock, where nothing pops up.
+/// It is handed the requesting widget's own view when the widget carries one
+/// (``WidgetEvent/clickRequestsMenu(_:actions:)``, row 282), so the menu
+/// drops below the widget however it was pressed.
 private struct MenuRequestKey: EnvironmentKey {
-    static let defaultValue: ((String) -> Void)? = nil
+    static let defaultValue: ((String, NSView?) -> Void)? = nil
 }
 
 extension EnvironmentValues {
-    var onMenuRequest: ((String) -> Void)? {
+    var onMenuRequest: ((String, NSView?) -> Void)? {
         get { self[MenuRequestKey.self] }
         set { self[MenuRequestKey.self] = newValue }
     }
@@ -285,9 +288,9 @@ struct YamlElementView: View {
             case "text":
                 renderText()
             case "button":
-                renderButton()
+                renderButton().background(menuAnchorBackground)
             case "icon_button":
-                renderIconButton()
+                renderIconButton().background(menuAnchorBackground)
             case "slider":
                 renderSlider()
             case "number_input":
@@ -1199,6 +1202,17 @@ struct YamlElementView: View {
     /// effects through the shared `runEffects` pipeline. The
     /// platform-effects registry is scoped to Align for now; other
     /// panels can extend this when they wire up their own handlers.
+    /// The view a menu this widget's click requests is dropped below (row
+    /// 282): an empty AppKit view behind the button, present only when its
+    /// click can request one, so the other buttons carry nothing.
+    @State private var menuAnchor = MenuAnchorBox()
+
+    @ViewBuilder private var menuAnchorBackground: some View {
+        if WidgetEvent.clickRequestsMenu(element, actions: WorkspaceData.load()?.actions() ?? [:]) {
+            MenuAnchorView(anchor: menuAnchor)
+        }
+    }
+
     private func handleClickBehavior() {
         guard let model = model else { return }
         // A CLICK KIND (`button`, `icon_button`) runs the contract's click
@@ -1214,7 +1228,7 @@ struct YamlElementView: View {
             // handed to the dock, which pops it up at the click.
             if let id = model.stateStore.pendingMenu {
                 model.stateStore.pendingMenu = nil
-                onMenuRequest?(id)
+                onMenuRequest?(id, menuAnchor.view)
             }
             return
         }

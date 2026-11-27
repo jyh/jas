@@ -630,9 +630,10 @@ final class MenuAnchorBox {
     weak var view: NSView?
 }
 
-/// A thin AppKit adapter: an empty NSView behind the hamburger button,
-/// whose only job is to be the view the menu is popped in.
-private struct MenuAnchorView: NSViewRepresentable {
+/// A thin AppKit adapter: an empty NSView behind the hamburger button (and
+/// behind a widget whose click requests a menu, row 282), whose only job is
+/// to be the view the menu is popped in.
+struct MenuAnchorView: NSViewRepresentable {
     let anchor: MenuAnchorBox
     func makeNSView(context: Context) -> NSView {
         let v = NSView()
@@ -897,18 +898,19 @@ private struct PanelBodyObserver: View {
             model: model, panelId: panelId, theme: theme,
             onStoreDialogOpened: onStoreDialogOpened
         )
-        .environment(\.onMenuRequest) { id in
-            popUpMenuRequest(id, layout: layout, model: capturedModel)
+        .environment(\.onMenuRequest) { id, anchor in
+            popUpMenuRequest(id, anchor: anchor, layout: layout, model: capturedModel)
         }
     }
 }
 
 /// The AppKit adapter for an `open_menu` request (STATUS-jas row 8): the named
 /// item's `items_from` rows (``panelMenuRequest``, ``panelSubmenuRows``) as a
-/// menu at the current event, each row running its action with its params
+/// menu below the requesting widget's own view (``panelMenuPlacement``, the
+/// hamburger's rule), each row running its action with its params
 /// (``panelDispatchRow(_:action:params:model:)``). An empty source pops one
 /// disabled "(none)" item; an id no panel menu declares pops nothing.
-private func popUpMenuRequest(_ id: String, layout: WorkspaceLayout, model: Model) {
+private func popUpMenuRequest(_ id: String, anchor: NSView?, layout: WorkspaceLayout, model: Model) {
     guard let hit = panelMenuRequest(id) else { return }
     let rows = panelSubmenuRows(hit.kind, spec: hit.spec, layout: layout, model: model)
     let menu = NSMenu(title: hit.label)
@@ -931,8 +933,23 @@ private func popUpMenuRequest(_ id: String, layout: WorkspaceLayout, model: Mode
         none.isEnabled = false
         menu.addItem(none)
     }
-    if let event = NSApp.currentEvent {
-        NSMenu.popUpContextMenu(menu, with: event, for: NSApp.keyWindow?.contentView ?? NSView())
+    // Row 282: placing it only at NSApp.currentEvent, in the KEY window,
+    // popped nothing for an accessibility press or a real click (measured
+    // live 11-26). The widget's own view wins whenever it is in a window.
+    let event = NSApp.currentEvent
+    switch panelMenuPlacement(hasAnchor: anchor?.window != nil, eventType: event?.type) {
+    case .belowAnchor:
+        if let view = anchor {
+            let at = panelMenuAnchorPoint(width: view.bounds.width, height: view.bounds.height,
+                                          isFlipped: view.isFlipped)
+            menu.popUp(positioning: nil, at: at, in: view)
+        }
+    case .atEvent:
+        if let event, let view = event.window?.contentView ?? NSApp.keyWindow?.contentView {
+            NSMenu.popUpContextMenu(menu, with: event, for: view)
+        }
+    case .none:
+        break
     }
 }
 
