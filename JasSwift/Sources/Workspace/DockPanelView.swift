@@ -1145,9 +1145,15 @@ func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
         // `gradient_libraries`: the Gradient preset strip's, the app tier
         // (``AppGradientLibraries``, design 2026-11-17 §1).
         "data": ["swatch_libraries": swatchLibs, "brush_libraries": (model?.stateStore.getDataPath("brush_libraries") as? [String: Any]) ?? ws.brushLibraries(), "gradient_libraries": model?.gradientLibraries.libs ?? ws.data["gradient_libraries"] ?? [String: Any](), "concepts": ws.conceptsList()] as [String: Any],
+        // The Artboards panel selection too (row 283): without it the body's
+        // `active_document.artboards_panel_selection_ids` was always `[]`, so
+        // Delete Artboards stayed disabled with rows selected and New Artboard
+        // never offset from the selected one. The menu route always passed it
+        // (``ViewActions``).
         "active_document": buildActiveDocumentView(
             model: model,
-            layersPanelSelection: layersPanelSelection
+            layersPanelSelection: layersPanelSelection,
+            artboardsPanelSelection: model.map(artboardsPanelSelectionIds) ?? []
         ),
         "theme": ["colors": themeColors] as [String: Any]
     ]

@@ -396,6 +396,20 @@ func commitPanelWidgetValue(
     }
 }
 
+/// Whether `effects` name a `doc.*` effect that `table` has no handler for,
+/// at any depth: inside an `if:` branch, a `foreach`'s body, or any other
+/// nested effect list (row 283). Such an action must run through the Layers
+/// registry, which holds the `doc.*` handlers.
+func effectsNeedDocRegistry(_ effects: Any?, table: [String: PlatformEffect]) -> Bool {
+    if let d = effects as? [String: Any] {
+        return d.contains { k, v in
+            (k.hasPrefix("doc.") && table[k] == nil) || effectsNeedDocRegistry(v, table: table)
+        }
+    }
+    if let a = effects as? [Any] { return a.contains { effectsNeedDocRegistry($0, table: table) } }
+    return false
+}
+
 /// Dispatch a YAML action by looking it up in the actions catalog
 /// and running its effects, plus any native side-effects (e.g.
 /// set_active_color updates ColorPanel state). Mirrors
@@ -535,11 +549,11 @@ func dispatchPanelAction(
     // the category label: until row 179 only `category: layers` went there, so
     // the Artboards panel's rename confirm (`doc.set_artboard_field`) and its
     // Move Up / Down (`doc.move_artboards_*`) ran their YAML here, found no
-    // handler, and changed nothing.
-    let needsDocRegistry = effects.contains { e in
-        guard let key = (e as? [String: Any])?.keys.first else { return false }
-        return key.hasPrefix("doc.") && platformEffects[key] == nil
-    }
+    // handler, and changed nothing. And at ANY DEPTH (row 283): New Artboard
+    // and Delete Artboards hold `doc.create_artboard` / `doc.delete_artboard_by_id`
+    // inside an `if:`, so a top-level test sent them to Align's table, and the
+    // Mac's `ap_new` and `ap_delete` reported committed and did nothing.
+    let needsDocRegistry = effectsNeedDocRegistry(effects, table: platformEffects)
     if actionDef["category"] as? String == "layers" || needsDocRegistry {
         // A Layers action writes the document (`snapshot`, `doc.op`), and
         // Align's table holds no `doc.*` handler, so run it through the
