@@ -9413,6 +9413,82 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 287 (STATUS-flask 1025, the class audit after #1137's web red): the
+    /// engine's REAL bytes for the shapes a shell reads that no shipped corpus
+    /// holds, pinned in `test_fixtures/engine_exports/`, so a shell's reader can
+    /// be driven over the producer's own output and a producer that renames or
+    /// drops a field reds HERE, beside the change, not in a live run. Each file
+    /// names the export and its subject. `JAS_WRITE_ENGINE_EXPORTS=1` rewrites
+    /// them from the exports.
+    #[test]
+    fn the_engine_exports_a_shell_reads_are_pinned() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test_fixtures");
+        let write = std::env::var("JAS_WRITE_ENGINE_EXPORTS").as_deref() == Ok("1");
+        let mut moved: Vec<String> = Vec::new();
+        let mut pin = |name: &str, got: String, e: *mut JasEngine| {
+            assert!(!got.is_empty(), "{name}: the export answered nothing: {}", take(unsafe { jas_last_error_json(e) }));
+            let got: serde_json::Value = serde_json::from_str(&got).unwrap_or_else(|x| panic!("{name}: {x}"));
+            let file = dir.join(name);
+            if write {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
+            }
+            match std::fs::read_to_string(&file) {
+                Ok(t) => if serde_json::from_str::<serde_json::Value>(&t).ok().as_ref() != Some(&got) { moved.push(name.to_string()) },
+                Err(_) => moved.push(format!("{name} (absent)")),
+            }
+        };
+        // The Layers panel at the default document: tree rows, their binds
+        // (`bind.source`, `bind.element_path`) and hit surfaces.
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        pin("engine_exports/layers_panel_plan.json", plan_of(e, "layers_panel_content", 228, 600), e);
+        let dock = "Default";
+        pin("engine_exports/dock_layout_default.json", take(unsafe { jas_dock_layout(dock.as_ptr(), dock.len()) }), e);
+        unsafe { jas_engine_free(e) };
+        // The Artboards panel with two artboards: the `repeats` key, each row's
+        // NAMED leaves with their `path`, the panel menu, a row click's reply,
+        // and the Artboard Options dialog's plan.
+        let mut doc = crate::document::document::Document::default();
+        doc.artboards = (0..2).map(|i| {
+            let mut a = Artboard::default_with_id(format!("ab{i:04}"));
+            a.name = format!("Board {}", i + 1);
+            a
+        }).collect();
+        let e = engine_with(Model::new(doc, None));
+        let plan_text = plan_of(e, "artboards_panel_content", 228, 600);
+        let plan: serde_json::Value = serde_json::from_str(&plan_text).expect("plan JSON");
+        pin("engine_exports/artboards_panel_plan_two.json", plan_text, e);
+        let ab = "artboards_panel_content";
+        pin("engine_exports/artboards_panel_menu.json", take(unsafe { jas_panel_menu(e, ab.as_ptr(), ab.len()) }), e);
+        let row1 = ["chrome", "containers", "leaves"].iter().filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["id"] == "ap_number").map(|r| r["path"].clone()).nth(1).expect("row 1's ap_number");
+        pin("engine_exports/artboards_row_click_reply.json",
+            behave(e, ab, &format!(r#"{{"path":{row1},"event":"click"}}"#)).0, e);
+        assert_eq!(dialog_open(e, "artboard_options", r#"{"artboard_id":"ab0001"}"#), JasStatus::Ok,
+                   "{}", take(unsafe { jas_last_error_json(e) }));
+        pin("engine_exports/artboard_options_dialog_plan.json", take(unsafe { jas_dialog_plan(e, 0, 0) }), e);
+        unsafe { jas_engine_free(e) };
+        // Floors on what each pin is FOR, derived from the export, so a pin
+        // that lost the shape a shell's arm needs fails here, not by passing
+        // over nothing (a fixture shorter than the cut hides the cut).
+        let rows = |p: &serde_json::Value| -> Vec<serde_json::Value> {
+            ["chrome", "containers", "leaves"].iter().filter_map(|k| p[*k].as_array()).flatten().cloned().collect()
+        };
+        let layers: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("engine_exports/layers_panel_plan.json")).unwrap_or_default()).unwrap_or_default();
+        let lr = rows(&layers);
+        assert!(lr.iter().filter(|r| r.get("events").is_some()).count() >= 1, "the Layers pin has a hit surface");
+        assert!(lr.iter().any(|r| r.to_string().contains("bind.source")), "the Layers pin has a tree row's bind.source");
+        let ab: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("engine_exports/artboards_panel_plan_two.json")).unwrap_or_default()).unwrap_or_default();
+        assert_eq!(ab["repeats"][0]["rows"], 2, "the Artboards pin repeats its two rows: {}", ab["repeats"]);
+        assert_eq!(rows(&ab).iter().filter(|r| r["id"] == "ap_number").count(), 2, "one named ap_number per row");
+        assert!(moved.is_empty(), "the engine's exports moved from their pins: {moved:?}; a shell's \
+                wire test reads these files (JAS_WRITE_ENGINE_EXPORTS=1 rewrites them; read the diff first)");
+    }
+
     /// Row 257: a row-menu query the engine cannot answer draws nothing and
     /// names its class. (The answered case, and that its indices run the item
     /// drawn, is witnessed by the replay's context-menu arms, which now read

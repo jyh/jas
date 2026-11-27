@@ -1,0 +1,472 @@
+{
+  "chrome": [
+    {
+      "display": {},
+      "events": [
+        "drag_start",
+        "drag_move",
+        "drag_end"
+      ],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        0
+      ],
+      "rect": {
+        "h": 24,
+        "w": 228,
+        "x": 0,
+        "y": 0
+      },
+      "static": {},
+      "type": "container",
+      "values": {
+        "bind.background": "transparent"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "drag_start",
+        "drag_move",
+        "drag_end"
+      ],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        1
+      ],
+      "rect": {
+        "h": 24,
+        "w": 228,
+        "x": 0,
+        "y": 24
+      },
+      "static": {},
+      "type": "container",
+      "values": {
+        "bind.background": "transparent"
+      }
+    }
+  ],
+  "containers": [],
+  "height": 600,
+  "hidden": [
+    [
+      0,
+      0,
+      2
+    ],
+    [
+      0,
+      1,
+      2
+    ]
+  ],
+  "icons": {
+    "arrow_down": {
+      "svg": "<line x1=\"8\" y1=\"3\" x2=\"8\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/> <path d=\"M3,8 L8,13 L13,8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "arrow_up": {
+      "svg": "<line x1=\"8\" y1=\"3\" x2=\"8\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/> <path d=\"M3,8 L8,3 L13,8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "artboard_new": {
+      "svg": "<path d=\"M2,3 L9,3 L9,13 L2,13 Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linejoin=\"miter\"/> <line x1=\"13\" y1=\"5\" x2=\"13\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/> <line x1=\"10\" y1=\"8\" x2=\"16\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "artboard_options": {
+      "svg": "<circle cx=\"8\" cy=\"3\" r=\"1.4\" fill=\"currentColor\"/> <circle cx=\"8\" cy=\"8\" r=\"1.4\" fill=\"currentColor\"/> <circle cx=\"8\" cy=\"13\" r=\"1.4\" fill=\"currentColor\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "rearrange": {
+      "svg": "<line x1=\"3\" y1=\"5\" x2=\"13\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <path d=\"M11,3 L13,5 L11,7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/> <line x1=\"3\" y1=\"11\" x2=\"13\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <path d=\"M5,9 L3,11 L5,13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "trash": {
+      "svg": "<line x1=\"2\" y1=\"4\" x2=\"14\" y2=\"4\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <line x1=\"6\" y1=\"2\" x2=\"10\" y2=\"2\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <path d=\"M4,4 L4.5,13 L11.5,13 L12,4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/> <line x1=\"7\" y1=\"7\" x2=\"7\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/> <line x1=\"9\" y1=\"7\" x2=\"9\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\"/>\n",
+      "viewbox": "0 0 16 16"
+    }
+  },
+  "icons_missing": [],
+  "leaves": [
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_number",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        0,
+        0
+      ],
+      "rect": {
+        "h": 20,
+        "w": 24,
+        "x": 4,
+        "y": 0
+      },
+      "static": {},
+      "type": "text",
+      "values": {
+        "content": "1"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click",
+        "click_and_wait"
+      ],
+      "flags": {},
+      "id": "ap_name",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        0,
+        1
+      ],
+      "rect": {
+        "h": 20,
+        "w": 70,
+        "x": 32,
+        "y": 0
+      },
+      "static": {},
+      "type": "text",
+      "values": {
+        "bind.visible": "true",
+        "content": "Board 1"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_options",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        0,
+        3
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 208,
+        "y": 2
+      },
+      "static": {
+        "icon": "artboard_options",
+        "summary": "Artboard Options"
+      },
+      "type": "icon_button",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_number",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        1,
+        0
+      ],
+      "rect": {
+        "h": 20,
+        "w": 24,
+        "x": 4,
+        "y": 24
+      },
+      "static": {},
+      "type": "text",
+      "values": {
+        "content": "2"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click",
+        "click_and_wait"
+      ],
+      "flags": {},
+      "id": "ap_name",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        1,
+        1
+      ],
+      "rect": {
+        "h": 20,
+        "w": 70,
+        "x": 32,
+        "y": 24
+      },
+      "static": {},
+      "type": "text",
+      "values": {
+        "bind.visible": "true",
+        "content": "Board 2"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_options",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        0,
+        1,
+        3
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 208,
+        "y": 26
+      },
+      "static": {
+        "icon": "artboard_options",
+        "summary": "Artboard Options"
+      },
+      "type": "icon_button",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        1
+      ],
+      "rect": {
+        "h": 1,
+        "w": 228,
+        "x": 0,
+        "y": 575
+      },
+      "static": {
+        "orientation": "horizontal"
+      },
+      "type": "separator",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_rearrange",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2,
+        0
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 6,
+        "y": 580
+      },
+      "static": {
+        "icon": "rearrange",
+        "summary": "Rearrange Artboards"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.badge": "false",
+        "bind.disabled": "true"
+      }
+    },
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2,
+        1
+      ],
+      "rect": {
+        "h": 0,
+        "w": 116,
+        "x": 26,
+        "y": 588
+      },
+      "static": {},
+      "type": "spacer",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_move_up",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2,
+        2
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 146,
+        "y": 580
+      },
+      "static": {
+        "icon": "arrow_up",
+        "summary": "Move Up"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.disabled": "true"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_move_down",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2,
+        3
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 166,
+        "y": 580
+      },
+      "static": {
+        "icon": "arrow_down",
+        "summary": "Move Down"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.disabled": "true"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_new",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2,
+        4
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 186,
+        "y": 580
+      },
+      "static": {
+        "icon": "artboard_new",
+        "summary": "New Artboard"
+      },
+      "type": "icon_button",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "ap_delete",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2,
+        5
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 206,
+        "y": 580
+      },
+      "static": {
+        "icon": "trash",
+        "summary": "Delete Artboards"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.disabled": "true"
+      }
+    }
+  ],
+  "repeats": [
+    {
+      "elements": false,
+      "id": "ap_list",
+      "path": [
+        0
+      ],
+      "rows": 2
+    }
+  ],
+  "unjoined": [],
+  "withheld": []
+}

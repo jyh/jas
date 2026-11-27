@@ -1,0 +1,507 @@
+{
+  "chrome": [
+    {
+      "display": {},
+      "events": [
+        "click",
+        "secondary_press",
+        "double_click",
+        "drag_start",
+        "drag_move",
+        "drag_end"
+      ],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0
+      ],
+      "rect": {
+        "h": 24,
+        "w": 228,
+        "x": 0,
+        "y": 29
+      },
+      "static": {},
+      "type": "container",
+      "values": {
+        "bind.background": "transparent",
+        "bind.opacity": "1"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "lp_select",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        8
+      ],
+      "rect": {
+        "h": 12,
+        "w": 12,
+        "x": 212,
+        "y": 35
+      },
+      "static": {},
+      "type": "container",
+      "values": {
+        "bind.background": "transparent",
+        "bind.border": "1px solid #555555"
+      }
+    }
+  ],
+  "containers": [
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "lp_tree",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3
+      ],
+      "rect": {
+        "h": 571,
+        "w": 228,
+        "x": 0,
+        "y": 29
+      },
+      "static": {
+        "summary": "Element hierarchy"
+      },
+      "type": "tree_view",
+      "values": {
+        "bind.collapsed_paths": "[]",
+        "bind.drag_active": "false",
+        "bind.element_selection": "[]",
+        "bind.isolation_root": "",
+        "bind.panel_selection": "[]",
+        "bind.renaming_element": "",
+        "bind.search_query": "",
+        "bind.source": "[{\"ancestor_layer_color\":\"\",\"depth\":0,\"element_selected\":false,\"id\":null,\"is_container\":true,\"locked\":false,\"name\":\"Layer\",\"path\":[0],\"type\":\"layer\",\"type_label\":\"Layer\",\"visibility\":\"preview\"}]",
+        "bind.type_filter": "[]"
+      }
+    }
+  ],
+  "height": 600,
+  "hidden": [
+    [
+      0
+    ],
+    [
+      3,
+      0,
+      4
+    ],
+    [
+      3,
+      0,
+      7
+    ]
+  ],
+  "icons": {
+    "eye_preview": {
+      "svg": "<path d=\"M1,8 C3,4 6,2 8,2 C10,2 13,4 15,8 C13,12 10,14 8,14 C6,14 3,12 1,8 Z\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linejoin=\"round\"/>\n<circle cx=\"8\" cy=\"8\" r=\"2.5\" fill=\"currentColor\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "filter": {
+      "svg": "<path d=\"M2,3 L14,3 L9.5,8.5 L9.5,12 L6.5,13.5 L6.5,8.5 Z\"\n  fill=\"currentColor\" opacity=\"0.8\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "lock_unlocked": {
+      "svg": "<rect x=\"3\" y=\"7\" width=\"10\" height=\"8\" rx=\"1\" fill=\"currentColor\" opacity=\"0.4\"/> <path d=\"M5,7 V5 C5,2.5 6.5,1 8,1 C9.5,1 11,2.5 11,5\"\n  fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" opacity=\"0.4\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "search": {
+      "svg": "<circle cx=\"7\" cy=\"7\" r=\"4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"/> <line x1=\"10\" y1=\"10\" x2=\"14\" y2=\"14\" stroke=\"currentColor\" stroke-width=\"1.5\"\n  stroke-linecap=\"round\"/>\n",
+      "viewbox": "0 0 16 16"
+    },
+    "twirl_open": {
+      "svg": "<path d=\"M4,5 L8,10 L12,5\" fill=\"currentColor\"/>\n",
+      "viewbox": "0 0 16 16"
+    }
+  },
+  "icons_missing": [],
+  "leaves": [
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        1,
+        0
+      ],
+      "rect": {
+        "h": 14,
+        "w": 14,
+        "x": 6,
+        "y": 7
+      },
+      "static": {
+        "icon": "search"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.disabled": "true"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "input"
+      ],
+      "flags": {},
+      "id": "lp_search_input",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        1,
+        1
+      ],
+      "rect": {
+        "h": 20,
+        "w": 174,
+        "x": 24,
+        "y": 4
+      },
+      "static": {
+        "placeholder": "Search All",
+        "summary": "Search layers"
+      },
+      "type": "text_input",
+      "values": {
+        "bind.value": ""
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "toggle",
+        "alt_toggle"
+      ],
+      "flags": {},
+      "id": "lp_filter_button",
+      "items": [
+        {
+          "checked": true,
+          "kind": "action",
+          "label": "All",
+          "value": "__all__"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Layer",
+          "value": "layer"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Group",
+          "value": "group"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Path",
+          "value": "path"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Rectangle",
+          "value": "rectangle"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Circle",
+          "value": "circle"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Ellipse",
+          "value": "ellipse"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Polyline",
+          "value": "polyline"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Polygon",
+          "value": "polygon"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Text",
+          "value": "text"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Text Path",
+          "value": "text_path"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Line",
+          "value": "line"
+        },
+        {
+          "checked": false,
+          "kind": "toggle",
+          "label": "Compound Shape",
+          "value": "live"
+        }
+      ],
+      "numbers": {},
+      "options": null,
+      "path": [
+        1,
+        2
+      ],
+      "rect": {
+        "h": 20,
+        "w": 20,
+        "x": 202,
+        "y": 4
+      },
+      "static": {
+        "icon": "filter",
+        "summary": "Filter by element type"
+      },
+      "type": "dropdown",
+      "values": {
+        "bind.checked_in": "[]"
+      }
+    },
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        2
+      ],
+      "rect": {
+        "h": 1,
+        "w": 228,
+        "x": 0,
+        "y": 28
+      },
+      "static": {
+        "orientation": "horizontal"
+      },
+      "type": "separator",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        0
+      ],
+      "rect": {
+        "h": 0,
+        "w": 0,
+        "x": 4,
+        "y": 41
+      },
+      "static": {},
+      "type": "spacer",
+      "values": {}
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "lp_eye",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        1
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 6,
+        "y": 33
+      },
+      "static": {
+        "summary": "Visibility"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.icon": "eye_preview"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "lp_lock",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        2
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 24,
+        "y": 33
+      },
+      "static": {
+        "summary": "Lock"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.icon": "lock_unlocked"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "click"
+      ],
+      "flags": {},
+      "id": "lp_twirl",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        3
+      ],
+      "rect": {
+        "h": 16,
+        "w": 16,
+        "x": 42,
+        "y": 33
+      },
+      "static": {
+        "summary": "Expand/Collapse"
+      },
+      "type": "icon_button",
+      "values": {
+        "bind.icon": "twirl_open",
+        "bind.visible": "true"
+      }
+    },
+    {
+      "display": {},
+      "events": [],
+      "flags": {},
+      "id": "lp_preview",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        5
+      ],
+      "rect": {
+        "h": 24,
+        "w": 24,
+        "x": 60,
+        "y": 29
+      },
+      "static": {
+        "summary": "Element preview"
+      },
+      "type": "element_preview",
+      "values": {
+        "bind.element_path": "[0]"
+      }
+    },
+    {
+      "display": {},
+      "events": [
+        "double_click"
+      ],
+      "flags": {},
+      "id": "lp_name",
+      "items": null,
+      "numbers": {},
+      "options": null,
+      "path": [
+        3,
+        0,
+        6
+      ],
+      "rect": {
+        "h": 20,
+        "w": 50,
+        "x": 86,
+        "y": 31
+      },
+      "static": {
+        "summary": "Element name"
+      },
+      "type": "text",
+      "values": {
+        "bind.visible": "true",
+        "content": "Layer"
+      }
+    }
+  ],
+  "repeats": [
+    {
+      "elements": true,
+      "id": "lp_tree",
+      "path": [
+        3
+      ],
+      "rows": 1
+    }
+  ],
+  "unjoined": [],
+  "withheld": []
+}
