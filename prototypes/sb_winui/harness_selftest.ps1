@@ -2216,10 +2216,12 @@ Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as
 # is their seeded app_state (jas 1027 item 2's seed door).
 $fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 foreach ($fp in 'fill_white', 'preset_a4') {
-    Test-Case "is: the proposed artboard_options.$fp names its first undelivered form" {
+    $want = if ($fp -eq 'fill_white') { 'ao_fill_dropdown:commit=white' } else { 'ao_preset:commit=a4' }
+    Test-Case "is: the proposed artboard_options.$fp is ACCEPTED whole (no gesture, the dock, the seed)" {
         $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
-        Show-SbScript (Read-SbInputScript $t)
-    } 'REFUSED: app_state sets panels: this driver cannot seed state'
+        $r = Read-SbInputScript $t
+        if ($null -ne $r.Refusal) { "REFUSED: $($r.Refusal)" } else { "nogesture=$($r.NoGesture) mode=$($r.Mode) panels=$($r.PanelShow) reads-after=$(@($r.DialogReads) -join ',') expect=$(@($r.ExpectedDialog) -join ',') seed=$($r.AppState)" }
+    } "nogesture=True mode=dock panels=panel_menu:artboards_panel_content/open_artboard_options;dialog:artboard_options/$want;dialog:artboard_options/ao_ok:click reads-after=1,3 expect=artboard_options,none seed={`"panels`":{`"artboards_panel_content`":{`"artboards_panel_selection`":[`"zs8ap4x3`"]}}}"
 }
 # And the control: no SHIPPED script is refused by the new form checks (they
 # would have stopped gating), and the read found the corpus at all.
@@ -3145,7 +3147,7 @@ Test-Case 'is: a script that names no tool is refused, never defaulted to select
 } "REFUSED: the script names no tool"
 Test-Case 'is: a non-empty app_state is refused, never ignored' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -AppState @{ fill_color = '#ff0000' }))
-} 'REFUSED: app_state sets fill_color: this driver cannot seed state'
+} "REFUSED: app_state.fill_color is not a ruled form: seed a panel's declared state as app_state.panels.<content id>.<key>"
 Test-Case 'is: a script that does not parse is refused' {
     Show-SbScript (Read-SbInputScript '{not json')
 } 'REFUSED: the script does not parse'
