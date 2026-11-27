@@ -2212,13 +2212,14 @@ Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as
 # Over the REAL files: both proposed scripts name their FIRST undelivered form,
 # not a missing expected_json hiding it. Since row 275's expectations they carry
 # a top-level expected_dialog list, which this driver reads since row 275 C2,
-# so the form named is their panel_menu step (jas 1009 (2): refused on Windows).
+# so the form named was their panel_menu step until row 284 delivered it; now it
+# is their seeded app_state (jas 1027 item 2's seed door).
 $fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 foreach ($fp in 'fill_white', 'preset_a4') {
     Test-Case "is: the proposed artboard_options.$fp names its first undelivered form" {
         $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
         Show-SbScript (Read-SbInputScript $t)
-    } 'REFUSED: step 0 is a panel_menu step: this driver does not deliver panel_menu steps yet'
+    } 'REFUSED: app_state sets panels: this driver cannot seed state'
 }
 # And the control: no SHIPPED script is refused by the new form checks (they
 # would have stopped gating), and the read found the corpus at all.

@@ -3618,6 +3618,7 @@ function Read-SbInputScript([string]$Json) {
         panel   = @{ delivered = @('panel', 'widget', 'event', 'value', 'row', 'at'); later = @('shift', 'alt', 'ctrl', 'meta', 'to', 'hover_ms', 'hold_ms') }
         menu    = @{ delivered = @('menu'); later = @() }
         dialog  = @{ delivered = @('dialog', 'widget', 'event', 'value'); later = @() }
+        panel_menu = @{ delivered = @('panel_menu', 'action'); later = @('params') }
         read    = @{ delivered = @('read'); later = @('keys') }
     }
     $formSteps = @($s.steps)
@@ -3666,6 +3667,9 @@ function Read-SbInputScript([string]$Json) {
     # ROW 275 C2: per dialog read, how many probing acts after the release come
     # before it (keys, then late steps); prove_e2e adds the release's probe.
     $dialogReads = New-Object System.Collections.Generic.List[int]
+    # ROW 284: panel_menu steps make a DOCK script; a row or at step there is
+    # refused (its plan is the single pane's), named by its own step.
+    $panelMenus = 0; $rowAtStep = $null
     # The first step the shell may defer for the clipboard, if any (C3).
     $deferrable = $null
     for ($i = 0; $i -lt $steps.Count; $i++) {
@@ -3719,6 +3723,20 @@ function Read-SbInputScript([string]$Json) {
         # MENU STEPS (jas sections 389/392), `{"menu": <node id>}`: after the
         # gesture and the keys, in script order with the panel steps, so they
         # share the panel steps' list and its crossing.
+        # ROW 284 (jas STATUS-flask 1027): A PANEL_MENU STEP, `panel_menu` (the
+        # panel content id) + `action` (the command its item dispatches). The
+        # hand delivers it in the dock: the panel's tab, its group's menu, the
+        # one item with that action. It probes as a panel-menu run does.
+        if ($names -contains 'panel_menu') {
+            $pm = "$($st.panel_menu)"; $pa = "$($st.action)"
+            if ($pm.Length -eq 0 -or $pa.Length -eq 0) { return (& $no "step $i panel_menu step names no panel or no action") }
+            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                return (& $no "step $i panel_menu $pm/$pa comes before the gesture ends: send_hand.ps1 delivers panel_menu steps only after the release")
+            }
+            $panels.Add([ordered]@{ panel_menu = $pm; action = $pa })
+            $panelMenus++
+            continue
+        }
         if ($names -contains 'menu') {
             $mn = "$($st.menu)"
             if ($mn.Length -eq 0) { return (& $no "step $i menu step names no item") }
@@ -3781,6 +3799,7 @@ function Read-SbInputScript([string]$Json) {
                 if (-not $ok) { return (& $no "step $i panel $tag at must be a non-empty list of non-negative integers (an iteration index per enclosing repeat)") }
                 $at = @($av | ForEach-Object { [int]$_ })
             }
+            if ($null -eq $rowAtStep -and ($null -ne $row -or $null -ne $at)) { $rowAtStep = "step $i panel $tag" }
             $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value; row = $row; at = $at })
             continue
         }
@@ -3884,6 +3903,9 @@ function Read-SbInputScript([string]$Json) {
     }
     $shift = $held['shift']
     if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
+    if ($panelMenus -gt 0 -and $null -ne $rowAtStep) {
+        return (& $no "$rowAtStep names a row or at in a script with a panel_menu step: this driver reads a row from the single pane's plan, and a panel_menu step launches the dock")
+    }
     foreach ($r in $reads) {
         if (@('document', 'dialog') -cnotcontains $r) { return (& $no "read '$r': this driver compares only read=document and read=dialog") }
     }
@@ -3958,6 +3980,7 @@ function Read-SbInputScript([string]$Json) {
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
             Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
+            PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
         }
     }
     # A CLICK (flask section 348): press + release at ONE point, no move, k=0.
@@ -3986,6 +4009,7 @@ function Read-SbInputScript([string]$Json) {
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
             Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
+            PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
         }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
@@ -4019,6 +4043,7 @@ function Read-SbInputScript([string]$Json) {
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
         Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
         Dialogs = @($panels | Where-Object { $_.dialog }).Count; DialogReads = @($dialogReads); ExpectedDialog = @($expDialog)
+        PanelMenus = $panelMenus; Mode = $(if ($panelMenus -gt 0) { 'dock' } else { 'single' })
     }
 }
 
@@ -4220,10 +4245,32 @@ function Resolve-SbPlanAt([string]$PlanJson, [int[]]$At, [string]$Widget) {
     [pscustomobject]@{ Refusal = $null; K = $At[$At.Count - 1]; Surface = "surface $(Format-SbPath $surfacePath)"; Foreach = (Format-SbPath $cur.path); Label = $null; Rows = [int]$cur.rows }
 }
 
+# ROW 284: the hand's two choices for a panel_menu step, pure. The tab (whose
+# AutomationId `<group>_tab_<panel>` names its group, DockWire.TabAutomationId),
+# then the one menu item whose AutomationId is the step's action
+# (PanelMenuWire.ItemAutomationId). Each is refused by name unless unique.
+function Select-SbDockTab([string[]]$TabIds, [string]$Panel) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why; Group = $null } }
+    $suffix = "_tab_$Panel"
+    $mine = @($TabIds | Where-Object { $_ -and $_.EndsWith($suffix, [System.StringComparison]::Ordinal) -and $_.Length -gt $suffix.Length })
+    if ($mine.Count -eq 0) { return (& $no "no dock tab shows '$Panel': a panel_menu step needs the dock, and the single pane has no group menu") }
+    $groups = @($mine | ForEach-Object { $_.Substring(0, $_.Length - $suffix.Length) })
+    if ($mine.Count -gt 1) { return (& $no "'$Panel' is tabbed in $($mine.Count) dock groups ($($groups -join ', ')): this driver will not guess which menu a person meant") }
+    [pscustomobject]@{ Refusal = $null; Group = $groups[0] }
+}
+function Select-SbMenuItemByAction([string[]]$ItemIds, [string]$Action, [string]$Panel) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why; Index = -1 } }
+    $hits = @(for ($i = 0; $i -lt @($ItemIds).Count; $i++) { if ($ItemIds[$i] -ceq $Action) { $i } })
+    if ($hits.Count -eq 0) { return (& $no "no item of '$Panel''s menu dispatches '$Action' ($(@($ItemIds).Count) item(s) shown)") }
+    if ($hits.Count -gt 1) { return (& $no "$($hits.Count) items of '$Panel''s menu dispatch '$Action': they differ only by params, which the engine does not report") }
+    [pscustomobject]@{ Refusal = $null; Index = $hits[0] }
+}
+
 function Format-SbPanelSteps($Panels) {
     @($Panels | ForEach-Object {
         if ($_.menu) { "menu:$($_.menu)" }
         elseif ($_.click) { "click@($($_.x),$($_.y))" }
+        elseif ($_.panel_menu) { "panel_menu:$($_.panel_menu)/$($_.action)" }
         elseif ($_.dialog) { "dialog:$($_.dialog)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
         else { "$($_.panel)/$($_.widget)$(if ($null -ne $_.row) { '@[' + (@($_.row) -join ',') + ']' })$(if ($null -ne $_.at) { '#[' + (@($_.at) -join ',') + ']' }):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
     }) -join ';'
