@@ -9212,19 +9212,22 @@ private func formsFindWidget(_ node: Any?, _ id: String) -> [String: Any]? {
     #expect((formsRefusal(none) ?? "").contains("no dialog is open"), "\(none)")
 }
 
-/// Every PROPOSED script replays to its outcome; the population is pinned in
-/// the corpus manifest's path form against the directory.
-@Test func formsEveryProposedDialogScriptReplaysToItsOutcome() throws {
-    let proposed = [
-        "input_scripts_proposed/artboard_options.fill_white.json",
-        "input_scripts_proposed/artboard_options.preset_a4.json",
+/// The two Artboard Options dialog scripts (admitted from the proposed
+/// directory in row 284) replay to their outcome. Rust's
+/// `the_artboard_options_dialog_scripts_replay_to_their_outcome` pins the same
+/// paths; the proposed directory is pinned EMPTY, so a script proposed there
+/// later reds this arm until it is given one.
+@Test func formsTheArtboardOptionsDialogScriptsReplayToTheirOutcome() throws {
+    let admitted = [
+        "input_scripts/artboard_options.fill_white.json",
+        "input_scripts/artboard_options.preset_a4.json",
     ]
     let dir = (fixturesPath() as NSString).appendingPathComponent("input_scripts_proposed")
-    let onDisk = try FileManager.default.contentsOfDirectory(atPath: dir)
-        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".expected.json") }.sorted()
-        .map { "input_scripts_proposed/\($0)" }
-    #expect(onDisk == proposed, "the population moved")
-    for n in proposed {
+    // An empty directory is not in git, so absent reads as empty.
+    let onDisk = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".expected.json") }
+    #expect(onDisk.isEmpty, "a proposed script appeared: give it its arm (\(onDisk))")
+    for n in admitted {
         let script = try JSONSerialization.jsonObject(with: readFixture(n).data(using: .utf8)!) as! [String: Any]
         let out = formsRun(script)
         #expect(formsRefusal(out) == nil, "\(n): \(out)")
@@ -9235,7 +9238,7 @@ private func formsFindWidget(_ node: Any?, _ id: String) -> [String: Any]? {
         let wantDialogs = ((script["expected_dialog"] as? [Any]) ?? []).map { ($0 as? String) ?? "null" }
         #expect(wantDialogs == formsDialogReads(out), "\(n): expected_dialog \(wantDialogs)")
         let golden = (script["expected_json"] as? String) ?? "(no expected_json)"
-        let want = readFixture("input_scripts_proposed/\(golden)").trimmingCharacters(in: .whitespacesAndNewlines)
+        let want = readFixture("input_scripts/\(golden)").trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(formsDocReads(out).last == want, "\(n): the document read is not \(golden)")
         let ab = formsArtboard(out).last ?? [:]
         if n.contains("fill_white") {

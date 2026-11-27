@@ -2259,26 +2259,27 @@ fn a4_from_the_spec() -> (f64, f64) {
     (it.next().unwrap(), it.next().unwrap())
 }
 
-/// Every PROPOSED script replays with no refusal, opens the dialog its steps
-/// name and ends with none open. The size preset's script ends with the
+/// The two Artboard Options dialog scripts (admitted from the proposed
+/// directory in row 284) replay with no refusal, open the dialog their steps
+/// name and end with none open. The size preset's script ends with the
 /// artboard at its option label's size, and the fill's at the bind's white.
+/// The proposed directory is pinned EMPTY, so a script proposed there later
+/// reds this arm until it is given one.
 #[test]
-fn every_proposed_dialog_script_replays_to_its_outcome() {
+fn the_artboard_options_dialog_scripts_replay_to_their_outcome() {
     let _counters = crate::ffi_instr::test_lock::lock();
-    // The population, pinned in the corpus manifest's path form and checked
-    // against the directory, so a script added there reds this arm.
-    const PROPOSED: [&str; 2] = [
-        "input_scripts_proposed/artboard_options.fill_white.json",
-        "input_scripts_proposed/artboard_options.preset_a4.json",
+    const ADMITTED: [&str; 2] = [
+        "input_scripts/artboard_options.fill_white.json",
+        "input_scripts/artboard_options.preset_a4.json",
     ];
     let dir = format!("{}/../test_fixtures/input_scripts_proposed", env!("CARGO_MANIFEST_DIR"));
-    let mut on_disk: Vec<String> = std::fs::read_dir(&dir).expect("the proposed directory").filter_map(|d| {
+    // An empty directory is not in git, so absent reads as empty.
+    let on_disk: Vec<String> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|d| {
         let n = d.ok()?.file_name().into_string().ok()?;
-        (n.ends_with(".json") && !n.ends_with(".expected.json")).then(|| format!("input_scripts_proposed/{n}"))
-    }).collect();
-    on_disk.sort();
-    assert_eq!(on_disk, PROPOSED, "the population moved");
-    for n in PROPOSED {
+        (n.ends_with(".json") && !n.ends_with(".expected.json")).then_some(n)
+    }).collect()).unwrap_or_default();
+    assert_eq!(on_disk, Vec::<String>::new(), "a proposed script appeared: give it its arm");
+    for n in ADMITTED {
         let script: Value = serde_json::from_str(&read(n)).unwrap();
         let out = replay_forms(&script).expect("replay");
         assert_eq!(refusal(&out), None, "{n}: {out:?}");
@@ -2288,7 +2289,7 @@ fn every_proposed_dialog_script_replays_to_its_outcome() {
         // entry per dialog read, in order, and the document read's golden.
         assert_eq!(script["expected_dialog"], Value::Array(dialog_reads(&out)), "{n}: expected_dialog");
         let golden = script["expected_json"].as_str().unwrap_or_else(|| panic!("{n}: no expected_json"));
-        let want: Value = serde_json::from_str(&read(&format!("input_scripts_proposed/{golden}"))).unwrap();
+        let want: Value = serde_json::from_str(&read(&format!("input_scripts/{golden}"))).unwrap();
         let doc = &out.iter().rev().find(|r| r["read"] == "document").expect("a document read")["value"];
         assert_eq!(doc, &want, "{n}: the document read is not {golden}:\n{doc}");
         let ab = doc["artboards"].as_array().unwrap().iter().find(|ab| ab["id"] == "zs8ap4x3").expect("zs8ap4x3");
