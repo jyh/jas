@@ -4169,6 +4169,9 @@ internal sealed unsafe class Canvas : IDisposable
             LastStatus = $"APP FAILED: could not open '{preload}' — see the OPEN row above";
             return false;
         }
+        // Row 284: a script's app_state, right after the launch's open (the app
+        // scene opens its document here, not through a LoadCmd).
+        if (!string.IsNullOrWhiteSpace(preload)) { ApplySeeds(); }
 
         ApplyMenuRefresh("startup");
         RepaintOnce("app", 0);
