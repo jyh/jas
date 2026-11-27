@@ -378,11 +378,11 @@ impl JasEngine {
 
     /// Write one DECLARED `state:` key of a panel (the runner's `app_state`
     /// seed). `Err` names an undeclared key or a panel the workspace lacks.
-    pub(crate) fn script_seed_panel(&self, panel_id: &str, key: &str, value: serde_json::Value) -> Result<(), String> {
-        let ws = Workspace::load().ok_or("no workspace")?;
-        ws.panel(panel_id).ok_or_else(|| format!("UnknownPanel {panel_id}"))?;
+    pub(crate) fn script_seed_panel(&self, panel_id: &str, key: &str, value: serde_json::Value) -> Result<(), SeedRefusal> {
+        let ws = Workspace::load().ok_or(SeedRefusal::NoWorkspace)?;
+        ws.panel(panel_id).ok_or_else(|| SeedRefusal::UnknownPanel(panel_id.to_string()))?;
         if !ws.panel_state_defaults(panel_id).contains_key(key) {
-            return Err(format!("UndeclaredPanelKey {panel_id}.{key}"));
+            return Err(SeedRefusal::UndeclaredPanelKey(panel_id.to_string(), key.to_string()));
         }
         seed_panel(self, &ws, panel_id);
         self.store.borrow_mut().set_panel(panel_id, key, value);
@@ -2461,6 +2461,37 @@ pub unsafe extern "C" fn jas_engine_load_user_libraries(e: *mut JasEngine, root:
     JasBytes::from_string(serde_json::Value::Object(taken).to_string())
 }
 
+/// Why a script seed was refused ([`JasEngine::script_seed_panel`]): its
+/// [`kind`](SeedRefusal::kind) is the name the FFI seam reports on
+/// [`jas_last_error_json`], and its `Display` is the message the replay
+/// carries (`UnknownPanel <panel>`, `UndeclaredPanelKey <panel>.<key>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SeedRefusal {
+    NoWorkspace,
+    UnknownPanel(String),
+    UndeclaredPanelKey(String, String),
+}
+
+impl SeedRefusal {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            SeedRefusal::NoWorkspace => "NoWorkspace",
+            SeedRefusal::UnknownPanel(_) => "UnknownPanel",
+            SeedRefusal::UndeclaredPanelKey(..) => "UndeclaredPanelKey",
+        }
+    }
+}
+
+impl std::fmt::Display for SeedRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SeedRefusal::NoWorkspace => write!(f, "no workspace"),
+            SeedRefusal::UnknownPanel(p) => write!(f, "UnknownPanel {p}"),
+            SeedRefusal::UndeclaredPanelKey(p, k) => write!(f, "UndeclaredPanelKey {p}.{k}"),
+        }
+    }
+}
+
 /// A script seed's value as the engine stores it: an array whose items are
 /// index paths (an element's document path) has each path wrapped as
 /// `{"__path__": [...]}`, the form the panel state holds a selection of
@@ -2515,8 +2546,7 @@ pub unsafe extern "C" fn jas_script_seed_panel(e: *mut JasEngine, json: *const u
     match engine.script_seed_panel(panel, key, seed_panel_value(value)) {
         Ok(()) => JasStatus::Ok,
         Err(why) => {
-            let kind = why.split(' ').next().unwrap_or("MissingTarget").to_string();
-            set_panel_event_error(engine, &kind, &why);
+            set_panel_event_error(engine, why.kind(), &why.to_string());
             JasStatus::MissingTarget
         }
     }
@@ -9729,12 +9759,16 @@ mod tests {
         assert_eq!(script_seed(e, r#"{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":["zs8ap4x3"]}"#),
                    (JasStatus::Ok, String::new()));
         assert_eq!(options(e), Some(serde_json::json!(true)), "the seed is the selection a person makes");
+        // The channel's KIND is read exactly (the detail repeats the word, so
+        // a `contains` could not tell a wrong kind from the right one).
+        let kind = |err: &str| serde_json::from_str::<serde_json::Value>(err).ok()
+            .and_then(|v| v["panel_event"].as_str().map(str::to_string)).unwrap_or_default();
         let (s, err) = script_seed(e, r#"{"panel":"no_such_panel_content","key":"k","value":1}"#);
         assert_eq!(s, JasStatus::MissingTarget);
-        assert!(err.contains("UnknownPanel"), "{err}");
+        assert_eq!(kind(&err), "UnknownPanel", "{err}");
         let (s, err) = script_seed(e, r#"{"panel":"artboards_panel_content","key":"not_a_declared_key","value":1}"#);
         assert_eq!(s, JasStatus::MissingTarget);
-        assert!(err.contains("UndeclaredPanelKey"), "{err}");
+        assert_eq!(kind(&err), "UndeclaredPanelKey", "{err}");
         assert_eq!(script_seed(e, "{nope").0, JasStatus::BadJson);
         let (s, err) = script_seed(e, r#"{"key":"artboards_panel_selection","value":[]}"#);
         assert_eq!(s, JasStatus::MissingParam);
@@ -9744,6 +9778,23 @@ mod tests {
         assert_eq!(options(e), Some(serde_json::json!(false)), "and an empty seed empties it again");
         assert_eq!(unsafe { jas_script_seed_panel(std::ptr::null_mut(), b"{}".as_ptr(), 2) }, JasStatus::NullHandle);
         unsafe { jas_engine_free(e) };
+    }
+
+    /// The seed door's refusal is TYPED (the #1153 review): its kind is the
+    /// name the FFI seam reports, never the message's first word ("no
+    /// workspace" read as the kind `no`), and its message is the one the
+    /// replay has always carried, byte for byte.
+    #[test]
+    fn a_seed_refusal_names_its_kind_and_keeps_the_replays_message() {
+        use super::SeedRefusal as R;
+        let cases = [
+            (R::NoWorkspace, "NoWorkspace", "no workspace"),
+            (R::UnknownPanel("p".into()), "UnknownPanel", "UnknownPanel p"),
+            (R::UndeclaredPanelKey("p".into(), "k".into()), "UndeclaredPanelKey", "UndeclaredPanelKey p.k"),
+        ];
+        for (r, kind, msg) in cases {
+            assert_eq!((r.kind(), r.to_string().as_str()), (kind, msg));
+        }
     }
 
     fn panel_menu(e: *mut JasEngine, panel: &str) -> (Vec<serde_json::Value>, String) {

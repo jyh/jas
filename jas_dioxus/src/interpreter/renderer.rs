@@ -7877,6 +7877,14 @@ pub(crate) fn scrollbar_px() -> i64 {
 /// placed in an absolutely-positioned box at its computed rect, inside a
 /// position:relative panel of the computed height. Containers contribute
 /// layout only (no box). Width is the canonical content width (dock 240 - 12).
+///
+/// Row 290: a leaf inside an identified foreach iteration is drawn inside a
+/// `div` whose id is `<foreach id>#<k>` (nested, outermost first), as Swift's
+/// Path B draws its accessibility layers (row 281), so a level-2 driver can
+/// scope a step's `at` to iteration k (`[id="ap_list#1"]`). The layer div is
+/// unstyled, so it is not positioned: its leaves stay placed against the
+/// panel at their plan rects, and the leaves keep their plan (paint) order
+/// ([`iteration_layers`](crate::interpreter::panel_layout::iteration_layers)).
 fn render_panel_absolute(
     panel_el: &serde_json::Value,
     _content: &serde_json::Value,
@@ -7919,7 +7927,7 @@ fn render_panel_absolute(
         chrome.push(rsx! { div { style: "{st}", {inner} } });
     }
 
-    let mut leaves: Vec<Element> = Vec::new();
+    let mut placed: Vec<Option<Element>> = Vec::new();
     for leaf in &plan.leaves {
         let (x, y, w, h) = (leaf.x, leaf.y, leaf.w, leaf.h);
         // Render the leaf node with ITS scope (the child/per-row ctx).
@@ -7927,8 +7935,13 @@ fn render_panel_absolute(
         let st = format!(
             "position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;overflow:hidden;"
         );
-        leaves.push(rsx! { div { style: "{st}", {inner} } });
+        placed.push(Some(rsx! { div { style: "{st}", {inner} } }));
     }
+    let chains: Vec<Vec<String>> = plan.leaves.iter()
+        .map(|l| crate::interpreter::panel_layout::iteration_chain(&l.path, &plan.repeats))
+        .collect();
+    let leaves = iteration_layer_elements(
+        crate::interpreter::panel_layout::iteration_layers(&chains), &mut placed);
 
     let outer = format!("position:relative;width:{avail_w}px;height:{panel_h}px;color:var(--jas-text,#ccc);");
     rsx! {
@@ -7942,6 +7955,23 @@ fn render_panel_absolute(
             }
         }
     }
+}
+
+/// Row 290: the placed Path B leaves (each taken once, by its plan index)
+/// inside their iteration layers, an unstyled `div id="<foreach id>#<k>"`
+/// per layer (see [`render_panel_absolute`]).
+fn iteration_layer_elements(
+    layers: Vec<crate::interpreter::panel_layout::IterationLayer>,
+    placed: &mut Vec<Option<Element>>,
+) -> Vec<Element> {
+    use crate::interpreter::panel_layout::IterationLayer;
+    layers.into_iter().filter_map(|layer| match layer {
+        IterationLayer::Leaf(i) => placed.get_mut(i).and_then(Option::take),
+        IterationLayer::Iteration(id, kids) => {
+            let inner = iteration_layer_elements(kids, placed);
+            Some(rsx! { div { id: "{id}", for e in inner { {e} } } })
+        }
+    }).collect()
 }
 
 /// A flattened row from the document tree, ready for rendering.
