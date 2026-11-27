@@ -249,7 +249,8 @@ marked PROPOSED and never gates.
   A hold that also clicked reads `partial_selection` with the flyout open, and a hold that never fired its timer reads
   the click's pair. Both are wrong answers the reads tell apart, so neither defect can pass as the other.
 * **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
-  `jas_gui_harness.py`) and not yet measured on a live app. The web channel refuses all three by name until its test
+  `jas_gui_harness.py`) and not yet measured on a live app, except `{"read": "dialog"}`, which the two proposed
+  Artboard Options scripts read live on 2026-11-26 (row 275). The web channel refuses all three by name until its test
   hook has them, and no level-1 runner reads them yet, so no shipped script uses them. (`{"read": "dialog"}` is read
   since 2026-11-25 by Rust's engine replay and Swift's forms runner, and since 2026-11-26 by the Windows driver
   (`prove_e2e.ps1`, the PROBE row's `dialog=` field), for the dialog step below; the other two are still read by none.)
@@ -278,7 +279,8 @@ marked PROPOSED and never gates.
   * **Delivered by the Windows driver (2026-11-26, row 275 C2):** `prove_e2e.ps1` sends it through the hand after
     checking the open dialog's id, and reads `{"read": "dialog"}` and `expected_dialog` (both forms), measured live on
     the Windows box against the `fill_white` golden. The web hook still refuses it by name.
-  * **The Mac driver delivers it (row 275, built and not yet measured on a live app):** it reads the open dialog by
+  * **The Mac driver delivers it (row 275; measured live 2026-11-26, both proposed Artboard Options scripts PASS end to
+    end):** it reads the open dialog by
     the FIFO's `dialog` first and refuses a step naming another dialog, or none open, by name. It then drives the
     widget inside the dialog's body (AX identifier `<dialog id>_dialog`) by the panel step's own widget code: a
     click presses it, and a commit picks a select's option by its label or types the text.
@@ -363,10 +365,11 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
   * `{"panel_menu": P, "action": A, "params": {...}}` picks the one item whose action is `A` and whose declared params
     equal every param the step names. Labels are never used. Zero or two matches, or a disabled item, are refused by
     name. The item runs as a shell's pick does.
-  * **The Mac driver delivers the `panel_menu` step (row 275), built and not yet measured on a live app.** It picks the
-    item by the same rule from the panel's `menu:`, then drives the person's route: the panel's tab (or Window item), a
-    real click on the group's hamburger (AX identifier `<panel content id>_menu`; it pops its menu from the click, so an
-    AXPress opens nothing), and the one item outside the menubar whose title is the item's label. An item whose label
+  * **The Mac driver delivers the `panel_menu` step (row 275; measured live 2026-11-26 by the same two scripts).** It
+    picks the item by the same rule from the panel's `menu:`, then drives the person's route: the panel's tab (or Window
+    item), a real click on the group's hamburger (AX identifier `<panel content id>_menu`; since #1135 the menu drops
+    below the button however it is pressed, so an AXPress opens it too), and the one item outside the menubar whose
+    title is the item's label (found by a hit test into the popped menu's own window, #1134). An item whose label
     is computed (`{{…}}`) is refused by name, and so is the step on the locked route, which gives no real click. The
     `read: panel_menu` form is still refused there.
 * **Both runners deliver the row context menu (row 139).**
@@ -456,7 +459,8 @@ recorded `unchanged` and the replay goes on. A refusal ends the replay and keeps
      checkable item's state into its title (`✓ Stroke`), so titles are compared without it.
    * A non-empty `app_state` is seeded right after the open, by the app's test-FIFO `seed <json>` verb (row 275 (b)),
      which runs the level-1 Swift runner's own parse and apply (`ScriptPanelSeeds`). The driver waits for the app's
-     receipt line and refuses the script on a refusal or on no receipt. Built and not yet measured on a live app.
+     receipt line and refuses the script on a refusal or on no receipt. Measured live 2026-11-26 by the two proposed
+     Artboard Options scripts (row 275).
    * Refused by name: an `app_state` that is not the ruled form, or that names a key the panel's `state:` does not
      declare (row 279: never dropped), `meta`, a pointer or key step after a panel or menu step, a read other than
      `document`, `state` or `dialog`, a menu id or panel with no unique path, a widget that is not found, found twice
