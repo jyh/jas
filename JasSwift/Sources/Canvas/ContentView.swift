@@ -287,6 +287,25 @@ public class WorkspaceState: ObservableObject {
         return canvases.first?.model
     }
 
+    /// The model the dock's panels act on when NO document is open (STATUS-jas
+    /// row 286): adopted into the same app tiers every canvas shares (default
+    /// paint, swatch, gradient and brush libraries), so an app-level panel
+    /// effect (Color's None, Swap, the brush-library menu) lands where the next
+    /// document reads it. Before this the dock got `activeModel`, nil with no
+    /// canvas, and every panel button was inert; on Windows they act (flask
+    /// STATUS-flask 1030). Its document is never shown.
+    public private(set) lazy var appModel: Model = {
+        let m = Model(document: Document.newEmptyDocument())
+        m.swatchLibraries = swatchLibraries
+        m.gradientLibraries = gradientLibraries
+        m.stateStore.sharedBrushLibraries = brushLibraries
+        m.appDefaults = appDefaults
+        return m
+    }()
+
+    /// What the dock acts on: the active document's model, else ``appModel``.
+    public var dockModel: Model { activeModel ?? appModel }
+
     /// Add a canvas for `model` and make it active. Mirrors
     /// `ContentView.addCanvas` (which delegates the actual mutation to this
     /// state object): if a non-untitled canvas for the same file already
@@ -403,7 +422,7 @@ public struct ContentView: View {
                         workspaceLayout: $workspace.workspaceLayout,
                         floatingDock: fd,
                         theme: workspace.theme,
-                        model: workspace.activeModel
+                        model: workspace.dockModel
                     )
                 }
             }
@@ -672,7 +691,7 @@ public struct ContentView: View {
             dockId: dock.id,
             edge: edge,
             theme: workspace.theme,
-            model: workspace.activeModel,
+            model: workspace.dockModel,
             yamlDialogState: $yamlDialogState
         )
         .frame(width: rect.w, height: rect.h)
@@ -694,7 +713,7 @@ public struct ContentView: View {
                 dockId: rightDock.id,
                 edge: .right,
                 theme: workspace.theme,
-                model: workspace.activeModel,
+                model: workspace.dockModel,
                 yamlDialogState: $yamlDialogState
             )
         } else {
