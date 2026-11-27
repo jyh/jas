@@ -250,8 +250,9 @@ marked PROPOSED and never gates.
   the click's pair. Both are wrong answers the reads tell apart, so neither defect can pass as the other.
 * **Where these three stand:** built in the Mac driver (`scripts/mac_l2_plan.py`, the FIFO's `state` and `dialog`,
   `jas_gui_harness.py`) and not yet measured on a live app, except `{"read": "dialog"}`, which the two proposed
-  Artboard Options scripts read live on 2026-11-26 (row 275). The web channel refuses all three by name until its test
-  hook has them, and no level-1 runner reads them yet, so no shipped script uses them. (`{"read": "dialog"}` is read
+  Artboard Options scripts read live on 2026-11-26 (row 275). The web channel reads `{"read": "dialog"}` since row 291
+  (its test hook's `dialog()`, the FIFO verb's reply form) and refuses the other two by name until its test hook has
+  them, and no level-1 runner reads them yet, so no shipped script uses them. (`{"read": "dialog"}` is read
   since 2026-11-25 by Rust's engine replay and Swift's forms runner, and since 2026-11-26 by the Windows driver
   (`prove_e2e.ps1`, the PROBE row's `dialog=` field), for the dialog step below; the other two are still read by none.)
 * **A dialog step (row 275, written 2026-11-25):**
@@ -278,7 +279,12 @@ marked PROPOSED and never gates.
     so the two Swift runners cannot drift).
   * **Delivered by the Windows driver (2026-11-26, row 275 C2):** `prove_e2e.ps1` sends it through the hand after
     checking the open dialog's id, and reads `{"read": "dialog"}` and `expected_dialog` (both forms), measured live on
-    the Windows box against the `fill_white` golden. The web hook still refuses it by name.
+    the Windows box against the `fill_white` golden.
+  * **Delivered by the web driver (row 291):** the test hook's `dialog()` confirms the open dialog first, and the
+    widget is found inside that dialog's box (`id="<dialog id>_dialog"`) and clicked or committed. The web delivers
+    the two proposed scripts' `seed` (the hook's `seed`, through the app's `set_panel_state` route) and `panel_menu`
+    (the group's hamburger `id="<content id>_menu"`, then the flyout's `menuitem` by its title) too; its `--proposed`
+    receipt line runs them.
   * **The Mac driver delivers it (row 275; measured live 2026-11-26, both proposed Artboard Options scripts PASS end to
     end):** it reads the open dialog by
     the FIFO's `dialog` first and refuses a step naming another dialog, or none open, by name. It then drives the
