@@ -123,6 +123,12 @@ $panelMenuCount = [int]$sc.PanelMenus
 $launchMode = "$($sc.Mode)"
 # Captured here: `$sc` is reused for the scale below.
 $dialogReads = @($sc.DialogReads); $expectedDialog = @($sc.ExpectedDialog)
+# ROW 284 (ruled 1029): a script with no pointer step sends no gesture, so its
+# late steps start at probe 0; and its app_state (the ruled form) is seeded by
+# the shell right after the open (SB_PANEL_SEED, jas_script_seed_panel).
+$noGesture = [bool]$sc.NoGesture
+$appStateSeed = "$($sc.AppState)"
+$gestureProbes = if ($noGesture) { 0 } else { 1 }
 $lateCount = $panelCount + $menuCount + $clickCount + $dialogCount + $panelMenuCount
 # G11 STEP 3: A DOUBLE-CLICK is the gesture's click and then one more click at
 # the same point inside the double-click time (`double`), and `then-click`
@@ -157,6 +163,7 @@ $env:SB_PROBE = 'sb-probe.json'
 # ROW 284: a script with a panel_menu step launches the Default dock, where
 # its panel's tab and group menu are; every other script launches as before.
 if ($launchMode -eq 'dock') { $env:SB_DOCK = 'Default' }
+if ($appStateSeed.Length -gt 0) { $env:SB_PANEL_SEED = $appStateSeed }
 # ROW E/F: a panel step's `row` or `at` is read from the plan the panel was drawn from,
 # so a script with one opens its panel by SB_PANEL (only that pane then writes
 # SB_PLAN_OUT) and hands the plan file to the hand. Scripts without a row
@@ -221,6 +228,15 @@ try {
         Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the shell failed before the drive: $($ht.Row.Trim())"
         exit 3
     }
+    # ROW 284: a seeded script drives nothing until the shell says it seeded
+    # (a refusal is a RUSTFAIL row, which the wait above already ends on).
+    if ($appStateSeed.Length -gt 0) {
+        $sd = Wait-SbRow -Log $log -Mark $mark -Patterns @('SEED DONE ', 'RUSTFAIL SEED') -TimeoutSeconds $TimeoutSeconds
+        if ($null -eq $sd.Row -or $sd.Row -notmatch 'SEED DONE ') {
+            Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the app_state seed was not applied: $(if ($sd.Row) { $sd.Row.Trim() } else { "no SEED DONE row within $($sd.Waited)s" })"
+            exit 3
+        }
+    }
     $offX = 0.0; $offY = 0.0
     if ($null -ne $ht.Row -and (Get-SbField $ht.Row 'offset-dips') -match '^\(([-0-9.]+),([-0-9.]+)\)$') {
         $offX = [double]$Matches[1]; $offY = [double]$Matches[2]
@@ -229,7 +245,7 @@ try {
     # ---- drive: a real SendInput drag, in session 1 -------------------------
     $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
                 " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Alt $altMode -Double $doubleMode -Keys `"$keyText`" -Panels `"$panelText`"" +
-                " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY" +
+                " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY" + $(if ($noGesture) { ' -NoGesture' } else { '' }) +
                 $(if ($planFile) { " -PlanFile `"$planFile`"" } else { '' }))
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
@@ -240,7 +256,7 @@ try {
     # The shell probes after the release, after each key (flask section 333) and
     # after each panel step (jas section 373), so the reading that describes the
     # script's end is probe 1 + keys + panel steps.
-    $wantSeq = 1 + $doubleClicks + $keyCount + $lateCount
+    $wantSeq = $gestureProbes + $doubleClicks + $keyCount + $lateCount
     # A panel step the hand REFUSES (an id not found, found twice, a disabled
     # control, no pattern for the event) is written to its receipt and nothing
     # more is sent, so no probe will come: the wait ends on the receipt too.
@@ -301,6 +317,13 @@ $readback = Compare-SbReadBack -Got $got -Want ([System.IO.File]::ReadAllText($e
 $ptrRows = @(Select-SbRows (Read-SbRows $log $mark) 'POINTER REAL ')
 $ptr = if ($ptrRows.Count -gt 0) { $ptrRows[0] } else { $null }
 $drive = 'UNREADABLE(no POINTER REAL row)'
+# ROW 284: a no-gesture script sends no pointer input, so the shell must
+# report none; any POINTER row is input this run did not send.
+if ($noGesture) {
+    $ptr = $null
+    $drive = if ($ptrRows.Count -eq 0) { 'PASS(no gesture: no POINTER row, as none was sent)' }
+             else { "DISTURBED(pointer-rows=$($ptrRows.Count) want=0: a script with no pointer step sends no pointer input)" }
+}
 if ($null -ne $ptr -and $ptrRows.Count -ne 1 + $doubleClicks + $clickCount) {
     $drive = "DISTURBED(pointer-rows=$($ptrRows.Count) want=$(1 + $doubleClicks + $clickCount): one for the gesture, one per click of its double ($doubleClicks), one per late click)"
     $ptr = $null
@@ -539,7 +562,7 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
 }
 # {"read": "dialog"} (row 275 C2): each read is the dialog= field of the probe
 # the act before it wrote; the release (and a double's clicks) probe first.
-$dialogV = Get-SbDialogReadVerdict -Rows @(Read-SbRows $log $mark) -BaseSeq (1 + $doubleClicks) -Reads $dialogReads -Expected $expectedDialog
+$dialogV = Get-SbDialogReadVerdict -Rows @(Read-SbRows $log $mark) -BaseSeq ($gestureProbes + $doubleClicks) -Reads $dialogReads -Expected $expectedDialog
 if ($dialogV -notlike 'PASS*' -and $dialogV -ne 'none') { $core = if ($core -eq 'PASS') { "FAIL(dialog=$dialogV)" } else { "$core dialog=$dialogV" } }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS' -and $paint -like 'PASS*' -and $gaps -like 'PASS*') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($lateCount -gt 0) { ",panels=$panelShow" })):$drive " +
