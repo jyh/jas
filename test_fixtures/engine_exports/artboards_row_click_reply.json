@@ -1,0 +1,58 @@
+{
+  "changed": [
+    {
+      "id": "",
+      "key": "bind.background",
+      "panel": "artboards_panel_content",
+      "path": [
+        0,
+        1
+      ],
+      "type": "color",
+      "value": "#3a6ea5"
+    },
+    {
+      "id": "ap_move_up",
+      "key": "bind.disabled",
+      "panel": "artboards_panel_content",
+      "path": [
+        2,
+        2
+      ],
+      "type": "bool",
+      "value": "false"
+    },
+    {
+      "id": "ap_move_down",
+      "key": "bind.disabled",
+      "panel": "artboards_panel_content",
+      "path": [
+        2,
+        3
+      ],
+      "type": "bool",
+      "value": "false"
+    },
+    {
+      "id": "ap_delete",
+      "key": "bind.disabled",
+      "panel": "artboards_panel_content",
+      "path": [
+        2,
+        5
+      ],
+      "type": "bool",
+      "value": "false"
+    }
+  ],
+  "clipboard_write": null,
+  "close_window": false,
+  "dialog": null,
+  "doc_changed": false,
+  "export_pdf": null,
+  "layout": null,
+  "menu": null,
+  "remove_tab": null,
+  "save_all_then_close": false,
+  "writes": []
+}
