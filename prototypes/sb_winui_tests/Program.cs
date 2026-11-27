@@ -1767,6 +1767,76 @@ static class Program
                 ProbeWire.DialogField(false, null),
                 ProbeWire.DialogField(true, null),
             }));
+        // THE CLASS AUDIT, arm D (jas STATUS-flask 1024 item 1): the shell's plan
+        // readers over the WHOLE corpus of the engine's real plan bytes, the 116
+        // e2e baselines' probes (each plan sliced raw from the probe body and
+        // proved byte-exact by the probe's own plan_sha). Every plan parses for
+        // HitBoxes and ActiveBoxes (null is "the plan does not parse", never "no
+        // boxes"), and LeafValue reads back every string value of every leaf with
+        // an id, as the panel value scenes read them. A producer that renames or
+        // drops a field the readers use reds this arm, not a live run.
+        var auDir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (auDir is not null && !Directory.Exists(Path.Combine(auDir.FullName, "prototypes", "sb_winui", "e2e_baselines"))) { auDir = auDir.Parent; }
+        int auPlans = 0, auValues = 0;
+        var auBad = new List<string>();
+        if (auDir is not null)
+        {
+            foreach (var bd in Directory.GetDirectories(Path.Combine(auDir.FullName, "prototypes", "sb_winui", "e2e_baselines")).OrderBy(x => x, StringComparer.Ordinal))
+            {
+                var pf = Path.Combine(bd, "probe.json");
+                if (!File.Exists(pf)) { continue; }
+                var body = File.ReadAllText(pf);
+                var at = body.LastIndexOf(",\"plan\":", StringComparison.Ordinal);
+                if (at < 0 || !body.EndsWith("}", StringComparison.Ordinal)) { auBad.Add(Path.GetFileName(bd) + ":no plan slice"); continue; }
+                var plan = body.Substring(at + 8, body.Length - at - 9);
+                var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plan))).ToLowerInvariant()[..16];
+                var rec = System.Text.RegularExpressions.Regex.Match(body, "\"plan_sha\":\"([0-9a-f]+)\"").Groups[1].Value;
+                if (sha != rec) { auBad.Add(Path.GetFileName(bd) + $":slice sha {sha} != plan_sha {rec}"); continue; }
+                auPlans++;
+                if (PanelWire.HitBoxes(plan) is null) { auBad.Add(Path.GetFileName(bd) + ":HitBoxes null"); }
+                if (PanelWire.ActiveBoxes(plan) is null) { auBad.Add(Path.GetFileName(bd) + ":ActiveBoxes null"); }
+                using var pd = System.Text.Json.JsonDocument.Parse(plan);
+                // The schema census: every key PaneView's plan reader takes with a
+                // hard GetProperty is on every real leaf and on the root, so a
+                // producer that renames or drops one reds here (the value arm
+                // below would read nothing and pass).
+                foreach (var rk in new[] { "leaves", "height", "icons" })
+                {
+                    if (!pd.RootElement.TryGetProperty(rk, out _)) { auBad.Add($"{Path.GetFileName(bd)}:root has no '{rk}'"); }
+                }
+                foreach (var leaf in pd.RootElement.TryGetProperty("leaves", out var lv0) ? lv0.EnumerateArray() : default)
+                {
+                    foreach (var lk in new[] { "id", "type", "path", "rect", "static", "display", "values" })
+                    {
+                        if (!leaf.TryGetProperty(lk, out _)) { auBad.Add($"{Path.GetFileName(bd)}:a leaf has no '{lk}'"); }
+                    }
+                    if (leaf.TryGetProperty("rect", out var auRect))
+                    {
+                        foreach (var rk in new[] { "x", "y", "w", "h" })
+                        {
+                            if (!auRect.TryGetProperty(rk, out _)) { auBad.Add($"{Path.GetFileName(bd)}:a leaf rect has no '{rk}'"); }
+                        }
+                    }
+                }
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var leaf in pd.RootElement.GetProperty("leaves").EnumerateArray())
+                {
+                    if (!leaf.TryGetProperty("id", out var lid) || lid.GetString() is not { Length: > 0 } id || !seen.Add(id)) { continue; }
+                    if (!leaf.TryGetProperty("values", out var vs) || vs.ValueKind != System.Text.Json.JsonValueKind.Object) { continue; }
+                    foreach (var kv in vs.EnumerateObject())
+                    {
+                        if (kv.Value.ValueKind != System.Text.Json.JsonValueKind.String) { continue; }
+                        auValues++;
+                        var auGot = PanelWire.LeafValue(plan, id, kv.Name);
+                        if (auGot != kv.Value.GetString()) { auBad.Add($"{Path.GetFileName(bd)}:{id}.{kv.Name} read '{auGot}' want '{kv.Value.GetString()}'"); }
+                    }
+                }
+            }
+        }
+        Eq("audit D: the shell's plan readers read every real plan in the baseline corpus (HitBoxes, ActiveBoxes, LeafValue)",
+            "plans=corpus values=read failed=0",
+            $"plans={(auPlans >= 100 ? "corpus" : auPlans.ToString(System.Globalization.CultureInfo.InvariantCulture))} values={(auValues >= 100 ? "read" : auValues.ToString(System.Globalization.CultureInfo.InvariantCulture))} failed={auBad.Count}"
+            + (auBad.Count > 0 ? " " + string.Join(" | ", auBad.Take(3)) : ""));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
             "Proposed: nudge|(no bar)",
