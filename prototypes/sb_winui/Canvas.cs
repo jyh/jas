@@ -2167,6 +2167,9 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case MenuActionCmd ma:
                     if (ApplyMenuAction(ma)) { dirty = true; cause = "menu"; }
+                    // jas 1031: a menu act can open a document (File > New after the
+                    // last tab closed), so the cover follows the engine's answer.
+                    if (_engine != IntPtr.Zero && DocumentWire.OpenOf(JasCore.jas_document_is_open(_engine)) is bool docOpen) { SetDocumentOpen(docOpen); }
                     // SB_PROBE (jas §389): a menu step lands on the document as a
                     // key does, so it is read the same way; a paste deferred for
                     // the clipboard is read when its resend lands.
