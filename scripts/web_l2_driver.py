@@ -228,7 +228,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             page.wait_for_timeout(100)
         elif k == "panel":
             release_mods()
-            _, pid, tab, wpath, widget, event, value, _label, _wtype = act
+            pid, tab, wpath, widget, event, value = panel_fields(act)
             if page.locator(f"#{pid}").count() == 0:
                 # Show it as a person does: its dock tab, or, for a panel in no
                 # dock group, its Window menu item.
@@ -995,6 +995,21 @@ WEB_ACTS = {"open", "tool", "pointer", "key", "panel", "menu"}
 WEB_READS = {"document"}
 
 
+def panel_fields(act):
+    """A planned panel act as (pid, tab, wpath, widget, event, value), read
+    by its plan's shape (mac_l2_plan.plan's docstring), or Refused by name.
+    The one place this channel reads that shape, so the self-test drives it
+    over every planned act of the corpus: on 11-26 the plan grew a field
+    (row 281's `scope`) and an unpack inline in the run raised on all 116."""
+    _, pid, tab, wpath, widget, event, value, _label, _wtype, scope = act
+    if scope:
+        # The Mac finds a foreach iteration as its own AX container
+        # `<foreach id>#<k>`; the web draws no such container yet, so a step
+        # scoped by `at` is refused by name rather than driven unscoped.
+        raise _plan.Refused(f"the web channel does not scope a panel step to {'/'.join(scope)} yet")
+    return pid, tab, wpath, widget, event, value
+
+
 def undelivered(act):
     """None if this channel delivers `act`, else the refusal naming it."""
     if act[0] in WEB_ACTS or (act[0] == "read" and act[1] in WEB_READS):
@@ -1035,7 +1050,7 @@ def self_test():
     menubar = _plan.load_menubar()
     paths = script_paths()
     check(len(paths) > 0, "the corpus is not empty")
-    planned = refused = 0
+    planned = refused = panel_acts = 0
     for p in paths:
         with open(p, encoding="utf-8") as f:
             s = json.load(f)
@@ -1050,10 +1065,32 @@ def self_test():
                         key_chord(a[1], a[2])
                     except _plan.Refused as e:
                         fails.append(f"{p}: {e}")
+                if a[0] == "panel":
+                    panel_acts += 1
+                    try:
+                        panel_fields(a)
+                    except Exception as e:  # noqa: BLE001 - any raise is the defect
+                        fails.append(f"{p}: the panel act does not read: {type(e).__name__}: {e}")
             check(os.path.exists(os.path.join(SCRIPTS, s["expected_json"])), f"{p}: expected exists")
         except _plan.Refused:
             refused += 1
     check(WITNESS in [os.path.basename(p)[:-5] for p in paths], f"the witness {WITNESS} is in the corpus")
+    # The floor: the corpus reaches the reader (a count of 0 would make the
+    # arm above vacuous), and a scope the web cannot find is refused by name.
+    check(panel_acts > 0, f"the corpus plans panel acts for panel_fields to read ({panel_acts})")
+    pa = ("panel", "p_panel", "p_panel_tab", None, "w", "click", None, None, "button")
+    try:
+        check(panel_fields(pa + ([],)) == ("p_panel", "p_panel_tab", None, "w", "click", None),
+              "a panel act with no scope reads as its six fields")
+    except Exception as e:  # noqa: BLE001
+        fails.append(f"a panel act with no scope does not read: {type(e).__name__}: {e}")
+    try:
+        panel_fields(pa + (["ap_list#1"],))
+        fails.append("a scoped panel act is refused by name on the web")
+    except _plan.Refused as e:
+        check("ap_list#1" in str(e), f"the scope refusal names the iteration ({e})")
+    except Exception as e:  # noqa: BLE001
+        fails.append(f"a scoped panel act raises {type(e).__name__}, not a refusal: {e}")
     ids = menu_ids_by_path(menubar)
     check(ids.get(tuple(_plan.menu_paths(menubar)["menu_group"])) == "menu_group", "a menu path maps back to its id")
     for a in (("toolbar", "btn_arrow_slot", 400), ("read", "state", ("active_tool",), "{}"), ("read", "dialog", None)):
