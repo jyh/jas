@@ -764,8 +764,11 @@ def offscreen_refusal(what, x, y, displays, window=None):
 def frame_inside(frame, window, margin=8):
     """True when the AX frame (x, y, w, h) can be pressed at its centre inside
     the window: vertically the WHOLE frame lies inside, `margin` points clear
-    of the top and bottom (a dock row half under the window's edge is not
-    pressable for certain); horizontally only the centre must, because every
+    of the top, and inside the bottom with its CENTRE `margin` points clear
+    of it (a dock row half under the window's edge is not pressable for
+    certain; the dock's last footer, flush 2 points above the bottom at the
+    end of the dock's travel, is: a real click at its centre acted, row 283,
+    11-27); horizontally only the centre must, because every
     dock menu button's frame was measured running 4 points past the window's
     right edge (x 1492-1523 against 1519) while its centre press works. No
     frame or no window is never inside."""
@@ -773,7 +776,8 @@ def frame_inside(frame, window, margin=8):
         return False
     x, y, w, h = frame
     wx, wy, ww, wh = window
-    return wx <= x + w / 2 < wx + ww and wy + margin <= y and y + h <= wy + wh - margin
+    return (wx <= x + w / 2 < wx + ww and wy + margin <= y
+            and y + h <= wy + wh and y + h / 2 <= wy + wh - margin)
 
 
 def leave_point(window, displays, gap=40):
@@ -1767,7 +1771,18 @@ def self_test():
     # sits wholly inside the window, `margin` clear of its top and bottom.
     check("the measured button frame is not inside the window", frame_inside((1492, 1202, 31, 16), win) is False)
     check("a frame well inside the window is inside", frame_inside((1492, 889, 31, 16), win) is True)
-    check("a frame touching the bottom margin is not inside", frame_inside((1492, 1005 - 8 - 15, 31, 16), win) is False)
+    # Row 283 (2), measured 11-27 (slot-1127a probe 5): at the end of the dock's
+    # travel the Artboards footer's ap_new sits at (1474, 987, 16, 16), 2 points
+    # above the window's bottom (1005), and a real click at its centre ACTED
+    # (rows 1 -> 2). The old rule (the whole frame `margin` clear) called it
+    # outside, so the last widget of the last group could never be pressed.
+    check("the measured dock footer flush with the bottom is inside (a click at its centre acted)",
+          frame_inside((1474, 987, 16, 16), win) is True)
+    check("a frame running past the window's bottom is not inside", frame_inside((1492, 1005 - 15, 31, 16), win) is False)
+    check("a frame whose centre is within the bottom margin is not inside",
+          frame_inside((1492, 1005 - 12, 31, 12), win) is False)
+    check("a tall frame whose centre clears the margin but whose bottom runs past the window is not inside",
+          frame_inside((1492, 975, 31, 40), win) is False)
     check("a frame one point clear of the bottom margin is inside", frame_inside((1492, 1005 - 8 - 16, 31, 16), win) is True)
     check("a frame above the top margin is not inside", frame_inside((1492, 105 + 7, 31, 16), win) is False)
     check("a frame at the top margin is inside", frame_inside((1492, 105 + 8, 31, 16), win) is True)
