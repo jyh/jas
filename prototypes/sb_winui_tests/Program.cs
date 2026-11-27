@@ -1767,6 +1767,15 @@ static class Program
                 ProbeWire.DialogField(false, null),
                 ProbeWire.DialogField(true, null),
             }));
+        // Row 284 (jas STATUS-flask 1027 item 1): the dock's tab and the panel
+        // menu's items carry an AutomationId a driver can find them by. Neither is
+        // read aloud (a Name or HelpText would be), so a person hears nothing new.
+        Eq("dock tab id: the group key and the panel content id",
+            "dock4_tab_artboards_panel_content", DockWire.TabAutomationId("dock4", "artboards_panel_content"));
+        Eq("panel menu item id: the item's action; a row with none has none",
+            "open_artboard_options|",
+            PanelMenuWire.ItemAutomationId(new PanelMenuRow(8, "item", "Artboard Options...", "open_artboard_options", true, null))
+            + "|" + PanelMenuWire.ItemAutomationId(new PanelMenuRow(0, "item", "x", "", true, null)));
         // THE CLASS AUDIT, arm D (jas STATUS-flask 1024 item 1): the shell's plan
         // readers over the WHOLE corpus of the engine's real plan bytes, the 116
         // e2e baselines' probes (each plan sliced raw from the probe body and
