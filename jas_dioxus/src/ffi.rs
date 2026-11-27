@@ -379,11 +379,8 @@ impl JasEngine {
     /// Write one DECLARED `state:` key of a panel (the runner's `app_state`
     /// seed). `Err` names an undeclared key or a panel the workspace lacks.
     pub(crate) fn script_seed_panel(&self, panel_id: &str, key: &str, value: serde_json::Value) -> Result<(), SeedRefusal> {
+        crate::interpreter::panel_seed::check_seed(panel_id, key)?;
         let ws = Workspace::load().ok_or(SeedRefusal::NoWorkspace)?;
-        ws.panel(panel_id).ok_or_else(|| SeedRefusal::UnknownPanel(panel_id.to_string()))?;
-        if !ws.panel_state_defaults(panel_id).contains_key(key) {
-            return Err(SeedRefusal::UndeclaredPanelKey(panel_id.to_string(), key.to_string()));
-        }
         seed_panel(self, &ws, panel_id);
         self.store.borrow_mut().set_panel(panel_id, key, value);
         Ok(())
@@ -2461,51 +2458,9 @@ pub unsafe extern "C" fn jas_engine_load_user_libraries(e: *mut JasEngine, root:
     JasBytes::from_string(serde_json::Value::Object(taken).to_string())
 }
 
-/// Why a script seed was refused ([`JasEngine::script_seed_panel`]): its
-/// [`kind`](SeedRefusal::kind) is the name the FFI seam reports on
-/// [`jas_last_error_json`], and its `Display` is the message the replay
-/// carries (`UnknownPanel <panel>`, `UndeclaredPanelKey <panel>.<key>`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SeedRefusal {
-    NoWorkspace,
-    UnknownPanel(String),
-    UndeclaredPanelKey(String, String),
-}
-
-impl SeedRefusal {
-    pub(crate) fn kind(&self) -> &'static str {
-        match self {
-            SeedRefusal::NoWorkspace => "NoWorkspace",
-            SeedRefusal::UnknownPanel(_) => "UnknownPanel",
-            SeedRefusal::UndeclaredPanelKey(..) => "UndeclaredPanelKey",
-        }
-    }
-}
-
-impl std::fmt::Display for SeedRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SeedRefusal::NoWorkspace => write!(f, "no workspace"),
-            SeedRefusal::UnknownPanel(p) => write!(f, "UnknownPanel {p}"),
-            SeedRefusal::UndeclaredPanelKey(p, k) => write!(f, "UndeclaredPanelKey {p}.{k}"),
-        }
-    }
-}
-
-/// A script seed's value as the engine stores it: an array whose items are
-/// index paths (an element's document path) has each path wrapped as
-/// `{"__path__": [...]}`, the form the panel state holds a selection of
-/// elements in; every other value goes as written. Rust's replay and the
-/// native shells' seed door ([`jas_script_seed_panel`]) both use this one.
-pub(crate) fn seed_panel_value(v: &serde_json::Value) -> serde_json::Value {
-    let is_path = |x: &serde_json::Value| x.as_array().is_some_and(|a| a.iter().all(|i| i.as_u64().is_some()));
-    match v {
-        serde_json::Value::Array(items) => serde_json::Value::Array(items.iter()
-            .map(|x| if is_path(x) { serde_json::json!({"__path__": x}) } else { x.clone() })
-            .collect()),
-        other => other.clone(),
-    }
-}
+// The seed's ruled check, refusal and stored form are shared with the web's
+// level-2 hook (`interpreter::panel_seed`, row 291).
+pub(crate) use crate::interpreter::panel_seed::{seed_panel_value, SeedRefusal};
 
 /// Row 284 (jas STATUS-flask 1027 item 2): THE SCRIPT SEED DOOR, A SCRIPT
 /// SEAM: no person's act reaches it; a driver seeds a script's starting state

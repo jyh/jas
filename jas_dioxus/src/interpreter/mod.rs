@@ -26,6 +26,7 @@ pub mod symbols_host;
 pub mod layer_doc_effects;
 pub mod workspace;
 pub mod panel_layout;
+pub mod panel_seed;
 pub mod widget_tree;
 pub mod bind_values;
 pub mod widget_commit;
