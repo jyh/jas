@@ -3667,3 +3667,15 @@ internal static class SeedWire
     internal static string Envelope(string panel, string key, string valueJson) =>
         "{\"panel\":" + System.Text.Json.JsonSerializer.Serialize(panel) + ",\"key\":" + System.Text.Json.JsonSerializer.Serialize(key) + ",\"value\":" + valueJson + "}";
 }
+
+/// <summary>
+/// jas STATUS-flask 1031: the engine's answer to "is a document open?"
+/// (`jas_document_is_open`). The shell asks after a menu act, because an act
+/// can open one (File &gt; New after the last tab closed), so the no-document
+/// cover follows the engine and never a guess from a changed document.
+/// </summary>
+internal static class DocumentWire
+{
+    /// <summary>1 is open, 0 is closed; 255 (a null engine) or any other value is unknown (null).</summary>
+    internal static bool? OpenOf(byte rc) => rc switch { 1 => true, 0 => false, _ => null };
+}

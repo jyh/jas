@@ -541,9 +541,9 @@ func setLayersRenamingPath(model: Model, _ path: [Int]?) {
                       path.map { $0 as Any } ?? NSNull())
 }
 
-/// The artboards-panel selection ids, read from the store scope the
-/// artboards effects write (`"artboards"` / `artboards_panel_selection`, the
-/// reader `Effects.swift`'s artboard verbs already use).
+/// The artboards-panel selection ids (`artboards_panel_selection`). The short
+/// spelling `"artboards"` is the canonical `artboards_panel_content` scope:
+/// ``StateStore/panelContentId(_:)`` normalises it on every read and write.
 func artboardsPanelSelection(model: Model?) -> [String] {
     (model?.stateStore.getPanel("artboards", "artboards_panel_selection") as? [String]) ?? []
 }

@@ -1112,6 +1112,18 @@ struct JasBytes jas_dialog_event(struct JasEngine *e,
 uint8_t jas_document_close(struct JasEngine *e);
 
 /**
+ * **Whether the engine holds an open document** (jas STATUS-flask 1031): 1
+ * when one is open, 0 when none is (the last tab closed, [`jas_document_close`]),
+ * 255 for a null engine. A shell covers its surface while none is open, and an
+ * act can open one (File > New after the last tab closed), so the shell ASKS
+ * after an act rather than guess from a changed document.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uint8_t jas_document_is_open(struct JasEngine *e);
+
+/**
  * **The shell names the document it opened or saved** (flask §256): the
  * model's `filename`, which the canvas tab shows (`workspace.open_documents`,
  * owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the

@@ -427,6 +427,13 @@ internal static unsafe class JasCore
     internal static extern int jas_script_seed_panel(IntPtr engine, byte[] json, nuint len);
 
     /// <summary>
+    /// jas STATUS-flask 1031: whether the engine holds an open document
+    /// (`jas_document_is_open`): 1 open, 0 closed, 255 for a null engine.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_document_is_open(IntPtr engine);
+
+    /// <summary>
     /// Open a dialog BY ID in the engine (`jas_dialog_open`, a test seam for the
     /// level-2 dialog pass): <paramref name="paramsJson"/> is a JSON object of
     /// literal values. Returns a <c>JasStatus</c>: 0 only when that dialog is then

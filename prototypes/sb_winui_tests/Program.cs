@@ -1878,6 +1878,13 @@ static class Program
         Eq("seed door envelope: panel, key, and the value's JSON as written",
             """{"panel":"artboards_panel_content","key":"artboards_panel_selection","value":["zs8ap4x3"]}""",
             SeedWire.Envelope("artboards_panel_content", "artboards_panel_selection", """["zs8ap4x3"]"""));
+        // jas STATUS-flask 1031: after a menu act the shell asks the engine whether
+        // a document is open (jas_document_is_open), so File > New after the last
+        // tab closed lifts the no-document cover. 1 open, 0 closed; 255 (a null
+        // engine) or any other value is unknown, and the cover is left as it is.
+        Eq("document open: 1 is open, 0 is closed, anything else is unknown",
+            "True|False|(unknown)|(unknown)",
+            string.Join("|", new byte[] { 1, 0, 255, 7 }.Select(b => DocumentWire.OpenOf(b) is bool o ? o.ToString() : "(unknown)")));
         // (A) W1c: the bar's label, as the Mac's ProposalBarView draws it; no bar when none is pending.
         Eq("mcp bar: the label names the proposal; none pending shows no bar",
             "Proposed: nudge|(no bar)",

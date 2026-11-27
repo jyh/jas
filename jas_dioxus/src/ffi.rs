@@ -423,6 +423,25 @@ impl JasEngine {
         crate::panel_behavior::Ran { doc_changed: true, state_changed: false }
     }
 
+    /// File > New on the one-document engine (flask STATUS 1030, jas 1031):
+    /// the engine is the Windows shell's document host, so `new_document`'s
+    /// `create_child` (a new canvas tab) is the engine's to run, as `revert` is.
+    /// With no document open (the last tab closed) it opens a fresh, untitled,
+    /// unmodified document, whose tab the canvas bar draws from the engine. With
+    /// one open it is refused by name, `OneDocument`: this engine holds one.
+    fn new_document(&self) -> Result<crate::panel_behavior::Ran, crate::panel_behavior::Refusal> {
+        if self.document_open.get() {
+            return Err(crate::panel_behavior::Refusal {
+                class: "OneDocument",
+                detail: "new_document: this engine holds one document, and one is open; close its tab first".into(),
+            });
+        }
+        *self.model.borrow_mut() = Model::default();
+        self.document_open.set(true);
+        *self.saved_svg.borrow_mut() = None;
+        Ok(crate::panel_behavior::Ran { doc_changed: true, state_changed: true })
+    }
+
     fn new() -> Self {
         let mut panel = PanelState::default();
         let mut store = StateStore::new();
@@ -2249,6 +2268,8 @@ unsafe fn jas_dispatch_action_inner(
     // File > Revert (finding 12 of the 10-20 sitting): a `log` stub in
     // `actions.yaml`, and its bytes are the engine's, so the engine runs it.
     let revert = (panel.is_none() && action == "revert").then(|| engine.revert());
+    // File > New (flask STATUS 1030): the one-document engine runs it, as Revert.
+    let new_doc = (panel.is_none() && action == "new_document").then(|| engine.new_document());
     // A paste's clipboard read is its action's VALUE param (`null`:
     // unreadable): the YAML's `doc.paste` hands it to the paste law.
     let is_paste = matches!(clip_verb, Some(crate::workspace::menu_native::ClipVerb::Paste));
@@ -2269,6 +2290,8 @@ unsafe fn jas_dispatch_action_inner(
         (Ok(ran), named)
     } else if let Some(ran) = revert {
         (Ok(ran), Named::default())
+    } else if let Some(ran) = new_doc {
+        (ran, Named::default())
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
@@ -2749,6 +2772,20 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
 pub unsafe extern "C" fn jas_document_close(e: *mut JasEngine) -> u8 {
     let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
     u8::from(engine.document_open.replace(false))
+}
+
+/// **Whether the engine holds an open document** (jas STATUS-flask 1031): 1
+/// when one is open, 0 when none is (the last tab closed, [`jas_document_close`]),
+/// 255 for a null engine. A shell covers its surface while none is open, and an
+/// act can open one (File > New after the last tab closed), so the shell ASKS
+/// after an act rather than guess from a changed document.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_is_open(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    u8::from(engine.document_open.get())
 }
 
 /// **The shell names the document it opened or saved** (flask §256): the
@@ -8374,8 +8411,10 @@ mod tests {
             // Dialogs open in the engine now (the dialog door, 2026-10-14), so
             // `open_document_setup`, `open_print_dialog`, `save_appearance_as`
             // and `save_workspace_as` left this list.
-            // Effects no engine runs yet: a new tab, the pane layout.
-            "new_document -> UnknownEffect:create_child",
+            // Effects no engine runs yet: the pane layout. `new_document` left
+            // this list on 2026-11-27: the one-document engine runs it after the
+            // last tab closes and refuses it by name (`OneDocument`) while one
+            // is open (`file_new_after_the_last_tab_closes_opens_a_fresh_untitled_document`).
             "reset_workspace -> UnknownEffect:reset_layout",
             "revert_workspace -> UnknownEffect:revert_layout",
             "tile_panes -> UnknownEffect:tile",
@@ -8575,6 +8614,48 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// flask STATUS 1030 / jas 1031: FILE > NEW AFTER THE LAST TAB CLOSES. The
+    /// engine is the Windows shell's document host and holds exactly ONE
+    /// document, so `new_document` is the engine's to run, as `revert` is: with
+    /// no document open (the last tab closed) it opens a fresh, untitled,
+    /// unmodified document whose tab the bar draws again; with one open it is
+    /// refused by name (`OneDocument`), never half run. Until this the engine
+    /// refused it as `UnknownEffect:create_child`, so after the last tab
+    /// closed a person on Windows could make no document at all.
+    #[test]
+    fn file_new_after_the_last_tab_closes_opens_a_fresh_untitled_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
+        assert!(reply.is_empty(), "the one-document engine refuses New while one is open: {reply}");
+        assert!(err.contains("OneDocument"), "{err}");
+        assert_eq!(canvas_tabs(e).len(), 1, "the refusal ran nothing");
+        // A shell covers the surface while no document is open, so it must be
+        // able to ASK (jas_document_is_open), not guess from a changed document.
+        assert_eq!(unsafe { jas_document_is_open(e) }, 1, "a document is open");
+        assert_eq!(unsafe { jas_document_close(e) }, 1, "the last tab closes");
+        assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(0), "no document, no tab");
+        assert_eq!(unsafe { jas_document_is_open(e) }, 0, "and the engine says none is open");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
+        assert!(err.is_empty(), "New after the close runs: {err}");
+        let reply: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
+        assert_eq!(reply["doc_changed"], serde_json::json!(true), "{reply}");
+        assert_eq!(canvas_tabs(e).len(), 1, "the bar draws the new document's tab");
+        assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(1));
+        let name = unsafe { &*e }.model.borrow().filename.clone();
+        assert!(name.starts_with("Untitled-"), "the new document is untitled: {name:?}");
+        let doc: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+        assert_eq!(doc["artboards"].as_array().map(Vec::len), Some(1), "a fresh document's one artboard: {doc}");
+        assert!(doc["layers"].as_array().unwrap().iter()
+                    .all(|l| l["children"].as_array().map_or(true, Vec::is_empty)), "and nothing drawn: {doc}");
+        assert_eq!(unsafe { jas_document_modified(e) }, 0, "a fresh document is unmodified");
+        assert_eq!(unsafe { jas_document_is_open(e) }, 1, "New opened it, and the engine says so");
+        assert_eq!(unsafe { jas_document_is_open(std::ptr::null_mut()) }, 255, "a null engine");
+        let (_, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
+        assert!(err.contains("OneDocument"), "with it open, New is refused again: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn dispatch_action_refuses_new_document_by_its_missing_effect_and_runs_nothing() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -8584,7 +8665,7 @@ mod tests {
         let e = jas_engine_new();
         let (reply, err) = dispatch(e, r#"{"action":"new_document"}"#);
         assert!(reply.is_empty(), "a refused action replies nothing: {reply}");
-        assert!(err.contains("PlatformEffect") && err.contains("create_child"), "{err}");
+        assert!(err.contains("OneDocument"), "a fresh engine holds its one document, so New is refused by name: {err}");
         // Nothing ran: the tab bar still shows the engine's one document,
         // and only it (owner note 4b: tabs are drawn from the open documents).
         assert_eq!(canvas_tabs(e).len(), 1, "nothing ran");
@@ -9472,6 +9553,82 @@ mod tests {
         let seps = want.as_array().map_or(0, |a| a.iter().filter(|x| x.get("separator").is_some()).count());
         assert!(items >= 3 && seps >= 1, "the fixture carries items and a separator: {items} {seps}");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// Row 287 (STATUS-flask 1025, the class audit after #1137's web red): the
+    /// engine's REAL bytes for the shapes a shell reads that no shipped corpus
+    /// holds, pinned in `test_fixtures/engine_exports/`, so a shell's reader can
+    /// be driven over the producer's own output and a producer that renames or
+    /// drops a field reds HERE, beside the change, not in a live run. Each file
+    /// names the export and its subject. `JAS_WRITE_ENGINE_EXPORTS=1` rewrites
+    /// them from the exports.
+    #[test]
+    fn the_engine_exports_a_shell_reads_are_pinned() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../test_fixtures");
+        let write = std::env::var("JAS_WRITE_ENGINE_EXPORTS").as_deref() == Ok("1");
+        let mut moved: Vec<String> = Vec::new();
+        let mut pin = |name: &str, got: String, e: *mut JasEngine| {
+            assert!(!got.is_empty(), "{name}: the export answered nothing: {}", take(unsafe { jas_last_error_json(e) }));
+            let got: serde_json::Value = serde_json::from_str(&got).unwrap_or_else(|x| panic!("{name}: {x}"));
+            let file = dir.join(name);
+            if write {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, serde_json::to_string_pretty(&got).unwrap() + "\n").unwrap();
+            }
+            match std::fs::read_to_string(&file) {
+                Ok(t) => if serde_json::from_str::<serde_json::Value>(&t).ok().as_ref() != Some(&got) { moved.push(name.to_string()) },
+                Err(_) => moved.push(format!("{name} (absent)")),
+            }
+        };
+        // The Layers panel at the default document: tree rows, their binds
+        // (`bind.source`, `bind.element_path`) and hit surfaces.
+        let e = engine_with(Model::new(crate::document::document::Document::default(), None));
+        pin("engine_exports/layers_panel_plan.json", plan_of(e, "layers_panel_content", 228, 600), e);
+        let dock = "Default";
+        pin("engine_exports/dock_layout_default.json", take(unsafe { jas_dock_layout(dock.as_ptr(), dock.len()) }), e);
+        unsafe { jas_engine_free(e) };
+        // The Artboards panel with two artboards: the `repeats` key, each row's
+        // NAMED leaves with their `path`, the panel menu, a row click's reply,
+        // and the Artboard Options dialog's plan.
+        let mut doc = crate::document::document::Document::default();
+        doc.artboards = (0..2).map(|i| {
+            let mut a = Artboard::default_with_id(format!("ab{i:04}"));
+            a.name = format!("Board {}", i + 1);
+            a
+        }).collect();
+        let e = engine_with(Model::new(doc, None));
+        let plan_text = plan_of(e, "artboards_panel_content", 228, 600);
+        let plan: serde_json::Value = serde_json::from_str(&plan_text).expect("plan JSON");
+        pin("engine_exports/artboards_panel_plan_two.json", plan_text, e);
+        let ab = "artboards_panel_content";
+        pin("engine_exports/artboards_panel_menu.json", take(unsafe { jas_panel_menu(e, ab.as_ptr(), ab.len()) }), e);
+        let row1 = ["chrome", "containers", "leaves"].iter().filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["id"] == "ap_number").map(|r| r["path"].clone()).nth(1).expect("row 1's ap_number");
+        pin("engine_exports/artboards_row_click_reply.json",
+            behave(e, ab, &format!(r#"{{"path":{row1},"event":"click"}}"#)).0, e);
+        assert_eq!(dialog_open(e, "artboard_options", r#"{"artboard_id":"ab0001"}"#), JasStatus::Ok,
+                   "{}", take(unsafe { jas_last_error_json(e) }));
+        pin("engine_exports/artboard_options_dialog_plan.json", take(unsafe { jas_dialog_plan(e, 0, 0) }), e);
+        unsafe { jas_engine_free(e) };
+        // Floors on what each pin is FOR, derived from the export, so a pin
+        // that lost the shape a shell's arm needs fails here, not by passing
+        // over nothing (a fixture shorter than the cut hides the cut).
+        let rows = |p: &serde_json::Value| -> Vec<serde_json::Value> {
+            ["chrome", "containers", "leaves"].iter().filter_map(|k| p[*k].as_array()).flatten().cloned().collect()
+        };
+        let layers: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("engine_exports/layers_panel_plan.json")).unwrap_or_default()).unwrap_or_default();
+        let lr = rows(&layers);
+        assert!(lr.iter().filter(|r| r.get("events").is_some()).count() >= 1, "the Layers pin has a hit surface");
+        assert!(lr.iter().any(|r| r.to_string().contains("bind.source")), "the Layers pin has a tree row's bind.source");
+        let ab: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("engine_exports/artboards_panel_plan_two.json")).unwrap_or_default()).unwrap_or_default();
+        assert_eq!(ab["repeats"][0]["rows"], 2, "the Artboards pin repeats its two rows: {}", ab["repeats"]);
+        assert_eq!(rows(&ab).iter().filter(|r| r["id"] == "ap_number").count(), 2, "one named ap_number per row");
+        assert!(moved.is_empty(), "the engine's exports moved from their pins: {moved:?}; a shell's \
+                wire test reads these files (JAS_WRITE_ENGINE_EXPORTS=1 rewrites them; read the diff first)");
     }
 
     /// Row 257: a row-menu query the engine cannot answer draws nothing and
