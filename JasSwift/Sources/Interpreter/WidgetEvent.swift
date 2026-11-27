@@ -142,6 +142,30 @@ enum WidgetEvent {
                       value: parsed.value, bindWritten: target != nil, behaviorsRun: ran)
     }
 
+    /// Whether a click on `widget` can ask the host for a menu (`open_menu`),
+    /// read from the spec without running anything: the effects of the click
+    /// that ``click`` would run (its declared `click` behaviors, or else the
+    /// node-level `action`), inline or through a named action, in any branch.
+    /// A widget for which this holds carries an anchor view, so the host can
+    /// drop the menu below it however it was pressed (STATUS-jas row 282;
+    /// #1135's rule for the hamburger menu).
+    static func clickRequestsMenu(_ widget: [String: Any], actions: [String: Any]) -> Bool {
+        guard let kind = widget["type"] as? String, clickKinds.contains(kind) else { return false }
+        var owners = declared(widget, events: clickEvents)
+        if owners.isEmpty, let action = widget["action"] as? String { owners = [["action": action]] }
+        func carries(_ node: Any?) -> Bool {
+            if let d = node as? [String: Any] {
+                return d["open_menu"] != nil || d.values.contains(where: carries)
+            }
+            if let a = node as? [Any] { return a.contains(where: carries) }
+            return false
+        }
+        return owners.contains { behavior in
+            carries(behavior["effects"])
+                || ((behavior["action"] as? String).map { carries((actions[$0] as? [String: Any])?["effects"]) } ?? false)
+        }
+    }
+
     /// The click's modifiers (the reference's `CLICK_MODIFIERS`).
     static let clickModifiers = ["shift", "ctrl", "meta", "alt"]
 
