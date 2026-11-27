@@ -423,6 +423,25 @@ impl JasEngine {
         crate::panel_behavior::Ran { doc_changed: true, state_changed: false }
     }
 
+    /// File > New on the one-document engine (flask STATUS 1030, jas 1031):
+    /// the engine is the Windows shell's document host, so `new_document`'s
+    /// `create_child` (a new canvas tab) is the engine's to run, as `revert` is.
+    /// With no document open (the last tab closed) it opens a fresh, untitled,
+    /// unmodified document, whose tab the canvas bar draws from the engine. With
+    /// one open it is refused by name, `OneDocument`: this engine holds one.
+    fn new_document(&self) -> Result<crate::panel_behavior::Ran, crate::panel_behavior::Refusal> {
+        if self.document_open.get() {
+            return Err(crate::panel_behavior::Refusal {
+                class: "OneDocument",
+                detail: "new_document: this engine holds one document, and one is open; close its tab first".into(),
+            });
+        }
+        *self.model.borrow_mut() = Model::default();
+        self.document_open.set(true);
+        *self.saved_svg.borrow_mut() = None;
+        Ok(crate::panel_behavior::Ran { doc_changed: true, state_changed: true })
+    }
+
     fn new() -> Self {
         let mut panel = PanelState::default();
         let mut store = StateStore::new();
@@ -2249,6 +2268,8 @@ unsafe fn jas_dispatch_action_inner(
     // File > Revert (finding 12 of the 10-20 sitting): a `log` stub in
     // `actions.yaml`, and its bytes are the engine's, so the engine runs it.
     let revert = (panel.is_none() && action == "revert").then(|| engine.revert());
+    // File > New (flask STATUS 1030): the one-document engine runs it, as Revert.
+    let new_doc = (panel.is_none() && action == "new_document").then(|| engine.new_document());
     // A paste's clipboard read is its action's VALUE param (`null`:
     // unreadable): the YAML's `doc.paste` hands it to the paste law.
     let is_paste = matches!(clip_verb, Some(crate::workspace::menu_native::ClipVerb::Paste));
@@ -2269,6 +2290,8 @@ unsafe fn jas_dispatch_action_inner(
         (Ok(ran), named)
     } else if let Some(ran) = revert {
         (Ok(ran), Named::default())
+    } else if let Some(ran) = new_doc {
+        (ran, Named::default())
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
@@ -8313,8 +8336,10 @@ mod tests {
             // Dialogs open in the engine now (the dialog door, 2026-10-14), so
             // `open_document_setup`, `open_print_dialog`, `save_appearance_as`
             // and `save_workspace_as` left this list.
-            // Effects no engine runs yet: a new tab, the pane layout.
-            "new_document -> UnknownEffect:create_child",
+            // Effects no engine runs yet: the pane layout. `new_document` left
+            // this list on 2026-11-27: the one-document engine runs it after the
+            // last tab closes and refuses it by name (`OneDocument`) while one
+            // is open (`file_new_after_the_last_tab_closes_opens_a_fresh_untitled_document`).
             "reset_workspace -> UnknownEffect:reset_layout",
             "revert_workspace -> UnknownEffect:revert_layout",
             "tile_panes -> UnknownEffect:tile",
@@ -8531,7 +8556,7 @@ mod tests {
         assert!(err.contains("OneDocument"), "{err}");
         assert_eq!(canvas_tabs(e).len(), 1, "the refusal ran nothing");
         assert_eq!(unsafe { jas_document_close(e) }, 1, "the last tab closes");
-        assert_eq!(canvas_tabs(e).len(), 0, "no document, no tab");
+        assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(0), "no document, no tab");
         let (reply, err) = dispatch(e, r#"{"menu_item":"menu_new"}"#);
         assert!(err.is_empty(), "New after the close runs: {err}");
         let reply: serde_json::Value = serde_json::from_str(&reply).expect("an act reply");
