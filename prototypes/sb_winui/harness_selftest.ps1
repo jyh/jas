@@ -2522,6 +2522,56 @@ Test-Case 'at join: a plan that does not parse is REFUSED by name' {
     Show-SbPlanAt (Resolve-SbPlanAt -PlanJson '{nope' -At @(0) -Widget 'ap_name')
 } 'REFUSED: the plan does not parse'
 
+# THE CLASS AUDIT (jas STATUS-flask 1024 item 1, after the web L2 red of #1137):
+# a reader is driven over the WHOLE shipped corpus of its producer's real
+# bytes, never only over a hand-built fixture, so a producer that drops or
+# adds a field reds here before a live run refuses it. Two such corpora are on
+# disk: the input scripts (the reader prove_e2e runs on them), and the 116 e2e
+# baselines' probes, each holding the live document the engine wrote
+# (`jas_document_json`) beside its `doc_sha`.
+$aRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# A. Every shipped input script is ACCEPTED by Read-SbInputScript (the form
+# census above holds only the form refusals; a script refused for any other
+# reason would stop gating and reach no arm until the nightly said NOT RUN).
+Test-Case 'audit A: every shipped input script is ACCEPTED by the reader prove_e2e runs (the whole corpus)' {
+    $files = @(Get-ChildItem (Join-Path $aRoot 'test_fixtures\input_scripts') -Filter '*.json' | Where-Object { $_.Name -notlike '*.expected.json' })
+    $refused = @($files | Where-Object {
+        $null -ne (Read-SbInputScript ([System.IO.File]::ReadAllText($_.FullName, [System.Text.Encoding]::UTF8))).Refusal
+    } | ForEach-Object { $_.BaseName })
+    "read=$(if ($files.Count -ge 100) { 'corpus' } else { $files.Count }) refused=$($refused.Count)$(if ($refused.Count) { ' ' + (($refused | Select-Object -First 5) -join ',') })"
+} 'read=corpus refused=0'
+# C. Compare-SbReadBack (the run's read-back comparator) over every baseline's
+# LIVE document, the engine's raw bytes sliced from the probe body and proved
+# byte-exact by the probe's own doc_sha, against its script's golden. The
+# comparator's laws (the open's artboard set aside, minted ids) meet the
+# producer's real bytes 116 times, not only the hand-built strings above.
+function Get-SbProbeDoc([string]$Body) {
+    $a = $Body.IndexOf('"doc":'); $b = $Body.LastIndexOf(',"plan":')
+    if ($a -lt 0 -or $b -lt $a) { return $null }
+    $got = $Body.Substring($a + 6, $b - $a - 6)
+    $sha = [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($got))).Replace('-', '').ToLowerInvariant().Substring(0, 16)
+    $rec = [regex]::Match($Body, '"doc_sha":"([0-9a-f]+)"').Groups[1].Value
+    if ($sha -cne $rec) { return $null }
+    $got
+}
+Test-Case 'audit C: every baseline''s live document passes the read-back comparator against its golden (the whole baseline corpus)' {
+    $dirs = @(Get-ChildItem (Join-Path $aRoot 'prototypes\sb_winui\e2e_baselines') -Directory)
+    $bad = New-Object System.Collections.Generic.List[string]; $n = 0
+    foreach ($d in $dirs) {
+        $sc = Join-Path $aRoot "test_fixtures\input_scripts\$($d.Name).json"
+        $pf = Join-Path $d.FullName 'probe.json'
+        if (-not (Test-Path $sc) -or -not (Test-Path $pf)) { $bad.Add("$($d.Name):missing"); continue }
+        $s = [System.IO.File]::ReadAllText($sc, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        $got = Get-SbProbeDoc ([System.IO.File]::ReadAllText($pf, [System.Text.Encoding]::UTF8))
+        if ($null -eq $got) { $bad.Add("$($d.Name):no doc slice matching doc_sha"); continue }
+        $want = [System.IO.File]::ReadAllText((Join-Path $aRoot "test_fixtures\input_scripts\$($s.expected_json)"), [System.Text.Encoding]::UTF8)
+        $n++
+        $v = Compare-SbReadBack -Got $got -Want $want
+        if ($v -notlike 'PASS*') { $bad.Add("$($d.Name):$v") }
+    }
+    "compared=$(if ($n -ge 100) { 'corpus' } else { $n }) failed=$($bad.Count)$(if ($bad.Count) { ' ' + (($bad | Select-Object -First 3) -join ' | ') })"
+} 'compared=corpus failed=0'
+
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'

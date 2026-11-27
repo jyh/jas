@@ -41,6 +41,18 @@ WHAT IT REFUSES, and each condition was bought by a real merge, not imagined:
                       AFTER #198 was green, because merging `main` in moved the
                       head -- the checks described a tree that no longer
                       existed.
+  (7) A NEW RED IN THE WEB LEVEL-2 RECEIPT, when that lane ran on the head.
+                      The lane is ADVISORY (`continue-on-error`), so its check
+                      concludes `success` whatever its receipt says, and (4)
+                      cannot see it. #1137 merged on 2026-11-26 with its own
+                      PR receipt reading RED(fail=0 refused=116); main's lane
+                      then read RED for 17 h. So the receipt's line 1 is read
+                      (`web_l2_main_verdict.verdict_of`). A RED refuses unless
+                      main's latest receipt reads the SAME red (the PR did not
+                      make it worse, and that is said by name); a lane that
+                      ran with no readable receipt refuses as UNREAD. A head
+                      the lane did not run on is not a refusal: the lane's
+                      `paths:` filter decides that, and the receipt says so.
 
 THE PASS SET IS `{success}` AND NOTHING ELSE -- A DELIBERATE NARROWING
 ---------------------------------------------------------------------
@@ -116,7 +128,7 @@ PASS_CONCLUSIONS = frozenset({"success"})
 # Every condition this tool evaluates. The verdict carries this denominator so
 # that narrowing the logic without saying so turns the self-test red: a bare
 # refusal count is 0 for a run that examined nothing.
-CONDITIONS = ("draft", "population", "pending", "non-pass", "required", "ancestor")
+CONDITIONS = ("draft", "population", "pending", "non-pass", "required", "ancestor", "web-l2")
 
 # Everything this tool PRINTS is ASCII. The seat most likely to run it is on a
 # Windows box whose console is cp1252, where one non-ASCII character raises
@@ -146,6 +158,12 @@ class State(NamedTuple):
     # The forge's OWN reading (`pulls/{n}`.`mergeable_state`): clean, blocked,
     # unstable, dirty, unknown. Read, never inferred: see THE FORGE'S READING.
     forge_state: str = "unknown"
+    # Condition (7): the web level-2 receipt's verdict on this head, as
+    # `web_l2_main_verdict.verdict_of` reads it ("GREEN", "RED(...)", or
+    # "UNREAD: why"), or None when the lane did not run on this head; and
+    # main's latest receipt verdict in the same form (None when unread).
+    web_l2: str | None = None
+    web_l2_main: str | None = None
 
 
 class Verdict(NamedTuple):
@@ -223,6 +241,21 @@ def evaluate(state: State) -> Verdict:
             "the green tree is not the merged tree"
         )
 
+    # (7) The advisory lane's verdict, which (4) cannot see.
+    w = state.web_l2
+    if w is not None and w != "GREEN":
+        if w.startswith("UNREAD"):
+            refusals.append(f"WEB-L2: the level-2 lane ran on this head and its receipt is {w}")
+        elif w != state.web_l2_main:
+            refusals.append(
+                f"WEB-L2: the level-2 receipt reads {w}; main's latest reads "
+                f"{state.web_l2_main or 'UNREAD'}, so this red is NEW"
+            )
+    web_note = (
+        "web-l2 not run on this head" if w is None
+        else f"web-l2 {w}" + (" (the same red as main: not made worse)" if w not in ("GREEN",) and w == state.web_l2_main else "")
+    )
+
     # ⛔ RECORDS AND NAMES ARE DIFFERENT POPULATIONS, AND PRINTING THEM
     #   UNLABELLED BESIDE EACH OTHER READS AS FAILURES. Found by running this
     #   tool on its own pull request: `check-runs 31; green 25` on a tree where
@@ -246,6 +279,7 @@ def evaluate(state: State) -> Verdict:
         f"check-runs {len(state.runs)} record(s) over {len(names)} distinct name(s); "
         f"green {len(green)}/{len(names)} name(s); "
         f"required {len(state.required) - len(missing)}/{len(state.required)} present; "
+        f"{web_note}; "
         f"refusals {len(refusals)}{dup_note}"
     )
     return Verdict(not refusals, tuple(refusals), receipt)
@@ -304,6 +338,56 @@ def base_is_ancestor_by_compare(status: str) -> bool:
     return status in ("ahead", "identical")
 
 
+WEB_L2_PR_WORKFLOW = "Web level 2 (pull request)"
+
+
+def _web_l2_reading(text: str | None) -> str:
+    """A receipt's text as condition (7) compares it: GREEN, the red's own
+    words (RED(...) or NOT RUN(...)), or UNREAD: why."""
+    import web_l2_main_verdict as wl2
+    v, why = wl2.verdict_of(text)
+    return "GREEN" if v == "GREEN" else (why if v == "RED" else f"UNREAD: {why}")
+
+
+def _web_l2_receipt(repo: str, run_id: int) -> str | None:
+    import tempfile
+    import web_l2_main_verdict as wl2
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            _gh("run", "download", str(run_id), "-R", repo, "-n", wl2.ARTIFACT, "-D", d)
+        except RuntimeError:
+            return None
+        for f in Path(d).rglob(wl2.RECEIPT):
+            return f.read_text(encoding="utf-8")
+    return None
+
+
+def fetch_web_l2(repo: str, head: str) -> tuple[str | None, str | None]:
+    """Condition (7)'s two readings: the PR head's web level-2 receipt (None
+    when the lane did not run on `head`) and main's latest. Any failure to
+    read a lane that DID run is UNREAD, which refuses: never a silent pass."""
+    import web_l2_main_verdict as wl2
+    try:
+        rs = json.loads(_gh("run", "list", "-R", repo, "--workflow", WEB_L2_PR_WORKFLOW, "--commit", head,
+                            "--json", "databaseId,status,createdAt"))
+    except (RuntimeError, ValueError) as e:
+        return f"UNREAD: the lane's runs could not be listed ({e})", None
+    if not rs:
+        return None, None
+    latest = max(rs, key=lambda r: r["createdAt"])
+    if latest["status"] != "completed":
+        pr_reading = f"UNREAD: its run {latest['databaseId']} is {latest['status']}"
+    else:
+        pr_reading = _web_l2_reading(_web_l2_receipt(repo, latest["databaseId"]))
+    try:
+        mains = json.loads(_gh("run", "list", "-R", repo, "--workflow", wl2.WORKFLOW, "--branch", BASE,
+                               "--status", "completed", "--limit", "1", "--json", "databaseId"))
+        main_reading = _web_l2_reading(_web_l2_receipt(repo, mains[0]["databaseId"])) if mains else None
+    except (RuntimeError, ValueError):
+        main_reading = None
+    return pr_reading, main_reading
+
+
 def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
     meta = json.loads(_gh("api", f"repos/{repo}/pulls/{pr}"))
     head = require_key(meta, "head", f"pulls/{pr}")["sha"]
@@ -339,7 +423,8 @@ def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
 
     compare = json.loads(_gh("api", f"repos/{repo}/compare/{base}...{head}"))
     ancestor = base_is_ancestor_by_compare(str(compare.get("status") or ""))
-    return State(head, draft, runs, required, ancestor, forge_state)
+    web_l2, web_l2_main = fetch_web_l2(repo, head)
+    return State(head, draft, runs, required, ancestor, forge_state, web_l2, web_l2_main)
 
 
 # --------------------------------------------------------------------------
@@ -435,6 +520,20 @@ def self_test(fixture: Path | None = None) -> int:
         "REQUIRED",
     )
     arm("base not an ancestor", _state(base_is_ancestor=False), False, "ANCESTOR")
+    # (7) The web level-2 receipt. #1137's real record is the red arm: every
+    #     check-run green, the receipt RED, main GREEN.
+    r1137 = "RED(fail=0 refused=116)"
+    arm("web-l2: #1137's record (receipt RED, main GREEN)", _state(web_l2=r1137, web_l2_main="GREEN"), False, "WEB-L2")
+    arm("web-l2: a RED with main unread", _state(web_l2=r1137, web_l2_main=None), False, "WEB-L2")
+    arm("web-l2: a RED that differs from main's red", _state(web_l2=r1137, web_l2_main="RED(fail=1 refused=0)"), False, "WEB-L2")
+    arm("web-l2: the lane ran, no readable receipt", _state(web_l2="UNREAD: no receipt", web_l2_main="GREEN"), False, "WEB-L2")
+    arm("web-l2: the same red as main passes", _state(web_l2=r1137, web_l2_main=r1137), True)
+    arm("web-l2: a GREEN receipt passes", _state(web_l2="GREEN", web_l2_main=r1137), True)
+    arm("web-l2: the lane did not run", _state(web_l2=None, web_l2_main=r1137), True)
+    declared += 1
+    if "web-l2 not run" not in evaluate(_state()).receipt or "not made worse" not in evaluate(
+            _state(web_l2=r1137, web_l2_main=r1137)).receipt:
+        failures.append("the receipt names the web-l2 reading, run or not, and a carried red by name")
 
     # (c) ⛔ THE ARM THAT SEPARATES (4) FROM (5), AND IT IS THE REASON THIS
     #     TOOL IS NOT `if failures == 0`. Every run that reported is GREEN and
