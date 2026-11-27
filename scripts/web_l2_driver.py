@@ -228,7 +228,7 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             page.wait_for_timeout(100)
         elif k == "panel":
             release_mods()
-            pid, tab, wpath, widget, event, value = panel_fields(act)
+            pid, tab, wpath, widget, event, value, iterations = panel_fields(act)
             if page.locator(f"#{pid}").count() == 0:
                 # Show it as a person does: its dock tab, or, for a panel in no
                 # dock group, its Window menu item.
@@ -245,9 +245,10 @@ def run_script(br, path, menubar, menu_ids, artifacts=None):
             panels = page.locator(f"#{pid}")
             if panels.count() != 1:
                 raise _plan.Refused(f"{panels.count()} panels carry id {pid!r}")
-            ws = panels.locator(f"#{widget}")
+            root, where = scoped_root(panels, iterations, pid)
+            ws = root.locator(f"#{widget}")
             if ws.count() != 1:
-                raise _plan.Refused(f"{ws.count()} widgets carry id {widget!r} in {pid!r}")
+                raise _plan.Refused(f"{ws.count()} widgets carry id {widget!r} in {where!r}")
             w = ws.first
             if w.is_disabled() or w.get_attribute("aria-disabled") == "true":
                 raise _plan.Refused(f"widget {widget!r} is disabled")
@@ -903,6 +904,82 @@ def _artboard_fill(page, case="fill"):
     return artboard_fill_verdict(before, after, want, what, widget)
 
 
+# ── --at (row 290): a panel step scoped to one foreach iteration, live. Two
+# artboards (the fixture's, then New Artboard), Options pressed INSIDE
+# iteration k of `ap_list`, Fill ▸ White, OK. Iteration k's artboard must turn
+# white and the other must not; k=0 is the control for k=1. A subject already
+# white could not show the step at all, so it is refused, not passed.
+def at_verdict(before, after, k, want=ARTBOARD_FILL_WANT):
+    if not isinstance(before, list) or not isinstance(after, list) or len(before) != 2 or len(after) != 2:
+        return "REFUSED", f"expected two artboards before and after, read {before!r} -> {after!r}"
+    if before[k] == want:
+        return "REFUSED", f"artboard {k} was already {want} before the step: the subject cannot show it"
+    other = 1 - k
+    if after[k] != want:
+        return "FAIL", f"artboard {k} read {after[k]!r}, not {want}"
+    if after[other] != before[other]:
+        return "FAIL", f"artboard {other} moved too ({before[other]!r} -> {after[other]!r}): the step was not scoped"
+    return "PASS", ""
+
+
+def at_line(cases):
+    """`AT PASS` only when iteration 1 and its control, iteration 0, both pass."""
+    sts = dict((k, st) for k, st, _ in cases)
+    why = "; ".join(f"k={k}: {st}" + (f" ({d})" if d else "") for k, st, d in cases)
+    ok = sts.get(1) == "PASS" and sts.get(0) == "PASS"
+    return ("AT PASS" if ok else "AT " + ("REFUSED" if "REFUSED" in sts.values() else "FAIL")) + f" -- {why}"
+
+
+def _at_check(page, k):
+    fills = lambda: [a.get("fill") for a in (json.loads(page.evaluate("() => window.__jasTest.read()")).get("artboards") or [])]
+    page.wait_for_function("() => window.__jasTest !== undefined", timeout=HOOK_TIMEOUT_MS)
+    svg = open(os.path.join(REPO, _plan.LAYERS_FIXTURE), encoding="utf-8").read()
+    if not page.evaluate("([s, n]) => window.__jasTest.open(s, n)", [svg, "at_check.svg"]):
+        raise _plan.Refused("window.__jasTest.open returned false")
+    page.wait_for_timeout(300)
+    tab = page.locator("#artboards_panel_content_tab")
+    if tab.count() != 1:
+        raise _plan.Refused(f"{tab.count()} elements carry id 'artboards_panel_content_tab'")
+    tab.scroll_into_view_if_needed()
+    _act("show the Artboards tab", tab)
+    page.wait_for_timeout(300)
+    new = page.locator("#artboards_panel_content #ap_new")
+    if new.count() != 1:
+        raise _plan.Refused(f"{new.count()} New Artboard buttons (#ap_new)")
+    _act("press New Artboard", new)
+    page.wait_for_timeout(400)
+    before = fills()
+    root, where = scoped_root(page.locator("#artboards_panel_content"), [("ap_list", k)], "artboards_panel_content")
+    opt = root.locator("#ap_options")
+    if opt.count() != 1:
+        raise _plan.Refused(f"{opt.count()} Options buttons in {where!r}")
+    _act(f"open Artboard Options in {where}", opt)
+    page.wait_for_timeout(400)
+    dd = page.locator("#ao_fill_dropdown")
+    if dd.count() != 1:
+        raise _plan.Refused(f"{dd.count()} elements carry id 'ao_fill_dropdown'")
+    try:
+        dd.select_option("white", timeout=5000)
+    except Exception as e:
+        raise _plan.Refused(f"choose white in ao_fill_dropdown: {type(e).__name__}")
+    page.wait_for_timeout(300)
+    _act("press OK", page.get_by_role("button", name="OK", exact=True).last)
+    page.wait_for_timeout(400)
+    return at_verdict(before, fills(), k)
+
+
+def run_at_check(br, k):
+    ctx, page = br.page(True)
+    try:
+        return _at_check(page, k)
+    except _plan.Refused as e:
+        return "REFUSED", str(e)
+    except Exception as e:
+        return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"
+    finally:
+        ctx.close()
+
+
 def run_artboard_fill(br, case="fill"):
     ctx, page = br.page(True)
     try:
@@ -921,7 +998,7 @@ def run(args):
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = fit = layers = abfill = None
+    dock = dock_cases = fit = layers = abfill = at = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -956,6 +1033,9 @@ def run(args):
             for c, st, d in layer_cases:
                 lines.append(f"{st} layers {c}" + (f" -- {d}" if d else ""))
             layers = _plan.layers_line(layer_cases)
+        if args.at:
+            at = ("AT NOT RUN (" + not_run + ")" if not_run else
+                  at_line([(k,) + run_at_check(br, k) for k in (1, 0)]))
         if args.artboard_fill:
             abfill = ("ARTBOARDFILL NOT RUN (" + not_run + ")" if not_run else
                       artboard_fill_line(run_artboard_fill(br, "fill"),
@@ -970,6 +1050,8 @@ def run(args):
         body.append(preview_line(dock_cases) + " (the press and the snap preview the root draws mid-drag: hit = the element under the press point (tab, child:<tag>, other:<tag>#<id>, or offscreen:y<y>/vh<h>); start = dragstart events the window saw; via = after the band pass, up = just before the release, viaw/upw = the same read again after a settle wait; over = dragover events the window saw before the release; seen = each change in which edges draw it, by phase, with the release's own over/drop/dragend in order; ctl = a planted element with the preview style, read back (the reader's positive control); src = the pressed tab node still in the DOM at the release)")
     if abfill is not None:
         body.append(abfill + " (the --artboard-fill check: Artboard Options' Fill dropdown by the person's route, row 270)")
+    if at is not None:
+        body.append(at + " (the --at check: Options pressed inside iteration k of ap_list, Fill > White; k=0 is k=1's control, row 290)")
     if layers is not None:
         body.append(layers + " (the --layers check: the Mac harness's `layers` cases on the web, rows 256/264/266)")
     if fit is not None:
@@ -1002,12 +1084,41 @@ def panel_fields(act):
     over every planned act of the corpus: on 11-26 the plan grew a field
     (row 281's `scope`) and an unpack inline in the run raised on all 116."""
     _, pid, tab, wpath, widget, event, value, _label, _wtype, scope = act
-    if scope:
-        # The Mac finds a foreach iteration as its own AX container
-        # `<foreach id>#<k>`; the web draws no such container yet, so a step
-        # scoped by `at` is refused by name rather than driven unscoped.
-        raise _plan.Refused(f"the web channel does not scope a panel step to {'/'.join(scope)} yet")
-    return pid, tab, wpath, widget, event, value
+    return pid, tab, wpath, widget, event, value, parse_scope(scope)
+
+
+def parse_scope(scope):
+    """A panel act's `scope` (row 281: `["<foreach id>#<k>", ...]`, outermost
+    first) as [(foreach id, k)], or Refused by name for any entry that is not
+    exactly one id, one `#`, and a non-negative integer."""
+    out = []
+    for entry in scope or []:
+        name, sep, k = str(entry).partition("#")
+        if not sep or not name or "#" in k or not k.isdigit():
+            raise _plan.Refused(f"scope entry {entry!r} is not '<foreach id>#<k>'")
+        out.append((name, int(k)))
+    return out
+
+
+def iteration_selector(foreach_id, k):
+    """Row 290: iteration k of an identified foreach on the web. The renderer
+    draws the foreach as div#<id> and each iteration as that div's direct
+    child (render_repeat), so the k-th iteration is its (k+1)-th child."""
+    return f"#{foreach_id} > :nth-child({k + 1})"
+
+
+def scoped_root(root, iterations, where):
+    """Narrow `root` (a Playwright locator) to the iteration a step's `at`
+    names, one level per enclosing foreach, refusing by name a container that
+    is not exactly one or an iteration that is not drawn."""
+    for name, k in iterations:
+        if root.locator(f"#{name}").count() != 1:
+            raise _plan.Refused(f"{root.locator(f'#{name}').count()} foreach containers carry id {name!r} in {where!r}")
+        it = root.locator(iteration_selector(name, k))
+        if it.count() != 1:
+            raise _plan.Refused(f"iteration {k} of {name!r} in {where!r} is not drawn")
+        root, where = it, f"{name}#{k}"
+    return root, where
 
 
 def undelivered(act):
@@ -1080,17 +1191,37 @@ def self_test():
     check(panel_acts > 0, f"the corpus plans panel acts for panel_fields to read ({panel_acts})")
     pa = ("panel", "p_panel", "p_panel_tab", None, "w", "click", None, None, "button")
     try:
-        check(panel_fields(pa + ([],)) == ("p_panel", "p_panel_tab", None, "w", "click", None),
-              "a panel act with no scope reads as its six fields")
+        check(panel_fields(pa + ([],)) == ("p_panel", "p_panel_tab", None, "w", "click", None, []),
+              "a panel act with no scope reads as its six fields and no iterations")
+        # Row 290: the web delivers `at`. A foreach renders as div#<foreach id>
+        # with each iteration as its direct child, so iteration k is that
+        # div's (k+1)-th child; nested foreaches chain, outermost first.
+        check(panel_fields(pa + (["outer#1", "inner#2"],))[6] == [("outer", 1), ("inner", 2)],
+              "a scoped panel act reads its iterations, outermost first")
+        check(iteration_selector("ap_list", 0) == "#ap_list > :nth-child(1)"
+              and iteration_selector("ap_list", 3) == "#ap_list > :nth-child(4)",
+              "iteration k is the foreach container's (k+1)-th direct child")
     except Exception as e:  # noqa: BLE001
-        fails.append(f"a panel act with no scope does not read: {type(e).__name__}: {e}")
-    try:
-        panel_fields(pa + (["ap_list#1"],))
-        fails.append("a scoped panel act is refused by name on the web")
-    except _plan.Refused as e:
-        check("ap_list#1" in str(e), f"the scope refusal names the iteration ({e})")
-    except Exception as e:  # noqa: BLE001
-        fails.append(f"a scoped panel act raises {type(e).__name__}, not a refusal: {e}")
+        fails.append(f"a panel act does not read: {type(e).__name__}: {e}")
+    w, t = ARTBOARD_FILL_WANT, "transparent"
+    check(at_verdict([t, t], [t, w], 1) == ("PASS", ""), "--at: iteration 1 turns white and iteration 0 does not")
+    check(at_verdict([t, t], [w, t], 1)[0] == "FAIL", "--at: the WRONG iteration turning white fails")
+    check(at_verdict([t, t], [w, w], 1)[0] == "FAIL", "--at: both turning white fails (the step was not scoped)")
+    check(at_verdict([t, t], [t, t], 1)[0] == "FAIL", "--at: nothing turning white fails")
+    check(at_verdict([t, w], [t, w], 1)[0] == "REFUSED", "--at: a subject already white is refused, never passed")
+    check(at_verdict([t], [t, w], 1)[0] == "REFUSED", "--at: not two artboards is refused")
+    check(at_line([(1, "PASS", ""), (0, "PASS", "")]).startswith("AT PASS")
+          and at_line([(1, "PASS", ""), (0, "FAIL", "x")]).startswith("AT FAIL")
+          and at_line([(1, "REFUSED", "y"), (0, "PASS", "")]).startswith("AT REFUSED"),
+          "--at: the line passes only when both iterations pass, and names a refusal")
+    for bad in (["ap_list"], ["ap_list#"], ["ap_list#x"], ["ap_list#-1"], ["#1"], ["a#1#2"]):
+        try:
+            parse_scope(bad)
+            fails.append(f"a malformed scope {bad} is refused by name")
+        except _plan.Refused as e:
+            check(bad[0] in str(e), f"the refusal names the malformed scope {bad} ({e})")
+        except Exception as e:  # noqa: BLE001
+            fails.append(f"a malformed scope {bad} raises {type(e).__name__}, not a refusal: {e}")
     ids = menu_ids_by_path(menubar)
     check(ids.get(tuple(_plan.menu_paths(menubar)["menu_group"])) == "menu_group", "a menu path maps back to its id")
     for a in (("toolbar", "btn_arrow_slot", 400), ("read", "state", ("active_tool",), "{}"), ("read", "dialog", None)):
@@ -1265,6 +1396,8 @@ def main(argv):
                     help="also drag two dock tabs into the left and bottom snap bands (R1-2)")
     ap.add_argument("--fit", action="store_true",
                     help="also read the dock's fit under overlay and classic scrollbars (row 66)")
+    ap.add_argument("--at", action="store_true",
+                    help="also drive a panel step scoped to one foreach iteration (Artboards Options in row k) and read it (row 290)")
     ap.add_argument("--artboard-fill", action="store_true",
                     help="also pick White in Artboard Options' Fill dropdown and read the artboard (row 270)")
     ap.add_argument("--layers", action="store_true",
