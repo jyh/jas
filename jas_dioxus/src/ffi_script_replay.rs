@@ -601,6 +601,7 @@ fn hover_expand(engine: &JasEngine, panel: &str, target: &[u64]) -> Result<(), S
     }
     let kept: Vec<Value> = paths.into_iter().filter(|p| *p != target).collect();
     engine.script_seed_panel(panel, "collapsed_paths", crate::ffi::seed_panel_value(&Value::Array(kept)))
+        .map_err(|why| why.to_string())
 }
 
 /// F6 (row 145, TESTING.md section 6): the ids of the fields a row step can
@@ -782,9 +783,6 @@ fn canonical_panel_value(v: &Value) -> Value {
         other => other.clone(),
     }
 }
-
-/// A seeded value in the store's form: in a list, an item that is a list of
-/// non-negative integers is a PATH (the ruled form: "entries are PATHS").
 
 /// Replay a script with the §6 panel forms; every read-back in step order, as
 /// `{"step": i, "read": kind, "value": ...}`. A step that ran and changed
