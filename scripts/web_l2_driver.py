@@ -45,6 +45,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1087,36 +1088,62 @@ def panel_fields(act):
     return pid, tab, wpath, widget, event, value, parse_scope(scope)
 
 
+FOREACH_ID = re.compile(r"[A-Za-z0-9_-]+")
+
+
 def parse_scope(scope):
     """A panel act's `scope` (row 281: `["<foreach id>#<k>", ...]`, outermost
     first) as [(foreach id, k)], or Refused by name for any entry that is not
-    exactly one id, one `#`, and a non-negative integer."""
+    exactly one id (letters, digits, `_`, `-`: it goes into a CSS selector),
+    one `#`, and a non-negative integer."""
     out = []
     for entry in scope or []:
         name, sep, k = str(entry).partition("#")
-        if not sep or not name or "#" in k or not k.isdigit():
+        if not sep or not FOREACH_ID.fullmatch(name) or not k.isdigit():
             raise _plan.Refused(f"scope entry {entry!r} is not '<foreach id>#<k>'")
         out.append((name, int(k)))
     return out
 
 
+def layer_selector(foreach_id, k):
+    """Row 290: iteration k of an identified foreach drawn by Path B
+    (`render_panel_absolute`), which draws it as a layer whose id is
+    `<foreach id>#<k>`, Swift's scheme (row 281). The `#` is why it is an
+    attribute selector and not `#id`."""
+    return f'[id="{foreach_id}#{k}"]'
+
+
 def iteration_selector(foreach_id, k):
-    """Row 290: iteration k of an identified foreach on the web. The renderer
-    draws the foreach as div#<id> and each iteration as that div's direct
-    child (render_repeat), so the k-th iteration is its (k+1)-th child."""
+    """Iteration k of an identified foreach drawn by the flow renderer
+    (`render_repeat`), which draws the foreach as div#<id> and each iteration
+    as that div's direct child, so the k-th iteration is its (k+1)-th child."""
     return f"#{foreach_id} > :nth-child({k + 1})"
 
 
 def scoped_root(root, iterations, where):
     """Narrow `root` (a Playwright locator) to the iteration a step's `at`
-    names, one level per enclosing foreach, refusing by name a container that
-    is not exactly one or an iteration that is not drawn."""
+    names, one level per enclosing foreach. The web draws an iteration one of
+    two ways, and each is read by its own structure, never by layout: a Path B
+    layer `<foreach id>#<k>` (row 290), else the flow renderer's container
+    `#<foreach id>` and its (k+1)-th child. Refused by name: a layer drawn
+    twice, both forms at once, a container that is not exactly one, and an
+    iteration that is not drawn."""
     for name, k in iterations:
-        if root.locator(f"#{name}").count() != 1:
-            raise _plan.Refused(f"{root.locator(f'#{name}').count()} foreach containers carry id {name!r} in {where!r}")
-        it = root.locator(iteration_selector(name, k))
-        if it.count() != 1:
-            raise _plan.Refused(f"iteration {k} of {name!r} in {where!r} is not drawn")
+        layers = root.locator(layer_selector(name, k))
+        conts = root.locator(f"#{name}")
+        nl, nc = layers.count(), conts.count()
+        if nl > 1:
+            raise _plan.Refused(f"{nl} iteration layers carry id '{name}#{k}' in {where!r}")
+        if nl == 1 and nc > 0:
+            raise _plan.Refused(f"{name!r} in {where!r} is drawn both as a layer and as {nc} container(s)")
+        if nl == 1:
+            it = layers
+        else:
+            if nc != 1:
+                raise _plan.Refused(f"{nc} foreach containers and no layer '{name}#{k}' carry {name!r} in {where!r}")
+            it = root.locator(iteration_selector(name, k))
+            if it.count() != 1:
+                raise _plan.Refused(f"iteration {k} of {name!r} in {where!r} is not drawn")
         root, where = it, f"{name}#{k}"
     return root, where
 
@@ -1201,6 +1228,41 @@ def self_test():
         check(iteration_selector("ap_list", 0) == "#ap_list > :nth-child(1)"
               and iteration_selector("ap_list", 3) == "#ap_list > :nth-child(4)",
               "iteration k is the foreach container's (k+1)-th direct child")
+        check(layer_selector("ap_list", 1) == '[id="ap_list#1"]',
+              "a Path B iteration is the layer whose id is <foreach id>#<k> (row 290)")
+
+        # scoped_root's choice between the two forms, over a fake locator that
+        # answers count() per selector (each nested root keys on its path).
+        class Fake:
+            def __init__(self, counts, path=""):
+                self.counts, self.path = counts, path
+
+            def locator(self, sel):
+                return Fake(self.counts, self.path + " " + sel)
+
+            def count(self):
+                return self.counts.get(self.path.strip(), 0)
+
+        def scoped(counts, its):
+            try:
+                r, where = scoped_root(Fake(counts), its, "p")
+                return f"{where} @{r.path.strip()}"
+            except _plan.Refused as e:
+                return f"REFUSED: {e}"
+
+        L1, C, N1 = '[id="ap_list#1"]', "#ap_list", "#ap_list > :nth-child(2)"
+        check(scoped({L1: 1}, [("ap_list", 1)]) == f"ap_list#1 @{L1}", "a Path B layer is the iteration")
+        check(scoped({C: 1, N1: 1}, [("ap_list", 1)]) == f"ap_list#1 @{N1}", "no layer: the flow container's child")
+        check(scoped({L1: 2}, [("ap_list", 1)]).startswith("REFUSED: 2 iteration layers"), "a layer drawn twice is refused")
+        check(scoped({L1: 1, C: 1}, [("ap_list", 1)]).startswith("REFUSED: 'ap_list' in 'p' is drawn both"),
+              "both forms at once is refused, never a choice")
+        check(scoped({}, [("ap_list", 1)]).startswith("REFUSED: 0 foreach containers and no layer 'ap_list#1'"),
+              "neither form is refused by name")
+        check(scoped({C: 1}, [("ap_list", 1)]).startswith("REFUSED: iteration 1 of 'ap_list'"),
+              "a flow iteration that is not drawn is refused")
+        nested = {'[id="o#0"]': 1, '[id="o#0"] [id="i#2"]': 1}
+        check(scoped(nested, [("o", 0), ("i", 2)]) == 'i#2 @[id="o#0"] [id="i#2"]',
+              "nested layers narrow outermost first, the inner looked up inside the outer")
     except Exception as e:  # noqa: BLE001
         fails.append(f"a panel act does not read: {type(e).__name__}: {e}")
     w, t = ARTBOARD_FILL_WANT, "transparent"
@@ -1214,7 +1276,7 @@ def self_test():
           and at_line([(1, "PASS", ""), (0, "FAIL", "x")]).startswith("AT FAIL")
           and at_line([(1, "REFUSED", "y"), (0, "PASS", "")]).startswith("AT REFUSED"),
           "--at: the line passes only when both iterations pass, and names a refusal")
-    for bad in (["ap_list"], ["ap_list#"], ["ap_list#x"], ["ap_list#-1"], ["#1"], ["a#1#2"]):
+    for bad in (["ap_list"], ["ap_list#"], ["ap_list#x"], ["ap_list#-1"], ["#1"], ["a#1#2"], ['a"]#1'], ["a b#1"]):
         try:
             parse_scope(bad)
             fails.append(f"a malformed scope {bad} is refused by name")
