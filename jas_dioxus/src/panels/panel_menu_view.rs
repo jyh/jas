@@ -23,7 +23,12 @@ pub fn PanelMenuOverlay() -> Element {
     // Tracks which Action command currently has its submenu showing
     // (set by mouseenter on the parent item, cleared by mouseleave
     // on parent + submenu).
-    let mut submenu_open_for = use_signal::<Option<&'static str>>(|| None);
+    // Row 298: the open submenu's key and its item's rect (left, right, top),
+    // read when the item is hovered; the submenu is drawn beside that rect as
+    // a sibling of the flyout. It stays open until another item is hovered,
+    // the flyout scrolls, or the menu closes, as a native menu's does.
+    let mut submenu_open_for =
+        use_signal::<Option<(&'static str, Option<(f64, f64, f64)>)>>(|| None);
 
     let Some(open) = (panel_menu.open)() else {
         return rsx! {};
@@ -31,20 +36,23 @@ pub fn PanelMenuOverlay() -> Element {
 
     let items = super::panel_menu(open.kind);
     let st = app.borrow();
-    // Position menu to the left of click point so it doesn't go off-screen.
-    let menu_width = 180.0_f64;
-    let x = (open.x - menu_width).max(0.0);
-    let y = open.y;
-    // Row 291/294: down from the press, shifted up just enough to stay in the
-    // window (`flyout_vertical_css`).
+    // Rows 291/294/296: the menu sits to the LEFT of the press and DOWN from
+    // it, shifted just enough to stay in the window whatever its size
+    // (`flyout_position_css`).
     #[cfg(target_arch = "wasm32")]
-    let viewport_h: f64 = web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|v| v.as_f64())
-        .unwrap_or(900.0);
+    let (viewport_w, viewport_h): (f64, f64) = web_sys::window()
+        .map(|w| (
+            w.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1280.0),
+            w.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(900.0),
+        ))
+        .unwrap_or((1280.0, 900.0));
     #[cfg(not(target_arch = "wasm32"))]
-    let viewport_h: f64 = 900.0;
-    let menu_vertical = flyout_vertical_css(y, viewport_h);
+    let (viewport_w, viewport_h): (f64, f64) = (1280.0, 900.0);
+    let menu_position = flyout_position_css(open.x, open.y, viewport_w, viewport_h);
+    // The menu's right edge is the press (pinned into the window); a
+    // submenu whose item rect could not be read is placed from it.
+    let press_x = open.x.clamp(0.0, viewport_w.max(0.0));
+    let press_y = open.y;
     let kind = open.kind;
     let addr = open.addr;
     // One expression context per menu render, shared by every row's
@@ -53,25 +61,10 @@ pub fn PanelMenuOverlay() -> Element {
     let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
     let items_dom_id = crate::workspace::test_hook::panel_menu_items_dom_id(content_id);
     let menu_ctx = super::panel_menu::panel_menu_ctx(content_id, &st);
-        // Flip submenu to the left when the parent menu is near
-        // the right edge of the viewport — otherwise left:100%
-        // pushes the flyout off-screen. menu_width is 180 (above);
-        // assume the submenu can be up to ~200 wide.
-        #[cfg(target_arch = "wasm32")]
-        let viewport_w: f64 = web_sys::window()
-            .and_then(|w| w.inner_width().ok())
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1280.0);
-        #[cfg(not(target_arch = "wasm32"))]
-        let viewport_w: f64 = 1280.0;
-        let flip_left = x + menu_width + 200.0 > viewport_w;
-        // Each side states BOTH offsets: a property the new style drops is
-        // RESTORED by dioxus's style update (rows 121-122).
-        let submenu_pos = if flip_left {
-            "position:absolute; left:auto; right:100%; top:0;"
-        } else {
-            "position:absolute; right:auto; left:100%; top:0;"
-        };
+    // Row 298: the open submenu's rows and its item's rect, collected by the
+    // item loop and drawn AFTER the flyout as its sibling
+    // (`submenu_position_css`).
+    let mut open_submenu: Option<(Vec<Element>, Option<(f64, f64, f64)>)> = None;
 
     // One `items_from` row: a check where its `checked_when` holds; a click
     // runs the row's own action with its own params
@@ -157,6 +150,9 @@ pub fn PanelMenuOverlay() -> Element {
                         role: "menuitem",
                         "aria-disabled": "{disabled}",
                         style: "padding:4px 24px 4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                        // Row 298: hovering another item closes an open
+                        // submenu, as in a native menu.
+                        onmouseenter: move |_| { submenu_open_for.set(None); },
                         // Stop the mousedown so the backdrop doesn't
                         // dismiss the menu before our onclick fires.
                         onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
@@ -254,30 +250,36 @@ pub fn PanelMenuOverlay() -> Element {
                 let key = label;
                 let display_label = format!("{label} \u{25B6}"); // ▶
                 let rows = super::panel_menu::submenu_rows(content_id, spec, &st);
-                let is_open = submenu_open_for() == Some(key);
+                let open_rect = submenu_open_for().filter(|(k, _)| *k == key).map(|(_, r)| r);
                 let row_nodes: Vec<Element> = rows.as_array().cloned().unwrap_or_default()
                     .into_iter().map(&render_row).collect();
-                let empty = row_nodes.is_empty();
+                if let Some(rect) = open_rect {
+                    if !row_nodes.is_empty() {
+                        open_submenu = Some((row_nodes, rect));
+                    }
+                }
+                // The item's DOM id, so a hover can read its rect.
+                let item_dom_id = format!("{items_dom_id}_sub_{}",
+                    key.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>());
+                let item_dom_id_c = item_dom_id.clone();
                 rsx! {
                     div {
-                        style: "position:relative;",
-                        onmouseenter: move |_| { submenu_open_for.set(Some(key)); },
-                        onmouseleave: move |_| { submenu_open_for.set(None); },
-                        div {
-                            class: "jas-menu-item",
-                            style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
-                            onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
-                            span { "{display_label}" }
-                        }
-                        if is_open && !empty {
-                            div {
-                                style: "{submenu_pos} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
-                                onmouseenter: move |_| { submenu_open_for.set(Some(key)); },
-                                onmouseleave: move |_| { submenu_open_for.set(None); },
-                                onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
-                                for node in row_nodes { {node} }
-                            }
-                        }
+                        id: "{item_dom_id}",
+                        class: "jas-menu-item",
+                        style: "padding:4px 24px 4px 16px; cursor:pointer; font-size:13px; color:{THEME_TEXT}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
+                        onmouseenter: move |_| {
+                            #[cfg(target_arch = "wasm32")]
+                            let rect = web_sys::window()
+                                .and_then(|w| w.document())
+                                .and_then(|d| d.get_element_by_id(&item_dom_id_c))
+                                .map(|el| { let r = el.get_bounding_client_rect(); (r.left(), r.right(), r.top()) });
+                            // No DOM off the web, where no hover arrives.
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let rect: Option<(f64, f64, f64)> = { let _ = &item_dom_id_c; None };
+                            submenu_open_for.set(Some((key, rect)));
+                        },
+                        onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                        span { "{display_label}" }
                     }
                 }
             }
@@ -293,24 +295,43 @@ pub fn PanelMenuOverlay() -> Element {
 
     drop(st);
 
+    let submenu: Option<(Vec<Element>, String)> = open_submenu.map(|(nodes, rect)| {
+        let (l, r, t) = rect.unwrap_or((press_x, press_x, press_y));
+        (nodes, submenu_position_css(l, r, t, viewport_w, viewport_h))
+    });
+
     rsx! {
         // Invisible backdrop — click to dismiss
         div {
             style: "position:fixed; left:0; top:0; width:100vw; height:100vh; z-index:1100;",
             onmousedown: move |_| {
+                submenu_open_for.set(None);
                 panel_menu.open.set(None);
             },
         }
-        // Menu dropdown
+        // Menu dropdown. Row 298: a menu taller than the window scrolls
+        // (`max-height`, border-box so its border and padding count), and a
+        // scroll closes an open submenu, whose item has moved.
         div {
             id: "{items_dom_id}",
             role: "menu",
-            style: "position:fixed; left:{x}px; {menu_vertical} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
+            style: "position:fixed; {menu_position} box-sizing:border-box; max-height:100vh; overflow-y:auto; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
+            onscroll: move |_| { submenu_open_for.set(None); },
             for node in item_nodes {
                 {node}
+            }
+        }
+        // Row 298: the open `items_from` submenu, a SIBLING of the flyout so
+        // the flyout's scroll and transform cannot clip it.
+        if let Some((sub_nodes, sub_style)) = submenu {
+            div {
+                role: "menu",
+                style: "position:fixed; {sub_style} box-sizing:border-box; max-height:100vh; overflow-y:auto; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1102; padding:4px 0; border-radius:4px;",
+                onmousedown: move |evt: Event<MouseData>| { evt.stop_propagation(); },
+                for node in sub_nodes { {node} }
             }
         }
     }
@@ -328,14 +349,59 @@ pub fn PanelMenuOverlay() -> Element {
 /// absolutely placed inside their item, so the transform leaves them as they
 /// were. `bottom` is stated too (dioxus restores a dropped property, rows
 /// 121-122).
-pub(crate) fn flyout_vertical_css(y: f64, viewport_h: f64) -> String {
+///
+/// Row 296: the horizontal half. The left sits at the press and the same
+/// `translate` shifts the menu LEFT by its own width (`-100%`), never past
+/// the window's left edge (`max(-x, -100%)`), so its RIGHT edge is the
+/// press whatever its width. Before, `left = x - 180` assumed a 180 px
+/// menu; the Brushes menu is 211 px, and it ran 18 px off the window's right
+/// edge from its hamburger in the right dock. Both shifts live in ONE
+/// `transform`: a second property would replace the first.
+pub(crate) fn flyout_position_css(x: f64, y: f64, viewport_w: f64, viewport_h: f64) -> String {
     // A press point outside the window is pinned to its edge first.
+    let x = x.clamp(0.0, viewport_w.max(0.0));
     let y = y.clamp(0.0, viewport_h.max(0.0));
     let room = (viewport_h - y).max(0.0);
-    format!("top:{y}px; bottom:auto; transform:translateY(clamp(-{y}px, calc({room}px - 100%), 0px));")
+    format!("left:{x}px; right:auto; top:{y}px; bottom:auto; \
+             transform:translate(max(-{x}px, -100%), clamp(-{y}px, calc({room}px - 100%), 0px));")
 }
 
-/// The top edge `flyout_vertical_css` yields for a menu `height` tall: the
+/// Row 298: an `items_from` submenu's placement, from its item's rect. The
+/// submenu is drawn as a SIBLING of the flyout, never inside it: the flyout
+/// scrolls (`overflow-y: auto`) when it is taller than the window, and it
+/// carries a `transform`, so even a `position:fixed` descendant would be
+/// placed against it and clipped by it. Beside the item on its right when a
+/// submenu `SUBMENU_ROOM` wide fits there, else on its left (its right edge
+/// at the item's left, never past the window's left edge); its top at the
+/// item's top, shifted up just enough to stay in the window, as the flyout's.
+pub(crate) fn submenu_position_css(item_left: f64, item_right: f64, item_top: f64,
+                                   viewport_w: f64, viewport_h: f64) -> String {
+    let vw = viewport_w.max(0.0);
+    let y = item_top.clamp(0.0, viewport_h.max(0.0));
+    let room = (viewport_h - y).max(0.0);
+    let vertical = format!("clamp(-{y}px, calc({room}px - 100%), 0px)");
+    if item_right + SUBMENU_ROOM <= vw {
+        let x = item_right.clamp(0.0, vw);
+        format!("left:{x}px; right:auto; top:{y}px; bottom:auto; transform:translate(0px, {vertical});")
+    } else {
+        let x = item_left.clamp(0.0, vw);
+        format!("left:{x}px; right:auto; top:{y}px; bottom:auto; transform:translate(max(-{x}px, -100%), {vertical});")
+    }
+}
+
+/// The width a submenu is assumed to need on the item's right before it is
+/// placed on the left instead (the flip the nested flyout made, row 296).
+pub(crate) const SUBMENU_ROOM: f64 = 200.0;
+
+/// The left edge `flyout_position_css` yields for a menu `width` wide: the
+/// CSS `max` term's own arithmetic, for the tests.
+#[cfg(test)]
+pub(crate) fn flyout_left_for(x: f64, width: f64, viewport_w: f64) -> f64 {
+    let x = x.clamp(0.0, viewport_w.max(0.0));
+    x + (-width).max(-x)
+}
+
+/// The top edge `flyout_position_css` yields for a menu `height` tall: the
 /// CSS clamp's own arithmetic, for the tests.
 #[cfg(test)]
 pub(crate) fn flyout_top_for(y: f64, height: f64, viewport_h: f64) -> f64 {
@@ -346,7 +412,28 @@ pub(crate) fn flyout_top_for(y: f64, height: f64, viewport_h: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{flyout_top_for, flyout_vertical_css};
+    use super::{flyout_left_for, flyout_position_css, flyout_top_for, submenu_position_css};
+
+    /// Row 298: a submenu sits beside its item, on the right when 200 px fit
+    /// there and on the left otherwise (the Brushes menu's own hamburger is
+    /// in the right dock, so its submenu goes LEFT), with the flyout's
+    /// vertical clamp. Each branch is pinned by its CSS.
+    #[test]
+    fn a_submenu_sits_beside_its_item_inside_the_window() {
+        // Room on the right (a menu opened mid-window).
+        assert_eq!(submenu_position_css(500.0, 711.0, 120.0, 1400.0, 900.0),
+                   "left:711px; right:auto; top:120px; bottom:auto; \
+                    transform:translate(0px, clamp(-120px, calc(780px - 100%), 0px));");
+        // No room: the right dock (item 1177..1388 in a 1400 px window).
+        assert_eq!(submenu_position_css(1177.0, 1388.0, 300.0, 1400.0, 900.0),
+                   "left:1177px; right:auto; top:300px; bottom:auto; \
+                    transform:translate(max(-1177px, -100%), clamp(-300px, calc(600px - 100%), 0px));");
+        // The boundary: exactly 200 px of room stays on the right.
+        assert!(submenu_position_css(0.0, 1200.0, 0.0, 1400.0, 900.0).starts_with("left:1200px;"));
+        assert!(submenu_position_css(0.0, 1200.5, 0.0, 1400.0, 900.0).starts_with("left:0px;"));
+        // An item scrolled above the window's top: the submenu's top is pinned at 0.
+        assert!(submenu_position_css(500.0, 711.0, -40.0, 1400.0, 900.0).contains("top:0px;"));
+    }
 
     /// Row 294: the menu opens DOWN from the press when it fits below, is
     /// shifted UP just enough when it does not, and never above the window's
@@ -361,10 +448,36 @@ mod tests {
         assert_eq!(flyout_top_for(1010.0, 250.0, 900.0), 650.0, "a press below the window still lands on screen");
     }
 
-    /// The CSS carries exactly the three terms `flyout_top_for` models.
+    /// Row 296, measured live at main be311876 (Playwright, CI's pinned
+    /// 1.49.1, main's Pages bundle): the Brushes ≡ menu is 211 px wide, the
+    /// placement assumed 180 (`left = press - 180`), so from its hamburger
+    /// (centre x 1388 in a 1400 px window) it ran 18 px past the window's
+    /// right edge at every window size. Now its RIGHT edge sits at the press
+    /// whatever its width, and its left edge never leaves the window.
+    #[test]
+    fn a_flyout_never_leaves_the_window_sideways() {
+        assert_eq!(flyout_left_for(1388.0, 211.0, 1400.0), 1177.0, "the Brushes menu from its hamburger: right edge at the press");
+        assert_eq!(flyout_left_for(1388.0, 180.0, 1400.0), 1208.0, "a 180 px menu lands where it always did");
+        assert_eq!(flyout_left_for(100.0, 211.0, 1400.0), 0.0, "a press near the left: pinned to the window's left edge");
+        assert_eq!(flyout_left_for(1500.0, 211.0, 1400.0), 1189.0, "a press right of the window is pinned to its edge first");
+        assert_eq!(flyout_left_for(-20.0, 211.0, 1400.0), 0.0, "a press left of the window: at its left edge");
+        // Margins: every right edge is <= the window's width.
+        for (x, w) in [(1388.0, 211.0), (1399.0, 300.0), (700.0, 211.0)] {
+            assert!(flyout_left_for(x, w, 1400.0) + w <= 1400.0, "press {x}, width {w}: right edge inside");
+        }
+    }
+
+    /// The CSS carries exactly the terms `flyout_left_for` and
+    /// `flyout_top_for` model, in ONE transform (a second `transform`
+    /// property would replace the first).
     #[test]
     fn the_flyout_css_is_the_modelled_clamp() {
-        assert_eq!(flyout_vertical_css(880.0, 900.0),
-                   "top:880px; bottom:auto; transform:translateY(clamp(-880px, calc(20px - 100%), 0px));");
+        assert_eq!(flyout_position_css(1388.0, 880.0, 1400.0, 900.0),
+                   "left:1388px; right:auto; top:880px; bottom:auto; \
+                    transform:translate(max(-1388px, -100%), clamp(-880px, calc(20px - 100%), 0px));");
+        assert_eq!(flyout_position_css(1500.0, -5.0, 1400.0, 900.0),
+                   "left:1400px; right:auto; top:0px; bottom:auto; \
+                    transform:translate(max(-1400px, -100%), clamp(-0px, calc(900px - 100%), 0px));",
+                   "a press outside the window is pinned to its edges first");
     }
 }
