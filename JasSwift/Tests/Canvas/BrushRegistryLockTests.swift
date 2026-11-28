@@ -17,11 +17,17 @@ import Testing
     var finishedInside = false
     withCanvasBrushRegistry {
         setCanvasBrushLibraries(["mine": [String: Any]()])
-        DispatchQueue.global().async {
+        // A DEDICATED thread, never a GCD queue: while this transaction holds
+        // the lock, other parallel tests' writers block on it on the
+        // cooperative threads, and GCD does not count a mutex wait as blocked,
+        // so a queued writer could wait for a thread for ever (it did: run 1
+        // of the first after-fix loop hung 12 min until sampled).
+        let writer = Thread {
             started.signal()
             setCanvasBrushLibraries(["theirs": [String: Any]()])
             wrote.signal()
         }
+        writer.start()
         started.wait()
         // Inside the transaction the writer cannot finish; without the lock
         // it lands here, well within the wait.
