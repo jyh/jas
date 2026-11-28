@@ -721,6 +721,56 @@ pub(crate) fn widget_node<'a>(spec: &'a Value, widget: &str) -> Option<&'a Value
     find_widget(spec.get("content")?, widget, false).map(|(n, _)| n)
 }
 
+/// Ruling 1054 condition 2: whether `widget` is what an id template under a
+/// `foreach` resolves to: the template's literal parts, in order, around at least
+/// one character per `{{...}}`.
+fn names_a_row_id(node: &Value, widget: &str, in_foreach: bool) -> bool {
+    let under = in_foreach || node.get("foreach").is_some();
+    if under {
+        if let Some(t) = node.get("id").and_then(Value::as_str) {
+            if t.contains("{{") && template_matches(t, widget) {
+                return true;
+            }
+        }
+    }
+    ["children", "do"].iter().any(|k| match node.get(*k) {
+        Some(Value::Array(items)) => items.iter().any(|c| names_a_row_id(c, widget, under)),
+        Some(c @ Value::Object(_)) => names_a_row_id(c, widget, under),
+        _ => false,
+    })
+}
+
+fn template_matches(template: &str, s: &str) -> bool {
+    let mut lits: Vec<&str> = vec![];
+    let mut rest = template;
+    while let Some(i) = rest.find("{{") {
+        lits.push(&rest[..i]);
+        let Some(j) = rest[i..].find("}}") else { return false };
+        rest = &rest[i + j + 2..];
+    }
+    lits.push(rest);
+    if lits.len() < 2 || !s.is_ascii() {
+        return false;
+    }
+    let (first, last) = (lits[0], lits[lits.len() - 1]);
+    if !s.starts_with(first) || !s.ends_with(last) || s.len() < first.len() + last.len() {
+        return false;
+    }
+    let end = s.len() - last.len();
+    let mut pos = first.len();
+    for mid in &lits[1..lits.len() - 1] {
+        let from = pos + 1;
+        if from > end {
+            return false;
+        }
+        match s[from..end].find(mid) {
+            Some(k) => pos = from + k + mid.len(),
+            None => return false,
+        }
+    }
+    end > pos
+}
+
 fn find_widget<'a>(node: &'a Value, widget: &str, in_foreach: bool) -> Option<(&'a Value, bool)> {
     if node.get("id").and_then(Value::as_str) == Some(widget) {
         return Some((node, in_foreach));
@@ -844,6 +894,11 @@ fn run_widget_behavior_in(
         }
         None => {
             let Some((node, in_foreach)) = find_widget(content, &ev.widget, false) else {
+                // Ruling 1054 condition 2: a RESOLVED row id is identity, never
+                // an address, refused by name as the raw template is.
+                if names_a_row_id(content, &ev.widget, false) {
+                    return Err(Refusal::new("NotAddressable", ev.widget.clone()));
+                }
                 return Err(Refusal::new("MissingTarget", ev.widget.clone()));
             };
             if in_foreach {

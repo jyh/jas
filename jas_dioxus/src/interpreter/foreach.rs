@@ -38,6 +38,9 @@ pub fn row_scopes(node: &Value, ctx: &Value) -> Option<Vec<Value>> {
         data.insert("_index".to_string(), json!(i));
         let mut child = base.clone();
         child.insert(var.to_string(), Value::Object(data));
+        // Ruling 1054: the row's OWN loop variable, innermost wins, so a
+        // foreach widget's id template may resolve from it and nothing else.
+        child.insert("_row_as".to_string(), json!(var));
         Value::Object(child)
     }).collect())
 }

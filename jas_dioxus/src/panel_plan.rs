@@ -586,13 +586,68 @@ fn parts_of(node: &Value, x: i64, y: i64, w: i64, h: i64) -> Option<Value> {
     Some(Value::Object(parts))
 }
 
-fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, withheld: &mut Vec<Value>) -> Value {
-    // A templated id is not resolved by any port and a foreach widget is not
-    // addressable by id (D12), so it is sent empty and named, never raw.
-    let mut id = item.node.get("id").and_then(Value::as_str).unwrap_or("");
-    if id.contains("{{") {
-        id = "";
-        withheld.push(json!({"path": item.path, "key": "id"}));
+/// Ruling 1054 (D12's withholding half, narrowed): a foreach widget's id
+/// template resolves per row when EVERY `{{...}}` in it is a plain path from
+/// the row's own loop variable (`_row_as`, innermost) to a non-empty string or a
+/// number. Anything else (state, an outer loop's variable, a missing key, an
+/// expression) is None, and the id stays withheld and named.
+fn row_id(template: &str, ctx: &Value) -> Option<String> {
+    let var = ctx.get("_row_as")?.as_str()?;
+    let row = ctx.get(var)?;
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(i) = rest.find("{{") {
+        out.push_str(&rest[..i]);
+        let j = rest[i..].find("}}")?;
+        let expr = rest[i + 2..i + j].trim();
+        let mut parts = expr.split('.');
+        if parts.next()? != var {
+            return None;
+        }
+        let mut v = row;
+        let mut depth = 0;
+        for p in parts {
+            if p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return None;
+            }
+            v = v.get(p)?;
+            depth += 1;
+        }
+        if depth == 0 {
+            return None;
+        }
+        match v {
+            Value::String(s) if !s.is_empty() => out.push_str(s),
+            Value::Number(n) => out.push_str(&n.to_string()),
+            _ => return None,
+        }
+        rest = &rest[i + j + 2..];
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, withheld: &mut Vec<Value>,
+         resolved: &mut Vec<Vec<i64>>) -> Value {
+    // A templated id resolves only from the row's own loop variable (ruling
+    // 1054, `row_id`); any other is not resolved by any port, so it is sent
+    // empty and named, never raw. Either way a foreach widget is addressed by
+    // its plan path, never by id (D12's addressing half, unchanged).
+    let raw = item.node.get("id").and_then(Value::as_str).unwrap_or("");
+    let resolved_id: String;
+    let mut id = raw;
+    if raw.contains("{{") {
+        match row_id(raw, &item.ctx) {
+            Some(s) => {
+                resolved.push(item.path.clone());
+                resolved_id = s;
+                id = &resolved_id;
+            }
+            None => {
+                id = "";
+                withheld.push(json!({"path": item.path, "key": "id"}));
+            }
+        }
     }
     let (st, held) = static_of(&item.node);
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
@@ -666,20 +721,46 @@ pub fn panel_plan(
         }
     }
 
+    let mut resolved: Vec<Vec<i64>> = vec![];
     let chrome: Vec<Value> = plan
         .chrome
         .iter()
-        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &acts, &mut withheld))
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &acts, &mut withheld, &mut resolved))
         .collect();
     let leaves: Vec<Value> = plan
         .leaves
         .iter()
-        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &acts, &mut withheld))
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &acts, &mut withheld, &mut resolved))
         .collect();
     let containers: Vec<Value> = omitted
         .iter()
-        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v, &acts, &mut withheld)))
+        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v, &acts, &mut withheld, &mut resolved)))
         .collect();
+    // Ruling 1054 condition 3: no two entries carry the same RESOLVED id. A
+    // resolved id that appears more than once (two rows, or a static id equal to
+    // it) is withheld from every carrier and named, never sent twice.
+    let (chrome, leaves, containers) = {
+        let mut lists = [chrome, leaves, containers];
+        let mut count: HashMap<String, usize> = HashMap::new();
+        for e in lists.iter().flatten() {
+            if let Some(s) = e["id"].as_str().filter(|s| !s.is_empty()) {
+                *count.entry(s.to_string()).or_default() += 1;
+            }
+        }
+        let resolved_ids: std::collections::HashSet<String> = lists.iter().flatten()
+            .filter(|e| resolved.contains(&path_of(&e["path"])))
+            .filter_map(|e| e["id"].as_str().map(str::to_string))
+            .collect();
+        for e in lists.iter_mut().flatten() {
+            let Some(s) = e["id"].as_str().map(str::to_string) else { continue };
+            if !s.is_empty() && count.get(&s).copied().unwrap_or(0) > 1 && resolved_ids.contains(&s) {
+                e["id"] = json!("");
+                withheld.push(json!({"path": e["path"], "key": "id"}));
+            }
+        }
+        let [c, l, k] = lists;
+        (c, l, k)
+    };
     // Whatever is left joined nothing, except the rows of a hidden node and its
     // descendants, which are not placed on purpose. Reported in row order.
     let is_hidden = |p: &[i64]| hidden.iter().any(|h| p.starts_with(h));

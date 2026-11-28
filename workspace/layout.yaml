@@ -737,7 +737,8 @@ layout:
               children:
                 - type: text
                   content: "{{doc.name}}{{if doc.is_modified then ' *' else ''}}"
-                - type: icon_button
+                - id: "canvas_tab_close_{{doc.index}}"
+                  type: icon_button
                   icon: "close"
                   summary: "Close tab"
                   style: { size: 12 }
