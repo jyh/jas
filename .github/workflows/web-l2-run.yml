@@ -57,11 +57,14 @@ jobs:
       # rides in the receipt body.
       # --proposed: the scripts proposed for the corpus (row 291); its PROPOSED
       # line rides in the receipt body, outside line 1's count.
+      # --menus: the Brushes panel menu, its last item and its submenu inside
+      # a wide and a short window (rows 296/298); its MENUS line rides in the
+      # receipt body.
       - name: Every input script through the live web app
         run: |
           python scripts/web_l2_driver.py --url http://127.0.0.1:8080/jas/ \
             --head "${{ github.event.pull_request.head.sha || github.sha }}" \
-            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock --fit --layers --artboard-fill --at --proposed
+            --receipt web-l2-receipt.txt --artifacts web-l2-artifacts --advisory --dock --fit --layers --artboard-fill --at --proposed --menus
       - name: The receipt in the run summary
         if: always()
         run: |
