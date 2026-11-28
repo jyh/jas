@@ -31,20 +31,21 @@ pub fn PanelMenuOverlay() -> Element {
 
     let items = super::panel_menu(open.kind);
     let st = app.borrow();
-    // Position menu to the left of click point so it doesn't go off-screen.
-    let menu_width = 180.0_f64;
-    let x = (open.x - menu_width).max(0.0);
-    let y = open.y;
-    // Row 291/294: down from the press, shifted up just enough to stay in the
-    // window (`flyout_vertical_css`).
+    // Rows 291/294/296: the menu sits to the LEFT of the press and DOWN from
+    // it, shifted just enough to stay in the window whatever its size
+    // (`flyout_position_css`).
     #[cfg(target_arch = "wasm32")]
-    let viewport_h: f64 = web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|v| v.as_f64())
-        .unwrap_or(900.0);
+    let (viewport_w, viewport_h): (f64, f64) = web_sys::window()
+        .map(|w| (
+            w.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1280.0),
+            w.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(900.0),
+        ))
+        .unwrap_or((1280.0, 900.0));
     #[cfg(not(target_arch = "wasm32"))]
-    let viewport_h: f64 = 900.0;
-    let menu_vertical = flyout_vertical_css(y, viewport_h);
+    let (viewport_w, viewport_h): (f64, f64) = (1280.0, 900.0);
+    let menu_position = flyout_position_css(open.x, open.y, viewport_w, viewport_h);
+    // The menu's right edge is the press (pinned into the window).
+    let press_x = open.x.clamp(0.0, viewport_w.max(0.0));
     let kind = open.kind;
     let addr = open.addr;
     // One expression context per menu render, shared by every row's
@@ -55,16 +56,10 @@ pub fn PanelMenuOverlay() -> Element {
     let menu_ctx = super::panel_menu::panel_menu_ctx(content_id, &st);
         // Flip submenu to the left when the parent menu is near
         // the right edge of the viewport — otherwise left:100%
-        // pushes the flyout off-screen. menu_width is 180 (above);
-        // assume the submenu can be up to ~200 wide.
-        #[cfg(target_arch = "wasm32")]
-        let viewport_w: f64 = web_sys::window()
-            .and_then(|w| w.inner_width().ok())
-            .and_then(|v| v.as_f64())
-            .unwrap_or(1280.0);
-        #[cfg(not(target_arch = "wasm32"))]
-        let viewport_w: f64 = 1280.0;
-        let flip_left = x + menu_width + 200.0 > viewport_w;
+        // pushes the flyout off-screen. The parent's right edge is the
+        // press (`flyout_position_css`); assume the submenu can be up
+        // to ~200 wide.
+        let flip_left = press_x + 200.0 > viewport_w;
         // Each side states BOTH offsets: a property the new style drops is
         // RESTORED by dioxus's style update (rows 121-122).
         let submenu_pos = if flip_left {
@@ -305,7 +300,7 @@ pub fn PanelMenuOverlay() -> Element {
         div {
             id: "{items_dom_id}",
             role: "menu",
-            style: "position:fixed; left:{x}px; {menu_vertical} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
+            style: "position:fixed; {menu_position} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
@@ -328,14 +323,32 @@ pub fn PanelMenuOverlay() -> Element {
 /// absolutely placed inside their item, so the transform leaves them as they
 /// were. `bottom` is stated too (dioxus restores a dropped property, rows
 /// 121-122).
-pub(crate) fn flyout_vertical_css(y: f64, viewport_h: f64) -> String {
+///
+/// Row 296: the horizontal half. The left sits at the press and the same
+/// `translate` shifts the menu LEFT by its own width (`-100%`), never past
+/// the window's left edge (`max(-x, -100%)`), so its RIGHT edge is the
+/// press whatever its width. Before, `left = x - 180` assumed a 180 px
+/// menu; the Brushes menu is 211 px, and it ran 18 px off the window's right
+/// edge from its hamburger in the right dock. Both shifts live in ONE
+/// `transform`: a second property would replace the first.
+pub(crate) fn flyout_position_css(x: f64, y: f64, viewport_w: f64, viewport_h: f64) -> String {
     // A press point outside the window is pinned to its edge first.
+    let x = x.clamp(0.0, viewport_w.max(0.0));
     let y = y.clamp(0.0, viewport_h.max(0.0));
     let room = (viewport_h - y).max(0.0);
-    format!("top:{y}px; bottom:auto; transform:translateY(clamp(-{y}px, calc({room}px - 100%), 0px));")
+    format!("left:{x}px; right:auto; top:{y}px; bottom:auto; \
+             transform:translate(max(-{x}px, -100%), clamp(-{y}px, calc({room}px - 100%), 0px));")
 }
 
-/// The top edge `flyout_vertical_css` yields for a menu `height` tall: the
+/// The left edge `flyout_position_css` yields for a menu `width` wide: the
+/// CSS `max` term's own arithmetic, for the tests.
+#[cfg(test)]
+pub(crate) fn flyout_left_for(x: f64, width: f64, viewport_w: f64) -> f64 {
+    let x = x.clamp(0.0, viewport_w.max(0.0));
+    x + (-width).max(-x)
+}
+
+/// The top edge `flyout_position_css` yields for a menu `height` tall: the
 /// CSS clamp's own arithmetic, for the tests.
 #[cfg(test)]
 pub(crate) fn flyout_top_for(y: f64, height: f64, viewport_h: f64) -> f64 {
@@ -346,7 +359,7 @@ pub(crate) fn flyout_top_for(y: f64, height: f64, viewport_h: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{flyout_top_for, flyout_vertical_css};
+    use super::{flyout_left_for, flyout_position_css, flyout_top_for};
 
     /// Row 294: the menu opens DOWN from the press when it fits below, is
     /// shifted UP just enough when it does not, and never above the window's
@@ -361,10 +374,36 @@ mod tests {
         assert_eq!(flyout_top_for(1010.0, 250.0, 900.0), 650.0, "a press below the window still lands on screen");
     }
 
-    /// The CSS carries exactly the three terms `flyout_top_for` models.
+    /// Row 296, measured live at main be311876 (Playwright, CI's pinned
+    /// 1.49.1, main's Pages bundle): the Brushes ≡ menu is 211 px wide, the
+    /// placement assumed 180 (`left = press - 180`), so from its hamburger
+    /// (centre x 1388 in a 1400 px window) it ran 18 px past the window's
+    /// right edge at every window size. Now its RIGHT edge sits at the press
+    /// whatever its width, and its left edge never leaves the window.
+    #[test]
+    fn a_flyout_never_leaves_the_window_sideways() {
+        assert_eq!(flyout_left_for(1388.0, 211.0, 1400.0), 1177.0, "the Brushes menu from its hamburger: right edge at the press");
+        assert_eq!(flyout_left_for(1388.0, 180.0, 1400.0), 1208.0, "a 180 px menu lands where it always did");
+        assert_eq!(flyout_left_for(100.0, 211.0, 1400.0), 0.0, "a press near the left: pinned to the window's left edge");
+        assert_eq!(flyout_left_for(1500.0, 211.0, 1400.0), 1189.0, "a press right of the window is pinned to its edge first");
+        assert_eq!(flyout_left_for(-20.0, 211.0, 1400.0), 0.0, "a press left of the window: at its left edge");
+        // Margins: every right edge is <= the window's width.
+        for (x, w) in [(1388.0, 211.0), (1399.0, 300.0), (700.0, 211.0)] {
+            assert!(flyout_left_for(x, w, 1400.0) + w <= 1400.0, "press {x}, width {w}: right edge inside");
+        }
+    }
+
+    /// The CSS carries exactly the terms `flyout_left_for` and
+    /// `flyout_top_for` model, in ONE transform (a second `transform`
+    /// property would replace the first).
     #[test]
     fn the_flyout_css_is_the_modelled_clamp() {
-        assert_eq!(flyout_vertical_css(880.0, 900.0),
-                   "top:880px; bottom:auto; transform:translateY(clamp(-880px, calc(20px - 100%), 0px));");
+        assert_eq!(flyout_position_css(1388.0, 880.0, 1400.0, 900.0),
+                   "left:1388px; right:auto; top:880px; bottom:auto; \
+                    transform:translate(max(-1388px, -100%), clamp(-880px, calc(20px - 100%), 0px));");
+        assert_eq!(flyout_position_css(1500.0, -5.0, 1400.0, 900.0),
+                   "left:1400px; right:auto; top:0px; bottom:auto; \
+                    transform:translate(max(-1400px, -100%), clamp(-0px, calc(900px - 100%), 0px));",
+                   "a press outside the window is pinned to its edges first");
     }
 }
