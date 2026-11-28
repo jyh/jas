@@ -35,8 +35,8 @@ pub fn PanelMenuOverlay() -> Element {
     let menu_width = 180.0_f64;
     let x = (open.x - menu_width).max(0.0);
     let y = open.y;
-    // Row 291: and DOWN from a press in the window's upper half, UP from one
-    // in its lower half, so a group near the bottom keeps its menu on screen.
+    // Row 291/294: down from the press, shifted up just enough to stay in the
+    // window (`flyout_vertical_css`).
     #[cfg(target_arch = "wasm32")]
     let viewport_h: f64 = web_sys::window()
         .and_then(|w| w.inner_height().ok())
@@ -44,7 +44,7 @@ pub fn PanelMenuOverlay() -> Element {
         .unwrap_or(900.0);
     #[cfg(not(target_arch = "wasm32"))]
     let viewport_h: f64 = 900.0;
-    let (menu_top, menu_bottom) = flyout_vertical(y, viewport_h);
+    let menu_vertical = flyout_vertical_css(y, viewport_h);
     let kind = open.kind;
     let addr = open.addr;
     // One expression context per menu render, shared by every row's
@@ -305,7 +305,7 @@ pub fn PanelMenuOverlay() -> Element {
         div {
             id: "{items_dom_id}",
             role: "menu",
-            style: "position:fixed; left:{x}px; top:{menu_top}; bottom:{menu_bottom}; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
+            style: "position:fixed; left:{x}px; {menu_vertical} background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
@@ -316,35 +316,55 @@ pub fn PanelMenuOverlay() -> Element {
     }
 }
 
-/// Row 291: where the flyout's top and bottom sit, as CSS, for a press at
-/// `y` in a window `viewport_h` tall. A press in the upper half opens the
-/// menu DOWN from the press point; one in the lower half opens it UP, its
-/// bottom at the press point, as a native menu flips when there is no room
-/// below. Both offsets are always stated (a property the new style drops is
-/// restored by dioxus's style update, rows 121-122). Live, a group near the
-/// window's bottom opened its menu below the window, where no item past the
-/// edge could be reached.
-pub(crate) fn flyout_vertical(y: f64, viewport_h: f64) -> (String, String) {
-    if y > viewport_h / 2.0 {
-        ("auto".to_string(), format!("{}px", (viewport_h - y).max(0.0)))
-    } else {
-        (format!("{}px", y.max(0.0)), "auto".to_string())
-    }
+/// Row 291 / row 294: the flyout's vertical placement, as CSS, for a press at
+/// `y` in a window `viewport_h` tall. The top sits at the press point and a
+/// `translateY` shifts the menu UP by just enough to keep its bottom in the
+/// window (`100%` is the menu's own height), never past the window's top:
+/// `clamp(-y, (viewport_h - y) - height, 0)`. So a menu opens DOWN when it fits
+/// below, and any menu shorter than the window stays wholly on screen,
+/// whatever its height. Live (row 291), a group near the bottom opened its
+/// menu below the window; a half-window flip (#1155) still let the tallest
+/// menu (Brushes, ~570 px) overflow near the middle (row 294). The submenus are
+/// absolutely placed inside their item, so the transform leaves them as they
+/// were. `bottom` is stated too (dioxus restores a dropped property, rows
+/// 121-122).
+pub(crate) fn flyout_vertical_css(y: f64, viewport_h: f64) -> String {
+    // A press point outside the window is pinned to its edge first.
+    let y = y.clamp(0.0, viewport_h.max(0.0));
+    let room = (viewport_h - y).max(0.0);
+    format!("top:{y}px; bottom:auto; transform:translateY(clamp(-{y}px, calc({room}px - 100%), 0px));")
+}
+
+/// The top edge `flyout_vertical_css` yields for a menu `height` tall: the
+/// CSS clamp's own arithmetic, for the tests.
+#[cfg(test)]
+pub(crate) fn flyout_top_for(y: f64, height: f64, viewport_h: f64) -> f64 {
+    let y = y.clamp(0.0, viewport_h.max(0.0));
+    let room = (viewport_h - y).max(0.0);
+    y + (room - height).min(0.0).max(-y)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::flyout_vertical;
+    use super::{flyout_top_for, flyout_vertical_css};
 
+    /// Row 294: the menu opens DOWN from the press when it fits below, is
+    /// shifted UP just enough when it does not, and never above the window's
+    /// top; any menu shorter than the window stays wholly on screen.
     #[test]
-    fn a_flyout_opens_down_from_a_high_press_and_up_from_a_low_one() {
-        let (top, bottom) = flyout_vertical(100.0, 900.0);
-        assert_eq!((top.as_str(), bottom.as_str()), ("100px", "auto"), "upper half: down from the press");
-        let (top, bottom) = flyout_vertical(880.0, 900.0);
-        assert_eq!((top.as_str(), bottom.as_str()), ("auto", "20px"), "lower half: up from the press");
-        let (top, bottom) = flyout_vertical(450.0, 900.0);
-        assert_eq!((top.as_str(), bottom.as_str()), ("450px", "auto"), "the midline opens down");
-        let (top, bottom) = flyout_vertical(1010.0, 900.0);
-        assert_eq!((top.as_str(), bottom.as_str()), ("auto", "0px"), "a press below the window pins the menu to its bottom");
+    fn a_flyout_stays_on_screen_whatever_its_height() {
+        assert_eq!(flyout_top_for(100.0, 250.0, 900.0), 100.0, "fits below: opens down from the press");
+        assert_eq!(flyout_top_for(880.0, 250.0, 900.0), 650.0, "a low press: shifted up, bottom at the window's");
+        assert_eq!(flyout_top_for(440.0, 573.0, 900.0), 327.0, "the tallest menu (Brushes) mid-window: both edges in");
+        assert_eq!(flyout_top_for(100.0, 573.0, 900.0), 100.0, "the tallest menu from a high press: opens down");
+        assert_eq!(flyout_top_for(440.0, 1000.0, 900.0), 0.0, "taller than the window: pinned to its top");
+        assert_eq!(flyout_top_for(1010.0, 250.0, 900.0), 650.0, "a press below the window still lands on screen");
+    }
+
+    /// The CSS carries exactly the three terms `flyout_top_for` models.
+    #[test]
+    fn the_flyout_css_is_the_modelled_clamp() {
+        assert_eq!(flyout_vertical_css(880.0, 900.0),
+                   "top:880px; bottom:auto; transform:translateY(clamp(-880px, calc(20px - 100%), 0px));");
     }
 }
