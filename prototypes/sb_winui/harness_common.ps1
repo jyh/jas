@@ -4408,6 +4408,24 @@ function Select-SbChoiceItem {
     & $no "the item '$Value' of widget '$Widget' has no SelectionItem pattern: it has [$($short -join ', ')]"
 }
 
+# jas STATUS-flask 1047 item 1: since #1160 a probe read with no document
+# open carries doc_state "none" (its doc and selection are null). prove_e2e
+# refuses it by name before it takes a selection or a read-back; a probe
+# from a shell before #1160 has no doc_state and is read as before.
+function Get-SbProbeDocRefusal($Probe) {
+    if ($null -ne $Probe -and $null -ne $Probe.PSObject.Properties['doc_state'] -and $Probe.doc_state -eq 'none') {
+        return 'doc=none: no document was open at the read'
+    }
+    return $null
+}
+
+# The probe's selection count, counted only from an array: a null selection
+# (no document) is 0, never @($null)'s one element.
+function Get-SbProbeSelectionCount($Probe) {
+    if ($null -eq $Probe -or $Probe.selection -isnot [array]) { return 0 }
+    return $Probe.selection.Count
+}
+
 # The level-2 oracle: the core's document BYTES against the expected BYTES.
 # Never a parsed comparison: `1` against `1.0` is a different read-back, and a
 # numeric equality would certify it. The first differing byte is named.
@@ -4701,11 +4719,18 @@ function Get-SbPromotedEngineDialogs {
 # `promoted=<p>` counts the runs whose dialog gates (Promoted); the rest are
 # advisory. A short run is torn, never a smaller denominator. Empty when none
 # are wanted.
+# jas STATUS-flask 1050 item 1: line 1 folds every gating body line, and no
+# tool reds on these two, so each says in its own text that it is a report.
+$SbEngineDialogsReport = '(report: line 1 gates only a promoted dialog)'
+function Get-SbNightlyCorpusLine([int]$Items, [int]$Panels, [int]$Dialogs, [int]$Uncovered, [int]$Promoted) {
+    "CORPUS items=$Items panels=$Panels dialogs=$Dialogs dialogs-uncovered=$Uncovered promoted=$Promoted (report: line 1 is checked against these counts)"
+}
+
 function Get-SbEngineDialogsLine {
     param($Runs = @(), [int]$Wanted = 0, [string[]]$Promoted = @())
     if ($Wanted -eq 0) { return '' }
     $runs = @($Runs | Where-Object { $null -ne $_ })
-    if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran)" }
+    if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran) $SbEngineDialogsReport" }
     $pass = @(); $fail = @(); $notrun = @(); $gating = 0
     foreach ($r in $runs) {
         if ($Promoted -ccontains "$($r.Dialog)") { $gating++ }
@@ -4714,7 +4739,7 @@ function Get-SbEngineDialogsLine {
     }
     $show = { param($xs) if ($xs.Count -eq 0) { '-' } else { $xs -join ',' } }
     "ENGINE-DIALOGS engine-dialogs=$($pass.Count)/$($runs.Count) fail=$($fail.Count) notrun=$($notrun.Count) promoted=$gating " +
-        "pass=$(& $show $pass) fail=$(& $show $fail) notrun=$(& $show $notrun) witness=default-render(params {})"
+        "pass=$(& $show $pass) fail=$(& $show $fail) notrun=$(& $show $notrun) witness=default-render(params {}) $SbEngineDialogsReport"
 }
 
 # The panel ids the nightly walks, from the panel specs' texts (in file order):

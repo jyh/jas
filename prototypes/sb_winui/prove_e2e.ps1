@@ -301,7 +301,10 @@ finally {
     if ($libGone -ne 'removed' -or (Test-Path $libRoot)) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the run's library root was not removed ($libGone): $libRoot"; exit 5 }
 }
 
-$selCount = @($r.selection).Count
+# jas STATUS-flask 1047 item 1: a probe read with no document open is refused
+# by name before a selection or a read-back is taken from it.
+if ($why = Get-SbProbeDocRefusal $r) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- $why"; exit 4 }
+$selCount = Get-SbProbeSelectionCount $r
 
 # ---- the INPUT SCRIPT's read-back, byte for byte (docs/TESTING.md section 6) --
 $got = if (Test-Path $probeDoc) { [System.IO.File]::ReadAllText($probeDoc, [System.Text.Encoding]::UTF8) } else { '' }
