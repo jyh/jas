@@ -209,6 +209,120 @@ def real_consumer_files(repo_root: str) -> dict[str, list[str]]:
     }
 
 
+def _skip_literal(text: str, i: int, swift: bool) -> int:
+    """If a string or char literal starts at ``text[i]``, the index just past
+    it; else ``i``. Covers Rust `"..."`, `r#"..."#` and `'{'`, and Swift
+    `"..."`, `#"..."#` and `\"\"\"...\"\"\"`, so a brace inside one cannot unbalance
+    a body scan."""
+    n = len(text)
+    if swift and text.startswith('"""', i):
+        j = text.find('"""', i + 3)
+        return n if j < 0 else j + 3
+    hashes = 0
+    j = i
+    if (not swift) and text[j] == "r" and (j == 0 or not (text[j - 1].isalnum() or text[j - 1] == "_")):
+        j += 1
+    k = j
+    while k < n and text[k] == "#":
+        k += 1
+    hashes = k - j
+    if k < n and text[k] == '"' and (hashes or j > i):
+        end = '"' + "#" * hashes
+        e = text.find(end, k + 1)
+        return n if e < 0 else e + len(end)
+    if text[i] == '"':
+        k = i + 1
+        while k < n and text[k] != '"':
+            k += 2 if text[k] == "\\" else 1
+        return min(n, k + 1)
+    if (not swift) and text[i] == "'":
+        m = re.match(r"'(?:\\.|[^\\'])'", text[i:])
+        if m:
+            return i + m.end()
+    return i
+
+
+def _body_end(text: str, start: int, swift: bool) -> int:
+    """The index just past the brace that closes the body opened by the first
+    `{` at or after ``start`` (literals skipped); len(text) if unbalanced."""
+    n = len(text)
+    i = start
+    depth = 0
+    while i < n:
+        j = _skip_literal(text, i, swift)
+        if j != i:
+            i = j
+            continue
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+_RUST_IGNORE = re.compile(r"#\[ignore\b[^\]]*\]")
+_SWIFT_TEST = re.compile(r"@Test\s*\(")
+
+
+def strip_unrun(text: str, path: str) -> str:
+    """``text`` with comments and the bodies of tests that never run removed
+    (row 299): every `//` comment, then each Rust fn carrying `#[ignore]` and
+    each Swift func whose `@Test(...)` carries `.disabled`, from its attribute
+    to its closing brace. Other files are returned with comments stripped."""
+    markers = _comment_markers_for(path)
+    text = "\n".join(_strip_line_comment(ln, markers) for ln in text.splitlines())
+    swift = path.endswith(".swift")
+    if not (swift or path.endswith(".rs")):
+        return text
+    out = []
+    pos = 0
+    pat = _SWIFT_TEST if swift else _RUST_IGNORE
+    while True:
+        m = pat.search(text, pos)
+        if not m:
+            break
+        if swift:
+            close = _paren_end(text, m.end() - 1)
+            if ".disabled" not in text[m.end():close]:
+                out.append(text[pos:close])
+                pos = close
+                continue
+            fn = re.compile(r"\bfunc\b").search(text, close)
+        else:
+            fn = re.compile(r"\bfn\b").search(text, m.end())
+        if not fn:
+            break
+        end = _body_end(text, fn.end(), swift)
+        out.append(text[pos:m.start()])
+        pos = end
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _paren_end(text: str, open_idx: int) -> int:
+    """The index just past the `)` matching the `(` at ``open_idx``."""
+    depth = 0
+    i = open_idx
+    n = len(text)
+    while i < n:
+        j = _skip_literal(text, i, True)
+        if j != i:
+            i = j
+            continue
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
 # ---------------------------------------------------------------------------
 # Extraction rule tables (the real corpus's registration conventions)
 # ---------------------------------------------------------------------------
@@ -301,6 +415,20 @@ HELPER_CALL_RULES = [
      [("test_fixtures/algorithms", "{}.json")]),
     ("scripts", "scripts/cross_language_workspace.py", r'_golden\("(\w+)"\)',
      [("test_fixtures/expected", "{}.json")]),
+]
+
+# Row 299: (consumer, regex). A READ CALL whose literal argument is
+# `<family>/<file>`: group(1) is the family directory's basename, group(2)
+# the file. Unlike a path-shaped mention, a read call is what a runner DOES,
+# so it is a runner claim for (b2), but only in code that runs: comments and
+# the bodies of tests that never run (Rust `#[ignore]`, Swift
+# `@Test(.disabled ...)`, where the corpus GENERATORS live) are dropped first
+# (`strip_unrun`). A fixture name held in a constant or passed through a
+# helper's default argument is NOT seen, and its family stays NOT COVERED.
+FAMILY_READ_RULES = [
+    ("rust", r'\bread_fixture\(\s*"([a-z0-9_]+)/([\w.\-]+)"\s*\)'),
+    ("swift", r'\breadFixture\(\s*"([a-z0-9_]+)/([\w.\-]+)"\s*\)'),
+    ("swift", r'\.appendingPathComponent\(\s*"([a-z0-9_]+)/([\w.\-]+)"\s*\)'),
 ]
 
 # (consumer, source file that must exist, family whose whole directory the
@@ -517,6 +645,7 @@ def extract_claims(
     helper_rules: list,
     family_dirs: list[str],
     mentions: bool = True,
+    read_rules: list | None = None,
 ) -> dict[str, set[tuple[str, str]]]:
     """Direct (non-transitive, non-glob) claims per consumer as a set of
     (family_key, filename) pairs.
@@ -552,6 +681,18 @@ def extract_claims(
             for m in pat.finditer(text):
                 for family, template in targets:
                     claims[consumer].add((family, template.format(m.group(1))))
+
+    # Row 299: read calls in code that runs (see FAMILY_READ_RULES).
+    known = set(family_dirs)
+    for consumer, regex in (read_rules or ()):
+        pat = re.compile(regex)
+        for path in consumer_files.get(consumer, []):
+            text = _read(path)
+            if not text:
+                continue
+            for m in pat.finditer(strip_unrun(text, path)):
+                if m.group(1) in known:
+                    claims[consumer].add((f"test_fixtures/{m.group(1)}", m.group(2)))
 
     return claims
 
@@ -767,6 +908,15 @@ def run_checks(
         covered: list[str] = []
         uncovered: list[str] = []
         for family, row in sorted(rows.items()):
+            # Row 299's ratchet: `runner_symmetry: true` declares a family
+            # (b2) MUST judge, so a port losing its runner reds by name
+            # instead of moving the family quietly to NOT COVERED. It needs
+            # port_symmetry, which is what (b2) judges.
+            if row.get("runner_symmetry") and not row.get("port_symmetry"):
+                errors.append(
+                    f"manifest: {family} declares runner_symmetry without "
+                    f"port_symmetry, which is what (b2) judges")
+                continue
             if not row.get("port_symmetry") or family not in families:
                 continue
             rust = {n for fam, n in run_closed.get("rust", set())
@@ -775,6 +925,15 @@ def run_checks(
                      if fam == family}
             if not rust or not swift:
                 uncovered.append(family)
+                if row.get("runner_symmetry"):
+                    lacking = " and ".join(
+                        c for c, got in (("rust", rust), ("swift", swift))
+                        if not got)
+                    report(family, None, "runner-uncovered",
+                           f"{family}: the manifest declares it runner-judged "
+                           f"(runner_symmetry), but {lacking} has no runner "
+                           f"claim there (a read call, name list, helper call "
+                           f"or glob)")
                 continue
             covered.append(family)
             for name in sorted(rust - swift):
@@ -791,9 +950,14 @@ def run_checks(
                 f"{', '.join(covered) or 'none'}")
             limits.append(
                 f"runner-symmetry (b2) NOT COVERED {len(uncovered)} (a port "
-                f"has no name-list, helper-call or glob rule there, so only "
-                f"(b), which counts mentions, judges them): "
+                f"has no name-list, helper-call, read-call or glob rule "
+                f"there, so only (b), which counts mentions, judges them): "
                 f"{', '.join(uncovered) or 'none'}")
+            limits.append(
+                "runner-symmetry (b2) read calls (row 299) are credited "
+                "outside comments and #[ignore] / .disabled test bodies; a "
+                "fixture name held in a constant or a helper's default "
+                "argument is not seen")
 
     # (d) orphans — skipped for glob-claimed families (vacuous by
     # construction; the manifest notes say so).
@@ -836,7 +1000,7 @@ def run_real() -> int:
         family_dirs)
     runners = extract_claims(
         REPO_ROOT, consumer_files, NAME_LIST_RULES, HELPER_CALL_RULES,
-        family_dirs, mentions=False)
+        family_dirs, mentions=False, read_rules=FAMILY_READ_RULES)
     limits: list[str] = []
     errors, warnings = run_checks(
         REPO_ROOT, manifest, families, claims, DIRECTORY_GLOB_RULES,
@@ -1228,10 +1392,36 @@ def self_test() -> int:
             _write(r2, f"test_fixtures/scripts/{n}.json", json.dumps(
                 {"expected_json": f"{n}.expected.json"}))
             _write(r2, f"test_fixtures/scripts/{n}.expected.json", "{}")
-        _write(r2, "test_fixtures/tables/t.json", "[]")
+        for t in ("t", "u", "v", "c", "gen"):
+            _write(r2, f"test_fixtures/tables/{t}.json", "[]")
+        _write(r2, "test_fixtures/notes/n.json", "[]")
+        _write(r2, "test_fixtures/decl/d.json", "[]")
+        _write(r2, "test_fixtures/loose/l.json", "[]")
+        # Row 299: a READ CALL in a test that runs is a runner claim. Rust
+        # runs t, u and v; Swift runs t (readFixture) and v
+        # (appendingPathComponent), and reads u only inside a DISABLED test.
+        # A read in a comment (c) and a read in an IGNORED generator (gen)
+        # are not runs, even with braces in strings around them. `notes` is
+        # only ever an array literal in both ports: a mention, not judged.
         _write(r2, "consumers/rust.rs", "\n".join([
             'const GESTURES: &[&str] = &["a.json", "b.json"];',
-            'let t = read_fixture("tables/t.json");',
+            '#[test]',
+            'fn reads_tables() {',
+            '    let t = read_fixture("tables/t.json");',
+            '    let u = read_fixture( "tables/u.json" );',
+            '    let v = read_fixture("tables/v.json");',
+            '    // let c = read_fixture("tables/c.json");',
+            '    let notes = ["notes/n.json"];',
+            '    let d = read_fixture("decl/d.json");',
+            '    let l = read_fixture("loose/l.json");',
+            '}',
+            '#[test]',
+            '#[ignore] // a generator, run by hand',
+            'fn generate_tables() {',
+            '    let open = \'{\'; let raw = r#"{"x": "}"}"#;',
+            '    let g = read_fixture("tables/gen.json");',
+            '    let c = read_fixture("tables/c.json");',
+            '}',
         ]))
         _write(r2, "consumers/glob.rs", "// reads test_fixtures/scripts\n")
         _write(r2, "consumers/swift.swift", "\n".join([
@@ -1240,7 +1430,19 @@ def self_test() -> int:
             'let admitted = ["gestures/b.json"]',
             'private let scripts = ["a.json"]',
             'let other = ["scripts/b.json"]',
-            'let t = readFixture("tables/t.json")',
+            '@Test func readsTables() {',
+            '    let t = readFixture("tables/t.json")',
+            '    let v = root.appendingPathComponent("tables/v.json")',
+            '    let notes = ["notes/n.json"]',
+            '    let decl = ["decl/d.json"]',
+            '}',
+            '@Test(.disabled("a generator")) func generateTables() {',
+            '    let s = "}"; let m = """',
+            '    { "y": "}" }',
+            '    """',
+            '    let u = readFixture("tables/u.json")',
+            '    let g = readFixture("tables/gen.json")',
+            '}',
         ]))
         fams2 = discover_families(r2)
         files2 = {
@@ -1259,18 +1461,37 @@ def self_test() -> int:
         globs2 = [("rust", "consumers/glob.rs", "test_fixtures/scripts")]
         sym = {"kind": "fixtures", "required_consumers": ["rust", "swift"],
                "port_symmetry": True}
+        # Row 299's ratchet: `decl` is DECLARED runner-judged, and Swift only
+        # names its fixture in an array, so (b2) cannot judge it: a red, by
+        # name. `loose` declares runner_symmetry without port_symmetry.
         manifest2 = {"families": {"test_fixtures/gestures": dict(sym),
                                   "test_fixtures/scripts": dict(sym),
-                                  "test_fixtures/tables": dict(sym)}}
-        dirs2 = ["gestures", "scripts", "tables"]
-        mentions2 = extract_claims(r2, files2, rules2, [], dirs2)
+                                  "test_fixtures/tables": dict(sym, runner_symmetry=True),
+                                  "test_fixtures/notes": dict(sym),
+                                  "test_fixtures/decl": dict(sym, runner_symmetry=True),
+                                  "test_fixtures/loose": {"kind": "fixtures",
+                                                          "required_consumers": ["rust"],
+                                                          "runner_symmetry": True}}}
+        dirs2 = ["gestures", "scripts", "tables", "notes", "decl", "loose"]
+        mentions2 = extract_claims(r2, files2, rules2, [], dirs2,
+                                   read_rules=FAMILY_READ_RULES)
         runners2 = extract_claims(r2, files2, rules2, [], dirs2,
-                                  mentions=False)
+                                  mentions=False, read_rules=FAMILY_READ_RULES)
         check(("test_fixtures/gestures", "b.json") in mentions2["swift"]
               and ("test_fixtures/gestures", "b.json") not in runners2["swift"],
               "b2: a mention credits swift with b.json; its runner does not")
-        check(("test_fixtures/tables", "t.json") not in runners2["rust"],
-              "b2: a read_fixture path literal is a mention, never a runner")
+        rt = {n for f, n in runners2["rust"] if f == "test_fixtures/tables"}
+        st = {n for f, n in runners2["swift"] if f == "test_fixtures/tables"}
+        check(rt == {"t.json", "u.json", "v.json"},
+              f"b2 (row 299): rust's read calls in a running test are runs, "
+              f"and neither a comment nor an #[ignore] generator is ({rt})")
+        check(st == {"t.json", "v.json"},
+              f"b2 (row 299): swift's readFixture and appendingPathComponent "
+              f"reads run, a .disabled test's do not ({st})")
+        check(not any(f == "test_fixtures/notes"
+                      for c in ("rust", "swift") for f, _ in runners2[c]),
+              "b2 (row 299): an array literal naming a fixture is still a "
+              "mention, never a run")
         limits2: list[str] = []
         errs2, _ = run_checks(r2, manifest2, fams2, mentions2, globs2,
                               runner_claims=runners2, limits=limits2)
@@ -1290,11 +1511,32 @@ def self_test() -> int:
               "b2: a glob runs scripts/b.json and the list skips it")
         check(not has2("runner-symmetry", "scripts/a.json"),
               "b2: glob against list agrees on the script the list names")
-        check(not has2("runner-symmetry", "tables"),
+        check(has2("runner-symmetry", "test_fixtures/tables/u.json")
+              and not has2("runner-symmetry", "tables/t.json")
+              and not has2("runner-symmetry", "tables/v.json")
+              and not has2("runner-symmetry", "tables/c.json")
+              and not has2("runner-symmetry", "tables/gen.json"),
+              f"b2 (row 299): tables is judged by its read calls, and only "
+              f"u.json (read in a disabled Swift test) is asymmetric ({errs2})")
+        check(not has2("runner-symmetry", "notes")
+              and not has2("runner-uncovered", "notes"),
               "b2: a family no runner rule covers is not judged by (b2)")
-        check(any("test_fixtures/tables" in ln and "NOT COVERED" in ln
+        check(has2("runner-uncovered", "test_fixtures/decl")
+              and any("swift" in e for e in errs2 if e.startswith("runner-uncovered:")),
+              f"b2 (row 299): a family the manifest declares runner-judged "
+              f"that a port has no runner for reds BY NAME, naming the port ({errs2})")
+        check(not has2("runner-uncovered", "tables"),
+              "b2 (row 299): a declared family both runners reach is not "
+              "runner-uncovered")
+        check(any("loose" in e and "port_symmetry" in e for e in errs2),
+              f"b2 (row 299): runner_symmetry without port_symmetry is "
+              f"refused, never silently ignored ({errs2})")
+        check(any("test_fixtures/notes" in ln and "NOT COVERED" in ln
                   for ln in limits2),
               f"b2: the uncovered symmetric family is NAMED ({limits2})")
+        check(any("read calls" in ln and "constant" in ln for ln in limits2),
+              f"b2 (row 299): what a read-call rule cannot see is printed "
+              f"beside the verdict ({limits2})")
         check(any("COVERED" in ln and "test_fixtures/gestures" in ln
                   and "NOT COVERED" not in ln for ln in limits2),
               "b2: the covered families are named beside the verdict")
@@ -1302,11 +1544,16 @@ def self_test() -> int:
         _write(r2, "consumers/swift.swift", "\n".join([
             'private let gestures = ["a.json", "b.json"]',
             'private let scripts = ["a.json", "b.json"]',
-            'let t = readFixture("tables/t.json")',
+            '@Test func readsTables() {',
+            '    let t = readFixture("tables/t.json")',
+            '    let u = readFixture("tables/u.json")',
+            '    let v = root.appendingPathComponent("tables/v.json")',
+            '}',
         ]))
         runners3 = extract_claims(r2, files2, rules2, [], dirs2,
-                                  mentions=False)
-        mentions3 = extract_claims(r2, files2, rules2, [], dirs2)
+                                  mentions=False, read_rules=FAMILY_READ_RULES)
+        mentions3 = extract_claims(r2, files2, rules2, [], dirs2,
+                                   read_rules=FAMILY_READ_RULES)
         errs3, _ = run_checks(r2, manifest2, fams2, mentions3, globs2,
                               runner_claims=runners3, limits=[])
         check(not any(e.startswith("runner-symmetry:") for e in errs3),

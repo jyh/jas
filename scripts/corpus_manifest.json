@@ -28,6 +28,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "action dispatch produces a whole document; the law available here is the Preservation Law, which needs a document differ (PHASE 2)",
       "claim_style": {
@@ -89,6 +90,7 @@
         "reference"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "character attributes are a field-assignment table; the law would restate it",
       "claim_style": {
@@ -107,6 +109,7 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "constraint satisfaction IS checkable (the fitted concept satisfies every declared constraint) -- PHASE 2, and the strongest unclaimed law in the manifest",
       "claim_style": {
@@ -126,6 +129,7 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "as concept_constraints: the fitter's output should satisfy the fitter's own declared predicate -- PHASE 2",
       "claim_style": {
@@ -145,6 +149,7 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "as concept_constraints -- PHASE 2",
       "claim_style": {
@@ -164,6 +169,7 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "concept DECLARATIONS, not results: there is no output to rule",
       "claim_style": {
@@ -199,6 +205,7 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "the expression corpus is the declarative tier's own gate; a law over it would be a second evaluator",
       "claim_style": {
@@ -215,6 +222,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "None needed: each port reads the cases and compares its own payload with the golden, so the law is the golden.",
       "claim_style": {
@@ -247,6 +255,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "SEAM 2, as the gesture corpus: the scripts replay through the same in-process gesture runner in both ports.",
       "claim_style": {
@@ -262,6 +271,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "SEAM 2 -- gesture replay is in-process in both ports, so a law here must be hand-mirrored per port and the Windows lane would see the Rust arm only. Deliberately not Phase 1: at most ONE Seam-2 checker, and shift_constrain already holds that slot",
       "claim_style": {
@@ -277,6 +287,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "key-to-action routing is a lookup table; the law would restate it",
       "claim_style": {
@@ -292,6 +303,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "op_apply is the journal spine; the law is round-trip (apply then undo restores the document byte-for-byte) -- PHASE 2, a genuine law and not a restatement",
       "claim_style": {
@@ -350,6 +362,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "the anchor is a three-row table (centre, right, everything else); a checker would restate it",
       "claim_style": {
@@ -366,6 +379,7 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "IT IS ALREADY A LAW FAMILY, and predates this tier: it asserts six invariants rather than pinning a golden. Registering it here would double-gate it; the honest note is that the checker tier generalises what this family did first",
       "claim_style": {
@@ -382,6 +396,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "captured production documents used as INPUT; they pin no output to rule",
       "claim_style": {
@@ -398,6 +413,7 @@
         "reference"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "stroke attributes are a field-assignment table, as character_apply",
       "claim_style": {
@@ -467,6 +483,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "zoom/pan state is a scalar bookkeeping table; the geometry law that matters (a point under the cursor stays under the cursor across a zoom) belongs to the tool seam, SEAM 2",
       "claim_style": {
@@ -482,6 +499,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "as test_fixtures/operations -- PHASE 2, the same round-trip law",
       "claim_style": {
@@ -603,6 +621,7 @@
         "swift"
       ],
       "port_symmetry": true,
+      "runner_symmetry": true,
       "checker": null,
       "checker_gap": "IT IS THE SEAM-2 PROPERTY FAMILY (shift_constrain): law, witnesses, mutant and a generative lane, in-process and mirrored per port. It is the other half of this tier, not a gap -- but its floors are hardcoded in the two runners rather than declared in the fixture, so it is not yet readable by this registry. Named as the first migration when the property corpus moves to declared floors",
       "claim_style": {
