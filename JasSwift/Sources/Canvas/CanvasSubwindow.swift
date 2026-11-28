@@ -23,8 +23,34 @@ public struct CanvasBoundingBox: Equatable {
 
 private var _currentBrushLibraries: [String: Any] = [:]
 
+/// Row 303: ONE lock for every read and write of the registry. The canvas is
+/// single-threaded in the app, but Swift Testing runs tests in parallel and
+/// three parties write this value (the brush render tests, every paint's
+/// `installCanvasBrushRegistry`, the Brush Options effects' `syncCanvasBrushes`),
+/// so a test that set it and then painted could paint with another test's
+/// libraries. Recursive, so a transaction may set it inside its own body.
+private let canvasBrushRegistryLock = NSRecursiveLock()
+
 public func setCanvasBrushLibraries(_ libs: [String: Any]) {
+    canvasBrushRegistryLock.lock()
+    defer { canvasBrushRegistryLock.unlock() }
     _currentBrushLibraries = libs
+}
+
+/// Run `body` holding the registry (row 303): no writer on another thread can
+/// change it until `body` returns. For code that sets the registry and then
+/// paints with it, which is what a render test does.
+func withCanvasBrushRegistry<T>(_ body: () throws -> T) rethrows -> T {
+    canvasBrushRegistryLock.lock()
+    defer { canvasBrushRegistryLock.unlock() }
+    return try body()
+}
+
+/// The registry's current libraries, read under its lock (row 303).
+func canvasBrushLibrariesSnapshot() -> [String: Any] {
+    canvasBrushRegistryLock.lock()
+    defer { canvasBrushRegistryLock.unlock() }
+    return _currentBrushLibraries
 }
 
 /// Install the model's brush libraries into the canvas registry, so the paint
@@ -105,7 +131,7 @@ private func lookupBrush(_ slug: String) -> [String: Any]? {
     guard let sep = slug.firstIndex(of: "/") else { return nil }
     let libId = String(slug[..<sep])
     let brushSlug = String(slug[slug.index(after: sep)...])
-    guard let lib = _currentBrushLibraries[libId] as? [String: Any],
+    guard let lib = canvasBrushLibrariesSnapshot()[libId] as? [String: Any],
           let brushes = lib["brushes"] as? [[String: Any]] else {
         return nil
     }
