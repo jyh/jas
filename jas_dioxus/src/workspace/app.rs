@@ -1021,17 +1021,25 @@ pub fn App() -> Element {
     };
     // --- Tab bar ---
     let borrowed = app.borrow();
-    let tab_info: Vec<(usize, String, bool)> = borrowed.tabs.iter().enumerate().map(|(i, tab)| {
+    // Row 302: each tab and its close button carry the ids the engine's plan
+    // gives them (`canvas_tab_<i>`, `canvas_tab_close_<i>`), resolved from the
+    // spec's `canvas_tab_bar` templates; a withheld id ("") sets no attribute.
+    let tab_ids = crate::interpreter::workspace::canvas_tab_ids(
+        &borrowed.tabs.iter().map(|t| (t.model.filename.clone(), t.model.is_modified())).collect::<Vec<_>>());
+    let tab_info: Vec<(usize, String, bool, Option<String>, Option<String>)> = borrowed.tabs.iter().enumerate().map(|(i, tab)| {
         // Row 115: the label is the spec's (layout.yaml `canvas_tab_bar`),
         // which marks a modified document "name *".
         let label = crate::interpreter::workspace::canvas_tab_label(&tab.model.filename, tab.model.is_modified());
-        (i, label, i == borrowed.active_tab)
+        let (tab_id, close_id) = tab_ids.get(i).cloned().unwrap_or_default();
+        let nonempty = |s: String| if s.is_empty() { None } else { Some(s) };
+        (i, label, i == borrowed.active_tab, nonempty(tab_id), nonempty(close_id))
     }).collect();
     let has_tabs = !borrowed.tabs.is_empty();
     drop(borrowed);
 
-    let tab_buttons: Vec<Result<VNode, RenderError>> = tab_info.iter().map(|(i, name, is_active)| {
+    let tab_buttons: Vec<Result<VNode, RenderError>> = tab_info.iter().map(|(i, name, is_active, tab_id, close_id)| {
         let idx = *i;
+        let (tab_id, close_id) = (tab_id.clone(), close_id.clone());
         let act = act.clone();
         let bg = if *is_active { THEME_BG_TAB } else { THEME_BG_TAB_INACTIVE };
         let border_bottom = if *is_active { "2px solid #4a4a4a" } else { "2px solid #555" };
@@ -1039,6 +1047,7 @@ pub fn App() -> Element {
         rsx! {
             div {
                 key: "tab-{idx}",
+                id: tab_id,
                 style: "display:inline-flex; align-items:center; padding:4px 8px; margin-right:1px; background:{bg}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; border-bottom:{border_bottom}; cursor:pointer; font-size:12px; color:{THEME_TEXT}; user-select:none;",
                 onclick: move |_| {
                     let act = act.clone();
@@ -1052,6 +1061,7 @@ pub fn App() -> Element {
                     let app_for_close = app.clone();
                     rsx! {
                         span {
+                            id: close_id,
                             style: "margin-left:6px; color:{THEME_TEXT_BUTTON}; cursor:pointer; font-size:14px; line-height:1;",
                             onclick: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();

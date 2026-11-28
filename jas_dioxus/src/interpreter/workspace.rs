@@ -55,6 +55,14 @@ impl Workspace {
     /// a tab says (its name, and its modified mark), so the web's native tab
     /// bar evaluates this rather than restating it. None if the layout lacks it.
     pub fn canvas_tab_label_template(&self) -> Option<&str> {
+        self.canvas_tab_bar()?.get("do")?.get("children")?.as_array()?.iter()
+            .find(|k| k.get("type").and_then(|v| v.as_str()) == Some("text"))?
+            .get("content")?.as_str()
+    }
+
+    /// The layout's `canvas_tab_bar` node (layout.yaml): the `foreach` over
+    /// `workspace.open_documents` whose `do:` is one tab. None if absent.
+    pub fn canvas_tab_bar(&self) -> Option<&serde_json::Value> {
         fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
             if node.get("id").and_then(|v| v.as_str()) == Some(id) {
                 return Some(node);
@@ -66,10 +74,7 @@ impl Workspace {
             }
             node.get("content").and_then(|c| find(c, id))
         }
-        let bar = find(self.data.get("layout")?, "canvas_tab_bar")?;
-        bar.get("do")?.get("children")?.as_array()?.iter()
-            .find(|k| k.get("type").and_then(|v| v.as_str()) == Some("text"))?
-            .get("content")?.as_str()
+        find(self.data.get("layout")?, "canvas_tab_bar")
     }
 
     /// A direct child of the layout root with this `id` that has `content`.
@@ -261,9 +266,66 @@ pub fn canvas_tab_label(name: &str, is_modified: bool) -> String {
     crate::interpreter::expr::eval_text(template, &ctx)
 }
 
+/// The ids a canvas tab strip carries (row 302, ruling 1054's twin): one
+/// `(tab, close)` pair per open document, `docs` as `(name, is_modified)` in tab
+/// order. The spec's `canvas_tab_bar` today gives `canvas_tab_<i>` and
+/// `canvas_tab_close_<i>`. A web or Mac strip that draws its tabs NATIVELY sets
+/// these as its element ids, so it names each tab and its close button exactly
+/// as the engine's plan does. Empty when the compiled layout has no tab bar.
+pub fn canvas_tab_ids(docs: &[(String, bool)]) -> Vec<(String, String)> {
+    let Some(ws) = Workspace::load() else { return vec![] };
+    let Some(bar) = ws.canvas_tab_bar() else { return vec![] };
+    canvas_strip_ids(bar, docs)
+}
+
+/// [`canvas_tab_ids`] for a given tab-bar node. The rows come from the
+/// engine's own expansion ([`row_scopes`](super::foreach::row_scopes)) over a
+/// `workspace.open_documents` shaped as the engine holds it
+/// (`panel_scope::workspace_facts`: `index`, `is_modified`, `name`), so a row
+/// here is the row the plan resolves in. Each id then follows the plan's three
+/// rules: a template resolves only from the row's own variable
+/// ([`row_id`](super::foreach::row_id)), else it is withheld (`""`); a static
+/// id is carried as it is; and a collision a resolved id takes part in is
+/// withheld from every carrier
+/// ([`duplicate_resolved_ids`](super::foreach::duplicate_resolved_ids)).
+/// ⚠️ SCOPE: the collision census is the STRIP, which is all a native strip
+/// draws; the engine's plan counts the whole canvas pane.
+pub fn canvas_strip_ids(bar: &serde_json::Value, docs: &[(String, bool)]) -> Vec<(String, String)> {
+    use super::foreach::{duplicate_resolved_ids, row_id, row_scopes};
+    let open: Vec<serde_json::Value> = docs.iter().enumerate()
+        .map(|(i, (name, m))| serde_json::json!({"index": i, "is_modified": m, "name": name}))
+        .collect();
+    let ctx = serde_json::json!({"workspace": {"open_documents": open}});
+    let Some(rows) = row_scopes(bar, &ctx) else { return vec![] };
+    let tab = bar.get("do");
+    let close = tab.and_then(|t| t.get("children")).and_then(|v| v.as_array()).and_then(|kids| kids.iter().find(|k| {
+        k.get("type").and_then(|v| v.as_str()) == Some("icon_button")
+            && k.get("icon").and_then(|v| v.as_str()) == Some("close")
+    }));
+    let raw = |n: Option<&serde_json::Value>| n.and_then(|n| n.get("id")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let (tab_raw, close_raw) = (raw(tab), raw(close));
+    // (id, resolved) for one raw id in one row.
+    let one = |raw: &str, row: &serde_json::Value| -> (String, bool) {
+        if !raw.contains("{{") {
+            return (raw.to_string(), false);
+        }
+        match row_id(raw, row) {
+            Some(s) => (s, true),
+            None => (String::new(), false),
+        }
+    };
+    let pairs: Vec<((String, bool), (String, bool))> = rows.iter()
+        .map(|row| (one(&tab_raw, row), one(&close_raw, row)))
+        .collect();
+    let dup = duplicate_resolved_ids(pairs.iter().flat_map(|(t, c)| [(t.0.as_str(), t.1), (c.0.as_str(), c.1)]));
+    let keep = |id: &String| if dup.contains(id) { String::new() } else { id.clone() };
+    pairs.iter().map(|(t, c)| (keep(&t.0), keep(&c.0))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     // Row 115: the canvas tab shows the document's modified mark, from the
     // spec. Twin of JasSwift/Tests/Canvas/CanvasTabLabelTests.swift.
@@ -282,6 +344,47 @@ mod tests {
         let ws = Workspace::load().expect("workspace");
         let template = ws.canvas_tab_label_template().expect("the compiled layout carries the tab label");
         assert!(template.contains("doc.is_modified"), "the spec names the mark: {template}");
+    }
+
+    /// Row 302 (ruling 1054's twin): a NATIVE canvas tab strip carries the ids
+    /// the engine's plan carries, `canvas_tab_<i>` and `canvas_tab_close_<i>`,
+    /// resolved from the spec's own templates by the engine's own expansion and
+    /// resolver. Twin of JasSwift/Tests/Canvas/CanvasTabIdsTests.swift.
+    #[test]
+    fn canvas_tab_ids_come_from_the_spec_one_pair_per_document() {
+        let docs = [("a.svg".to_string(), false), ("b.svg".to_string(), true)];
+        assert_eq!(canvas_tab_ids(&docs), [
+            ("canvas_tab_0".to_string(), "canvas_tab_close_0".to_string()),
+            ("canvas_tab_1".to_string(), "canvas_tab_close_1".to_string()),
+        ]);
+        assert!(canvas_tab_ids(&[]).is_empty(), "no document, no tab");
+    }
+
+    /// The strip's rules are the plan's, driven on synthetic templates the
+    /// shipped spec never writes: a template reading anything but the row's
+    /// own variable is withheld (""); a static id is carried as is; a resolved
+    /// id carried twice (two rows naming the same document name) is withheld
+    /// from BOTH carriers, never sent twice.
+    #[test]
+    fn canvas_strip_ids_follow_the_plans_three_rules() {
+        let bar = |tab: &str, close: &str| json!({
+            "id": "canvas_tab_bar",
+            "foreach": {"source": "workspace.open_documents", "as": "doc"},
+            "do": {"id": tab, "type": "row", "children": [
+                {"type": "text", "content": "{{doc.name}}"},
+                {"id": close, "type": "icon_button", "icon": "close"},
+            ]},
+        });
+        let docs = [("a".to_string(), false), ("a".to_string(), false), ("b".to_string(), false)];
+        let s = |v: &[(String, String)]| v.iter().map(|(t, c)| format!("{t}|{c}")).collect::<Vec<_>>();
+        assert_eq!(s(&canvas_strip_ids(&bar("t_{{doc.index}}", "c_{{state.x}}"), &docs)),
+                   ["t_0|", "t_1|", "t_2|"], "condition 1: a state read is withheld");
+        assert_eq!(s(&canvas_strip_ids(&bar("t_{{doc.name}}", "c_{{doc.index}}"), &docs)),
+                   ["|c_0", "|c_1", "t_b|c_2"], "condition 3: 'a' twice is withheld from both rows");
+        assert_eq!(s(&canvas_strip_ids(&bar("tab", "c_{{doc._index}}"), &docs)),
+                   ["tab|c_0", "tab|c_1", "tab|c_2"], "a static id is carried as is, even repeated");
+        assert_eq!(s(&canvas_strip_ids(&bar("c_1", "c_{{doc.index}}"), &docs)),
+                   ["|c_0", "|", "|c_2"], "condition 3: a static id equal to a resolved one is withheld from both");
     }
 
     #[test]

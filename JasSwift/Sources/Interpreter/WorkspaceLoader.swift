@@ -172,11 +172,18 @@ class WorkspaceData {
     /// a tab says (its name, and its modified mark), so the native tab bar
     /// evaluates this rather than restating it. Nil if the layout lacks it.
     func canvasTabLabelTemplate() -> String? {
-        guard let layout = data["layout"] as? [String: Any],
-              let bar = findLayoutNode("canvas_tab_bar", in: layout),
+        guard let bar = canvasTabBar(),
               let tab = bar["do"] as? [String: Any],
               let kids = tab["children"] as? [[String: Any]] else { return nil }
         return kids.first { $0["type"] as? String == "text" }?["content"] as? String
+    }
+
+    /// The layout's `canvas_tab_bar` node (layout.yaml): the `foreach` over
+    /// `workspace.open_documents` whose `do:` is one tab. Nil if absent.
+    /// Twin of `Workspace::canvas_tab_bar`.
+    func canvasTabBar() -> [String: Any]? {
+        guard let layout = data["layout"] as? [String: Any] else { return nil }
+        return findLayoutNode("canvas_tab_bar", in: layout)
     }
 
     /// The toolbar's ``tool_grid`` element from the compiled layout
