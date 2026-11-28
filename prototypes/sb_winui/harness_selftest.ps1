@@ -2645,6 +2645,14 @@ Test-Case 'audit C: every baseline''s live document passes the read-back compara
 # `NOT RUN -- no frozen baseline` (#1156's two admitted scripts). Both
 # directories are globbed and pinned EQUAL here, and the control proves the
 # pairing names an extra script and an orphan baseline.
+function Get-SbCorpusPairing([string]$Scripts, [string]$Baselines) {
+    $s = @(Get-ChildItem $Scripts -Filter '*.json' | Where-Object { $_.Name -notlike '*.expected.json' } | ForEach-Object { $_.BaseName } | Sort-Object)
+    $b = @(Get-ChildItem $Baselines -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'baseline.json') } | ForEach-Object { $_.Name } | Sort-Object)
+    $noBase = @($s | Where-Object { $b -cnotcontains $_ })
+    $noScript = @($b | Where-Object { $s -cnotcontains $_ })
+    $show = { param($xs) if ($xs.Count) { $xs -join ',' } else { '-' } }
+    "scripts=$(if ($s.Count -ge 100) { 'corpus' } else { $s.Count }) no-baseline=$(& $show $noBase) no-script=$(& $show $noScript)"
+}
 Test-Case 'audit E: every shipped input script has a frozen e2e baseline, and every baseline a script' {
     Get-SbCorpusPairing (Join-Path $aRoot 'test_fixtures\input_scripts') (Join-Path $aRoot 'prototypes\sb_winui\e2e_baselines')
 } 'scripts=corpus no-baseline=- no-script=-'
