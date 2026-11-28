@@ -4413,12 +4413,17 @@ function Select-SbChoiceItem {
 # refuses it by name before it takes a selection or a read-back; a probe
 # from a shell before #1160 has no doc_state and is read as before.
 function Get-SbProbeDocRefusal($Probe) {
+    if ($null -ne $Probe -and $null -ne $Probe.PSObject.Properties['doc_state'] -and $Probe.doc_state -eq 'none') {
+        return 'doc=none: no document was open at the read'
+    }
     return $null
 }
 
-# The probe's selection count, counted only from an array.
+# The probe's selection count, counted only from an array: a null selection
+# (no document) is 0, never @($null)'s one element.
 function Get-SbProbeSelectionCount($Probe) {
-    return @($Probe.selection).Count
+    if ($null -eq $Probe -or $Probe.selection -isnot [array]) { return 0 }
+    return $Probe.selection.Count
 }
 
 # The level-2 oracle: the core's document BYTES against the expected BYTES.
