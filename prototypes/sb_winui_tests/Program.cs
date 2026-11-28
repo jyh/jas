@@ -1767,6 +1767,25 @@ static class Program
                 ProbeWire.DialogField(false, null),
                 ProbeWire.DialogField(true, null),
             }));
+        // jas STATUS-flask 1042 item 3: after the last tab closes the engine still
+        // answers jas_document_json with the closed document, so the probe asks
+        // jas_document_is_open too. Closed is `doc=none`, with no document bytes
+        // and doc_sha NONE (written as the sha, never hashed, as plan_sha and
+        // tab_sha are), so a closed document can never pass for a reading.
+        // Unknown (a null engine, 255) keeps the engine's bytes, as before.
+        static string ShowDoc((string State, string Doc) r) => r.State + ":" + r.Doc;
+        Eq("probe doc: open keeps the document, closed is none with no bytes, unknown keeps them",
+            "open:{\"a\":1}|none:|unknown:{\"a\":1}|unknown:{\"a\":1}",
+            string.Join("|", new byte[] { 1, 0, 255, 7 }.Select(b => ShowDoc(ProbeWire.Doc(b, "{\"a\":1}")))));
+        Eq("probe doc sha: closed is NONE, an empty open read is EMPTY, else the digest",
+            "NONE|EMPTY|h({\"a\":1})|h({\"a\":1})",
+            string.Join("|", new[]
+            {
+                ProbeWire.DocSha("none", "", s => "h(" + s + ")"),
+                ProbeWire.DocSha("open", "", s => "h(" + s + ")"),
+                ProbeWire.DocSha("open", "{\"a\":1}", s => "h(" + s + ")"),
+                ProbeWire.DocSha("unknown", "{\"a\":1}", s => "h(" + s + ")"),
+            }));
         // Row 284 (jas STATUS-flask 1027 item 1): the dock's tab and the panel
         // menu's items carry an AutomationId a driver can find them by. Neither is
         // read aloud (a Name or HelpText would be), so a person hears nothing new.

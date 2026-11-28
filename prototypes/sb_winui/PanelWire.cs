@@ -3600,6 +3600,17 @@ internal static class ProbeWire
     /// </summary>
     internal static string DialogField(bool read, DialogReading? reading) =>
         !read ? "none" : reading is null ? "UNREADABLE" : reading.Open ? reading.Id : "none";
+
+    /// <summary>
+    /// jas STATUS-flask 1042 item 3: the PROBE row's <c>doc=</c> field and the
+    /// document bytes it reads, from <c>jas_document_is_open</c>'s answer and
+    /// <c>jas_document_json</c>'s bytes.
+    /// </summary>
+    internal static (string State, string Doc) Doc(byte openRc, string engineDoc) => ("open", engineDoc);
+
+    /// <summary>The PROBE row's <c>doc-sha=</c>: the digest of the document bytes it reads.</summary>
+    internal static string DocSha(string state, string doc, Func<string, string> sha) =>
+        doc.Length == 0 ? "EMPTY" : sha(doc);
 }
 
 /// <summary>
