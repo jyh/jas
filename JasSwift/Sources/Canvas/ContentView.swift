@@ -628,13 +628,21 @@ public struct ContentView: View {
             if !workspace.canvases.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
-                        ForEach(workspace.canvases) { entry in
+                        // Row 302: each tab and its close button carry the ids
+                        // the engine's plan gives them (`canvas_tab_<i>`,
+                        // `canvas_tab_close_<i>`), from the spec's templates.
+                        let tabIds = canvasTabIds(docs: workspace.canvases.map {
+                            (name: $0.model.filename, isModified: $0.model.isModified)
+                        })
+                        ForEach(Array(workspace.canvases.enumerated()), id: \.element.id) { i, entry in
                             CanvasTabLabel(
                                 model: entry.model,
                                 isSelected: workspace.selectedTab == entry.id,
                                 theme: workspace.theme,
                                 onSelect: { workspace.selectedTab = entry.id },
-                                onClose: { closeCanvas(entry.id) }
+                                onClose: { closeCanvas(entry.id) },
+                                tabId: i < tabIds.count ? tabIds[i].tab : "",
+                                closeId: i < tabIds.count ? tabIds[i].close : ""
                             )
                         }
                     }
@@ -850,6 +858,10 @@ struct CanvasTabLabel: View {
     var theme: Theme
     var onSelect: () -> Void
     var onClose: () -> Void
+    /// Row 302: the plan's ids for this tab and its close button; "" is a
+    /// withheld id and sets no identifier.
+    var tabId: String = ""
+    var closeId: String = ""
 
     var body: some View {
         HStack(spacing: 4) {
@@ -864,6 +876,7 @@ struct CanvasTabLabel: View {
             }
             .buttonStyle(.plain)
             .frame(width: 14, height: 14)
+            .modifier(AxIdentifierIfAny(id: closeId))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
@@ -872,6 +885,20 @@ struct CanvasTabLabel: View {
             : SwiftUI.Color(nsColor: theme.tabInactive))
         .foregroundColor(SwiftUI.Color(nsColor: theme.text))
         .onTapGesture { onSelect() }
+        .modifier(RepeatIterationAx(id: tabId.isEmpty ? nil : tabId))
+    }
+}
+
+/// An accessibility identifier only when there is one: a withheld id ("")
+/// sets none, as the web's native strip sets no `id` attribute (row 302).
+struct AxIdentifierIfAny: ViewModifier {
+    let id: String
+    func body(content: Content) -> some View {
+        if id.isEmpty {
+            content
+        } else {
+            content.accessibilityIdentifier(id)
+        }
     }
 }
 
