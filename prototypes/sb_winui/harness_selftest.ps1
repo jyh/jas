@@ -3894,13 +3894,13 @@ $eNotRun = New-SbEngRun 'pen_alternates' 2 @('VERDICT: REFUSED: the plan has no 
 $eZero = New-SbEngRun 'swatch_library_save' 0 @('VERDICT: compared=0 mismatches=0', 'KINDS-VERDICT: PASS(pairs=0; known: none)')
 Test-Case 'engine dialogs: the line prints pass, fail and not-run, each named' {
     Get-SbEngineDialogsLine -Runs @($ePass, $eFail, $eNotRun, $ePass2) -Wanted 4
-} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 promoted=0 pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=2/4 fail=1 notrun=1 promoted=0 pass=boolean_options(5),layer_options(12) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=pen_alternates(REFUSED: the plan has no addressable leaf) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: a PASS at compared=0 is refused, a NOT RUN that says so' {
     Get-SbEngineDialogsLine -Runs @($eZero) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=swatch_library_save(a pass at compared=0 compares nothing) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: a run short of the wanted count is torn, never a smaller denominator' {
     Get-SbEngineDialogsLine -Runs @($ePass) -Wanted 3
-} 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran)'
+} 'ENGINE-DIALOGS NOT RUN(torn: 1 of 3 engine dialogs ran) (report: line 1 gates only a promoted dialog)'
 # jas 799's notes 1 and 2: the shapes the first arms did not build. An engine
 # refusal names the engine's reason, not rendered_tree's `plan=False`; a run with
 # no VERDICT row is a NOT RUN that says so; a FAIL at mismatches=0 (exit 1 from
@@ -3910,13 +3910,13 @@ $eNoRow = New-SbEngRun 'boolean_options' 2 @('start: pid=0 waited=30 refusal=the
 $eKinds = New-SbEngRun 'scale_options' 1 @('VERDICT: compared=10 mismatches=0', 'GAPS: PASS(known: none)', 'KINDS-VERDICT: FAIL(new: radio->RadioButton:2)')
 Test-Case 'engine dialogs: an engine refusal names the engine''s reason, not plan=False' {
     Get-SbEngineDialogsLine -Runs @($eRefused) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=pen_alternates(engine refused: status=4 error={"class":"MissingTarget"}) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=pen_alternates(engine refused: status=4 error={"class":"MissingTarget"}) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: a run with no VERDICT row is a NOT RUN that says so' {
     Get-SbEngineDialogsLine -Runs @($eNoRow) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=boolean_options(no verdict row) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=boolean_options(no verdict row) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: a FAIL at mismatches=0 names the verdict that failed it' {
     Get-SbEngineDialogsLine -Runs @($eKinds) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 promoted=0 pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=1 notrun=0 promoted=0 pass=- fail=scale_options(compared=10 mismatches=0; KINDS-VERDICT: FAIL[new: radio->RadioButton:2]) notrun=- witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 # jas 802's notes: (A) the no-engine refusal carries no status= or error=, so its
 # reason is the text after `--`; (B) a real engine error's detail has spaces, and
 # the error is read whole up to the row's ui-tid=.
@@ -3928,13 +3928,13 @@ $eSpaced = New-SbEngRun 'swatch_options' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REF
 $eKnob = New-SbEngRun 'Bad Id' 2 @("12:00:00`tRUSTFAIL DIALOG OPEN REFUSED -- SB_DIALOG_OPEN='Bad Id' is not a dialog id ([a-z0-9_]+)", 'VERDICT: NOT RUN (plan=False uia=True)')
 Test-Case 'engine dialogs: the no-engine refusal is the shell''s, and names its reason' {
     Get-SbEngineDialogsLine -Runs @($eNoEngine) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=layer_options(shell refused: no engine) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=layer_options(shell refused: no engine) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: a malformed knob is the shell''s refusal, never the engine''s' {
     Get-SbEngineDialogsLine -Runs @($eKnob) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=Bad Id(shell refused: SB_DIALOG_OPEN=''Bad Id'' is not a dialog id [[a-z0-9_]+]) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=Bad Id(shell refused: SB_DIALOG_OPEN=''Bad Id'' is not a dialog id [[a-z0-9_]+]) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: an engine error with a spaced detail is read whole' {
     Get-SbEngineDialogsLine -Runs @($eSpaced) -Wanted 1
-} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=swatch_options(engine refused: status=4 error={"class":"MissingTarget","detail":"no dialog named swatch_options in the workspace"}) witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=0/1 fail=0 notrun=1 promoted=0 pass=- fail=- notrun=swatch_options(engine refused: status=4 error={"class":"MissingTarget","detail":"no dialog named swatch_options in the workspace"}) witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
 Test-Case 'engine dialogs: none wanted prints nothing' {
     "[$(Get-SbEngineDialogsLine -Runs @() -Wanted 0)]"
 } '[]'
@@ -3963,7 +3963,13 @@ Test-Case 'nightly: a promoted engine dialog that stops running reds the night' 
 } 'RED(items=1/1 panels=1/1 dialogs=1/2; first: dialog pen_alternates exit=2)'
 Test-Case 'engine dialogs: the line counts the promoted among its runs' {
     Get-SbEngineDialogsLine -Runs @($ePass, $eFail) -Wanted 2 -Promoted @('boolean_options', 'not_run_tonight')
-} 'ENGINE-DIALOGS engine-dialogs=1/2 fail=1 notrun=0 promoted=1 pass=boolean_options(5) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=- witness=default-render(params {})'
+} 'ENGINE-DIALOGS engine-dialogs=1/2 fail=1 notrun=0 promoted=1 pass=boolean_options(5) fail=color_picker(compared=22 mismatches=6; KINDS-VERDICT: FAIL[new: radio_group->ABSENT:6]) notrun=- witness=default-render(params {}) (report: line 1 gates only a promoted dialog)'
+# jas STATUS-flask 1050 item 1 (row 301's twin): no tool reds on the nightly's
+# CORPUS or ENGINE-DIALOGS body lines (line 1 folds every gating line), so
+# each says in its own text that it is a report.
+Test-Case 'nightly CORPUS line: the counts, labelled a report' {
+    Get-SbNightlyCorpusLine -Items 118 -Panels 30 -Dialogs 5 -Uncovered 3 -Promoted 1
+} 'CORPUS items=118 panels=30 dialogs=5 dialogs-uncovered=3 promoted=1 (report: line 1 is checked against these counts)'
 Test-Case 'promotion list: read from its JSON, every id an engine dialog' {
     (Get-SbPromotedEngineDialogs -Json '{"_source":"t","promoted":["a_options","b_options"]}' -Known @('a_options', 'b_options', 'c_options')) -join ','
 } 'a_options,b_options'
