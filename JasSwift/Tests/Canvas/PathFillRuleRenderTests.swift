@@ -88,28 +88,36 @@ private func installThinCalligraphicBrush() {
 // MARK: - 1. The strokeBrush branch
 
 @Test func brushedPathFillHonoursEvenOddRule() {
-    installThinCalligraphicBrush()
-    defer { setCanvasBrushLibraries([:]) }
-    let evenodd = renderDonut(Path(
-        d: donutCommands, fill: Fill(color: black),
-        stroke: Stroke(color: black, width: 1.0),
-        strokeBrush: "t/thin", fillRule: .evenodd))
-    #expect(evenodd.ring > 0, "the ring must be painted")
-    #expect(evenodd.hole == 0,
-            "a brushed even-odd path must leave the hole empty")
+    // Row 303: set, install and paint inside one registry transaction,
+    // so a parallel test's write cannot land between them.
+    withCanvasBrushRegistry {
+        installThinCalligraphicBrush()
+        defer { setCanvasBrushLibraries([:]) }
+        let evenodd = renderDonut(Path(
+            d: donutCommands, fill: Fill(color: black),
+            stroke: Stroke(color: black, width: 1.0),
+            strokeBrush: "t/thin", fillRule: .evenodd))
+        #expect(evenodd.ring > 0, "the ring must be painted")
+        #expect(evenodd.hole == 0,
+                "a brushed even-odd path must leave the hole empty")
+    }
 }
 
 @Test func brushedPathFillUnderNonZeroFillsTheHole() {
-    // The other half of the contract: nonzero is not rewritten to
-    // even-odd. Same geometry, opposite rule, opposite result — this is
-    // also what proves the probe point is inside the fill at all.
-    installThinCalligraphicBrush()
-    defer { setCanvasBrushLibraries([:]) }
-    let winding = renderDonut(Path(
-        d: donutCommands, fill: Fill(color: black),
-        stroke: Stroke(color: black, width: 1.0),
-        strokeBrush: "t/thin", fillRule: .nonzero))
-    #expect(winding.hole > 0, "under nonzero the fill covers the inner square")
+    // Row 303: set, install and paint inside one registry transaction,
+    // so a parallel test's write cannot land between them.
+    withCanvasBrushRegistry {
+        // The other half of the contract: nonzero is not rewritten to
+        // even-odd. Same geometry, opposite rule, opposite result — this is
+        // also what proves the probe point is inside the fill at all.
+        installThinCalligraphicBrush()
+        defer { setCanvasBrushLibraries([:]) }
+        let winding = renderDonut(Path(
+            d: donutCommands, fill: Fill(color: black),
+            stroke: Stroke(color: black, width: 1.0),
+            strokeBrush: "t/thin", fillRule: .nonzero))
+        #expect(winding.hole > 0, "under nonzero the fill covers the inner square")
+    }
 }
 
 // MARK: - 2. The variable-width (widthPoints) branch
@@ -197,30 +205,34 @@ private func anchorDashedStroke() -> Stroke {
 /// and irrelevant. This one contrasts a FAT brush (size 14) against a HAIRLINE
 /// stroke (width 1) and probes a pixel only the brush can reach.
 @Test func theModelsBrushLibrariesReachTheCanvasRegistry() {
-    setCanvasBrushLibraries([:])            // the state a fresh session is in
-    defer { setCanvasBrushLibraries([:]) }
+    // Row 303: set, install and paint inside one registry transaction,
+    // so a parallel test's write cannot land between them.
+    withCanvasBrushRegistry {
+        setCanvasBrushLibraries([:])            // the state a fresh session is in
+        defer { setCanvasBrushLibraries([:]) }
 
-    let model = Model(document: Document(layers: [Layer(name: "L0", children: [])]))
-    model.stateStore.setDataPath("brush_libraries", [
-        "t": ["brushes": [["slug": "fat", "type": "calligraphic",
-                           "angle": 0.0, "roundness": 100.0, "size": 14.0]]],
-    ])
-    installCanvasBrushRegistry(from: model)
+        let model = Model(document: Document(layers: [Layer(name: "L0", children: [])]))
+        model.stateStore.setDataPath("brush_libraries", [
+            "t": ["brushes": [["slug": "fat", "type": "calligraphic",
+                               "angle": 0.0, "roundness": 100.0, "size": 14.0]]],
+        ])
+        installCanvasBrushRegistry(from: model)
 
-    // A horizontal hairline across the middle. A width-1 plain stroke covers
-    // roughly y=49...51; a size-14 calligraphic nib covers ~y=43...57.
-    let line = Path(d: [.moveTo(20, 50), .lineTo(80, 50)],
-                    fill: nil,
-                    stroke: Stroke(color: black, width: 1.0),
-                    strokeBrush: "t/fat", fillRule: .nonzero)
-    let (ctx, buf) = makeBitmap()
-    defer { buf.deallocate() }
-    drawElement(ctx, .path(line))
+        // A horizontal hairline across the middle. A width-1 plain stroke covers
+        // roughly y=49...51; a size-14 calligraphic nib covers ~y=43...57.
+        let line = Path(d: [.moveTo(20, 50), .lineTo(80, 50)],
+                        fill: nil,
+                        stroke: Stroke(color: black, width: 1.0),
+                        strokeBrush: "t/fat", fillRule: .nonzero)
+        let (ctx, buf) = makeBitmap()
+        defer { buf.deallocate() }
+        drawElement(ctx, .path(line))
 
-    let onTheLine = alphaAt(buf, 50, 50)
-    let farOffTheLine = alphaAt(buf, 50, 45)   // only a fat brush reaches here
+        let onTheLine = alphaAt(buf, 50, 50)
+        let farOffTheLine = alphaAt(buf, 50, 45)   // only a fat brush reaches here
 
-    #expect(onTheLine > 0, "something must be drawn at all")
-    #expect(farOffTheLine > 0,
-            "the FAT brush must have painted 5pt off the centreline; a hairline plain stroke cannot reach here, so this pixel is what separates the brush arm from the fallback")
+        #expect(onTheLine > 0, "something must be drawn at all")
+        #expect(farOffTheLine > 0,
+                "the FAT brush must have painted 5pt off the centreline; a hairline plain stroke cannot reach here, so this pixel is what separates the brush arm from the fallback")
+    }
 }
