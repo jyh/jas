@@ -122,7 +122,7 @@ if ($Only) {
 }
 $promoted = @($promoted | Where-Object { $engineDialogs -ccontains $_ })
 $dialogsWanted = $dialogs.Count + $promoted.Count
-$lines.Add("CORPUS items=$($scripts.Count) panels=$($panelIds.Count) dialogs=$($dialogs.Count) dialogs-uncovered=$uncoveredDialogs promoted=$($promoted.Count)")
+$lines.Add((Get-SbNightlyCorpusLine -Items $scripts.Count -Panels $panelIds.Count -Dialogs $dialogs.Count -Uncovered $uncoveredDialogs -Promoted $promoted.Count))
 
 # ---- build once: capture_desktop, then the cdylib lane LAST (the last lane to
 # touch target/ decides what the shell loads), then the shell. prove_e2e.ps1

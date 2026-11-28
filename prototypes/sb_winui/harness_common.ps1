@@ -4701,11 +4701,18 @@ function Get-SbPromotedEngineDialogs {
 # `promoted=<p>` counts the runs whose dialog gates (Promoted); the rest are
 # advisory. A short run is torn, never a smaller denominator. Empty when none
 # are wanted.
+# jas STATUS-flask 1050 item 1: line 1 folds every gating body line, and no
+# tool reds on these two, so each says in its own text that it is a report.
+$SbEngineDialogsReport = '(report: line 1 gates only a promoted dialog)'
+function Get-SbNightlyCorpusLine([int]$Items, [int]$Panels, [int]$Dialogs, [int]$Uncovered, [int]$Promoted) {
+    "CORPUS items=$Items panels=$Panels dialogs=$Dialogs dialogs-uncovered=$Uncovered promoted=$Promoted (report: line 1 is checked against these counts)"
+}
+
 function Get-SbEngineDialogsLine {
     param($Runs = @(), [int]$Wanted = 0, [string[]]$Promoted = @())
     if ($Wanted -eq 0) { return '' }
     $runs = @($Runs | Where-Object { $null -ne $_ })
-    if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran)" }
+    if ($runs.Count -lt $Wanted) { return "ENGINE-DIALOGS NOT RUN(torn: $($runs.Count) of $Wanted engine dialogs ran) $SbEngineDialogsReport" }
     $pass = @(); $fail = @(); $notrun = @(); $gating = 0
     foreach ($r in $runs) {
         if ($Promoted -ccontains "$($r.Dialog)") { $gating++ }
@@ -4714,7 +4721,7 @@ function Get-SbEngineDialogsLine {
     }
     $show = { param($xs) if ($xs.Count -eq 0) { '-' } else { $xs -join ',' } }
     "ENGINE-DIALOGS engine-dialogs=$($pass.Count)/$($runs.Count) fail=$($fail.Count) notrun=$($notrun.Count) promoted=$gating " +
-        "pass=$(& $show $pass) fail=$(& $show $fail) notrun=$(& $show $notrun) witness=default-render(params {})"
+        "pass=$(& $show $pass) fail=$(& $show $fail) notrun=$(& $show $notrun) witness=default-render(params {}) $SbEngineDialogsReport"
 }
 
 # The panel ids the nightly walks, from the panel specs' texts (in file order):
