@@ -3604,13 +3604,28 @@ internal static class ProbeWire
     /// <summary>
     /// jas STATUS-flask 1042 item 3: the PROBE row's <c>doc=</c> field and the
     /// document bytes it reads, from <c>jas_document_is_open</c>'s answer and
-    /// <c>jas_document_json</c>'s bytes.
+    /// <c>jas_document_json</c>'s bytes. After the last tab closes the engine
+    /// still answers with the closed document, so 0 (closed) is <c>none</c> with
+    /// NO bytes, and the probe reads no document; 1 is <c>open</c>; 255 (a null
+    /// engine) or any other value is <c>unknown</c> and keeps the bytes, as the
+    /// probe read them before it asked.
     /// </summary>
-    internal static (string State, string Doc) Doc(byte openRc, string engineDoc) => ("open", engineDoc);
+    internal static (string State, string Doc) Doc(byte openRc, string engineDoc) =>
+        DocumentWire.OpenOf(openRc) switch
+        {
+            true => ("open", engineDoc),
+            false => ("none", ""),
+            null => ("unknown", engineDoc),
+        };
 
-    /// <summary>The PROBE row's <c>doc-sha=</c>: the digest of the document bytes it reads.</summary>
+    /// <summary>
+    /// The PROBE row's <c>doc-sha=</c>: <c>NONE</c> when no document is open,
+    /// written as the sha and never hashed (as plan_sha and tab_sha are), so a
+    /// closed document cannot pass for a reading; <c>EMPTY</c> for an empty
+    /// read of an open one; otherwise the digest of the bytes.
+    /// </summary>
     internal static string DocSha(string state, string doc, Func<string, string> sha) =>
-        doc.Length == 0 ? "EMPTY" : sha(doc);
+        state == "none" ? "NONE" : doc.Length == 0 ? "EMPTY" : sha(doc);
 }
 
 /// <summary>
