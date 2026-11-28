@@ -2324,6 +2324,36 @@ Test-Case 'probe selection: counted only from an array, so null is 0 and never o
     @(@('null', '[]', '[{"path":[0,1]}]', '[{"path":[0,1]},{"path":[0,2]}]') | ForEach-Object {
         Get-SbProbeSelectionCount ('{"selection":' + $_ + '}' | ConvertFrom-Json) }) -join '|'
 } '0|0|1|2'
+# jas STATUS-flask 1057 item 3: the doc=none guard's PERMANENT driver. (a) A
+# REAL closed-document probe and its certificate line, captured on Windows
+# (selftest_fixtures/closed_doc, README there): the guard refuses that probe by
+# name, the certificate carries exactly that refusal, and its selection counts
+# 0. (b) prove_e2e.ps1 CALLS the guard, inside an `if` that exits, before its
+# first selection count and read-back, read from the script's own syntax
+# tree, so deleting the call reds here, not only in a nightly.
+Test-Case 'doc=none driver: the captured closed-document probe is refused by name, and its certificate carries that refusal' {
+    $fx = Join-Path (Join-Path $PSScriptRoot 'selftest_fixtures') 'closed_doc'
+    $pr = [System.IO.File]::ReadAllText((Join-Path $fx 'probe.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $cert = ([System.IO.File]::ReadAllText((Join-Path $fx 'cert.txt'), [System.Text.Encoding]::UTF8)).Trim()
+    $why = Get-SbProbeDocRefusal $pr
+    "refusal=[$why] cert-carries-it=$($null -ne $why -and $cert.EndsWith(' verdict=NOT RUN -- ' + $why)) selection=$(Get-SbProbeSelectionCount $pr)"
+} 'refusal=[doc=none: no document was open at the read] cert-carries-it=True selection=0'
+Test-Case 'doc=none driver: prove_e2e calls the guard, in an if that exits, before it counts a selection or reads back' {
+    $errs = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'prove_e2e.ps1'), [ref]$null, [ref]$errs)
+    $cmds = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))
+    $at = { param($name) @($cmds | Where-Object { $_.GetCommandName() -eq $name } | ForEach-Object { $_.Extent.StartOffset } | Sort-Object) }
+    $guard = @(& $at 'Get-SbProbeDocRefusal')
+    $sel = @(& $at 'Get-SbProbeSelectionCount'); $rb = @(& $at 'Compare-SbReadBack')
+    $exits = $false
+    if ($guard.Count -gt 0) {
+        $call = @($cmds | Where-Object { $_.GetCommandName() -eq 'Get-SbProbeDocRefusal' })[0]
+        $if = $call.Parent
+        while ($null -ne $if -and $if -isnot [System.Management.Automation.Language.IfStatementAst]) { $if = $if.Parent }
+        if ($null -ne $if) { $exits = @($if.Clauses[0].Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.ExitStatementAst] }, $true)).Count -gt 0 }
+    }
+    "parse-errors=$(@($errs).Count) guard=$(if ($guard.Count) { 'found' } else { 'MISSING' }) exits=$exits before-selection=$($guard.Count -gt 0 -and $sel.Count -gt 0 -and $guard[0] -lt $sel[0]) before-readback=$($guard.Count -gt 0 -and $rb.Count -gt 0 -and $guard[0] -lt $rb[0])"
+} 'parse-errors=0 guard=found exits=True before-selection=True before-readback=True'
 Test-Case 'dialog reads: reads and expectations of different lengths FAIL by name, never compare against an empty want' {
     Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(1, 3) -Expected @('artboard_options')
 } 'FAIL(2 dialog read(s) and 1 expected entry: the reader pairs them one to one)'

@@ -81,7 +81,53 @@ pub(crate) fn expands_as_foreach(el: &serde_json::Value) -> bool {
         && el.get("type").and_then(|t| t.as_str()) != Some("tree_view")
 }
 
+/// Row 302 slice 2 (ruling 1054 condition 1): the DOM id an element carries,
+/// and the template it names when it carries none. A templated id resolves
+/// only from the row's own loop variable
+/// ([`row_id`](crate::interpreter::foreach::row_id), the engine plan's own
+/// resolver); any other is withheld (`""`), with its template returned so the
+/// caller can name it as data. A static id is carried as is.
+fn dom_id(el: &serde_json::Value, ctx: &serde_json::Value) -> (String, Option<String>) {
+    let raw = el.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    if !raw.contains("{{") {
+        return (raw.to_string(), None);
+    }
+    match crate::interpreter::foreach::row_id(raw, ctx) {
+        Some(s) => (s, None),
+        None => (String::new(), Some(raw.to_string())),
+    }
+}
+
+/// Every element renders through here. A TEMPLATED id is settled once, before
+/// any renderer reads it (row 302 slice 2): the renderer receives the element
+/// with the id the engine's plan would carry, and a withheld id is named on a
+/// layout-neutral wrapper (`display:contents`, `data-id-template`), so a
+/// driver can still find the element by its template without the DOM
+/// carrying one raw string as the id of every row. ⚠️ Condition 3 (withhold a
+/// collision a resolved id takes part in) is NOT applied here: no shipped
+/// panel or dialog template resolves, and
+/// `no_panel_or_dialog_id_template_resolves_yet` (workspace.rs) reds the day
+/// one does.
 fn render_el(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    rctx: &RenderCtx,
+) -> Element {
+    if el.get("id").and_then(|v| v.as_str()).is_some_and(|s| s.contains("{{")) {
+        let (id, template) = dom_id(el, ctx);
+        let mut settled = el.clone();
+        settled["id"] = serde_json::Value::String(id);
+        let inner = render_el_settled(&settled, ctx, rctx);
+        return match template {
+            None => inner,
+            Some(t) => rsx! { div { style: "display:contents", "data-id-template": "{t}", {inner} } },
+        };
+    }
+    render_el_settled(el, ctx, rctx)
+}
+
+/// [`render_el`] after the element's id is settled.
+fn render_el_settled(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
     rctx: &RenderCtx,
@@ -155,6 +201,25 @@ fn render_children(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rende
 
 /// Expand a repeat directive: evaluate the source, then render the template
 /// once per item with the loop variable injected via Scope.
+/// One row's scope in the web's own foreach expansion: `base` with `var`
+/// bound to `item` (plus `_index: i`) and the row's own variable recorded
+/// ([`ROW_AS`](crate::interpreter::foreach::ROW_AS)), as the engine's
+/// `row_scopes` records it, so an id template resolves in the same scope in
+/// both (row 302 slice 2).
+fn repeat_row_ctx(
+    base: &serde_json::Map<String, serde_json::Value>,
+    var: &str,
+    item: &serde_json::Value,
+    i: usize,
+) -> serde_json::Value {
+    let mut item_obj = item.as_object().cloned().unwrap_or_default();
+    item_obj.insert("_index".into(), serde_json::json!(i));
+    let mut child = base.clone();
+    child.insert(var.into(), serde_json::Value::Object(item_obj));
+    child.insert(crate::interpreter::foreach::ROW_AS.into(), serde_json::json!(var));
+    serde_json::Value::Object(child)
+}
+
 fn render_repeat(
     repeat: &serde_json::Value,
     template: &serde_json::Value,
@@ -193,13 +258,7 @@ fn render_repeat(
     let mut children = Vec::new();
     if let Some(arr) = items.as_array() {
         for (i, item) in arr.iter().enumerate() {
-            let mut item_obj = item.as_object().cloned().unwrap_or_default();
-            item_obj.insert("_index".into(), serde_json::json!(i));
-
-            let mut child_map = base_map.clone();
-            child_map.insert(var_name.into(), serde_json::Value::Object(item_obj));
-            let child_ctx = serde_json::Value::Object(child_map);
-
+            let child_ctx = repeat_row_ctx(&base_map, var_name, item, i);
             children.push(render_el(template, &child_ctx, rctx));
         }
     }
@@ -10068,6 +10127,38 @@ mod tests {
     use super::*;
     use crate::geometry::element::{Color, Fill, Stroke};
     use crate::workspace::app_state::AppState;
+
+    /// Row 302 slice 2 (ruling 1054 condition 1, the web's generic renderer):
+    /// a templated id becomes what the engine's plan carries. One that reads
+    /// only the row's own variable resolves; any other is WITHHELD (no DOM
+    /// id), and its template is named beside the element as data, never as
+    /// an id. A static id is carried as is.
+    #[test]
+    fn a_dom_id_resolves_from_the_row_or_is_withheld_and_named() {
+        use crate::interpreter::foreach::ROW_AS;
+        let ctx = serde_json::json!({"it": {"k": "a"}, "g": {"k": "G"}, ROW_AS: "it"});
+        let id = |raw: &str| dom_id(&serde_json::json!({"type": "container", "id": raw}), &ctx);
+        assert_eq!(id("x_{{it.k}}"), ("x_a".to_string(), None), "the row's own variable resolves");
+        assert_eq!(id("y_{{g.k}}_{{it.k}}"), (String::new(), Some("y_{{g.k}}_{{it.k}}".to_string())),
+                   "an outer loop's variable is withheld, and the template named");
+        assert_eq!(id("z"), ("z".to_string(), None), "a static id is carried as is");
+        assert_eq!(dom_id(&serde_json::json!({"type": "text"}), &ctx), (String::new(), None), "no id, nothing named");
+    }
+
+    /// Row 302 slice 2: the web's own foreach expansion records the row's
+    /// variable, as the engine's `row_scopes` does, so the renderer resolves
+    /// in the same scope the plan resolves in.
+    #[test]
+    fn a_web_repeat_row_records_its_own_variable() {
+        use crate::interpreter::foreach::{row_id, ROW_AS};
+        let base: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_value(serde_json::json!({"keep": 1, ROW_AS: "outer"})).unwrap();
+        let row = repeat_row_ctx(&base, "brush", &serde_json::json!({"slug": "s"}), 2);
+        assert_eq!(row[ROW_AS], "brush", "innermost wins");
+        assert_eq!(row["brush"], serde_json::json!({"slug": "s", "_index": 2}));
+        assert_eq!(row["keep"], 1, "the outer scope is kept");
+        assert_eq!(row_id("t_{{brush.slug}}_{{brush._index}}", &row).as_deref(), Some("t_s_2"));
+    }
 
     /// Row 189: a `spacer` that declares `style.width` is exactly that wide and
     /// does not grow; only a spacer with no width is flexible. The width may be

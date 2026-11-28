@@ -61,3 +61,26 @@ private func scope(_ v: String, _ row: [String: Any]) -> [String: Any] {
     ])
     #expect(got.sorted() == ["d_x", "d_y"])
 }
+
+// Row 302 slice 2: the Mac's generic renderer (`YamlElementView`) carries the
+// identifier the engine's plan carries. Twin of the web's
+// `a_dom_id_resolves_from_the_row_or_is_withheld_and_named` (renderer.rs).
+@Test func yamlAxIdentifierResolvesFromTheRowOrIsWithheld() {
+    let ctx: [String: Any] = ["it": ["k": "a"], "g": ["k": "G"], rowAsKey: "it"]
+    #expect(yamlAxIdentifier(["id": "x_{{it.k}}"], ctx) == "x_a", "the row's own variable resolves")
+    #expect(yamlAxIdentifier(["id": "y_{{g.k}}_{{it.k}}"], ctx) == "", "an outer loop's variable is withheld")
+    #expect(yamlAxIdentifier(["id": "z"], ctx) == "z", "a static id is carried as is")
+    #expect(yamlAxIdentifier(["type": "text"], ctx) == "", "no id")
+}
+
+// Twin of `a_web_repeat_row_records_its_own_variable`: the Mac's foreach
+// expansion records the row's variable, innermost winning.
+@Test func repeatItemBindingsRecordTheRowsOwnVariable() {
+    let b = repeatItemBindings("brush", item: ["slug": "s"], index: 2)
+    #expect(b[rowAsKey] as? String == "brush")
+    #expect((b["brush"] as? [String: Any])?["_index"] as? Int == 2)
+    var scope: [String: Any] = ["keep": 1, rowAsKey: "outer"]
+    scope.merge(b) { _, new in new }
+    #expect(scope[rowAsKey] as? String == "brush", "innermost wins")
+    #expect(rowId("t_{{brush.slug}}_{{brush._index}}", scope) == "t_s_2")
+}
