@@ -214,14 +214,17 @@ struct YamlElementView: View {
             // the flex path: in the Color panel all 32 elements read
             // `cp_content` and `cp_hex` could not be found (level-2 script
             // `color.hex`, docs/TESTING.md section 6).
+            // Row 302 slice 2: the identifier the engine's plan carries (a
+            // row's own template resolved, any other withheld), never a raw
+            // template shared by every row.
             bodyContent
                 .accessibilityElement(children: .contain)
-                .accessibilityIdentifier((element["id"] as? String) ?? "")
-                .fifoTarget((element["id"] as? String) ?? "")
+                .accessibilityIdentifier(yamlAxIdentifier(element, context))
+                .fifoTarget(yamlAxIdentifier(element, context))
         } else {
             bodyContent
-                .accessibilityIdentifier((element["id"] as? String) ?? "")
-                .fifoTarget((element["id"] as? String) ?? "")
+                .accessibilityIdentifier(yamlAxIdentifier(element, context))
+                .fifoTarget(yamlAxIdentifier(element, context))
         }
     }
 
@@ -540,9 +543,7 @@ struct YamlElementView: View {
     }
 
     private func itemBindings(_ varName: String, item: [String: Any], index: Int) -> [String: Any] {
-        var data = item
-        data["_index"] = index
-        return [varName: data]
+        repeatItemBindings(varName, item: item, index: index)
     }
 
     /// Evaluate a source expression and return the result as a list of dictionaries.

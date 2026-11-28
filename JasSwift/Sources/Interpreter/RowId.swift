@@ -56,6 +56,28 @@ private func rowIdText(_ v: Any) -> String? {
     }
 }
 
+/// Twin of the web's `dom_id` (renderer.rs, row 302 slice 2): the
+/// accessibility identifier (and FIFO target) `YamlElementView` gives an
+/// element. A templated id resolves only from the row's own variable, any
+/// other is withheld (""), and a static id is carried as is. ⚠️ Condition 3 is
+/// not applied in the generic renderer; `no_panel_or_dialog_id_template_resolves_yet`
+/// (workspace.rs) reds the day a shipped panel or dialog template resolves.
+func yamlAxIdentifier(_ element: [String: Any], _ context: [String: Any]) -> String {
+    let raw = element["id"] as? String ?? ""
+    guard raw.contains("{{") else { return raw }
+    return rowId(raw, context) ?? ""
+}
+
+/// One foreach row's bindings in the Mac's own expansion: `varName` bound to
+/// `item` plus `_index`, and the row's own variable recorded (`rowAsKey`),
+/// as the engine's `row_scopes` records it. Twin of the web's
+/// `repeat_row_ctx` (row 302 slice 2).
+func repeatItemBindings(_ varName: String, item: [String: Any], index: Int) -> [String: Any] {
+    var data = item
+    data["_index"] = index
+    return [varName: data, rowAsKey: varName]
+}
+
 /// Twin of `interpreter::foreach::duplicate_resolved_ids` (ruling 1054
 /// condition 3): the ids to withhold from EVERY carrier, each non-empty id
 /// carried more than once when at least one carrier RESOLVED it. Two static

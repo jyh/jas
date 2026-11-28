@@ -322,6 +322,65 @@ pub fn canvas_strip_ids(bar: &serde_json::Value, docs: &[(String, bool)]) -> Vec
     pairs.iter().map(|(t, c)| (keep(&t.0), keep(&c.0))).collect()
 }
 
+/// Row 302 slice 2's gate instrument: every `panels.<name>` and
+/// `dialogs.<name>` id template that ruling 1054's rule CAN resolve, read
+/// statically (every `{{...}}` a plain path from the innermost foreach
+/// variable, `as` defaulting to `item`), as `"<where>: <template>"`. The
+/// layout is not read: its one resolvable strip, `canvas_tab_bar`, is drawn
+/// natively by every port.
+pub fn resolvable_id_templates(data: &serde_json::Value) -> Vec<String> {
+    fn own_paths(t: &str, var: &str) -> bool {
+        let mut rest = t;
+        let mut any = false;
+        while let Some(i) = rest.find("{{") {
+            let Some(j) = rest[i..].find("}}") else { return false };
+            let expr = rest[i + 2..i + j].trim();
+            let mut parts = expr.split('.');
+            if parts.next() != Some(var) {
+                return false;
+            }
+            let segs: Vec<&str> = parts.collect();
+            if segs.is_empty() || segs.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')) {
+                return false;
+            }
+            any = true;
+            rest = &rest[i + j + 2..];
+        }
+        any
+    }
+    fn walk(n: &serde_json::Value, at: &str, scope: Option<&str>, out: &mut Vec<String>) {
+        match n {
+            serde_json::Value::Object(m) => {
+                if let (Some(var), Some(id)) = (scope, m.get("id").and_then(|v| v.as_str())) {
+                    if id.contains("{{") && own_paths(id, var) {
+                        out.push(format!("{at}: {id}"));
+                    }
+                }
+                let inner = m.get("foreach").filter(|f| f.is_object())
+                    .map(|f| f.get("as").and_then(|v| v.as_str()).unwrap_or("item"));
+                for (k, v) in m {
+                    match (k.as_str(), inner) {
+                        ("foreach", _) => {}
+                        ("do", Some(var)) => walk(v, at, Some(var), out),
+                        _ => walk(v, at, scope, out),
+                    }
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|v| walk(v, at, scope, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    for top in ["panels", "dialogs"] {
+        if let Some(m) = data.get(top).and_then(|v| v.as_object()) {
+            for (name, v) in m {
+                walk(v, &format!("{top}.{name}"), None, &mut out);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +444,42 @@ mod tests {
                    ["tab|c_0", "tab|c_1", "tab|c_2"], "a static id is carried as is, even repeated");
         assert_eq!(s(&canvas_strip_ids(&bar("c_1", "c_{{doc.index}}"), &docs)),
                    ["|c_0", "|", "|c_2"], "condition 3: a static id equal to a resolved one is withheld from both");
+    }
+
+    /// Row 302 slice 2's DEFERRAL, made a gate (card: a deferral with a
+    /// checkable precondition). The generic renderers (the web's `render_el`,
+    /// the Mac's `YamlElementView`) carry condition 1 but NOT condition 3 (a
+    /// collision a resolved id takes part in), because no panel or dialog in
+    /// the shipped workspace has an id template that can resolve: the only
+    /// ones that do are the canvas tab strip's, which every port draws
+    /// natively through `canvas_tab_ids`. The day a panel or dialog gains one,
+    /// this reds and condition 3 is owed in both generic renderers.
+    #[test]
+    fn no_panel_or_dialog_id_template_resolves_yet() {
+        let ws = Workspace::load().expect("workspace");
+        let found = resolvable_id_templates(&ws.data);
+        assert!(found.is_empty(),
+            "row 302: a panel or dialog id template now resolves from its row, so condition 3 \
+             (withhold a collision a resolved id takes part in) is owed in the web's render_el and \
+             the Mac's YamlElementView: {found:?}");
+    }
+
+    /// The gate's instrument, driven: it finds a resolvable template planted
+    /// in a dialog, and passes over an outer-loop one and a layout one.
+    #[test]
+    fn resolvable_id_templates_finds_a_planted_one() {
+        let data = json!({
+            "panels": {"p": {"content": {"type": "col", "children": [
+                {"type": "col", "foreach": {"source": "gs", "as": "g"}, "do": {
+                    "type": "col", "foreach": {"source": "g.items", "as": "it"},
+                    "do": {"type": "button", "id": "o_{{g.k}}_{{it.k}}"}}},
+            ]}}},
+            "dialogs": {"d": {"content": {"type": "col", "foreach": {"source": "xs"},
+                "do": {"type": "button", "id": "x_{{item.name}}"}}}},
+            "layout": {"type": "col", "foreach": {"source": "docs", "as": "doc"},
+                "do": {"type": "row", "id": "t_{{doc.index}}"}},
+        });
+        assert_eq!(resolvable_id_templates(&data), ["dialogs.d: x_{{item.name}}"]);
     }
 
     #[test]
