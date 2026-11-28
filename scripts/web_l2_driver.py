@@ -674,6 +674,134 @@ def run_fit(br):
     return out
 
 
+# --menus: rows 296 and 298's live arm. The tallest panel menu (Brushes, its
+# hamburger in the right dock) and its `items_from` submenu must stay in the
+# window: in a wide window the flyout ran 18 px past the right edge (it was
+# placed as if 180 px wide; it is 211), and in a short one its bottom ran off
+# with no scroll, so its last item could not be reached. Each condition is a
+# window size; a reading the arm could not take is NOT RUN, never a PASS.
+MENUS_SIZES = ((1400, 900), (900, 560))
+MENUS_HAMBURGER = "brushes_panel_content_menu"
+MENUS_TAB = "brushes_panel_content_tab"
+MENUS_SUBMENU_ITEM = "Open Brush Library"
+
+
+def _box_outside(b, vw, vh):
+    """The edges a rect crosses, as text ("" when it is inside)."""
+    out = []
+    if b["x"] < -0.5:
+        out.append(f"left {-b['x']:.0f}")
+    if b["y"] < -0.5:
+        out.append(f"top {-b['y']:.0f}")
+    if b["x"] + b["width"] > vw + 0.5:
+        out.append(f"right {b['x'] + b['width'] - vw:.0f}")
+    if b["y"] + b["height"] > vh + 0.5:
+        out.append(f"bottom {b['y'] + b['height'] - vh:.0f}")
+    return " ".join(out)
+
+
+def menus_line(readings):
+    """The MENUS line from {(w, h): reading}. A reading is a dict with the
+    rects `flyout`, `last` (the last item, after scrolling it into view) and
+    `submenu` (or None when hovering its item opened no menu beside the
+    flyout), `held` (the submenu still open after the mouse moved into it),
+    or `error`. A missing condition, an error or an unread rect is NOT RUN."""
+    if not readings:
+        return "MENUS NOT RUN (no condition read)"
+    fails = []
+    for vw, vh in MENUS_SIZES:
+        tag = f"{vw}x{vh}"
+        r = readings.get((vw, vh))
+        if r is None:
+            return f"MENUS NOT RUN ({tag}: not read)"
+        if "error" in r:
+            return f"MENUS NOT RUN ({tag}: {r['error']})"
+        if r.get("flyout") is None or r.get("last") is None:
+            return f"MENUS NOT RUN ({tag}: the flyout or its last item has no rect)"
+        bad = []
+        for name in ("flyout", "last"):
+            o = _box_outside(r[name], vw, vh)
+            if o:
+                bad.append(f"{name} off {o}")
+        if r.get("submenu") is None:
+            bad.append("no submenu beside the flyout")
+        else:
+            o = _box_outside(r["submenu"], vw, vh)
+            if o:
+                bad.append(f"submenu off {o}")
+            if not r.get("held"):
+                bad.append("submenu closed when the mouse moved into it")
+        if bad:
+            fails.append(f"{tag}: " + ", ".join(bad))
+    n = len(MENUS_SIZES)
+    if not fails:
+        return f"MENUS {n}/{n}"
+    return f"MENUS RED {n - len(fails)}/{n} (" + "; ".join(fails) + ")"
+
+
+def run_menus(br):
+    """-> {(w, h): reading}, one fresh page per window size, by the person's
+    route: show the Brushes tab, press its hamburger, scroll to the last item,
+    hover the submenu item, then move into the submenu."""
+    out = {}
+    for vw, vh in MENUS_SIZES:
+        page = None
+        try:
+            page = br._b.new_context(viewport={"width": vw, "height": vh}, device_scale_factor=1).new_page()
+            page.goto(br.url)
+            page.wait_for_selector(".jas-menu-title", timeout=HOOK_TIMEOUT_MS)
+            page.wait_for_timeout(1500)
+            tab = page.locator(f'[id="{MENUS_TAB}"]')
+            if tab.count() != 1:
+                out[(vw, vh)] = {"error": f"{tab.count()} elements carry id {MENUS_TAB}"}
+                continue
+            tab.scroll_into_view_if_needed()
+            tab.click()
+            page.wait_for_timeout(400)
+            ham = page.locator(f'[id="{MENUS_HAMBURGER}"]')
+            hb = ham.bounding_box() if ham.count() == 1 else None
+            if hb is None:
+                out[(vw, vh)] = {"error": f"no rect for {MENUS_HAMBURGER}"}
+                continue
+            ham.dispatch_event("mousedown", {"bubbles": True,
+                                             "clientX": hb["x"] + hb["width"] / 2,
+                                             "clientY": hb["y"] + hb["height"] / 2})
+            flyout = page.locator(f'[id="{MENUS_HAMBURGER}_items"]')
+            flyout.wait_for(timeout=5000)
+            r = {"flyout": flyout.bounding_box()}
+            items = flyout.locator(".jas-menu-item")
+            last = items.nth(items.count() - 1)
+            last.scroll_into_view_if_needed()
+            page.wait_for_timeout(200)
+            r["last"] = last.bounding_box()
+            flyout.evaluate("e => { e.scrollTop = 0; }")
+            page.wait_for_timeout(200)
+            item = flyout.locator(".jas-menu-item", has_text=MENUS_SUBMENU_ITEM)
+            ib = item.bounding_box() if item.count() == 1 else None
+            if ib is None:
+                out[(vw, vh)] = {"error": f"{item.count()} items read {MENUS_SUBMENU_ITEM!r}"}
+                continue
+            page.mouse.move(ib["x"] + ib["width"] / 2, ib["y"] + ib["height"] / 2)
+            page.wait_for_timeout(400)
+            subs = [m for m in page.locator('[role="menu"]').all()
+                    if m.get_attribute("id") != f"{MENUS_HAMBURGER}_items" and m.is_visible()]
+            r["submenu"] = subs[0].bounding_box() if subs else None
+            r["held"] = False
+            if r["submenu"] is not None:
+                sb = r["submenu"]
+                page.mouse.move(sb["x"] + sb["width"] / 2, sb["y"] + min(10, sb["height"] / 2))
+                page.wait_for_timeout(400)
+                r["held"] = any(m.get_attribute("id") != f"{MENUS_HAMBURGER}_items" and m.is_visible()
+                                for m in page.locator('[role="menu"]').all())
+            out[(vw, vh)] = r
+        except Exception as e:
+            out[(vw, vh)] = {"error": f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}"}
+        finally:
+            if page is not None:
+                page.context.close()
+    return out
+
+
 def dock_summary(cases):
     """The DOCK line for cases that carry a preview dict after the four
     fields _plan.dock_line reads (kind, edge, status, detail)."""
@@ -1105,7 +1233,7 @@ def run(args):
     paths = script_paths(args.only)
     br = Browser(args.url)
     lines = []
-    dock = dock_cases = fit = layers = abfill = at = proposed = None
+    dock = dock_cases = fit = layers = abfill = at = proposed = menus = None
     try:
         absent, present = br.hook_present(False), br.hook_present(True)
         lines.append(f"HOOK without-flag={'PRESENT' if absent else 'absent'} with-flag={'present' if present else 'ABSENT'}")
@@ -1135,6 +1263,8 @@ def run(args):
             dock = dock_summary(dock_cases)
         if args.fit:
             fit = fit_line(run_fit(br)) if not not_run else "FIT NOT RUN (" + not_run + ")"
+        if args.menus:
+            menus = menus_line(run_menus(br)) if not not_run else "MENUS NOT RUN (" + not_run + ")"
         if args.layers:
             layer_cases = [] if not_run else [(c,) + run_layers_case(br, c) for c in _plan.LAYERS_CASES]
             for c, st, d in layer_cases:
@@ -1176,6 +1306,8 @@ def run(args):
         body.append(layers + " (the --layers check: the Mac harness's `layers` cases on the web, rows 256/264/266)")
     if fit is not None:
         body.append(fit + " (the --fit check: row 66's live arm; the dock's tab bars and sideways scroll under overlay and classic 16-px scrollbars)")
+    if menus is not None:
+        body.append(menus + " (the --menus check: rows 296/298; the Brushes panel menu, its last item and its submenu inside the window, wide and short)")
     body += lines
     print("\n".join(body))
     if args.receipt:
@@ -1185,7 +1317,8 @@ def run(args):
         return 0   # the verdict rides in the receipt; only a run that wrote none fails the step (jas, #836 review)
     dock_ok = dock_cases is None or (bool(dock_cases) and all(c[2] == "PASS" for c in dock_cases))
     fit_ok = fit is None or fit == f"FIT {len(FIT_CONDITIONS)}/{len(FIT_CONDITIONS)}"
-    return 0 if " verdict=GREEN " in first and dock_ok and fit_ok else 1
+    menus_ok = menus is None or menus == f"MENUS {len(MENUS_SIZES)}/{len(MENUS_SIZES)}"
+    return 0 if " verdict=GREEN " in first and dock_ok and fit_ok and menus_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -1601,6 +1734,34 @@ def self_test():
     check(fit_line({"overlay": good, "classic": dict(goodc, vbar=0)}).startswith("FIT NOT RUN (classic: the dock shows no scrollbar width"),
           "classic bars that did not take are NOT RUN, never an overlay read under the classic label")
     check(fit_line({}) == "FIT NOT RUN (no condition read)", "no readings is NOT RUN")
+    # --menus (rows 296/298). The rects are the probe's own readings: main
+    # be311876 (the defect) and the fix's local build, 11-27.
+    def _bx(x, y, w, h):
+        return {"x": x, "y": y, "width": w, "height": h}
+    mgood = {(1400, 900): {"flyout": _bx(1176, 59, 211, 623), "last": _bx(1181, 650, 201, 28),
+                           "submenu": _bx(1001, 586, 180, 38), "held": True},
+             (900, 560): {"flyout": _bx(676, 0, 211, 560), "last": _bx(681, 528, 201, 28),
+                          "submenu": _bx(501, 522, 180, 38), "held": True}}
+    check(menus_line(mgood) == "MENUS 2/2", f"the fix's readings are MENUS 2/2 ({menus_line(mgood)})")
+    mmain = {(1400, 900): {"flyout": _bx(1207, 59, 211, 623), "last": _bx(1212, 650, 201, 28),
+                           "submenu": None, "held": False},
+             (900, 560): {"flyout": _bx(707, 0, 211, 623), "last": _bx(712, 590, 201, 28),
+                          "submenu": None, "held": False}}
+    check(menus_line(mmain) == "MENUS RED 0/2 (1400x900: flyout off right 18, last off right 13, no submenu beside the flyout; "
+                               "900x560: flyout off right 18 bottom 63, last off right 13 bottom 58, no submenu beside the flyout)",
+          f"main's readings are RED and name every edge ({menus_line(mmain)})")
+    check(menus_line({**mgood, (900, 560): dict(mgood[(900, 560)], held=False)})
+          == "MENUS RED 1/2 (900x560: submenu closed when the mouse moved into it)",
+          "a submenu that closes on the way into it is RED")
+    check(menus_line({**mgood, (1400, 900): dict(mgood[(1400, 900)], submenu=_bx(1300, 586, 180, 38))})
+          == "MENUS RED 1/2 (1400x900: submenu off right 80)", "a submenu past the right edge is RED")
+    check(menus_line({(1400, 900): mgood[(1400, 900)]}) == "MENUS NOT RUN (900x560: not read)",
+          "a missing window size is NOT RUN, never a PASS of the one read")
+    check(menus_line({**mgood, (1400, 900): {"error": "no rect for x"}}) == "MENUS NOT RUN (1400x900: no rect for x)",
+          "an error is NOT RUN and names itself")
+    check(menus_line({**mgood, (900, 560): dict(mgood[(900, 560)], last=None)})
+          == "MENUS NOT RUN (900x560: the flyout or its last item has no rect)", "an unread rect is NOT RUN")
+    check(menus_line({}) == "MENUS NOT RUN (no condition read)", "no readings is NOT RUN")
     check(fit_line({"overlay": dict(good, cut=["input#prop_x 131/90"]), "classic": goodc})
           == "FIT RED 1/2 (FAIL overlay: bad=0 hscroll=0 cut=1 [input#prop_x 131/90])",
           "a control drawn past its cell on ANY dock tab is RED and named (row 193)")
@@ -1687,6 +1848,8 @@ def main(argv):
                     help="also pick White in Artboard Options' Fill dropdown and read the artboard (row 270)")
     ap.add_argument("--layers", action="store_true",
                     help="also run the Layers tree cases R1 R4-R7 on the shared verdicts (row 266)")
+    ap.add_argument("--menus", action="store_true",
+                    help="also read the Brushes panel menu and its submenu against a wide and a short window (rows 296/298)")
     ap.add_argument("--advisory", action="store_true",
                     help="exit 0 once the receipt is written; the verdict rides in the receipt")
     args = ap.parse_args(argv)
