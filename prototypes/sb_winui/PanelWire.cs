@@ -1827,9 +1827,11 @@ internal static class PanelMenuWire
     /// <summary>
     /// jas STATUS-flask 1045: where an `open_menu` popup opens against the
     /// control that asked, as a FlyoutPlacementMode member's name (the shell
-    /// parses it, so a misspelling throws at the first popup).
+    /// parses it, so a misspelling throws at the first popup): BELOW it, as the
+    /// Mac (#1141) and the web place it. WinUI still flips a flyout that has no
+    /// room below.
     /// </summary>
-    internal const string PopupPlacement = "Top";
+    internal const string PopupPlacement = "Bottom";
 
     /// <summary>
     /// Row 284 (jas STATUS-flask 1027): the AutomationId of a panel-menu item,
