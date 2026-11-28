@@ -8801,6 +8801,24 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Row 304: a PATH-addressed event is NAMED by the id the plan carries
+    /// for that row, so a refusal on the canvas tab's close button names
+    /// `canvas_tab_close_0`, never the raw template `canvas_tab_close_{{doc.index}}`
+    /// (the door renamed the event to the resolved node's raw `id`).
+    #[test]
+    fn a_path_addressed_refusal_names_the_rows_resolved_id() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let tabs = canvas_tabs(e);
+        let (_, kids) = &tabs[0];
+        let close = kids.iter().find(|k| k["type"] == "icon_button" && k["static"]["icon"] == "close")
+            .expect("the close button is placed");
+        let ev = serde_json::json!({"widget": "", "event": "double_click", "path": close["path"]});
+        let (reply, err) = behave(e, "canvas_pane", &ev.to_string());
+        assert_eq!(err, refusal("EmptyBehavior", "canvas_tab_close_0"), "reply {reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 115: THE TAB MARKS A MODIFIED DOCUMENT, from the spec's label
     /// (`{{doc.name}}{{if doc.is_modified then ' *' else ''}}`), so a shell
     /// drawing the plan shows "name *" with no rule of its own.
