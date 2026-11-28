@@ -284,6 +284,14 @@ HELPER_CALL_RULES = [
      [("test_fixtures/expected", "{}.json")]),
     ("swift", None, r'assertWorkspaceFixture\("(\w+)"',
      [("test_fixtures/expected", "{}.json")]),
+    # Rust's two operation runners take a path-shaped argument, which (b)
+    # already counts as a mention; these rules make the same calls RUNNER
+    # claims for (b2), as Swift's helpers below are.
+    ("rust", None, r'run_operation_fixture\("operations/([\w.]+)"\)',
+     [("test_fixtures/operations", "{}")]),
+    ("rust", None,
+     r'run_workspace_operation_fixture\("workspace_operations/([\w.]+)"\)',
+     [("test_fixtures/workspace_operations", "{}")]),
     ("swift", None, r'runOperationFixture\("([\w.]+)"\)',
      [("test_fixtures/operations", "{}")]),
     ("swift", None, r'runWorkspaceOperationFixture\("([\w.]+)"\)',
@@ -508,12 +516,19 @@ def extract_claims(
     name_list_rules: list,
     helper_rules: list,
     family_dirs: list[str],
+    mentions: bool = True,
 ) -> dict[str, set[tuple[str, str]]]:
     """Direct (non-transitive, non-glob) claims per consumer as a set of
-    (family_key, filename) pairs."""
+    (family_key, filename) pairs.
+
+    ``mentions=False`` keeps only the RUNNER claims: name lists and helper
+    calls, the forms that are the list a runner iterates or the call that
+    runs one fixture. A path-shaped literal or a Python path segment can be
+    a runner's argument, a comment or another test's array, and this
+    extraction cannot tell which, so check (b2) does not count it."""
     claims: dict[str, set[tuple[str, str]]] = {c: set() for c in CONSUMERS}
 
-    for consumer, files in consumer_files.items():
+    for consumer, files in (consumer_files.items() if mentions else ()):
         for path in files:
             text = _read(path)
             if not text:
@@ -630,8 +645,13 @@ def run_checks(
     families: dict[str, list[str]],
     direct_claims: dict[str, set[tuple[str, str]]],
     glob_rules: list,
+    runner_claims: dict[str, set[tuple[str, str]]] | None = None,
+    limits: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Returns (errors, warnings)."""
+    """Returns (errors, warnings). With ``runner_claims`` (from
+    ``extract_claims(..., mentions=False)``) it also runs check (b2) and
+    appends to ``limits`` the lines naming which symmetric families (b2)
+    covers and which it does not."""
     errors: list[str] = []
     warnings: list[str] = []
     rows = manifest.get("families", {})
@@ -692,6 +712,10 @@ def run_checks(
         glob_claimed.setdefault(family, set()).add(consumer)
         direct_claims.setdefault(consumer, set()).update(
             (family, f) for f in files)
+        if runner_claims is not None:
+            # A glob is a runner: it iterates the whole directory.
+            runner_claims.setdefault(consumer, set()).update(
+                (family, f) for f in files)
 
     # Transitive closure per consumer (port-symmetry needs per-port
     # closures), then the global union.
@@ -729,6 +753,47 @@ def run_checks(
         for name in sorted(swift - rust):
             report(family, name, "port-symmetry",
                    f"{family}/{name} is claimed by swift but not rust")
+
+    # (b2) RUNNER symmetry (row 295). (b) counts a mention as a claim, so a
+    # fixture one port's runner skips passes (b) whenever that port names it
+    # anywhere else (row 293: Swift ran 116 of 118 scripts while a second
+    # test's `admitted` array named the other two). Here each port's claim
+    # is what its RUNNER reaches: its name lists, helper calls and globs,
+    # closed over their data references. A family in which either port has
+    # no runner rule cannot be judged, and is NAMED, never passed.
+    if runner_claims is not None:
+        run_closed = {c: transitive_close(repo_root, s)
+                      for c, s in runner_claims.items()}
+        covered: list[str] = []
+        uncovered: list[str] = []
+        for family, row in sorted(rows.items()):
+            if not row.get("port_symmetry") or family not in families:
+                continue
+            rust = {n for fam, n in run_closed.get("rust", set())
+                    if fam == family}
+            swift = {n for fam, n in run_closed.get("swift", set())
+                     if fam == family}
+            if not rust or not swift:
+                uncovered.append(family)
+                continue
+            covered.append(family)
+            for name in sorted(rust - swift):
+                report(family, name, "runner-symmetry",
+                       f"{family}/{name} is run by rust's runner but not "
+                       f"swift's (a mention elsewhere is not a run)")
+            for name in sorted(swift - rust):
+                report(family, name, "runner-symmetry",
+                       f"{family}/{name} is run by swift's runner but not "
+                       f"rust's (a mention elsewhere is not a run)")
+        if limits is not None:
+            limits.append(
+                f"runner-symmetry (b2) COVERED {len(covered)}: "
+                f"{', '.join(covered) or 'none'}")
+            limits.append(
+                f"runner-symmetry (b2) NOT COVERED {len(uncovered)} (a port "
+                f"has no name-list, helper-call or glob rule there, so only "
+                f"(b), which counts mentions, judges them): "
+                f"{', '.join(uncovered) or 'none'}")
 
     # (d) orphans — skipped for glob-claimed families (vacuous by
     # construction; the manifest notes say so).
@@ -769,8 +834,13 @@ def run_real() -> int:
     claims = extract_claims(
         REPO_ROOT, consumer_files, NAME_LIST_RULES, HELPER_CALL_RULES,
         family_dirs)
+    runners = extract_claims(
+        REPO_ROOT, consumer_files, NAME_LIST_RULES, HELPER_CALL_RULES,
+        family_dirs, mentions=False)
+    limits: list[str] = []
     errors, warnings = run_checks(
-        REPO_ROOT, manifest, families, claims, DIRECTORY_GLOB_RULES)
+        REPO_ROOT, manifest, families, claims, DIRECTORY_GLOB_RULES,
+        runner_claims=runners, limits=limits)
     gap_errors, gap_lines = check_coverage_gaps(manifest)
     errors = errors + gap_errors + check_vector_floors(REPO_ROOT, families)
 
@@ -779,6 +849,8 @@ def run_real() -> int:
     # blind spot this list exists to remove.
     n_gaps = len(manifest.get("coverage_gaps") or [])
     for line in gap_lines:
+        print(line)
+    for line in limits:
         print(line)
 
     for w in warnings:
@@ -1139,6 +1211,106 @@ def self_test() -> int:
         real_families = discover_families(REPO_ROOT)
         check(check_vector_floors(REPO_ROOT, real_families) == [],
               "the shipped preservation corpus meets its declared floor")
+
+    # --- (b2) RUNNER symmetry (row 295) -------------------------------
+    # Row 293's shape, rebuilt: Swift's runner list named 116 scripts while
+    # Rust globbed the directory, and a SECOND Swift test named the two
+    # missing scripts in an `admitted` array. Port symmetry (b) counts any
+    # path-shaped mention as a claim, so it passed while Swift ran neither.
+    # (b2) compares what each port's RUNNER claims (name lists, helper calls
+    # and directory globs, closed over their data references), never a
+    # mention, and names every symmetric family it cannot see.
+    with tempfile.TemporaryDirectory(prefix="corpus_selftest_b2_") as r2:
+        for n in ("a", "b"):
+            _write(r2, f"test_fixtures/gestures/{n}.json", json.dumps(
+                [{"name": n, "expected_json": f"{n}.expected.json"}]))
+            _write(r2, f"test_fixtures/gestures/{n}.expected.json", "{}")
+            _write(r2, f"test_fixtures/scripts/{n}.json", json.dumps(
+                {"expected_json": f"{n}.expected.json"}))
+            _write(r2, f"test_fixtures/scripts/{n}.expected.json", "{}")
+        _write(r2, "test_fixtures/tables/t.json", "[]")
+        _write(r2, "consumers/rust.rs", "\n".join([
+            'const GESTURES: &[&str] = &["a.json", "b.json"];',
+            'let t = read_fixture("tables/t.json");',
+        ]))
+        _write(r2, "consumers/glob.rs", "// reads test_fixtures/scripts\n")
+        _write(r2, "consumers/swift.swift", "\n".join([
+            'private let gestures = ["a.json"]',
+            '// a second test names the one the runner skips:',
+            'let admitted = ["gestures/b.json"]',
+            'private let scripts = ["a.json"]',
+            'let other = ["scripts/b.json"]',
+            'let t = readFixture("tables/t.json")',
+        ]))
+        fams2 = discover_families(r2)
+        files2 = {
+            "rust": [os.path.join(r2, "consumers/rust.rs")],
+            "swift": [os.path.join(r2, "consumers/swift.swift")],
+            "reference": [], "scripts": [],
+        }
+        rules2 = [
+            ("rust", "consumers/rust.rs", "const GESTURES",
+             [("test_fixtures/gestures", "{}")]),
+            ("swift", "consumers/swift.swift", "private let gestures",
+             [("test_fixtures/gestures", "{}")]),
+            ("swift", "consumers/swift.swift", "private let scripts",
+             [("test_fixtures/scripts", "{}")]),
+        ]
+        globs2 = [("rust", "consumers/glob.rs", "test_fixtures/scripts")]
+        sym = {"kind": "fixtures", "required_consumers": ["rust", "swift"],
+               "port_symmetry": True}
+        manifest2 = {"families": {"test_fixtures/gestures": dict(sym),
+                                  "test_fixtures/scripts": dict(sym),
+                                  "test_fixtures/tables": dict(sym)}}
+        dirs2 = ["gestures", "scripts", "tables"]
+        mentions2 = extract_claims(r2, files2, rules2, [], dirs2)
+        runners2 = extract_claims(r2, files2, rules2, [], dirs2,
+                                  mentions=False)
+        check(("test_fixtures/gestures", "b.json") in mentions2["swift"]
+              and ("test_fixtures/gestures", "b.json") not in runners2["swift"],
+              "b2: a mention credits swift with b.json; its runner does not")
+        check(("test_fixtures/tables", "t.json") not in runners2["rust"],
+              "b2: a read_fixture path literal is a mention, never a runner")
+        limits2: list[str] = []
+        errs2, _ = run_checks(r2, manifest2, fams2, mentions2, globs2,
+                              runner_claims=runners2, limits=limits2)
+
+        def has2(check_name: str, needle: str) -> bool:
+            return any(e.startswith(check_name + ":") and needle in e
+                       for e in errs2)
+
+        check(not has2("port-symmetry", "gestures/b.json"),
+              "b2: the old check (b) is satisfied by the mention (the hole)")
+        check(has2("runner-symmetry", "test_fixtures/gestures/b.json"),
+              "b2: rust's runner runs gestures/b.json and swift's does not")
+        check(not has2("runner-symmetry", "gestures/a.json")
+              and not has2("runner-symmetry", "a.expected.json"),
+              "b2: a fixture both runners run, and its golden, are clean")
+        check(has2("runner-symmetry", "test_fixtures/scripts/b.json"),
+              "b2: a glob runs scripts/b.json and the list skips it")
+        check(not has2("runner-symmetry", "scripts/a.json"),
+              "b2: glob against list agrees on the script the list names")
+        check(not has2("runner-symmetry", "tables"),
+              "b2: a family no runner rule covers is not judged by (b2)")
+        check(any("test_fixtures/tables" in ln and "NOT COVERED" in ln
+                  for ln in limits2),
+              f"b2: the uncovered symmetric family is NAMED ({limits2})")
+        check(any("COVERED" in ln and "test_fixtures/gestures" in ln
+                  and "NOT COVERED" not in ln for ln in limits2),
+              "b2: the covered families are named beside the verdict")
+        # Matched runners: swift's list grows to the directory -> clean.
+        _write(r2, "consumers/swift.swift", "\n".join([
+            'private let gestures = ["a.json", "b.json"]',
+            'private let scripts = ["a.json", "b.json"]',
+            'let t = readFixture("tables/t.json")',
+        ]))
+        runners3 = extract_claims(r2, files2, rules2, [], dirs2,
+                                  mentions=False)
+        mentions3 = extract_claims(r2, files2, rules2, [], dirs2)
+        errs3, _ = run_checks(r2, manifest2, fams2, mentions3, globs2,
+                              runner_claims=runners3, limits=[])
+        check(not any(e.startswith("runner-symmetry:") for e in errs3),
+              f"b2: matched runners are clean ({errs3})")
 
     if failures:
         print(f"self-test: {len(failures)} FAILURE(S)")
