@@ -9477,6 +9477,7 @@
                     "content": "{{doc.name}}{{if doc.is_modified then ' *' else ''}}"
                   },
                   {
+                    "id": "canvas_tab_close_{{doc.index}}",
                     "type": "icon_button",
                     "icon": "close",
                     "summary": "Close tab",

@@ -8768,6 +8768,39 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// jas STATUS-flask 1050 item 2, ruled (A) in 1054: THE TAB'S CLOSE BUTTON
+    /// HAS AN IDENTITY, `canvas_tab_close_<index>`, resolved from the spec's id
+    /// template because it reads only the row's own loop variable (`doc`). The tab
+    /// itself carries `canvas_tab_<index>` the same way. Identity, not an address:
+    /// the door stays path-addressed (condition 2, below).
+    #[test]
+    fn the_canvas_tab_close_button_has_an_identity() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let tabs = canvas_tabs(e);
+        assert_eq!(tabs.len(), 1, "one tab for the one document: {tabs:?}");
+        let (tab, kids) = &tabs[0];
+        assert_eq!(tab["id"], "canvas_tab_0", "the tab's own id: {tab}");
+        let close: Vec<_> = kids.iter().filter(|k| k["type"] == "icon_button" && k["static"]["icon"] == "close").collect();
+        assert_eq!(close.len(), 1, "one close button: {kids:?}");
+        assert_eq!(close[0]["id"], "canvas_tab_close_0", "the close button's id: {}", close[0]);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Ruling 1054 condition 2: A RESOLVED ID IS IDENTITY, NEVER AN ADDRESS. An
+    /// event that names a foreach leaf by its resolved id (with no plan path) is
+    /// refused by name, `NotAddressable`, as an event naming the raw template is.
+    #[test]
+    fn an_event_naming_a_resolved_row_id_is_not_addressable() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let before = doc_json(e);
+        let (reply, err) = behave(e, "canvas_pane", r#"{"widget":"canvas_tab_close_0","event":"click"}"#);
+        assert_eq!(err, refusal("NotAddressable", "canvas_tab_close_0"), "reply {reply}");
+        assert_eq!(doc_json(e), before, "a refused event edits nothing");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// Row 115: THE TAB MARKS A MODIFIED DOCUMENT, from the spec's label
     /// (`{{doc.name}}{{if doc.is_modified then ' *' else ''}}`), so a shell
     /// drawing the plan shows "name *" with no rule of its own.
