@@ -185,6 +185,8 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
     let is_modal = dlg_def.get("modal").and_then(|m| m.as_bool()).unwrap_or(true);
     let anchor = ds.anchor;
 
+    // Row 291: the box's identity, for a level-2 driver's dialog step.
+    let dialog_dom_id = crate::workspace::test_hook::dialog_dom_id(&ds.id);
     // Optional width from dialog spec
     let width_style = if let Some(w) = dlg_def.get("width").and_then(|w| w.as_f64()) {
         format!("width:{w}px;")
@@ -231,6 +233,8 @@ pub fn YamlDialogView(dialog_ctx: Signal<Option<DialogState>>) -> Element {
 
             // Dialog container
             div {
+                id: "{dialog_dom_id}",
+                role: "dialog",
                 style: "background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.25); {width_style} {container_pos_style}",
                 onmousedown: move |evt: Event<MouseData>| {
                     evt.stop_propagation();

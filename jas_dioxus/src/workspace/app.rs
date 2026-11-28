@@ -682,6 +682,19 @@ pub fn App() -> Element {
     // mouseup can open a dialog a TOOL opened; the context provider is
     // registered below alongside the other menu-bar signals). ---
     let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
+    // Row 291: the level-2 hook's `dialog()` reads this signal, which exists
+    // only from here, after the hook itself was installed (a no-op without
+    // the hook's flag).
+    use_hook(move || {
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::workspace::test_hook::install_dialog(yaml_dialog);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = yaml_dialog;
+        }
+    });
 
     let on_mousedown = {
         let act = act.clone();

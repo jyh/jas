@@ -1308,8 +1308,12 @@ pub(crate) fn build_dock_groups(
                     if !group_collapsed && active_panel_info.is_some() {
                         {
                             let (active_kind, active_idx) = active_panel_info.unwrap();
+                            // Row 291: the identity a level-2 driver presses.
+                            let menu_dom_id = crate::workspace::test_hook::panel_menu_dom_id(
+                                panel_kind_to_content_id(active_kind));
                             rsx! {
                                 div {
+                                    id: "{menu_dom_id}",
                                     style: "{tab_bar_menu_style()}",
                                     onmousedown: move |evt: Event<MouseData>| {
                                         evt.stop_propagation();

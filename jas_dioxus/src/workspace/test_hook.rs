@@ -52,6 +52,27 @@ pub fn tab_dom_id(content_id: &str) -> String {
     format!("{content_id}_tab")
 }
 
+/// The DOM id of a dock group's hamburger (row 291): the ACTIVE panel's
+/// content id plus `_menu`, as the Mac's `panelMenuButtonId` names it and as
+/// the shared planner's panel_menu act names it (`mac_l2_plan.MENU_SUFFIX`).
+pub fn panel_menu_dom_id(content_id: &str) -> String {
+    format!("{content_id}_menu")
+}
+
+/// The DOM id of that hamburger's flyout (row 291), whose action items carry
+/// `role="menuitem"` and are picked by the title a person reads.
+pub fn panel_menu_items_dom_id(content_id: &str) -> String {
+    format!("{}_items", panel_menu_dom_id(content_id))
+}
+
+/// The DOM id of an open dialog's box (row 291): the dialog's id plus
+/// `_dialog`, the id the shared planner's dialog act names
+/// (`mac_l2_plan.DIALOG_SUFFIX`), so a driver finds a widget inside the
+/// dialog that is open and nowhere else.
+pub fn dialog_dom_id(dialog_id: &str) -> String {
+    format!("{dialog_id}_dialog")
+}
+
 /// The DOM id of a dock GROUP's root element (row 111: Window > <panel>
 /// scrolls the group it leaves a panel in into view). One statement, used by
 /// the render and by the scroll.
@@ -135,6 +156,74 @@ pub(crate) fn state(st: &AppState, name: &str) -> String {
         Some(v) => serde_json::json!({ name: v }).to_string(),
         None => refuse(format!("panel {content_id:?} has no key {:?}", parts[2])),
     }
+}
+
+/// `seed`: a script's `app_state` in its ruled form,
+/// `{"panels": {<content id>: {<key>: <value>}}}` (row 291), applied as the
+/// engine's seed door applies it: each key passes the shared ruled check
+/// (`panel_seed::check_seed`: a panel the workspace has, a key its `state:`
+/// declares) and is written in the store's form (`seed_panel_value`), here
+/// through the app's own `set_panel_state` route, so the panels read it back
+/// as a person's own selection. Every key is checked before any is written,
+/// so a refused seed changes nothing. Answers `{"seeded": <n>}` or
+/// `{"refused": "<why>"}`; the engine's refusals keep their kind as the
+/// message's first word (`UnknownPanel …`, `UndeclaredPanelKey …`).
+///
+/// Refused by name, and not yet delivered: a seed of the Stroke panel (its
+/// write re-applies the field to the selection, a different route), and a
+/// STRING value (the `set_panel_state` route reads a string as an
+/// expression). No script in the corpus seeds either.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // called by the wasm binding
+pub(crate) fn seed(st: &mut AppState, json: &str) -> String {
+    use crate::interpreter::panel_seed::{check_seed, seed_panel_value};
+    let refuse = |why: String| serde_json::json!({ "refused": why }).to_string();
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return refuse("the seed does not parse as JSON".into());
+    };
+    let Some(top) = v.as_object() else { return refuse("the seed is not an object".into()) };
+    let mut writes = vec![];
+    for (k, panels) in top {
+        if k != "panels" {
+            return refuse(format!("app_state.{k} is not a ruled form: seed a panel's declared state as \
+                                   app_state.panels.<content id>.<key>"));
+        }
+        let Some(panels) = panels.as_object() else { return refuse("app_state.panels is not an object".into()) };
+        for (pid, keys) in panels {
+            let Some(keys) = keys.as_object() else {
+                return refuse(format!("app_state.panels.{pid} is not an object"));
+            };
+            if pid == "stroke_panel_content" {
+                return refuse(format!("app_state.panels.{pid}: the web does not seed the Stroke panel yet \
+                                       (its write re-applies the field to the selection)"));
+            }
+            for (key, val) in keys {
+                if let Err(why) = check_seed(pid, key) {
+                    return refuse(why.to_string());
+                }
+                if val.is_string() {
+                    return refuse(format!("app_state.panels.{pid}.{key} is a string: the web's set_panel_state \
+                                           reads a string as an expression, so a string seed is not delivered yet"));
+                }
+                writes.push((pid.clone(), key.clone(), seed_panel_value(val)));
+            }
+        }
+    }
+    let n = writes.len();
+    for (pid, key, val) in writes {
+        let mut sps = serde_json::Map::new();
+        sps.insert("panel".into(), serde_json::Value::String(pid));
+        sps.insert("key".into(), serde_json::Value::String(key));
+        sps.insert("value".into(), val);
+        crate::interpreter::renderer::apply_set_panel_state_with_ctx(&sps, st, None);
+    }
+    serde_json::json!({ "seeded": n }).to_string()
+}
+
+/// `dialog`: the open dialog's id in the Mac FIFO `dialog` read's reply form,
+/// `{"dialog": <id> | null}` (row 291).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // called by the wasm binding
+pub(crate) fn dialog_reply(open: Option<&str>) -> String {
+    serde_json::json!({ "dialog": open }).to_string()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -230,18 +319,58 @@ mod wasm_api {
             set(&obj, "state", cb.as_ref());
             cb.forget();
         }
+        {
+            let app = app.clone();
+            let rev = revision;
+            let cb = Closure::<dyn Fn(String) -> String>::new(move |json: String| {
+                let Ok(mut st) = app.try_borrow_mut() else { return String::new() };
+                let out = seed(&mut st, &json);
+                drop(st);
+                { let mut r = rev; r += 1; }
+                out
+            });
+            set(&obj, "seed", cb.as_ref());
+            cb.forget();
+        }
         set(&js_sys::global(), "__jasTest", &JsValue::from(obj));
+    }
+
+    /// Row 291: add `dialog()` to `window.__jasTest` (installed above, when the
+    /// flag is set), reading the app's dialog signal, which is created after
+    /// the hook is installed.
+    pub fn install_dialog(dialog: Signal<Option<crate::interpreter::dialog_view::DialogState>>) {
+        let Ok(obj) = js_sys::Reflect::get(&js_sys::global(), &"__jasTest".into()) else { return };
+        if !obj.is_object() {
+            return;
+        }
+        let cb = Closure::<dyn Fn() -> String>::new(move || {
+            let open = dialog.try_read().ok().and_then(|d| d.as_ref().map(|s| s.id.clone()));
+            dialog_reply(open.as_deref())
+        });
+        set(&js_sys::Object::from(obj), "dialog", cb.as_ref());
+        cb.forget();
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use wasm_api::install;
+pub(crate) use wasm_api::{install, install_dialog};
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const FIXTURE: &str = include_str!("../../../test_fixtures/svg/three_rects.svg");
+
+    /// Row 291: a dock group's hamburger is `<active panel content id>_menu`
+    /// (the Mac's `panelMenuButtonId`, and the id the shared planner's
+    /// panel_menu act names), and its flyout is that id plus `_items`.
+    #[test]
+    fn the_panel_menu_ids_derive_from_the_content_id() {
+        assert_eq!(panel_menu_dom_id("artboards_panel_content"), "artboards_panel_content_menu");
+        assert_eq!(panel_menu_items_dom_id("artboards_panel_content"), "artboards_panel_content_menu_items");
+        assert_ne!(panel_menu_dom_id("artboards_panel_content"), tab_dom_id("artboards_panel_content"));
+        assert_eq!(dialog_dom_id("artboard_options"), "artboard_options_dialog", "the planner's DIALOG_SUFFIX");
+    }
 
     #[test]
     fn the_flag_is_one_whole_parameter() {
@@ -359,6 +488,50 @@ mod tests {
         assert!(refused("layers.renaming_element").contains("panel.<kind>.<key>"), "malformed");
         assert!(refused("panel.nosuch.key").contains("nosuch"), "an unknown panel");
         assert!(refused("panel.layers.nosuch_key").contains("nosuch_key"), "an absent key");
+    }
+
+    /// Row 291: `seed` applies a script's `app_state` (the ruled form) through
+    /// the app's own `set_panel_state` route, after the engine's ruled check,
+    /// so the Artboards menu reads the seeded selection as a person's own.
+    /// Everything the engine refuses is refused here by the same kind, with
+    /// nothing changed.
+    #[test]
+    fn seed_sets_a_declared_key_as_a_person_would_and_refuses_by_name() {
+        let mut st = AppState::new();
+        open(&mut st, FIXTURE, "three_rects.svg");
+        let v = |s: String| serde_json::from_str::<serde_json::Value>(&s).expect("seed answers JSON");
+        let ids = |st: &AppState| crate::panels::panel_menu::panel_menu_ctx("artboards_panel_content", st)
+            ["active_document"]["artboards_panel_selection_ids"].clone();
+        assert_eq!(ids(&st), serde_json::json!([]), "the control: nothing selected");
+        assert_eq!(v(seed(&mut st, r#"{"panels":{"artboards_panel_content":{"artboards_panel_selection":["a1"]}}}"#)),
+                   serde_json::json!({"seeded": 1}));
+        assert_eq!(ids(&st), serde_json::json!(["a1"]), "the seed is the selection the menu reads");
+        let refused = |st: &mut AppState, json: &str| {
+            let r = v(seed(st, json));
+            r.get("refused").and_then(|x| x.as_str()).map(str::to_string)
+                .unwrap_or_else(|| panic!("{json} was not refused: {r}"))
+        };
+        assert!(refused(&mut st, r#"{"panels":{"no_such_panel_content":{"k":1}}}"#).starts_with("UnknownPanel "));
+        assert!(refused(&mut st, r#"{"panels":{"artboards_panel_content":{"not_a_declared_key":1}}}"#)
+            .starts_with("UndeclaredPanelKey "));
+        assert!(refused(&mut st, r##"{"fill_color":"#fff"}"##).contains("not a ruled form"));
+        assert!(refused(&mut st, r#"{"panels":{"artboards_panel_content":3}}"#).contains("is not an object"));
+        assert!(refused(&mut st, "{nope").contains("does not parse"));
+        assert!(refused(&mut st, r#"{"panels":{"stroke_panel_content":{"cap":"round"}}}"#)
+            .contains("stroke_panel_content"), "the stroke panel's write is not this route: refused by name");
+        // A refused seed changes nothing, even when a key before it was good.
+        assert!(refused(&mut st, r#"{"panels":{"artboards_panel_content":{"artboards_panel_selection":[],"zz_undeclared":1}}}"#)
+            .starts_with("UndeclaredPanelKey "));
+        assert_eq!(ids(&st), serde_json::json!(["a1"]), "no refusal changed the state");
+    }
+
+    /// Row 291: `dialog` answers the open dialog in the Mac FIFO `dialog`
+    /// read's reply form, `{"dialog": <id> | null}`.
+    #[test]
+    fn the_dialog_reply_is_the_mac_form() {
+        let v = |s: String| serde_json::from_str::<serde_json::Value>(&s).unwrap();
+        assert_eq!(v(dialog_reply(Some("artboard_options"))), serde_json::json!({"dialog": "artboard_options"}));
+        assert_eq!(v(dialog_reply(None)), serde_json::json!({"dialog": null}));
     }
 
     #[test]

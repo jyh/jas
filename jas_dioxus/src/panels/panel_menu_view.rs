@@ -35,12 +35,23 @@ pub fn PanelMenuOverlay() -> Element {
     let menu_width = 180.0_f64;
     let x = (open.x - menu_width).max(0.0);
     let y = open.y;
+    // Row 291: and DOWN from a press in the window's upper half, UP from one
+    // in its lower half, so a group near the bottom keeps its menu on screen.
+    #[cfg(target_arch = "wasm32")]
+    let viewport_h: f64 = web_sys::window()
+        .and_then(|w| w.inner_height().ok())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(900.0);
+    #[cfg(not(target_arch = "wasm32"))]
+    let viewport_h: f64 = 900.0;
+    let (menu_top, menu_bottom) = flyout_vertical(y, viewport_h);
     let kind = open.kind;
     let addr = open.addr;
     // One expression context per menu render, shared by every row's
     // `enabled_when` / `checked_when` — the same context `panel_is_enabled` /
     // `panel_is_checked` build per call.
     let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+    let items_dom_id = crate::workspace::test_hook::panel_menu_items_dom_id(content_id);
     let menu_ctx = super::panel_menu::panel_menu_ctx(content_id, &st);
         // Flip submenu to the left when the parent menu is near
         // the right edge of the viewport — otherwise left:100%
@@ -137,9 +148,14 @@ pub fn PanelMenuOverlay() -> Element {
                 } else {
                     (THEME_TEXT_HINT, "default", "0.5")
                 };
+                let disabled = if enabled { "false" } else { "true" };
                 rsx! {
                     div {
                         class: "jas-menu-item",
+                        // Row 291: an action item a level-2 driver picks by
+                        // its title, as the Mac picks it by its AX title.
+                        role: "menuitem",
+                        "aria-disabled": "{disabled}",
                         style: "padding:4px 24px 4px 16px; cursor:{cursor}; font-size:13px; color:{color}; opacity:{opacity}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                         // Stop the mousedown so the backdrop doesn't
                         // dismiss the menu before our onclick fires.
@@ -287,7 +303,9 @@ pub fn PanelMenuOverlay() -> Element {
         }
         // Menu dropdown
         div {
-            style: "position:fixed; left:{x}px; top:{y}px; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
+            id: "{items_dom_id}",
+            role: "menu",
+            style: "position:fixed; left:{x}px; top:{menu_top}; bottom:{menu_bottom}; background-color:{THEME_BG}; border-width:1px; border-style:solid; border-top-color:{THEME_BORDER}; border-right-color:{THEME_BORDER}; border-bottom-color:{THEME_BORDER}; border-left-color:{THEME_BORDER}; box-shadow:2px 2px 8px rgba(0,0,0,0.4); min-width:180px; z-index:1101; padding:4px 0; border-radius:4px;",
             onmousedown: move |evt: Event<MouseData>| {
                 evt.stop_propagation();
             },
@@ -295,5 +313,38 @@ pub fn PanelMenuOverlay() -> Element {
                 {node}
             }
         }
+    }
+}
+
+/// Row 291: where the flyout's top and bottom sit, as CSS, for a press at
+/// `y` in a window `viewport_h` tall. A press in the upper half opens the
+/// menu DOWN from the press point; one in the lower half opens it UP, its
+/// bottom at the press point, as a native menu flips when there is no room
+/// below. Both offsets are always stated (a property the new style drops is
+/// restored by dioxus's style update, rows 121-122). Live, a group near the
+/// window's bottom opened its menu below the window, where no item past the
+/// edge could be reached.
+pub(crate) fn flyout_vertical(y: f64, viewport_h: f64) -> (String, String) {
+    if y > viewport_h / 2.0 {
+        ("auto".to_string(), format!("{}px", (viewport_h - y).max(0.0)))
+    } else {
+        (format!("{}px", y.max(0.0)), "auto".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flyout_vertical;
+
+    #[test]
+    fn a_flyout_opens_down_from_a_high_press_and_up_from_a_low_one() {
+        let (top, bottom) = flyout_vertical(100.0, 900.0);
+        assert_eq!((top.as_str(), bottom.as_str()), ("100px", "auto"), "upper half: down from the press");
+        let (top, bottom) = flyout_vertical(880.0, 900.0);
+        assert_eq!((top.as_str(), bottom.as_str()), ("auto", "20px"), "lower half: up from the press");
+        let (top, bottom) = flyout_vertical(450.0, 900.0);
+        assert_eq!((top.as_str(), bottom.as_str()), ("450px", "auto"), "the midline opens down");
+        let (top, bottom) = flyout_vertical(1010.0, 900.0);
+        assert_eq!((top.as_str(), bottom.as_str()), ("auto", "0px"), "a press below the window pins the menu to its bottom");
     }
 }
