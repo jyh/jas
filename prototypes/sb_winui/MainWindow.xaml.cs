@@ -438,8 +438,9 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// jas §915: an act asked for a panel-menu item's rows to pop up at the
     /// control it was on (the Brushes toolbar's library button). Drawn as the
-    /// group menu's submenu is; a control no drawn view holds is refused by
-    /// name, never popped up somewhere else.
+    /// group menu's submenu is, BELOW the control (jas STATUS-flask 1045,
+    /// <see cref="PanelMenuWire.PopupPlacement"/>); a control no drawn view
+    /// holds is refused by name, never popped up somewhere else.
     /// </summary>
     private void OnPanelMenuPopup(DialogOpener at, PanelMenuRow item)
     {
@@ -454,7 +455,7 @@ public sealed partial class MainWindow : Window
         var key = _dockGroups.FirstOrDefault(kv => ReferenceEquals(kv.Value.View, view)).Key ?? "pane";
         var flyout = new MenuFlyout();
         AddMenuRows(flyout.Items, item.Rows ?? Array.Empty<PanelMenuSubRow>(), key, at.Panel, item.Index, "popup");
-        flyout.ShowAt(el);
+        flyout.ShowAt(el, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Placement = Enum.Parse<Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode>(PanelMenuWire.PopupPlacement) });
         Report($"PANEL MENU POPUP SHOWN group={key} panel={at.Panel} widget={at.Widget} index={item.Index} rows={flyout.Items.Count}");
     }
 

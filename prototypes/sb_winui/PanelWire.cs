@@ -1825,6 +1825,15 @@ internal sealed record PanelMenuSubRow(int Index, string Label, string Action, b
 internal static class PanelMenuWire
 {
     /// <summary>
+    /// jas STATUS-flask 1045: where an `open_menu` popup opens against the
+    /// control that asked, as a FlyoutPlacementMode member's name (the shell
+    /// parses it, so a misspelling throws at the first popup): BELOW it, as the
+    /// Mac (#1141) and the web place it. WinUI still flips a flyout that has no
+    /// room below.
+    /// </summary>
+    internal const string PopupPlacement = "Bottom";
+
+    /// <summary>
     /// Row 284 (jas STATUS-flask 1027): the AutomationId of a panel-menu item,
     /// its action, so a driver picks the item a script's `panel_menu` step names
     /// by the command it dispatches (TESTING.md section 6). Empty for a row with
@@ -3600,6 +3609,32 @@ internal static class ProbeWire
     /// </summary>
     internal static string DialogField(bool read, DialogReading? reading) =>
         !read ? "none" : reading is null ? "UNREADABLE" : reading.Open ? reading.Id : "none";
+
+    /// <summary>
+    /// jas STATUS-flask 1042 item 3: the PROBE row's <c>doc=</c> field and the
+    /// document bytes it reads, from <c>jas_document_is_open</c>'s answer and
+    /// <c>jas_document_json</c>'s bytes. After the last tab closes the engine
+    /// still answers with the closed document, so 0 (closed) is <c>none</c> with
+    /// NO bytes, and the probe reads no document; 1 is <c>open</c>; 255 (a null
+    /// engine) or any other value is <c>unknown</c> and keeps the bytes, as the
+    /// probe read them before it asked.
+    /// </summary>
+    internal static (string State, string Doc) Doc(byte openRc, string engineDoc) =>
+        DocumentWire.OpenOf(openRc) switch
+        {
+            true => ("open", engineDoc),
+            false => ("none", ""),
+            null => ("unknown", engineDoc),
+        };
+
+    /// <summary>
+    /// The PROBE row's <c>doc-sha=</c>: <c>NONE</c> when no document is open,
+    /// written as the sha and never hashed (as plan_sha and tab_sha are), so a
+    /// closed document cannot pass for a reading; <c>EMPTY</c> for an empty
+    /// read of an open one; otherwise the digest of the bytes.
+    /// </summary>
+    internal static string DocSha(string state, string doc, Func<string, string> sha) =>
+        state == "none" ? "NONE" : doc.Length == 0 ? "EMPTY" : sha(doc);
 }
 
 /// <summary>

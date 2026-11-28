@@ -795,14 +795,15 @@ internal sealed unsafe class Canvas : IDisposable
         PaintAndHash("PROBE");
         try
         {
-            var doc = JasCore.TakeString(JasCore.jas_document_json(_engine));
+            // jas STATUS-flask 1042 item 3: closed is doc=none with no bytes.
+            var (docState, doc) = ProbeWire.Doc(JasCore.jas_document_is_open(_engine), JasCore.TakeString(JasCore.jas_document_json(_engine)));
             var plan = Panel?.PlanJson ?? "";
             string selection;
             using (var d = System.Text.Json.JsonDocument.Parse(doc.Length == 0 ? "{}" : doc))
             {
                 selection = d.RootElement.TryGetProperty("selection", out var sel) ? sel.GetRawText() : "null";
             }
-            var docSha = doc.Length == 0 ? "EMPTY" : Sha256Of(doc);
+            var docSha = ProbeWire.DocSha(docState, doc, Sha256Of);
             var planSha = plan.Length == 0 ? "NONE" : Sha256Of(plan);
             // §260: the canvas strip's tabs (name and active state), so `tree`
             // also watches the document tab. §265: NONE when the strip is not
@@ -818,6 +819,7 @@ internal sealed unsafe class Canvas : IDisposable
                 + $"\"seq\":{_probeSeq},"
                 + $"\"surface\":\"{_lastHashSurface}\","
                 + $"\"frame_hash\":\"{frame}\","
+                + $"\"doc_state\":\"{docState}\","
                 + $"\"doc_sha\":\"{docSha}\","
                 + $"\"dialog\":\"{dialog}\","
                 + $"\"selection\":{selection},"
@@ -835,7 +837,7 @@ internal sealed unsafe class Canvas : IDisposable
             // ALONE: pulling `doc` back out of the body through a JSON parser would
             // re-serialize it (1.0 becomes 1) and compare a different document.
             System.IO.File.WriteAllText(System.IO.Path.ChangeExtension(full, ".doc.json"), doc);
-            _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc-sha={docSha} dialog={dialog} "
+            _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc={docState} doc-sha={docSha} dialog={dialog} "
                   + $"selection={selection.Replace(" ", "")} plan={Panel?.PanelId ?? "NONE"} plan-sha={planSha} tab-sha={tabSha} "
                   + $"-> {ProbePath} {Tids()}");
         }
