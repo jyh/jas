@@ -1776,10 +1776,45 @@ static class Program
             "open_artboard_options|",
             PanelMenuWire.ItemAutomationId(new PanelMenuRow(8, "item", "Artboard Options...", "open_artboard_options", true, null))
             + "|" + PanelMenuWire.ItemAutomationId(new PanelMenuRow(0, "item", "x", "", true, null)));
+        // Audit D's reading of ONE baseline probe, as a kind: "plan" (a slice proved
+        // byte-exact by the probe's own plan_sha), "none" (a probe that carries no
+        // panel plan, legitimately), or "bad" with its reason, never a skip.
+        static string ShowProbePlan((string Kind, string? Plan, string? Why) r) => r.Kind + ":" + (r.Why ?? r.Plan ?? "");
+        const string auSlice = """{"leaves":[],"height":0,"icons":[]}""";
+        var auSliceSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(auSlice))).ToLowerInvariant()[..16];
+        Eq("audit D probe: a slice that matches its plan_sha is a plan",
+            "plan:" + auSlice, ShowProbePlan(AuditProbePlan("{\"plan_sha\":\"" + auSliceSha + "\",\"plan\":" + auSlice + "}", "align_panel_content")));
+        Eq("audit D probe: a probe with no plan slice is bad, by name",
+            "bad:no plan slice", ShowProbePlan(AuditProbePlan("{\"plan_sha\":\"NONE\"}", "")));
+        // Row 284: a dock run sets no SB_PANEL, so its probe carries `"plan":null`
+        // with plan_sha NONE, and its baseline is frozen with plan_panel "".
+        Eq("audit D probe: a dock run's probe (no plan, plan_sha NONE, plan_panel \"\") carries none",
+            "none:", ShowProbePlan(AuditProbePlan("{\"plan_sha\":\"NONE\",\"plan\":null}", "")));
+        Eq("audit D probe: no plan under a baseline that names a panel is bad, by name",
+            "bad:no plan, but its baseline names plan_panel 'align_panel_content'",
+            ShowProbePlan(AuditProbePlan("{\"plan_sha\":\"NONE\",\"plan\":null}", "align_panel_content")));
+        Eq("audit D probe: a null plan whose plan_sha is a hash is bad, by its sha",
+            "bad:slice sha 74234e98afe7498f != plan_sha 0123456789abcdef",
+            ShowProbePlan(AuditProbePlan("{\"plan_sha\":\"0123456789abcdef\",\"plan\":null}", "")));
+        static (string Kind, string? Plan, string? Why) AuditProbePlan(string body, string? planPanel)
+        {
+            var at = body.LastIndexOf(",\"plan\":", StringComparison.Ordinal);
+            if (at < 0 || !body.EndsWith("}", StringComparison.Ordinal)) { return ("bad", null, "no plan slice"); }
+            var plan = body.Substring(at + 8, body.Length - at - 9);
+            var rec = System.Text.RegularExpressions.Regex.Match(body, "\"plan_sha\":\"([0-9A-Za-z]+)\"").Groups[1].Value;
+            if (plan == "null" && rec == "NONE")
+            {
+                return planPanel == "" ? ("none", null, null) : ("bad", null, $"no plan, but its baseline names plan_panel '{planPanel}'");
+            }
+            var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plan))).ToLowerInvariant()[..16];
+            if (sha != rec) { return ("bad", null, $"slice sha {sha} != plan_sha {rec}"); }
+            return ("plan", plan, null);
+        }
         // THE CLASS AUDIT, arm D (jas STATUS-flask 1024 item 1): the shell's plan
-        // readers over the WHOLE corpus of the engine's real plan bytes, the 116
+        // readers over the WHOLE corpus of the engine's real plan bytes, the
         // e2e baselines' probes (each plan sliced raw from the probe body and
-        // proved byte-exact by the probe's own plan_sha). Every plan parses for
+        // proved byte-exact by the probe's own plan_sha; a dock run's probe
+        // carries no plan, and AuditProbePlan names it). Every plan parses for
         // HitBoxes and ActiveBoxes (null is "the plan does not parse", never "no
         // boxes"), and LeafValue reads back every string value of every leaf with
         // an id, as the panel value scenes read them. A producer that renames or
@@ -1788,6 +1823,8 @@ static class Program
         while (auDir is not null && !Directory.Exists(Path.Combine(auDir.FullName, "prototypes", "sb_winui", "e2e_baselines"))) { auDir = auDir.Parent; }
         int auPlans = 0, auValues = 0;
         var auBad = new List<string>();
+        var auNoPlan = new List<string>();
+        var auDockRuns = new List<string>();
         if (auDir is not null)
         {
             foreach (var bd in Directory.GetDirectories(Path.Combine(auDir.FullName, "prototypes", "sb_winui", "e2e_baselines")).OrderBy(x => x, StringComparer.Ordinal))
@@ -1795,12 +1832,18 @@ static class Program
                 var pf = Path.Combine(bd, "probe.json");
                 if (!File.Exists(pf)) { continue; }
                 var body = File.ReadAllText(pf);
-                var at = body.LastIndexOf(",\"plan\":", StringComparison.Ordinal);
-                if (at < 0 || !body.EndsWith("}", StringComparison.Ordinal)) { auBad.Add(Path.GetFileName(bd) + ":no plan slice"); continue; }
-                var plan = body.Substring(at + 8, body.Length - at - 9);
-                var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plan))).ToLowerInvariant()[..16];
-                var rec = System.Text.RegularExpressions.Regex.Match(body, "\"plan_sha\":\"([0-9a-f]+)\"").Groups[1].Value;
-                if (sha != rec) { auBad.Add(Path.GetFileName(bd) + $":slice sha {sha} != plan_sha {rec}"); continue; }
+                var bf = Path.Combine(bd, "baseline.json");
+                string? planPanel = null;
+                if (File.Exists(bf))
+                {
+                    using var bdoc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(bf));
+                    if (bdoc.RootElement.TryGetProperty("plan_panel", out var ppEl)) { planPanel = ppEl.GetString(); }
+                }
+                if (planPanel == "") { auDockRuns.Add(Path.GetFileName(bd)); }
+                var probePlan = AuditProbePlan(body, planPanel);
+                if (probePlan.Kind == "bad") { auBad.Add(Path.GetFileName(bd) + ":" + probePlan.Why); continue; }
+                if (probePlan.Kind == "none") { auNoPlan.Add(Path.GetFileName(bd)); continue; }
+                var plan = probePlan.Plan!;
                 auPlans++;
                 if (PanelWire.HitBoxes(plan) is null) { auBad.Add(Path.GetFileName(bd) + ":HitBoxes null"); }
                 if (PanelWire.ActiveBoxes(plan) is null) { auBad.Add(Path.GetFileName(bd) + ":ActiveBoxes null"); }
@@ -1846,6 +1889,10 @@ static class Program
             "plans=corpus values=read failed=0",
             $"plans={(auPlans >= 100 ? "corpus" : auPlans.ToString(System.Globalization.CultureInfo.InvariantCulture))} values={(auValues >= 100 ? "read" : auValues.ToString(System.Globalization.CultureInfo.InvariantCulture))} failed={auBad.Count}"
             + (auBad.Count > 0 ? " " + string.Join(" | ", auBad.Take(3)) : ""));
+        // Row 284: the probes that carry no plan are exactly the dock runs, read from
+        // each baseline.json on its own, so a no-plan probe is never a silent skip.
+        Eq("audit D: a probe carries no plan exactly when its baseline is a dock run's (plan_panel \"\")",
+            string.Join(",", auDockRuns), string.Join(",", auNoPlan));
         // Row 284 (jas STATUS-flask 1027 item 2): SB_PANEL_SEED, a script's
         // app_state, read in its RULED form only (`panels.<content id>.<key>`,
         // what Rust's replay and the Mac's ScriptPanelSeeds apply). Anything

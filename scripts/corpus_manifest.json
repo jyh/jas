@@ -255,21 +255,6 @@
       },
       "notes": "The input scripts (docs/TESTING.md section 6): one per spec item, shared by level 1 (each port's core supplies the EXPECTED read-back) and level 2 (each live app). Goldens claimed transitively."
     },
-    "test_fixtures/input_scripts_proposed": {
-        "kind": "fixtures",
-        "required_consumers": [
-            "rust",
-            "swift"
-        ],
-        "port_symmetry": true,
-        "checker": null,
-        "checker_gap": "as test_fixtures/input_scripts: the scripts replay through the engine; the outcome is asserted against values read from the spec (the fill bind's white, the A4 option label's size), and against each script's own expectations: its expected_dialog list and its expected_json golden beside it (Rust structurally, Swift byte for byte). Goldens claimed transitively.",
-        "claim_style": {
-            "rust": "path list (PROPOSED in every_proposed_dialog_script_replays_to_its_outcome, src/ffi_script_replay.rs), pinned against the directory",
-            "swift": "path list (proposed in formsEveryProposedDialogScriptReplaysToItsOutcome, Tests/CrossLanguageTests.swift), pinned against the directory"
-        },
-        "notes": "PROPOSED input scripts (docs/TESTING.md section 6, row 275): scripts that use a form only some runners and drivers deliver, so no gating runner reads this directory. Both ports' level-1 forms runners replay them (the dialog step since 2026-11-25); a script moves into test_fixtures/input_scripts when every gating runner and driver (the Mac, Windows and web level 2) delivers its forms."
-    },
     "test_fixtures/gestures": {
       "kind": "fixtures",
       "required_consumers": [

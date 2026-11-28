@@ -2217,8 +2217,8 @@ Test-Case 'is: read=state with keys is REFUSED by name for its keys, not read as
 $fRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 foreach ($fp in 'fill_white', 'preset_a4') {
     $want = if ($fp -eq 'fill_white') { 'ao_fill_dropdown:commit=white' } else { 'ao_preset:commit=a4' }
-    Test-Case "is: the proposed artboard_options.$fp is ACCEPTED whole (no gesture, the dock, the seed)" {
-        $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts_proposed\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
+    Test-Case "is: the admitted artboard_options.$fp is ACCEPTED whole (no gesture, the dock, the seed)" {
+        $t = [System.IO.File]::ReadAllText((Join-Path $fRoot "test_fixtures\input_scripts\artboard_options.$fp.json"), [System.Text.Encoding]::UTF8)
         $r = Read-SbInputScript $t
         if ($null -ne $r.Refusal) { "REFUSED: $($r.Refusal)" } else { "nogesture=$($r.NoGesture) mode=$($r.Mode) panels=$($r.PanelShow) reads-after=$(@($r.DialogReads) -join ',') expect=$(@($r.ExpectedDialog) -join ',') seed=$($r.AppState)" }
     } "nogesture=True mode=dock panels=panel_menu:artboards_panel_content/open_artboard_options;dialog:artboard_options/$want;dialog:artboard_options/ao_ok:click reads-after=1,3 expect=artboard_options,none seed={`"panels`":{`"artboards_panel_content`":{`"artboards_panel_selection`":[`"zs8ap4x3`"]}}}"

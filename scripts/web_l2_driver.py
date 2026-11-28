@@ -1312,9 +1312,11 @@ def scoped_root(root, iterations, where):
 def proposed_line(results):
     """Row 291: the --proposed body line over [(name, status, detail)]:
     `PROPOSED PASS` only when there is at least one script and every one
-    passed; else FAIL, or REFUSED when any was refused, naming each."""
+    passed; else FAIL, or REFUSED when any was refused, naming each. An empty
+    directory (every proposed script admitted) is `PROPOSED NONE`, never a
+    pass."""
     if not results:
-        return "PROPOSED REFUSED -- no proposed script was found"
+        return "PROPOSED NONE -- the proposed directory holds no script"
     sts = [st for _, st, _ in results]
     v = "PASS" if all(st == "PASS" for st in sts) else ("REFUSED" if "REFUSED" in sts else "FAIL")
     return f"PROPOSED {v} -- " + "; ".join(f"{n}: {st}" + (f" ({d})" if d else "") for n, st, d in results)
@@ -1462,29 +1464,29 @@ def self_test():
         check(undelivered(a) is not None and str(a[1]) in undelivered(a), f"{a[:2]} is refused by name")
     check(undelivered(("read", "document")) is None, "a document read is delivered")
     # Row 291: seed, panel_menu, the dialog step and the dialog read are
-    # delivered, and both proposed Artboard Options scripts plan to acts the
-    # web delivers, each of the four kinds at least once.
+    # delivered, and both Artboard Options scripts (admitted in row 284) plan
+    # to acts the web delivers, each of the four kinds at least once.
     check(undelivered(("read", "dialog", None)) is None, "a dialog read is delivered")
     kinds = set()
     for fp in ("fill_white", "preset_a4"):
-        sp = os.path.join(REPO, "test_fixtures", "input_scripts_proposed", f"artboard_options.{fp}.json")
+        sp = os.path.join(SCRIPTS, f"artboard_options.{fp}.json")
         with open(sp, encoding="utf-8") as fh:
             sc = json.load(fh)
         try:
             pa = _plan.plan(sc, menubar, _plan.load_spec(sc))
             bad = [a[:2] for a in pa if undelivered(a)]
-            check(not bad, f"proposed {fp}: every act is delivered (undelivered: {bad})")
+            check(not bad, f"{fp}: every act is delivered (undelivered: {bad})")
             kinds |= {a[0] if a[0] != "read" else "read " + a[1] for a in pa}
         except _plan.Refused as e:
-            fails.append(f"proposed {fp} is refused by the plan: {e}")
-    check({"seed", "panel_menu", "dialog", "read dialog"} <= kinds, f"the proposed scripts exercise all four ({sorted(kinds)})")
+            fails.append(f"{fp} is refused by the plan: {e}")
+    check({"seed", "panel_menu", "dialog", "read dialog"} <= kinds, f"the Artboard Options scripts exercise all four ({sorted(kinds)})")
     check(proposed_line([("a", "PASS", ""), ("b", "PASS", "")]) == "PROPOSED PASS -- a: PASS; b: PASS",
           "--proposed passes only when every proposed script passes")
     check(proposed_line([("a", "PASS", ""), ("b", "FAIL", "x")]).startswith("PROPOSED FAIL -- a: PASS; b: FAIL (x)"),
           "--proposed names a failing script and its reason")
     check(proposed_line([("a", "FAIL", ""), ("b", "REFUSED", "y")]).startswith("PROPOSED REFUSED"),
           "--proposed reads REFUSED when any script was refused")
-    check(proposed_line([]).startswith("PROPOSED REFUSED"), "--proposed with no script is never a pass")
+    check(proposed_line([]).startswith("PROPOSED NONE"), "--proposed with no script reads NONE, never a pass")
     check(seed_reply('{"seeded": 1}') is None, "a seeded reply passes")
     check(seed_reply('{"refused": "UndeclaredPanelKey p.k"}') == "seed REFUSED UndeclaredPanelKey p.k",
           "a refused seed is refused by name, carrying the app's reason")
