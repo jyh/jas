@@ -245,13 +245,15 @@ def _fault_dead_tile(p: GuiProbe):
 def _fault_dead_brush_tile(p: GuiProbe):
     """Sever the handler on every brush tile the promotion check might click.
 
-    The tile ids are TEMPLATED (`bp_tile_<lib>_<slug>`), so target them by the
-    `id^="bp_tile_"` prefix rather than a literal id. With the handler cut, the
+    The tile id template reads an outer loop (`bp_tile_{{lib.id}}_{{brush.slug}}`),
+    so the DOM carries no tile id (row 302, ruling 1054); the template is named
+    on a `display:contents` wrapper, so target the wrapped element by
+    `[data-id-template^="bp_tile_"] > *`. With the handler cut, the
     click lands on a live-looking tile that applies no brush — the Line is never
     promoted, the stroke stays thin, and `brush_promotes_line` sees no band.
     """
     p.cdp.evaluate(
-        "(()=>{for(const e of document.querySelectorAll('[id^=\"bp_tile_\"]')){"
+        "(()=>{for(const e of document.querySelectorAll('[data-id-template^=\"bp_tile_\"] > *')){"
         "e.removeAttribute('data-dioxus-id');e.style.pointerEvents='auto';}"
         "return true;})()")
 
@@ -873,7 +875,7 @@ def brush_promotes_line(ctx: Ctx):
     check would go red on that build exactly as it does under the owned fault.
     """
     p = ctx.p
-    tile = 'css:[id^="bp_tile_"]'
+    tile = 'css:[data-id-template^="bp_tile_"] > *'
 
     # Open the Brushes panel via Window ▸ Brushes (the title is text-addressed;
     # the item could now use its id, left as-is deliberately). Opened BEFORE
@@ -908,9 +910,10 @@ def brush_promotes_line(ctx: Ctx):
     before = p.ink_span(SCAN_X, BAND_SCAN_Y0, BAND_SCAN_SPAN)["longest"]
     ctx.note(f"before brush: plain line thickness = {before}px")
 
-    # Click a wide (10 pt round) brush tile. The tiles all share the LITERAL
-    # templated id `bp_tile_{{lib.id}}_{{brush.slug}}` (the container id template
-    # is not expanded), so a specific brush is reached by INDEX, not id. Index 5
+    # Click a wide (10 pt round) brush tile. The tile id template reads an
+    # outer loop (`bp_tile_{{lib.id}}_{{brush.slug}}`), so no tile carries an id
+    # (row 302) and every tile is named by the same template on its wrapper, so
+    # a specific brush is reached by INDEX, not id. Index 5
     # is the 10 pt round calligraphic. In regress mode the tile handler is
     # severed here so the brush never applies.
     def _click_nth(sel, n):
@@ -925,7 +928,7 @@ def brush_promotes_line(ctx: Ctx):
         p.click_xy(c[0], c[1])
         return True
     ctx.inject("dead_brush_tile")
-    ctx.want(_click_nth('[id^="bp_tile_"]', 5),
+    ctx.want(_click_nth('[data-id-template^="bp_tile_"] > *', 5),
              "the 10 pt round brush tile is clickable")
     p.heartbeat(6.0, "the app after clicking the brush tile")
     after = p.ink_span(SCAN_X, BAND_SCAN_Y0, BAND_SCAN_SPAN)["longest"]
@@ -1169,7 +1172,7 @@ def canvas_transform_balance(ctx: Ctx):
 
     # Scene: a line with a brush applied (the exact leaking render), via the
     # same steps brush_promotes_line uses.
-    tile = 'css:[id^="bp_tile_"]'
+    tile = 'css:[data-id-template^="bp_tile_"] > *'
     if not p.exists(tile):
         _click_by_text(p, "css:.jas-menu-title", "Window")
         time.sleep(0.3)
