@@ -195,7 +195,14 @@ def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS)
         if tabs.count() > 1:
             raise _plan.Refused(f"{tabs.count()} dock tabs carry id {tab!r}")
         if tabs.count() == 1:
-            tabs.click()
+            try:
+                tabs.click()
+            except Exception as e:
+                try:
+                    where = tabs.evaluate(HIT_JS)
+                except Exception:
+                    where = "unreadable"
+                raise _plan.Refused(f"show {pid}: its tab {tab!r} did not take the click: {type(e).__name__} ({where})")
         elif wpath:
             menu_click(wpath)
         else:
@@ -304,7 +311,8 @@ def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS)
                 raise _plan.Refused(f"{items.count()} items of {menu_id!r} read {label!r}")
             if items.first.get_attribute("aria-disabled") == "true":
                 raise _plan.Refused(f"the item {label!r} of {menu_id!r} is disabled")
-            items.first.click()
+            # _act: a failure names this act and what lies under its point.
+            _act(f"panel_menu {menu_id}: pick {label!r}", items.first)
             page.wait_for_timeout(300)
         elif k == "dialog":
             # Row 291: a widget of the OPEN dialog, found inside that dialog's
@@ -324,15 +332,17 @@ def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS)
             if w.is_disabled() or w.get_attribute("aria-disabled") == "true":
                 raise _plan.Refused(f"widget {wid!r} is disabled")
             tag = w.evaluate("e => e.tagName.toLowerCase()")
+            # _act: a failure names this act and what lies under its point.
             if event == "click":
-                w.click()
+                _act(f"dialog {did}: click {wid}", w)
             elif tag == "select" or w.locator("select").count() == 1:
-                (w if tag == "select" else w.locator("select")).select_option(value=str(value))
+                _act(f"dialog {did}: commit {wid}={value}", w if tag == "select" else w.locator("select"),
+                     how="select_option", value=str(value))
             else:
                 fields = w if tag in ("input", "textarea") else w.locator("input, textarea")
                 if fields.count() != 1:
                     raise _plan.Refused(f"widget {wid!r} holds {fields.count()} text fields; a commit needs one")
-                fields.first.fill(str(value))
+                _act(f"dialog {did}: fill {wid}", fields.first, how="fill", value=str(value))
                 fields.first.press("Enter")
             page.wait_for_timeout(300)
         elif k == "read" and act[1] == "dialog":
@@ -350,6 +360,16 @@ def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS)
             page.wait_for_timeout(150)
             return _plan.read_back(page.evaluate("() => window.__jasTest.read()").strip(), want)
         return None
+
+    def refused_shot():
+        """Row 291: a PROPOSED script's refusal keeps a screenshot too, since
+        nothing else shows what the page held at the refused act."""
+        if artifacts and scripts_dir != SCRIPTS:
+            try:
+                os.makedirs(artifacts, exist_ok=True)
+                page.screenshot(path=os.path.join(artifacts, name + ".refused.png"))
+            except Exception:
+                pass
 
     try:
         got = None
@@ -370,8 +390,10 @@ def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS)
                 f.write(got or "")
         return "FAIL", "read-back differs from the expected", moved
     except _plan.Refused as e:
+        refused_shot()
         return "REFUSED", str(e), None
     except Exception as e:  # a driver crash is this script's result, never the run's end
+        refused_shot()
         return "REFUSED", f"driver error: {type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}", None
     finally:
         try:
