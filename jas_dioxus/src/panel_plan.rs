@@ -1659,6 +1659,64 @@ mod tests {
         ]), "an expanded repeat with no rows is still named, with rows 0: {empty}");
     }
 
+    /// Ruling 1054 (D12's withholding half narrowed): a foreach widget's id
+    /// template whose every reference is the ROW'S OWN loop variable resolves
+    /// per row, and is no longer withheld.
+    #[test]
+    fn a_row_id_template_resolves_from_the_rows_own_variable() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "col", "id": "list", "foreach": {"source": "items", "as": "it"},
+             "do": {"type": "button", "id": "b_{{it.k}}_{{it.n}}", "label": "x"}},
+        ]}});
+        let ctx = json!({"items": [{"k": "a", "n": 0}, {"k": "b", "n": 1}]});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
+        let ids: Vec<&Value> = plan["leaves"].as_array().unwrap().iter().filter(|l| l["type"] == "button").map(|l| &l["id"]).collect();
+        assert_eq!(ids, [&json!("b_a_0"), &json!("b_b_1")], "{plan}");
+        assert!(!plan["withheld"].as_array().unwrap().iter().any(|w| w["key"] == "id"), "a resolved id is not withheld: {plan}");
+    }
+
+    /// Ruling 1054 condition 1: any OTHER reference (state, an outer loop's
+    /// variable, a missing key) is still withheld and named, as before.
+    #[test]
+    fn a_row_id_template_reading_anything_else_is_withheld() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "col", "id": "outer", "foreach": {"source": "groups", "as": "g"},
+             "do": {"type": "col", "id": "inner", "foreach": {"source": "g.items", "as": "it"},
+                    "do": {"type": "row", "children": [
+                        {"type": "button", "id": "s_{{state.q}}", "label": "x"},
+                        {"type": "button", "id": "o_{{g.k}}_{{it.k}}", "label": "x"},
+                        {"type": "button", "id": "m_{{it.nope}}", "label": "x"},
+                        {"type": "button", "id": "ok_{{it.k}}", "label": "x"},
+                    ]}}},
+        ]}});
+        let ctx = json!({"state": {"q": "z"}, "groups": [{"k": "G", "items": [{"k": "a"}]}]});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
+        let ids: Vec<String> = plan["leaves"].as_array().unwrap().iter().filter(|l| l["type"] == "button")
+            .map(|l| l["id"].as_str().unwrap_or("?").to_string()).collect();
+        assert_eq!(ids, ["", "", "", "ok_a"], "state, an outer loop and a missing key are withheld; the row's own resolves: {plan}");
+        let held = plan["withheld"].as_array().unwrap().iter().filter(|w| w["key"] == "id").count();
+        assert_eq!(held, 3, "each withheld id is named: {plan}");
+    }
+
+    /// Ruling 1054 condition 3: no two entries in one plan carry the same
+    /// resolved id. A duplicate (two rows templating the same string, or a static
+    /// id equal to a resolved one) is withheld from BOTH and named.
+    #[test]
+    fn a_resolved_id_is_never_sent_twice() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "button", "id": "d_x", "label": "static"},
+            {"type": "col", "id": "list", "foreach": {"source": "items", "as": "it"},
+             "do": {"type": "button", "id": "d_{{it.k}}", "label": "x"}},
+        ]}});
+        let ctx = json!({"items": [{"k": "x"}, {"k": "y"}, {"k": "y"}]});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
+        let ids: Vec<String> = plan["leaves"].as_array().unwrap().iter().filter(|l| l["type"] == "button")
+            .map(|l| l["id"].as_str().unwrap_or("?").to_string()).collect();
+        assert_eq!(ids, ["", "", "", ""], "d_x (static and resolved) and d_y (twice) are each withheld from every carrier: {plan}");
+        let held = plan["withheld"].as_array().unwrap().iter().filter(|w| w["key"] == "id").count();
+        assert_eq!(held, 4, "every withheld carrier is named: {plan}");
+    }
+
     /// A bound widget the layout pass never places (a static `visible: false`)
     /// is REPORTED in `unjoined` by path and key, never dropped. No panel in the
     /// workspace has one today (the stop-2 measurement), so this is synthetic.
