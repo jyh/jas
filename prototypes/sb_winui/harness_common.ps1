@@ -4408,6 +4408,24 @@ function Select-SbChoiceItem {
     & $no "the item '$Value' of widget '$Widget' has no SelectionItem pattern: it has [$($short -join ', ')]"
 }
 
+# jas STATUS-flask 1047 item 1: since #1160 a probe read with no document
+# open carries doc_state "none" (its doc and selection are null). prove_e2e
+# refuses it by name before it takes a selection or a read-back; a probe
+# from a shell before #1160 has no doc_state and is read as before.
+function Get-SbProbeDocRefusal($Probe) {
+    if ($null -ne $Probe -and $null -ne $Probe.PSObject.Properties['doc_state'] -and $Probe.doc_state -eq 'none') {
+        return 'doc=none: no document was open at the read'
+    }
+    return $null
+}
+
+# The probe's selection count, counted only from an array: a null selection
+# (no document) is 0, never @($null)'s one element.
+function Get-SbProbeSelectionCount($Probe) {
+    if ($null -eq $Probe -or $Probe.selection -isnot [array]) { return 0 }
+    return $Probe.selection.Count
+}
+
 # The level-2 oracle: the core's document BYTES against the expected BYTES.
 # Never a parsed comparison: `1` against `1.0` is a different read-back, and a
 # numeric equality would certify it. The first differing byte is named.

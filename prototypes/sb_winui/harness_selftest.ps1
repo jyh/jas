@@ -2311,6 +2311,19 @@ Test-Case 'dialog reads: a PROBE row with no dialog= field (a shell before row 2
 Test-Case 'dialog reads: seq=1 is not seq=12 (the probe number is a whole token)' {
     Get-SbDialogReadVerdict -Rows @('PROBE seq=12 surface=1x1 frame=f doc-sha=a dialog=none selection=[] plan=p') -BaseSeq 1 -Reads @(0) -Expected @('none')
 } 'FAIL(read 1: no PROBE seq=1 row)'
+# jas STATUS-flask 1047 item 1: a probe read with no document open (doc_state
+# none, since #1160) is refused by name, and its null selection is never
+# @($null)'s one element.
+Test-Case 'probe doc: a closed document (doc_state none) is refused by name; open and pre-#1160 probes are read' {
+    $pc = '{"doc_state":"none","selection":null,"doc":null}' | ConvertFrom-Json
+    $po = '{"doc_state":"open","selection":[]}' | ConvertFrom-Json
+    $pp = '{"selection":[]}' | ConvertFrom-Json
+    @("$(Get-SbProbeDocRefusal $pc)", "$(Get-SbProbeDocRefusal $po)", "$(Get-SbProbeDocRefusal $pp)") -join '|'
+} 'doc=none: no document was open at the read||'
+Test-Case 'probe selection: counted only from an array, so null is 0 and never one' {
+    @(@('null', '[]', '[{"path":[0,1]}]', '[{"path":[0,1]},{"path":[0,2]}]') | ForEach-Object {
+        Get-SbProbeSelectionCount ('{"selection":' + $_ + '}' | ConvertFrom-Json) }) -join '|'
+} '0|0|1|2'
 Test-Case 'dialog reads: reads and expectations of different lengths FAIL by name, never compare against an empty want' {
     Get-SbDialogReadVerdict -Rows $dRows -BaseSeq 1 -Reads @(1, 3) -Expected @('artboard_options')
 } 'FAIL(2 dialog read(s) and 1 expected entry: the reader pairs them one to one)'
@@ -2625,6 +2638,40 @@ Test-Case 'audit C: every baseline''s live document passes the read-back compara
     }
     "compared=$(if ($n -ge 100) { 'corpus' } else { $n }) failed=$($bad.Count)$(if ($bad.Count) { ' ' + (($bad | Select-Object -First 3) -join ' | ') })"
 } 'compared=corpus failed=0'
+
+# E. jas STATUS-flask 1047 item 3 (row 293's twin): the input scripts and the
+# e2e baselines are ONE population. Audit C fails a baseline with no script;
+# nothing failed a shipped script with no baseline until the nightly read
+# `NOT RUN -- no frozen baseline` (#1156's two admitted scripts). Both
+# directories are globbed and pinned EQUAL here, and the control proves the
+# pairing names an extra script and an orphan baseline.
+function Get-SbCorpusPairing([string]$Scripts, [string]$Baselines) {
+    $s = @(Get-ChildItem $Scripts -Filter '*.json' | Where-Object { $_.Name -notlike '*.expected.json' } | ForEach-Object { $_.BaseName } | Sort-Object)
+    $b = @(Get-ChildItem $Baselines -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'baseline.json') } | ForEach-Object { $_.Name } | Sort-Object)
+    $noBase = @($s | Where-Object { $b -cnotcontains $_ })
+    $noScript = @($b | Where-Object { $s -cnotcontains $_ })
+    $show = { param($xs) if ($xs.Count) { $xs -join ',' } else { '-' } }
+    "scripts=$(if ($s.Count -ge 100) { 'corpus' } else { $s.Count }) no-baseline=$(& $show $noBase) no-script=$(& $show $noScript)"
+}
+Test-Case 'audit E: every shipped input script has a frozen e2e baseline, and every baseline a script' {
+    Get-SbCorpusPairing (Join-Path $aRoot 'test_fixtures\input_scripts') (Join-Path $aRoot 'prototypes\sb_winui\e2e_baselines')
+} 'scripts=corpus no-baseline=- no-script=-'
+Test-Case 'audit E: CONTROL -- a script added with no baseline, and a baseline with no script, are named' {
+    $t = Join-Path ([System.IO.Path]::GetTempPath()) ('sb-pairing-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $ts = Join-Path $t 'scripts'; $tb = Join-Path $t 'baselines'
+        New-Item -ItemType Directory -Force -Path $ts, $tb | Out-Null
+        foreach ($n in @('a.one', 'b.two', 'zz.extra')) { Set-Content -Path (Join-Path $ts "$n.json") -Value '{}' -Encoding ascii }
+        Set-Content -Path (Join-Path $ts 'a.one.expected.json') -Value '{}' -Encoding ascii
+        foreach ($n in @('a.one', 'b.two', 'zz.orphan')) {
+            New-Item -ItemType Directory -Force -Path (Join-Path $tb $n) | Out-Null
+            Set-Content -Path (Join-Path (Join-Path $tb $n) 'baseline.json') -Value '{}' -Encoding ascii
+        }
+        New-Item -ItemType Directory -Force -Path (Join-Path $tb 'not.a.baseline') | Out-Null
+        Set-Content -Path (Join-Path $tb 'shell_gaps.json') -Value '{}' -Encoding ascii
+        Get-SbCorpusPairing $ts $tb
+    } finally { Remove-Item -Recurse -Force $t -ErrorAction SilentlyContinue }
+} 'scripts=3 no-baseline=zz.extra no-script=zz.orphan'
 
 # ROW 284 (jas STATUS-flask 1027 item 2, ruled in 1029): THE NO-GESTURE FORM
 # and THE APP_STATE SEED. A script with NO pointer step sends no gesture: its
