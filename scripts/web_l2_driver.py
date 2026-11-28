@@ -300,10 +300,16 @@ def run_script(br, path, menubar, menu_ids, artifacts=None, scripts_dir=SCRIPTS)
             if btn.count() != 1:
                 raise _plan.Refused(f"{btn.count()} panel menu buttons carry id {menu_id!r}")
             # The hamburger opens on mousedown at the press point, as a
-            # menubar title does (menu_click), so the press carries one.
+            # menubar title does (menu_click), so the press carries one. A
+            # person sees the button first: scroll it into view, and refuse a
+            # press point outside the window (live, the Artboards group sat
+            # below it and its menu opened off screen).
+            btn.scroll_into_view_if_needed()
             box = btn.bounding_box()
-            btn.dispatch_event("mousedown", {"bubbles": True, "clientX": box["x"] + box["width"] / 2,
-                                             "clientY": box["y"] + box["height"] / 2})
+            cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            if not (0 <= cx < VIEWPORT["width"] and 0 <= cy < VIEWPORT["height"]):
+                raise _plan.Refused(f"panel_menu {menu_id}: the button's centre ({cx:.0f},{cy:.0f}) is outside the window")
+            btn.dispatch_event("mousedown", {"bubbles": True, "clientX": cx, "clientY": cy})
             flyout = page.locator(f'[id="{menu_id}_items"]')
             flyout.wait_for(timeout=5000)
             items = flyout.get_by_role("menuitem", name=label, exact=True)
