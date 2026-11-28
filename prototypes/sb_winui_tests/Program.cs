@@ -1795,6 +1795,11 @@ static class Program
             "open_artboard_options|",
             PanelMenuWire.ItemAutomationId(new PanelMenuRow(8, "item", "Artboard Options...", "open_artboard_options", true, null))
             + "|" + PanelMenuWire.ItemAutomationId(new PanelMenuRow(0, "item", "x", "", true, null)));
+        // jas STATUS-flask 1045 (RULED: below): an open_menu popup opens BELOW the
+        // button that asked, for parity with the Mac (#1141) and the web. Measured
+        // on Windows in 1044 at WinUI's default, above it. WinUI still flips it
+        // when there is no room below.
+        Eq("open_menu popup: below the control that asked", "Bottom", PanelMenuWire.PopupPlacement);
         // Audit D's reading of ONE baseline probe, as a kind: "plan" (a slice proved
         // byte-exact by the probe's own plan_sha), "none" (a probe that carries no
         // panel plan, legitimately), or "bad" with its reason, never a skip.

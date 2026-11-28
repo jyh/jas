@@ -1825,6 +1825,13 @@ internal sealed record PanelMenuSubRow(int Index, string Label, string Action, b
 internal static class PanelMenuWire
 {
     /// <summary>
+    /// jas STATUS-flask 1045: where an `open_menu` popup opens against the
+    /// control that asked, as a FlyoutPlacementMode member's name (the shell
+    /// parses it, so a misspelling throws at the first popup).
+    /// </summary>
+    internal const string PopupPlacement = "Top";
+
+    /// <summary>
     /// Row 284 (jas STATUS-flask 1027): the AutomationId of a panel-menu item,
     /// its action, so a driver picks the item a script's `panel_menu` step names
     /// by the command it dispatches (TESTING.md section 6). Empty for a row with
