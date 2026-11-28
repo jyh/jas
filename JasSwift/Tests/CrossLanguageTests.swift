@@ -5158,6 +5158,9 @@ private func payloadContent(_ svg: String) -> String {
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
 private let scriptFixtures = ["paragraph.left_indent.json", "paragraph.right_indent.json", "paragraph.first_line_indent.json", "paragraph.space_before.json", "paragraph.space_after.json", "paragraph.hyphenate.json", "paragraph.bullets.json", "paragraph.numbered_list.json", "paragraph.justify_left.json", "paragraph.justify_center.json", "paragraph.justify_right.json", "paragraph.justify_all.json", "stroke.cap_round.json", "stroke.join_bevel.json", "stroke.align_center.json", "paragraph.align_left.json", "boolean.expand.json", "distribute.horizontal_spacing.json", "distribute.vertical_spacing.json", "distribute.right.json", "distribute.top.json", "distribute.bottom.json", "boolean.merge.json", "boolean.divide.json", "boolean.trim.json", "boolean.crop.json", "boolean.subtract_back.json", "character.vertical_scale.json", "character.baseline_shift.json", "character.character_rotation.json", "align.top.json", "align.bottom.json", "distribute.vertical_center.json", "distribute.left.json", "boolean.exclude.json", "stroke.start_arrowhead.json", "stroke.end_arrowhead.json", "align.right.json", "align.right_to_artboard.json", "align.left_to_key_object.json", "distribute.horizontal_spacing_key_object.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.all_caps.json", "character.small_caps.json", "character.strikethrough.json", "character.leading.json", "character.kerning.json", "character.superscript.json", "character.subscript.json", "character.language.json", "character.anti_aliasing.json", "character.font_family.json", "character.style_name.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "paragraph.align_center_styled_wrap.json", "character.all_caps_styled_wrap.json", "character.superscript_styled_wrap.json", "character.stack_super_underline.json", "character.stack_rotation_shift.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "stroke.dash_1.json", "stroke.gap_1.json", "stroke.dash_pair_2.json", "gradient.linear.json", "gradient.radial.json", "gradient.angle.json", "gradient.aspect_ratio.json", "gradient.method.json", "gradient.dither.json", "gradient.stop_opacity.json", "gradient.stop_location.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+    // Row 284 admitted these two forms scripts (seed, panel_menu, the dialog
+    // step, read: dialog); `scriptCorpus` replays them through `formsRun`.
+    "artboard_options.fill_white.json", "artboard_options.preset_a4.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json", "shortcut.nudge.json"]
 
 /// One menu step, `{"menu": <item id>}`: the menubar item's action, run as the
@@ -5358,12 +5361,53 @@ private struct MintRefusal: Error, Equatable {
     #expect(control.document.selection.map(\.path) == [[0, 2]])
 }
 
+/// Row 293: the name list IS the shipped corpus, so a script admitted later
+/// cannot be skipped by this port's whole-corpus runner without a red (Rust
+/// replays the directory by glob; this port by name).
+@Test func scriptFixturesIsTheShippedCorpus() throws {
+    let dir = (fixturesPath() as NSString).appendingPathComponent("input_scripts")
+    let onDisk = try FileManager.default.contentsOfDirectory(atPath: dir)
+        .filter { $0.hasSuffix(".json") && !$0.hasSuffix(".expected.json") }.sorted()
+    #expect(onDisk.count > 100, "the corpus was found (\(onDisk.count))")
+    #expect(scriptFixtures.sorted() == onDisk,
+            "not in scriptFixtures: \(Set(onDisk).subtracting(scriptFixtures).sorted()); not on disk: \(Set(scriptFixtures).subtracting(onDisk).sorted())")
+}
+
+/// Whether a script uses a section-6 form the gesture route does not take: a
+/// panel_menu or dialog step, a read before its last step, or a non-empty
+/// `app_state` seed. Mirrors Rust `uses_forms` (row 284); `formsRun` delivers
+/// them (row 275).
+private func scriptUsesForms(_ script: [String: Any]) -> Bool {
+    let steps = (script["steps"] as? [[String: Any]]) ?? []
+    let earlyRead = steps.dropLast().contains { $0["read"] != nil }
+    let seeded = !(((script["app_state"] as? [String: Any]) ?? [:]).isEmpty)
+    return steps.contains { $0["panel_menu"] != nil || $0["dialog"] != nil } || earlyRead || seeded
+}
+
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
     for fixture in scriptFixtures {
         let script = try JSONSerialization.jsonObject(
             with: readFixture("input_scripts/\(fixture)").data(using: .utf8)!) as! [String: Any]
         let item = script["item"] as! String
+        // Row 293: a forms script replays through `formsRun`; its LAST document
+        // read is the read-back, after its expected_dialog is checked, as Rust's
+        // corpus runner does (`corpus_read_back`).
+        if scriptUsesForms(script) {
+            let out = formsRun(script)
+            if let why = formsRefusal(out) { Issue.record("script \(item): \(why)"); continue }
+            if let want = script["expected_dialog"] as? [Any] {
+                let w = want.map { ($0 as? String) ?? "null" }
+                if w != formsDialogReads(out) {
+                    Issue.record("script \(item): the dialog reads \(formsDialogReads(out)) are not expected_dialog \(w)")
+                    continue
+                }
+            }
+            let expected = readFixture("input_scripts/\(script["expected_json"] as! String)")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            #expect(formsDocReads(out).last == expected, "script \(item): the forms read-back moved")
+            continue
+        }
         let steps = script["steps"] as! [[String: Any]]
         guard let last = steps.last, last.count == 1, last["read"] as? String == "document" else {
             Issue.record("script \(item): must end on a document read")
