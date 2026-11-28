@@ -113,6 +113,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -341,12 +342,52 @@ def base_is_ancestor_by_compare(status: str) -> bool:
 WEB_L2_PR_WORKFLOW = "Web level 2 (pull request)"
 
 
-def _web_l2_reading(text: str | None) -> str:
+# Row 301: the receipt's verdict-bearing BODY arms (web_l2_driver.py's
+# --dock --fit --layers --at --artboard-fill --proposed --menus). Line 1 was
+# the only line any tool read, so a RED arm under a GREEN line 1 merged unread.
+# `DOCK PREVIEW`, `HOOK`, `WITNESS` (it already feeds line 1) and `unmoved=`
+# carry no verdict of their own.
+BODY_ARMS = ("DOCK", "FIT", "LAYERS", "AT", "ARTBOARDFILL", "PROPOSED", "MENUS")
+_RED_WORDS = re.compile(r"\b(RED|FAIL|FAILED|REFUSED|NOT RUN|UNREAD)\b")
+
+
+def body_arm_lines(text: str | None) -> dict[str, str]:
+    """{arm: its line, without the driver's trailing ` (the --<flag> check: …)`
+    description}, for each BODY_ARMS line in a receipt."""
+    out: dict[str, str] = {}
+    for line in (text or "").splitlines()[1:]:
+        head, _, rest = line.partition(" ")
+        if head in BODY_ARMS and not rest.startswith("PREVIEW"):
+            out[head] = line.split(" (the --", 1)[0]
+    return out
+
+
+def body_arm_is_green(line: str) -> bool:
+    """`<ARM> k/n` with k == n, `<ARM> PASS…` or `PROPOSED NONE`, and no red
+    word anywhere in the verdict part (`ARTBOARDFILL PASS; control FAIL` is red)."""
+    if _RED_WORDS.search(line):
+        return False
+    verdict = (line.split(" ", 2)[1] if " " in line else "").rstrip(";,")
+    m = re.fullmatch(r"(\d+)/(\d+)", verdict)
+    if m:
+        return m.group(1) == m.group(2) and int(m.group(2)) > 0
+    return verdict == "PASS" or line.startswith("PROPOSED NONE")
+
+
+def _web_l2_reading(text: str | None, main_text: str | None = None) -> str:
     """A receipt's text as condition (7) compares it: GREEN, the red's own
-    words (RED(...) or NOT RUN(...)), or UNREAD: why."""
+    words (RED(...) or NOT RUN(...)), BODY-RED(...) when line 1 is GREEN but
+    a body arm is not (row 301) or an arm main's receipt carries is absent
+    here, or UNREAD: why."""
     import web_l2_main_verdict as wl2
     v, why = wl2.verdict_of(text)
-    return "GREEN" if v == "GREEN" else (why if v == "RED" else f"UNREAD: {why}")
+    if v != "GREEN":
+        return why if v == "RED" else f"UNREAD: {why}"
+    arms = body_arm_lines(text)
+    bad = [line for line in arms.values() if not body_arm_is_green(line)]
+    bad += [f"{a} line absent: main's receipt carries it"
+            for a in body_arm_lines(main_text) if a not in arms]
+    return "GREEN" if not bad else "BODY-RED(" + "; ".join(bad) + ")"
 
 
 def _web_l2_receipt(repo: str, run_id: int) -> str | None:
@@ -375,16 +416,20 @@ def fetch_web_l2(repo: str, head: str) -> tuple[str | None, str | None]:
     if not rs:
         return None, None
     latest = max(rs, key=lambda r: r["createdAt"])
-    if latest["status"] != "completed":
-        pr_reading = f"UNREAD: its run {latest['databaseId']} is {latest['status']}"
-    else:
-        pr_reading = _web_l2_reading(_web_l2_receipt(repo, latest["databaseId"]))
+    # Main's receipt first: its body arms are the population a PR's receipt
+    # must carry (row 301), and its reading is what a PR red is compared with.
+    main_text: str | None = None
     try:
         mains = json.loads(_gh("run", "list", "-R", repo, "--workflow", wl2.WORKFLOW, "--branch", BASE,
                                "--status", "completed", "--limit", "1", "--json", "databaseId"))
-        main_reading = _web_l2_reading(_web_l2_receipt(repo, mains[0]["databaseId"])) if mains else None
+        main_text = _web_l2_receipt(repo, mains[0]["databaseId"]) if mains else None
+        main_reading = _web_l2_reading(main_text) if mains else None
     except (RuntimeError, ValueError):
         main_reading = None
+    if latest["status"] != "completed":
+        pr_reading = f"UNREAD: its run {latest['databaseId']} is {latest['status']}"
+    else:
+        pr_reading = _web_l2_reading(_web_l2_receipt(repo, latest["databaseId"]), main_text=main_text)
     return pr_reading, main_reading
 
 
@@ -530,6 +575,57 @@ def self_test(fixture: Path | None = None) -> int:
     arm("web-l2: the same red as main passes", _state(web_l2=r1137, web_l2_main=r1137), True)
     arm("web-l2: a GREEN receipt passes", _state(web_l2="GREEN", web_l2_main=r1137), True)
     arm("web-l2: the lane did not run", _state(web_l2=None, web_l2_main=r1137), True)
+    # (7b) Row 301: the receipt's BODY arms. Line 1 was the only line any tool
+    #      read, so a RED arm below a GREEN line 1 merged unread. The lines are
+    #      main be311876's real receipt (11-27), cut to the verdict-bearing ones.
+    g1 = "UI-NIGHTLY v1 suite=web.live verdict=GREEN items=118/118 panels=- head=be311876 scope=full date=x"
+    body_green = "\n".join([
+        g1, "unmoved=0 (PASSes whose read equals their opening read; a vacuity tell, not a failure)",
+        "DOCK 3/3 (the --dock check: R1-2's live edge-dock arm; outside items=P/N on purpose)",
+        "DOCK PREVIEW stroke->left[hit=child:span start=1] layers->bottom[hit=child:span]",
+        "ARTBOARDFILL PASS; control PASS; preset PASS (the --artboard-fill check: row 270)",
+        "AT PASS -- k=1: PASS; k=0: PASS (the --at check: row 290)",
+        "PROPOSED NONE -- the proposed directory holds no script (the --proposed check: row 291)",
+        "LAYERS 5/5 (the --layers check: rows 256/264/266)",
+        "FIT 2/2 (the --fit check: row 66's live arm)",
+        "HOOK without-flag=absent with-flag=present", "WITNESS align.left PASS moved=True", "PASS align.left",
+    ]) + "\n"
+    rd = _web_l2_reading
+    declared += 1
+    if rd(body_green) != "GREEN":
+        failures.append(f"main's real receipt (every arm passing) must read GREEN, got {rd(body_green)!r}")
+    menus_red = body_green + "MENUS RED 0/2 (1400x900: flyout off right 18) (the --menus check: rows 296/298)\n"
+    declared += 1
+    if rd(menus_red) != "BODY-RED(MENUS RED 0/2 (1400x900: flyout off right 18))":
+        failures.append(f"a RED body arm under a GREEN line 1 must be named, got {rd(menus_red)!r}")
+    declared += 1
+    fit_red = body_green.replace("FIT 2/2 (", "FIT RED 1/2 (FAIL classic: bad=0 hscroll=1) (")
+    if rd(fit_red) != "BODY-RED(FIT RED 1/2 (FAIL classic: bad=0 hscroll=1))":
+        failures.append(f"a k<n arm must be red, got {rd(fit_red)!r}")
+    declared += 1
+    sub_fail = body_green.replace("control PASS;", "control FAIL;")
+    if not rd(sub_fail).startswith("BODY-RED(ARTBOARDFILL"):
+        failures.append(f"a FAIL inside a PASS-led line must be red, got {rd(sub_fail)!r}")
+    declared += 1
+    no_layers = "\n".join(l for l in body_green.split("\n") if not l.startswith("LAYERS "))
+    if rd(no_layers, main_text=body_green) != "BODY-RED(LAYERS line absent: main's receipt carries it)":
+        failures.append(f"an arm main carries and this receipt lacks must be refused by name, got {rd(no_layers, main_text=body_green)!r}")
+    declared += 1
+    if rd(body_green, main_text=menus_red) != "BODY-RED(MENUS line absent: main's receipt carries it)":
+        failures.append("an arm main carries, RED or not, and this receipt lacks is refused by name: "
+                        f"got {rd(body_green, main_text=menus_red)!r}")
+    declared += 1
+    if rd(body_green.replace("LAYERS 5/5 (", "LAYERS 4/5 (")) != "BODY-RED(LAYERS 4/5)":
+        failures.append("a k<n count with no red word is red on the count alone")
+    declared += 1
+    if rd(g1 + "\nMENUS 2/2 (the --menus check)\n") != "GREEN":
+        failures.append("MENUS 2/2 is a pass")
+    # End to end through `evaluate`: a body red NEW against main refuses; the
+    # SAME body red as main is carried by name.
+    arm("web-l2: a GREEN line 1 with a RED body arm, main GREEN",
+        _state(web_l2=rd(menus_red), web_l2_main=rd(body_green)), False, "WEB-L2")
+    arm("web-l2: the same body red as main passes",
+        _state(web_l2=rd(menus_red), web_l2_main=rd(menus_red)), True)
     declared += 1
     if "web-l2 not run" not in evaluate(_state()).receipt or "not made worse" not in evaluate(
             _state(web_l2=r1137, web_l2_main=r1137)).receipt:
