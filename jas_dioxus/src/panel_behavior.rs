@@ -721,6 +721,18 @@ pub(crate) fn widget_node<'a>(spec: &'a Value, widget: &str) -> Option<&'a Value
     find_widget(spec.get("content")?, widget, false).map(|(n, _)| n)
 }
 
+/// Row 304: the name a PATH-addressed event carries (in its refusals and its
+/// reply): the id the plan carries for the node at the path. A template that
+/// reads only the row's own variable is named by its resolution in the row
+/// scope the path resolved (ruling 1054); any other keeps its raw name, which
+/// is what the plan withholds.
+fn event_name(id: &str, row_scope: &Value) -> String {
+    if !id.contains("{{") {
+        return id.to_string();
+    }
+    crate::interpreter::foreach::row_id(id, row_scope).unwrap_or_else(|| id.to_string())
+}
+
 /// Ruling 1054 condition 2: whether `widget` is what an id template under a
 /// `foreach` resolves to: the template's literal parts, in order, around at least
 /// one character per `{{...}}`.
@@ -888,7 +900,7 @@ fn run_widget_behavior_in(
             resolved = resolve_path(content, path, scope)?;
             let mut named = ev.clone();
             if let Some(id) = resolved.0.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-                named.widget = id.to_string();
+                named.widget = event_name(id, &resolved.1);
             }
             (&resolved.0, &resolved.1, std::borrow::Cow::Owned(named))
         }
@@ -1672,6 +1684,18 @@ pub(crate) use crate::document::test_fixture;
 
 #[cfg(test)]
 mod tests {
+
+    /// Row 304: a path-addressed event's name. A row's own template resolves;
+    /// an outer loop's keeps its raw name (the plan withholds it); a static id
+    /// is itself.
+    #[test]
+    fn a_path_addressed_event_is_named_as_the_plan_names_its_node() {
+        use crate::interpreter::foreach::ROW_AS;
+        let scope = serde_json::json!({"doc": {"index": 0}, "lib": {"id": "L"}, ROW_AS: "doc"});
+        assert_eq!(event_name("canvas_tab_close_{{doc.index}}", &scope), "canvas_tab_close_0");
+        assert_eq!(event_name("bp_tile_{{lib.id}}", &scope), "bp_tile_{{lib.id}}");
+        assert_eq!(event_name("align_left_button", &scope), "align_left_button");
+    }
     use super::test_fixture::{misaligned, model_with, rect};
     use super::*;
     use crate::interpreter::workspace::Workspace;
